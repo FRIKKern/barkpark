@@ -153,6 +153,31 @@ type LiveServer struct {
 	IP      string
 	Server  Server
 	Secrets Secrets
+
+	// SitePlaneInstalled is the go-live chain's OWN record of step 7c, and it is
+	// THREE-STATE under the law internal/agent/site_plane.go keeps verbatim:
+	//
+	//	nil   — UNMEASURED. The step was never attempted, so this provision has
+	//	        NOTHING to say about the box's plane. That is the unclaimed gate
+	//	        (an old control plane sent no agent token / control URL), and it
+	//	        is emphatically NOT "the box has no plane": nobody looked.
+	//	false — A VERDICT ABOUT THIS BOX. The installer ran over SSH and came
+	//	        back non-zero, so the box went live WITHOUT a working site plane
+	//	        and every site pointed at it will sit `queued`.
+	//	true  — the installer ran and exited zero.
+	//
+	// It exists because step 7c is deliberately NON-FATAL: before this field the
+	// ONLY trace of a degrade was an os.Stderr line in the provisioning worker's
+	// journal, which no caller can read and no test upstream can assert. A
+	// structured verdict on the value Provision returns is what lets the caller
+	// (and, later, a verify probe reading the agent's beat) tell a box that was
+	// never asked from a box that answered no.
+	//
+	// It is a PROVISION-TIME fact, not a live one: it says what the installer did
+	// in that window, never what the box carries now. The agent's site_plane beat
+	// is the live reading; these two agreeing is the healthy case and these two
+	// DISAGREEING is the interesting one.
+	SitePlaneInstalled *bool
 }
 
 // ─── injected seams ─────────────────────────────────────────────────────────
@@ -1552,10 +1577,25 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	// ORDERING IS SAFE: the verify gate runs strictly AFTER configureHost, so a
 	// plane installed here — in the window between 7b and the step-8 health poll —
 	// already exists before any probe goes looking for it.
+	//
+	// THE VERDICT IS RECORDED, not just shouted. sitePlaneInstalled stays nil
+	// through the skip path — nobody looked, so this provision says nothing —
+	// and is set to a measured true/false the moment the step is actually run.
+	// See LiveServer.SitePlaneInstalled for the three-state law it keeps.
+	var sitePlaneInstalled *bool
 	if spec.ControlURL != "" && spec.AgentToken != "" {
 		wp.progress("configure", "progress", "Installing the site-hosting plane…")
-		if err := runner.Run(ctx, siteRuntimeInstallStep()); err != nil {
+		err := runner.Run(ctx, siteRuntimeInstallStep())
+		ok := err == nil
+		sitePlaneInstalled = &ok
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: site-plane install on %s degraded (box serves, but its site deployments stay queued until the plane is installed): %v\n", host.IP, err)
+			// Narrate the degrade on the SAME hook the operator is already
+			// watching. The stderr line above lands in the worker journal, which
+			// the person staring at the /new progress screen cannot see; this is
+			// telemetry only (wp.progress is nil-safe and never affects the
+			// chain), so the box still ships exactly as before.
+			wp.progress("configure", "progress", "Site-hosting plane degraded — the box will serve, but its site deployments stay queued until the plane is installed")
 		}
 	}
 	wp.progress("configure", "done", "")
@@ -1581,6 +1621,9 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		IP:      host.IP,
 		Server:  host,
 		Secrets: secrets,
+		// Carried out of the chain verbatim — including nil, which is the honest
+		// answer for a box whose plane was never attempted.
+		SitePlaneInstalled: sitePlaneInstalled,
 	}
 	if err := wp.Registry.Register(ctx, live); err != nil {
 		return LiveServer{}, fmt.Errorf("register: %w", err)

@@ -13,7 +13,6 @@ import { generateTypes } from '../src/generate'
 
 const exec = promisify(execFile)
 const here = dirname(fileURLToPath(import.meta.url))
-const fixturePath = resolve(here, 'fixtures/production-schema.json')
 const cliPath = resolve(here, '../dist/cli.mjs')
 
 /**
@@ -80,5 +79,30 @@ describe('name collation is pinned, never the host locale', () => {
     const committed = readFileSync(resolve(here, '../../../../web/lib/barkpark.types.ts'), 'utf8')
     const md5 = (s: string) => createHash('md5').update(s).digest('hex')
     expect(md5(outputs[0]!)).toBe(md5(committed))
+  })
+})
+
+/**
+ * task-b48b8587e0935449: this file was the SINGLE file excluded from the
+ * package's lint script — `--ignore-pattern test/pinned-collator.test.ts`, a
+ * config-only workaround for one dead binding here. The binding is gone and so
+ * is the flag. Deleting an escape hatch without an arm that reds when it
+ * returns is half a fix, so the arm lives here, in the file the hatch existed
+ * for: re-add any `--ignore-pattern` (or drop `test` from the globs) and this
+ * reds.
+ */
+describe('the lint script keeps no escape hatch', () => {
+  const lint = (
+    JSON.parse(readFileSync(resolve(here, '../package.json'), 'utf8')) as {
+      scripts: Record<string, string>
+    }
+  ).scripts.lint!
+
+  it('carries no --ignore-pattern', () => {
+    expect(lint).not.toContain('--ignore-pattern')
+  })
+
+  it('still lints the singular test/ dir this file lives in', () => {
+    expect(lint.split(/\s+/)).toContain('test')
   })
 })

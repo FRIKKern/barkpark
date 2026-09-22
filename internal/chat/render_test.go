@@ -1383,7 +1383,7 @@ func TestVisibleAgentsPinsRunning(t *testing.T) {
 	// the painted row names — including the pinned running agents past the old
 	// cap (wire 9 at position 6, wire 17 at position 7).
 	for pos, wantWire := range map[int]int{6: 9, 7: 17} {
-		pane := strings.Join(renderWorkflowAgentDetail(80, j, time.Now(), 0, pos, true), "\n")
+		pane := strings.Join(renderWorkflowAgentDetail(80, j, time.Now(), 0, pos, true, nil), "\n")
 		want := fmt.Sprintf("agent-%02d", wantWire)
 		if !strings.Contains(pane, want) {
 			t.Fatalf("detail at position %d must resolve %s via the index map, got:\n%s", pos, want, pane)

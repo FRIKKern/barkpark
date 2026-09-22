@@ -385,73 +385,32 @@ func TestPrivateSchemaReadIsAuthorizationShaped(t *testing.T) {
 	})
 }
 
-// TestResolvedCredentialIsNotBoundToTheResolvedServer is a CHARACTERIZATION
-// test, and it is deliberately named for what it FOUND rather than for a
-// guarantee, because there is no guarantee here to name.
+// TestResolvedCredentialIsNotBoundToTheResolvedServer — INVERTED, NOT DELETED,
+// and this block is the record of why it moved.
 //
-// hq-doc-get-auth-tier-gap asked for proof that "no credential is sent to an
-// untrusted or mismatched resolved server under the existing context rules".
-// Measured on this tree: THERE ARE NO SUCH RULES. manifest.ResolveWithSources
-// picks Server and Token through two INDEPENDENT precedence walks (flag > env >
-// active config > baked defaults) with nothing comparing them, and the only
-// place normalizeServerURL touches the pair is the cosmetic `tokenProvenance`
-// shadow warning, which merely SUPPRESSES a warning on a mismatch.
+// It was a CHARACTERIZATION test: hq-doc-get-auth-tier-gap asked for proof that
+// no credential is sent to a mismatched resolved server "under the existing
+// context rules", and what it measured on 2026-09-15 was that THERE WERE NO SUCH
+// RULES — Server and Token were picked by two independent precedence walks with
+// nothing comparing them, so a credential saved for guerrilla followed any host
+// a raw `-s` or BARKPARK_API_URL named. It asserted that behaviour and was
+// written to fail with "EXPECTATION CHANGED" if it ever moved.
 //
-// So a saved credential issued for guerrilla travels to any host a raw `-s` or
-// BARKPARK_API_URL names. This predates the optional-auth change and applies to
-// every authenticated tier (read/write/admin) identically — but attaching the
-// bearer to the tier-"none" read verbs widened the set of commands that carry it,
-// so it is recorded here rather than left as folklore.
+// task-c05d0f7fa7bef688 moved it. The gap was reproduced live on 2026-09-16
+// against a header-recording server (the saved credential left on the FIRST
+// request, /v1/capabilities, before any dispatch), the decision was taken to
+// BIND a saved credential to the server it was saved for, and the assertions are
+// now inverted — a withholding assertion plus both over-fire controls — under the
+// name that describes the guarantee that now exists:
 //
-// This test asserts the CURRENT behaviour. If a server<->credential binding is
-// ever added, this test SHOULD go red — that red is the signal the gap closed,
-// and the fix is to invert the assertions, not to delete them.
-func TestResolvedCredentialIsNotBoundToTheResolvedServer(t *testing.T) {
-	withTempConfigHome(t)
-	clearBarkparkEnv(t)
-	t.Chdir(t.TempDir())
-
-	const savedServer = "https://guerrilla.barkpark.cloud"
-	const savedToken = "bppat_saved_for_guerrilla"
-	cfg := &Config{
-		Server: savedServer, Token: savedToken,
-		Workspace: "default", Project: "default", Dataset: "production",
-		KnownServers: []ServerEntry{
-			{Server: savedServer, Token: savedToken, Workspace: "default", Project: "default", Dataset: "production"},
-		},
-	}
-	if err := SaveConfig(cfg); err != nil {
-		t.Fatalf("SaveConfig: %v", err)
-	}
-
-	// THE CONTROL: on the server the credential WAS saved for, it is used. Without
-	// this arm, "the token travels" could equally be satisfied by "the token is
-	// never used", and the test would measure nothing.
-	if ctx := resolveContext(globals{server: savedServer}); ctx.Token != savedToken {
-		t.Fatalf("control failed: on its OWN server the saved token resolved to %q, want %q", ctx.Token, savedToken)
-	}
-
-	// The subject: an unrelated raw URL. The saved guerrilla credential follows it.
-	other := resolveContext(globals{server: "http://unrelated.example"})
-	if other.Server != "http://unrelated.example" {
-		t.Fatalf("server = %q, want the raw URL", other.Server)
-	}
-	if other.Token != savedToken {
-		t.Fatalf("EXPECTATION CHANGED — the saved credential no longer follows a mismatched -s "+
-			"(token = %q). If a server<->credential binding was added, invert this test.", other.Token)
-	}
-
-	// Same through the env layer.
-	t.Setenv("BARKPARK_API_URL", "http://unrelated-env.example")
-	viaEnv := resolveContext(globals{})
-	if viaEnv.Server != "http://unrelated-env.example" {
-		t.Fatalf("env server = %q", viaEnv.Server)
-	}
-	if viaEnv.Token != savedToken {
-		t.Fatalf("EXPECTATION CHANGED — the saved credential no longer follows BARKPARK_API_URL "+
-			"(token = %q). If a server<->credential binding was added, invert this test.", viaEnv.Token)
-	}
-}
+//	TestSavedCredentialIsWithheldFromAMismatchedServer
+//	TestExplicitCredentialStillReachesAnyServer
+//	TestNoAuthorizationHeaderCarriesASavedCredentialToAMismatchedHost
+//
+// all in internal/cli/server_credential_pairing_test.go, which carries the
+// measurement, the decision, and the mutation proofs. Searching for the old name
+// lands here, and here points at its successor; nothing about what was measured
+// is lost.
 
 // TestNoCLIInvocationResolvesAnEmptyToken records the second half of the same
 // finding, and it is why the byte-compatible tokenless path above is a CODE
@@ -474,6 +433,21 @@ func TestResolvedCredentialIsNotBoundToTheResolvedServer(t *testing.T) {
 // Like the test above, this asserts CURRENT behaviour. If an anonymous mode is
 // ever added (an empty baked token, or an explicit --anonymous), this test goes
 // red and should be inverted.
+//
+// THE DECISION ON THIS ONE, task-c05d0f7fa7bef688, is CHANGE NOTHING — recorded
+// here so the absence of a change is not mistaken for an oversight. Its sibling
+// (the server<->credential binding) shipped; this did not, because they are
+// different questions. The binding stops a SECRET reaching a host it was not
+// issued for. This test is about the baked floor, `barkpark-dev-token`, which is
+// a public well-known constant seeded by the `demo` profile (docs/auth.md §Dev
+// token) — sending it discloses nothing. Making it empty means inventing an
+// ANONYMOUS CLI tier: a contract change across every tier-"none" verb, `bp
+// whoami`, and the refused-credential path, not a resolver tweak. Note that the
+// binding deliberately withholds DOWN TO this floor rather than to empty,
+// precisely so it does not decide this question by accident.
+//
+// So this stays a characterization test, asserting current behaviour, and keeps
+// its "EXPECTATION CHANGED" red for whoever takes the anonymous-mode decision.
 func TestNoCLIInvocationResolvesAnEmptyToken(t *testing.T) {
 	withTempConfigHome(t)
 	clearBarkparkEnv(t)

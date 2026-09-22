@@ -24,7 +24,7 @@
 # no new floor, no new predicate is introduced by this file.
 #
 # THE FLOOR IT ARMS, AND TWO NON-ACTIONS — load-bearing, not decoration:
-#   * It arms the DERIVED floor of 897 MiB (PDS-D276/D277), against the DEPLOYED
+#   * It arms the DERIVED floor of 897 MiB (PDS-D276/PDS-D277), against the DEPLOYED
 #     streaming spill engine, in all three floor knobs at once: the poll
 #     predicate (:348), the arm-refusal guard (:412-414), and
 #     PDS_FULL_EXPORT_MIN_MEM_MB exported to the harness (fire_detached). The old
@@ -86,11 +86,16 @@
 #
 # ── WHERE THE PRE-WARM RUNS, AND WHY IT MOVED (PDS-D241) ────────────────────
 #
-# D241 requires `cd api && CC=/usr/bin/clang MIX_ENV=prod mix compile` to be paid
-# BEFORE the timed window opens (measured 155.72 s cold-prod on a real host). The
-# `CC` override is LOAD-BEARING: bare `cc` resolves to the Claude CLI wrapper and
+# D241 requires `cd api && CC=/usr/bin/clang mix compile` to be paid BEFORE the
+# timed window opens (measured 155.72 s cold-prod on a real host). The `CC`
+# override is LOAD-BEARING: bare `cc` resolves to the Claude CLI wrapper and
 # argon2_elixir then FAILS to build ("unknown option '-g'") rather than merely
 # running slow.
+#
+# PDS-D755 fixes WHICH env is warmed. It was `MIX_ENV=prod` only, while the
+# harness's sole mix invocation is `MIX_ENV=dev mix run --no-start` — separate
+# _build trees, so the pre-warm stamped OK having warmed nothing the climb
+# reads. Both are now warmed, dev FIRST, and every stamp names its env.
 #
 # That compile is paid by the CHILD, as its first act, before the first draw is
 # taken. This is deliberate: paying it inside `arm` would blow the one constraint
@@ -117,12 +122,29 @@
 # And the banner claims exactly what was read: "child is UP as of <t>" —
 # necessary, not sufficient. It never claims the climb finishes.
 #
+# ── A ZERO-SPEND REFUSAL NO LONGER ENDS THE POLL ────────────────────────────
+#
+# The launcher and the harness read MemAvailable at DIFFERENT moments, and
+# adjacent draws swing ~100 MiB, so a marginal FIRE can be refused by the
+# harness's own gate (b) the instant it looks. Such a refusal costs ZERO export
+# attempts but used to end the whole window. The child now re-enters the SAME
+# poll loop on exactly one proven shape — rc != 0 AND the harness's attempts
+# counter provably unmoved across the invocation — and terminates on every
+# other, including an unreadable counter. Same MAX_DRAWS, no extension, every
+# invocation stamped. The rationale and the three laws it satisfies sit above
+# refire_verdict() in the generated child.
+#
 # ── EXIT STATUS ─────────────────────────────────────────────────────────────
 #   arm       0 armed (child proven up, or liveness UNPERFORMABLE and said so)
 #             4 the child is NOT up (the named state is printed)
 #             3 refused/usage/environment
 #   collect   0 FINISHED or FINISHED-nosent · 2 STILL-RUNNING · 1 anything else
 #   selftest  0 every check held · 1 a check failed
+#
+# The CHILD's own sentinel (the transcript's last line) is the harness rc on a
+# spend, 5 on a draws-exhausted stand-down that never invoked the harness, and
+# 6 on a window exhausted after one or more proven ZERO-SPEND refusals. All of
+# them still classify as one of the six states (PDS-D247); 6 invents no seventh.
 #
 # bash 3.2 compatible (macOS system bash).
 
@@ -154,7 +176,7 @@ FULL_LOCK="$FULL_DIR/lock"
 # floor can be dialled down is a rubber stamp with extra steps.
 INTERVAL="${PDS_LAUNCH_INTERVAL:-10}"
 MAX_DRAWS="${PDS_LAUNCH_MAX_DRAWS:-360}"
-# PDS-D276/D277: the DERIVED floor is 897 MiB, against the deployed streaming
+# PDS-D276/PDS-D277: the DERIVED floor is 897 MiB, against the deployed streaming
 # spill engine (98.16 demand + 798.81 margin). Both the poll-predicate default
 # and the tighten-only guard-law move off the fossil 2200 together — moving one
 # without the other leaves the predicate defaulting to 2200 and the child
@@ -324,7 +346,7 @@ fire_detached() {
   spent="$(cat "$attempts_file" 2>/dev/null || echo 0)"
   is_int "$spent" || spent=0
   export PDS_FULL_EXPORT_BUDGET=$(( spent + 2 ))                    # PDS-D224
-  # PDS-D276/D277: export the DERIVED 897 MiB floor to the frozen harness's own
+  # PDS-D276/PDS-D277: export the DERIVED 897 MiB floor to the frozen harness's own
   # cond_b (b) gate. This REVERSES D244's deliberate UNSET — that refusal was
   # taken against the retired in-RAM engine's NEGATIVE -7.55 MiB delta; the
   # deployed streaming engine's real demand is 98.16 MiB + 798.81 margin = 897.
@@ -409,6 +431,9 @@ write_child_script() { # $1 = dest · $2 = run_tag
     printf 'SSH_HOST=%q\n'       "$SSH_HOST"
     printf 'SSH_KEY=%q\n'        "$SSH_KEY"
     printf 'DO_PREWARM=%q\n'     "${DO_PREWARM:-1}"
+    # The harness's OWN attempts counter, spelled by the launcher so the child
+    # reads the very file the harness writes. The child only ever READS it.
+    printf 'FULL_ATTEMPTS_FILE=%q\n' "$FULL_ATTEMPTS_FILE"
   } > "$dest"
 
   cat >> "$dest" <<'CHILD_BODY'
@@ -426,32 +451,48 @@ sentinel() { printf 'EXIT: %s\n' "$1"; }
 stamp "child up — pid=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ') sid_leader=$(ps -o stat= -p $$ | tr -d ' ')"
 stamp "run_tag=$RUN_TAG"
 stamp "budget PDS_FULL_EXPORT_BUDGET=${PDS_FULL_EXPORT_BUDGET:-<UNSET — the child did not inherit it>}"
-stamp "poll   MEM_FLOOR_MIB=$MEM_FLOOR_MIB (the launcher's poll predicate — PDS-D276/D277 derived floor)"
-stamp "floor  PDS_FULL_EXPORT_MIN_MEM_MB=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET — expected 897 per PDS-D276/D277; UNSET here means the export did NOT cross the fork>}"
+stamp "poll   MEM_FLOOR_MIB=$MEM_FLOOR_MIB (the launcher's poll predicate — PDS-D276/PDS-D277 derived floor)"
+stamp "floor  PDS_FULL_EXPORT_MIN_MEM_MB=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET — expected 897 per PDS-D276/PDS-D277; UNSET here means the export did NOT cross the fork>}"
 stamp "home   BARKPARK_HOME=${BARKPARK_HOME:-<unset>}"
 stamp "point  PDS_SCRATCH_POINTER=${PDS_SCRATCH_POINTER:-<unset>}"
 stamp "art    PDS_PROOF_ARTIFACTS=${PDS_PROOF_ARTIFACTS:-<unset>}"
 
-# ── PRE-WARM (PDS-D241) ──────────────────────────────────────────────────────
-# CC=/usr/bin/clang is LOAD-BEARING: bare `cc` is the Claude CLI wrapper and
-# argon2_elixir FAILS to build under it ("unknown option '-g'"). This is paid
-# HERE, before the first draw, so the timed window never pays a cold compile.
+# ── PRE-WARM (PDS-D241, PDS-D755) ────────────────────────────────────────────
+# CC=/usr/bin/clang is LOAD-BEARING in BOTH envs: bare `cc` is the Claude CLI
+# wrapper and argon2_elixir FAILS to build under it ("unknown option '-g'").
+# This is paid HERE, before the first draw, so the timed window never pays a
+# cold compile.
+#
+# PDS-D755: `dev` is FIRST and is not optional. The harness's only mix
+# invocation is `MIX_ENV=dev mix run --no-start` (pds-pull-proof.sh), and mix
+# envs do not share a _build tree — a prod-only pre-warm reported OK while
+# warming a tree the climb never reads, so a cold api/_build/dev still paid its
+# compile inside the window the pre-warm exists to protect. `prod` is retained
+# because PDS-D241 measured it (155.72 s cold-prod) and a release build is the
+# fallback path. EVERY stamp below NAMES its env, so the transcript says which
+# tree was warmed instead of leaving a reader to assume.
+PREWARM_ENVS="dev prod"
 if [ "$DO_PREWARM" = "1" ]; then
-  stamp "prewarm: cd $API_DIR && CC=/usr/bin/clang MIX_ENV=prod mix compile"
-  if ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV=prod mix compile ); then
-    stamp "prewarm: OK — the window will not pay a cold compile"
-  else
-    rc=$?
-    stamp "prewarm: FAILED rc=$rc — NOT firing. A climb that pays 155 s of compile"
-    stamp "         inside its own window is a measurement of the compile."
-    sentinel "$rc"
-    exit "$rc"
-  fi
+  stamp "prewarm: envs=$PREWARM_ENVS (dev first — the harness runs MIX_ENV=dev mix run; PDS-D755)"
+  for pw_env in $PREWARM_ENVS; do
+    stamp "prewarm: MIX_ENV=$pw_env — cd $API_DIR && CC=/usr/bin/clang MIX_ENV=$pw_env mix compile"
+    if ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV="$pw_env" mix compile ); then
+      stamp "prewarm: OK MIX_ENV=$pw_env — api/_build/$pw_env is warm"
+    else
+      rc=$?
+      stamp "prewarm: FAILED rc=$rc MIX_ENV=$pw_env — NOT firing. A climb that pays 155 s of compile"
+      stamp "         inside its own window is a measurement of the compile."
+      sentinel "$rc"
+      exit "$rc"
+    fi
+  done
+  stamp "prewarm: OK — the window will not pay a cold compile (warmed: $PREWARM_ENVS)"
 elif [ "$DO_PREWARM" = "0" ]; then
-  stamp "prewarm: already paid synchronously in the arming shell (--prewarm-now)"
+  stamp "prewarm: already paid synchronously in the arming shell (--prewarm-now), envs=$PREWARM_ENVS"
 else
-  stamp "prewarm: SKIPPED by --no-prewarm. If api/_build/prod is not already warm,"
-  stamp "         the window below pays the compile and measures it (PDS-D241)."
+  stamp "prewarm: SKIPPED by --no-prewarm. If api/_build/dev (what the harness reads)"
+  stamp "         and api/_build/prod are not already warm, the window below pays the"
+  stamp "         compile and measures it (PDS-D241/PDS-D755)."
 fi
 
 # ── the draw probe — ONE ssh round trip, every value a READ ──────────────────
@@ -482,8 +523,65 @@ printf 'builds=%s\n' "${builds:-}"
 REMOTE
 }
 
+# ── A REFUSAL THAT COST NOTHING MUST NOT COST THE WINDOW ─────────────────────
+#
+# The launcher probes MemAvailable here; the harness re-reads it for its OWN
+# gate (b) seconds to tens of seconds later. Adjacent draws have been measured
+# swinging by ~100 MiB, so a marginal FIRE is roughly a coin flip to be refused
+# the instant the harness looks. That refusal costs ZERO export attempts — the
+# harness's gate (b) refuses ABOVE its spend — but this loop used to exit on the
+# harness rc regardless, burning the whole window and yielding neither a climb
+# transcript nor a full stand-down dataset.
+#
+# THE DISCRIMINATOR IS THE HARNESS'S OWN ATTEMPTS COUNTER, read immediately
+# before and immediately after the invocation. Not the rc, and not the refusal
+# text: only the counter is the thing the one-attempt law is actually written
+# about, so a harness that rewords a message or refuses for a reason nobody has
+# named yet is still classified correctly.
+#
+# THE ONLY CONTINUE-ABLE OUTCOME is rc != 0 with BOTH readings numeric and
+# EQUAL. Every other shape — rc 0, a moved counter, an unreadable or garbage
+# counter — exits exactly as this loop always did. Therefore:
+#
+#   * NO SECOND ATTEMPT CAN BE SPENT SILENTLY. The shape that spends is the
+#     shape that terminates, and an UNVERIFIABLE counter is read as a spend, not
+#     as a licence to re-fire. Being wrong in that direction costs a window;
+#     being wrong in the other direction costs a real export attempt.
+#   * NO UNBOUNDED RETRY AND NO EXTENDED WINDOW. A re-entry consumes the draw it
+#     sat in like any other draw, the budget stays the SAME $MAX_DRAWS, and the
+#     loop condition is untouched — which is what makes termination provable.
+#   * NOTHING IS SILENT. Every invocation stamps its before/after readings and
+#     its verdict, so `collect` and a human read the same fact.
+#
+# A MISSING counter file reads 0, mirroring the harness's own full_attempts();
+# a PRESENT but non-numeric one reads UNVERIFIABLE, which is stricter than the
+# harness on purpose — this is the read that decides whether to fire again.
+read_attempts() {
+  local v=""
+  [ -e "$FULL_ATTEMPTS_FILE" ] || { printf '0'; return 0; }
+  v="$(cat "$FULL_ATTEMPTS_FILE" 2>/dev/null || true)"
+  v="$(printf '%s' "$v" | tr -d '[:space:]')"
+  [ -n "$v" ] || v=0
+  printf '%s' "$v"
+}
+
+# $1 rc · $2 attempts-before · $3 attempts-after -> exactly one of
+#   ZERO-SPEND-REFUSAL · SPENT · SPENT-UNVERIFIED
+refire_verdict() {
+  local rc="${1:-}" before="${2:-}" after="${3:-}"
+  case "$before" in ''|*[!0-9]*) printf 'SPENT-UNVERIFIED\n'; return 0 ;; esac
+  case "$after"  in ''|*[!0-9]*) printf 'SPENT-UNVERIFIED\n'; return 0 ;; esac
+  if [ "$rc" = "0" ]; then printf 'SPENT\n'; return 0; fi
+  if [ "$after" -eq "$before" ]; then
+    printf 'ZERO-SPEND-REFUSAL\n'
+  else
+    printf 'SPENT\n'
+  fi
+}
+
 draw=0
 fired=0
+refusals=0
 while [ "$draw" -lt "$MAX_DRAWS" ]; do
   draw=$((draw + 1))
 
@@ -537,14 +635,30 @@ while [ "$draw" -lt "$MAX_DRAWS" ]; do
     "${builds:-<empty>}" "${rss_kb:-?}" "${elapsed:-?}" "$verdict"
 
   if [ "$verdict" = "FIRE" ]; then
-    fired=1
+    fired=$(( fired + 1 ))
     stamp "FIRE — draw $draw of $MAX_DRAWS qualified."
     stamp "  gated on: mem_mib=$mem_mib >= $MEM_FLOOR_MIB AND bp-site-build-* listing EMPTY"
     stamp "  recorded, NOT gated (PDS-D246): beam rss_kb=${rss_kb:-?} slot_uptime=${elapsed:-?}"
     stamp "  firing ONE unsplit --all (W6-C: --only across rungs 2-6 is forbidden)"
+    att_before="$(read_attempts)"
+    stamp "  attempts before this invocation: $att_before (read from $FULL_ATTEMPTS_FILE)"
     "$HARNESS" --all
     rc=$?
-    stamp "harness returned rc=$rc after $draw draw(s)"
+    att_after="$(read_attempts)"
+    refire="$(refire_verdict "$rc" "$att_before" "$att_after")"
+    stamp "attempts: before=$att_before after=$att_after rc=$rc verdict=$refire"
+    if [ "$refire" = "ZERO-SPEND-REFUSAL" ]; then
+      refusals=$(( refusals + 1 ))
+      stamp "ZERO-SPEND REFUSAL #$refusals — the harness refused with rc=$rc and its attempts counter"
+      stamp "  did NOT move ($att_before -> $att_after), so NO export attempt was spent. This is the"
+      stamp "  launcher/harness floor disagreement: two MemAvailable reads, seconds apart."
+      stamp "  Re-entering the SAME poll loop — draw $draw of $MAX_DRAWS spent, budget UNCHANGED,"
+      stamp "  window NOT extended. The next FIRE re-checks this counter before it exits."
+      sleep "$INTERVAL"
+      continue
+    fi
+    stamp "harness returned rc=$rc after $draw draw(s) — ATTEMPT SPENT ($refire). The launcher exits"
+    stamp "  here and NEVER re-fires: a spent attempt is the one outcome that must not be retried."
     sentinel "$rc"
     exit "$rc"
   fi
@@ -559,11 +673,24 @@ if [ "$fired" -eq 0 ]; then
   sentinel 5
   exit 5
 fi
+
+# Reached ONLY by the re-entry path above: the harness ran, every run was a
+# proven zero-spend refusal, and the draw budget ran out. It is neither a
+# stand-down (the harness WAS invoked) nor a spend (the counter never moved), so
+# it gets its own anchored stamp and its own sentinel rather than being folded
+# into either — `collect` reads this stamp to make the attempt-cost claim, and a
+# claim made on the FIRE stamp alone would call this a spent attempt.
+stamp "WINDOW-EXHAUSTED — $MAX_DRAWS draws taken. The harness was invoked $fired time(s) and"
+stamp "  EVERY invocation was a zero-spend refusal ($refusals of them): its attempts counter never"
+stamp "  moved, so ZERO export attempts were spent and re-arming is free. The refused draws and the"
+stamp "  refused invocations are both the dataset. Re-arm, or raise --max-draws for a longer window."
+sentinel 6
+exit 6
 CHILD_BODY
   chmod +x "$dest"
 }
 
-# ── the floor record (PDS-D276/D277) ─────────────────────────────────────────
+# ── the floor record (PDS-D276/PDS-D277) ─────────────────────────────────────────
 #
 # ONE producer for the two floor knobs this arm carries, emitted as key=value
 # lines. run_dir/meta, the arm banner, and the selftest ALL read this — so the
@@ -585,7 +712,7 @@ arm_floor_summary() {
   info "poll floor  mem_floor_mib=$MEM_FLOOR_MIB — the launcher's poll predicate (:348)"
   info "harness flr full_export_min_mem_mb=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET>} — exported to the frozen harness's cond_b gate"
   if [ "$MEM_FLOOR_MIB" != 2200 ] || [ "${PDS_FULL_EXPORT_MIN_MEM_MB:-}" != 2200 ]; then
-    info "            DERIVED floor (PDS-D276/D277) — the fossil 2200 of the retired in-RAM engine no longer applies; see scripts/pds-w20-floor-derivation.md"
+    info "            DERIVED floor (PDS-D276/PDS-D277) — the fossil 2200 of the retired in-RAM engine no longer applies; see scripts/pds-w20-floor-derivation.md"
   fi
 }
 
@@ -619,7 +746,8 @@ cmd_arm() {
     case "$1" in
       --force)       force=1 ;;
       --prewarm-now) DO_PREWARM=0 ;;
-      # For a tree whose api/_build/prod is ALREADY warm, and for proving `arm`
+      # For a tree whose api/_build/dev AND api/_build/prod are ALREADY warm,
+      # and for proving `arm`
       # itself against a dummy harness. Skipping it on a cold tree makes the
       # window pay a 155 s compile, which is why it is opt-in and never default.
       --no-prewarm)  DO_PREWARM=2 ;;
@@ -728,9 +856,15 @@ cmd_arm() {
   child="$run_dir/child.sh"
 
   if [ "$DO_PREWARM" -eq 0 ]; then
-    say "pre-warming synchronously (--prewarm-now); arming will take as long as this compile."
-    ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV=prod mix compile ) \
-      || die "pre-warm FAILED — refusing to arm a climb that would pay a cold compile inside its own window."
+    say "pre-warming synchronously (--prewarm-now); arming will take as long as these compiles."
+    # PDS-D755: the SAME env list as the child leg, dev first, and each leg says
+    # which env it is paying. dev is the one the harness actually reads.
+    for pw_env in dev prod; do
+      say "pre-warm MIX_ENV=$pw_env — cd $API_DIR && CC=/usr/bin/clang MIX_ENV=$pw_env mix compile"
+      ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV="$pw_env" mix compile ) \
+        || die "pre-warm FAILED at MIX_ENV=$pw_env — refusing to arm a climb that would pay a cold compile inside its own window."
+      say "pre-warm OK MIX_ENV=$pw_env — api/_build/$pw_env is warm"
+    done
   fi
 
   write_child_script "$child" "$run_tag"
@@ -757,7 +891,7 @@ cmd_arm() {
 
   # meta records BOTH floor knobs distinctly (mem_floor_mib AND
   # full_export_min_mem_mb) via arm_floor_record, so a revert of either is
-  # individually diagnosable from the run directory (PDS-D276/D277).
+  # individually diagnosable from the run directory (PDS-D276/PDS-D277).
   write_run_meta "$run_dir" "$run_tag" "$run_id" "$pid" "$log"
 
   # ── the read-back behind the word ARMED (PDS-D317) ──────────────────────
@@ -1018,11 +1152,41 @@ cmd_collect() {
       sd_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] STAND-DOWN — ' || true)"
       fire_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] FIRE — draw ' || true)"
       pw_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] prewarm: FAILED rc=' || true)"
-      is_int "$sd_stamp"   || sd_stamp=0
-      is_int "$fire_stamp" || fire_stamp=0
-      is_int "$pw_stamp"   || pw_stamp=0
+      # A FIRE stamp no longer implies a spend. The child may invoke the harness,
+      # be refused at zero cost, and re-enter the poll loop; so the attempt-cost
+      # claim is made from the two stamps that actually READ the counter, and
+      # only falls back to the FIRE stamp when neither is present (a pre-re-arm
+      # transcript, or a child killed before it could stamp its readings — both
+      # of which must keep the conservative "an attempt WAS SPENT" reading).
+      #
+      # ORDER IS LOAD-BEARING: a spend stamp wins over an exhaustion stamp,
+      # because a window that exhausted BEFORE a later spend is not the verdict,
+      # and the spend stamp is the only one written after a counter moved.
+      spend_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] attempts: .* verdict=SPENT' || true)"
+      exh_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] WINDOW-EXHAUSTED — ' || true)"
+      zsr_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] ZERO-SPEND REFUSAL #' || true)"
+      is_int "$sd_stamp"    || sd_stamp=0
+      is_int "$fire_stamp"  || fire_stamp=0
+      is_int "$pw_stamp"    || pw_stamp=0
+      is_int "$spend_stamp" || spend_stamp=0
+      is_int "$exh_stamp"   || exh_stamp=0
+      is_int "$zsr_stamp"   || zsr_stamp=0
 
-      if [ "$fire_stamp" -gt 0 ]; then
+      if [ "$spend_stamp" -gt 0 ]; then
+        info "The harness RAN and its attempts counter MOVED (or could not be read)."
+        info "An export attempt WAS SPENT — re-arming is NOT free. The \`attempts:\`"
+        info "line above carries the before/after readings that prove it. Read"
+        info "$FULL_ATTEMPTS_FILE against the PDS-D224 budget of 5;"
+        info "a second arm burns a second real attempt."
+      elif [ "$exh_stamp" -gt 0 ]; then
+        info "WINDOW EXHAUSTED AFTER ZERO-SPEND REFUSALS — not a mid-rung abort."
+        info "The harness was invoked $fire_stamp time(s) and refused $zsr_stamp time(s)"
+        info "with its attempts counter UNMOVED across every invocation, then the"
+        info "draw budget ran out. ZERO export attempts were spent; re-arming is"
+        info "free. This is the launcher/harness floor disagreement — the two read"
+        info "MemAvailable seconds apart. Re-arm, or widen the window with"
+        info "\`--max-draws\`; the \`attempts:\` lines above are the proof."
+      elif [ "$fire_stamp" -gt 0 ]; then
         info "Sentinel present, no ^RESULT: — the harness died mid-rung under its"
         info "own \`set -euo pipefail\` (:85). This is NOT an OOM-kill (those keep"
         info "no sentinel at all) and the exit code below is the harness's own."
@@ -1041,7 +1205,8 @@ cmd_collect() {
         info "PDS-D241 pre-warm (:264), before its first draw — no FIRE stamp,"
         info "so the harness was NEVER INVOKED and ZERO export attempts were"
         info "spent. Re-arming is free, but it will fail identically until the"
-        info "\`MIX_ENV=prod mix compile\` above builds; fix that first."
+        info "\`mix compile\` above builds — the stamp names WHICH MIX_ENV"
+        info "failed (PDS-D755); fix that env first."
       else
         info "Sentinel present, no ^RESULT:, and NEITHER the FIRE (:358) nor the"
         info "STAND-DOWN (:373) nor the pre-warm-failure (:264) stamp is in the"
@@ -1218,6 +1383,7 @@ cmd_selftest() {
   local t0 t1 elapsed pid line pgid ppid stat budget seeded expect
   local state live_pid dead_pid out i reuse_log rc
   local unbooted_id unbooted_tag unbooted_home booted_id booted_tag
+  local pw_harness_envs pw_leg pw_body pw_list pw_lits pw_have pw_env pw_unnamed pw_legacy pw_stamps
 
   real_attempts_before="$(cat /tmp/pds-full-export/attempts 2>/dev/null || echo '<none>')"
   real_lock_before=absent; [ -d /tmp/pds-full-export/lock ] && real_lock_before=present
@@ -1303,12 +1469,12 @@ DUMMY
   if [ "${budget:-1}" = "1" ]; then
     bad "the child read 1 — that is the silent default, i.e. the export never crossed the fork"
   fi
-  # PDS-D276/D277: fire_detached exports the derived 897 floor, so the DUMMY
+  # PDS-D276/PDS-D277: fire_detached exports the derived 897 floor, so the DUMMY
   # child MUST inherit it across the fork. Mutation-provable: remove the
   # `export PDS_FULL_EXPORT_MIN_MEM_MB=897` knob and the child prints `unset`
   # here and this check FAILS (this is the pds-bl-floor-env-silent-revert guard).
   out="$(grep '^DUMMY-FLOOR=' "$scratch/dummy.log" 2>/dev/null | head -1 | cut -d= -f2 || true)"
-  check "${out:-unset}" "897" "PDS_FULL_EXPORT_MIN_MEM_MB=897 crosses the fork (PDS-D276/D277 — was UNSET under D244)"
+  check "${out:-unset}" "897" "PDS_FULL_EXPORT_MIN_MEM_MB=897 crosses the fork (PDS-D276/PDS-D277 — was UNSET under D244)"
 
   # …and the arm's OWN floor record carries the derived 897 in BOTH knobs. This
   # is the single producer that meta AND the banner read (arm_floor_record /
@@ -1654,8 +1820,8 @@ DUMMY
   # attempt was spent is D252's own error with the polarity flipped.
   {
     printf '[2026-07-21T07:00:00Z] child up — pid=1234\n'
-    printf '[2026-07-21T07:00:01Z] prewarm: cd /x && CC=/usr/bin/clang MIX_ENV=prod mix compile\n'
-    printf '[2026-07-21T07:02:00Z] prewarm: FAILED rc=1 — NOT firing. A climb that pays 155 s of compile\n'
+    printf '[2026-07-21T07:00:01Z] prewarm: MIX_ENV=dev — cd /x && CC=/usr/bin/clang MIX_ENV=dev mix compile\n'
+    printf '[2026-07-21T07:02:00Z] prewarm: FAILED rc=1 MIX_ENV=dev — NOT firing. A climb that pays 155 s of compile\n'
     printf 'EXIT: 1\n'
   } > "$scratch/prewarm-fail.log"
   state="$(classify "$scratch/prewarm-fail.log" "$scratch/dummy.pid")"
@@ -2075,6 +2241,310 @@ MUTECHILD
     bad "the banner makes a promise about the climb's outcome that one read cannot back"
   fi
 
+  # ── 10. the pre-warm warms the env the HARNESS runs (PDS-D755) ────────────
+  say ""
+  say "10 · the pre-warm warms every MIX_ENV the harness actually runs (PDS-D755)"
+
+  # The expected env set is DERIVED FROM THE HARNESS, never listed here. A
+  # hard-coded "dev" would go on passing if the harness moved to another env —
+  # which is exactly the class of bug this section exists to catch, one level up.
+  pw_harness_envs="$(grep -oE 'MIX_ENV=[a-z]+[[:space:]]+mix[[:space:]]' "$HARNESS" 2>/dev/null \
+                     | grep -oE 'MIX_ENV=[a-z]+' | cut -d= -f2 | sort -u | tr '\n' ' ')"
+  pw_harness_envs="${pw_harness_envs% }"
+
+  # PRECONDITION, not a control: an empty derivation would make every assertion
+  # below vacuously true. Print the key set before trusting an empty read.
+  if [ -n "$pw_harness_envs" ]; then
+    ok "the harness names at least one MIX_ENV (derived from $HARNESS: $pw_harness_envs)"
+  else
+    bad "derived NO MIX_ENV from $HARNESS — every check below would be vacuous; fix the derivation"
+  fi
+
+  # `pw_warmed_envs <file>` prints the envs a pre-warm body compiles, one per
+  # line. It reads compile invocations only, so a mere mention in a comment
+  # does not count as warming.
+  pw_warmed_envs() {
+    grep -oE 'MIX_ENV="?\$?[A-Za-z_]+"?[[:space:]]+mix[[:space:]]+compile' "$1" \
+      | grep -oE 'MIX_ENV="?\$?[A-Za-z_]+"?' | sed 's/MIX_ENV=//; s/"//g' | sort -u
+  }
+
+  # The child's pre-warm body, and the synchronous --prewarm-now leg, verbatim
+  # from this file. Both are compared against the SAME derived set, because a
+  # fix that lands in only one of them leaves the other warming the wrong tree.
+  sed -n '/^# ── PRE-WARM (PDS-D241/,/^fi$/p'  "$SCRIPT_DIR/$SELF" > "$scratch/pw-child.txt"
+  sed -n '/pre-warming synchronously/,/^  fi$/p' "$SCRIPT_DIR/$SELF" > "$scratch/pw-sync.txt"
+
+  for pw_leg in child sync; do
+    pw_body="$scratch/pw-$pw_leg.txt"
+    if [ ! -s "$pw_body" ]; then
+      bad "could not extract the $pw_leg pre-warm leg from $SELF — the anchor moved"
+      continue
+    fi
+    # A literal env, or the loop variable expanded from a literal list.
+    pw_list="$(grep -oE 'PREWARM_ENVS="[a-z ]+"|for pw_env in [a-z ]+;' "$pw_body" \
+               | sed 's/.*PREWARM_ENVS="//; s/for pw_env in //; s/[";]//g' | tr ' ' '\n' | sort -u)"
+    pw_lits="$(pw_warmed_envs "$pw_body" | grep -v '^\$' || true)"
+    pw_have="$(printf '%s\n%s\n' "$pw_list" "$pw_lits" | grep -v '^$' | sort -u)"
+    for pw_env in $pw_harness_envs; do
+      if printf '%s\n' "$pw_have" | grep -qx "$pw_env"; then
+        ok "the $pw_leg pre-warm leg warms MIX_ENV=$pw_env — the env the harness runs"
+      else
+        bad "the $pw_leg pre-warm leg does NOT warm MIX_ENV=$pw_env; it warms: $(printf '%s' "$pw_have" | tr '\n' ' ')"
+      fi
+    done
+  done
+
+  # …and every per-env stamp NAMES its env, so the transcript is
+  # self-describing rather than leaving a reader to assume which tree was
+  # warmed. The rule is "every stamp INSIDE the per-env loop", not a list of
+  # stamp prefixes — a list would stop matching the very stamp that dropped
+  # its env, and pass.
+  sed -n '/for pw_env in \$PREWARM_ENVS; do/,/^  done$/p' "$scratch/pw-child.txt" \
+    > "$scratch/pw-loop.txt"
+  pw_stamps="$(grep -cE '^[[:space:]]*stamp "prewarm:' "$scratch/pw-loop.txt" || true)"
+  if [ "${pw_stamps:-0}" -ge 3 ]; then
+    ok "the per-env pre-warm loop was found and carries $pw_stamps stamps"
+  else
+    bad "found only ${pw_stamps:-0} stamp(s) in the per-env pre-warm loop — the anchor moved and the naming check below is vacuous"
+  fi
+  pw_unnamed="$(grep -E '^[[:space:]]*stamp "prewarm:' "$scratch/pw-loop.txt" \
+                | grep -cv 'pw_env' || true)"
+  if [ "${pw_unnamed:-1}" -eq 0 ]; then
+    ok "every stamp inside the per-env pre-warm loop names its MIX_ENV"
+  else
+    bad "$pw_unnamed stamp(s) inside the per-env pre-warm loop do not name their MIX_ENV"
+  fi
+
+  # CONTROL — the predicate must DISCRIMINATE. Run the same extractor over the
+  # pre-PDS-D755 body (prod only). If this reports dev as warmed, the checks
+  # above are passing on their own shape and prove nothing about the fix.
+  cat > "$scratch/pw-legacy.txt" <<'LEGACYPW'
+if [ "$DO_PREWARM" = "1" ]; then
+  stamp "prewarm: cd $API_DIR && CC=/usr/bin/clang MIX_ENV=prod mix compile"
+  if ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV=prod mix compile ); then
+    stamp "prewarm: OK — the window will not pay a cold compile"
+  fi
+fi
+LEGACYPW
+  pw_legacy="$(pw_warmed_envs "$scratch/pw-legacy.txt" | tr '\n' ' ')"
+  case " $pw_legacy " in
+    *" prod "*) ok "the extractor does read the legacy body (it sees prod: $pw_legacy)" ;;
+    *)          bad "the extractor cannot even read the legacy body — it measures nothing" ;;
+  esac
+  case " $pw_legacy " in
+    *" dev "*) bad "the extractor reports dev warmed by a prod-only body — it cannot detect this defect" ;;
+    *)         ok  "the extractor reports the prod-only body as NOT warming dev (the defect is detectable)" ;;
+  esac
+
+  # ── 11. a zero-spend refusal re-enters the poll; a spend never does ───────
+  #
+  # This section RUNS the generated child end to end against a stub ssh and a
+  # stub harness — it arms nothing, touches no real host, and spends no real
+  # attempt (the whole mechanism is pointed at a scratch attempts file, and §7
+  # separately proves the real counter is untouched). Three legs drive the three
+  # verdicts refire_verdict can return, and a fourth MUTATES the generated child
+  # back to the one-shot form to prove these assertions discriminate.
+  say ""
+  say "11 · a zero-spend refusal re-enters the poll; a spend exits and never re-fires"
+
+  r11="$scratch/refire"
+  mkdir -p "$r11/bin" "$r11/full"
+
+  # The stub remote: swallows the heredoc program, answers with a reading that
+  # clears any floor and no running site builds, so EVERY draw verdicts FIRE.
+  cat > "$r11/bin/ssh" <<'STUB_SSH'
+#!/usr/bin/env bash
+cat >/dev/null 2>&1 || true
+printf 'mem_kb=99999999\n'
+printf 'rss_kb=1000\n'
+printf 'elapsed=10:00\n'
+printf 'builds=\n'
+STUB_SSH
+  chmod +x "$r11/bin/ssh"
+
+  # Stub harness A — REFUSES and never touches the counter (the cond_b shape).
+  cat > "$r11/bin/harness-refuse" <<STUB_REFUSE
+#!/usr/bin/env bash
+printf 'STUB: refusing --all, counter untouched\n'
+printf 'call\n' >> "$r11/calls-refuse"
+exit 1
+STUB_REFUSE
+  # Stub harness B — SPENDS an attempt, then fails (the mid-rung abort shape).
+  cat > "$r11/bin/harness-spend" <<STUB_SPEND
+#!/usr/bin/env bash
+printf 'STUB: spending one attempt, then failing\n'
+printf 'call\n' >> "$r11/calls-spend"
+n=\$(cat "$r11/full/attempts" 2>/dev/null || echo 0)
+printf '%s\n' "\$(( n + 1 ))" > "$r11/full/attempts"
+exit 1
+STUB_SPEND
+  # Stub harness C — refuses, but the counter is GARBAGE and cannot be read.
+  cat > "$r11/bin/harness-unverifiable" <<STUB_UNV
+#!/usr/bin/env bash
+printf 'STUB: refusing --all against an unreadable counter\n'
+printf 'call\n' >> "$r11/calls-unv"
+exit 1
+STUB_UNV
+  chmod +x "$r11/bin/harness-refuse" "$r11/bin/harness-spend" "$r11/bin/harness-unverifiable"
+
+  # $1 dest · $2 harness — write a child pointed entirely at scratch.
+  write_stub_child() {
+    (
+      HARNESS="$2"
+      FULL_ATTEMPTS_FILE="$r11/full/attempts"
+      API_DIR="$scratch/api-never-read"
+      INTERVAL=0
+      MAX_DRAWS=3
+      MEM_FLOOR_MIB=1
+      SSH_HOST=stub-host
+      SSH_KEY=/dev/null
+      DO_PREWARM=2
+      write_child_script "$1" "stub$$"
+    )
+  }
+
+  run_stub_child() { # $1 child · $2 log -> prints the rc
+    local c="$1" l="$2" rc
+    set +e
+    PATH="$r11/bin:$PATH" bash "$c" > "$l" 2>&1
+    rc=$?
+    set -e
+    printf '%s\n' "$rc"
+  }
+
+  # ── leg A: the zero-spend refusal ────────────────────────────────────────
+  printf '3\n' > "$r11/full/attempts"
+  a11_before="$(cat "$r11/full/attempts")"
+  write_stub_child "$r11/child-refuse.sh" "$r11/bin/harness-refuse"
+  a11_rc="$(run_stub_child "$r11/child-refuse.sh" "$r11/refuse.log")"
+  a11_after="$(cat "$r11/full/attempts")"
+  a11_calls="$(wc -l < "$r11/calls-refuse" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${a11_calls:-}" || a11_calls=0
+
+  check "$a11_calls" "3" "the refused harness is re-invoked once per remaining draw, capped at MAX_DRAWS=3"
+  check "$a11_rc" "6" "the child TERMINATES on its own with the window-exhausted status (the loop is bounded)"
+  check "$(tail -1 "$r11/refuse.log")" "EXIT: 6" "the last line is the sentinel — the transcript is still diagnosable"
+  check "$a11_before" "3" "PRECONDITION: the scratch attempts counter reads 3 before the run"
+  check "$a11_after" "3" "the attempts counter is UNCHANGED at 3 across three re-fires — no attempt was spent"
+  check "$(grep -c 'ZERO-SPEND REFUSAL #' "$r11/refuse.log" || true)" "3" "every re-entry is STAMPED, none is silent"
+  check "$(grep -c 'verdict=ZERO-SPEND-REFUSAL' "$r11/refuse.log" || true)" "3" "each invocation records its before/after counter readings and its verdict"
+  check "$(grep -c 'WINDOW-EXHAUSTED — ' "$r11/refuse.log" || true)" "1" "the exhausted window gets its own terminal stamp, exactly once"
+  check "$(grep -c 'ATTEMPT SPENT' "$r11/refuse.log" || true)" "0" "the zero-spend leg never claims an attempt was spent"
+
+  # ── leg B: a real spend must still end the run, on the FIRST invocation ───
+  printf '3\n' > "$r11/full/attempts"
+  write_stub_child "$r11/child-spend.sh" "$r11/bin/harness-spend"
+  b11_rc="$(run_stub_child "$r11/child-spend.sh" "$r11/spend.log")"
+  b11_after="$(cat "$r11/full/attempts")"
+  b11_calls="$(wc -l < "$r11/calls-spend" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${b11_calls:-}" || b11_calls=0
+
+  check "$b11_calls" "1" "a SPENT attempt invokes the harness exactly ONCE — no second, hidden attempt"
+  check "$b11_rc" "1" "the child exits on the harness rc, exactly as it always did"
+  check "$b11_after" "4" "CONTROL: the spend leg really did move the counter (3 -> 4), so leg A measured something"
+  check "$(grep -c 'ZERO-SPEND REFUSAL #' "$r11/spend.log" || true)" "0" "a moved counter never re-enters the poll"
+  check "$(grep -c 'ATTEMPT SPENT' "$r11/spend.log" || true)" "1" "the spend is named in the transcript"
+
+  # ── leg C: an UNREADABLE counter is read as a spend, never as a licence ──
+  printf 'not-a-number\n' > "$r11/full/attempts"
+  write_stub_child "$r11/child-unv.sh" "$r11/bin/harness-unverifiable"
+  c11_rc="$(run_stub_child "$r11/child-unv.sh" "$r11/unv.log")"
+  c11_calls="$(wc -l < "$r11/calls-unv" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${c11_calls:-}" || c11_calls=0
+  check "$c11_calls" "1" "a garbage counter stops the run after ONE invocation — unverifiable is treated as spent"
+  check "$c11_rc" "1" "the unverifiable leg exits on the harness rc rather than re-firing"
+  check "$(grep -c 'verdict=SPENT-UNVERIFIED' "$r11/unv.log" || true)" "1" "the unverifiable verdict is named in the transcript"
+
+  # ── the MUTATION: revert the child to the one-shot form and re-run leg A ──
+  #
+  # Deleting the re-entry branch from the GENERATED child reproduces the exact
+  # pre-fix behaviour (fire once, exit on rc). If leg A's assertions still pass
+  # against it, they are passing on their own shape and prove nothing.
+  awk '
+    /^    if \[ "\$refire" = "ZERO-SPEND-REFUSAL" \]; then$/ { skip=1 }
+    skip && /^    fi$/ { skip=0; next }
+    !skip { print }
+  ' "$r11/child-refuse.sh" > "$r11/child-oneshot.sh"
+  chmod +x "$r11/child-oneshot.sh"
+  m11_dropped="$(( $(wc -l < "$r11/child-refuse.sh") - $(wc -l < "$r11/child-oneshot.sh") ))"
+  if [ "$m11_dropped" -gt 0 ]; then
+    ok "the mutation APPLIED — $m11_dropped line(s) of the re-entry branch removed from the generated child"
+  else
+    bad "the mutation changed NOTHING — the anchor moved, and the control below is vacuous"
+  fi
+  if bash -n "$r11/child-oneshot.sh" 2>/dev/null; then
+    ok "the mutated child is still syntactically valid, so its result is behaviour, not a parse error"
+  else
+    bad "the mutated child does not parse — the control measures a syntax error, not the revert"
+  fi
+
+  printf '3\n' > "$r11/full/attempts"
+  : > "$r11/calls-refuse"
+  m11_rc="$(run_stub_child "$r11/child-oneshot.sh" "$r11/oneshot.log")"
+  m11_calls="$(wc -l < "$r11/calls-refuse" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${m11_calls:-}" || m11_calls=0
+
+  # Each assertion below is the NEGATION of one of leg A's — i.e. leg A goes RED
+  # on the reverted tree. Stated as the value leg A demanded, and what it is now.
+  if [ "$m11_calls" = "1" ] && [ "$m11_calls" != "$a11_calls" ]; then
+    ok "REVERTED: the one-shot child invokes the harness ONCE, not $a11_calls — leg A's call count goes RED"
+  else
+    bad "REVERTED: the one-shot child still invoked the harness $m11_calls time(s); leg A's count does not discriminate"
+  fi
+  if [ "$m11_rc" != "6" ]; then
+    ok "REVERTED: the one-shot child exits rc=$m11_rc, not 6 — leg A's exit-status check goes RED"
+  else
+    bad "REVERTED: the one-shot child still exits 6; leg A's exit status does not discriminate"
+  fi
+  m11_exh="$(grep -c 'WINDOW-EXHAUSTED — ' "$r11/oneshot.log" || true)"
+  if [ "${m11_exh:-0}" -eq 0 ]; then
+    ok "REVERTED: no WINDOW-EXHAUSTED stamp — leg A's terminal-stamp check goes RED"
+  else
+    bad "REVERTED: the one-shot child still printed WINDOW-EXHAUSTED; that check does not discriminate"
+  fi
+
+  # ── collect must not call an exhausted window a spent attempt ─────────────
+  {
+    printf '[2026-07-21T07:00:00Z] FIRE — draw 1 of 3 qualified.\n'
+    printf '[2026-07-21T07:00:10Z] attempts: before=3 after=3 rc=1 verdict=ZERO-SPEND-REFUSAL\n'
+    printf '[2026-07-21T07:00:10Z] ZERO-SPEND REFUSAL #1 — the harness refused with rc=1\n'
+    printf '[2026-07-21T07:01:00Z] WINDOW-EXHAUSTED — 3 draws taken. The harness was invoked 3 time(s) and\n'
+    printf 'EXIT: 6\n'
+  } > "$scratch/exhausted.log"
+  check "$(classify "$scratch/exhausted.log" "$scratch/dummy.pid")" "CRASHED" \
+    "an exhausted-after-refusals transcript classifies CRASHED (still six states, no seventh)"
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/exhausted.log" --pid-file "$scratch/dummy.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"ZERO export attempts were spent"*) ok "collect reads the exhausted window as costing ZERO attempts" ;;
+    *) bad "collect does not say the exhausted window spent zero attempts — it would hoard a budget still held" ;;
+  esac
+  case "$out" in
+    *"An export attempt WAS SPENT"*) bad "collect calls an unmoved counter a spent attempt (the FIRE-stamp misread)" ;;
+    *) ok "collect does NOT call the exhausted window a spent attempt" ;;
+  esac
+
+  # …and the spend shape must still read as spent, from the counter this time.
+  {
+    printf '[2026-07-21T07:00:00Z] FIRE — draw 1 of 3 qualified.\n'
+    printf '[2026-07-21T07:00:10Z] attempts: before=3 after=4 rc=2 verdict=SPENT\n'
+    printf 'EXIT: 2\n'
+  } > "$scratch/spent.log"
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/spent.log" --pid-file "$scratch/dummy.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"An export attempt WAS SPENT"*) ok "a MOVED counter still reads as a spent attempt" ;;
+    *) bad "a moved counter no longer reads as a spent attempt — re-arming would burn a second one" ;;
+  esac
+  case "$out" in
+    *"ZERO export attempts were spent"*) bad "the spend shape is called free to re-arm" ;;
+    *) ok "the spend shape is never called free to re-arm" ;;
+  esac
+
   say ""
   rule
   printf '  %d ok · %d FAIL\n' "$ST_PASS" "$ST_FAIL"
@@ -2098,7 +2568,9 @@ usage: $SELF <command>
   arm [--force] [--prewarm-now|--no-prewarm] [--max-draws N] [--interval S]
         Launch the climb DETACHED and return. Does not poll; the poll loop
         lives in the child, which outlives this turn. By default the child
-        pays the MIX_ENV=prod pre-warm before its first draw (PDS-D241).
+        pays the pre-warm before its first draw (PDS-D241): MIX_ENV=dev
+        first — the env the harness actually runs — then MIX_ENV=prod
+        (PDS-D755). Each stamp names its env.
 
   collect [<run-tag>] [--transcript P --pid-file F]
         Classify a transcript into one of six states (PDS-D247):

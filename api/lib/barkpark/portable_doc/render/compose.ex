@@ -375,14 +375,19 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # Lists stay semantic in every style. Article mode leaves the resulting
   # PdList/PdListItem frame bare for the paper stylesheet; email/default mode
   # applies its Outlook-safe spacing inline in Walk.
+  # A checklist is a list with `"task" => true`; each item map may carry
+  # `"checked" => true`. Items stay inline arrays or {content|text, checked, children}
+  # maps, so every existing list reader keeps working and a checklist degrades to
+  # a plain list wherever the flag is unknown.
   def compose_block(%{"type" => "list"} = b, style) do
     ordered = Map.get(b, "ordered") == true
+    task = Map.get(b, "task") == true
 
     items =
       Map.get(b, "items", [])
       |> List.wrap()
       |> Enum.map(fn item ->
-        %{
+        base = %{
           "kind" => "PdListItem",
           "children" =>
             [
@@ -392,9 +397,17 @@ defmodule Barkpark.PortableDoc.Render.Compose do
               }
             ] ++ compose_list_children(item, style)
         }
+
+        if task do
+          checked = is_map(item) and Map.get(item, "checked") == true
+          Map.merge(base, %{"task" => true, "checked" => checked})
+        else
+          base
+        end
       end)
 
-    %{"kind" => "PdList", "ordered" => ordered, "children" => items}
+    list = %{"kind" => "PdList", "ordered" => ordered, "children" => items}
+    if task, do: Map.put(list, "task", true), else: list
   end
 
   def compose_block(%{"type" => "callout"} = b, style) do

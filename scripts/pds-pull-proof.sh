@@ -12,6 +12,36 @@
 #                                           this harness can PROVE it owns, and
 #                                           with --apply remove exactly those.
 #                                           Refuses everything else, by name.
+#   scripts/pds-pull-proof.sh --selftest-conninfo
+#                                           OFFLINE two-arm control over the
+#                                           PDS_SCRATCH_DB reader: an unquoted
+#                                           hand-written scratch.env must still
+#                                           fail closed AND be named, and the
+#                                           quoted recipe must parse all four
+#                                           keys in SILENCE. No network, no
+#                                           target, no export.
+#   scripts/pds-pull-proof.sh --selftest-citations
+#                                           OFFLINE two-arm control over this
+#                                           file's OWN decision citations: a
+#                                           slash-compressed citation carries
+#                                           the PDS-D prefix on the first
+#                                           number only, so the standard census
+#                                           grep silently misses every later
+#                                           one. Fixtures prove the detector
+#                                           fires and stays quiet; the last arm
+#                                           runs it on this script.
+#   scripts/pds-pull-proof.sh --selftest-roster
+#                                           OFFLINE control that the rung-6
+#                                           sentinel exclusion roster has ONE
+#                                           edit site: scripts/pds-schema-row-
+#                                           census.md declares
+#                                           PDS_SENTINEL_EXCLUSION and this
+#                                           harness derives its NOT IN clause
+#                                           from it. Positive arm reads the
+#                                           real census; negative arm drifts a
+#                                           fixture by one row; refusal arms
+#                                           prove an unusable source reads as
+#                                           NOT DERIVED, never derived-empty.
 #   scripts/pds-pull-proof.sh --help
 #
 # WHY THIS EXISTS BEFORE THE ENGINES DO (PDS-D39, "the proof is the program").
@@ -40,7 +70,7 @@
 # draft row), and why step 4's clean scan is only ever reported next to a control
 # that FIRES.
 #
-# COST DISCIPLINE (PDS-D31/D44/D69). Two exports, at most, per run:
+# COST DISCIPLINE (PDS-D31/PDS-D44/PDS-D69). Two exports, at most, per run:
 #   · the DEV export of step 0a, re-used by step 1's pull;
 #   · exactly ONE full-fidelity export, shared by steps 3 and 4 and by nothing
 #     else. It is parked at a RUN-STABLE path with a .meta sidecar so the NEXT
@@ -133,7 +163,7 @@
 #   PDS_STEP6_GUARD_DEMO=0  skip step 6's guard-off control (same honesty)
 #   PDS_STEP1_GRAIN_DEMO=0  skip step 1's manifest-grain negative control — the
 #                        locally built mis-grained bundles that prove the
-#                        PDS-D61/D62 guard can REFUSE. On by default (it costs no
+#                        PDS-D61/PDS-D62 guard can REFUSE. On by default (it costs no
 #                        network, no export and no credentials); the pass then
 #                        says so, because the green is weaker without it.
 #   PDS_PROOF_LIB=1      load the rungs as a library without running any
@@ -218,7 +248,7 @@ ART_MARKER_NAME=".pds-proof-owner"
 ART_DIR_OWNED=""
 MAX_HOME_LEN=85
 
-# ── the ONE full-fidelity export (PDS-D69/D70/D71) ───────────────────────────
+# ── the ONE full-fidelity export (PDS-D69/PDS-D70/PDS-D71) ───────────────────
 #
 # ART_DIR is RUN_TAG-scoped: a bundle parked there is INVISIBLE to the next run,
 # which then spends a second attempt on a 3.8 GB box. So the one full export
@@ -524,7 +554,49 @@ src_psql() { # sql — read-only. The SQL travels on ssh's STDIN (psql -f -) rat
 # port, a token or a conninfo — a harness that guesses them is proving something
 # about its guess.
 
+# ── the conninfo, READ THE SAME WAY EVERYWHERE ──────────────────────────────
+#
+# `PDS_SCRATCH_DB` is a libpq conninfo: `host=… port=… dbname=… user=…`. Two
+# pure helpers read it, and BOTH the warning in load_target and the abort in
+# step 0c go through them, so the two can never name different key sets.
+#
+# WHY THE WARNING EXISTS (pds-w6-scratch-env-quoting-trap). load_target sources
+# scratch.env with `. "$envf"`. A HAND-WRITTEN line
+#
+#     PDS_SCRATCH_DB=host=127.0.0.1 port=59999 dbname=nope user=nope
+#
+# is a shell assignment followed by three COMMAND WORDS: the variable gets
+# `host=127.0.0.1` and the rest is dropped at the first space. The generated
+# scratch.env is safe — pds-scratch-target.sh writes `export PDS_SCRATCH_DB="…"`
+# — so this only ever bites a fixture somebody typed. It already FAILS CLOSED
+# (step 0c aborts `env:scratch-db-unparsed` and refuses the ambient dev Repo),
+# and that is NOT traded away here: nothing below repairs, completes or guesses
+# at a half-parsed conninfo. The only change is that the operator is told WHICH
+# keys are missing, and that the cause is the missing quotes, at the moment the
+# value is read rather than several steps downstream.
+
+conninfo_part() { # key conninfo -> the value for that key ('' when absent)
+  local want="$1" kv
+  # Word-splitting $2 IS the parse: a libpq conninfo is space-separated.
+  # shellcheck disable=SC2086
+  for kv in $2; do
+    case "$kv" in
+      "$want"=*) printf '%s' "${kv#"$want"=}"; return 0 ;;
+    esac
+  done
+  printf ''
+}
+
+conninfo_missing_keys() { # conninfo -> the missing key names, space-separated
+  local k missing=""        # empty output = all four keys present
+  for k in host port dbname user; do
+    [ -n "$(conninfo_part "$k" "$1")" ] || missing="$missing $k"
+  done
+  printf '%s' "${missing# }"
+}
+
 TARGET_BASE=""; TARGET_TOKEN=""; TARGET_DB=""; TARGET_TREE=""; TARGET_MEDIA=""
+SCRATCH_DB_WARNED=""
 load_target() { # 0 = a booted target is loaded
   local envf="$BARKPARK_HOME/scratch.env"
   [ -f "$envf" ] || return 1
@@ -535,6 +607,18 @@ load_target() { # 0 = a booted target is loaded
   TARGET_DB="${PDS_SCRATCH_DB:-}"
   TARGET_TREE="${PDS_SCRATCH_TREE:-}"
   TARGET_MEDIA="${BARKPARK_MEDIA_DIR:-}"
+  # A non-empty conninfo missing any of the four keys is named HERE, once per
+  # distinct value, on stderr. TARGET_DB is left exactly as it was read.
+  local missing
+  if [ -n "$TARGET_DB" ]; then
+    missing="$(conninfo_missing_keys "$TARGET_DB")"
+    if [ -n "$missing" ] && [ "$SCRATCH_DB_WARNED" != "$TARGET_DB" ]; then
+      SCRATCH_DB_WARNED="$TARGET_DB"
+      printf 'WARN  %s/scratch.env: PDS_SCRATCH_DB parsed to fewer than four keys — missing: %s (value read: %s)\n' \
+        "$BARKPARK_HOME" "$missing" "$TARGET_DB" >&2
+      printf 'WARN  a HAND-WRITTEN scratch.env must QUOTE the value — export PDS_SCRATCH_DB="host=… port=… dbname=… user=…" — because sourcing an unquoted multi-field assignment keeps only the first field. Nothing is guessed from a short conninfo: step 0c still aborts rather than fall back to the ambient dev Repo.\n' >&2
+    fi
+  fi
   [ -n "$TARGET_BASE" ] && [ -n "$TARGET_TOKEN" ]
 }
 
@@ -873,7 +957,7 @@ cmd_plan() {
 
   plan_row 1 "THE PULL — export --profile dev + import --yes --merge, both --with-blobs" \
     "a booted scratch target + a bp built FROM THIS WORKTREE (the installed one predates the dialect)" \
-    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/D62) — and that assertion carries a NEGATIVE CONTROL, on by default (PDS_STEP1_GRAIN_DEMO=0 to skip, and the pass then says so), which puts five locally built manifests through the same assertion and FAILs the step unless it refuses every mis-grained one; (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it. PRECONDITION READ FROM THE LIVE TARGET, not from a migration file: documents_task_lifecycle_status_check must already accept all seven lifecycle values (PDS-D32 migrations 20260719030000 + 20260719030100); a pre-widening target ABORTS by name here instead of dying mid-import on a raw CHECK violation that reads like an engine defect."
+    "RUNNABLE. Runs the PAIR (PDS-D58) with explicit -s/--token on both calls — BARKPARK_TOKEN is read NOWHERE. ASSERTS: (1) the built bp advertises --profile/--merge/--with-blobs in its own --help; (2) the export exits 0 and the tar carries a manifest; (3) the manifest's dataset EQUALS the dataset asked for — a workspace-grain bundle ABORTS naming pds-w4-pull-dataset-flag rather than being imported (PDS-D61/PDS-D62) — and that assertion carries a NEGATIVE CONTROL, on by default (PDS_STEP1_GRAIN_DEMO=0 to skip, and the pass then says so), which puts five locally built manifests through the same assertion and FAILs the step unless it refuses every mis-grained one; (4) the import exits 0 and its receipt names tables+rows; (5) blob failures exit non-zero by the CLI's own contract. --merge is MANDATORY: mode=clean answers an opaque 500 (25P02 at workspace_bundle.ex:233) on a populated target. PDS-D9 adoption is reported by diffing the workspaces row across the import — the CLI never says it. PRECONDITION READ FROM THE LIVE TARGET, not from a migration file: documents_task_lifecycle_status_check must already accept all seven lifecycle values (PDS-D32 migrations 20260719030000 + 20260719030100); a pre-widening target ABORTS by name here instead of dying mid-import on a raw CHECK violation that reads like an engine defect."
 
   plan_row 2 "RAW-PERSPECTIVE CENSUS — per-type ?perspective=raw&count=true, BOTH ends" \
     "source HTTP; for the target half, step 1's import" \
@@ -891,7 +975,7 @@ cmd_plan() {
     "step 1 imported blobs into the scratch target" \
     "RUNNABLE. Resolves from the TARGET's OWN /v1/media/:dataset (the flat /media index emits no originalUrl and ignores limit) and takes originalUrl and size VERBATIM per asset — originalUrl may be signed, so it is never rebuilt from a path. ASSERTS HTTP 200 AND content-length == the stored size for EVERY asset. FAILURE DEMO, run inline and reversed: one blob truncated to 100 bytes still serves 200 — only the stored size convicts it. SEPARATE ASSERTION: a missing blob answers the typed 404 'media blob missing', never a 500."
 
-  plan_row 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/D62/D65)" \
+  plan_row 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/PDS-D62/PDS-D65)" \
     "step 1's import, stamped" \
     "RUNNABLE. Reboot is \`bin/barkpark stop\` then \`up\` in the SAME BARKPARK_HOME — there is NO restart verb and teardown stops Postgres. ASSERTS the eight columns the boot-time schema upsert would otherwise revert (title, icon, visibility, owner_scoped, fields, cors_origins, desk_groups, list_preview) are byte-identical across the reboot, and the pull_provenance stamp survives. THEN — sequenced AFTER the convergence it demonstrates against — the guard is switched OFF by direct SQL (no CLI/HTTP surface exists) with the RETURNING value ASSERTED, because jsonb_set is a proven silent no-op when the parent path is absent, and the next boot must CLOBBER those columns. A demo that fails to clobber makes the convergence green uninterpretable and is reported as a FAIL."
 
@@ -930,7 +1014,12 @@ cmd_plan() {
 # each removal names one path the loop proved it owns.
 
 art_uid_of() { # dir -> numeric owner uid ('' when unreadable)
-  stat -f %u "$1" 2>/dev/null || stat -c %u "$1" 2>/dev/null || true
+  # GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+  # FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a block-count
+  # report instead of failing, and a BSD-first `||` chain never reaches the
+  # GNU form. BSD stat rejects `-c` outright, so GNU-first fails loudly on
+  # the wrong platform instead of quietly.
+  stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null || true
 }
 
 art_dir_age_hours_ok() { # dir min_hours -> 0 when OLDER than min_hours
@@ -1143,7 +1232,7 @@ step_0a() {
     info "last deploy run ${last_deploy:-none visible (auto-deploy may not be firing — see task-85eb87a30db908ec)}"
   fi
 
-  # The one budgeted export: DEV profile. Never :full here (PDS-D31/D44).
+  # The one budgeted export: DEV profile. Never :full here (PDS-D31/PDS-D44).
   art_dir_ensure
   local bundle hdr t0 t1 bytes elapsed fname
   bundle="$ART_DIR/dev-$SOURCE_WS-$SOURCE_DS.tar"
@@ -1312,19 +1401,17 @@ step_0c() {
 
   # Parse libpq conninfo -> the four parts Ecto needs. Written by
   # pds-scratch-target.sh as: host=… port=… dbname=… user=…
-  local pg_host pg_port pg_db pg_user kv
-  pg_host=""; pg_port=""; pg_db=""; pg_user=""
-  for kv in $TARGET_DB; do
-    case "$kv" in
-      host=*)   pg_host="${kv#host=}" ;;
-      port=*)   pg_port="${kv#port=}" ;;
-      dbname=*) pg_db="${kv#dbname=}" ;;
-      user=*)   pg_user="${kv#user=}" ;;
-    esac
-  done
-  if [ -z "$pg_host" ] || [ -z "$pg_port" ] || [ -z "$pg_db" ] || [ -z "$pg_user" ]; then
+  # Same reader as load_target's warning (conninfo_part), so the abort below
+  # cannot disagree with the WARN line about which keys are missing.
+  local pg_host pg_port pg_db pg_user missing
+  pg_host="$(conninfo_part host "$TARGET_DB")"
+  pg_port="$(conninfo_part port "$TARGET_DB")"
+  pg_db="$(conninfo_part dbname "$TARGET_DB")"
+  pg_user="$(conninfo_part user "$TARGET_DB")"
+  missing="$(conninfo_missing_keys "$TARGET_DB")"
+  if [ -n "$missing" ]; then
     abort 0c "env:scratch-db-unparsed" \
-      "PDS_SCRATCH_DB did not parse into host/port/dbname/user ('$TARGET_DB'). Refusing to fall back to the ambient dev Repo."
+      "PDS_SCRATCH_DB did not parse into host/port/dbname/user — MISSING: $missing ('$TARGET_DB'). A hand-written scratch.env must QUOTE the value (export PDS_SCRATCH_DB=\"host=… port=… dbname=… user=…\"); sourcing an unquoted multi-field assignment keeps only the first field. Refusing to fall back to the ambient dev Repo."
     return 0
   fi
   info "scratch Repo    host=$pg_host port=$pg_port dbname=$pg_db user=$pg_user (from scratch.env, not from dev.exs)"
@@ -1457,7 +1544,7 @@ print(v)' "$d/manifest.json" 2>/dev/null)"
 
 # ── THE GRAIN VERDICT, AS ONE CALLABLE (PDS-D20) ─────────────────────────────
 #
-# The PDS-D61/D62 grain-hazard guard used to live INLINE in step_1, which is why
+# The PDS-D61/PDS-D62 grain-hazard guard used to live INLINE in step_1, which is why
 # it was the one asserting rung nobody could point a control at. It is the same
 # comparison, moved behind a name so a locally built bundle can be put through
 # the EXACT assertion the live bundle goes through. stdout and the exit code of
@@ -1565,7 +1652,7 @@ GRAIN_FIXTURES
   fi
   blk="$(grain_blocker no-dataset)"
   if [ "$blk" != "pds-w4-pull-dataset-flag" ]; then
-    fail 1 "THE GRAIN CONTROL DID NOT FIRE: a dataset-less (workspace-grain) manifest routes to blocker '${blk:-<none>}', not the pds-w4-pull-dataset-flag ABORT this rung claims to raise for it (PDS-D61/D62). Nothing was exported and nothing was imported."
+    fail 1 "THE GRAIN CONTROL DID NOT FIRE: a dataset-less (workspace-grain) manifest routes to blocker '${blk:-<none>}', not the pds-w4-pull-dataset-flag ABORT this rung claims to raise for it (PDS-D61/PDS-D62). Nothing was exported and nothing was imported."
     return 1
   fi
   info "  $n/$n classified as expected, and a workspace-grain manifest routes to ABORT $blk."
@@ -1710,7 +1797,7 @@ GRAIN_VERDICT
   info "manifest        profile='${m_profile:-$([ "$m_prc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' dataset='${m_ds:-$([ "$m_drc" -eq 2 ] && echo '<unreadable>' || echo '<absent>')}' (asked for profile=dev dataset=$SOURCE_DS)$m_note"
   if [ "$m_verdict" = "no-dataset" ]; then
     abort 1 "$(grain_blocker "$m_verdict")" \
-      "the exported manifest carries NO dataset field — this is a WORKSPACE-GRAIN bundle wearing a dataset command line. Refusing to import it: every per-type census downstream would silently describe the whole workspace while the transcript claimed dataset=$SOURCE_DS (PDS-D61/D62). The bundle is on disk at $tar if you want to look."
+      "the exported manifest carries NO dataset field — this is a WORKSPACE-GRAIN bundle wearing a dataset command line. Refusing to import it: every per-type census downstream would silently describe the whole workspace while the transcript claimed dataset=$SOURCE_DS (PDS-D61/PDS-D62). The bundle is on disk at $tar if you want to look."
     return 0
   fi
   if [ "$m_verdict" = "dataset-mismatch" ]; then
@@ -2073,7 +2160,7 @@ step_2() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 # ═════════════════════════════════════════════════════════════════════════════
-# THE ONE FULL EXPORT (PDS-D69/D70/D71) — acquired once, consumed twice
+# THE ONE FULL EXPORT (PDS-D69/PDS-D70/PDS-D71) — acquired once, consumed twice
 # ═════════════════════════════════════════════════════════════════════════════
 #
 # Steps 3 and 4 both need a FULL-fidelity bundle: step 3 for the ticket control
@@ -2377,6 +2464,71 @@ gate_d_verdict() { # <gh_rc> [<run-id>=<verdict> ...] -> the cond_d text; 0 = OK
   return 0
 }
 
+# ── THE PER-RUN DESCENT, AND ITS COUNT IDENTITY (task-adad29e7487ed2b6) ─────
+# EXTRACTED so it can be driven from a fixture. The loop below used to sit
+# inline in the full-export precondition block, wedged between an ssh memory
+# probe and a `df`, which meant the only route to its behaviour was a live
+# export against a live box — the exact shape PDS-D31 forbids buying a
+# demonstration with. Its body is otherwise unchanged.
+#
+# WHY THE IDENTITY EXISTS. `$gh_out` is read on fd 0 (a heredoc). Any body
+# child that reads stdin — a `gh` invoked with `--input -`, a future `ssh`, a
+# `psql`, a stray `read` — swallows the remaining run ids, the loop ENDS EARLY
+# with no error and no non-zero status, and `d_pairs` is simply SHORTER than
+# the listing it was built from. gate_d_verdict is worst-case over the pairs it
+# is HANDED, so a run it never examined cannot be represented: an in-flight
+# `instance` deploy on run 3 of 3 then reads as "every one of them is
+# CONTROL-PLANE ONLY", or — if the loop died on iteration 1 of 1 — as "no
+# deploy.yml run in progress". That is the precise false-clear this gate exists
+# to prevent, and it is the same sentence a true clear uses.
+#
+# THE IDENTITY IS: pairs built == NON-EMPTY lines the enumeration handed the
+# loop. Non-empty on both sides, because the body's own `[ -n "$d_run" ] ||
+# continue` arm skips a blank line without appending a pair, so a blank line
+# must not be counted on the enumeration side either. `awk 'NF'` and the body
+# guard agree on what "non-empty" means: a whitespace-only line is NF==0 on one
+# side and IFS-stripped to empty on the other.
+#
+# It is the same identity scripts/pds-secret-scan.sh landed in #19577 over its
+# table list, and the same one the deploy.yml anchor loop landed in #19561.
+gate_d_conditions() { # <gh_rc> <gh_out> -> the cond_d text; 0 = OK
+  local gh_rc="${1-0}" gh_out="${2-}"
+  local d_run d_jobs d_jrc d_pairs=() d_enumerated=0
+
+  if [ "$gh_rc" -eq 0 ] && [ -n "$gh_out" ]; then
+    # COUNTED BEFORE THE LOOP READS A BYTE. This is the number of in-flight
+    # runs the enumeration HANDED the loop; `${#d_pairs[@]}` below is the number
+    # it actually examined. Nothing else in this block can tell "3 of 3" from
+    # "1 of 3" — both look like a completed loop.
+    d_enumerated="$(printf '%s\n' "$gh_out" | awk 'NF { n++ } END { print n+0 }')"
+
+    while read -r d_run; do
+      [ -n "$d_run" ] || continue
+      d_jrc=0
+      # MUT-ANCHOR: gate-d-body-child
+      d_jobs="$(gh run view "$d_run" --json jobs \
+                  -q '.jobs[] | [.name, .status, (.conclusion // "")] | @tsv' 2>/dev/null)" || d_jrc=$?
+      if [ "$d_jrc" -ne 0 ]; then
+        d_pairs+=("$d_run=unknown:gh run view exited $d_jrc, so this run's job graph was never read")
+      else
+        d_pairs+=("$d_run=$(deploy_run_instance_verdict "$d_jobs")")
+      fi
+    done <<EOF
+$gh_out
+EOF
+
+    # MUT-ANCHOR: gate-d-count-identity
+    if [ "${#d_pairs[@]}" -ne "$d_enumerated" ]; then
+      printf 'UNKNOWN (SHORT RUN SCAN — built %s run/verdict pair(s) from the %s in-flight deploy.yml run(s) the enumeration handed the loop. The loop ended before the list did, so %s run(s) were never examined and cannot be represented in the verdict; a gate that looked at part of the listing must never clear in the same words as one that looked at all of it)\n' \
+        "${#d_pairs[@]}" "$d_enumerated" "$((d_enumerated - ${#d_pairs[@]}))"
+      return 1
+    fi
+    # MUT-END: gate-d-count-identity
+  fi
+
+  gate_d_verdict "$gh_rc" ${d_pairs[@]+"${d_pairs[@]}"}
+}
+
 acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says why not
   FULL_WHY=""
   local stale_note=""
@@ -2492,23 +2644,13 @@ acquire_full_bundle() { # 0 = $FULL_TAR is on disk and usable; 1 = FULL_WHY says
     # the whole defect PDS-D746 thaws this block to fix — the discriminator is
     # the `instance` job, and it is only visible one level down, in the run's
     # own job graph.
-    local d_run d_jobs d_jrc d_pairs=()
-    if [ "$gh_rc" -eq 0 ] && [ -n "$gh_out" ]; then
-      while read -r d_run; do
-        [ -n "$d_run" ] || continue
-        d_jrc=0
-        d_jobs="$(gh run view "$d_run" --json jobs \
-                    -q '.jobs[] | [.name, .status, (.conclusion // "")] | @tsv' 2>/dev/null)" || d_jrc=$?
-        if [ "$d_jrc" -ne 0 ]; then
-          d_pairs+=("$d_run=unknown:gh run view exited $d_jrc, so this run's job graph was never read")
-        else
-          d_pairs+=("$d_run=$(deploy_run_instance_verdict "$d_jobs")")
-        fi
-      done <<EOF
-$gh_out
-EOF
-    fi
-    cond_d="$(gate_d_verdict "$gh_rc" ${d_pairs[@]+"${d_pairs[@]}"})" || ok=0
+    #
+    # THE DESCENT AND ITS COUNT IDENTITY LIVE IN gate_d_conditions (above), so
+    # both directions are reachable from a fixture rather than only from a live
+    # export (PDS-D31). It refuses outright when it built fewer run/verdict
+    # pairs than the enumeration handed it — a short loop can no longer hand
+    # gate_d_verdict a truncated pair list and have it read as a clear.
+    cond_d="$(gate_d_conditions "$gh_rc" "$gh_out")" || ok=0
   else
     cond_d="UNKNOWN (gh is not on PATH, so an in-flight deploy cannot be ruled out)"; ok=0
   fi
@@ -3342,7 +3484,7 @@ GUARDED_DIGEST_SQL="SELECT md5(string_agg(dataset || '|' || name || '|' || coale
 # aggregate and would read as a clean control firing (PDS-D130).
 GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_groups list_preview"
 
-# ── THE 34 (PDS-D127/D128) ───────────────────────────────────────────────────
+# ── THE 34 (PDS-D127/PDS-D128) ───────────────────────────────────────────────
 #
 # `schema_definitions` on a pulled target holds 36 rows in three CLASSES, and
 # only one of them behaves the way the guard is about:
@@ -3353,7 +3495,7 @@ GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_gro
 #                          BEFORE register_all_schemas/0 and outside BOOTSTRAP's
 #                          registry walk — but NOT outside the guard. It goes
 #                          through the SAME `Tenancy.pulled_schema_row/2`
-#                          predicate as the 34 — PDS-D125/D126, in
+#                          predicate as the 34 — PDS-D125/PDS-D126, in
 #                          `Content.TagRegistry.register_attrs!/2` — so it
 #                          SURVIVES stamped and REVERTS cleared, exactly like
 #                          them. It is excluded for SCOPING reasons, not for
@@ -3387,9 +3529,140 @@ GUARDED_COLUMNS="title icon visibility owner_scoped fields cors_origins desk_gro
 # the SKIP count in the target's own server.log below (PDS-D129). That
 # cross-check is the only thing that turns a future guerrilla-only orphan, or a
 # third core writer, from a silent vacuous green into a loud red.
+#
+# ── ONE EDIT SITE, NOT TWO (PDS-D129) ────────────────────────────────────────
+#
+# The roster used to live here as a typed-in `NOT IN ('tag','metric')` AND again
+# as prose in scripts/pds-schema-row-census.md, and a third time in step 6's
+# scope banner. Three copies of a hand-maintained list is the drift shape the
+# census file was written to warn about, reproduced by the pair that wrote it.
+#
+# Now the census declares it once, machine-readably, and this harness DERIVES:
+#
+#   scripts/pds-schema-row-census.md   `PDS_SENTINEL_EXCLUSION = tag metric`
+#
+# The literal below is a FALLBACK for the one case where that file is not
+# readable, never a second authority. When both are readable and they disagree,
+# step 6 FAILS before the sentinel is written — sentinelling a set nobody
+# declared is exactly the vacuous green this rung exists to prevent. When the
+# census is unreadable the run says so and proceeds on the fallback, UNCHECKED.
+# Same shape as step 2's @e3_dataset_keyed derivation.
+SENTINEL_EXCLUSION_FALLBACK="tag metric"
+SENTINEL_EXCLUSION_SOURCE_REL="scripts/pds-schema-row-census.md"
+# The resolved roster, space separated. Seeded with the fallback so every reader
+# has a defined value; sentinel_roster_resolve below replaces it from the census
+# (or leaves it, loudly) before step 6 touches a row.
+SENTINEL_EXCLUSION="$SENTINEL_EXCLUSION_FALLBACK"
+# The census's answer, set only when it DISAGREES with the fallback, so the fail
+# message can name both sides. Defined up here because `set -u` is on.
+SENTINEL_ROSTER_DRIFT=""
+
+# Print the space-separated roster declared by the census, or nothing and a
+# non-zero exit when the file is unreadable or the declaration does not parse.
+# An unparseable source must read as "NOT derived", never as "derived empty":
+# an empty derivation would mismatch the fallback and red a healthy run for a
+# reason that has nothing to do with the census's contents.
+#
+# Takes the file to read as $1 so the selftest can point it at a fixture — a
+# derivation that can only ever read the real file cannot be given a negative
+# control, and a detector with no negative control is a claim, not a check.
+sentinel_exclusion_derive() {
+  local src="${1:-$REPO_ROOT/$SENTINEL_EXCLUSION_SOURCE_REL}" out
+  [ -r "$src" ] || return 1
+  out="$(sed -n 's/^PDS_SENTINEL_EXCLUSION[[:space:]]*=[[:space:]]*\(.*\)$/\1/p' "$src" \
+          | sed -n '1p' | tr -s '[:space:]' ' ' | sed 's/^ *//; s/ *$//')"
+  [ -n "$out" ] || return 1
+  # A name is interpolated into a SQL string literal below. Anything that could
+  # close that literal is REFUSED, not escaped: the roster is a handful of
+  # lowercase schema names and a surprise there is a defect, not a quoting job.
+  case "$out" in
+    *"'"*|*\\*) return 1 ;;
+  esac
+  printf '%s' "$out"
+}
+
+# The roster as a SQL IN-list: `tag metric` -> `'tag','metric'`.
+sentinel_exclusion_sql_list() {
+  local n out=""
+  for n in $SENTINEL_EXCLUSION; do
+    [ -n "$out" ] && out="$out,"
+    out="$out'$n'"
+  done
+  printf '%s' "$out"
+}
+
+# Resolve SENTINEL_EXCLUSION from the census. Exit 1 (having printed nothing)
+# when the census and the fallback DISAGREE — the caller turns that into a
+# `fail`, before any row is written.
+sentinel_roster_resolve() {
+  local derived
+  if ! derived="$(sentinel_exclusion_derive)"; then
+    SENTINEL_EXCLUSION="$SENTINEL_EXCLUSION_FALLBACK"
+    info "sentinel roster NOT derived this run ($SENTINEL_EXCLUSION_SOURCE_REL unreadable, or its PDS_SENTINEL_EXCLUSION line did not parse) — the exclusion below is named from the in-script fallback ('$SENTINEL_EXCLUSION_FALLBACK'), UNCHECKED against the census"
+    return 0
+  fi
+  if [ "$derived" != "$SENTINEL_EXCLUSION_FALLBACK" ]; then
+    SENTINEL_ROSTER_DRIFT="$derived"
+    return 1
+  fi
+  SENTINEL_EXCLUSION="$derived"
+  info "sentinel roster DERIVED this run from $SENTINEL_EXCLUSION_SOURCE_REL (PDS_SENTINEL_EXCLUSION = '$derived') and it MATCHES the in-script fallback"
+  return 0
+}
+
+# ── THE THIRD SCOPING TERM: dataset (PDS_SOURCE_DATASET MUST STAY UNSET) ─────
+#
+# `sentinel_scope_sql` below joins THREE terms and until now only two of them
+# had anything watching. `workspace_id` is CAPTURED by stamp_before rather than
+# assumed (PDS-D132); the `name NOT IN (...)` roster is DERIVED from the census
+# above and reds when the two copies disagree (PDS-D129). The third term is
+# `$SOURCE_DS`, i.e. `${PDS_SOURCE_DATASET:-production}` resolved at the top of
+# this file, and nothing checked it at all.
+#
+# It cannot be anything but `production` and leave step 6 interpretable, and the
+# reason lives in the application, not here:
+#
+#   api/lib/barkpark/plugins/bootstrap.ex  `register_schema/3`:
+#       dataset = schema.dataset || "production"
+#     Every plugin-declared row lands in `production` unless its own plugin
+#     names something else -- and none does. The string-literal declarations in
+#     api/lib/barkpark/plugins/ all read `dataset: "production"`, and the one
+#     non-literal (`tickets.ex`, `dataset: dataset`) defaults from
+#     `@dataset_default "production"`. The roster selftest re-derives BOTH of
+#     those rather than trusting this comment.
+#
+#   api/lib/barkpark/schema_bootstrap.ex   `init/1` calls
+#       Barkpark.Content.TagRegistry.register!("production")
+#     with the dataset as a LITERAL (PDS-D145), so the `tag` row's other writer
+#     does not run at all off production -- which is also why (c) in the `tag`
+#     exclusion note far above is worded the way it is.
+#
+# So exporting PDS_SOURCE_DATASET to anything else scopes the sentinel to a
+# dataset that holds none of the rows, and the UPDATE matches ZERO. There IS
+# already a `fail` for that further down ("the sentinel UPDATE matched ZERO
+# rows"), and it is true -- but it diagnoses the symptom. It says there is
+# nothing for the boot-time upsert to clobber; it does not say an environment
+# variable moved the scope off the only dataset the rows have ever lived in.
+# The refusal below is that diagnosis, taken BEFORE a row is written, in the
+# same place and for the same reason as the roster-drift refusal.
+#
+# QUIET on the real tree: PDS_SOURCE_DATASET unset resolves to `production`,
+# the predicate returns 0 and nothing is printed.
+SENTINEL_DATASET_REQUIRED="production"
+
+# dataset -> exit 0, no output, when it is the dataset the rows live in; exit 1
+# and the offending value otherwise. Takes the dataset as $1 instead of reading
+# $SOURCE_DS so the selftest can drive BOTH directions without exporting
+# anything into the process that is doing the measuring.
+sentinel_dataset_refusal() {
+  [ "${1-}" = "$SENTINEL_DATASET_REQUIRED" ] && return 0
+  printf 'PDS_SOURCE_DATASET=%s' "${1-}"
+  return 1
+}
+
 sentinel_scope_sql() { # workspace_id -> the WHERE clause selecting exactly those 34
-  printf "workspace_id = '%s' AND dataset = '%s' AND name NOT IN ('tag','metric')" \
-    "$1" "$SOURCE_DS"
+  printf "workspace_id = '%s' AND dataset = '%s' AND name NOT IN (%s)" \
+    "$1" "$SOURCE_DS" "$(sentinel_exclusion_sql_list)"
 }
 
 scoped_column_digests() { # workspace_id -> ONE tab-separated line, one md5 per
@@ -3529,7 +3802,7 @@ reboot_target() { # 0 = the target answered HTTP again
 }
 
 step_6() {
-  head_step 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/D62/D65)"
+  head_step 6 "CONVERGENCE — the imported state survives a REBOOT (PDS-D23/PDS-D62/PDS-D65)"
 
   say "  The Bootstrap clobber fires only on BOOT. A convergence proof that does not"
   say "  restart the target measures nothing: it re-reads rows from a process that"
@@ -3610,7 +3883,7 @@ step_6() {
   # only legal alternate. It does NOT hide rows from /api/schemas
   # (`Schema.list_schemas` has no visibility predicate) but it DOES 404
   # anonymous document reads. THAT IS CONTAINED ONLY BECAUSE STEP 6 IS TERMINAL
-  # AMONG TARGET-READING RUNGS (PDS-D101/D116) — steps 2 and 5 run BEFORE it and
+  # AMONG TARGET-READING RUNGS (PDS-D101/PDS-D116) — steps 2 and 5 run BEFORE it and
   # `--all`'s own order is the only safe one. Re-ordering this rung earlier
   # silently poisons every later read; do not.
   #
@@ -3619,8 +3892,24 @@ step_6() {
   sentinel_id="$(printf '%s' "$RUN_ID" | tr -c 'A-Za-z0-9._-' '-')"
   mark="PDS-SENTINEL-$sentinel_id"
   say ""
+  # THE ROSTER, BEFORE ANYTHING IS WRITTEN. Resolving it here rather than at
+  # source-time means a census/harness disagreement reds the rung with the
+  # target untouched, instead of after a sentinel has already gone into a set
+  # nobody declared.
+  # THE DATASET TERM, BEFORE ANYTHING IS WRITTEN. Same placement and same
+  # reason as the roster check immediately below: a scope that selects none of
+  # the rows must red by NAME here, not as a bare zero-rows count after the
+  # fact.
+  if ! sentinel_dataset_refusal "$SOURCE_DS"; then
+    fail 6 "SENTINEL SCOPE OFF DATASET: this run resolved dataset '$SOURCE_DS' from PDS_SOURCE_DATASET, but every row this rung is about lives in '$SENTINEL_DATASET_REQUIRED'. \`Plugins.Bootstrap.register_schema/3\` writes plugin rows to \`schema.dataset || \"production\"\` and no plugin names anything else, and \`SchemaBootstrap.init/1\` passes the dataset to TagRegistry as the literal \"production\" (PDS-D145). The sentinel UPDATE would therefore match ZERO rows and both legs would be vacuous -- the zero-rows fail further down would report that truthfully and diagnose the wrong thing. NOTHING was written to the target. FIX: leave PDS_SOURCE_DATASET unset; it has no supported non-production value."
+    return 0
+  fi
+  if ! sentinel_roster_resolve; then
+    fail 6 "SENTINEL ROSTER DRIFT: $SENTINEL_EXCLUSION_SOURCE_REL declares PDS_SENTINEL_EXCLUSION = '$SENTINEL_ROSTER_DRIFT', this harness's fallback names '$SENTINEL_EXCLUSION_FALLBACK'. The two are the same roster and only one of them can be right, so the sentinel would scope to a set nobody declared and both legs would be uninterpretable (PDS-D129). NOTHING was written to the target. FIX: make them agree — the census is the edit site, the fallback follows it."
+    return 0
+  fi
   info "SENTINEL        writing deliberate drift into all eight guarded columns"
-  info "                scope: workspace $stamp_ws · dataset $SOURCE_DS · name NOT IN ('tag','metric')"
+  info "                scope: workspace $stamp_ws · dataset $SOURCE_DS · name NOT IN ($(sentinel_exclusion_sql_list))"
   # THE PRE-SENTINEL STATE (PDS-D742), taken BEFORE the UPDATE and per row, so
   # the run can MEASURE which guarded columns the sentinel moved rather than
   # assume all eight moved because all eight appear in the SET list.
@@ -3744,7 +4033,7 @@ step_6() {
     return 0
   fi
   if [ "${skip_count:-0}" != "$sentinel_rows" ]; then
-    fail 6 "ROSTER DRIFT: the sentinel wrote $sentinel_rows rows but the boot logged ${skip_count:-0} Bootstrap guard SKIPs (the core \`tag\` row's own TagRegistry skip, ${tag_skip_count:-0} this boot, is excluded from both sides on purpose). Those two numbers are derived independently — the sentinel from this script's hand-maintained exclusion list ('tag','metric'), the SKIPs from Bootstrap's own Registry.all() walk — and no SQL discriminator for plugin-declared rows exists to reconcile them (PDS-D129). A mismatch means the scope below no longer selects the rows the guard is about, so neither leg can be interpreted."
+    fail 6 "ROSTER DRIFT: the sentinel wrote $sentinel_rows rows but the boot logged ${skip_count:-0} Bootstrap guard SKIPs (the core \`tag\` row's own TagRegistry skip, ${tag_skip_count:-0} this boot, is excluded from both sides on purpose). Those two numbers are derived independently — the sentinel from the roster declared in $SENTINEL_EXCLUSION_SOURCE_REL ($(sentinel_exclusion_sql_list)), the SKIPs from Bootstrap's own Registry.all() walk — and no SQL discriminator for plugin-declared rows exists to reconcile them (PDS-D129). A mismatch means the scope below no longer selects the rows the guard is about, so neither leg can be interpreted."
     return 0
   fi
 
@@ -4087,6 +4376,389 @@ preflight() {
   resolve_source_token || die "no source token. Set PDS_SOURCE_TOKEN, or add $SOURCE_BASE to ~/.config/barkpark/config.json. (It is never printed by this script.)"
 }
 
+# ── THE CONNINFO READER'S OWN CONTROL (pds-w6-scratch-env-quoting-trap) ─────
+#
+# A warning that is present in the file is not a warning that FIRES. This runs
+# the SHIPPED load_target against two scratch.env fixtures it writes itself and
+# pins BOTH directions:
+#
+#   NEGATIVE — a hand-written UNQUOTED assignment. The value must still arrive
+#     truncated (nothing repairs it), the missing keys must be named exactly
+#     `port dbname user`, the WARN must reach stderr, and the step-0c
+#     classifier must still select the ABORT branch. Fail-closed is pinned as
+#     an assertion, not as a promise in a comment.
+#   POSITIVE — the QUOTED recipe. All four keys parse to their exact values and
+#     stderr is EMPTY. A warner that shouts on a correct fixture is noise, and
+#     it is this arm that makes the negative arm mean something.
+#
+# Offline and side-effect free: one mktemp directory, removed on the way out.
+cmd_selftest_conninfo() {
+  local tmpd arms=0 fails=0 err db missing
+  tmpd="$(mktemp -d)"
+
+  _sc_ok()  { arms=$((arms + 1)); printf '  ok   %s\n' "$1"; }
+  _sc_bad() { arms=$((arms + 1)); fails=$((fails + 1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
+  _sc_eq()  { # arm expected actual
+    if [ "$2" = "$3" ]; then _sc_ok "$1"; else _sc_bad "$1" "expected [$2], got [$3]"; fi
+  }
+
+  say "selftest: the PDS_SCRATCH_DB conninfo reader"
+  say ""
+  say "  NEGATIVE CONTROL — hand-written, UNQUOTED (the form that bites)"
+
+  mkdir -p "$tmpd/unquoted"
+  {
+    printf 'export PDS_SCRATCH_BASE=http://127.0.0.1:59999\n'
+    printf 'export PDS_SCRATCH_TOKEN=selftest-token\n'
+    printf 'PDS_SCRATCH_DB=host=127.0.0.1 port=59999 dbname=nope user=nope\n'
+  } > "$tmpd/unquoted/scratch.env"
+
+  db="$( BARKPARK_HOME="$tmpd/unquoted" ; load_target >/dev/null 2>&1 || true ; printf '%s' "$TARGET_DB" )"
+  _sc_eq "unquoted: the sourced value is TRUNCATED at the first space and NOT repaired" \
+    "host=127.0.0.1" "$db"
+
+  missing="$(conninfo_missing_keys "$db")"
+  _sc_eq "unquoted: the missing keys are named exactly" "port dbname user" "$missing"
+
+  err="$( BARKPARK_HOME="$tmpd/unquoted" ; load_target 2>&1 1>/dev/null || true )"
+  case "$err" in
+    *"missing: port dbname user"*) _sc_ok "unquoted: load_target WARNS on stderr and names the missing keys" ;;
+    *) _sc_bad "unquoted: load_target WARNS on stderr and names the missing keys" "stderr was [$err]" ;;
+  esac
+  case "$err" in
+    *'must QUOTE the value'*) _sc_ok "unquoted: the WARN names the CAUSE (the missing quotes)" ;;
+    *) _sc_bad "unquoted: the WARN names the CAUSE (the missing quotes)" "stderr was [$err]" ;;
+  esac
+
+  # FAIL-CLOSED, ASSERTED: step 0c aborts exactly when conninfo_missing_keys is
+  # non-empty, so a non-empty answer here IS the abort branch being selected.
+  if [ -n "$missing" ] && [ -z "$(conninfo_part port "$db")" ]; then
+    _sc_ok "unquoted: step 0c still takes env:scratch-db-unparsed (no port -> no ambient-Repo fallback)"
+  else
+    _sc_bad "unquoted: step 0c still takes env:scratch-db-unparsed" \
+      "missing=[$missing] port=[$(conninfo_part port "$db")] — the warning must not have bought a fallback"
+  fi
+
+  say ""
+  say "  POSITIVE CONTROL — the CORRECTED, QUOTED recipe"
+
+  mkdir -p "$tmpd/quoted"
+  {
+    printf 'export PDS_SCRATCH_BASE=http://127.0.0.1:59999\n'
+    printf 'export PDS_SCRATCH_TOKEN=selftest-token\n'
+    printf 'export PDS_SCRATCH_DB="host=127.0.0.1 port=59999 dbname=nope user=nope"\n'
+  } > "$tmpd/quoted/scratch.env"
+
+  db="$( BARKPARK_HOME="$tmpd/quoted" ; load_target >/dev/null 2>&1 || true ; printf '%s' "$TARGET_DB" )"
+  _sc_eq "quoted: host"   "127.0.0.1" "$(conninfo_part host "$db")"
+  _sc_eq "quoted: port"   "59999"     "$(conninfo_part port "$db")"
+  _sc_eq "quoted: dbname" "nope"      "$(conninfo_part dbname "$db")"
+  _sc_eq "quoted: user"   "nope"      "$(conninfo_part user "$db")"
+  _sc_eq "quoted: nothing is missing" "" "$(conninfo_missing_keys "$db")"
+
+  err="$( BARKPARK_HOME="$tmpd/quoted" ; load_target 2>&1 1>/dev/null || true )"
+  _sc_eq "quoted: load_target is SILENT (a warner that shouts on a good fixture is noise)" "" "$err"
+
+  # A PREDICATE, NOT AN ENUMERATION: one absent key is named on its own.
+  _sc_eq "one missing key is named alone" "user" \
+    "$(conninfo_missing_keys 'host=127.0.0.1 port=59999 dbname=nope')"
+
+  rm -rf "$tmpd"
+  say ""
+  if [ "$fails" -eq 0 ]; then
+    say "selftest: $arms/$arms arms pass"
+    return 0
+  fi
+  say "selftest: $fails of $arms arms FAILED"
+  return 1
+}
+
+# ── CITATION GREP HONESTY (pds-w5-citation-grep-honesty) ─────────────────────
+#
+# The census contract for this harness is a grep: `grep -oE 'PDS-D[0-9]+'`
+# over the source is how a reader finds every ruling a line is governed by.
+# A citation written the compressed way — one PDS-D number, then a bare `/D`
+# continuation for each sibling — satisfies a HUMAN reader and defeats that
+# grep, because the prefix appears on the FIRST number only. The census
+# reports the head and silently loses every sibling behind it. The loss is
+# invisible: nothing errors, the number is just quietly too low.
+#
+# (This comment deliberately does not spell an example out. The guard below
+# reads THIS FILE, so an illustration here would be a real finding — which is
+# itself the proof that the guard carries no exception list.)
+#
+# A PREDICATE, NOT AN ENUMERATION. The row that asked for this named two
+# sites; the file had fourteen. So the guard is a shape — any PDS-D number
+# followed by a bare /D number — and not a list of the places we happened to
+# look. A list goes stale the first time someone writes a fifteenth.
+#
+# DENOMINATOR, STATED: `grep -o` counts MATCHES, not LINES. Two compressed
+# citations on one line are two findings, and `grep -c` would call them one.
+# Every count this selftest prints is a match count.
+compressed_citations() {
+  # Each offending citation, one per line. Empty output == clean.
+  grep -oE 'PDS-D[0-9]+(/D[0-9]+)+' "$1" 2>/dev/null || true
+}
+
+# What the standard census actually sees in a file: the distinct rulings a
+# naive `grep -oE 'PDS-D[0-9]+'` can reach.
+census_identifiers() {
+  grep -oE 'PDS-D[0-9]+' "$1" 2>/dev/null | sort -u || true
+}
+
+cmd_selftest_citations() {
+  local tmpd arms=0 fails=0 found n_compressed n_seen bad
+  # THE DEFECT SHAPE, BUILT FROM PARTS — never written as a literal.
+  # A fixture that spelled the compressed form out as a literal would itself
+  # be a finding in this file, and the last arm below would have to carve an
+  # exception for its own test data. A guard with an exception list is a guard
+  # you have to trust; this one measures the whole file with none.
+  bad='/D'
+
+  _st_ok()  { arms=$((arms + 1)); printf '  ok   %s\n' "$1"; }
+  _st_bad() { arms=$((arms + 1)); fails=$((fails + 1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
+  _st_eq()  { if [ "$2" = "$3" ]; then _st_ok "$1"; else _st_bad "$1" "expected [$2], got [$3]"; fi; }
+
+  tmpd="$(mktemp -d)"
+
+  say "selftest: decision-citation grep honesty"
+  say ""
+  say "  NEGATIVE CONTROL — the compressed form (the shape that loses numbers)"
+
+  {
+    printf '# the ONE full-fidelity export (PDS-D69%s70%s71)\n' "$bad" "$bad"
+    printf '# THE 34 (PDS-D127%s128)\n' "$bad"
+  } > "$tmpd/compressed.txt"
+
+  found="$(compressed_citations "$tmpd/compressed.txt")"
+  n_compressed="$(printf '%s' "$found" | grep -c . || true)"
+  _st_eq "compressed: the detector FIRES, and names 2 citations (match count, not line count)" \
+    "2" "$n_compressed"
+
+  # THE ACTUAL DAMAGE, MEASURED: five rulings are cited, the census reaches two.
+  n_seen="$(census_identifiers "$tmpd/compressed.txt" | grep -c . || true)"
+  _st_eq "compressed: the standard census reaches only 2 of the 5 cited rulings" "2" "$n_seen"
+  case "$(census_identifiers "$tmpd/compressed.txt" | tr '\n' ' ')" in
+    *PDS-D70*) _st_bad "compressed: D70 is INVISIBLE to the census" "the fixture did not reproduce the defect, so the positive arm proves nothing" ;;
+    *)         _st_ok  "compressed: PDS-D70 is INVISIBLE to the census (this is the bug)" ;;
+  esac
+
+  say ""
+  say "  POSITIVE CONTROL — the expanded form (a guard that shouts here is noise)"
+
+  {
+    printf '# the ONE full-fidelity export (PDS-D69/PDS-D70/PDS-D71)\n'
+    printf '# THE 34 (PDS-D127/PDS-D128)\n'
+  } > "$tmpd/expanded.txt"
+  # The expanded fixture IS spelled out: it is the correct shape, so it is
+  # exactly what the last arm should find nothing wrong with.
+
+  _st_eq "expanded: the detector is SILENT" "" "$(compressed_citations "$tmpd/expanded.txt")"
+  n_seen="$(census_identifiers "$tmpd/expanded.txt" | grep -c . || true)"
+  _st_eq "expanded: the census now reaches all 5 cited rulings" "5" "$n_seen"
+
+  say ""
+  say "  THE SUBJECT — this harness's own source"
+
+  found="$(compressed_citations "$0")"
+  n_compressed="$(printf '%s' "$found" | grep -c . || true)"
+  if [ "$n_compressed" -eq 0 ]; then
+    _st_ok "$SELF cites every ruling in full-prefix form ($(census_identifiers "$0" | grep -c . || true) distinct rulings reachable by the census grep)"
+  else
+    _st_bad "$SELF cites every ruling in full-prefix form" \
+      "$n_compressed compressed citation(s) still present — the census under-reports this file: $(printf '%s' "$found" | tr '\n' ' ')"
+  fi
+
+  rm -rf "$tmpd"
+  say ""
+  if [ "$fails" -eq 0 ]; then
+    say "selftest: $arms/$arms arms pass"
+    return 0
+  fi
+  say "selftest: $fails of $arms arms FAILED"
+  return 1
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SELFTEST — THE SENTINEL EXCLUSION ROSTER HAS ONE EDIT SITE (PDS-D129)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# What this measures, in one sentence: that the roster this harness scopes its
+# rung-6 sentinel with is the roster scripts/pds-schema-row-census.md declares,
+# and that a disagreement between them is LOUD rather than silent.
+#
+# The old failure was not a wrong list. It was TWO lists — a `NOT IN` literal
+# here and prose there — that a reader had to keep in step by hand, with nothing
+# that noticed when they stopped agreeing. Both could be individually correct on
+# the day they were written and wrong together a month later.
+#
+# THREE ARMS, and the middle one is the point:
+#
+#   POSITIVE   the real census, read from disk, derives EXACTLY the fallback.
+#              This is the arm that reds if someone edits one file and not the
+#              other — in EITHER direction, because it compares, not asserts.
+#   NEGATIVE   a fixture census naming a third row derives that third row and is
+#              REJECTED against the fallback. Without this arm the positive arm
+#              proves only that the parser can return something.
+#   REFUSALS   unreadable / absent declaration / a name carrying a quote all read
+#              as NOT DERIVED (exit 1, no output), never as "derived empty" —
+#              because an empty derivation would mismatch the fallback and red a
+#              healthy run for a reason that is not about the roster at all.
+#
+# Offline. It reads two files and writes fixtures into a mktemp dir; it never
+# needs a target, a network or a database.
+cmd_selftest_roster() {
+  local tmpd arms=0 fails=0 got rc census
+
+  _sr_ok()  { arms=$((arms + 1)); printf '  ok   %s\n' "$1"; }
+  _sr_bad() { arms=$((arms + 1)); fails=$((fails + 1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
+  _sr_eq()  { if [ "$2" = "$3" ]; then _sr_ok "$1"; else _sr_bad "$1" "expected [$2], got [$3]"; fi; }
+  # Runs the derivation on a fixture and reports "<exit>|<stdout>", so an arm can
+  # tell "returned nothing and said so" from "returned nothing and claimed
+  # success" — the distinction the whole not-derived-vs-derived-empty rule rests on.
+  _sr_derive() { local o; if o="$(sentinel_exclusion_derive "$1")"; then printf '0|%s' "$o"; else printf '1|%s' "$o"; fi; }
+
+  tmpd="$(mktemp -d)"
+  census="$REPO_ROOT/$SENTINEL_EXCLUSION_SOURCE_REL"
+
+  say "selftest: the sentinel exclusion roster has ONE edit site"
+  say ""
+  say "  POSITIVE CONTROL — the real census on disk"
+
+  if [ -r "$census" ]; then
+    _sr_eq "the census declares a roster and it parses" "0|$SENTINEL_EXCLUSION_FALLBACK" "$(_sr_derive "$census")"
+  else
+    _sr_bad "the census declares a roster and it parses" \
+      "$SENTINEL_EXCLUSION_SOURCE_REL is not readable from $REPO_ROOT — the derivation has no source, so this harness is running on its UNCHECKED fallback"
+  fi
+
+  # The same comparison the run makes, made here where it costs nothing.
+  got="$(_sr_derive "$census")"
+  case "$got" in
+    "0|$SENTINEL_EXCLUSION_FALLBACK")
+      _sr_ok "census and in-script fallback AGREE ('$SENTINEL_EXCLUSION_FALLBACK') — step 6 would scope the sentinel to the declared roster" ;;
+    0\|*)
+      _sr_bad "census and in-script fallback AGREE" \
+        "they do NOT: the census declares '${got#0|}', this harness's fallback names '$SENTINEL_EXCLUSION_FALLBACK'. Step 6 would FAIL before writing. FIX: the census is the edit site; the fallback follows it." ;;
+    *)
+      _sr_bad "census and in-script fallback AGREE" "the census did not derive, so nothing was compared" ;;
+  esac
+
+  say ""
+  say "  NEGATIVE CONTROL — a census that names a THIRD row (the drift this catches)"
+
+  printf 'prose\nPDS_SENTINEL_EXCLUSION = tag metric a_third_row\nmore prose\n' > "$tmpd/drifted.md"
+  _sr_eq "a drifted census derives the drifted roster" "0|tag metric a_third_row" "$(_sr_derive "$tmpd/drifted.md")"
+  if [ "tag metric a_third_row" = "$SENTINEL_EXCLUSION_FALLBACK" ]; then
+    _sr_bad "the drifted roster is REJECTED against the fallback" \
+      "the fixture happens to equal the fallback, so it reproduces no drift and the positive arm above proves nothing"
+  else
+    _sr_ok "the drifted roster is REJECTED against the fallback (this is the red step 6 would print)"
+  fi
+
+  say ""
+  say "  REFUSALS — every unusable source reads as NOT DERIVED, never as derived-empty"
+
+  _sr_eq "an absent file: exit 1, no output" "1|" "$(_sr_derive "$tmpd/nope.md")"
+
+  printf 'a census with no declaration at all\n' > "$tmpd/silent.md"
+  _sr_eq "no PDS_SENTINEL_EXCLUSION line: exit 1, no output" "1|" "$(_sr_derive "$tmpd/silent.md")"
+
+  printf 'PDS_SENTINEL_EXCLUSION =    \n' > "$tmpd/empty.md"
+  _sr_eq "an empty declaration: exit 1, no output (NOT an empty roster)" "1|" "$(_sr_derive "$tmpd/empty.md")"
+
+  printf "PDS_SENTINEL_EXCLUSION = tag me'tric\n" > "$tmpd/quoted.md"
+  _sr_eq "a name carrying a quote is REFUSED, not escaped" "1|" "$(_sr_derive "$tmpd/quoted.md")"
+
+  say ""
+  say "  THE DATASET TERM — PDS_SOURCE_DATASET must stay unset"
+
+  # Same "<exit>|<stdout>" shape as _sr_derive, for the same reason: an arm has
+  # to tell "accepted" from "refused and said nothing about it".
+  _sr_ds() { local o; if o="$(sentinel_dataset_refusal "$1")"; then printf '0|%s' "$o"; else printf '1|%s' "$o"; fi; }
+
+  # The expression, not a retyped copy of it: each arm resolves
+  # ${PDS_SOURCE_DATASET:-production} itself, in a subshell whose environment it
+  # sets, so what is under test is the same default the top of this file uses.
+  _sr_eq "UNSET resolves to '$SENTINEL_DATASET_REQUIRED' and is accepted" \
+    "0|" "$(unset PDS_SOURCE_DATASET; _sr_ds "${PDS_SOURCE_DATASET:-production}")"
+  _sr_eq "exported EMPTY still resolves to '$SENTINEL_DATASET_REQUIRED' (:- not :=) and is accepted" \
+    "0|" "$(PDS_SOURCE_DATASET=; _sr_ds "${PDS_SOURCE_DATASET:-production}")"
+  _sr_eq "an explicit '$SENTINEL_DATASET_REQUIRED' is accepted" \
+    "0|" "$(PDS_SOURCE_DATASET=production; _sr_ds "${PDS_SOURCE_DATASET:-production}")"
+
+  # NEGATIVE CONTROL. Without this the three arms above prove only that the
+  # predicate can return zero.
+  _sr_eq "a non-production dataset is REFUSED (this is the red step 6 prints)" \
+    "1|PDS_SOURCE_DATASET=scratch" "$(PDS_SOURCE_DATASET=scratch; _sr_ds "${PDS_SOURCE_DATASET:-production}")"
+  _sr_eq "so is one that merely LOOKS like it" \
+    "1|PDS_SOURCE_DATASET=production-2" "$(PDS_SOURCE_DATASET=production-2; _sr_ds "${PDS_SOURCE_DATASET:-production}")"
+
+  # The live arm: what THIS process would actually scope to.
+  got="$(_sr_ds "$SOURCE_DS")"
+  case "$got" in
+    "0|") _sr_ok "this process's own SOURCE_DS is '$SOURCE_DS' — step 6 would scope to the dataset the rows live in" ;;
+    *)    _sr_bad "this process's own SOURCE_DS is usable" \
+            "it is '$SOURCE_DS'; step 6 would FAIL before writing a row. FIX: leave PDS_SOURCE_DATASET unset." ;;
+  esac
+
+  say ""
+  say "  THE PREMISE BEHIND THAT REFUSAL, re-derived from the application source"
+
+  # The refusal above is only correct while the rows really do all live in
+  # `production`. That is a fact about api/lib, not about this harness, so it is
+  # DERIVED here rather than asserted in the comment block. A future plugin that
+  # declares another dataset reds this arm and the roster needs re-deriving.
+  #
+  # BOUND, stated because a detector without one is a claim: the first arm sees
+  # STRING-LITERAL `dataset:` declarations only. The one declaration in the tree
+  # that is not a literal (tickets.ex `dataset: dataset`) is covered by the
+  # second arm, which reads its default. A third shape would be seen by neither.
+  local plugdir lits others attr_default
+  plugdir="$REPO_ROOT/api/lib/barkpark/plugins"
+  if [ -d "$plugdir" ]; then
+    lits="$(grep -rhoE 'dataset:[[:space:]]*"[^"]*"' "$plugdir" 2>/dev/null | sed 's/.*"\(.*\)"/\1/' | sort | uniq -c | sed 's/^ *//' | tr '\n' ';' || true)"
+    others="$(grep -rhoE 'dataset:[[:space:]]*"[^"]*"' "$plugdir" 2>/dev/null | sed 's/.*"\(.*\)"/\1/' | sort -u | grep -v "^$SENTINEL_DATASET_REQUIRED\$" | tr '\n' ' ' || true)"
+    if [ -z "$lits" ]; then
+      _sr_bad "every string-literal \`dataset:\` under api/lib/barkpark/plugins names '$SENTINEL_DATASET_REQUIRED'" \
+        "the grep found NO literal declaration at all — an empty key set is not evidence of agreement, it is evidence the probe stopped matching. The shape changed; re-derive it."
+    elif [ -z "$others" ]; then
+      _sr_ok "every string-literal \`dataset:\` under api/lib/barkpark/plugins names '$SENTINEL_DATASET_REQUIRED' [$lits]"
+    else
+      _sr_bad "every string-literal \`dataset:\` under api/lib/barkpark/plugins names '$SENTINEL_DATASET_REQUIRED'" \
+        "these do not: ${others}— the premise behind the dataset refusal no longer holds, and the sentinel roster in $SENTINEL_EXCLUSION_SOURCE_REL needs re-deriving against the new dataset."
+    fi
+
+    attr_default="$(sed -n 's/^[[:space:]]*@dataset_default[[:space:]]*"\([^"]*\)".*/\1/p' "$plugdir/tickets.ex" 2>/dev/null | head -n 1 || true)"
+    if [ -z "$attr_default" ]; then
+      _sr_bad "tickets.ex's non-literal \`dataset: dataset\` defaults to '$SENTINEL_DATASET_REQUIRED'" \
+        "no @dataset_default literal was found in $plugdir/tickets.ex — the one declaration the literal grep cannot see is now unaccounted for"
+    else
+      _sr_eq "tickets.ex's non-literal \`dataset: dataset\` defaults to '$SENTINEL_DATASET_REQUIRED'" \
+        "$SENTINEL_DATASET_REQUIRED" "$attr_default"
+    fi
+  else
+    _sr_bad "the plugin sources are readable" \
+      "$plugdir is not a directory from $REPO_ROOT — the premise behind the dataset refusal could not be re-derived this run"
+  fi
+
+  say ""
+  say "  THE CLAUSE — what the roster becomes in SQL"
+
+  _sr_eq "the IN-list is built from the roster, not typed" "'tag','metric'" "$(SENTINEL_EXCLUSION='tag metric'; sentinel_exclusion_sql_list)"
+  got="$(SENTINEL_EXCLUSION='tag metric a_third_row'; sentinel_exclusion_sql_list)"
+  _sr_eq "a three-name roster widens the clause with no further edit" "'tag','metric','a_third_row'" "$got"
+
+  rm -rf "$tmpd"
+  say ""
+  if [ "$fails" -eq 0 ]; then
+    say "selftest: $arms/$arms arms pass"
+    return 0
+  fi
+  say "selftest: $fails of $arms arms FAILED"
+  return 1
+}
+
 main() {
   # ── --plan WINS WHEREVER IT APPEARS, and nothing trailing is ignored (PDS-D89)
   #
@@ -4134,12 +4806,27 @@ main() {
       cmd_sweep_artifacts "${2:-}"
       exit 0
       ;;
+    --selftest-conninfo)
+      [ $# -le 1 ] || die "--selftest-conninfo takes no further arguments (got: $*). A flag this parser does not understand is REFUSED, never silently dropped (PDS-D89)."
+      cmd_selftest_conninfo
+      exit $?
+      ;;
+    --selftest-citations)
+      [ $# -le 1 ] || die "--selftest-citations takes no further arguments (got: $*). A flag this parser does not understand is REFUSED, never silently dropped (PDS-D89)."
+      cmd_selftest_citations
+      exit $?
+      ;;
+    --selftest-roster)
+      [ $# -le 1 ] || die "--selftest-roster takes no further arguments (got: $*). A flag this parser does not understand is REFUSED, never silently dropped (PDS-D89)."
+      cmd_selftest_roster
+      exit $?
+      ;;
     -h|--help|help)
       sed -n '2,/^# bash 3\.2 compatible/p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
-      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--help}\n' "$SELF" >&2
+      printf 'usage: %s {--plan|--all|--only <ids>|--sweep-artifacts [--apply]|--selftest-conninfo|--selftest-citations|--selftest-roster|--help}\n' "$SELF" >&2
       exit 3
       ;;
   esac

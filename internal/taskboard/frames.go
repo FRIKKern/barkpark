@@ -34,10 +34,18 @@ type TaskDetail struct {
 	ReopenTrigger     string
 	CodeRefs          []string
 	Assignee          string
-	PreviousWorker    string    // claim.previous_worker ("" when absent)
-	ClaimExpiredAt    time.Time // claim.expired_at (zero when absent)
-	LastWorkedAt      time.Time // content.last_worked_at (zero when absent)
-	Purpose           TaskPurpose
+	PreviousWorker    string // claim.previous_worker ("" when absent)
+	// ClosedBy is claim.closed_by — the worker recorded by the close that
+	// terminalised this row ("" when absent, which is every row closed before
+	// the field shipped and every row that never closed). It is the CONFOUND
+	// axis the enrichment control stratifies on: a bulk-closing session that
+	// skipped one content field on half of everything it touched manufactures
+	// a field-absence enrichment in whichever class it happened to touch most,
+	// and nothing in the marginal ratio shows it.
+	ClosedBy       string
+	ClaimExpiredAt time.Time // claim.expired_at (zero when absent)
+	LastWorkedAt   time.Time // content.last_worked_at (zero when absent)
+	Purpose        TaskPurpose
 }
 
 type PurposeScore struct {

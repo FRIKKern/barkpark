@@ -1398,12 +1398,108 @@
         accountTwoFactorPanelHtml({ phase: a2fPhase, meState: meStateValue }) +
       "</div>" +
 
+      accountDangerZoneHtml(model) +
+
       '<div class="modal-actions">' +
         '<button class="btn" type="button" data-close>Close</button>' +
         '<button class="btn btn-primary" type="button" id="modal-logout">Log out</button>' +
       "</div>" +
       "</div>"
     );
+  }
+
+  // Pure: the account sheet's Danger zone — the self-serve erasure affordance.
+  //
+  // It is UNCONDITIONAL, and that is the decision, not an omission. Every other
+  // elevated affordance on this console is role-banded because the server would
+  // refuse a member who pressed it; DELETE /v1/account is gated on nothing but
+  // holding the session, so banding it would be the console inventing a refusal
+  // the plane does not make. The two things that CAN refuse it — a wrong
+  // password, and being the sole owner of a live team — are refusals the server
+  // alone can decide, and both arrive as honest in-modal sentences
+  // (accountEraseFailureCopy) rather than as a hidden button.
+  //
+  // The sentence names ANONYMISATION as well as deletion. "Delete my account"
+  // that quietly leaves the team's audit trail standing would be a promise the
+  // route does not keep; saying so here is cheaper than a support thread.
+  function accountDangerZoneHtml(model) {
+    model = model || {};
+    return '<div class="am-head">' +
+        '<h3 class="modal-section">Danger zone</h3>' +
+      "</div>" +
+      '<div class="sessions-box">' +
+        '<p class="muted">Deleting your account removes your profile, every session and access token you hold, ' +
+          "your sign-in identities and your personal security log. Your teams keep their audit history with your " +
+          "name removed from it. This can't be undone.</p>" +
+        '<button class="btn btn-danger btn-sm" type="button" id="account-erase">Delete account…</button>' +
+      "</div>";
+  }
+
+  // Delete the account = destroy-tier typed-confirm (DELETE /v1/account) with a
+  // PASSWORD FIELD in the body slot. The typed echo proves attention; the
+  // password proves identity, and the two are not the same proof. A live session
+  // says the browser was authenticated once, which is not enough for the one
+  // write on this plane an operator cannot undo.
+  function confirmEraseAccount() {
+    var model = accountModalModel();
+    var email = model.email ? String(model.email) : "";
+    openConfirmModal({
+      tier: "destroy",
+      title: "Delete account?",
+      resourceName: email || "delete",
+      bodyHtml:
+        '<label class="label" for="acct-erase-pw">Confirm your password</label>' +
+        '<input class="form-input" id="acct-erase-pw" type="password" autocomplete="current-password" />',
+      consequences: [
+        "Removes your profile, every session and access token you hold, and your sign-in identities.",
+        "Removes your personal security log.",
+        "Your teams keep their audit history, with your name removed from it.",
+        "Refused while you're the only owner of a team that still exists.",
+        "This can't be undone.",
+      ],
+      confirmLabel: "Delete account",
+      busyLabel: "Deleting\u2026",
+      onConfirm: function (ctl) { runEraseAccount(ctl); },
+    });
+  }
+
+  function runEraseAccount(ctl) {
+    var field = $("#acct-erase-pw");
+    var password = field ? String(field.value || "") : "";
+    api("DELETE", "/v1/account", { password: password }).then(function (r) {
+      if (r.ok) {
+        ctl.succeed();
+        // The session token died with the user row. Clear local state before
+        // anything can re-render off a cache describing an account that is gone.
+        clearSession();
+        location.hash = "";
+        location.reload();
+        return;
+      }
+      ctl.fail(accountEraseFailureCopy(r.status, r.data), "Try again", function (c) {
+        c.busy();
+        runEraseAccount(c);
+      });
+    });
+  }
+
+  // Pure: the honest sentence for a failed DELETE /v1/account, one per refusal
+  // the route can actually make. `sole_owner` names the teams, because "you own
+  // a team" without saying WHICH is a dead end on an account with several.
+  function accountEraseFailureCopy(status, data) {
+    // Branch on the CODE, not on 401 alone. A 401 from an expired session is
+    // not a wrong password, and telling that person their password did not
+    // match would send them to reset a password that was never the problem.
+    if (status === 401 && data && data.error === "invalid_password") {
+      return "That password didn't match. If you sign in with GitHub or Google and have never set a password, " +
+        "set one first \u2014 account deletion needs it.";
+    }
+    if (status === 409 && data && data.error === "sole_owner") {
+      var teams = (data.teams || []).join(", ");
+      return "You're the only owner of " + (teams || "a team that still exists") +
+        ". Promote another owner, or delete the team first.";
+    }
+    return friendly(data, "Please try again.");
   }
 
   // ======================================================= TWO-FACTOR (GR52/GR55/GR56)
@@ -1883,6 +1979,9 @@
     // model this open already built, through the ONE phase mapper.
     a2fView = { phase: accountTwoFactorPhase(model.twoFactorEnabled), meState: meState() };
     a2fWire();
+
+    var erase = $("#account-erase");
+    if (erase) erase.addEventListener("click", function () { confirmEraseAccount(); });
 
     var out = $("#modal-logout");
     if (out) out.addEventListener("click", function () {
@@ -2380,6 +2479,43 @@
     return { state: state, label: LIFECYCLE_PILL_LABEL[state] || "Unknown", cls: instanceLifecycleClass(state) };
   }
 
+  // cch-r21l: THE LIFECYCLE STATE CHIP IS A statusMeta ROLE, NOT ITS OWN FAMILY.
+  // RULING (task-c74cf3120f6bca69): `.inst-life-pill` was a STATE chip — the same
+  // idea the fleet row already paints through statusMetaPill — wearing a second
+  // vocabulary. Its base rule was a clone of `.status-pill`'s box (same
+  // inline-flex/gap/height/padding/border/radius metrics, only font-weight
+  // differed), it was hand-emitted in lifecycleActionRowHtml and then RE-CLASSED
+  // imperatively in runDecommission, so the one-emitter predicate decision 24
+  // bought (E13 arm (f)) could never see it. It is absorbed here.
+  //
+  // The role per state is READ OFF the S4 token, never invented: app.css paints
+  // `.bp-inst--provisioning { color: var(--info) }`, `--live { var(--ok) }`,
+  // `--degraded { var(--warn) }`, `--stopped { var(--muted-text) }`,
+  // `--decommissioned { var(--danger) }`. Suspended additionally takes the
+  // `stopped` VARIANT (dim + dashed hairline), which is what the ladder already
+  // says for "a thing that was deliberately halted".
+  //
+  // The DOMAIN is held against LIFECYCLE_PILL_LABEL by the harness, so a sixth
+  // lifecycle state cannot arrive with a label and no role.
+  var LIFECYCLE_PILL_ROLE = {
+    provisioning:   { role: "info" },
+    live:           { role: "ok" },
+    degraded:       { role: "warn" },
+    stopped:        { role: "neutral", variant: "stopped" },
+    decommissioned: { role: "danger" }
+  };
+
+  // The ONE lifecycle-state chip emitter. Both the pure render and the optimistic
+  // decommission repaint go through it, so the chip has exactly one author.
+  // An unplaceable state degrades to a neutral chip labelled "Unknown" — never a
+  // fabricated hue.
+  function lifecycleStatePillHtml(state) {
+    var r = LIFECYCLE_PILL_ROLE[state] || { role: "neutral" };
+    return statusMetaPill(
+      { role: r.role, variant: r.variant || "", label: LIFECYCLE_PILL_LABEL[state] || "Unknown" },
+      instanceLifecycleClass(state));
+  }
+
   // Region · size meta for a fleet row (blank-tolerant — pre-S6 rows carry null
   // region/server_type). Renders nothing when both are absent so an old row never
   // shows an empty "·". Presentation only; the values are server-stamped slugs.
@@ -2719,12 +2855,10 @@
   // no test pins and nothing keeps in step.
   function lifecycleActionRowHtml(model) {
     if (!model) return "";
-    // The label sits in its own span so it stays neutral (--text) while the dot
-    // carries the S4 state hue (the model.pill.cls bp-inst--<state> tints color,
-    // the dot reads it through currentColor) — mirrors .status-pill.
-    var pill = '<span class="inst-life-pill ' + model.pill.cls + '">' +
-      '<span class="inst-life-dot" aria-hidden="true"></span>' +
-      '<span class="inst-life-label">' + esc(model.pill.label) + "</span></span>";
+    // cch-r21l: the state chip IS a statusMeta pill now (see lifecycleStatePillHtml
+    // for the ruling). It used to open its own span on the retired inst-life-pill
+    // family here; that hand-built chip is exactly the shape E13 arm (f) refuses.
+    var pill = lifecycleStatePillHtml(model.pill.state);
 
     // cch-w38-s1 — an UNKNOWN authority reuses the shipped checking grammar
     // verbatim (no new copy, no new CSS): while /v1/me is in flight or failed
@@ -2825,6 +2959,15 @@
   // unknown arm omits too: resurrect stands up (and bills) a real box, so an
   // unanswered /v1/me fails CLOSED. The copy-paste CLI chip is untouched in
   // every arm — it teaches the command, it does not fire a write.
+  //
+  // cch-w47-rv-bl QUALIFIED THAT LAST SENTENCE WITHOUT MOVING THE CHIP. The chip
+  // still renders in every arm, byte for byte. What the sentence left out is that
+  // the CLI reaches the SAME resurrect/1 gate and collects the SAME 403 — so on
+  // the REFUSE arm the chip was the member's only remaining affordance and still
+  // read as an offer the system cannot honour. archivesPanelHtml now prints ONE
+  // line above the list on that arm alone (forbiddenEvidenceCopy's own answer to
+  // `{required:"admin", scope:"team"}`, never new copy), which turns the chip
+  // from an invitation into a reference. Grant and unknown are unchanged.
   //
   // Every rule is a node-pinned pure function; the DOM mount (loadArchives) is
   // browser-verified.
@@ -3094,7 +3237,42 @@
     // authority argument, and any index but 0 is truthy, so every row past the
     // first would render its live Resurrect regardless of the answer.
     var authority = model.authority || "grant";
-    return '<div class="archive-list">' +
+    // cch-w47-rv-bl — THE REFUSE ARM NAMES THE AUTHORITY THE CHIP NEEDS.
+    //
+    // cch-w47-s3 omitted the live Resurrect for a refused member and left the
+    // copy-paste CLI chip standing in every arm, on the ruling that the chip
+    // TEACHES rather than writes. True — but the CLI hits the SAME route, and
+    // router.ex's resurrect/1 refuses every non-team-admin with
+    // `Auth.forbidden(required: "admin", scope: "team")`. So for a refused
+    // member the chip was the last affordance on the row and it still read as
+    // an invitation the system cannot honour: one layer quieter, not one layer
+    // more honest.
+    //
+    // THE RULING IS (a) — KEEP THE CHIP, SAY SO. Omitting it (option (c)) costs
+    // every member the ability to learn the command and hand it to someone who
+    // can run it; a per-row "needs admin" affix (option (b)) writes new copy on
+    // every row. One line, once, above the list, turns the chip from an offer
+    // into a reference.
+    //
+    // THE SENTENCE IS NOT AUTHORED HERE. It is forbiddenEvidenceCopy's answer to
+    // the EXACT payload that route sends — the same reader the members screen,
+    // the delivery log and the site-delete sheet already render a 403 through.
+    // Inventing a sentence here is how this epic got "Only the team owner can
+    // manage billing." onto the Activity screen (D448); reusing the reader means
+    // the console says what the server would say and nothing more. If the gate
+    // ever moves to `owner`, the literal below is the one line to change and the
+    // sentence follows from the map.
+    //
+    // REFUSE ONLY. "grant" and "unknown" render byte-identically to what shipped:
+    // "grant" is offered the live button and needs no apology, and "unknown" is
+    // an UNANSWERED /v1/me — asserting a role requirement there would state as
+    // fact something the console never read.
+    var refusalNote = authority === "refuse"
+      ? '<div class="archives-note"><p>' +
+          esc(forbiddenEvidenceCopy({ error: "forbidden", required: "admin", scope: "team" }) || "") +
+        "</p></div>"
+      : "";
+    return '<div class="archive-list">' + refusalNote +
       model.rows.map(function (row) { return archiveRowHtml(row, authority); }).join("") + "</div>";
   }
 
@@ -3257,9 +3435,19 @@
   // providers page connects through its own inline card. With Back rewired to
   // the launch wizard the picker had no entry door at all, and a dead function
   // behind a fix is just the next slice's finding — so it is gone, not fenced.
-  // Its `.choice*` styles stay in app.css (out of this slice's file fence) and
-  // its `choice-ico ` allowlist entry stays live through the sheet's own
-  // `.modal-head` tile and the providers roster's mini-tile.
+  // Its `.choice*` styles OUTLIVED it in app.css for a whole epic, because
+  // app.css was out of this slice's file fence: #18991 finally retired the
+  // seven zero-producer heads it alone emitted — `.choice-list`, `.choice`,
+  // `.choice-main`, `.choice-name`, `.choice-sub`, `.choice-chev` and
+  // `.choice-tag`. Only the `.choice-ico` family survives there
+  // (`grep -n '\.choice' cloud/priv/static/app.css` shows `.choice-ico`,
+  // `.choice-ico.sm` and the `.modal-head .choice-ico` size override), and it
+  // still earns BOTH of its `__css_check.mjs` ALLOW_PREFIXES waivers —
+  // `"choice-ico "` and `"choice-ico sm "` — through the sheet's own
+  // `.modal-head` tile in `openProviderCredential` and the providers roster's
+  // mini-tile. The live arm is now `cloud/test/web/choice_family_producer_test.exs`,
+  // which DERIVES the declared `.choice*` heads from the stylesheet on every run
+  // and reds on any head with no producer, while asserting `.choice-ico` stays.
 
   // The per-kind credential inputs. hetzner: one API key (affixed eye toggle).
   // azure: the four service-principal fields, the secret one carrying its own eye
@@ -3571,6 +3759,20 @@
             (rotated ? '<span class="prov-row-when" data-prov-rotated>credential updated ' +
               esc(rotated) + "</span>" : "") + "</span>" +
         "</span>" +
+        // gr-r21m-defect-jk (DEFECT-K, screen `providers-connected`). RULED:
+        // `.btn .btn-ghost .btn-sm` IS the console's sanctioned secondary tier
+        // (50+ sites), NOT a missing class. The re-review's "no button chrome"
+        // is a RESTING-STATE reading: `.btn-ghost` zeroes only background and
+        // border-color, so the control keeps `.btn`'s 28px box, its padding, its
+        // `:hover { background: var(--muted-surface) }` and the house
+        // `.btn:focus-visible` ring. Promoting this one to a filled tier would
+        // make it the loudest thing on the providers screen and leave 50 ghost
+        // siblings inconsistent. Destructiveness is carried where it belongs —
+        // `canDisconnect` gates it, and the click opens the TYPED-confirm
+        // (`grep -n 'function confirmDisconnectProvider' app.js`), which is the
+        // affordance that actually protects the account. If the resting ghost
+        // tier is ever re-decided, it is re-decided for `.btn-ghost` in app.css,
+        // once, not for three buttons the matrix happened to photograph.
         (canDisconnect
           ? '<button class="btn btn-ghost btn-sm" type="button" data-prov-disconnect data-prov-kind="' +
             esc(p.kind || "") + '">Disconnect&hellip;</button>'
@@ -4517,6 +4719,16 @@
   // this row names it. It is the chain the fleet GAVE UP ON — the row a person
   // scanning "Deployment failed" could not pick out, which is why it is worth a
   // name of its own rather than a severity word inside the old one.
+  // cch-w30-bl-member-joined-alert — TEN. `member_joined` is NOT `member_invited`
+  // coming back, and the difference is the whole row. `member_invited` promised a
+  // mail when an invitation was SENT — a duplicate of the letter the invitee
+  // already gets from `Transactional.deliver_invite/1` — and nothing dispatched
+  // it. `member_joined` fires when the invitation is ACCEPTED
+  // (`Accounts.accept_invitation/2`, post-commit), which is the membership change
+  // nobody on the team was ever told about. Producer, column, both renderer arms
+  // and this row land in ONE change, so arm (b) of the census reds until the row
+  // exists and arm (a) reds if the producer ever leaves. The label says JOINED:
+  // the toggle must never be readable as the invite that preceded it.
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
@@ -4526,7 +4738,8 @@
     ["deployment_abandoned", "Rebuild chain given up on"],
     ["agent_unreachable", "Instance unreachable"],
     ["agent_reachable", "Instance reachable again"],
-    ["subscription_past_due", "Subscription past due"]
+    ["subscription_past_due", "Subscription past due"],
+    ["member_joined", "Member joined"]
   ];
 
   // The ALWAYS-SEND events: dispatched, never toggleable, and therefore stated
@@ -6636,10 +6849,27 @@
   // C4/C5 instance-API proxy spine). #instance/<id> (the legacy-stable hash
   // `bp cloud open` mints, D14) maps to "overview" forever; an unknown/stale tab
   // suffix degrades to overview rather than 404ing a bookmark.
-  var INSTANCE_TABS = ["overview", "timeline", "webhooks", "usage", "metrics"];
+  var INSTANCE_TABS = ["overview", "timeline", "webhooks", "usage", "metrics", "group"];
   var INSTANCE_TAB_DEFAULT = "overview";
   function instanceTabOf(tab) {
     return INSTANCE_TABS.indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
+  }
+
+  // WHICH TABS A GIVEN BOX HAS — ONE decider, because a second one drifts.
+  // `instanceTabOf` above is the ROUTER's parse and knows only the string; it
+  // cannot know whose screen it is. "Group" is about a MAIN and the supports
+  // filed under it, and a support has no group of its own, so it is the one
+  // registered tab that is not offered everywhere. Everything that renders a
+  // tab list (the strip, the sidebar morph) and everything that resolves WHICH
+  // panel to paint goes through these two, so a support deep-linked to
+  // `#instance/<id>/group` degrades to Overview exactly the way an unknown tab
+  // suffix does (D49/D14: never 404 a bookmark).
+  function instanceTabsFor(bp) {
+    if (!isSupportBp(bp)) return INSTANCE_TABS.slice();
+    return INSTANCE_TABS.filter(function (t) { return t !== "group"; });
+  }
+  function instanceTabFor(bp, tab) {
+    return instanceTabsFor(bp).indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
   }
 
   // Charter decisions 6 + 14: the IA moved, but no deep link may ever break.
@@ -7051,7 +7281,12 @@
   function paintInstanceSections(id, activeTab) {
     var box = $("#nav-instance-sections");
     if (!box) return;
-    box.innerHTML = INSTANCE_TABS.map(function (tab) {
+    // Same decider the strip takes (instanceTabsFor): the morph must not offer
+    // a support a Group link that resolves back to Overview. `fleetLookup` can
+    // answer null on frame 1 (the fleet is still in flight), and a null bp is
+    // not a support — so the unknown case offers the full set, which is the
+    // pre-existing behaviour rather than a new hidden-tab bug.
+    box.innerHTML = instanceTabsFor(fleetLookup(id)).map(function (tab) {
       var href = "#instance/" + encodeURIComponent(id) + (tab === INSTANCE_TAB_DEFAULT ? "" : "/" + tab);
       var on = instanceTabOf(activeTab) === tab;
       return '<a class="nav-link nav-sub' + (on ? " is-active" : "") + '" href="' + esc(href) + '"' +
@@ -7670,8 +7905,13 @@
     };
   }
 
-  // THE ONE EMITTER. Every status affordance in this file goes through it —
-  // there are no hand-written pill class attributes left. `meta` is a statusMeta
+  // THE ONE EMITTER. Every status affordance in this file goes through it, and
+  // that is now a CHECKED rule rather than a sentence: __css_check.mjs E13 arm
+  // (f) and __app.test.mjs `gr-backlog-d24 (f)` both brace-match THIS function's
+  // body and refuse any status-pill class attribute authored outside it. (The
+  // first sweep wrote the sentence while seven call sites still opened their own
+  // span; the predicate is what makes the eighth one red on its first commit.)
+  // `meta` is a statusMeta
   // (or `statusOf`'s shape, which is the same `{role,label,detail}` plus a
   // detail segment); `extraClass` rides after the role; `attrs` is a pre-escaped
   // attribute string for the callers that need a title / aria-label.
@@ -8892,10 +9132,25 @@
   // hint is retracted to what is true: this step does not tick itself, and the
   // "Open Studio →" action stays, because publishing is still the real next move.
   // Pinned in __app.test.mjs (the old sentence was asserted by NOTHING).
+  //
+  // cch-w55-bl — THE ACK CONTROL NOW EXISTS, AND IT IS THE WHOLE FIX (charter
+  // D902, ending 1 of the three the row named). The server half was already
+  // built and already routed: `Accounts.ack_onboarding_step/2` ticks the step,
+  // `POST /v1/onboarding {action:"ack", step:"published_doc"}` reaches it, and
+  // `onboarding_status/1` ORs the ack with the never-written `content` event.
+  // Only the console was missing — {action:"skip"} was the one onboarding
+  // action this file POSTed, so the plane's own "reachable via the user-ack
+  // path" prose (accounts.ex, agent_event.ex) described a path no customer had.
+  // A pending published_doc step now renders "Mark as done" beside the Studio
+  // nudge, gated on canManage for the SAME reason the Dismiss button is: the
+  // route is owner/admin-only, so a member would get a silent 403. Still no
+  // producer, deliberately — ticking a checkbox you ticked yourself is an
+  // honest self-report; inventing an agent endpoint to observe it is the
+  // "build the actor before deciding the effect" trap this wave refuses.
   var RUNWAY_STEPS = [
     { key: "subscription", label: "Start your trial", hint: "14 days, no card needed" },
     { key: "instance", label: "Launch your first Barkpark" },
-    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →" },
+    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →", ack: "Mark as done" },
   ];
   // Pure: the render model for the runway steps. done marks render a mint check,
   // pending steps render their ordinal digit. The instance-step hint carries the
@@ -8921,6 +9176,14 @@
         // The Open Studio nudge shows only while the published_doc step is still
         // open (and only when there is a live box to open it on).
         action: (!isDone && spec.action && spec.key === "published_doc" && opts.studioId) ? spec.action : "",
+        // The ack control (cch-w55-bl): the ONLY path a customer has to this
+        // step, since no producer writes the `content` event it would otherwise
+        // derive from. Pending only (acking a done step is a no-op the server
+        // would accept and the card would not change), and canManage only —
+        // POST /v1/onboarding is owner/admin-gated, so a member's click would be
+        // a silent 403. Unlike the Studio nudge it does NOT need a live box: the
+        // user may well have published on an instance this console can't link.
+        ack: (!isDone && spec.ack && opts.canManage) ? spec.ack : "",
       };
     });
   }
@@ -8943,6 +9206,14 @@
         (st.action
           ? '<button class="btn-link runway-step-action" type="button" data-runway-studio="' +
               esc(opts.studioId) + '">' + esc(st.action) + "</button>"
+          : "") +
+        // Styled by the SAME .runway-step-action rule as the Studio nudge (no
+        // new class: E12 requires every emitted class to have an app.css rule,
+        // and this button wants that rule's exact look). The click hook is the
+        // data attribute, which E12 does not govern.
+        (st.ack
+          ? '<button class="btn-link runway-step-action" type="button" data-runway-ack="' +
+              esc(st.key) + '">' + esc(st.ack) + "</button>"
           : "") +
       "</div>";
     }).join("");
@@ -9194,9 +9465,8 @@
         // Nothing needs action. Stay honest when boxes are still in flight —
         // "all healthy" would be a lie while something is provisioning.
         var settled = sum["in-flight"] === 0;
-        queueHtml = '<div class="overview-ok"><span class="status-pill status-pill--ok">' +
-            '<span class="status-pill-dot" aria-hidden="true"></span>' +
-            '<span class="status-pill-label">' + (settled ? "All healthy" : "All clear") + "</span></span>" +
+        queueHtml = '<div class="overview-ok">' +
+          statusMetaPill({ role: "ok", label: settled ? "All healthy" : "All clear" }) +
           "<p>" + (settled
             ? "Every instance is up, current, and reporting in."
             : "Nothing needs your attention right now — " + sum["in-flight"] +
@@ -9321,6 +9591,26 @@
     if (dismiss) dismiss.addEventListener("click", function () { dismissRunway(dismiss); });
     slot.querySelectorAll("[data-runway-studio]").forEach(function (b) {
       b.addEventListener("click", function () { openStudio(b.getAttribute("data-runway-studio"), null); });
+    });
+    slot.querySelectorAll("[data-runway-ack]").forEach(function (b) {
+      b.addEventListener("click", function () { ackRunwayStep(b, b.getAttribute("data-runway-ack")); });
+    });
+  }
+
+  // cch-w55-bl — tick a step the control plane cannot observe. POST
+  // /v1/onboarding {action:"ack", step} appends the step to onboarding_state.acked
+  // (Accounts.ack_onboarding_step/2); onboarding_status/1 then ORs that ack with
+  // the agent-derived signal, so the step stays done across reloads and tabs.
+  // Owner/admin only (the button is hidden otherwise — same rule as Dismiss), so
+  // a 403 is not expected; any non-2xx re-enables the button and toasts, and the
+  // card is NOT optimistically ticked — the next read is the truth.
+  function ackRunwayStep(btn, step) {
+    if (!step) return;
+    if (btn) btn.disabled = true;
+    api("POST", "/v1/onboarding", { action: "ack", step: step }).then(function (r) {
+      if (r.ok) { loadOverview(); return; }
+      if (btn) btn.disabled = false;
+      toast({ kind: "error", title: "Couldn't mark that step done", body: friendly(r.data, "Please try again.") });
     });
   }
 
@@ -9506,7 +9796,7 @@
   // decides — the lifecycleActionsModel precedent, and the only shape the node
   // harness can drive without a meCache.
   function instanceDetailHtml(bp, tab, opts, authority) {
-    tab = instanceTabOf(tab);
+    tab = instanceTabFor(bp, tab);
     authority = authority || "grant";
     // S11b + GR24: the lifecycle surface between the header and the tabs is now
     // the collapsible "bp CLI" card (screens/02), disclosed by the header's
@@ -9523,6 +9813,7 @@
       instanceTabStripHtml(bp, tab) +
       '<div id="instance-tabpanel" class="inst-tabpanel" data-inst="' + esc(bp.id) + '">' +
         (tab === "overview" ? instanceOverviewHtml(bp, opts, authority) : "") +
+        (tab === "group" ? instanceGroupPanelHtml(bp) : "") +
       "</div>";
   }
 
@@ -9530,10 +9821,10 @@
   // Back/deep-links/copy work, the active one carrying aria-current="page"; the
   // house focus-visible ring is applied in app.css.
   function instanceTabStripHtml(bp, tab) {
-    tab = instanceTabOf(tab);
-    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks", usage: "Usage", metrics: "Metrics" };
+    tab = instanceTabFor(bp, tab);
+    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks", usage: "Usage", metrics: "Metrics", group: "Group" };
     return '<nav class="inst-tabs" aria-label="Instance sections">' +
-      INSTANCE_TABS.map(function (t) {
+      instanceTabsFor(bp).map(function (t) {
         var on = t === tab;
         return '<a class="inst-tab' + (on ? " is-active" : "") + '" href="#instance/' +
           esc(bp.id) + "/" + t + '"' + (on ? ' aria-current="page"' : "") + ">" +
@@ -9861,17 +10152,40 @@
     // affordance for an up box; the in-flight / failed states keep their
     // honest chips (the SSE fast path in loadInstance patches
     // .fleet-url.provisioning in place — that class stays load-bearing).
+    var addressHtml = '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
+      '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
+      '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+
+    // cch DEFECT-D — THE ADDRESS SLOT IS NOT A SECOND PLACE TO SAY "FAILED".
+    // The two failed arms used to print a bare "— removal failed" / "—
+    // provisioning failed" in the slot under the H1. That em-dash lead is a
+    // FLEET-LIST idiom: in fleetRow the fragment hangs off the box name one
+    // line above it, so it reads as a continuation. Under a detail H1 that
+    // already carries the lifecycle pill ("Removal failed · <server error>")
+    // and, one block lower, the failure banner, it is an ORPHAN — an em dash
+    // with no antecedent, red, in the slot a reader scans for the address.
+    // Measured on instance-remove-failed: the same sentence three times inside
+    // ~130px, and the box's host was KNOWN the whole time (the Identity card
+    // prints it two columns to the right).
+    //
+    // A FAILED TEARDOWN DOES NOT REMOVE AN ADDRESS — it is failed precisely
+    // because the server is still there. So removeFailed now renders the real
+    // address whenever bp.host is set, exactly like a live box. The genuinely
+    // address-less states (a failed provision never gets a host; a teardown
+    // that failed after the host column was cleared) keep a red slot, but a
+    // LABELLED one: it leads with what the ADDRESS is, not with a third copy
+    // of the failure.
     var url = lc.removing
       ? '<div class="fleet-url provisioning">&mdash; removing</div>'
       : lc.removeFailed
-        ? '<div class="fleet-url failed">&mdash; removal failed</div>'
+        ? (bp.host
+            ? addressHtml
+            : '<div class="fleet-url failed">No address — removal failed</div>')
         : lc.failed
-          ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
+          ? '<div class="fleet-url failed">No address — provisioning failed</div>'
           : lc.provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
-            : '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
-              '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
-              '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+            : addressHtml;
 
     // GR24 (screens/02): ONE two-axis compound pill beside the H1 — statusPill
     // already carries label + detail ("Degraded · Health down"); its rules are
@@ -10072,6 +10386,9 @@
     if (!isSupportBp(bp)) wireOffloadActions(bp, supportsOf(fleetCache, bp.id));
     // PDF-D94: each live support's paste-a-key delivery form.
     if (!isSupportBp(bp)) wireAgentKeyForms(bp, supportsOf(fleetCache, bp.id));
+    // PDF-D11: the group tab's roster read. DOM-gated (the panel only exists on
+    // that tab) AND data-gated (a support has no group), like its siblings.
+    wireGroupView(bp);
   }
 
   // cch-w46-s3 — WHAT THE MOUNTED RAIL IS MADE OF: {bp, caps} for the instance
@@ -10227,6 +10544,15 @@
     if (updates && updates.isConnected !== false) {
       updates.innerHTML = updatePanelActionsHtml(bp, authority);
       wireUpdatePanel(bp);
+      // cch-w45-s5-fu: this strip now carries the unknown arm's exit too, and
+      // the innerHTML above just destroyed whichever button was wired. Same
+      // selfHealing:false the header strip takes, and for the same reason —
+      // loadMe re-enters this repaint, never this view's loader, so a
+      // SUCCESSFUL retry must still re-render or the strip keeps saying
+      // "Checking capabilities…" against an answer the console holds.
+      wireMeRetry(updates, function () {
+        loadInstance(bp.id, (instanceAuthorityMount || {}).tab);
+      }, false);
     }
   }
 
@@ -10374,12 +10700,13 @@
   // The live decommission with an optimistic pill + rollback (mirrors the pure
   // lifecycleOptimistic reducer). Same DELETE the Remove button issued.
   function runDecommission(bp, ctl) {
-    var pill = $("#inst-lifecycle-actions .inst-life-pill");
+    // cch-r21l: the optimistic repaint goes through the SAME emitter as the pure
+    // render (lifecycleStatePillHtml). It used to rewrite `className` and
+    // `innerHTML` by hand — a second author for the chip that no static check
+    // could see, because it never spelled a class attribute at all.
+    var pill = $("#inst-lifecycle-actions .inst-life-head .status-pill");
     var prev = pill ? pill.outerHTML : null;
-    if (pill) {
-      pill.className = "inst-life-pill " + instanceLifecycleClass("decommissioned");
-      pill.innerHTML = '<span class="inst-life-dot" aria-hidden="true"></span>' + esc(LIFECYCLE_PILL_LABEL.decommissioned);
-    }
+    if (pill) pill.outerHTML = lifecycleStatePillHtml("decommissioned");
     api("DELETE", "/v1/barkparks/" + encodeURIComponent(bp.id)).then(function (r) {
       if (r.status === 200 || r.status === 202) {
         fleetCache = null;
@@ -10403,7 +10730,7 @@
       // SHAPE: DELETE /v1/barkparks/:id refuses FLAT ({error:"forbidden",required,
       // scope} / {error:"no_team"}), NOT the nested {error:{code}} rollbackInstance
       // reads; the dual-shape read below covers both so neither can be misclassified.
-      var back = $("#inst-lifecycle-actions .inst-life-pill");
+      var back = $("#inst-lifecycle-actions .inst-life-head .status-pill");
       if (back && prev) back.outerHTML = prev;
       var derr = (r.data && r.data.error) || {};
       var dcode = typeof derr === "string" ? derr : derr.code;
@@ -11152,6 +11479,328 @@
     "</section>";
   }
 
+  // ── The GROUP VIEW (PDF-D11: the 7-state catalogue) ────────────────────────
+  // A dedicated surface for ONE main plus its supports: a per-support row with
+  // status, capacity (both stored shapes) and the age of its last beat, under a
+  // single GROUP state drawn from PDF-D11's catalogue —
+  //   empty / roster-conflict / blocked / offline / provisioning / cap-hit / working.
+  //
+  // THE ONE SOURCE OF TRUTH FOR "ONLINE" IS `presenceChip`, AND THIS SURFACE
+  // ADDS NO SECOND ONE. Staleness is computed SERVER-SIDE (Barkpark.Tasks.Fleet
+  // `roster/2`: "a row whose `last_seen` is missing, unparsable, or older than
+  // its OWN `ttl_s` reads `offline`"), so the roster's `status` IS the
+  // staleness-derived status and the console's only job is to render it. The
+  // beat age below is rendered as an OBSERVATION for the operator — it is never
+  // read by any predicate here, because a console that re-derived offline from
+  // `last_seen` would be a second authority disagreeing with the server the
+  // moment the two clocks drift, and would silently overrule a `ttl_s` the box
+  // itself declared. `groupViewState` reaches `chip.online` and nothing else.
+  //
+  // THE ROUTE: `#instance/<main-id>/group`, the "group" tab of a MAIN's instance
+  // workspace (`instanceGroupPanelHtml` paints it, `wireGroupView` fills it from
+  // `readFleetRoster` — the SAME read `loadSupportPresence` takes). It is still
+  // a pure renderer: the mount hands it `documents` off the wire and holds none
+  // of it.
+  //
+  // WHAT THIS SURFACE STILL DOES NOT DO: order history, named in the backlog
+  // row's prose and in neither of its criteria. It is deliberately not built —
+  // whether an order log belongs on this surface at all is a product question,
+  // and the follow-up row says so in as many words.
+
+  // THE catalogue, in PRECEDENCE order — the first predicate that holds names
+  // the group's state. This array is the ONE enumeration: the render, the copy
+  // table and the preview scenarios are all keyed off it, so an eighth state
+  // cannot be added in one place and forgotten in another (the pins walk this
+  // list and refuse a state with no painted class, no copy, or no scenario).
+  // THE TOKEN IS `roster-conflict`, NOT `conflict`, AND THAT IS FORCED.
+  // console_reader_census_test.exs's Side B "counts a slug quoted ANYWHERE in
+  // app.js as read" — its own moduledoc names this as the false-read it cannot
+  // see. `conflict` is a CLASSIFIED wire code (seven `/v1/internal/*`
+  // provisioner settle routes whose 409 no console reader consumes), so
+  // spelling this state `conflict` made the census's rot arm report a reader
+  // that does not exist, and clearing it that way would have meant deleting
+  // seven TRUE rows on a string coincidence. The longer token is also the more
+  // accurate one: this is a roster identity collision, never an HTTP 409.
+  var GROUP_VIEW_STATES = ["empty", "roster-conflict", "blocked", "offline", "provisioning", "cap-hit", "working"];
+
+  // Milliseconds since a roster row's `last_seen`, or null when there is no
+  // parsable stamp. Total over junk. PURE — and deliberately NOT consulted by
+  // `groupViewState`: see the header. Negative ages (a box's clock ahead of the
+  // browser's) clamp to 0 rather than rendering "in 4s".
+  function rosterBeatAgeMs(row, now) {
+    var seen = row && row.last_seen;
+    if (typeof seen !== "string" || !seen) return null;
+    var t = Date.parse(seen);
+    if (isNaN(t)) return null;
+    var n = (typeof now === "number") ? now : Date.now();
+    return n - t < 0 ? 0 : n - t;
+  }
+
+  // The operator-facing staleness sentence for one row. Says the SERVER's own
+  // budget (`ttl_s`) beside the age so the two can be compared by eye — which is
+  // the whole reason to show an age the console refuses to act on. PURE.
+  function rosterStalenessText(row, now) {
+    var age = rosterBeatAgeMs(row, now);
+    if (age == null) return "No beat recorded";
+    var s = Math.floor(age / 1000);
+    var text = s < 60 ? s + "s ago" : (s < 3600 ? Math.floor(s / 60) + "m ago" : Math.floor(s / 3600) + "h ago");
+    var ttl = row && row.ttl_s;
+    return typeof ttl === "number" ? "Beat " + text + " (budget " + ttl + "s)" : "Beat " + text;
+  }
+
+  // Free slots off the VALIDATED capacity object (PDF-D34). The legacy free-text
+  // shape carries no number, so it answers null — "unknown", never 0, because a
+  // fabricated 0 would make a legacy box read as cap-hit. PURE.
+  function rosterSlotsFree(capacity) {
+    if (!capacity || typeof capacity !== "object") return null;
+    return typeof capacity.slots_free === "number" ? capacity.slots_free : null;
+  }
+
+  // One support's cells, folded from the TWO planes it actually has: the fleet
+  // payload (lifecycle) and the roster read (everything live). `chip` is the
+  // shipped `presenceChip` — this function makes no online decision of its own.
+  // PURE.
+  function groupSupportCell(support, rosterDocs, now) {
+    var s = support || {};
+    var row = rosterRowFor(rosterDocs, s);
+    var chip = presenceChip(row);
+    return {
+      id: s.id,
+      name: s.name,
+      live: instanceLifecycle(s).live,
+      failed: instanceLifecycle(s).failed,
+      worker: row && row.worker != null ? String(row.worker) : null,
+      chip: chip,
+      online: chip.online,
+      capacityText: rosterCapacityText(row && row.capacity),
+      slotsFree: rosterSlotsFree(row && row.capacity),
+      stalenessText: rosterStalenessText(row, now),
+      task: (row && row.task && row.task.title) ? String(row.task.title) : null,
+      row: row,
+    };
+  }
+
+  function groupSupportCells(supports, rosterDocs, now) {
+    now = (typeof now === "number") ? now : Date.now();
+    return (supports || []).map(function (s) { return groupSupportCell(s, rosterDocs, now); });
+  }
+
+  // TWO supports resolving to the SAME roster row is the conflict this surface
+  // names: the roster registers a listener under one worker identity, so a
+  // collision means neither box's status nor capacity is attributable and every
+  // verdict below would be assigned to an arbitrary one of them. Detected
+  // purely from the matched rows — no second read. PURE.
+  function groupRosterConflicts(cells) {
+    var seen = {};
+    var dupes = [];
+    (cells || []).forEach(function (c) {
+      if (!c || c.worker == null) return;
+      if (seen[c.worker]) { if (dupes.indexOf(c.worker) === -1) dupes.push(c.worker); }
+      else seen[c.worker] = true;
+    });
+    return dupes;
+  }
+
+  // ── THE OTHER TWO COLLISION SHAPES, AND WHY NEITHER IS A CATALOGUE STATE ───
+  // `roster-conflict` above classifies ONE fleet-payload/roster disagreement
+  // (two supports, one roster identity). The follow-up row named two more and
+  // asked for each to be classified or ruled out with a reason HERE. Both are
+  // ruled out of the catalogue, for different reasons, and the first is
+  // surfaced as an OBSERVATION instead.
+  //
+  // (a) A ROSTER ROW THAT MATCHES NO SUPPORT is not a fault, so it must not be
+  //     a state. The roster is not a list of supports: `Barkpark.Tasks.Fleet`'s
+  //     own moduledoc defines its subject as "a listener (a dev-server/agent
+  //     session running the fleet-listener protocol)", and `roster/2` returns
+  //     "every listener in `dataset` THE CALLER'S WORKSPACE OWNS". A developer's
+  //     own laptop session running the listener protocol registers there under
+  //     its own worker name, beside the provisioned supports. Ranking that as a
+  //     group state would put a healthy group into a non-working state because
+  //     somebody opened a listener on their machine — a false alarm built in by
+  //     design. It IS worth saying out loud (until now these rows were silently
+  //     dropped, so the surface claimed to show "the group" while rendering only
+  //     the part of it the control plane minted), so `groupOtherListeners` names
+  //     them under the table and NOTHING reads it as a predicate.
+  //
+  // (b) A SUPPORT WHOSE `dataset` DIFFERS FROM THE ROSTER'S SCOPE cannot be
+  //     detected from this payload at all, and the reason is structural rather
+  //     than a gap worth filling later. `Fleet.to_row/3` serializes exactly
+  //     worker / agent / scope / status / capacity / last_seen / ttl_s / task —
+  //     there is NO `dataset` key on the wire — and `load_listeners/2` selects
+  //     `where: d.dataset == ^dataset`, so every row this console receives is in
+  //     the queried dataset BY CONSTRUCTION. A support beating into a different
+  //     dataset is therefore not a divergent row; it is an ABSENT one, and an
+  //     absent row is already `presenceChip`'s honest "No heartbeat yet" — the
+  //     same answer as a box registered but never beat, which is the truth
+  //     available to a reader that cannot tell those two apart. Classifying it
+  //     would mean inventing a distinction the payload does not carry. Giving
+  //     the console a way to tell them apart is a SERVER change (a `dataset` on
+  //     the row, or a per-support scope echo), not a console one.
+  //     WHERE THE TRIPWIRE FOR THIS BELONGS, and why it is not here: the pin
+  //     that proves it used to read `to_row/3` out of the api tree from
+  //     `__app.test.mjs`, and the console path-escape ratchet refused it —
+  //     correctly. That read would put a hot api file in CONSOLE_PATHS and bill
+  //     every PR touching fleet presence for a browser-heavy console run to
+  //     guard THIS COMMENT. The api half is checkable in one grep beside the
+  //     function itself (`grep -n "defp to_row" api/lib/barkpark/tasks/fleet.ex`
+  //     — eight string keys, no `dataset`); the CONSOLE half, which is the
+  //     operative one, is pinned in `__app.test.mjs` without leaving this tree:
+  //     a support that never beat and a support beating into another dataset
+  //     render the SAME BYTES here, so there is no distinction to classify.
+  //
+  // Roster rows whose `worker` matches no support in this group. PURE, and
+  // deliberately NOT consulted by `groupViewState`.
+  function groupOtherListeners(cells, rosterDocs) {
+    if (!rosterDocs) return []; // a read that never landed knows of no listeners
+    var claimed = {};
+    (cells || []).forEach(function (c) { if (c && c.worker != null) claimed[String(c.worker)] = true; });
+    return rosterDocs.filter(function (row) {
+      return row && row.worker != null && !claimed[String(row.worker)];
+    });
+  }
+
+  // The observation sentence for those rows. Never a verdict — it says what
+  // they are (listener sessions), so the count does not read as an alarm.
+  function groupOtherListenersHtml(others) {
+    if (!others || !others.length) return "";
+    var names = others.map(function (r) { return String(r.worker); });
+    return '<p class="group-others">Also on this roster: ' +
+      esc(names.join(", ")) +
+      " &mdash; " + (names.length === 1 ? "a listener session" : "listener sessions") +
+      " beating into this workspace that no support of this server accounts for." +
+    "</p>";
+  }
+
+  // THE STATE. First predicate in `GROUP_VIEW_STATES` order that holds. Every
+  // reach for liveness goes through `cell.online`, which is `presenceChip`'s
+  // answer and nothing else. Total: the last rung has no predicate. PURE.
+  function groupViewState(cells) {
+    cells = cells || [];
+    if (!cells.length) return "empty";
+    if (groupRosterConflicts(cells).length) return "roster-conflict";
+    var blocked = cells.filter(function (c) { return c.chip.state === "blocked"; });
+    if (blocked.length) return "blocked";
+    var liveCells = cells.filter(function (c) { return c.live; });
+    var onlineCells = liveCells.filter(function (c) { return c.online; });
+    if (liveCells.length && !onlineCells.length) return "offline";
+    if (!liveCells.length) return "provisioning";
+    var atCap = onlineCells.filter(function (c) { return c.slotsFree === 0; });
+    if (atCap.length === onlineCells.length) return "cap-hit";
+    return "working";
+  }
+
+  // The copy for each catalogue state. Keyed by the same strings
+  // `GROUP_VIEW_STATES` holds; a state with no entry is a pinned refusal, not a
+  // silent blank. PURE.
+  var GROUP_VIEW_STATE_COPY = {
+    "empty": { label: "No supports", detail: "This server has no support boxes yet." },
+    "roster-conflict": { label: "Roster conflict", detail: "Two supports registered under the same worker name — status and capacity can't be attributed until one is renamed." },
+    "blocked": { label: "Blocked", detail: "A support is blocked and needs attention before it takes more work." },
+    "offline": { label: "Offline", detail: "No live support is beating — orders filed now would sit unclaimed." },
+    "provisioning": { label: "Provisioning", detail: "Supports are still coming up." },
+    "cap-hit": { label: "At capacity", detail: "Every online support reports zero free slots — new orders will queue." },
+    "working": { label: "Working", detail: "Supports are online and taking work." },
+  };
+
+  function groupViewStateCopy(state) {
+    return GROUP_VIEW_STATE_COPY[state] || { label: "Unknown", detail: "" };
+  }
+
+  // Full static class literals per branch (__css_check E2/E3 — a composed
+  // modifier is refused by the checker, so the seven arms are written out
+  // rather than built from `state`. That is the CONSTRAINT, not a preference:
+  // the pins below walk GROUP_VIEW_STATES and assert each one reaches a branch
+  // carrying its own token, so a state added to the catalogue without a branch
+  // here reds by name instead of falling silently through the else.)
+  function groupStateBadgeHtml(state) {
+    var copy = groupViewStateCopy(state);
+    var label = esc(copy.label);
+    if (state === "empty") return '<span class="group-state group-state--empty">' + label + "</span>";
+    if (state === "roster-conflict") return '<span class="group-state group-state--roster-conflict">' + label + "</span>";
+    if (state === "blocked") return '<span class="group-state group-state--blocked">' + label + "</span>";
+    if (state === "offline") return '<span class="group-state group-state--offline">' + label + "</span>";
+    if (state === "provisioning") return '<span class="group-state group-state--provisioning">' + label + "</span>";
+    if (state === "cap-hit") return '<span class="group-state group-state--cap-hit">' + label + "</span>";
+    if (state === "working") return '<span class="group-state group-state--working">' + label + "</span>";
+    return '<span class="group-state group-state--unknown">' + label + "</span>";
+  }
+
+  // One support's row on the group surface. The status cell is the SHIPPED
+  // `presenceChipHtml` — the group view paints no chip of its own, so a change
+  // to the presence vocabulary reaches both surfaces at once. PURE.
+  function groupSupportRowHtml(cell) {
+    var c = cell || {};
+    var cap = c.capacityText ? esc(c.capacityText) : "&mdash;";
+    var task = c.task ? esc(c.task) : "&mdash;";
+    return '<div class="group-row" data-group-support="' + esc(c.id) + '">' +
+      '<a class="group-cell group-cell--name" href="#instance/' + esc(c.id) + '">' + esc(c.name) + "</a>" +
+      '<span class="group-cell group-cell--status">' + presenceChipHtml(c.row) + "</span>" +
+      '<span class="group-cell group-cell--cap">' + cap + "</span>" +
+      '<span class="group-cell group-cell--beat">' + esc(c.stalenessText) + "</span>" +
+      '<span class="group-cell group-cell--task">' + task + "</span>" +
+    "</div>";
+  }
+
+  // The surface. `rosterDocs` is the app-token-direct roster read's `documents`
+  // (null = the read itself never landed — the cells then carry presenceChip's
+  // honest "no heartbeat yet" rather than a fabricated Offline). PURE.
+  function groupViewHtml(main, supports, rosterDocs, now) {
+    var bp = main || {};
+    var cells = groupSupportCells(supports, rosterDocs, now);
+    var state = groupViewState(cells);
+    var copy = groupViewStateCopy(state);
+    var body;
+    if (state === "empty") {
+      body = '<p class="group-empty">' + esc(copy.detail) + "</p>";
+    } else {
+      body =
+        '<div class="group-table" role="table" aria-label="Support servers in this group">' +
+          '<div class="group-row group-row--head" role="row">' +
+            '<span class="group-cell group-cell--name">Support</span>' +
+            '<span class="group-cell group-cell--status">Status</span>' +
+            '<span class="group-cell group-cell--cap">Capacity</span>' +
+            '<span class="group-cell group-cell--beat">Last beat</span>' +
+            '<span class="group-cell group-cell--task">Current task</span>' +
+          "</div>" +
+          cells.map(groupSupportRowHtml).join("") +
+        "</div>";
+    }
+    body += groupOtherListenersHtml(groupOtherListeners(cells, rosterDocs));
+    return '<section class="card group-view" data-group-state="' + esc(state) + '">' +
+      '<div class="group-head">' +
+        '<h2 class="group-title">' + esc(bp.name || "Group") + "</h2>" +
+        groupStateBadgeHtml(state) +
+      "</div>" +
+      '<p class="group-detail">' + esc(copy.detail) + "</p>" +
+      body +
+    "</section>";
+  }
+
+  // ── THE ROUTE (#instance/<main-id>/group) ──────────────────────────────────
+  // What `groupViewHtml` was missing: a way in. The surface is the "group" tab
+  // of a MAIN's instance workspace, which is the screen that already owns this
+  // main and its supports, so the tab strip and the back stack come for free
+  // and no new detail view has to be invented.
+  //
+  // FRAME 1 IS NOT `groupViewHtml(bp, supports, null, now)`. A null roster is
+  // the shape of a read that FAILED — the `roster-unreachable` control pins
+  // exactly that, and it resolves the GROUP to `offline`. This read has not
+  // been ISSUED yet, so painting "Offline — no live support is beating" before
+  // asking would be a fabricated verdict about boxes nobody has questioned:
+  // the same lie, one frame earlier, that the control exists to forbid. The
+  // panel says it is reading, and `wireGroupView` replaces it with the derived
+  // surface once the roster answers (including when it answers with a failure,
+  // which IS the null-roster shape and IS honestly offline).
+  function instanceGroupPanelHtml(bp) {
+    var b = bp || {};
+    return '<div id="instance-group-view" data-group-bp="' + esc(b.id) + '">' +
+      '<section class="card group-view">' +
+        '<div class="group-head"><h2 class="group-title">' + esc(b.name || "Group") + "</h2></div>" +
+        '<p class="group-detail">Reading the roster&hellip;</p>' +
+      "</section>" +
+    "</div>";
+  }
+
   // ── Add-support flow (PDF-D83: the CP provisions server-side) ───────────────
   // The pure state machine (launchFlowReducer shape, container-agnostic):
   //   name --submit--> submitting --202/201--> submitted
@@ -11286,11 +11935,43 @@
     }).catch(function () { return { status: 0, documents: null }; });
   }
 
-  // Paint every live support's presence slot from ONE roster read. A 401 (the
-  // cached token expired) drops the cache and retries the mint exactly once.
-  function loadSupportPresence(mainBp, supports, retried) {
+  // THE ROSTER READ, named once. Mint the app token (401 = the cached one
+  // expired: drop it and re-mint EXACTLY once), read the main's roster
+  // browser-direct, hand the caller `documents` — or null, which means the read
+  // itself never landed and must never be rendered as a box that answered.
+  //
+  // This was inlined in `loadSupportPresence` until the group route needed the
+  // same answer. It is extracted rather than copied for the reason PDF-D11's
+  // criterion [1] is about: a second roster read is a second place where a
+  // liveness answer gets cached, compared or aged, and the surface's one rule
+  // is that liveness comes from the plane it is handed. Both consumers now pass
+  // the SAME `documents` array straight into the shipped derivations.
+  function readFleetRoster(mainBp, then, retried) {
+    if (!mainBp || !mainBp.url) { then(null); return; }
+    mintAppToken(mainBp.id).then(function (token) {
+      if (!token) { then(null); return; }
+      fetchFleetRoster(mainBp.url, token).then(function (r) {
+        if (r.status === 401 && !retried) {
+          delete appTokenCache[mainBp.id];
+          readFleetRoster(mainBp, then, true);
+          return;
+        }
+        then(r.documents);
+      });
+    });
+  }
+
+  // Paint every live support's presence slot from ONE roster read.
+  function loadSupportPresence(mainBp, supports) {
     var targets = (supports || []).filter(function (s) { return instanceLifecycle(s).live; });
     if (!targets.length || !mainBp || !mainBp.url) return;
+    // DOM-gated as well as data-gated. wireInstanceActions runs on EVERY tab,
+    // and the presence slots this paints live in the Overview panel's fleet
+    // card — so off Overview this used to mint a token and read the roster to
+    // paint nothing. Harmless until the group tab started reading the same
+    // roster for its own render, at which point the group screen issued TWO
+    // reads of one endpoint. No slot on screen, no read.
+    if (!document.querySelectorAll("[data-support-presence]").length) return;
     var paint = function (documents) {
       targets.forEach(function (s) {
         // Attribute-scan rather than an interpolated selector: an exotic id
@@ -11304,16 +11985,33 @@
         if (slot) slot.innerHTML = presenceSlotHtml(documents, s);
       });
     };
-    mintAppToken(mainBp.id).then(function (token) {
-      if (!token) { paint(null); return; }
-      fetchFleetRoster(mainBp.url, token).then(function (r) {
-        if (r.status === 401 && !retried) {
-          delete appTokenCache[mainBp.id];
-          loadSupportPresence(mainBp, supports, true);
-          return;
-        }
-        paint(r.documents);
-      });
+    readFleetRoster(mainBp, paint);
+  }
+
+  // The group tab's ONE mount. Same read, same derivations, no cache of its
+  // own: `documents` goes straight from the wire into `groupViewHtml`, which
+  // rebuilds every cell through `presenceChip`. Nothing here remembers, ages or
+  // re-decides "online" — that is criterion [1] surviving the routing, and the
+  // absence is what the mutation pin measures.
+  // WHOSE group panel is on screen. The lifecycleRail / instanceAuthorityMount
+  // precedent: module state rather than an attribute read, because the answer
+  // has to survive the panel's own re-renders and be readable the instant the
+  // read lands. Rewritten on EVERY loadInstance paint (wireInstanceActions
+  // re-enters), and nulled the moment the panel is not mounted — so a
+  // drill-down to another instance, or a move to another tab, invalidates an
+  // in-flight read instead of letting it paint the previous main's group.
+  var groupViewMount = null;
+
+  function wireGroupView(bp) {
+    var box = $("#instance-group-view");
+    groupViewMount = (box && bp && !isSupportBp(bp)) ? String(bp.id) : null;
+    if (!groupViewMount) return;
+    var supports = supportsOf(fleetCache, bp.id);
+    readFleetRoster(bp, function (documents) {
+      if (groupViewMount !== String(bp.id)) return;
+      var live = $("#instance-group-view");
+      if (!live) return;
+      live.innerHTML = groupViewHtml(bp, supports, documents, Date.now());
     });
   }
 
@@ -11856,15 +12554,24 @@
     // /v1/barkparks/:id/rollback is require_current_team_admin, and this button
     // was appended UNCONDITIONALLY — a plain member was offered the widest-blast
     // write on the screen and got a 403 on the confirm. The offer is now
-    // authority-gated (no exit here: the page's one [data-me-retry] rides the
-    // header, where the still-checking arm first appears).
+    // authority-gated.
     buttons += adminWriteControlHtml(authority, "Roll back&hellip;", 'data-rollback="1"', "", "", UPDATE_ACTIONS_REASON_ID);
     // cch-w47-rv-bl: ONE reason for the strip. The pointer test (rather than
     // re-deriving which arms fired) keeps this correct if a future control is
     // added or a policy block goes missing — no grouped control, no span.
+    // cch-w45-s5-fu — THIS STRIP CARRIES ITS OWN EXIT. It used to pass "" and
+    // say so in words: "the page's one [data-me-retry] rides the header, where
+    // the still-checking arm first appears". That is false on every lifecycle
+    // arm whose header actions draw no adminWriteControlHtml control — a
+    // SUSPENDED box (and a removing one) still has a host, so this panel still
+    // renders and its Roll back still takes the unknown arm, while the header
+    // strip emits only the CLI disclosure and therefore no group reason and no
+    // exit. The result was a disabled "Checking capabilities…" with nothing on
+    // screen that could re-ask /v1/me. wireMeRetry now binds EVERY match in the
+    // subtree, so this second copy is a live button and not dead bytes.
     return buttons + (buttons.indexOf('aria-describedby="' + UPDATE_ACTIONS_REASON_ID + '"') === -1
       ? ""
-      : adminWriteGroupReasonHtml(authority, UPDATE_ACTIONS_REASON_ID, ""));
+      : adminWriteGroupReasonHtml(authority, UPDATE_ACTIONS_REASON_ID, meRetryHtml()));
   }
 
   function updatePanelHtml(bp, authority) {
@@ -11879,11 +12586,8 @@
     var channel = bp.channel ? cap(String(bp.channel)) : "—";
     var policy = autoupdatePolicyLabel(bp);
 
-    var badgeHtml =
-      '<span class="status-pill status-pill--' + esc(b.role) + ' update-badge" data-update-state="' + esc(b.state) + '">' +
-        '<span class="status-pill-dot" aria-hidden="true"></span>' +
-        '<span class="status-pill-label">' + esc(b.label) + "</span>" +
-      "</span>";
+    var badgeHtml = statusMetaPill({ role: b.role, label: b.label }, "update-badge",
+      ' data-update-state="' + esc(b.state) + '"');
 
     // The verification clock, from the two columns the fleet list now also
     // states. It is a DIFFERENT clock from "Last checked" one line above
@@ -12120,10 +12824,14 @@
   //      bar and no percentage: count_ready_warm_servers/0 merges ready+refreshing
   //      out of four real statuses and the target size lives in the off-box
   //      provisioner's env, so there IS no denominator to draw (GR50).
-  //   4. Fleet digest    — GET /v1/operator/deliveries. A send LOG only; there is
-  //      NO send-now button because no route calls deliver_fleet_digest (it is
-  //      cron-only, daily 06:00 UTC — GR40; gr-backlog-operator-digest-send is
-  //      the successor if one is ever wanted).
+  //   4. Fleet digest    — GET /v1/operator/deliveries, plus the SEND-NOW button
+  //      over POST /v1/operator/digest/send. GR40 cut this button because no
+  //      route called deliver_fleet_digest and GR28 forbids a button without a
+  //      route; gr-backlog-operator-digest-send built the route, so the button
+  //      is no longer fiction and renders. It is the ONE control in this console
+  //      that puts mail in real inboxes, so it asks first (danger confirm), it
+  //      names the fleet-wide audience in the question, and it reports the
+  //      server's OWN counts afterwards rather than a client-side "Sent!".
   //
   // Every card degrades honestly on its own: a card whose route doesn't answer
   // says so about ITSELF and never fakes a reading (the G-04 deliveries pattern).
@@ -12292,13 +13000,10 @@
     return { role: "ok", text: "Arming: every instance reports one-click apply on." };
   }
 
-  // The console's state pill. Reuses the shared .status-pill grammar (the same
-  // dynamic head the fleet pill uses, already allowlisted in __css_check).
+  // The console's state pill — one more consumer of statusMetaPill, so the role
+  // ladder it paints is the family's and not its own.
   function operatorPillHtml(role, label) {
-    return '<span class="status-pill status-pill--' + esc(role) + '">' +
-      '<span class="status-pill-dot" aria-hidden="true"></span>' +
-      '<span class="status-pill-label">' + esc(label) + "</span>" +
-    "</span>";
+    return statusMetaPill({ role: role, label: label });
   }
 
   // cch-w36-s4 — THE REFUSAL HAS A VOICE, AND THE FUNNEL STOPS DESTROYING WHY.
@@ -12338,7 +13043,7 @@
     return { kind: "other", text: null };
   }
 
-  // THE ONE FUNNEL, made pure so all four cards are pinned at a single seam:
+  // THE ONE FUNNEL, made pure so EVERY operator card is pinned at a single seam:
   // given a response and the card's own renderer, decide whose sentence runs.
   // fault.text is STATIC author copy (never server data), so it is emitted raw
   // like the gate line above — apostrophes and dashes render verbatim.
@@ -12458,17 +13163,68 @@
   // 06:00 UTC claim STAYS — it matches `{"0 6 * * *",
   // BarkparkCloud.Workers.DailyDigestWorker}` at cloud/config/config.exs:334
   // exactly. Pinned in __app.test.mjs.
+  // ---- SEND ONE NOW (gr-backlog-operator-digest-send) -----------------------
+  //
+  // THE BUTTON GR40 CUT. It was cut for one reason and one only — no route
+  // called deliver_fleet_digest, and GR28 forbids rendering a control that
+  // cannot do anything. POST /v1/operator/digest/send now exists, so the reason
+  // is spent and the affordance is honest.
+  //
+  // THE SCOPE IS SENT EXPLICITLY, always. The route refuses a bodyless POST with
+  // 422 scope_required precisely so no client can mail the platform by accident,
+  // and this console is a client: it names {"scope":"fleet"} in the request the
+  // same way it names it in the confirm dialog, so the bytes and the question
+  // agree. There is no team picker here yet and therefore no team-scoped send
+  // from this console — the route supports one, this surface does not claim to.
+  var OPERATOR_DIGEST_SEND = "/v1/operator/digest/send";
+
+  // PURE, so the harness reads the exact sentence a human gets. It reports the
+  // SERVER's counts and NEVER upgrades them: `accepted` is the mail relay
+  // answering at the submission hop, which is not delivery, and the trailing
+  // clause is the server's own status_meaning rather than a second vocabulary
+  // invented here. A zero-recipient run is reported as a zero, not as a success.
+  function operatorDigestSendResultText(d) {
+    if (!d || typeof d !== "object") {
+      return "The send answered in a shape this console can't read, so it can't say what happened.";
+    }
+    var recipients = typeof d.recipients === "number" ? d.recipients : 0;
+    var accepted = typeof d.accepted === "number" ? d.accepted : 0;
+    var failed = typeof d.failed === "number" ? d.failed : 0;
+    if (recipients === 0) {
+      return "Nothing was mailed: no team in this scope has a member to send to.";
+    }
+    var line = "Accepted for " + accepted + " of " + recipients + " recipient" +
+      (recipients === 1 ? "" : "s");
+    if (failed > 0) line += ", " + failed + " failed";
+    line += ".";
+    if (d.status_meaning) line += " " + d.status_meaning;
+    return line;
+  }
+
+  function operatorDigestSendControlHtml() {
+    return '<div class="op-digest-send">' +
+      '<button class="btn" type="button" data-digest-send="fleet">Send one now</button>' +
+      '<p class="set-purpose">Mails every team that owns an instance — one digest per member, ' +
+      "now, over the same machinery as the 06:00 UTC daily send.</p>" +
+    "</div>";
+  }
+
   function operatorDigestCardHtml(list) {
+    // The button rides ABOVE the log on every arm, including the unreadable one:
+    // a log this card could not read says nothing about whether a send would
+    // work, and hiding the control on a failed READ would be the same fiction in
+    // the other direction.
+    var send = operatorDigestSendControlHtml();
     if (!Array.isArray(list)) {
-      return '<p class="set-empty">Digest log unavailable — the send log didn\'t answer. ' +
+      return send + '<p class="set-empty">Digest log unavailable — the send log didn\'t answer. ' +
         "That says nothing about the digest itself; this card just couldn't read it.</p>";
     }
     if (!list.length) {
-      return '<p class="set-empty">No digest send has been recorded yet. ' +
+      return send + '<p class="set-empty">No digest send has been recorded yet. ' +
         "The digest goes out daily at 06:00 UTC to each team's own members, and this log now carries every team's receipts, " +
         "so an empty list means nothing was recorded — not that the receipts are elsewhere.</p>";
     }
-    return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
+    return send + '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
   }
 
   // 5. DEPLOY LEDGER CENSUS — GET /v1/operator/deploy-ledger/census?from=&to=
@@ -12663,7 +13419,7 @@
       basis + table + operatorCensusTotalsHtml(data);
   }
 
-  // The page shell: five cards, each with its own body slot so one silent route
+  // The page shell: one body slot PER CARD, so one silent route
   // never blanks the others. Painted BEFORE the reads land, so the console has a
   // shape instantly and every card owns its loading line — the loading line is
   // the card's HONEST in-flight state, and it is why a card is never empty
@@ -12683,7 +13439,7 @@
       card("op-warm-body", "Warm pool",
         "Pre-provisioned boxes a launch can claim instead of waiting for a cold provision.") +
       card("op-digest-body", "Fleet digest",
-        "The daily fleet-digest send log, newest first. Sending is cron-only — there is no send-now here.") +
+        "The fleet-digest send log, newest first, and the one control here that mails real people.") +
       card("op-census-body", "Deploy ledger",
         "Failure classes across every site over a pinned window, and the failure rate with its own denominator beside it.");
   }
@@ -12719,7 +13475,7 @@
   //   • answered, not an operator   → BOUNCE to #overview. Registering "operator"
   //     in VIEWS made init()'s validator accept the deep link for anybody, so the
   //     sidebar gate alone is no longer enough.
-  //   • answered, operator          → paint the shell and read the four routes.
+  //   • answered, operator          → paint the shell and read every operator route.
   //
   // D411'S FENCE, CARVED OUT DELIBERATELY. __app.test.mjs pinned the SOURCE TEXT
   // of the `if (!meCache)` arm — the checking line immediately followed by
@@ -12742,7 +13498,7 @@
           // loadMe's SUCCESS arm re-enters this loader itself; its failure arm
           // deliberately does not (app.js loadMe's else), so re-enter here ONLY
           // when the read did not land — otherwise the page would paint twice
-          // and issue the four operator reads twice.
+          // and issue every operator read twice.
           loadMe().then(function () { if (meState() !== "loaded") loadOperator(); });
         });
       }
@@ -12777,7 +13533,7 @@
     operatorRefresh();
   }
 
-  // Read all four routes in parallel; each paints its own card. noBounce is
+  // Read every operator route in parallel; each paints its own card. noBounce is
   // LOAD-BEARING on every one: these are platform-operator gated, so a session
   // that has lost the allowlist 403s (and an expired one 401s) — without it a
   // stale probe would clearSession() and log the operator out mid-page.
@@ -12792,8 +13548,11 @@
     operatorPaint("#op-warm-body", OPERATOR_WARM_POOL, function (data) { return operatorWarmPoolCardHtml(data); });
     operatorPaint("#op-digest-body", OPERATOR_DELIVERIES, function (data) {
       return operatorDigestCardHtml(data && data.deliveries);
+    }, function (slot) {
+      var btn = slot.querySelector ? slot.querySelector("[data-digest-send]") : null;
+      if (btn) btn.addEventListener("click", function () { operatorConfirmDigestSend(); });
     });
-    // The census rides the SAME funnel as the other four: operatorPaint owns the
+    // The census rides the SAME funnel as every other card: operatorPaint owns the
     // only GET call site the whole console has, so the window query is computed
     // here and handed in as a path rather than opening a fifth read seam with a
     // degrade story of its own. (Spelled without the call expression on purpose
@@ -12845,6 +13604,46 @@
           ctl.fail(haltFault && haltFault.text ? haltFault.text : friendly(r.data, "Please try again."),
             "Try again", function () {
               operatorConfirmBrake("halt");
+            });
+        });
+      },
+    });
+  }
+
+  // THE ONE CONSOLE CONTROL THAT MAILS STRANGERS, so it asks first and the
+  // question names the consequence in the same words the button acts on: every
+  // team, one email per member, now. `tier: "danger"` is the same dialog the
+  // fleet brake uses — this is not more reversible than halting a rollout, it is
+  // LESS: a halted rollout resumes, a sent email does not unsend.
+  //
+  // The scope travels EXPLICITLY. The route has no default and 422s a bodyless
+  // POST, and this call site is why that refusal is cheap: naming the audience
+  // costs one key, and it means no retry, no double-click and no half-built
+  // client can widen the blast radius by omission.
+  function operatorConfirmDigestSend() {
+    openConfirmModal({
+      tier: "danger",
+      title: "Send a fleet digest now?",
+      consequence: "Every team that owns an instance is mailed immediately — one digest per member, " +
+        "from the platform's own address. This is the same send the 06:00 UTC cron does, " +
+        "not a preview, and it cannot be recalled.",
+      confirmLabel: "Send it now",
+      busyLabel: "Sending…",
+      onConfirm: function (ctl) {
+        ctl.busy();
+        api("POST", OPERATOR_DIGEST_SEND, { scope: "fleet" }, { noBounce: true }).then(function (r) {
+          if (r.ok) {
+            ctl.succeed();
+            // The server's OWN counts, never a client-side "Sent!". A run that
+            // mailed nobody says so here rather than reading as a success.
+            toast({ kind: "success", title: "Digest send accepted", body: operatorDigestSendResultText(r.data) });
+            operatorRefresh();
+            return;
+          }
+          var sendFault = operatorReadFault(r);
+          ctl.fail(sendFault && sendFault.text ? sendFault.text : friendly(r.data, "Please try again."),
+            "Try again", function () {
+              operatorConfirmDigestSend();
             });
         });
       },
@@ -13061,16 +13860,22 @@
     }).filter(function (s) { return !!s; }).join(", ");
   }
 
-  // cch-w66-bl — Pure: the binding refusal MINUS its CLI re-run clause. The
-  // control plane writes ONE `detail` for both surfaces and ends it with a
-  // literal `bp cloud site create … --doc-type <type>` line (router.ex ~12620).
-  // Every sentence before that line is surface-neutral and worth relaying; the
-  // incantation must never reach a modal that already HAS those fields.
-  function siteDetailWithoutCliReRun(detail) {
-    var s = String(detail || "");
-    var cut = s.indexOf("Re-run naming a type");
-    if (cut === -1) cut = s.indexOf("`bp ");
-    return (cut === -1 ? s : s.slice(0, cut)).trim();
+  // cch-w69-bl — Pure: the binding refusal's detail, relayed. THE STRIP IS GONE.
+  //
+  // siteDetailWithoutCliReRun used to live here: it cut the server's `detail` at
+  // the literal marker "Re-run naming a type" (falling back to the first "`bp ")
+  // because the control plane wrote ONE CLI-voiced sentence for two surfaces.
+  // That was a string match on someone else's prose — reword the server and this
+  // console silently relays a terminal incantation into a modal, with no test on
+  // either side failing, because each side tests against its own fixture string.
+  //
+  // The control plane now writes a SURFACE-NEUTRAL `detail` and puts the terminal
+  // re-run in its own `cli_hint` key (router.ex refuse_empty_binding — grep for
+  // `cli_hint`). The console reads `detail` and never `cli_hint`, so the modal
+  // gets no flags no matter how either sentence is worded. This function is
+  // therefore a plain read of a STRUCTURED field: it trims, and that is all.
+  function siteRelayedDetail(detail) {
+    return String(detail || "").trim();
   }
 
   // cch-w37-s1 — Pure: the create-site error line. The router answers a failed
@@ -13112,7 +13917,7 @@
     var detail = (data && typeof data.detail === "string" && data.detail) || "";
 
     if (slug === "content_binding_empty") {
-      var relayed = siteDetailWithoutCliReRun(detail);
+      var relayed = siteRelayedDetail(detail);
       var menu = siteReadableTypesMenu(data.readable_types);
       if (menu) {
         // The server's FIRST sentence is the verdict ("this site would build
@@ -13128,13 +13933,14 @@
       // No machine-readable menu: the server's own sentences are the most
       // specific true thing anyone has (why the binding is empty, and why the
       // menu is unavailable), so they all stand \u2014 and the console supplies the
-      // next step the stripped CLI line used to carry.
+      // next step in ITS OWN voice, naming the fields this modal actually has.
       return cap(relayed ||
         "this site would build from nothing \u2014 the content you bound has nothing this site can read.") +
         " Check the workspace/project/dataset and content type above.";
     }
-    // The server's detail here says "bind it with `--dataset \u2026`" \u2014 a flag, for a
-    // person who is looking straight at that field.
+    // The server's detail here is surface-neutral prose about an unnamed binding
+    // (the `--dataset` flag moved to `cli_hint`, which this console never reads).
+    // The modal has those three fields on screen, so it names them instead.
     if (slug === "content_binding_required") {
       return "This site needs content to build from \u2014 fill in the workspace/project/dataset above.";
     }
@@ -13342,11 +14148,11 @@
       silent: pathState === "unknown" && token !== "present",
     };
   }
-  // The binding as a shared status pill. Role ∈ ok | danger | neutral.
+  // The binding as a shared status pill, emitted by statusMetaPill with the
+  // hover title riding in as an attrs string. Role ∈ ok | danger | neutral.
   function siteBindingPill(m) {
-    return '<span class="status-pill status-pill--' + esc(m.role) + '" title="' + esc(m.title) + '">' +
-      '<span class="status-pill-dot" aria-hidden="true"></span>' +
-      '<span class="status-pill-label">' + esc(m.label) + "</span></span>";
+    return statusMetaPill({ role: m.role, label: m.label }, "",
+      ' title="' + esc(m.title) + '"');
   }
   // The compact row chip — "" when the payload says nothing about a binding.
   function siteBindingChip(s) {
@@ -13514,15 +14320,22 @@
   // stamp (not castable), so a re-enabled row keeps the old stamp — without the
   // gate, Re-enable would "succeed" and the reconciled card would STILL shout
   // Auto-disabled next to an Active pill, forever.
-  function webhookBannerHtml(wh) {
+  // cch-r21-w16: `authority` is instanceAdminAuthority()'s three-valued answer,
+  // threaded from webhookCardHtml (never read here). Absent it defaults to
+  // "grant", byte-identical to the shipped banner. Re-enable is a PUT through
+  // the update capability, which is `Auth.require_team_admin` on the proxy — so
+  // a DETERMINATE refusal omits the button and the banner keeps its sentence.
+  function webhookBannerHtml(wh, authority) {
     wh = wh || {};
+    authority = authority || "grant";
     if (!wh.auto_disabled_at || wh.active) return "";
     var reason = wh.disable_reason != null && String(wh.disable_reason) !== ""
       ? esc(wh.disable_reason)
       : "This endpoint was auto-disabled after repeated delivery failures.";
     return '<div class="notice notice-error wh-autodisable" role="alert">' +
       '<span class="wh-autodisable-text"><b>Auto-disabled.</b> ' + reason + "</span>" +
-      '<button class="btn btn-sm" type="button" data-wh-reenable>Re-enable</button>' +
+      (authority === "refuse" ? "" :
+        '<button class="btn btn-sm" type="button" data-wh-reenable>Re-enable</button>') +
       "</div>";
   }
 
@@ -13531,12 +14344,33 @@
   // every action. State is rendered from the ROW, so a reconciled response
   // repaints the true state (D55: pre-C6.5 instances degrade to their stale
   // stamps honestly rather than to an optimistic guess).
-  function webhookCardHtml(wh, instance, dataset) {
+  // cch-r21-w16 — THE ACTION BAR IS AUTHORITY-GATED, and it is the console
+  // telling the truth about the tiers as they stand, not a change to any tier.
+  // Six of this card's controls drive proxy verbs that are
+  // `Auth.require_team_admin` in router.ex — update (Edit and the enable/disable
+  // toggle share the one PUT), delete, rotate, test-send and the deliveries
+  // read; only `webhook.list` and `webhook.show` stayed member-tier. The card
+  // rendered all six for every role, so a plain member was offered a bar of
+  // buttons that each answered 403. D514's rule for a discretionary control a
+  // role cannot use is OMIT, not disable-and-explain (that is reserved for the
+  // two named rail verbs), so the bar is replaced by ONE sentence in the
+  // server's own words — FORBIDDEN_ROLE_COPY.admin, the same bytes the 403
+  // itself now renders through.
+  //
+  // `authority` is instanceAdminAuthority()'s three-valued answer, threaded from
+  // the mount path rather than read here, and only "refuse" — a DETERMINATE no —
+  // removes anything. "unknown" (/v1/me not answered) claims nothing and keeps
+  // the shipped card, matching instanceHeaderHtml and fleetSupportCardHtml.
+  // Absent the argument it defaults to "grant": byte-identical to the shipped
+  // card, which is what keeps every pure call site unmoved.
+  function webhookCardHtml(wh, instance, dataset, authority) {
     wh = wh || {};
+    authority = authority || "grant";
+    var mayMutate = authority !== "refuse";
     var active = !!wh.active;
-    var pill = active
-      ? '<span class="status-pill status-pill--ok"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Active</span></span>'
-      : '<span class="status-pill status-pill--neutral"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Disabled</span></span>';
+    var pill = statusMetaPill(active
+      ? { role: "ok", label: "Active" }
+      : { role: "neutral", label: "Disabled" });
     var toggleBtn = active
       ? '<button class="btn btn-sm" type="button" data-wh-toggle>Disable</button>'
       : '<button class="btn btn-sm" type="button" data-wh-toggle>Enable</button>';
@@ -13558,9 +14392,9 @@
           webhookEventsHtml(wh) +
         "</div>" + pill +
       "</div>" +
-      webhookBannerHtml(wh) +
+      webhookBannerHtml(wh, authority) +
       (meta ? '<div class="wh-meta">' + meta + "</div>" : "") +
-      '<div class="wh-actions">' +
+      (mayMutate ? '<div class="wh-actions">' +
         '<button class="btn btn-sm" type="button" data-wh-edit>Edit</button>' +
         toggleBtn +
         '<button class="btn btn-sm" type="button" data-wh-rotate>Rotate secret</button>' +
@@ -13568,18 +14402,30 @@
         // (POST /v1/barkparks/:id/api/webhooks/:webhook_id/test-send → the
         // instance's one-shot synthetic probe, SINGLE attempt, delivery row
         // written with a NULL endpoint_id so a failed test never perturbs the
-        // auto-disable streak). No copy-as-CLI chip beside it on purpose: `bp
-        // cloud webhook` has no test-send verb today, and a chip for a command
-        // that does not exist is worse than no chip (backlog gr-bl-cli-test-send).
+        // auto-disable streak). The verb NOW EXISTS on the CLI side — `bp cloud
+        // webhook test-send` (internal/cli/cloud_webhook_cmd.go,
+        // runCloudWebhookTestSend; grep `case "test-send", "test":`) — so the
+        // chip this comment used to withhold is emitted below with the rest of
+        // the .wh-cli row. gr-bl-cli-test-send.
         '<button class="btn btn-sm" type="button" data-wh-test>Send test</button>' +
         '<button class="btn btn-sm" type="button" data-wh-deliveries>Deliveries</button>' +
         '<button class="btn btn-sm btn-danger" type="button" data-wh-delete>Delete</button>' +
         '<span class="wh-toggle-note" role="status" hidden></span>' +
-      "</div>" +
+      "</div>"
+      // `dim` only — no new class, so the app.css census (held elsewhere this
+      // round) does not move. The fleetSupportCardHtml refusal line is the
+      // precedent, byte-for-byte.
+      : '<p class="dim">' + esc(FORBIDDEN_ROLE_COPY.admin) + "</p>") +
       '<div class="wh-cli">' +
         cliChipHtml(webhookCliChip("show", instance, dataset)) +
         cliChipHtml(webhookCliChip("toggle", instance, dataset)) +
         cliChipHtml(webhookCliChip("rotate", instance, dataset)) +
+        // The twin of the `Send test` button above. The verb spelling is the
+        // one C7's parser dispatches — internal/cli/cloud_webhook_cmd.go's
+        // `case "test-send", "test":` — and internal/cli/cloud_webhook_cmd_test.go
+        // pins this exact prefix as webhookTestSendChip, so a rename on either
+        // side reds a test rather than handing an operator a dead command.
+        cliChipHtml(webhookCliChip("test-send", instance, dataset)) +
         cliChipHtml(webhookCliChip("deliveries", instance, dataset)) +
         cliChipHtml(webhookCliChip("rm", instance, dataset)) +
       "</div>" +
@@ -13805,11 +14651,21 @@
       // Nothing above matched, so this envelope named no instance fact. Route
       // the terminal sentence through the same 5xx/transport switch every other
       // crash path uses; a real 4xx answer keeps the instance-shaped copy.
-      // `err` may be a flat slug string, which friendly() reads off `error`.
+      // cch-r21-w16 — THE WHOLE ENVELOPE GOES THROUGH, and the rebuild that used
+      // to stand here is deleted rather than narrowed. It read `typeof err ===
+      // "string" ? { error: err } : resp`, written to hand friendly() a FLAT
+      // shape when `err` is a slug string — but `resp` ALREADY IS that flat
+      // shape in exactly that case (`resp.error` IS the slug), so the ternary
+      // could never change the `error` key it was reaching for. Its only effect
+      // was to DROP every sibling key beside the slug, and friendly() reads five
+      // of them: reason, required, scope (the forbidden evidence fence) and
+      // details/detail (the field ladder). GET .../deliveries is team-admin
+      // (router.ex, `webhook.deliveries`), so a refused member's
+      // {error:"forbidden", required:"admin", scope:"team"} landed here with its
+      // evidence already thrown away.
       // (One line on purpose: the census guard in __app.test.mjs reads the LINE
       // a blaming fallback sits on and demands faultCopy( on it.)
-      var flat = typeof err === "string" ? { error: err } : resp;
-      body = detail || faultCopy(respStatus, flat, "Something went wrong reaching this instance.");
+      body = detail || faultCopy(respStatus, resp, "Something went wrong reaching this instance.");
     }
     return '<div class="wh-error empty-state"><h2>' + esc(title) + "</h2><p>" + esc(body) + "</p>" +
       (retry ? '<p><button class="btn btn-sm btn-primary" type="button" data-wh-retry>Retry</button></p>' : "") +
@@ -13863,12 +14719,27 @@
     // Nothing above matched, so this envelope said nothing about the INPUT.
     // Route the terminal sentence through the same 5xx/transport switch every
     // other crash path uses: only a real 4xx answer keeps the check-the-details
-    // copy. `err` may be a flat slug string, which friendly() reads off `error`.
+    // copy.
+    //
+    // cch-r21-w16 — THE WHOLE ENVELOPE GOES THROUGH. A rebuild used to stand
+    // here, `typeof err === "string" ? { error: err } : data`, written so
+    // friendly() would see a FLAT shape when `err` is a slug string. It could
+    // never do that job: `data` ALREADY IS the flat shape in exactly that case
+    // — `data.error` IS the slug — so the ternary's only measurable effect was
+    // to DROP every sibling key beside it. friendly() reads FIVE such siblings
+    // (reason, required, scope for the forbidden-evidence fence; details and
+    // detail for the field ladder), and since every instance-webhook `:mutate`
+    // proxy moved to team admin, Auth.forbidden/2 answers a plain member with
+    // {error:"forbidden", required:"admin", scope:"team"} FLAT — so
+    // forbiddenEvidenceCopy() saw an empty envelope and the member read the
+    // generic "the refusal didn't say which role would allow it" about a
+    // refusal that said exactly that. The `{error:"network_error"}` shape the
+    // rebuild cited returns at the TOP of this function and never reaches this
+    // line at all; a quiet arm in __app.test.mjs pins that it still does.
     // (One line on purpose: the census guard in __app.test.mjs reads the LINE a
     // blaming fallback sits on and demands faultCopy( on it, so wrapping this
     // call would hide the fix from the guard that is supposed to catch it.)
-    var flat = typeof err === "string" ? { error: err } : data;
-    return faultCopy(status, flat, "Please check the details and try again.");
+    return faultCopy(status, data, "Please check the details and try again.");
   }
 
   // The proxy path for a webhook capability under a dataset. `suffix` is "" for
@@ -13878,7 +14749,14 @@
       "?dataset=" + encodeURIComponent(ds || "production");
   }
 
-  function webhooksTabShellHtml(bp, ds) {
+  // cch-r21-w16: `authority` threaded, defaulting to "grant" (byte-identical to
+  // the shipped shell). POST /v1/barkparks/:id/api/webhooks is
+  // `Auth.require_team_admin`, so a determinate refusal omits the CTA. The TAB
+  // itself stays: `webhook.list` is member-tier by the router's own written
+  // ruling, so a member can still SEE their team's box configuration — the
+  // dataset picker and Load are their controls and they keep working.
+  function webhooksTabShellHtml(bp, ds, authority) {
+    authority = authority || "grant";
     return '<div class="wh-toolbar">' +
       '<div class="wh-dataset">' +
         '<label class="wh-dataset-label" for="wh-dataset-input">Dataset</label>' +
@@ -13886,7 +14764,8 @@
           '" spellcheck="false" autocomplete="off" autocapitalize="off">' +
         '<button class="btn btn-sm" type="button" data-wh-load>Load</button>' +
       "</div>" +
-      '<button class="btn btn-primary btn-sm" type="button" data-wh-new>New webhook</button>' +
+      (authority === "refuse" ? "" :
+        '<button class="btn btn-primary btn-sm" type="button" data-wh-new>New webhook</button>') +
       "</div>" +
       '<div class="wh-list" aria-live="polite"><div class="loading">Loading webhooks&hellip;</div></div>';
   }
@@ -13925,7 +14804,14 @@
     if (!root && typeof document !== "undefined" && document.getElementById) root = document.getElementById("instance-tabpanel");
     if (!root) return;
     var ds = "production";
-    root.innerHTML = webhooksTabShellHtml(bp, ds);
+    // cch-r21-w16 — READ THE AUTHORITY ONCE, HERE, and let every builder in this
+    // tab render from that ONE answer. Three DOM sites paint webhook markup (this
+    // shell, loadWebhooks' list, renderWhCard's single-row repaint); three
+    // independent reads of instanceAdminAuthority() could disagree inside one
+    // visible tab if /v1/me landed between them, which is the defect the
+    // instanceDetailHtml precedent exists to avoid.
+    webhookTabAuthority = instanceAdminAuthority();
+    root.innerHTML = webhooksTabShellHtml(bp, ds, webhookTabAuthority);
     wireWebhooksToolbar(root, bp);
     loadWebhooks(root, bp, ds);
   }
@@ -13942,6 +14828,11 @@
     var neu = root.querySelector("[data-wh-new]");
     if (neu) neu.addEventListener("click", function () { openCreateWebhookModal(root, bp, currentWhDataset(root)); });
   }
+
+  // The tab's ONE authority answer, captured at mount (see mountWebhooksTab).
+  // "grant" until a mount says otherwise, so every pure/harness call path keeps
+  // the shipped behaviour.
+  var webhookTabAuthority = "grant";
 
   var webhookLoadSeq = 0;
   function loadWebhooks(root, bp, ds) {
@@ -13968,12 +14859,17 @@
         listBox.innerHTML = head +
           '<div class="empty-state wh-empty"><h2>No webhooks on ' + esc(ds) + "</h2>" +
           "<p>Deliver document mutation events to your own endpoints.</p>" +
-          '<p><button class="btn btn-sm btn-primary" type="button" data-wh-new>New webhook</button></p></div>';
+          (webhookTabAuthority === "refuse"
+            ? '<p class="dim">' + esc(FORBIDDEN_ROLE_COPY.admin) + "</p>"
+            : '<p><button class="btn btn-sm btn-primary" type="button" data-wh-new>New webhook</button></p>') +
+          "</div>";
         var neu = listBox.querySelector("[data-wh-new]");
         if (neu) neu.addEventListener("click", function () { openCreateWebhookModal(root, bp, ds); });
         return;
       }
-      listBox.innerHTML = head + whs.map(function (w) { return webhookCardHtml(w, cliInstance(bp), ds); }).join("");
+      listBox.innerHTML = head + whs.map(function (w) {
+        return webhookCardHtml(w, cliInstance(bp), ds, webhookTabAuthority);
+      }).join("");
       whs.forEach(function (w) { wireWebhookCard(listBox, bp, ds, w); });
     });
   }
@@ -14030,7 +14926,7 @@
     var card = findWhCard(listBox, wh.id);
     if (!card || !card.parentNode) return;
     var tmp = document.createElement("div");
-    tmp.innerHTML = webhookCardHtml(wh, cliInstance(bp), ds);
+    tmp.innerHTML = webhookCardHtml(wh, cliInstance(bp), ds, webhookTabAuthority);
     var fresh = tmp.firstChild;
     if (!fresh) return;
     card.parentNode.replaceChild(fresh, card);
@@ -15707,8 +16603,8 @@
   // reusing the shared .status-pill roles rather than a site-only pill
   // vocabulary. freshnessModel is the single source (status · trigger · when);
   // a NEVER-deployed site reads a neutral "Not deployed" (nil-honest — no
-  // invented green). Dynamic head `status-pill status-pill--` is ALLOW_PREFIXES-
-  // listed (E3); role ∈ ok|info|warn|danger|neutral, all real rules.
+  // invented green). The chip itself is emitted by statusMetaPill, so the role
+  // ∈ ok|info|warn|danger|neutral it names is the shared family's ladder.
   function siteStatusPill(s) {
     var m = freshnessModel(s);
     var role = "neutral", label = "Not deployed";
@@ -15719,10 +16615,7 @@
       else if (m.dot === "deploy") role = "info";
       else if (m.dot === "down") role = "danger";
     }
-    return '<span class="status-pill status-pill--' + esc(role) + '">' +
-      '<span class="status-pill-dot" aria-hidden="true"></span>' +
-      '<span class="status-pill-label">' + esc(label) + "</span>" +
-    "</span>";
+    return statusMetaPill({ role: role, label: label });
   }
 
   // E-01 (GR28): the global sites list on v4 density rows. Renders ONLY real
@@ -16166,6 +17059,36 @@
     // The chip is exactly the arm a non-admin already gets — one grammar, one
     // .set-chip, no new CSS.
     //
+    // cch-w48-bl-site-repo-chip-visual-weight — AND THE CHIP IS NOW GONE FROM
+    // THE BADGES ROW, because the fact it was carrying is ALREADY on this
+    // screen and always was. The Details rail's "Repository" row (see
+    // `railRowHtml("Repository", repo)` below) renders `owner/repo@branch` in
+    // mono for EVERY actor, unpredicated on authority or readiness — a strict
+    // SUPERSET of the chip's text, since the chip omitted the branch. So the
+    // withheld arms delete no information: they delete a DUPLICATE, and the
+    // rail row is the honest home for a read-only fact.
+    //
+    // WHY NOT A BADGES-SCOPED RULE. The alternative was a
+    // `.fleet-badges .set-chip` rule sized to btn-sm. Measured in headless
+    // Chrome on this screen, the chip computes font-size 12px — the SAME as
+    // #site-deploy — and differs on height (22 vs 28) and colour (muted-text,
+    // transparent ground). So a restyle would have to grow it to button height
+    // and button colour, i.e. make a non-interactive span look like the
+    // buttons on either side of it, which is the worse outcome: .fleet-badges
+    // is a row of CONTROLS, and the honest fix is that it stops carrying a
+    // non-control at all. It also costs a CSS rule and a cssom-heads baseline
+    // regeneration for a duplicate of a row two inches away.
+    //
+    // AND IT WAS NOT ONLY A WEIGHT PROBLEM. `.set-chip` carries
+    // `white-space: nowrap`, and github_repo's only server-side ceiling is the
+    // varchar(255) column (registry/site.ex `validate_github_repo/1` is a
+    // FORMAT check with no length clause). Driven at a 320px viewport on the
+    // preview's 255-char cruel repo fixture, the chip measured 1658px wide and
+    // put documentElement.scrollWidth at 2688 against a 320 clientWidth — a
+    // 2368px sideways scroll on the whole page. The rail row held the FULL
+    // 511-char `repo@branch` span in 250px at the same width, because `.v`
+    // wraps. Removing the chip removes the overhang with it.
+    //
     // NO SENTENCE, at either withholding. This function's own s2 note settles
     // it: sentences belong to the POST-hoc refusal (the server's own words
     // through friendly()); a sentence at a PRE-hoc omit invents a refusal for
@@ -16175,7 +17098,7 @@
     var githubOffered = authority === "grant" && githubReady === "ready";
     var githubControl = githubOffered
       ? '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>"
-      : (site.github_repo ? '<span class="set-chip">' + githubLabel + "</span>" : "");
+      : "";
     // gh-6: branch previews render in their own section, distinct from the
     // production deploy list — one row per branch, each with a click-through to
     // its preview URL and its own build console (the #815 standard).
@@ -17098,6 +18021,22 @@
   // highlighted; the honest "Rolled back" completion pill + a link to the now-serving
   // URL read here instead. The "restored" branch shows nothing here (its cue is the
   // marked row). `url` is server data → escaped. Pure.
+  //
+  // cch-r21l RULING (task-c74cf3120f6bca69) — `.deploys-rollback-pill` STAYS ITS
+  // OWN COMPONENT; it is deliberately NOT absorbed into the .status-pill ladder,
+  // and this comment is the reason so the next sweep does not re-open it.
+  // The ladder is a STATE vocabulary: every `.status-pill` names what a thing IS
+  // right now (a deploy is building, a box is live) and carries a dot whose hue
+  // is that state's role. This marker names an EVENT that has already finished,
+  // it labels no entity, it has no state to be in, and it is one flex child of a
+  // composite banner (`.deploys-rollback-note`) — 20px tall, dotless, --text-xs,
+  // tinted to the BANNER's info wash rather than to a role. Giving it a role
+  // would assert a semantic it does not have ("this deploy's status is Rolled
+  // back" is false — `current_deployment_id` is UNCHANGED on this branch, which
+  // is exactly why no row is highlighted and this banner reads instead), and
+  // giving it a dot would make a settled completion look like a live state.
+  // A distinct affordance keeping its own component is not a second grammar; a
+  // second way to say the SAME thing is, and that is what .inst-life-pill was.
   function deployRollbackBannerHtml(flashView) {
     if (!flashView || flashView.kind !== "previous") return "";
     var link = flashView.url
@@ -18372,9 +19311,10 @@
   // An instance's /login page deep-links here carrying its own public origin:
   //   https://barkpark.cloud/#/instance-login?url=https%3A%2F%2Fguerrilla.barkpark.cloud
   // Same park/resume shape as invitations: logged out → park the origin +
-  // banner the login card; the first authed render() matches the origin
-  // against the user's OWN fleet and rides the existing studio-link mint —
-  // authorization never moves client-side, the deep link carries no secret.
+  // banner the login card; the first authed render() POSTs the origin to
+  // `/v1/auth/studio-signin`, which resolves the row by PUBLIC HOST and reads
+  // the membership row on that row's own team — authorization never moves
+  // client-side, and the deep link carries no secret.
   var STUDIO_LOGIN_KEY = "bpcloud.studioLogin";
   function studioLoginFromHash(hash) {
     var m = (hash != null ? hash : location.hash || "").match(/^#\/?instance-login\?url=([^&]+)/);
@@ -18396,15 +19336,92 @@
     if (typeof u !== "string" || !/^https?:\/\//i.test(u)) return null;
     try { return new URL(u).host || null; } catch (e) { return null; }
   }
-  // Pure: which of MY instances is the deep link asking for? Host equality
-  // against each barkpark's public url — never a substring match.
-  function studioLoginMatch(fleet, instanceUrl) {
-    var want = studioLoginHost(instanceUrl);
-    if (!want || !Array.isArray(fleet)) return null;
-    for (var i = 0; i < fleet.length; i++) {
-      if (fleet[i] && studioLoginHost(fleet[i].url) === want) return fleet[i];
+  // PURE: what a `POST /v1/auth/studio-signin` answer MEANS. Exactly one of two
+  // shapes comes back:
+  //   {go: "<url>"}           — the ONLY shape resumeStudioLogin navigates on
+  //   {toast: {title, body}}  — every other answer, refusing in place
+  //
+  // THIS REPLACED A CLIENT-SIDE MATCH, and that is the point. resumeStudioLogin
+  // used to answer "is this instance mine?" HERE, against ensureFleet() — `GET
+  // /v1/barkparks` with no `scope=all`, which the router scopes to
+  // `current_team` — comparing the arriving origin against each row's `url`
+  // only. Two instances were unreachable through that door and both were real:
+  //   * an instance in a team the console is not currently PINNED to was simply
+  //     absent from the list, so a member of two teams got "Instance not
+  //     linked" for a box they own;
+  //   * an instance reached at its ATTACHED CUSTOM HOST never matched at all —
+  //     the instance deep-links the origin its own endpoint serves (`PHX_HOST`,
+  //     required to be the public DNS hostname, which on a custom-host install
+  //     IS the custom host), while the comparison only ever saw the
+  //     provisioning FQDN. The button was dead on every custom-host install.
+  // The control plane now answers both questions in one place, by public host
+  // (custom_host OR the url origin) and against the membership row on the
+  // RESOLVED row's team — never against the team this console happens to have
+  // pinned. Resolution stops being a client's guess.
+  //
+  // FAILS CLOSED BY CONSTRUCTION. `go` is produced by ONE branch and one only:
+  // status exactly 200 AND a non-empty STRING `url` in the body. A refusal, a
+  // 5xx, a network zero, a 200 whose body lost its url — every one of them
+  // falls through to a toast, so no answer this console can misread becomes a
+  // navigation. This is a LOGIN path; open is the wrong direction to fail.
+  //
+  // WHY THE SLUG IS READ, NOT THE STATUS ALONE. This door answers 404 with two
+  // different facts: `not_found` (no such host, OR a host owned by a team you
+  // are not in — one indistinguishable answer, deliberately, so the route is no
+  // existence oracle) and `no_admin_token` (YOUR registered box, with no stored
+  // credential to mint against). A `status === 404` branch would tell the owner
+  // of a registered instance that it "isn't managed by this account" — the same
+  // shape of confident-and-false sentence accountEraseFailureCopy had to be
+  // corrected for, where a 401 on an EXPIRED SESSION rendered as a wrong
+  // password.
+  function studioSigninOutcome(r, host) {
+    r = r || {};
+    var data = r.data || {};
+    var slug = data.error;
+    // The nested `{error: {code}}` envelope four route families send — unwrapped
+    // here for the same reason friendly() unwraps it: a truthy OBJECT compared
+    // against a slug string silently matches nothing and takes the wrong arm.
+    if (slug && typeof slug === "object") slug = slug.code;
+    var where = host ? String(host) : "the instance";
+
+    if (r.status === 200 && typeof data.url === "string" && data.url) return { go: data.url };
+
+    if (r.status === 401) {
+      return { toast: { title: "Signed out", body: SESSION_EXPIRED_COPY } };
     }
-    return null;
+    if (slug === "not_found") {
+      return {
+        toast: { title: "Instance not linked", body: where + " isn't managed by this account." }
+      };
+    }
+    if (slug === "no_admin_token") {
+      return {
+        toast: {
+          title: "Can't open Studio yet",
+          body: friendly(data, "No stored credentials for this instance.")
+        }
+      };
+    }
+    if (slug === "suspended") {
+      return {
+        toast: {
+          title: "Instance suspended",
+          body: "Studio access to " + where + " is closed until the suspension is cleared."
+        }
+      };
+    }
+    if (slug === "not_live") {
+      return { toast: { title: "Instance isn't live yet", body: friendly(data, "Try again once " + where + " has finished provisioning.") } };
+    }
+    if (slug === "instance_unreachable") {
+      return { toast: { title: "Couldn't reach the instance", body: friendly(data, "Try again from " + where + "/login.") } };
+    }
+    return {
+      toast: {
+        title: "Couldn't open Studio",
+        body: faultCopy(r.status || 0, data, "Try again from " + where + "/login.", r.transport)
+      }
+    };
   }
 
   // Pure: what the landing shows BEFORE any accept POST.
@@ -18763,31 +19780,33 @@
       esc(host) + ".</span> You'll be sent straight back once you're signed in.";
   }
 
-  // First authed render() after an instance-login landing: match the origin
-  // against MY fleet, mint through the existing studio-link route, and send
-  // the browser back. Failures degrade to a toast on the normal dashboard —
-  // the park is cleared up front so a broken link can't loop every render.
+  // First authed render() after an instance-login landing: hand the arriving
+  // PUBLIC HOST to the control plane and let it decide. One request, one
+  // decision, and the decision is made by the only party that can make it: the
+  // host resolves the row (custom_host OR the url origin) and the grant is read
+  // against that row's own team. No fleet list, no client-side match, no
+  // dependence on which team this console is pinned to.
+  //
+  // Failures degrade to a toast on the normal dashboard — the park is cleared up
+  // front so a broken link can't loop every render. The transport is the shared
+  // api() by NAME and not through any injected seam: the elevated-write binding
+  // census (`__binding_census.mjs`) finds this console's write call sites by
+  // reading `api("VERB", "<route>"` out of the shipped source, and a write
+  // routed through a local alias would be invisible to it. The unit harness
+  // drives the real path with a stubbed `fetch` instead.
   function resumeStudioLogin(instanceUrl) {
     clearParkedStudioLogin();
     var host = studioLoginHost(instanceUrl);
     if (!host) return;
-    ensureFleet().then(function (fleet) {
-      if (!fleet) {
-        toast({ kind: "error", title: "Couldn't reach your instances", body: "Try again from " + host + "/login." });
-        return;
+
+    return api("POST", "/v1/auth/studio-signin", { host: instanceUrl }).then(function (r) {
+      var outcome = studioSigninOutcome(r, host);
+      if (outcome.go) {
+        location.replace(outcome.go);
+        return outcome;
       }
-      var bp = studioLoginMatch(fleet, instanceUrl);
-      if (!bp) {
-        toast({ kind: "error", title: "Instance not linked", body: host + " isn't managed by this account." });
-        return;
-      }
-      api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/studio-link", {}).then(function (r) {
-        if (r.status === 200 && r.data && r.data.url) {
-          location.replace(r.data.url);
-        } else {
-          toast({ kind: "error", title: "Couldn't open Studio", body: friendly(r.data, "Try again from the instance page.") });
-        }
-      });
+      toast({ kind: "error", title: outcome.toast.title, body: outcome.toast.body });
+      return outcome;
     });
   }
 
@@ -19130,6 +20149,12 @@
         : "Connect a " + name + " account to provision here. Until then we launch a fully-managed instance for you.";
       return '<div class="launch-catalog-empty">' +
         '<p class="dim">' + lead + "</p>" +
+        // gr-r21m-defect-jk (DEFECT-K, screen `empty`). RULED as the ghost tier
+        // BY DESIGN — same ruling as `providerRosterHtml`'s Disconnect above.
+        // It is also NOT this screen's primary action: the lead sentence right
+        // above says a managed instance launches anyway, so the screen's primary
+        // is the launch submit and this is the secondary BYO detour. A filled
+        // tier here would out-shout the door that actually works.
         '<button class="btn btn-ghost btn-sm launch-connect-provider" type="button" data-kind="' + esc(kind) + '">Connect ' + name + "</button></div>";
     }
     if (vs.state === "unavailable") {
@@ -19942,10 +20967,33 @@
     // Always read the real subscription before deciding what to show — the plan
     // state is the server's truth, never assumed.
     if (!subLoaded && !subError) {
-      box.innerHTML = '<div class="loading">Loading your plan&hellip;</div>';
+      // cch-w49-bl-repaint — THE COLD ARM IS ENTERED MORE THAN ONCE PER BOOT,
+      // and every entry used to buy a whole extra render chain. A #billing deep
+      // link reaches renderBilling from applyRoute, and loadMe's billing seam
+      // re-enters it the moment /v1/me lands — both while the subscription is
+      // still in flight. Each entry re-wrote this placeholder AND attached its
+      // own `.then(renderBilling)`, so the FINAL card was painted once per cold
+      // entry, and each of those paints started its own ceiling read, doubling
+      // again. Measured on the shipped bytes: 6 / 8 / 6 writes to
+      // #billing-recommended for billing-past-due / -portal-return /
+      // -cancelling.
+      //
+      // Two guards, both about the SECOND caller doing nothing:
+      //   • the placeholder is written only when it is not already on screen.
+      //     Safe HERE and nowhere else on this screen: the loading div carries
+      //     no listener and no state, so skipping the write cannot strand a
+      //     handler (the plan card below DOES carry handlers, which is why its
+      //     paint is deduped by not RE-RENDERING, never by skipping a write).
+      //   • only the caller that STARTS the read subscribes the re-render. A
+      //     caller that merely joins an in-flight read is already covered by
+      //     the initiator's continuation.
+      var loadingHtml = '<div class="loading">Loading your plan&hellip;</div>';
+      if (box.innerHTML !== loadingHtml) box.innerHTML = loadingHtml;
       showBillingSection("#billing-manage-section", false);
       showBillingSection("#billing-cancel-section", false);
-      loadSubscription().then(renderBilling);
+      var startsSubRead = !subInflight;
+      var subRead = loadSubscription();
+      if (startsSubRead) subRead.then(renderBilling);
       return;
     }
 
@@ -20002,7 +21050,22 @@
     // is one line under it, and holding the card behind a second read would
     // trade a real absence for a spinner. The repaint is once — the loaded flag
     // makes the recursion terminal.
-    if (!billingQuotaLoaded) { loadBillingCeiling().then(function () { renderBilling(); }); }
+    // cch-w49-bl-repaint — the recursion is still terminal, and now it is also
+    // SINGLE. Two things changed: only the caller that STARTS the ceiling read
+    // subscribes a re-render (a second renderBilling arriving while the read is
+    // open used to attach a second one, so the card was repainted once per
+    // entry), and the re-render fires only when the answer actually MOVED the
+    // screen. `planCeilingHtml(billingQuota)` is the ceiling's only consumer,
+    // so a read that lands on the same value — overwhelmingly nil → nil, which
+    // is every team without an ACTIVE subscription, past_due included — would
+    // repaint byte-identical markup and destroy the card's live handlers to do
+    // it.
+    if (!billingQuotaLoaded && !ceilingInflight) {
+      var quotaBefore = billingQuota;
+      loadBillingCeiling().then(function () {
+        if (billingQuota !== quotaBefore) renderBilling();
+      });
+    }
 
     var band = billingOwnerAuthority();
     if (band !== "grant" && band !== "refuse") { renderBillingMeUnknown(box, band); return; }
@@ -20408,7 +21471,14 @@
         // an ACTION section carries the action (never a save-row, never a button
         // buried in a status card). "See all plans" stays: it toggles the grid,
         // a read affordance the card owns.
-        '<a class="plan-more" id="plan-more">See all plans</a>' +
+        // gr-r21m-defect-jk (DEFECT-K, screen `billing-cancelling`) — RULED a
+        // read/disclosure affordance by the GR33 note directly above, not an
+        // action tier, so "the primary action renders as plain body text"
+        // mis-reads it. The real residual it hid — a bare `<a>` with no href, no
+        // role and no tabindex, i.e. the one control this card owns was not
+        // keyboard reachable — IS fixed: it is a real button now, boxed
+        // identically by `.plan-more` in app.css and in the shared focus ring.
+        '<button class="plan-more" id="plan-more" type="button">See all plans</button>' +
       "</div>";
   }
 
@@ -21091,15 +22161,42 @@
   // and deliberately has none, and there the retry must repaint on BOTH
   // outcomes or a successful read leaves the stale unknown picker on screen,
   // which is the exact lie this slice exists to kill.
+  // cch-w45-s5-fu — EVERY [data-me-retry] IN THE SUBTREE, not the first one.
+  // This used to bind `root.querySelector("[data-me-retry]")`, and that single
+  // binding was load-bearing in the WRONG direction: because a second copy of
+  // the exit would be a DEAD button, five call sites reasoned their way OUT of
+  // emitting one ("the page's ONE shipped exit is already on screen beside
+  // it"), and the instance screen's Updates strip was left with none at all on
+  // every lifecycle arm whose header draws no grouped control — a disabled
+  // "Checking capabilities…" Roll back with no way to re-ask. Measured, not
+  // argued: the committed instance-suspended-me-unreadable scenario booted the
+  // instance screen on a failed /v1/me and #instance-body contained ZERO
+  // [data-me-retry].
+  //
+  // Binding all of them is the smaller of the two available fixes. The other
+  // was to hoist ONE exit to the instance screen, above the strips — rejected
+  // because the exit is an explanation attached to a specific disabled control
+  // (it sits inside the strip's own reason span, which is what
+  // `aria-describedby` points at), and a screen-level button would either
+  // duplicate the header's or float unanchored above two strips that can appear
+  // independently of each other. A per-strip exit keeps the D428 grammar; this
+  // makes the second one LIVE.
+  //
+  // Each button owns its own disable, so pressing one does not blank the other;
+  // whichever repaint wins replaces both nodes anyway.
   function wireMeRetry(root, repaint, selfHealing) {
-    var btn = root && root.querySelector ? root.querySelector("[data-me-retry]") : null;
-    if (!btn) return;
-    btn.addEventListener("click", function () {
-      btn.disabled = true;
-      loadMe().then(function () {
-        if (selfHealing === false || meState() !== "loaded") repaint();
-      });
-    });
+    var btns = root && root.querySelectorAll ? root.querySelectorAll("[data-me-retry]") : null;
+    if (!btns || !btns.length) return;
+    for (var i = 0; i < btns.length; i++) {
+      (function (btn) {
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          loadMe().then(function () {
+            if (selfHealing === false || meState() !== "loaded") repaint();
+          });
+        });
+      })(btns[i]);
+    }
   }
 
   function setAccountChip(team, email) {
@@ -21344,13 +22441,22 @@
   // leaves `billingQuotaLoaded` false — an unanswered ceiling must never render
   // as an absent one and must never render as a number either, and both of
   // those are the same OMIT, so there is no error surface here to build.
+  // cch-w49-bl-repaint: SINGLE-FLIGHT. Two callers arriving while the read is
+  // open share one GET and one answer instead of issuing two. The ref is
+  // cleared only by the flight that owns it, so a reset that drops it mid-read
+  // (sign-out, below) cannot be un-done by the stale promise settling later.
+  var ceilingInflight = null;
   function loadBillingCeiling() {
-    return api("GET", "/v1/usage/summary").then(function (r) {
+    if (ceilingInflight) return ceilingInflight;
+    var flight = api("GET", "/v1/usage/summary").then(function (r) {
+      if (ceilingInflight === flight) ceilingInflight = null;
       if (!r.ok) return billingQuota;
       billingQuotaLoaded = true;
       billingQuota = usageInstanceCeiling(r.data && r.data.usage);
       return billingQuota;
     });
+    ceilingInflight = flight;
+    return flight;
   }
 
   // The declared checkout capability, or "" when the server has not told us.
@@ -21360,8 +22466,17 @@
     return capCache && typeof capCache.checkout === "string" ? capCache.checkout : "";
   }
 
+  // cch-w49-bl-repaint: SINGLE-FLIGHT, for the same reason as the ceiling and
+  // with wider reach — six call sites read this, and a #billing deep link had
+  // two of them open at once (applyRoute's cold render and loadMe's billing
+  // seam), so the console issued GET /v1/subscription twice per boot. Sharing
+  // one flight also makes "am I the caller that started this read?" answerable,
+  // which is what lets renderBilling subscribe exactly one re-render.
+  var subInflight = null;
   function loadSubscription() {
-    return api("GET", "/v1/subscription").then(function (r) {
+    if (subInflight) return subInflight;
+    var flight = api("GET", "/v1/subscription").then(function (r) {
+      if (subInflight === flight) subInflight = null;
       if (r.ok) {
         subLoaded = true;
         subError = false;
@@ -21379,6 +22494,8 @@
       renderBillingChip();  // GR20: the topbar trial/past-due chip follows too
       return subCache;
     });
+    subInflight = flight;
+    return flight;
   }
 
   // cch-w50-bl: reads the WHOLE vocabulary (catalog ∪ PLAN_NAMES), not just the
@@ -25325,6 +26442,21 @@
     return (i === 0 ? String(v) : v.toFixed(1)) + " " + units[i];
   }
 
+  // Pure: a ring width in seconds as human span text ("60s", "5m", "1h"). Whole
+  // minutes/hours only — a 90-second ring reads "90s", never "1.5m", because a
+  // rounded window would misstate the very denominator it exists to pin.
+  //
+  // One minute stays "60s" deliberately: the instance ring IS 60 seconds, every
+  // comment and reason string in this system calls it "the 60s ring", and a
+  // surface that renders the fleet's most common window as "1m" reads as a
+  // DIFFERENT window to the operator who knows the number.
+  function usageWindowText(seconds) {
+    var s = Math.round(seconds);
+    if (s % 3600 === 0 && s >= 3600) return (s / 3600) + "h";
+    if (s % 60 === 0 && s >= 120) return (s / 60) + "m";
+    return s + "s";
+  }
+
   function c10FmtValue(fmt, value) {
     if (fmt === "bytes") return c10FmtBytes(value);
     if (fmt === "percent") return Math.round(value) + "%";
@@ -25377,6 +26509,32 @@
     var pending = spec.key === "seats" && typeof meter.pending_invitations === "number" && meter.pending_invitations > 0
       ? meter.pending_invitations + " pending invitation" + (meter.pending_invitations === 1 ? "" : "s")
       : "";
+    // dr-w14-bl: the ring window the request-stats rates were measured over,
+    // carried on the ring meters by Usage.compose/1 as the conditional
+    // `window_s`. It rides in the meter's sub-line beside the freshness because
+    // a rate an operator cannot bound is a number, not a reading — 0.22 5xx/s
+    // over 60s and over 1s are different facts. Rendered ONLY for a real
+    // positive span and ONLY when the meter reports a number: attaching "over
+    // 60s" to "Not yet metered" would claim a measurement window for a
+    // measurement nobody took.
+    var windowText = !unmetered && typeof meter.window_s === "number" && isFinite(meter.window_s) && meter.window_s > 0
+      ? "over " + usageWindowText(meter.window_s)
+      : "";
+    // charter D103 made structural: the 5xx rate off the same ring hangs on the
+    // REQUEST-RATE meter, never on one of its own, so it cannot be read — or
+    // screenshotted, or escalated — apart from the volume that bounds it. 0.22
+    // 5xx/s is 14.4% of traffic at the median observed request rate and 2.0% at
+    // the max; the row it sits in IS the denominator.
+    //
+    // A measured 0.0 renders ("no 5xx in this window" is the good news the
+    // carriage exists to deliver, and it is only news because somebody looked);
+    // an absent key renders nothing at all. When the meter itself is unmetered
+    // the rate still shows, worded as UNBOUNDED — an instance can expose the
+    // error probe and not the request one, and suppressing the alarming number
+    // because its denominator is missing is the exact dishonesty D103 forbids.
+    var errText = typeof meter.err_5xx_per_s === "number" && isFinite(meter.err_5xx_per_s) && meter.err_5xx_per_s >= 0
+      ? c10FmtValue("rate", meter.err_5xx_per_s).replace("/s", " 5xx/s") + (unmetered ? " (no request rate to bound it)" : "")
+      : "";
     // OC25 — the threshold state, computed independent of whether a bar draws.
     // "over" when the value reaches over_at OR the quota ceiling (both inclusive,
     // mirroring the create-time guard); "warn" once it crosses warn_at; "ok" for a
@@ -25419,12 +26577,12 @@
     var spark = (Array.isArray(history) && history.some(function (v) { return typeof v === "number" && isFinite(v); }))
       ? history.slice()
       : null;
-    return { key: spec.key, label: spec.label, unmetered: unmetered, unavailable: unavailable, value: value, freshness: freshness, pending: pending, state: state, bar: bar, spark: spark };
+    return { key: spec.key, label: spec.label, unmetered: unmetered, unavailable: unavailable, value: value, freshness: freshness, pending: pending, window: windowText, err5xx: errText, state: state, bar: bar, spark: spark };
   }
 
   function usageMeterHtml(spec, meter, history) {
     var d = usageMeterDisplay(spec, meter, history);
-    var sub = [d.freshness, d.pending].filter(Boolean).join(" · ");
+    var sub = [d.freshness, d.window, d.err5xx, d.pending].filter(Boolean).join(" · ");
     // Wave 4 (OC19): the quiet 14-day trend. Rendered ONLY when the meter has real
     // numeric history — an absent/all-null series draws nothing (honest absence).
     // sparklineSvg is reused VERBATIM (currentColor, null-is-gap, isolated-point
@@ -25819,11 +26977,33 @@
   // Pure: the headline sentence per state. "unknown" is deliberately NOT worded
   // as reassurance — reading absence as health is the exact failure this block
   // exists to end.
+  //
+  // console-r21m DEFECT-F/H/I — THE UNKNOWN ARM SAID "No vitals to judge" AND
+  // THE VITALS WERE ON SCREEN. The banner has exactly ONE call site
+  // (metricsPanelHtml, `grep -n 'pressureBannerHtml(' app.js` → 1 render
+  // site + 1 hooks export), and that call site RETURNS EARLY on
+  // `model.absent`: a box that has never reported a beat gets the "Waiting
+  // for the first beat" empty state and no banner at all. So every render of
+  // the unknown arm that can exist sits directly above `.metrics-grid`.
+  // Measured on origin/main d5bea4de9, `?scen=metrics-stale#instance/…a1/
+  // metrics`, light/1440: "No vitals to judge" painted 96px above CPU 58%,
+  // Memory 57%, Disk 74%, Load 1.1 — four populated cards. The copy was not
+  // merely misleading in one fixture; it was false at every site it could
+  // reach.
+  // WHAT IS ACTUALLY ABSENT IS THE VERDICT, NOT THE VITALS. The `pressure`
+  // block is a SEPARATE key on the /metrics envelope from `series`
+  // (metricsSeries reads `payload.pressure` and `payload.series`
+  // independently), and pressureModel is TOTAL over a missing one — an older
+  // control plane sends readings and no pressure block at all. So the
+  // headline now names the thing that is missing. The `unknown`-means-never-
+  // calm contract is untouched: this is a rewording of ONE headline, not a
+  // new state, and the `pressure--unknown` class, the tone and every arm
+  // beside it are byte-identical.
   var PRESSURE_HEADLINES = {
     struggling: "This box is struggling",
     watch: "This box is under pressure",
     calm: "No resource pressure",
-    unknown: "No vitals to judge",
+    unknown: "No pressure verdict",
   };
 
   // Pure: a human byte size. null/absent → the honest em-dash, never "0 B".
@@ -25929,7 +27109,12 @@
     if (model.state === "struggling" || model.state === "watch") {
       detail = model.firing.map(function (x) { return x.text; }).join(" · ");
     } else if (model.state === "unknown") {
-      detail = "This box has not reported the numbers this verdict is made of.";
+      // console-r21m DEFECT-H, the second half of the same contradiction.
+      // "has not reported the numbers" reads as "there are no numbers" while
+      // the numbers are painted immediately below. It names the PRESSURE
+      // SIGNALS — the `pressure.signals` array this banner is made of — and
+      // then points at the readings that DID land, so the two boxes agree.
+      detail = "The last beat carried no pressure signals, so there is nothing to judge — the readings below are what the box did report.";
     }
 
     // The confidence line. It appears whenever the verdict was made on an
@@ -26775,7 +27960,50 @@
             : '<p class="set-empty">No pending invitations.</p>') +
         "</section>";
     }
+    out += teamDangerZoneHtml(ctx);
     return out;
+  }
+
+  // Pure: the Members view's Danger zone — team erasure, OWNER ONLY.
+  //
+  // Banded here and NOT on the account sheet, because here the band is real:
+  // DELETE /v1/teams/:id runs through with_team_role(conn, "owner", ...), so an
+  // admin who pressed this would be refused by the server, and a button the
+  // server will refuse is a lie the console told. `ctx.role` is membersContext's
+  // fail-closed floor ("member" when the authority names no role), so an
+  // unresolved authority renders NOTHING rather than a destroy button.
+  //
+  // The instance sentence is the one that matters. The route refuses while the
+  // team still owns a box, and an owner who finds that out only by typing the
+  // team name and pressing the red button has been ambushed.
+  function teamDangerZoneHtml(ctx) {
+    if (!ctx || ctx.role !== "owner") return "";
+    return '<section class="set-section">' +
+      '<h2 class="set-h">Danger zone</h2>' +
+      '<p class="set-purpose">Deleting the team removes it, every membership and invitation, its connected ' +
+        "providers, its subscription, its notification settings and its audit history. Decommission every " +
+        "instance and site first &mdash; the team can't be deleted while it still owns one.</p>" +
+      '<div class="set-list">' +
+        '<button class="btn btn-danger btn-sm" type="button" data-team-erase="' + esc(ctx.teamId || "") + '">Delete team\u2026</button>' +
+      "</div>" +
+      "</section>";
+  }
+
+  // Pure: the honest sentence for a failed DELETE /v1/teams/:id. The 409 names
+  // the COUNTS the server measured, not the ones the console had cached.
+  function teamEraseFailureCopy(status, data) {
+    if (status === 409 && data && data.error === "instances_present") {
+      var bp = Number(data.barkparks || 0);
+      var sites = Number(data.sites || 0);
+      var parts = [];
+      if (bp) parts.push(bp === 1 ? "1 instance" : bp + " instances");
+      if (sites) parts.push(sites === 1 ? "1 site" : sites + " sites");
+      return "This team still owns " + (parts.join(" and ") || "live infrastructure") +
+        ". Decommission them first \u2014 deleting the team now would leave the servers running and billing.";
+    }
+    if (status === 403) return "Only an owner can delete a team.";
+    if (status === 404) return "That team is no longer there.";
+    return friendly(data, "Please try again.");
   }
 
   // Load the Members panel: resolve the team context (from /v1/me, fetching it
@@ -26884,6 +28112,52 @@
     box.querySelectorAll("[data-invite-revoke]").forEach(function (b) {
       b.addEventListener("click", function () {
         confirmRevokeInvite(ctx, b.getAttribute("data-invite-revoke"), b.getAttribute("data-email"));
+      });
+    });
+    box.querySelectorAll("[data-team-erase]").forEach(function (b) {
+      b.addEventListener("click", function () { confirmEraseTeam(ctx); });
+    });
+  }
+
+  // Delete the team = destroy-tier typed-confirm (DELETE /v1/teams/:id). The
+  // echo is the team NAME, read from the same /v1/me envelope membersContext
+  // came from; a team whose name never landed echoes its slug-free id rather
+  // than an invented label.
+  function confirmEraseTeam(ctx) {
+    var team = (meCache && meCache.team) || {};
+    var label = team.name ? String(team.name) : (team.slug ? String(team.slug) : "this team");
+    openConfirmModal({
+      tier: "destroy",
+      title: "Delete team?",
+      resourceName: label,
+      consequences: [
+        "Removes " + label + " and every membership, invitation and pending invite on it.",
+        "Removes its connected providers, its subscription and its notification settings.",
+        "Removes its audit history \u2014 the team's record of what happened to it.",
+        "Refused while the team still owns an instance or a site.",
+        "This can't be undone.",
+      ],
+      confirmLabel: "Delete team",
+      busyLabel: "Deleting\u2026",
+      onConfirm: function (ctl) { runEraseTeam(ctx, ctl); },
+    });
+  }
+
+  function runEraseTeam(ctx, ctl) {
+    api("DELETE", "/v1/teams/" + encodeURIComponent(ctx.teamId)).then(function (r) {
+      if (r.ok) {
+        ctl.succeed();
+        toast({ kind: "success", title: "Team deleted" });
+        // The team this console was scoped to is gone; a re-render off a stale
+        // meCache would paint a dead team. Drop the session view and reload the
+        // envelope from the server.
+        location.hash = "";
+        location.reload();
+        return;
+      }
+      ctl.fail(teamEraseFailureCopy(r.status, r.data), "Try again", function (c) {
+        c.busy();
+        runEraseTeam(ctx, c);
       });
     });
   }
@@ -27529,6 +28803,13 @@
       // so the next account can never read the previous team's ceiling.
       billingQuota = null;
       billingQuotaLoaded = false;
+      // cch-w49-bl-repaint: the two single-flight refs are per-SESSION too. Left
+      // standing, the next account's first read would be handed the previous
+      // one's promise and paint that team's plan. Dropping the ref cannot be
+      // undone by the old flight settling later — each flight clears the ref
+      // only while it still owns it.
+      subInflight = null;
+      ceilingInflight = null;
       // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
       // standing, a scoped tick racing the next sign-in could repaint the new
       // account's Overview from the previous one's fleet/usage/fold. Cleared
@@ -27758,10 +29039,31 @@
     env: "Environment variables",
   };
 
-  // Pure: the STATIC nav registry — the frozen IA (D17) plus the three Fleet lenses
-  // and every registered Settings view. `run` closes over paletteNavRun; the label
+  // Pure: the nav registry for a VIEWER — the frozen IA (D17) plus the three Fleet
+  // lenses and every registered Settings view, plus the Operator row when (and only
+  // when) `me` says platform operator. `run` closes over paletteNavRun; the label
   // + group + kind are inspectable without invoking it.
-  function paletteNavItems() {
+  //
+  // GR49 — THE IDENTITY ARGUMENT IS REQUIRED, and calling with NO argument throws.
+  // This registry used to be argument-free, which is why the Operator route was
+  // absent from Cmd+K for everyone: a registry that cannot see who is asking cannot
+  // role-gate anything. A caller that has no /v1/me yet must say so explicitly by
+  // passing the undefined it holds (`paletteNavItems(meCache)`) — that is
+  // fail-closed and offers no Operator row. Reverting the signature to zero
+  // parameters reds `paletteNavItems refuses to be called argument-free` in
+  // __app.test.mjs, so the defect cannot silently return.
+  //
+  // ONE GATE, NOT TWO: the visibility decision delegates to operatorVisible — the
+  // SAME predicate the sidebar entry (applyOperatorGate) and the route bounce
+  // (operatorRouteAllowed) already use, so the three surfaces can never disagree
+  // about who is an operator. The palette is a CONVENIENCE, never a fence: every
+  // /v1/operator/* read behind #operator is gated server-side by
+  // `Auth.require_platform_operator` (401 no session, 403 non-operator), so hiding
+  // the row withholds discovery, not authority.
+  function paletteNavItems(me) {
+    if (arguments.length === 0) {
+      throw new TypeError("paletteNavItems(me) requires the /v1/me envelope — pass meCache (undefined is fail-closed)");
+    }
     var nav = [
       { id: "nav-overview", label: "Overview", group: "Go to", target: "#overview" },
       { id: "nav-fleet", label: "Fleet", group: "Go to", target: "#fleet" },
@@ -27771,6 +29073,10 @@
       { id: "nav-sites", label: "Sites", group: "Go to", target: "#sites" },
       { id: "nav-activity", label: "Activity", group: "Go to", target: "#activity" },
     ];
+    // Fail-closed: an unloaded/absent/non-true me → no row at all.
+    if (operatorVisible(me)) {
+      nav.push({ id: "nav-operator", label: "Operator", group: "Go to", target: "#operator" });
+    }
     SETTINGS_VIEWS.forEach(function (v) {
       nav.push({ id: "nav-settings-" + v, label: "Settings · " + (PAL_SETTINGS_LABEL[v] || v),
         group: "Settings", target: "#settings/" + v });
@@ -27832,12 +29138,15 @@
     });
   }
 
-  // Pure: the full registry for a data snapshot. Order = static nav, actions,
+  // Pure: the full registry for a data snapshot. Order = viewer nav, actions,
   // instances, sites — so the palette paints a complete slate the instant it opens
   // (static + cached instances) and sites slot in when their fetch lands.
+  // `data.me` overrides the module's /v1/me cache when supplied (the node pins
+  // drive both operator arms through here); otherwise the live meCache decides,
+  // and an unloaded meCache is undefined → fail-closed, no Operator row.
   function paletteRegistry(data) {
     data = data || {};
-    return paletteNavItems()
+    return paletteNavItems(data.me !== undefined ? data.me : meCache)
       .concat(paletteActionItems())
       .concat(paletteInstanceItems(data.instances))
       .concat(paletteSiteItems(data.sites));
@@ -29037,7 +30346,7 @@
       emailConfirmOutcome: emailConfirmOutcome, bootEmailConfirm: bootEmailConfirm,
       // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
       studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
-      studioLoginMatch: studioLoginMatch,
+      studioSigninOutcome: studioSigninOutcome, resumeStudioLogin: resumeStudioLogin,
       // bp-login-ux W3 — shared two-factor challenge card (decision 39): the two
       // pure classifiers (login-response kind + challenge outcome), the card
       // markup, the error copy, and the mount seam (driven with a stubbed fetch,
@@ -29351,6 +30660,7 @@
       instanceTimelineHtml: instanceTimelineHtml, mountInstanceTimeline: mountInstanceTimeline,
       // C6 instance-workspace tabs + the Webhooks tab (charter D49/D46/D51/D18/D5).
       instanceTabOf: instanceTabOf, instanceTabs: INSTANCE_TABS.slice(),
+      instanceTabsFor: instanceTabsFor, instanceTabFor: instanceTabFor,
       instanceDetailHtml: instanceDetailHtml, instanceTabStripHtml: instanceTabStripHtml,
       webhookCliChip: webhookCliChip, cliChipHtml: cliChipHtml,
       webhookEventsHtml: webhookEventsHtml, webhookBannerHtml: webhookBannerHtml,
@@ -29710,6 +31020,10 @@
       // gr-p5-account-2fa (GR54): the account modal body, extracted PURE so its
       // eight lockout-bearing element ids are node-pinned.
       accountModalHtml: accountModalHtml,
+      accountDangerZoneHtml: accountDangerZoneHtml,
+      accountEraseFailureCopy: accountEraseFailureCopy,
+      teamDangerZoneHtml: teamDangerZoneHtml,
+      teamEraseFailureCopy: teamEraseFailureCopy,
       accountModel: accountModel, accountIdentityLine: accountIdentityLine,
       // GR63: one session row, pure — the seam that lets a node test build the
       // TALL (9+ session) modal that broke on live without a browser.
@@ -29764,7 +31078,7 @@
       // gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50). operatorRouteAllowed is
       // the fail-closed ROUTE gate — applyRoute itself is not exported and cannot
       // be pinned, so the predicate it consults is pinned instead (GR49). The rest
-      // are the four cards' pure derivations; the DOM mounts (loadOperator /
+      // are the operator cards' pure derivations; the DOM mounts (loadOperator /
       // operatorRefresh / operatorPaint / operatorConfirmBrake) are smoke-driven.
       operatorRouteAllowed: operatorRouteAllowed,
       operatorRowState: operatorRowState,
@@ -29779,6 +31093,8 @@
       operatorCanaryCardHtml: operatorCanaryCardHtml,
       operatorWarmPoolCardHtml: operatorWarmPoolCardHtml,
       operatorDigestCardHtml: operatorDigestCardHtml,
+      operatorDigestSendControlHtml: operatorDigestSendControlHtml,
+      operatorDigestSendResultText: operatorDigestSendResultText,
       // dr-w1-s2's census, finally read. The window helpers are exported so the
       // harness can assert the URL the browser actually sends, and the rate /
       // class-row helpers so the REFUSAL arm ("not enough data (n=74)") is
@@ -30084,6 +31400,17 @@
       supportKeyCommand: supportKeyCommand, supportKeyStepHtml: supportKeyStepHtml,
       agentKeyShapeValid: agentKeyShapeValid, agentKeyStatusCopy: agentKeyStatusCopy,
       fleetNest: fleetNest, fleetNestedRowsHtml: fleetNestedRowsHtml,
+      // PDF-D11 group view (pdf-bl-fleet-group-view): the 7-state catalogue,
+      // its derivation and its pure renderer. `groupViewState` is the ONLY
+      // state decision and it reaches liveness through presenceChip alone.
+      GROUP_VIEW_STATES: GROUP_VIEW_STATES, groupViewState: groupViewState,
+      groupViewStateCopy: groupViewStateCopy, groupStateBadgeHtml: groupStateBadgeHtml,
+      groupSupportCell: groupSupportCell, groupSupportCells: groupSupportCells,
+      groupRosterConflicts: groupRosterConflicts, groupSupportRowHtml: groupSupportRowHtml,
+      groupOtherListeners: groupOtherListeners, groupOtherListenersHtml: groupOtherListenersHtml,
+      instanceGroupPanelHtml: instanceGroupPanelHtml,
+      groupViewHtml: groupViewHtml, rosterBeatAgeMs: rosterBeatAgeMs,
+      rosterStalenessText: rosterStalenessText, rosterSlotsFree: rosterSlotsFree,
       // MVP-0 offload (PDF-D87/D92, pdf-mvp0-offload-spa): the order-doc
       // builder + tag-seed contingency, the eligibility gate, the watch
       // reducer/rows/panel, and the browser-direct URL join. DOM mounts

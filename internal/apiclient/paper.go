@@ -175,3 +175,128 @@ func trimForErr(body []byte) string {
 	}
 	return s
 }
+
+// PaperExport is one paper retrieved in PUBLISH SHAPE: the exact body
+// `POST /v1/plugins/bulldocs/papers` (`bp bulldocs publish`) accepts back.
+// Exactly one of Blocks / HTML is populated, mirroring the source route's
+// `source.kind` — a blocks paper exports blocks, an opaque body_html paper
+// exports body_html, and neither leg is ever synthesised from the other.
+// Rev is the row's `_rev` hash, carried for the caller's receipt only: the
+// publish endpoint is an unfenced create-or-replace and REFUSES a body that
+// carries ifRev/if_rev, so it is deliberately NOT part of the payload.
+type PaperExport struct {
+	Slug        string          `json:"slug"`
+	Title       string          `json:"title,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Tags        json.RawMessage `json:"tags,omitempty"`
+	Blocks      json.RawMessage `json:"blocks,omitempty"`
+	HTML        string          `json:"body_html,omitempty"`
+	Rev         string          `json:"-"`
+
+	// SpineMissing names the label-spine fields the export could NOT recover
+	// (the stored row was unreadable with this token, or carries none). It is
+	// not an error — the payload is still the paper — but a re-publish of it
+	// WILL be refused by the publish wall, which requires a description of 20+
+	// characters and 1-12 weighted tags. The caller says so out loud rather
+	// than handing over a payload that looks complete and is not.
+	SpineMissing []string `json:"-"`
+}
+
+// PaperExportPayload fetches the paper's block truth from the SAME public
+// source route `PaperPullBpml` reads (`?format=json` instead of `?format=bpml`)
+// and reshapes the reader envelope — {id,title,_rev,source:{kind,…}} — into the
+// publish payload. `format=json` is the block truth and has no BPML kernel to
+// escape, so it answers for papers the isomorphic view refuses with
+// `bpml_unprintable`.
+func (c *Client) PaperExportPayload(slug string) (*PaperExport, *PaperAPIErr, error) {
+	u := c.flatURL("/papers/" + url.PathEscape(slug) + "/source?format=json")
+
+	resp, err := c.authGet(u)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, paperBodyCap))
+	if err != nil {
+		return nil, nil, fmt.Errorf("paper export %s: %w", slug, err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, decodePaperErr(resp.StatusCode, body), nil
+	}
+
+	var envelope struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Rev    string `json:"_rev"`
+		Source struct {
+			Kind   string          `json:"kind"`
+			Blocks json.RawMessage `json:"blocks"`
+			HTML   string          `json:"html"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, nil, fmt.Errorf("paper export %s: unreadable source envelope: %w", slug, err)
+	}
+
+	// The slug the CALLER asked for is the one that must go back in: the
+	// envelope's `id` is the stored doc id, and publishing under a different
+	// key than the one exported would silently fork the paper.
+	out := &PaperExport{Slug: slug, Title: envelope.Title, Rev: envelope.Rev}
+
+	switch envelope.Source.Kind {
+	case "blocks":
+		if len(envelope.Source.Blocks) == 0 {
+			return nil, nil, fmt.Errorf("paper export %s: source says blocks but carries none", slug)
+		}
+		out.Blocks = envelope.Source.Blocks
+	case "html":
+		out.HTML = envelope.Source.HTML
+	default:
+		return nil, nil, fmt.Errorf("paper export %s: source kind %q is neither blocks nor html", slug, envelope.Source.Kind)
+	}
+
+	// The publish wall's LABEL SPINE (description + 1-12 weighted tags) is
+	// REQUIRED to re-publish, and the reader source route does not serve it —
+	// it serves what a reader renders. Without this second read the export
+	// round-trips the prose and loses the spine, and the re-publish is refused
+	// `label_spine`. The stored row is the only place it lives, so export reads
+	// it: same token, the charter-D13e direct doc read, best effort (a caller
+	// who can reach the reader but not the document API still gets the blocks,
+	// and is told what is missing).
+	c.fillPaperExportSpine(out)
+
+	return out, nil, nil
+}
+
+// fillPaperExportSpine adds description + tags from the stored row, recording
+// in SpineMissing anything it could not recover.
+func (c *Client) fillPaperExportSpine(out *PaperExport) {
+	raw, err := c.PaperDoc(c.Dataset, out.Slug, "")
+	if err != nil {
+		out.SpineMissing = []string{"description", "tags"}
+		return
+	}
+
+	var row struct {
+		Description string          `json:"description"`
+		Tags        json.RawMessage `json:"tags"`
+	}
+	if json.Unmarshal(raw, &row) != nil {
+		out.SpineMissing = []string{"description", "tags"}
+		return
+	}
+
+	out.Description = row.Description
+	if len(row.Tags) > 0 && !bytes.Equal(bytes.TrimSpace(row.Tags), []byte("null")) {
+		out.Tags = row.Tags
+	}
+
+	if out.Description == "" {
+		out.SpineMissing = append(out.SpineMissing, "description")
+	}
+	if len(out.Tags) == 0 {
+		out.SpineMissing = append(out.SpineMissing, "tags")
+	}
+}

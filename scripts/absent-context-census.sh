@@ -31,7 +31,19 @@
 #        RERUN_DELETED   attempt >= 2, run COMPLETED, no rendered check run.
 #                        Re-run. Completion is required — an unfinished re-run
 #                        is in flight, not deleted.
-#        NAME_NOT_IN_RUN the producing run COMPLETED on its first attempt and
+#        STARTUP_FAILURE the producing run COMPLETED with conclusion
+#                        `startup_failure` — refused at creation, zero jobs,
+#                        zero check runs, TERMINAL, and it never self-heals.
+#                        Re-arm the head: `gh pr update-branch`, or push a new
+#                        sha. Matched as a WHOLE TOKEN, because
+#                        `startup_failure` contains `failure` and `failure` is
+#                        an ordinary conclusion whose absence is a genuine
+#                        NAME_NOT_IN_RUN; a substring test swaps two classes
+#                        with opposite remedies. GitHub publishes no reason for
+#                        a startup failure, so this class names the conclusion
+#                        and the remedy and never a cause.
+#        NAME_NOT_IN_RUN the producing run COMPLETED on its first attempt, on a
+#                        conclusion that is NOT `startup_failure`, and
 #                        rendered no check run under this name — a head
 #                        predating the context, a renamed job, a pruned
 #                        aggregator. Rebase, or edit the spec. Never
@@ -393,15 +405,22 @@ read_check_runs() { # <sha>
   fi
 }
 
-# Workflow runs on a head: NDJSON of {id, path, status, run_attempt, created_at}.
+# Workflow runs on a head: NDJSON of
+# {id, path, status, run_attempt, created_at, conclusion}.
+#
+# `conclusion` is carried for ONE reason: `startup_failure` is a terminal
+# conclusion that publishes ZERO jobs and ZERO check runs, so without it a run
+# that never compiled is indistinguishable, in this projection, from a run that
+# executed and simply carried no job of that name. Those are opposite
+# diagnoses. See classify_completed_run() for the whole-token match.
 read_head_runs() { # <sha>
   local sha="$1" f
   if [ -n "$FIXTURES" ]; then
     f="$(fixture "runs-$sha.json")" || { warn "fixtures mode: missing runs-$sha.json"; return 1; }
-    jq -c '.workflow_runs[] | {id, path, status, run_attempt, created_at}' "$f"
+    jq -c '.workflow_runs[] | {id, path, status, run_attempt, created_at, conclusion}' "$f"
   else
     gh_api "repos/$REPO/actions/runs?head_sha=$sha&per_page=100" \
-      '.workflow_runs[] | {id, path, status, run_attempt, created_at}'
+      '.workflow_runs[] | {id, path, status, run_attempt, created_at, conclusion}'
   fi
 }
 
@@ -409,6 +428,27 @@ read_head_runs() { # <sha>
 # queued run's head is judged against open-PR heads PLUS this; an unreadable
 # answer disables the orphan downgrade entirely (fail closed — a run nobody can
 # prove dead keeps screaming).
+# ── the full-oid gate (task-0a44c3bc96baa8cc) ────────────────────────────────
+# `repos/<r>/actions/runs?head_sha=` matches the FULL 40-character oid ONLY.
+# Handed an abbreviation it returns HTTP 200 with an EMPTY workflow_runs list —
+# well-formed, so no transport or shape guard fires — and the caller then reads
+# "no runs on this head" off a query the endpoint simply refused to match. That
+# is the failed-read-equals-zero class; it was MEASURED on main-gate-watch.sh,
+# where `--sha 769c39bd6` said MISSING/exit 1 in the same minute the full oid
+# said WAITING/exit 2. Widen here, before the feed is queried, or refuse.
+# Prints the 40-character oid, or the single token UNRESOLVED.
+acc_full_oid() {
+  local sha="$1" full
+  case "$sha" in
+    ""|*[!0-9a-fA-F]*) echo "UNRESOLVED"; return 0 ;;
+  esac
+  if [ "${#sha}" -eq 40 ]; then printf '%s\n' "$sha" | tr 'A-F' 'a-f'; return 0; fi
+  [ "${#sha}" -ge 4 ] || { echo "UNRESOLVED"; return 0; }
+  full="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "${sha}^{commit}" 2>/dev/null)"
+  [ "${#full}" -eq 40 ] || full="$(gh api "repos/$REPO/commits/$sha" 2>/dev/null | jq -r '.sha // ""' 2>/dev/null)"
+  if [ "${#full}" -eq 40 ]; then printf '%s\n' "$full"; else echo "UNRESOLVED"; fi
+}
+
 read_main_head() {
   local f
   if [ -n "$FIXTURES" ]; then
@@ -520,6 +560,64 @@ producing_workflow() { # <context> -> repo-relative workflow path, or empty
 }
 
 # ── the census, one head at a time ───────────────────────────────────────────
+# ── startup_failure, matched as a WHOLE TOKEN ────────────────────────────────
+#
+# A run whose conclusion is exactly `startup_failure` never reached the job
+# graph: GitHub refused the run at creation, so it publishes ZERO jobs and ZERO
+# check runs, it is TERMINAL, and it NEVER self-heals — only a new head clears
+# it. Every required context that run would have rendered therefore takes a
+# PERMANENT pending: it never concludes, so it never reds, and the pull request
+# page shows a spinner forever. Measured on PR #18045, head b1990da86: 22 runs,
+# 18 of them startup_failure, FOUR check runs on the whole head, three required
+# contexts pending for two hours. `update-branch` cleared it — the replacement
+# head took 22 runs, 0 startup failures, 36 check runs.
+#
+# WHOLE TOKEN, NOT SUBSTRING, and this is the load-bearing part. The string
+# `startup_failure` CONTAINS `failure`, and `failure` is an ordinary, healthy
+# terminal conclusion for a run that executed fine and simply carried no job of
+# the name being censused — which is a genuine NAME_NOT_IN_RUN. A substring test
+# in either direction swaps the two classes, and their remedies are opposite:
+# NAME_NOT_IN_RUN says "rebase, or edit the spec, never re-dispatch", while a
+# startup failure says "re-arm this head NOW". scripts/main-verdict-presence.sh
+# makes the same whole-token argument for main's tip; this is its counterpart
+# for open pull-request heads, which had none.
+#
+# WHAT IS NOT KNOWABLE AND IS THEREFORE NOT SAID. GitHub exposes NO
+# machine-readable reason for a startup failure: the run object carries the
+# conclusion and nothing else, and `gh run view`'s rendered "this run likely
+# failed because of a workflow file issue" is a FIXED CLIENT STRING, not a
+# field — and it was measured FALSE on the specimen head, where all 72 workflow
+# files parsed and 17 of the 18 failures were in workflows the branch does not
+# touch. So this census reports the CONCLUSION and the REMEDY, and never a
+# guessed cause. There is deliberately no cause field in the output.
+is_startup_failure() { # <conclusion>
+  case "$1" in
+    startup_failure) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The remedy a class implies, printed beside it. The class name alone is not a
+# diagnosis at 3am: STARTUP_FAILURE and NAME_NOT_IN_RUN are both "a completed
+# run rendered nothing under this name", and only the remedy line tells them
+# apart without opening a log.
+class_remedy() { # <class>
+  case "$1" in
+    STARTUP_FAILURE)
+      echo "re-arm this head NOW — \`gh pr update-branch <n>\`, or push a new sha. The run was refused at creation, published no jobs and no check runs, and is TERMINAL: this context will stay pending forever on THIS head. GitHub publishes no reason for it, so none is guessed here." ;;
+    ZOMBIED)
+      echo "re-dispatch — GitHub created the run and never dispatched it." ;;
+    RERUN_DELETED)
+      echo "re-run — the re-run completed and its check run is gone." ;;
+    NAME_NOT_IN_RUN)
+      echo "rebase, or edit the spec — the run executed and carried no job of this name (a head predating the context, a renamed job, a pruned aggregator). NEVER re-dispatch; there is nothing to dispatch." ;;
+    NO_RUN)
+      echo "no run of the producing workflow exists on this head at all." ;;
+    *)
+      echo "unknown — the census does not know the remedy for this class, and says so rather than picking the nearest one." ;;
+  esac
+}
+
 census_head() { # <sha> <label> <pr-updated-at> <mergeable>
   local sha="$1" label="$2" mergeable="${4:-UNKNOWN}"
   local checks runs names oldest_queued anchor anchor_label
@@ -553,7 +651,7 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
     fi
   fi
 
-  local ctx wf wfruns newest attempt status jobs class rid
+  local ctx wf wfruns newest attempt status conclusion jobs class rid
   while IFS= read -r ctx; do
     [ -n "$ctx" ] || continue
     # Here-string, not a pipe: under pipefail a matching `grep -q` exits at once
@@ -588,6 +686,7 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
       rid="$(jq -r '.id' <<<"$newest")"
       attempt="$(jq -r '.run_attempt // 1' <<<"$newest")"
       status="$(jq -r '.status // ""' <<<"$newest")"
+      conclusion="$(jq -r '.conclusion // ""' <<<"$newest")"
       # STATUS IS READ BEFORE ATTEMPT, and that order is itself a fix. A re-run
       # that has not finished is in flight exactly like a first attempt that has
       # not finished; branching on `run_attempt` first labelled it RERUN_DELETED
@@ -647,10 +746,21 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
         # a real deadlock whose remedy is a rebase or a spec edit, never a
         # re-dispatch — which is exactly why it must not wear ZOMBIED's name.
         completed)
+          # THE CONCLUSION IS READ BEFORE THE ATTEMPT, and that order is the
+          # fix. A `startup_failure` is a run that never reached its job graph,
+          # so it rendered nothing for a reason that has nothing to do with
+          # which attempt it was or whether the name is in the spec. Branching
+          # on `run_attempt` first filed the specimen head's eighteen startup
+          # failures as NAME_NOT_IN_RUN — "this name does not belong on this
+          # head" — when the truth was "the run for it died before it could
+          # speak". Opposite diagnoses, opposite remedies. Whole token: see
+          # is_startup_failure() above for why a substring test loses this.
+          if is_startup_failure "$conclusion"; then
+            class="STARTUP_FAILURE"
           # A re-run that finished and still rendered nothing is a DELETED
           # check run; a first attempt that did the same never had one. The
           # remedies differ, so the names must.
-          if [ "$attempt" -ge 2 ] 2>/dev/null; then
+          elif [ "$attempt" -ge 2 ] 2>/dev/null; then
             class="RERUN_DELETED"
           else
             class="NAME_NOT_IN_RUN"
@@ -680,6 +790,7 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
         say "ABSENT   $label  head $sha"
         say "         context \"$ctx\" renders nowhere on this head"
         say "         class   $class"
+        say "         remedy  $(class_remedy "$class")"
         say "         age     $(age_hours "$anchor")h  (anchor: $anchor_label $anchor)"
         say "         run     $rid  producer $wf"
         ABSENT_ROWS=$((ABSENT_ROWS + 1))
@@ -715,6 +826,25 @@ LIVE_OK=0
 
 HEADS_SEEN=0
 if [ "${#SHAS[@]}" -gt 0 ]; then
+  # --sha is OPERATOR-SUPPLIED, so unlike read_main_head (which reads
+  # commits/main -> .sha, always 40 chars) it can arrive abbreviated. Widen or
+  # refuse BEFORE the run feed is queried — see acc_full_oid above. Under
+  # --fixtures nothing is queried and the recorded payloads are keyed by
+  # whatever sha the harness named, so the gate is skipped there.
+  if [ -z "$FIXTURES" ]; then
+    for _i in "${!SHAS[@]}"; do
+      _full="$(acc_full_oid "${SHAS[$_i]}")"
+      if [ "$_full" = "UNRESOLVED" ]; then
+        warn "REFUSE: --sha ${SHAS[$_i]} is not a full 40-character commit oid and could not be widened to one;"
+        warn "        actions/runs?head_sha= matches the FULL oid only and would answer an EMPTY feed for it."
+        exit 2
+      fi
+      if [ "$_full" != "${SHAS[$_i]}" ]; then
+        warn "resolved --sha ${SHAS[$_i]} to the full oid $_full (the run feed matches the full oid only)"
+        SHAS[_i]="$_full"
+      fi
+    done
+  fi
   for s in "${SHAS[@]}"; do
     HEADS_SEEN=$((HEADS_SEEN + 1))
     census_head "$s" "sha" ""

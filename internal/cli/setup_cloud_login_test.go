@@ -236,19 +236,41 @@ func TestCloudFleetPickSingleSecondaryTeamUsesTeamContext(t *testing.T) {
 	}
 }
 
+// TestCloudFleetPickMemberStaysLoggedInWithoutCredentials: a member still ends up
+// logged-in-only with actionable guidance — but for a DIFFERENT reason than it
+// used to, and the difference is the point of task-3f8604ba07cfac82.
+//
+// THIS TEST WAS INVERTED ON PURPOSE. It used to assert `client.credTeam == ""`,
+// i.e. that bp answered the question WITHOUT ASKING, off a local
+// `EqualFold(Role, "member")`. That local check was the defect: it fired only when
+// the payload happened to spell the word, so a member whose row arrived with a
+// nil Team or an empty Role was walked straight into the credential fetch. bp now
+// always asks and the SERVER refuses, so the assertion flips: the request MUST
+// have been made. The fail-open shapes the old check missed are covered in
+// fleet_credential_refusal_test.go.
 func TestCloudFleetPickMemberStaysLoggedInWithoutCredentials(t *testing.T) {
 	w, out, _ := newTestWriter()
 	client := &fakeFleetClient{
 		list: []cloudclient.Barkpark{{ID: "bp-2", Name: "docs", Team: &cloudclient.Team{ID: "team-docs", Name: "Docs", Role: "member"}}},
+		credErrs: map[string]error{"bp-2": &cloudclient.CloudRefusal{
+			HTTPStatus: 403,
+			Code:       "forbidden",
+			Detail:     "your role on Docs cannot mint this Barkpark's admin token",
+			Required:   "admin",
+			Scope:      "team",
+		}},
 	}
 	res, err := cloudFleetPick(w, client, strings.NewReader(""))
 	if err != nil || !res.LoggedInOnly {
 		t.Fatalf("member pick = %+v, %v; want clean logged-in-only", res, err)
 	}
-	if client.credTeam != "" {
-		t.Fatalf("member selection attempted credential retrieval for %q", client.credTeam)
+	if client.credTeam != "team-docs" {
+		t.Fatalf("member selection must ASK the server (credTeam=%q) — authority is not bp's to derive", client.credTeam)
 	}
-	if !strings.Contains(out.String(), "member role") || !strings.Contains(out.String(), "owner or admin") {
+	if !strings.Contains(out.String(), "cannot mint this Barkpark's admin token") {
+		t.Fatalf("the refusal must carry the SERVER's sentence:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "owner or admin") {
 		t.Fatalf("member guidance not actionable:\n%s", out.String())
 	}
 }

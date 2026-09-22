@@ -352,8 +352,73 @@ defmodule Barkpark.Plugins.Registry do
   def collect_cli_commands(opts \\ []) do
     baseline = Keyword.get(opts, :baseline, [])
     ctx = Keyword.get(opts, :ctx, %{})
-    ResolverChain.reduce_resolvers(:resolve_cli_commands, baseline, ctx)
+
+    :resolve_cli_commands
+    |> ResolverChain.reduce_resolvers(baseline, ctx)
+    |> Enum.map(&declare_dataset_on_task_doc_id_route/1)
   end
+
+  # ── THE `?dataset=` DISAMBIGUATOR, KEYED ON THE ROUTE, OVER THE ASSEMBLED
+  #    MANIFEST ─────────────────────────────────────────────────── (#18611's
+  #    rule, moved to where every plugin's declaration passes through —
+  #    task-4968634c648cda54)
+  #
+  # `TasksController.find_task_by_doc_id/2` refuses a doc_id that lives in two
+  # datasets of one workspace+project with a 409 `ambiguous_dataset` whose
+  # message names the remedy: "?dataset=<name> on the task route". The CLI can
+  # type that remedy only for a command whose manifest DECLARES a dataset flag
+  # (`commandDeclaresFlag`, internal/cli/run.go, gating `globalQueryForwards`
+  # in internal/cli/globals.go). So every command that can RECEIVE that refusal
+  # must declare it, or the refusal names a remedy the caller cannot follow.
+  #
+  # WHY HERE AND NOT IN THE TASKS PLUGIN. #18611 derived exactly this rule, but
+  # applied it with `Enum.map/2` over the tasks plugin's OWN `cli_commands/0`
+  # list. The predicate is about the ROUTE; the application was about the LIST.
+  # A command that targets a `/v1/tasks/:doc_id` route but is DECLARED IN
+  # ANOTHER PLUGIN therefore escaped it for free. Measured on the served
+  # manifest: `session.link-task` (POST /v1/tasks/:doc_id/sessions, declared in
+  # `Barkpark.Plugins.Bulldocs`) was the one such command, and its route is
+  # `TasksController.sessions/2` — which resolves through
+  # `find_task_by_doc_id/2` and CAN answer the 409. A hand-written exception
+  # for it would have been the same stale-by-construction shape the derived
+  # rule exists to avoid, so the rule moved to the chokepoint instead: this
+  # collector is what the `/v1/capabilities` controller folds into
+  # `commands[]`, so EVERY plugin's declaration passes through it.
+  #
+  # THE PREFIX GUARD IS NOT COSMETIC. The predicate is ":doc_id UNDER
+  # /v1/tasks", not ":doc_id anywhere": the twin resolver is the task family's
+  # rule, and a `:doc_id` route some other plugin mounts elsewhere would get a
+  # flag its route never reads. No such route exists today (every `:doc_id`
+  # path_template in `lib/barkpark/plugins/` is under `/v1/tasks`), which is
+  # exactly why the guard is written now rather than after one appears.
+  #
+  # IDEMPOTENT: a command that already declares `dataset` (task.ready,
+  # task.events, task.ls, and the eleven the tasks plugin declares on its own
+  # list) is left verbatim — the clause never appends a second copy.
+  #
+  # Tolerant on shape by design: only a command with an atom-keyed
+  # `http.path_template` + `flags` list is rewritten; anything else falls to
+  # the catch-all unchanged rather than raising inside a boot-time collector.
+  @doc """
+  Declare the `?dataset=` disambiguator on a command whose ROUTE is a
+  `/v1/tasks/:doc_id` route, whichever plugin declared the command.
+
+  Public so a test can assert the predicate directly. THE RULE ITSELF — the
+  flag literal and the route predicate — lives in
+  `Barkpark.Tenancy.CliDatasetFlag`, the tenancy KERNEL module, because it has
+  a second application point: `Barkpark.Plugins.Tasks.cli_commands/0` applies
+  it to its own list so that list is self-consistent read directly. Two
+  FEATURE concepts needing one rule must both reach INWARD for it; the tasks
+  plugin delegating here instead was a sideways `tasks>registry` edge that
+  reddened the architecture boundary gate on every PR (task-9a90596e9194f370).
+  This clause is the registry's own door onto that one definition, not a
+  second copy of it.
+  """
+  @spec declare_dataset_on_task_doc_id_route(Barkpark.Plugin.cli_command()) ::
+          Barkpark.Plugin.cli_command()
+  defdelegate declare_dataset_on_task_doc_id_route(cmd),
+    to: Barkpark.Tenancy.CliDatasetFlag,
+    as: :declare_on_task_doc_id_route
 
   # ─── Delegations ────────────────────────────────────────────────────────
   # Public surface preserved verbatim; canonical docs live on each delegated

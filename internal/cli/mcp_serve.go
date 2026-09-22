@@ -28,15 +28,21 @@ package cli
 // is copied into a per-request manifest.Context and rides downstream on the
 // normal dispatch seam, so Barkpark's own Auth.verify_token/1 stays the single
 // choke point and a missing/bogus bearer fails closed with the ordinary 401
-// envelope. D18 rules the SHAPE — token->scope forward-through, no verify-only
-// route, Auth.verify_token/1 as the single choke point; it says nothing about
-// the SDK middleware. The fail-closed behaviour is proved in code, not by the
-// charter: mcp_http_test.go TestMCPHTTPDenyPathsFailClosed (and
-// TestMCPHTTPForwardThroughBearer for the per-request token copy).
+// envelope. D18 is titled "Bearer transport = FORWARD-THROUGH" and rules this
+// whole shape, not just an abstract one: Stateless mode, the per-request
+// getServer copy of the base manifest.Context, ctx.Token off the inbound
+// Authorization header, ZERO edits to mcp_tasks.go/mcp_bridge.go/
+// mcp_resources.go, and Auth.verify_token/1 as the single choke point. What
+// D18 does NOT do is prove the behaviour — that is code: mcp_http_test.go
+// TestMCPHTTPDenyPathsFailClosed (and TestMCPHTTPForwardThroughBearer for the
+// per-request token copy).
 //
-// No pre-verify middleware in v1 — D18 for the "no verify-only route" half, and
-// a Go-SDK code rationale for the rest: auth.RequireBearerToken hard-401s a
-// TokenInfo carrying no Expiration, which Barkpark tokens legitimately do not.
+// No pre-verify middleware in v1 — BOTH reasons are D18's own text, not a
+// local judgement call: no bearer-gated verify-only route exists (/v1/auth/me
+// is session-gated), AND the Go SDK hard-401s a zero-Expiration TokenInfo
+// while Barkpark tokens legitimately carry a nil expires_at. D18 defers
+// auth.RequireBearerToken + RFC 9728 PRM to the later OAuth slice
+// (ve-w3-oauth-as).
 
 import (
 	"context"
@@ -293,9 +299,10 @@ func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 // The template's fields and read handler deliberately mirror
 // registerPaperResources (mcp_resources.go) — kept as a sibling here rather
 // than a parameter on it so the resources file stays transport-agnostic and
-// byte-unchanged: the transport split edits mcp_serve.go only — the shape of
-// the ve-w2-remote-mcp-bearer slice, a code-structure rationale, not a D18
-// ruling.
+// byte-unchanged. That the resources file stays untouched IS a D18 ruling
+// ("ZERO changes to mcp_tasks.go/mcp_bridge.go/mcp_resources.go"), so the
+// transport split edits mcp_serve.go only; sibling-rather-than-a-parameter is
+// the local code-structure choice D18 leaves open.
 func registerPaperResourceTemplateOnly(out *writer, srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest) {
 	getCmd, ok := m.Tree().Lookup("doc", "get")
 	if !ok {
@@ -423,9 +430,9 @@ func newMCPHTTPServer(handler http.Handler, limiter *mcpRateLimiter) *http.Serve
 }
 
 // newMCPHTTPHandler builds the Streamable-HTTP handler for `bp mcp serve
-// --http`. Forward-through bearer (viable-everywhere charter D18 — the SHAPE:
-// token->scope per request, no verify-only route, Auth.verify_token/1 the
-// single choke point). The fail-closed proof is mcp_http_test.go
+// --http`. Forward-through bearer (viable-everywhere charter D18: Stateless
+// mode, token->scope per request, no verify-only route, Auth.verify_token/1
+// the single choke point). The fail-closed proof is mcp_http_test.go
 // (TestMCPHTTPForwardThroughBearer, TestMCPHTTPDenyPathsFailClosed), not the
 // charter:
 //
@@ -440,24 +447,55 @@ func newMCPHTTPServer(handler http.Handler, limiter *mcpRateLimiter) *http.Serve
 //     tool result (fail closed), zero side effects server-side.
 //   - Stateless: no Mcp-Session-Id bookkeeping, so getServer runs per request
 //     and one request's token can never bleed into another's.
-//   - DisableLocalhostProtection: the deploy shape is a loopback bind behind a
-//     reverse proxy (viable-everywhere charter D19 — the /mcp Caddy path route
-//     over loopback :4010; the connectors charter's D34 is the ANALOGOUS but
-//     separate /connectors route on :4020, and is not what this serves), where
-//     inbound Host headers are the public
-//     hostname — the SDK's DNS-rebind guard would 403 exactly that. The proxy
-//     terminates TLS and owns origin policy.
+//   - DisableLocalhostProtection: viable-everywhere charter D19 names this
+//     setting in so many words ("Set DisableLocalhostProtection: true") as
+//     part of its deploy shape — the /mcp Caddy path route on the existing
+//     guerrilla site over loopback 127.0.0.1:4010, port held outside
+//     {4000,4001}. Do not re-point this at the connectors charter's D34: that
+//     rules the ANALOGOUS but separate /connectors route on :4020
+//     (arm_caddy_connectors_route, cloned FROM arm_caddy_mcp_route), and is
+//     not what this serves. Behind that proxy the inbound Host header is the
+//     public hostname, which the SDK's DNS-rebind guard would 403 on a
+//     loopback bind. The proxy terminates TLS and owns origin policy.
 //
-// No RequireBearerToken pre-verify in v1. Two independent reasons, only the
-// first of which is a charter ruling: (a) viable-everywhere charter D18 — the
-// forward-through shape leaves Auth.verify_token/1 the single choke point and
-// Barkpark exposes no bearer-gated verify-only route to pre-verify against;
-// (b) a Go-SDK code fact — auth.RequireBearerToken rejects a TokenInfo with no
-// Expiration, while Barkpark tokens legitimately never expire.
+// No RequireBearerToken pre-verify in v1. Two independent reasons, and D18
+// carries BOTH of them verbatim — neither is a local inference: (a) Barkpark
+// exposes no bearer-gated verify-only route to pre-verify against (/v1/auth/me
+// is session-gated), leaving Auth.verify_token/1 the single choke point; (b)
+// the Go SDK's auth.RequireBearerToken rejects a TokenInfo with no Expiration,
+// while Barkpark tokens legitimately never expire. D18 layers
+// RequireBearerToken + RFC 9728 PRM on later, with OAuth (ve-w3-oauth-as).
 func newMCPHTTPHandler(out *writer, g globals, base manifest.Context, m *manifest.Manifest, toolset string, nouns []string) (http.Handler, error) {
 	// No ambient credential, ever: scrub the process token from the base context
-	// (belt-and-braces — getServer overwrites Token per request regardless).
+	// (belt-and-braces — getServer overwrites Token per request regardless) AND
+	// withdraw the right to read one out of the process environment.
+	//
+	// The Token scrub alone was NOT the whole boundary, and the gap was a
+	// confused deputy. `auth_tier: ingest` commands — every bulldocs.*, session.*
+	// and sheets.* verb the manifest declares — do not authenticate with
+	// ctx.Token at all; ingestSecret (run.go) read BARKPARK_INGEST_TOKEN /
+	// PAPERFLOW_INGEST_TOKEN straight out of os.Environ, AFTER this scrub and
+	// after getServer installed the caller's bearer. So a remote caller that
+	// presented no credential whatsoever had its request signed with the SERVING
+	// PROCESS'S ingest secret and the write went through. Clearing
+	// AmbientCredentialsOK here is what makes the per-request token seam total:
+	// from this point every tier, ingest included, can only use a credential the
+	// request itself carried. A caller holding the ingest secret sends it as its
+	// bearer and is served exactly as before; a caller holding nothing sends no
+	// Authorization header downstream and RequireIngestToken refuses it.
+	//
+	// Note which half is load-bearing: this is a REFUSAL TO SUBSTITUTE, not a
+	// warning. The stderr line below is explanatory only — it tells an operator
+	// whose unit file exports the var why their ingest tools now ask callers for
+	// a credential. Guidance alone was considered and rejected as the boundary:
+	// nothing enforces it, and the next supervisor that exports the var would
+	// re-open the hole in silence.
 	base.Token = ""
+	base.AmbientCredentialsOK = false
+
+	if os.Getenv("BARKPARK_INGEST_TOKEN") != "" || os.Getenv("PAPERFLOW_INGEST_TOKEN") != "" {
+		out.errf("mcp serve: an ingest secret is set in this process's environment and is NOT used on behalf of remote callers — ingest-tier tools (bulldocs/session/sheets verbs, exposed by --tools all or a matching --tools <noun>) authenticate with the credential each request presents in its own Authorization header, so a caller that presents none is refused downstream")
+	}
 
 	// A missing task noun must NOT take the endpoint down. The startup manifest
 	// here is fetched with no credential, so on a stock Barkpark it is the

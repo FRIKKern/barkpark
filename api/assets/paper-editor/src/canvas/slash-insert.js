@@ -50,6 +50,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "paragraph",
   "heading",
   "list",
+  "checklist",
   "callout",
   "note",
   "code",
@@ -61,6 +62,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "section",
   "terminal",
   "table",
+  "blockquote",
   "stage",
   "card",
   "field-string",
@@ -115,6 +117,15 @@ export function canvasDefaultBlock(type) {
         type: "list",
         ordered: false,
         items: [[{ type: "text", value: "" }]],
+      };
+    // Canvas-only: a checklist is a list with task:true and item maps carrying checked.
+    case "checklist":
+      return {
+        id: null,
+        type: "list",
+        ordered: false,
+        task: true,
+        items: [{ content: [{ type: "text", value: "" }], checked: false }],
       };
     case "callout":
       return {
@@ -244,7 +255,10 @@ export const CANVAS_SLASH_TEXTABLE_NODES = new Set([
   "heading",
   "bulletList",
   "orderedList",
+  "taskList",
   "callout",
+  // A quote is inline content the caret should land inside, like a callout body.
+  "blockquote",
   // note.type === "note" is a content node whose body is an editable inline hole —
   // the caret should land in the body after insert (the callout precedent).
   "note",

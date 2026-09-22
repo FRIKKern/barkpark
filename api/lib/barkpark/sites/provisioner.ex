@@ -41,6 +41,23 @@ defmodule Barkpark.Sites.Provisioner do
   configurable (Application env, wired from `runtime.exs`) so a test points them
   at a tmp dir instead of `/opt/barkpark`.
 
+  ## Source OWNERSHIP — who may delete `<slug>/src` (D33/D34 + source_kind)
+
+  Everything this module does to `<slug>/src` is a DESTRUCTIVE swap: the live
+  tree is renamed aside and unlinked once the starter is live. That is correct
+  only while the Provisioner owns the tree. `DeployRequest.source_kind` is the
+  authority:
+
+    * `:content_bound` — the Provisioner owns `src` and materializes into it;
+    * `:external_git` / `:external_artifact` — the tree came from a clone or an
+      unpacked artifact. `provision/1` returns `{:ok, :external_source_preserved}`
+      and does not stat, write, rename or delete a single path under it.
+
+  The guard exists BEFORE any on-box clone/untar step does, on purpose: the day
+  such a step lands, the very next deploy through an unguarded `provision/1`
+  deletes the customer's source and replaces it with astro-starter, silently
+  (HEALTH passes on genuine markers — the site just serves the wrong app).
+
   ## Fail-closed + idempotent (charter D34)
 
     * **Swap, never delete-then-fill.** The template is copied into a
@@ -102,6 +119,8 @@ defmodule Barkpark.Sites.Provisioner do
   place.
   """
 
+  require Logger
+
   alias Barkpark.Sites.DeployRequest
 
   # Same default as site-deploy.sh's `${BARKPARK_SITES_DIR:-/opt/barkpark/sites}`.
@@ -144,11 +163,51 @@ defmodule Barkpark.Sites.Provisioner do
   Idempotent for a `deploy` (a marker-guarded no-op if already provisioned),
   fail-closed (`{:error, {:provision_failed, reason}}` on any error, and never a
   half-materialized `src`). Never raises.
+
+  An EXTERNAL-SOURCE deploy (`source_kind` other than `:content_bound`) returns
+  `{:ok, :external_source_preserved}` WITHOUT touching `<slug>/src` — see "the
+  ownership guard" above. The tag is deliberately distinct from `:ok`: a caller
+  that wants to know whether a starter is now on disk must be able to tell the
+  two apart, and a test asserting the refusal must not be satisfiable by the
+  destructive path returning successfully.
   """
-  @spec provision(DeployRequest.t()) :: :ok | {:error, {:provision_failed, term()}}
+  @spec provision(DeployRequest.t()) ::
+          :ok | {:ok, :external_source_preserved} | {:error, {:provision_failed, term()}}
   def provision(%DeployRequest{mode: :rollback}), do: :ok
   # A teardown deletes the site — there is nothing to materialize (like a rollback).
   def provision(%DeployRequest{mode: :teardown}), do: :ok
+
+  # ── the ownership guard ───────────────────────────────────────────────────
+  #
+  # THIS CLAUSE MUST STAY ABOVE THE MATERIALIZING ONE. Everything below it
+  # `rename`s the live `src` aside and unlinks it. For a site whose source came
+  # from a git clone or an unpacked artifact, that is deletion of the
+  # customer's code, replaced with astro-starter — and it would be SILENT: the
+  # swap succeeds, the marker is written, BUILD compiles the starter, HEALTH
+  # passes on genuine markers, and the site goes live with the wrong bytes.
+  #
+  # `DeployRequest.content_bound?/1` is the single authority. It is a
+  # PREDICATE over the closed `@source_kinds` table, not a list of kinds to
+  # skip, so a source kind added later is externally-owned (hands off) until
+  # someone deliberately records it as provisioner-owned. The fail-open
+  # direction — a new external kind quietly treated as ours — cannot be reached
+  # by forgetting to update this module.
+  def provision(%DeployRequest{mode: :deploy, slug: slug, source_kind: source_kind} = req)
+      when source_kind != :content_bound do
+    if DeployRequest.content_bound?(req) do
+      # Unreachable with today's enum (only :content_bound is provisioner-owned
+      # and the guard above excluded it). Kept as a fail-closed tripwire: if the
+      # two ever disagree, refuse rather than guess about a delete.
+      {:error, {:provision_failed, {:ambiguous_source_kind, source_kind}}}
+    else
+      Logger.info(
+        "[site-deploy] provision REFUSED for #{inspect(slug)} — source_kind=#{source_kind}: " <>
+          "#{src_dir(slug)} is externally owned and was left untouched"
+      )
+
+      {:ok, :external_source_preserved}
+    end
+  end
 
   def provision(%DeployRequest{
         mode: :deploy,

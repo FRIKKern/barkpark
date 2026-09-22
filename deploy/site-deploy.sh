@@ -762,7 +762,10 @@ write_release_receipt() { # <reldir>
   local reldir="$1" sha=""
   [ -n "$SHA_CMD" ] || { printf ''; return 0; }
   sha="$(release_tree_digest "$reldir")"
-  printf '%s' "$sha" | grep -qE '^[0-9a-f]{64}$' || { printf ''; return 0; }
+  # Here-string, not `printf | grep -q`: under pipefail the reader's early exit
+  # SIGPIPEs the producer and 141 comes back, so a VALID digest would be
+  # discarded and the receipt silently skipped.
+  grep -qE '^[0-9a-f]{64}$' <<<"$sha" || { printf ''; return 0; }
   printf '%s\n' "$sha" > "$reldir/$BUILD_MARK" 2>/dev/null || true
   printf '%s' "$sha"
 }
@@ -2722,6 +2725,30 @@ FAKECP
     # result through a REAL caddy on a real port with real requests. Re-widen
     # either side and rows 4/5/6 go red.
     # -----------------------------------------------------------------------
+    # THE PIN ABOVE GUARDS TWO FILES OUT OF FIVE. Its two static checks read
+    # deploy/instance-deploy.sh and deploy/caddy/barkpark-maintenance.caddy, and
+    # they were green for the whole life of the fix while three other renderers
+    # (internal/caddyfile/caddyfile.go's MaintenanceHandler,
+    # internal/cli/setup/assets/deploy.sh, and its byte-identical twin at the
+    # repo root) went on emitting the bare form. A guard that looks at two of
+    # five reads as present and is blind. The check below is a PREDICATE over
+    # every tracked file instead of a list anyone has to remember to extend, so
+    # a renderer written tomorrow is covered the day it lands.
+    check "no BARE handle_errors is emitted anywhere in the tree (repo-wide predicate)" \
+      bash "$(cd "$(dirname "$SELF")" && pwd)/caddy-handle-errors-scope-check.sh"
+
+    # The predicate above is a GREP: it proves the shape, never the behaviour.
+    # Nothing in this tree had ever OBSERVED a bare handle_errors eating a
+    # file_server 404 — the filing row (task-d06e8a2a42f1ed2f) says so itself:
+    # "I did not walk a live box." This drives a REAL caddy twice on one rig
+    # (dead upstream + an armed handle_path /sites/demo/* file_server) and
+    # measures BOTH arms: bare -> 503 on a static miss, scoped -> 404, with two
+    # controls that must agree under both arms so a green can never be "the
+    # scoped config serves less". It fails rather than skips under
+    # BARKPARK_SELFTEST_REQUIRE_E2E=1, which CI sets.
+    check "a bare handle_errors EATS a static 404 and the scoped one does not (real caddy, both arms)" \
+      bash "$(cd "$(dirname "$SELF")" && pwd)/caddy-handle-errors-behaviour-proof.sh"
+
     echo "[selftest] e2e: a miss on a spawned static site 404s through REAL caddy (the maintenance 503 no longer eats it)"
     MS="$E2E/misscode"; mkdir -p "$MS/bin" "$MS/root"
     printf '#!/usr/bin/env bash\nexit 0\n' > "$MS/bin/systemctl"; chmod +x "$MS/bin/systemctl"

@@ -34,8 +34,12 @@
 # number written here is stale the next time the baseline moves. (It was 34 + 7
 # of 41 on 2026-08-24, the same day a hardcoded "57 rows" elsewhere in this
 # subsystem was found to have been wrong for weeks.) Run both and add them up:
-#   bash api/scripts/sobelow-baseline-staleness-check.sh   | tail -2
-#   bash api/scripts/sobelow-baseline-fingerprint-check.sh | tail -1
+#   bash api/scripts/sobelow-baseline-staleness-check.sh
+#   bash api/scripts/sobelow-baseline-fingerprint-check.sh
+#
+# Run them UNPIPED. Both ratchets signal through their EXIT CODE, and `| tail`
+# reports tail's rc, not the ratchet's — a dead checker reads as rc=0. Either
+# cwd works; each script resolves its own baseline from its location.
 #
 # The two populations partition the baseline; neither is widened into the
 # other's territory. Run this checker on a baseline of only token-anchored rows
@@ -134,11 +138,17 @@
 
 set -euo pipefail
 
-BASELINE="api/.sobelow-skips"
-API_DIR="api"
+# Resolve every default from THIS SCRIPT's location, never from $PWD. The
+# literal relative "api/.sobelow-skips" that used to sit here made cwd a trap:
+# run from api/ (the natural cwd, since `mix sobelow` runs there) the checker
+# died `** (File.Error) could not read file "api/.sobelow-skips"`, and any
+# recipe that piped it reported rc=0 — a false green from a checker that never
+# read its input. Both sibling ratchets already resolve this way.
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+API_DIR=$(cd -- "$HERE/.." && pwd)
+BASELINE="$API_DIR/.sobelow-skips"
 SELFTEST=0
 
-HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 CHECKER="$HERE/sobelow-baseline-fingerprint.exs"
 
 usage() {
@@ -146,8 +156,8 @@ usage() {
 usage: sobelow-baseline-fingerprint-check.sh [--baseline FILE] [--api-dir DIR]
                                              [--selftest]
 
-  --baseline FILE   baseline to check (default: api/.sobelow-skips)
-  --api-dir DIR     root the baseline's paths are relative to (default: api/)
+  --baseline FILE   baseline to check (default: <repo>/api/.sobelow-skips)
+  --api-dir DIR     root the baseline's paths are relative to (default: <repo>/api)
   --selftest        run the mutation fixtures that prove this checker can fail,
                     in both directions, and exit
 USAGE
@@ -179,6 +189,15 @@ command -v elixir >/dev/null 2>&1 || {
 
 [[ -f "$CHECKER" ]] || {
   echo "error: checker not found next to this script: $CHECKER" >&2
+  exit 2
+}
+
+# Fail CLOSED and SAY SO when the baseline is unreachable, in the same words
+# both sibling ratchets use. Without this the .exs raised File.Error and exited
+# 1 — the code this script documents as "one or more rows disagree", i.e. an
+# unreadable input looked exactly like a real finding.
+[[ $SELFTEST -eq 1 || -r "$BASELINE" ]] || {
+  echo "error: baseline not found: $BASELINE" >&2
   exit 2
 }
 

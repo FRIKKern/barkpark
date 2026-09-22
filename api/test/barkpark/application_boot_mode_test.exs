@@ -23,6 +23,7 @@ defmodule Barkpark.ApplicationBootModeTest do
   use ExUnit.Case, async: false
 
   alias Barkpark.Application, as: App
+  alias Barkpark.BootModeSandbox
 
   # A sentinel in each of the four injected lists, so "the filter touched only
   # the two entries it is allowed to touch" is observable.
@@ -133,52 +134,84 @@ defmodule Barkpark.ApplicationBootModeTest do
   end
 
   describe "boot_mode/0" do
-    test "defaults to :full for every ordinary boot" do
-      refute Application.fetch_env(:barkpark, :boot_mode) != :error and
-               Application.get_env(:barkpark, :boot_mode) not in [:full, :seed]
+    # WHY THIS DOES NOT READ AMBIENT NODE STATE (2026-09-18). It used to:
+    # `refute fetch_env(:barkpark, :boot_mode) != :error and ...`. `:boot_mode`
+    # is ONE value for the WHOLE NODE, and `mix test` is one node: any module
+    # that has swapped it and not yet put it back makes this assertion report a
+    # defect in `config/*.exs` that `config/*.exs` does not have. Measured on
+    # main: the Elixir gate was red on 8 of 10 heads with `left: :one_shot`, a
+    # value NOTHING in `config/` can produce, and the merge button stayed grey
+    # for every `api/` PR behind it.
+    #
+    # The CLAIM is about the CONFIG, so it is made against the config FILES,
+    # which no test can mutate, plus an ESTABLISHED absence for the default. A
+    # global-state observation can only ever report who else was running.
+    test "no config/*.exs sets :boot_mode — the default is what every boot takes" do
+      configs = Path.wildcard(Path.join([__DIR__, "..", "..", "config", "*.exs"]))
 
-      assert App.boot_mode() == :full
+      # Control: the glob found the config directory. Without this an empty list
+      # passes the loop below on nothing at all.
+      assert length(configs) >= 3,
+             "found #{length(configs)} config/*.exs files — the glob is blind, not the config clean"
+
+      for path <- configs do
+        refute File.read!(path) =~ ":boot_mode",
+               "#{Path.relative_to_cwd(path)} sets :boot_mode — an ordinary boot no longer defaults"
+      end
+    end
+
+    test "defaults to :full when the key is absent" do
+      # ESTABLISH the precondition rather than observe it: an absent key is the
+      # state an ordinary boot is in, and deleting it is the only way to be in
+      # that state regardless of what else this node has run.
+      #
+      # Through the sandbox (task-086261728f14c078) rather than a hand-rolled
+      # `on_exit`: `absent/1` deletes persistently, asserts the delete TOOK, and
+      # puts back whatever was there in a `try … after`. The hand-rolled version
+      # of this pair is what was live when elixir-nightly 35323296944 reddened
+      # this exact test with `left: :one_shot`.
+      BootModeSandbox.absent(fn ->
+        assert Application.fetch_env(:barkpark, :boot_mode) == :error
+        assert App.boot_mode() == :full
+      end)
     end
 
     test "reads the app env, and refuses an unknown value" do
-      original = Application.fetch_env(:barkpark, :boot_mode)
+      BootModeSandbox.sandboxed(fn set ->
+        set.(:seed)
+        assert App.boot_mode() == :seed
 
-      on_exit(fn ->
-        case original do
-          {:ok, value} -> Application.put_env(:barkpark, :boot_mode, value, persistent: true)
-          :error -> Application.delete_env(:barkpark, :boot_mode, persistent: true)
+        set.(:nope)
+
+        assert_raise ArgumentError, ~r/unknown :barkpark, :boot_mode :nope/, fn ->
+          App.boot_mode()
         end
       end)
-
-      Application.put_env(:barkpark, :boot_mode, :seed, persistent: true)
-      assert App.boot_mode() == :seed
-
-      Application.put_env(:barkpark, :boot_mode, :nope, persistent: true)
-
-      assert_raise ArgumentError, ~r/unknown :barkpark, :boot_mode :nope/, fn ->
-        App.boot_mode()
-      end
     end
   end
 
   describe "Barkpark.Release.seed/0 uses the seam" do
     test "seed_boot!/0 selects :seed mode before starting the app" do
-      original = Application.fetch_env(:barkpark, :boot_mode)
+      # ESTABLISH the precondition — do not observe it. Reading whatever the
+      # node happens to hold made this assertion fail with `left: :one_shot` on
+      # main (see the note in the "boot_mode/0" describe above): another
+      # module's in-flight swap is not a defect in `seed_boot!/0`.
+      #
+      # NOTE the sandbox is what makes this safe in the OTHER direction too:
+      # `seed_boot!/0` itself does a PERSISTENT `put_env` of `:seed`, so this
+      # test is a node-global writer by proxy. `absent/1`'s `try … after`
+      # restores that write as well.
+      BootModeSandbox.absent(fn ->
+        assert App.boot_mode() == :full
 
-      on_exit(fn ->
-        case original do
-          {:ok, value} -> Application.put_env(:barkpark, :boot_mode, value, persistent: true)
-          :error -> Application.delete_env(:barkpark, :boot_mode, persistent: true)
-        end
+        # `:barkpark` is already started here, so this is a no-op start — the
+        # observable effect under test is the mode selection that precedes it.
+        assert {:ok, _apps} = Barkpark.Release.seed_boot!()
+        assert App.boot_mode() == :seed
       end)
 
-      # Precondition: not already in seed mode, else this proves nothing.
-      assert App.boot_mode() == :full
-
-      # `:barkpark` is already started here, so this is a no-op start — the
-      # observable effect under test is the mode selection that precedes it.
-      assert {:ok, _apps} = Barkpark.Release.seed_boot!()
-      assert App.boot_mode() == :seed
+      assert BootModeSandbox.current() == :error,
+             "seed_boot!/0's persistent :seed write outlived this test"
     end
 
     test "seed/0's body calls seed_boot!/0, not a bare start" do

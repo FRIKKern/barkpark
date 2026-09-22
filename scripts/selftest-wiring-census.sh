@@ -76,6 +76,33 @@ census() {
   grep -hv '^[[:space:]]*#' "$root"/.github/workflows/*.yml 2>/dev/null \
     | grep -vE '^[[:space:]]*-[[:space:]]*"?'"'"'?[A-Za-z0-9_./*{}-]+"?'"'"'?[[:space:]]*$' > "$wf_nc"
 
+  # THE MATRIX COLLAPSE MOVED 234 EXECUTION LINES OUT OF THE YAML
+  # (task-1afb6eaf3a04b8ea). shell-harnesses.yml's 53 sibling jobs became ONE
+  # matrix job whose per-leg `run:` bodies live in
+  # .github/shell-harness-legs.json; the `harness` job executes them verbatim
+  # through scripts/shell-harness-run.sh. Those bodies ARE workflow execution,
+  # so they belong in this corpus — MEASURED: with the legs file omitted this
+  # census reported 14 wired self-tests as ORPHANED on the very commit that
+  # wired them, which is the census printing the opposite of the truth.
+  # Decoded through python3 so a JSON-escaped newline becomes a real line and
+  # the verb filter below sees `bash scripts/x.test.sh` at the head of a line.
+  # Absent file or absent python3: the corpus is simply the YAML, exactly as
+  # before — this widens the corpus, it can never narrow it.
+  if [ -f "$root/.github/shell-harness-legs.json" ] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$root/.github/shell-harness-legs.json" >>"$wf_nc" <<'LEGS'
+import json, sys
+try:
+    legs = json.load(open(sys.argv[1]))
+except Exception:
+    raise SystemExit(0)
+for leg in legs if isinstance(legs, list) else []:
+    for arm in leg.get("arms") or []:
+        for line in str(arm.get("run", "")).split("\n"):
+            if line.strip() and not line.strip().startswith("#"):
+                print(line)
+LEGS
+  fi
+
   # R1's corpus: the EXECUTION LINES of that workflow text.
   #
   # WHY A SECOND FILTER (task-1484df07d2d226c2). Dropping bare scalar sequence
@@ -252,6 +279,10 @@ selftest() {
   mkdir -p "$tmp/.github"
   cp -R "$ROOT/scripts" "$tmp/scripts"
   cp -R "$ROOT/.github/workflows" "$tmp/.github/workflows"
+  # The legs file is half the execution corpus now; a fixture tree without it
+  # would green this control while the real tree reds, which is the exact
+  # disagreement between suite and subject this census exists to catch.
+  [ -f "$ROOT/.github/shell-harness-legs.json" ] && cp "$ROOT/.github/shell-harness-legs.json" "$tmp/.github/shell-harness-legs.json"
   [ -d "$ROOT/api/test" ] && { mkdir -p "$tmp/api"; ln -s "$ROOT/api/test" "$tmp/api/test"; }
 
   echo "== POSITIVE CONTROL: the census must find the WIRED ones, by all four routes =="

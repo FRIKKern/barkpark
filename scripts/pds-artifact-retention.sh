@@ -154,8 +154,44 @@ marker_field() { # field dir -> value on stdout ('' when unreadable)
   return 0
 }
 
-uid_of()   { stat -f %u "$1" 2>/dev/null || stat -c %u "$1" 2>/dev/null || true; }
-mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || true; }
+# ── stat(1) PORTABILITY: PROBE ONCE, REMEMBER THE ANSWER ────────────────────
+# `-f` means OPPOSITE things in the two stats, and that is why the usual
+# defensive idiom is broken here:
+#   BSD / macOS   stat -f FORMAT path   — "render path with this FORMAT"
+#   GNU coreutils stat -f path          — "print FILE SYSTEM status of path",
+#                                         and the format flag is `-c`.
+# So on Linux `stat -f %m "$d"` does NOT fail. It treats `%m` as a FILE operand
+# (which does not exist) and `$d` as another, prints a block-size/inode-count
+# report for the containing filesystem, and the `|| stat -c …` fallback either
+# never fires or appends a second line to garbage. Either way every mtime and
+# uid compared downstream is nonsense, SILENTLY — every directory then reads as
+# "owned by another unix user" and NOTHING is ever retained or removed.
+# Measured: GH Actions run 35504059438, job 106061128225 — nine arms of
+# pds-artifact-retention.test.sh red on a Linux runner, green on this Mac.
+#
+# A `||` fallback is only safe when the FIRST form FAILS on the other platform.
+# BSD stat rejects `-c` outright, so GNU-FIRST is the safe ordering — but a
+# fallback chain also mis-fires on a path that simply does not exist (the GNU
+# form fails for the right reason, and the BSD form then answers with garbage).
+# So this file does not chain at all: it PROBES ONCE, on a path that certainly
+# exists, and every call below reuses the one answer. There is no literal
+# `stat -f` in this file for a later editor to copy.
+if stat -c %u . >/dev/null 2>&1; then
+  STAT_FLAG=-c;  STAT_F_UID=%u; STAT_F_MTIME=%Y; STAT_F_SIZE=%s   # GNU coreutils
+else
+  STAT_FLAG=-f;  STAT_F_UID=%u; STAT_F_MTIME=%m; STAT_F_SIZE=%z   # BSD / macOS
+fi
+
+uid_of()   { stat "$STAT_FLAG" "$STAT_F_UID"   "$1" 2>/dev/null || true; }
+mtime_of() { stat "$STAT_FLAG" "$STAT_F_MTIME" "$1" 2>/dev/null || true; }
+size_of()  { stat "$STAT_FLAG" "$STAT_F_SIZE"  "$1" 2>/dev/null || true; }
+
+# The probe is a claim, so it is CHECKED before anything is classified: if the
+# chosen flavour cannot read the uid and mtime of a directory that certainly
+# exists, this verb refuses rather than reading every entry as unreadable and
+# reporting a confident "0 removable".
+is_int "$(uid_of .)"   || die "stat $STAT_FLAG $STAT_F_UID gave no numeric uid for '.'; neither GNU nor BSD stat works here. Nothing was examined."
+is_int "$(mtime_of .)" || die "stat $STAT_FLAG $STAT_F_MTIME gave no numeric mtime for '.'; neither GNU nor BSD stat works here. Nothing was examined."
 
 # A name this apparatus makes. TWO shapes, and the second is the whole point:
 #   pds-proof-art.<hex>              — pds-pull-proof.sh's own default
@@ -190,8 +226,7 @@ full_store_listing() { # a stable, comparable description of the parked store
   find "$FULL_DIR" -mindepth 0 2>/dev/null \
     | LC_ALL=C sort \
     | while IFS= read -r e; do
-        printf '%s\t%s\t%s\n' "$e" "$(stat -f %z "$e" 2>/dev/null || stat -c %s "$e" 2>/dev/null || echo '?')" \
-                              "$(mtime_of "$e")"
+        printf '%s\t%s\t%s\n' "$e" "$(size_of "$e")" "$(mtime_of "$e")"
       done
   return 0
 }
@@ -314,7 +349,10 @@ if [ "$FULL_BEFORE" != "$FULL_AFTER" ]; then
   # NOT process substitution: this file is run under whatever bash the operator
   # has, and bash 3.2 in POSIX mode refuses `<(…)` at EXPANSION time — which
   # would abort the very branch that exists to report the worst outcome.
-  _b="$(mktemp -t pds-art-before)"; _a="$(mktemp -t pds-art-after)"
+  # PORTABLE mktemp (explicit path + XXXXXX): `-t NAME` without XXXXXX is BSD-only
+  # and GNU coreutils refuses it outright.
+  _b="$(mktemp "${TMPDIR:-/tmp}/pds-art-before.XXXXXX")" || { say "FATAL: mktemp failed"; exit 3; }
+  _a="$(mktemp "${TMPDIR:-/tmp}/pds-art-after.XXXXXX")"  || { say "FATAL: mktemp failed"; exit 3; }
   printf '%s\n' "$FULL_BEFORE" >"$_b"; printf '%s\n' "$FULL_AFTER" >"$_a"
   diff "$_b" "$_a" | sed 's/^/    /'
   rm -f "$_b" "$_a"

@@ -2442,6 +2442,127 @@
       // Reader and TUI occupy the identical measure). Keep in lockstep.
       var TUI_COLS = 80;
 
+      // ── TUI image map ─────────────────────────────────────────────────────
+      // bpRenderTUI's OPTIONAL 5th argument is a {src: base64} object. Every
+      // bound is RE-ENFORCED in Go by internal/wasmimages (same-origin, MIME
+      // sniff, per-entry bytes, pixels, total memory, entry count) and a
+      // refused entry simply resolves to nil, keeping the honest labeled box —
+      // so nothing here is a trust boundary. These page-side limits exist only
+      // so the toggle never spends bandwidth or wall-clock on bytes the wasm
+      // would refuse anyway. Each is AT OR UNDER its Go counterpart:
+      //   IMG_MAX_ENTRIES     64      <= wasmimages.MaxEntries     (256)
+      //   IMG_MAX_ENTRY_BYTES 4 MiB   == wasmimages.MaxEntryBytes  (4 << 20)
+      //   IMG_MAX_TOTAL_BYTES 24 MiB  == wasmimages.MaxTotalBytes  (24 << 20)
+      var IMG_MAX_ENTRIES = 64;
+      var IMG_MAX_ENTRY_BYTES = 4 * 1024 * 1024;
+      var IMG_MAX_TOTAL_BYTES = 24 * 1024 * 1024;
+      // Concurrency + two clocks: one per request, one for the whole pre-fetch.
+      // Whichever fires first, renderTUI proceeds with the entries it has, so a
+      // slow or hanging image costs a picture and never the toggle.
+      var IMG_CONCURRENCY = 6;
+      var IMG_FETCH_TIMEOUT_MS = 4000;
+      var IMG_TOTAL_BUDGET_MS = 6000;
+
+      // Collect the image-block srcs worth pre-fetching, in document order.
+      // Mirrors the Go renderer's notion of an image: an explicit
+      // `type:"image"` block, or a typeless `{src,alt}` media element (the
+      // coerceMediaImages seam in internal/pdrender/composeblocks.go). Typed
+      // non-image carriers of `src` — asciicast, video — are NOT collected:
+      // their renderers never consult the ImageResolver.
+      //
+      // SAME-ORIGIN filter, matching wasmimages.sameOrigin: keep only a rooted
+      // path. An absolute URL ("https://…"), a protocol-relative "//host/x",
+      // a "data:" URI and a backslash-bearing path are all skipped here and
+      // would be rejected there too.
+      function collectImageSrcs(blocks) {
+        var out = [], seen = {};
+        function sameOrigin(src) {
+          return src.charAt(0) === "/" && src.slice(0, 2) !== "//" &&
+            src.indexOf("\\") < 0 && src.indexOf("\u0000") < 0;
+        }
+        function visit(node) {
+          if (!node || typeof node !== "object") return;
+          if (Array.isArray(node)) {
+            for (var i = 0; i < node.length; i++) visit(node[i]);
+            return;
+          }
+          var type = node.type;
+          var imageish = type === "image" ||
+            ((type === undefined || type === null || type === "") &&
+              typeof node.src === "string");
+          if (imageish && typeof node.src === "string") {
+            // The resolver keys on the TRIMMED src string, so key identically.
+            var key = node.src.trim();
+            if (key && sameOrigin(key) && !Object.prototype.hasOwnProperty.call(seen, key)) {
+              seen[key] = true;
+              if (out.length < IMG_MAX_ENTRIES) out.push(key);
+            }
+          }
+          for (var k in node) {
+            if (Object.prototype.hasOwnProperty.call(node, k)) visit(node[k]);
+          }
+        }
+        visit(blocks);
+        return out;
+      }
+
+      // btoa() over a Uint8Array, chunked so a multi-megabyte image does not
+      // blow the argument limit of String.fromCharCode.apply. Standard base64
+      // WITH padding — Go decodes with base64.StdEncoding.
+      function bytesToBase64(bytes) {
+        var chunk = 0x8000, parts = [];
+        for (var i = 0; i < bytes.length; i += chunk) {
+          parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + chunk)));
+        }
+        return btoa(parts.join(""));
+      }
+
+      // Build the {src: base64} map. Failures — non-2xx, network error, abort,
+      // an over-budget body — are simply OMITTED: the wasm keeps the box for
+      // any src it cannot resolve, which is the honest outcome.
+      async function buildImageMap(blocks) {
+        var map = {}, srcs = collectImageSrcs(blocks);
+        if (!srcs.length) return map;
+        var next = 0, total = 0, expired = false;
+        async function worker() {
+          while (!expired) {
+            var i = next++;
+            if (i >= srcs.length) return;
+            var src = srcs[i];
+            if (total >= IMG_MAX_TOTAL_BYTES) return;
+            try {
+              var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+              var timer = ctl ? setTimeout(function () { ctl.abort(); }, IMG_FETCH_TIMEOUT_MS) : null;
+              var r;
+              try {
+                r = await fetch(src, ctl ? { signal: ctl.signal } : undefined);
+              } finally {
+                if (timer) clearTimeout(timer);
+              }
+              if (!r || !r.ok) continue;
+              var buf = await r.arrayBuffer();
+              // No await between this budget test and the commit below, so the
+              // running total can never be overspent by a racing worker.
+              if (!buf.byteLength || buf.byteLength > IMG_MAX_ENTRY_BYTES) continue;
+              if (total + buf.byteLength > IMG_MAX_TOTAL_BYTES) continue;
+              total += buf.byteLength;
+              map[src] = bytesToBase64(new Uint8Array(buf));
+            } catch (e) {
+              // omitted on purpose — see above
+            }
+          }
+        }
+        var pool = [];
+        for (var w = 0; w < IMG_CONCURRENCY && w < srcs.length; w++) pool.push(worker());
+        await Promise.race([
+          Promise.all(pool),
+          new Promise(function (res) {
+            setTimeout(function () { expired = true; res(); }, IMG_TOTAL_BUDGET_MS);
+          })
+        ]);
+        return map;
+      }
+
       async function renderTUI() {
         if (!out) return;
         var slug = currentSlug();
@@ -2455,7 +2576,11 @@
           await ensureWasm();
           var blocks = await blocksP;
           if (!blocks) throw new Error("could not load this paper's blocks");
-          var html = window.bpRenderTUI(JSON.stringify(blocks), TUI_COLS, "dark");
+          // arg 3 is the light/dark MODE; arg 4 is the theme IDENTITY, which
+          // the reader does not select — "" makes the Go side fall back to
+          // pdrender.DefaultTheme (evergreen). arg 5 is the image map.
+          var images = await buildImageMap(blocks);
+          var html = window.bpRenderTUI(JSON.stringify(blocks), TUI_COLS, "dark", "", images);
           out.innerHTML = html;
         } catch (e) {
           out.innerHTML = '<pre class="bp-tui-pre">TUI render failed: ' +

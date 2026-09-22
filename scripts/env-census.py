@@ -348,6 +348,42 @@ def dockerfile_env_names(path):
     return out
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# `.env.example` documentation assertion (charter D25).
+#
+# A hand-written list of documented names goes stale the moment someone adds the
+# next one -- which is exactly how `cloud/.env.example` came to document 30 of
+# the 61 names the control plane reads. This turns the snapshot into a RULE:
+# every name the code READS *and* compose PASSES must appear in that root's
+# `.env.example`, either as `NAME=` or as a whole-line-commented `#   NAME=`
+# (the D16/D24 form for a knob whose empty value is meaningful).
+#
+# Absences are allowed only with a DATED reason, same rule as EXEMPT.
+# ─────────────────────────────────────────────────────────────────────────────
+ENV_EXAMPLE_EXEMPT = {
+    "PORT": "cloud/docker-compose.yml hardcodes `- PORT=4100` rather than "
+            "`${PORT}`, so the container's listen port is NOT reachable from "
+            "cloud/.env at all; documenting it there would advertise a knob "
+            "that does nothing (2026-09-16)",
+}
+
+# `NAME=` at the head of a line, optionally behind a comment marker. The
+# commented form is how D16/D24 document a knob whose empty value is meaningful,
+# so it counts as documented.
+ENV_EXAMPLE_RE = re.compile(r"^\s*(?:#\s*)?([A-Za-z_][A-Za-z0-9_]*)=")
+
+
+def env_example_names(path):
+    """Names documented in a `.env.example`, bare or whole-line commented."""
+    names = set()
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            m = ENV_EXAMPLE_RE.match(line)
+            if m:
+                names.add(m.group(1))
+    return names
+
+
 ROOTS = {
     "api": dict(
         sources=["api/config/runtime.exs", "api/lib"],
@@ -355,6 +391,11 @@ ROOTS = {
         anchor=r"^  api:\s*$",
         label="root docker-compose.yml service `api`",
         dockerfile="api/Dockerfile",
+        # The root `.env.example` is TIERED prose (charter D16) covering the
+        # instance install; the D25 documentation assertion is scoped to the
+        # control plane for now. Widening it here is a future decision, not a
+        # silent default (2026-09-16).
+        env_example=None,
     ),
     "cloud": dict(
         sources=["cloud/config/runtime.exs", "cloud/lib"],
@@ -362,6 +403,7 @@ ROOTS = {
         anchor=r"^x-control-plane:",
         label="cloud/docker-compose.yml `x-control-plane` anchor",
         dockerfile=None,
+        env_example="cloud/.env.example",
     ),
 }
 
@@ -471,6 +513,34 @@ def audit_root(tree, name, skip_compose):
                   "compose passthrough of an unset shell var never reaches the code:")
             for n, ln in shadows:
                 print(f"      - {cfg['dockerfile']}:{ln}  ENV {n}=…")
+
+    # `.env.example` documentation assertion (D25). Scoped to passed-AND-read:
+    # a name the code never reads is not an operator knob, and a name compose
+    # does not pass cannot be set from that file.
+    if cfg.get("env_example"):
+        ee_path = os.path.join(tree, cfg["env_example"])
+        documented = env_example_names(ee_path)
+        target = census & passed
+        undocumented = sorted(
+            n for n in target
+            if n not in documented and n not in ENV_EXAMPLE_EXEMPT
+        )
+        ee_exempt = sorted(n for n in target if n not in documented
+                           and n in ENV_EXAMPLE_EXEMPT)
+        print(f"  {cfg['env_example']}: documents {len(target & documented)} of "
+              f"{len(target)} passed-and-read ({len(ee_exempt)} exempt)")
+        if undocumented:
+            rc = 1
+            print(f"  ✗ UNDOCUMENTED in {cfg['env_example']} "
+                  f"({len(undocumented)}) — the control plane reads these and "
+                  "compose passes them, so an operator can set them and has "
+                  "nothing telling them what they do:")
+            for n in undocumented:
+                print(f"      - {n}")
+            print("    Add each to that file as `NAME=` (or, when a blank value "
+                  "means something different from unset, as a whole-line "
+                  "commented `#   NAME=value` per D16/D24), or exempt it in "
+                  "ENV_EXAMPLE_EXEMPT with a dated reason.")
 
     print()
     return rc

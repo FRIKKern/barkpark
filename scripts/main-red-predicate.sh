@@ -52,6 +52,9 @@ _mrp_selftest() {
   if bash -n "$_MRP_SELF" 2>/dev/null; then _ok "parses" "bash -n clean"
   else _no "parses" "bash -n FAILED — file truncated or malformed"; fi
   if grep -qF 'CANNOT READ: run feed shows' "$_MRP_SELF" \
+  && grep -qF 'STALE FEED' "$_MRP_SELF" \
+  && grep -qF '2H PREDICATE' "$_MRP_SELF" \
+  && grep -qF 'streak=' "$_MRP_SELF" \
   && grep -qF 'branch-driven push workflows' "$_MRP_SELF"; then _ok "not truncated" "control text + summary line both present"
   else _no "not truncated" "a load-bearing line is missing — file truncated"; fi
   # THE DESCENT MUST BE ABLE TO FIRE. The run-list projection must ASK for databaseId, or the
@@ -77,6 +80,13 @@ case " $* " in
     if [ -n "${MRP_FJOB:-}" ]; then printf '{"jobs":[{"name":"%s","conclusion":"failure"}]}\n' "$MRP_FJOB"
     else printf '{"jobs":[{"name":"fine","conclusion":"success"}]}\n'; fi
     exit 0;;
+  *"actions/workflows/"*"/runs"*)
+    # THE AUTHORITATIVE FRESHNESS SOURCE. MRP_AUTHTS drives the newest main run's
+    # timestamp; the default matches the verdict row, i.e. NO lag. MRP_TC drives
+    # total_count, which the unread arm reads off this same response.
+    printf '{"total_count":%s,"workflow_runs":[{"id":4242,"created_at":"%s"}]}\n' \
+      "${MRP_TC:-7}" "${MRP_AUTHTS:-2026-01-01T00:00:00Z}"
+    exit 0;;
   *"--json name"*)
     case "${MRP_FEED:-many}" in
       dead) exit 1;;
@@ -90,11 +100,22 @@ case " $* " in
     # feed of nothing BUT cancels, which must still read CANNOT READ.
     if [ -n "${MRP_NOID:-}" ]; then _ID=""; else _ID=',"databaseId":4242'; fi
     _CANCROW='{"conclusion":"cancelled","headSha":"cccccccccccccccc","createdAt":"2026-02-02T00:00:00Z","status":"completed"'"$_ID"'}'
-    _VERDROW='{"conclusion":"'"${MRP_CONC:-failure}"'","headSha":"abcdef1234567890","createdAt":"2026-01-01T00:00:00Z","status":"completed"'"$_ID"'}'
+    _VERDROW='{"conclusion":"'"${MRP_CONC:-failure}"'","headSha":"abcdef1234567890","createdAt":"'"${MRP_TS:-2026-01-01T00:00:00Z}"'","status":"completed"'"$_ID"'}'
     # MRP_CANC=two adds a SECOND, OLDER verdict row (MRP_OLD) behind the first.
     # This is web-fork-drift.yml's real shape and the only one that can tell
     # "newest verdict wins" apart from "any verdict behind the cancel wins".
     _OLDROW='{"conclusion":"'"${MRP_OLD:-failure}"'","headSha":"0123456789abcdef","createdAt":"2025-12-01T00:00:00Z","status":"completed"'"$_ID"'}'
+    # MRP_STALE_ONCE: serve a stale page ONCE (per workflow is not distinguishable
+    # here, so once per stub process tree via a marker file), then fresh. This is
+    # the only way to exercise the retry: a stateless stub can express "always
+    # stale" and "never stale" but not "stale then fixed", which is the actual
+    # shape of the live fault.
+    if [ -n "${MRP_STALE_ONCE:-}" ]; then
+      if [ ! -f "$MRP_STALE_ONCE" ]; then : > "$MRP_STALE_ONCE"
+        printf '[{"conclusion":"success","headSha":"0000000000000000","createdAt":"2026-01-01T00:00:00Z","status":"completed","databaseId":9}]\n'
+        exit 0
+      fi
+    fi
     case "${MRP_CANC:-}" in
       only) printf '[%s]\n' "$_CANCROW";;
       two)  printf '[%s,%s,%s]\n' "$_CANCROW" "$_VERDROW" "$_OLDROW";;
@@ -110,7 +131,9 @@ STUB
   _arm(){ # label FEED CONC FJOB NOID want-exit needle [forbidden]
     local lbl="$1" feed="$2" conc="$3" fjob="$4" noid="$5" wrc="$6" need="$7" bad="${8:-}"
     out=$(PATH="$d/bin:$PATH" MRP_FEED="$feed" MRP_CONC="$conc" MRP_FJOB="$fjob" MRP_NOID="$noid" \
-          MRP_CANC="${MRP_CANC_ARM:-}" MRP_OLD="${MRP_OLD_ARM:-}" bash "$_MRP_SELF" acme/widget 2>&1); rc=$?
+          MRP_CANC="${MRP_CANC_ARM:-}" MRP_OLD="${MRP_OLD_ARM:-}" \
+          MRP_AUTHTS="${MRP_AUTHTS_ARM:-}" MRP_TS="${MRP_TS_ARM:-}" \
+          MRP_STALE_ONCE="${MRP_STALE_ONCE_ARM:-}" bash "$_MRP_SELF" acme/widget 2>&1); rc=$?
     if [ "$rc" != "$wrc" ]; then _no "$lbl" "exit=$rc (want $wrc) | $(printf '%s\n' "$out" | tail -1)"; return; fi
     case "$out" in *"$need"*) : ;; *) _no "$lbl" "output lacks [$need]"; return;; esac
     if [ -n "$bad" ]; then case "$out" in *"$bad"*) _no "$lbl" "output CONTAINS the forbidden [$bad]"; return;; esac; fi
@@ -186,6 +209,89 @@ STUB
   # second); it is the disagreement between them that pins the ordering.
   MRP_CANC_ARM=two MRP_OLD_ARM=failure _arm "newest success outranks an older failure" many success "" "" 0 "red 0 · green"
   MRP_CANC_ARM=two MRP_OLD_ARM=success _arm "newest failure outranks an older success" many failure "" "" 1 "RED ON MAIN"
+  # ── THE FRESHNESS ARMS (gates-r21-w6, 2026-09-17, task-0a48c7b64d5ab0f1) ────
+  # REPRODUCED LIVE, twice, before these were written: `gh run list
+  # --workflow=elixir.yml --branch main --limit 50` served a page whose newest row
+  # was 2026-08-23T16:53Z while the REST endpoint, queried seconds later, served
+  # 2026-09-17T08:37Z. The same command repeated 3/3 immediately after returned
+  # today's rows. Nothing in the stale response says it is stale, so without this
+  # control a 25-day-old run is published as the CURRENT state of main — which is
+  # exactly what happened to elixir.yml in the r21 lane brief.
+  #
+  # THE DISCRIMINATING PAIR. One arm alone proves nothing: a rule that refused
+  # EVERY feed would pass the stale arm and be useless, and a rule that refused
+  # NONE would pass the race arm. It is their disagreement that pins the
+  # threshold. SAME inputs, only the authority's timestamp moves.
+  #   stale (25 days of lag) -> no verdict taken, bucketed unread, exit 2
+  #   race  (10 min of lag)  -> the verdict still stands, RED ON MAIN, exit 1
+  # NO `forbidden` HERE: the script prints the literal header "RED ON MAIN (0):"
+  # on every invocation, so a forbidden-string check on it fires over the tool's
+  # own prose rather than over behaviour (the same trap the cancel arms document).
+  # The exit code carries "no red was manufactured", and the arm below states it
+  # positively off the summary line.
+  MRP_AUTHTS_ARM=2026-09-17T08:37:00Z _arm "a stale feed yields no verdict" many failure "" "" 2 "STALE FEED"
+  MRP_AUTHTS_ARM=2026-09-17T08:37:00Z _arm "a stale feed manufactures no red" many failure "" "" 2 "red 0 · green 0"
+  MRP_AUTHTS_ARM=2026-01-01T00:10:00Z _arm "a seconds-scale race still reports" many failure "" "" 1 "RED ON MAIN"
+  # ...and the stale row must NAME both timestamps, or the refusal is unactionable.
+  MRP_AUTHTS_ARM=2026-09-17T08:37:00Z _arm "the stale row names both clocks" many failure "" "" 2 "authoritative REST newest is 2026-09-17T08:37:00Z"
+  # THE RETRY. A page that is stale ONCE and fresh on the re-read must yield a
+  # verdict, not a refusal — otherwise the control converts an intermittent API
+  # fault into permanent unread debt for a handful of workflows every sweep.
+  # Paired with the always-stale arm above: same control, opposite outcomes,
+  # and only the retry distinguishes them.
+  MRP_STALE_ONCE_ARM="$d/staleonce" MRP_AUTHTS_ARM=2026-09-17T08:37:00Z MRP_TS_ARM=2026-09-17T08:37:00Z \
+    _arm "a feed stale ONCE is re-read, not refused" many failure "" "" 1 "RED ON MAIN" "STALE FEED"
+  # ── THE 2H AGE ARMS (c0's actual predicate) ────────────────────────────────
+  # A bare red set cannot answer "red for more than 2 hours". These two arms are
+  # the pair: the SAME failing run, only its age moves, must reach OPPOSITE
+  # readings of the 2H PREDICATE line.
+  _arm "an ancient red is OVER-2H" many failure "" "" 1 "OVER-2H"
+  MRP_TS_ARM="$(python3 -c 'import datetime as d;print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=9)).strftime("%Y-%m-%dT%H:%M:%SZ"))')" \
+    _arm "a nine-minute red is not OVER-2H" many failure "" "" 1 "under-2h" "OVER-2H"
+  # ...and a young red must NOT falsify the 2h predicate, or every merge reds it.
+  MRP_TS_ARM="$(python3 -c 'import datetime as d;print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=9)).strftime("%Y-%m-%dT%H:%M:%SZ"))')" \
+    _arm "a young red leaves the 2h predicate TRUE" many failure "" "" 1 "2H PREDICATE: TRUE"
+  # ...while an ancient one falsifies it. Without this the arm above is satisfied
+  # by a predicate line hard-wired to TRUE.
+  _arm "an ancient red falsifies the 2h predicate" many failure "" "" 1 "2H PREDICATE: FALSE"
+  # UNREAD IS NOT A PASS. A workflow with no readable verdict has no measurable
+  # age, so the predicate must refuse rather than report TRUE over its silence.
+  MRP_CANC_ARM=only _arm "unread leaves the 2h predicate CANNOT READ" many failure "" "" 2 "2H PREDICATE: CANNOT READ"
+
+  # ── THE RED-STREAK ARMS (gates-r21f-w4) ────────────────────────────────────
+  # THE FAULT: the age used to come off the NEWEST run, so a push-triggered
+  # workflow that reds on every push reset the clock on every merge and could be
+  # red for hours while reporting `age=0h4m under-2h`. The age must be the
+  # elapsed time since the workflow last SUCCEEDED.
+  # These arms are a PAIR over MRP_OLD: the newest failure is nine minutes old in
+  # BOTH, and only what sits behind it moves. If the age still came off the
+  # newest run, both would read under-2h and the pair would be indistinguishable.
+  _MRP_YOUNG="$(python3 -c 'import datetime as d;print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=9)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+  # FIRES WHEN THE FIX IS REVERTED: a young red with an OLDER failure behind it
+  # (no success between) is an unbroken streak reaching back to 2025-12-01.
+  MRP_CANC_ARM=two MRP_OLD_ARM=failure MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "a young red on an OLD streak is OVER-2H" many failure "" "" 1 "OVER-2H" "under-2h"
+  MRP_CANC_ARM=two MRP_OLD_ARM=failure MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "an old streak falsifies the 2h predicate" many failure "" "" 1 "2H PREDICATE: FALSE"
+  # ...and the streak must be NAMED, not just folded into the age, or the lead
+  # cannot tell a long streak from a slow clock.
+  MRP_CANC_ARM=two MRP_OLD_ARM=failure MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "the streak length and start are printed" many failure "" "" 1 "streak=2x since=2025-12-01"
+  # THE QUIET ARM: the SAME young red, but a SUCCESS sits behind it. The streak is
+  # one run long, so this is a merge landing, not standing debt — it must stay
+  # under-2h and leave the predicate TRUE. Without this arm the fix above is
+  # satisfied by an age hard-wired to the oldest row in the window.
+  MRP_CANC_ARM=two MRP_OLD_ARM=success MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "a young red behind a SUCCESS stays under-2h" many failure "" "" 1 "under-2h" "OVER-2H"
+  MRP_CANC_ARM=two MRP_OLD_ARM=success MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "a one-run streak leaves the 2h predicate TRUE" many failure "" "" 1 "2H PREDICATE: TRUE"
+  MRP_CANC_ARM=two MRP_OLD_ARM=success MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "a one-run streak is named as 1x" many failure "" "" 1 "streak=1x"
+  # A WINDOW WITH NO SUCCESS AT ALL IS A FLOOR, AND MUST SAY SO. Otherwise a
+  # workflow red for a month reads as red only as far back as the 50-run page.
+  MRP_TS_ARM="$_MRP_YOUNG" \
+    _arm "an all-red window is marked FLOOR" many failure "" "" 1 "FLOOR(no success in the 50-run window)"
+
   # The tags-only partition must fire against this repo's real workflows.
   out=$(PATH="$d/bin:$PATH" MRP_FEED=many MRP_CONC=success MRP_FJOB= MRP_NOID= bash "$_MRP_SELF" acme/widget 2>&1)
   case "$out" in
@@ -225,7 +331,7 @@ fi
 echo "control: run feed sees $DISTINCT distinct workflow names on main"
 
 # --- enumerate workflows carrying a push: arm ----------------------------------
-red=0; green=0; unseen=0; total=0; na=0
+red=0; green=0; unseen=0; total=0; na=0; over2h=0
 RED_LIST=$(mktemp); UNSEEN_LIST=$(mktemp); NA_LIST=$(mktemp)
 for f in "$WF_DIR"/*.yml "$WF_DIR"/*.yaml; do
   [ -f "$f" ] || continue
@@ -295,6 +401,69 @@ PYEOF
   # 20 consecutive runs of one workflow.
   WFEED=$(gh run list --repo "$REPO" --workflow="$BASE" --branch main --limit 50 \
           --json conclusion,headSha,createdAt,status,databaseId 2>/dev/null)
+  # ── FRESHNESS CONTROL: THE FEED ITSELF CAN BE STALE ────────────────────────
+  # FOUND 2026-09-17 by gates-r21-w6 (task-0a48c7b64d5ab0f1), REPRODUCED LIVE.
+  # `gh run list --workflow=elixir.yml --branch main --limit 50` returned a page
+  # whose NEWEST row was 2026-08-23T16:53Z — TWENTY-FIVE DAYS OLD — while the
+  # authoritative REST endpoint, queried seconds later, returned runs from
+  # 2026-09-17T08:37Z. The SAME command repeated 3/3 immediately afterwards
+  # returned today's rows. It is intermittent and it is SILENT: nothing in the
+  # response says "this page is stale".
+  #
+  # WHAT THAT COST. On that stale page the newest completed rows were Aug-23
+  # cancels; the selector stepped over 43 of them, landed on 7c57c7d52
+  # (2026-08-23T14:21:58Z, RUN=success), descended to its jobs, found the
+  # ADVISORY `Format` job red, and reported elixir.yml RED ON MAIN. The lead's
+  # 08:30:32Z run of this file reported exactly that row. A twenty-five-day-old
+  # run was published as the CURRENT state of main, and every downstream reader
+  # — the hourly main-red-owner issue, the r21 lane brief, this row's own c0 —
+  # inherited it. The workflow was never red; the INSTRUMENT was.
+  #
+  # THE CONTROL. Read the workflow's newest main run from the authoritative REST
+  # endpoint and compare its timestamp against the feed's newest row. A genuine
+  # race between the two calls is SECONDS; the observed fault was 25 DAYS. More
+  # than one hour of daylight between them means the feed is stale, and a stale
+  # feed yields NO VERDICT — it is bucketed CANNOT READ, where debt accrues, and
+  # is NEVER reported red. Reporting a months-old run as today's red is strictly
+  # worse than reporting nothing, because it is indistinguishable from a real red.
+  #
+  # ASYMMETRIC ON PURPOSE: only the feed lagging the authority is a fault. The
+  # authority lagging the feed is the harmless direction (our feed is ahead), and
+  # is not flagged.
+  RETRIED=""
+  AUTHROW=$(gh api "repos/$REPO/actions/workflows/$BASE/runs?branch=main&per_page=1" 2>/dev/null)
+  AUTH_TS=$(printf '%s' "$AUTHROW" | jq -r '.workflow_runs[0].created_at // empty' 2>/dev/null)
+  FEED_TS=$(printf '%s' "$WFEED" | jq -r 'sort_by(.createdAt)|reverse|.[0].createdAt // empty' 2>/dev/null)
+  if [ -n "$AUTH_TS" ] && [ -n "$FEED_TS" ]; then
+    # jq, not python3: this runs once per workflow (55x per invocation) and the
+    # selftest runs the whole sweep ~22 times, so a python3 spawn here costs
+    # minutes. `fromdateiso8601` is exact for the Z-suffixed stamps GitHub emits.
+    LAG=$(jq -n --arg a "$AUTH_TS" --arg f "$FEED_TS" \
+          '(($a|fromdateiso8601) - ($f|fromdateiso8601))|floor' 2>/dev/null)
+    # RETRY ONCE BEFORE GIVING UP. MEASURED 2026-09-17T08:50Z on the live repo:
+    # three workflows tripped this control in a SINGLE sweep — mobile.yml (13
+    # days of lag), required-checks-drift.yml (12 days), crown-reconcile.yml
+    # (4 hours). The fault is not a rare one-off, so refusing on first sight
+    # would park a handful of workflows in the unread bucket on most runs and
+    # bury the real debt under noise. The stale page is intermittent, so one
+    # fresh request usually clears it. If the SECOND read is also stale we stop
+    # and refuse — a retry loop that keeps asking until it likes the answer is
+    # how an instrument talks itself into a verdict.
+    if [ -n "$LAG" ] && [ "$LAG" -gt 3600 ] 2>/dev/null; then
+      WFEED=$(gh run list --repo "$REPO" --workflow="$BASE" --branch main --limit 50 \
+              --json conclusion,headSha,createdAt,status,databaseId 2>/dev/null)
+      FEED_TS=$(printf '%s' "$WFEED" | jq -r 'sort_by(.createdAt)|reverse|.[0].createdAt // empty' 2>/dev/null)
+      LAG=$(jq -n --arg a "$AUTH_TS" --arg f "${FEED_TS:-1970-01-01T00:00:00Z}" \
+            '(($a|fromdateiso8601) - ($f|fromdateiso8601))|floor' 2>/dev/null)
+      RETRIED=" (re-read once; still stale)"
+    fi
+    if [ -n "$LAG" ] && [ "$LAG" -gt 3600 ] 2>/dev/null; then
+      unseen=$((unseen+1))
+      printf '%s\tSTALE FEED — no verdict taken: run-list newest is %s but the authoritative REST newest is %s (%ss of lag). A stale page is NOT a verdict.\n' \
+        "$BASE" "$FEED_TS" "$AUTH_TS" "$LAG${RETRIED:-}" >> "$UNSEEN_LIST"
+      continue
+    fi
+  fi
   ROW=$(printf '%s' "$WFEED" \
         | jq -r '[.[]|select(.status=="completed" and (.conclusion|IN("success","failure","timed_out","startup_failure")))]
                  | sort_by(.createdAt) | reverse | .[0] // empty')
@@ -313,7 +482,7 @@ PYEOF
     # No run ever CONCLUDED a verdict on main. Distinguish structural absence (no
     # run was created) from destroyed verdicts (runs exist, all cancelled), the
     # same way the `*)` arm used to.
-    TC=$(gh api "repos/$REPO/actions/workflows/$BASE/runs?branch=main&per_page=1" --jq '.total_count' 2>/dev/null)
+    TC=$(printf '%s' "$AUTHROW" | jq -r '.total_count // empty' 2>/dev/null)
     CN=$(printf '%s' "$WFEED" | jq -r '[.[]|select(.conclusion=="cancelled")]|length' 2>/dev/null)
     unseen=$((unseen+1))
     if [ "${CN:-0}" -gt 0 ] 2>/dev/null; then
@@ -358,7 +527,61 @@ PYEOF
   fi
   case "$CONC" in
     failure|timed_out|startup_failure)
-      red=$((red+1)); printf '%s\t%s\t%s\t%s%s%s\n' "$CONC" "$SHA" "$WHEN" "$BASE" "$LAUNDERED" "$EVICTED" >> "$RED_LIST";;
+      # AGE IS PART OF THE VERDICT (task-0a48c7b64d5ab0f1 c0). "No workflow has
+      # been red on its newest completed run for more than 2 hours" cannot be
+      # evaluated from a bare red set: a red four minutes old is a merge landing,
+      # a red four hours old is an unowned standing failure. Emit the age so the
+      # 2h predicate is READ OFF THIS OUTPUT rather than recomputed by every
+      # consumer. Printed even when the age cannot be computed, as `age=?`, so an
+      # unreadable clock is never silently rendered as a young red.
+      # THE AGE OF WHAT, THOUGH -- see the streak block immediately below.
+      # ── THE AGE IS THE RED STREAK, NOT THE LATEST RUN ────────────────────────
+      # FOUND 2026-09-18 (gates-r21f-w4). This block used to age `$WHEN`, the
+      # createdAt of the NEWEST run. For a push-triggered workflow that reds on
+      # EVERY push, every merge to main starts a fresh run, so the clock RESET on
+      # each merge and the 2h predicate could never trip no matter how long the
+      # workflow had been broken.
+      # SPECIMEN: `stale-verdict-watch` reported `age=0h4m under-2h` while it had
+      # been red continuously since 22:17:43Z — ~3h20m, ~17 consecutive failures,
+      # ZERO greens in between. `cli-release-cadence` and `doc-gates` carry the
+      # same exposure. Only a rare-trigger workflow (`scaffy-catalog-drift`,
+      # 8h45m) ever accumulated age under the old logic — i.e. the predicate
+      # measured TRIGGER FREQUENCY and called it health.
+      # THE FIX: age the UNBROKEN RED STREAK — walk the verdict rows newest-first
+      # and stop at the first `success`; the oldest row before that success is
+      # when the workflow last worked. The 2h threshold is UNCHANGED.
+      # TWO DELIBERATE FLOORS, both annotated rather than hidden:
+      #   * the streak is walked on RUN conclusions only. A laundered green
+      #     (RUN=success over a failing job) inside the streak ends the walk
+      #     early, so the streak is a floor, never an overcount. Descending jobs
+      #     for 50 rows x 55 workflows is not affordable here.
+      #   * if the whole 50-row window is red with no success, the streak reaches
+      #     only as far back as the window and is marked FLOOR.
+      STREAK_JSON=$(printf '%s' "$WFEED" | jq -c '
+        [.[]|select(.status=="completed" and (.conclusion|IN("success","failure","timed_out","startup_failure")))]
+        | sort_by(.createdAt) | reverse
+        | (map(.conclusion=="success")|index(true)) as $i
+        | (if $i == null then . else .[0:$i] end) as $streak
+        | {truncated: ($i == null), n: ($streak|length), oldest: ($streak[-1].createdAt // null)}' 2>/dev/null)
+      STREAK_WHEN=$(printf '%s' "$STREAK_JSON" | jq -r '.oldest // empty' 2>/dev/null)
+      STREAK_N=$(printf '%s' "$STREAK_JSON" | jq -r '.n // empty' 2>/dev/null)
+      # FAIL TOWARD THE OLD READING, NOT TOWARD SILENCE: an unreadable streak
+      # falls back to the newest run's own timestamp, which is what this block
+      # did before. It can only ever UNDER-report age, never invent one.
+      [ -n "$STREAK_WHEN" ] || { STREAK_WHEN="$WHEN"; STREAK_N="${STREAK_N:-1}"; }
+      STREAK=" streak=${STREAK_N:-1}x since=${STREAK_WHEN}"
+      if [ "$(printf '%s' "$STREAK_JSON" | jq -r '.truncated' 2>/dev/null)" = "true" ]; then
+        STREAK="$STREAK FLOOR(no success in the 50-run window)"
+      fi
+      AGE_S=$(jq -n --arg w "$STREAK_WHEN" '(now - ($w|fromdateiso8601))|floor' 2>/dev/null)
+      if [ -n "$AGE_S" ] && [ "$AGE_S" -ge 0 ] 2>/dev/null; then
+        AGE_H=$(( AGE_S / 3600 )); AGE_M=$(( (AGE_S % 3600) / 60 ))
+        if [ "$AGE_S" -gt 7200 ]; then AGE=" age=${AGE_H}h${AGE_M}m OVER-2H"; over2h=$((over2h+1))
+        else AGE=" age=${AGE_H}h${AGE_M}m under-2h"; fi
+      else
+        AGE=" age=? UNREADABLE-CLOCK"; over2h=$((over2h+1))
+      fi
+      red=$((red+1)); printf '%s\t%s\t%s\t%s%s%s%s%s\n' "$CONC" "$SHA" "$WHEN" "$BASE" "$AGE" "$STREAK" "$LAUNDERED" "$EVICTED" >> "$RED_LIST";;
     success)
       # THE NO-DESCENT WARNING MUST FIRE ON GREEN TOO. Found by gates-r19-w11 while
       # vendoring this file, measured with a control: NOID+success -> green 53, exit 0,
@@ -393,6 +616,16 @@ echo "N/A — TAGS-ONLY push arm, a main run is structurally impossible ($na):"
 [ -s "$NA_LIST" ] && sort "$NA_LIST" | sed 's/^/  /' || echo "  (none)"
 echo
 echo "branch-driven push workflows = $total · red $red · green $green · unread $unseen · n/a $na"
+# THE 2H PREDICATE, STATED AS A LINE A WATCHER CAN GREP. An unread workflow is
+# NOT a pass: it is a workflow whose age we could not measure, so it can never
+# satisfy "has not been red for more than 2 hours".
+if [ "$over2h" -gt 0 ]; then
+  echo "2H PREDICATE: FALSE -- $over2h workflow(s) red for more than 2 hours (or with an unreadable clock)"
+elif [ "$unseen" -gt 0 ]; then
+  echo "2H PREDICATE: CANNOT READ -- $unseen workflow(s) have no readable verdict; absence is not a pass"
+else
+  echo "2H PREDICATE: TRUE -- 0 of $total branch-driven push workflows red for more than 2 hours"
+fi
 if [ "$total" -lt 5 ]; then
   echo "CANNOT READ: only $total workflow(s) carried a push: arm — this measures nothing"; exit 4
 fi

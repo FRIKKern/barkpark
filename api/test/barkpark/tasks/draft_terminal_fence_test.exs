@@ -56,6 +56,7 @@ defmodule Barkpark.Tasks.DraftTerminalFenceTest do
   defp content(extra) do
     %{
       "kind" => "task",
+      "brief" => Barkpark.TaskBriefFixtures.brief(),
       "lifecycle_status" => "open",
       "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
     }
@@ -164,34 +165,50 @@ defmodule Barkpark.Tasks.DraftTerminalFenceTest do
     assert doc.content["lifecycle_status"] == "blocked"
   end
 
+  # THE FIXTURE MUST REACH THE NAMED CLAUSE. Publishing CONSUMES the draft, so a
+  # write straight after the publish is a BIRTH (`prev_doc == nil`) and the
+  # birth exemption three clauses earlier already returns `:ok` — delete
+  # `published_twin?/3` and this test still passed. Re-cut the draft at `open`
+  # FIRST: now `prev_doc` is a live `open` draft, the write carries no close
+  # provenance, `doc_id` IS a draft, and `open != cancelled`, so
+  # `published_twin?/3` is the ONLY clause that can exempt it.
   test "a draft WITH a published twin is not fenced here — the publish door owns it",
        %{scope: scope} do
     draft_only!("dtf-twin", scope)
     {:ok, _pub} = Content.publish_document("dtf-twin", "task", @dataset, scope)
 
+    # Re-cut the draft so the cancelling write below is a MOVE, not a birth.
+    {:ok, redraft} = write("dtf-twin", %{}, scope)
+
+    assert redraft.content["lifecycle_status"] == "open",
+           "the re-cut draft is not at `open`, so the cancelling write below would " <>
+             "take the birth or same-to-same exemption and `published_twin?/3` would " <>
+             "go unmeasured"
+
     assert {:ok, doc} = write("dtf-twin", %{"lifecycle_status" => "cancelled"}, scope)
     assert doc.content["lifecycle_status"] == "cancelled"
   end
 
+  # THE FIXTURE MUST REACH THE NAMED CLAUSE. Both writes used to carry
+  # `close_reason`, so `close_provenance?/1` — two clauses EARLIER — already
+  # returned `:ok`: delete the same-to-same clause and this test still passed.
+  # The row is now born `cancelled` with NO provenance (the birth exemption
+  # lands it), and the patch below carries none either, so `previous_status ==
+  # now` is the ONLY clause left that can exempt it.
   test "same → same: an already-cancelled draft can still be patched on other fields",
        %{scope: scope} do
-    draft_only!("dtf-samesame", scope)
+    {:ok, born} = write("dtf-samesame", %{"lifecycle_status" => "cancelled"}, scope)
 
-    {:ok, _} =
-      write(
-        "dtf-samesame",
-        %{"lifecycle_status" => "cancelled", "close_reason" => "created for probe"},
-        scope
-      )
+    assert born.content["lifecycle_status"] == "cancelled"
+
+    refute Map.has_key?(born.content, "close_reason"),
+           "the fixture carries close provenance, so `close_provenance?/1` would " <>
+             "exempt the patch below and the same-to-same clause would go unmeasured"
 
     assert {:ok, doc} =
              write(
                "dtf-samesame",
-               %{
-                 "lifecycle_status" => "cancelled",
-                 "close_reason" => "created for probe",
-                 "priority" => 3
-               },
+               %{"lifecycle_status" => "cancelled", "priority" => 3},
                scope
              )
 

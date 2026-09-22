@@ -6214,321 +6214,18 @@
         },
         {
           "type": "text",
-          "value": ":"
-        }
-      ]
-    },
-    {
-      "id": "b63",
-      "type": "list",
-      "ordered": true,
-      "items": [
-        [
-          {
-            "type": "text",
-            "value": "sobelow",
-            "marks": [
-              "code",
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " job",
-            "marks": [
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " — Phoenix-aware static analysis (XSS.Raw / SendResp,"
-          },
-          {
-            "type": "text",
-            "value": " SQL injection, unsafe "
-          },
-          {
-            "type": "text",
-            "value": "String.to_atom",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": ", missing CSRF/CSP, hardcoded secrets,"
-          },
-          {
-            "type": "text",
-            "value": " "
-          },
-          {
-            "type": "text",
-            "value": "binary_to_term",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": ", directory traversal…). "
-          },
-          {
-            "type": "text",
-            "value": "Advisory",
-            "marks": [
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " (`continue-on-error:"
-          },
-          {
-            "type": "text",
-            "value": " true`) because the reviewed baseline is not drained — see the amended flip"
-          },
-          {
-            "type": "text",
-            "value": " verdict below. What "
-          },
-          {
-            "type": "text",
-            "value": "is",
-            "marks": [
-              "em"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " unstable is the"
-          },
-          {
-            "type": "text",
-            "value": " "
-          },
-          {
-            "type": "text",
-            "value": "line number",
-            "marks": [
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": ", which is inside the hash: a pure renumber invalidates every"
-          },
-          {
-            "type": "text",
-            "value": " waiver in the file. That is a reason to migrate waivers to AST-bound inline"
-          },
-          {
-            "type": "text",
-            "value": " annotations, not a reason to stay advisory."
-          },
-          {
-            "type": "text",
-            "value": " "
-          },
-          {
-            "type": "text",
-            "value": "mix sobelow --skip --exit Low",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " reads the reviewed "
-          },
-          {
-            "type": "text",
-            "value": "api/.sobelow-skips",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " baseline and reds on a fresh unskipped finding. CI also runs a pinned"
-          },
-          {
-            "type": "text",
-            "value": " Elixir 1.18.1/OTP27 reconcile in the only safe order: "
-          },
-          {
-            "type": "text",
-            "value": "--clear-skip",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": ", then"
-          },
-          {
-            "type": "text",
-            "value": " "
-          },
-          {
-            "type": "text",
-            "value": "--mark-skip-all",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": "; it uploads the regenerated baseline and diff as an"
-          },
-          {
-            "type": "text",
-            "value": " artifact for human review. CI never auto-commits it, and a developer-box"
-          },
-          {
-            "type": "text",
-            "value": " regeneration must never be committed. After review, a separate change may"
-          },
-          {
-            "type": "text",
-            "value": " update the tracked baseline. The fresh-finding guard plants a non-controller"
-          },
-          {
-            "type": "text",
-            "value": " "
-          },
-          {
-            "type": "text",
-            "value": "String.to_atom",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " call and requires Sobelow to exit 1, preventing blanket"
-          },
-          {
-            "type": "text",
-            "value": " suppression while the job remains advisory."
-          }
-        ]
-      ]
-    },
-    {
-      "id": "b64",
-      "type": "paragraph",
-      "content": [
+          "value": " — items "
+        },
         {
           "type": "text",
-          "value": "Flip verdict 2026-07-21 — STAY ADVISORY",
+          "value": "9 (",
           "marks": [
             "strong"
           ]
         },
         {
           "type": "text",
-          "value": ", and "
-        },
-        {
-          "type": "text",
-          "value": "amended 2026-07-28 (D139)",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " because the precondition as first written was unsatisfiable. History: "
-        },
-        {
-          "type": "link",
-          "href": "merge-gates-history.md#the-sobelow-flip-precondition-as-first-written",
-          "children": [
-            {
-              "type": "text",
-              "value": "merge-gates-history.md"
-            }
-          ]
-        },
-        {
-          "type": "text",
-          "value": "."
-        }
-      ]
-    },
-    {
-      "id": "b65",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "Live count — RE-DERIVE, never quote.",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " The count is drained by every annotation wave, so any number written here is stale on arrival. Run:"
-        }
-      ]
-    },
-    {
-      "id": "b66",
-      "type": "code",
-      "value": "   $ grep -c '^[A-Za-z]' api/.sobelow-skips\n   $ grep '^[A-Za-z]' api/.sobelow-skips | sed 's/:.*//' | sort | uniq -c | sort -rn"
-    },
-    {
-      "id": "b67",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "History: "
-        },
-        {
-          "type": "link",
-          "href": "merge-gates-history.md#sobelow-baseline-and-floor-derivations-2026-07-28-onward",
-          "children": [
-            {
-              "type": "text",
-              "value": "merge-gates-history.md"
-            }
-          ]
-        },
-        {
-          "type": "text",
-          "value": "."
-        }
-      ]
-    },
-    {
-      "id": "b68",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "Amended precondition — the floor is 9, not 0.",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " The flip is gated on the baseline holding "
-        },
-        {
-          "type": "text",
-          "value": "ONLY entries that provably cannot carry an inline ",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": "# sobelow_skip",
+          "value": "sobelow",
           "marks": [
             "code",
             "strong"
@@ -6536,51 +6233,7 @@
         },
         {
           "type": "text",
-          "value": " annotation",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": ", enumerated by type and count. The floor is a property of sobelow 0.14.1's architecture, not of the baseline's size: it is "
-        },
-        {
-          "type": "text",
-          "value": "9",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " today, out of the baseline that "
-        },
-        {
-          "type": "text",
-          "value": "grep -c '^[A-Za-z]' api/.sobelow-skips",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " prints — "
-        },
-        {
-          "type": "text",
-          "value": "35",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " rows read at a333e4b58 on 2026-09-11, a dated snapshot and not a live fact — in two mechanical classes. Derive both numbers rather than quoting this paragraph — it said "
-        },
-        {
-          "type": "text",
-          "value": "10",
+          "value": ")",
           "marks": [
             "strong"
           ]
@@ -6591,251 +6244,54 @@
         },
         {
           "type": "text",
-          "value": "8",
+          "value": "10 (",
           "marks": [
             "strong"
           ]
         },
         {
           "type": "text",
-          "value": " until 2026-09-01, having predicted its own decay two paragraphs down and never been re-derived after the fix landed:"
-        }
-      ]
-    },
-    {
-      "id": "b69",
-      "type": "table",
-      "head": [
-        [
-          {
-            "type": "text",
-            "value": "Class"
-          }
-        ],
-        [
-          {
-            "type": "text",
-            "value": "Count"
-          }
-        ],
-        [
-          {
-            "type": "text",
-            "value": "Entries"
-          }
-        ],
-        [
-          {
-            "type": "text",
-            "value": "Why no annotation can ever reach it"
-          }
-        ]
-      ],
-      "rows": [
-        [
-          [
-            {
-              "type": "text",
-              "value": "Sobelow.Config.*",
-              "marks": [
-                "code"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "7",
-              "marks": [
-                "strong"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "6 "
-            },
-            {
-              "type": "text",
-              "value": "Config.CSRF",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " + 1 "
-            },
-            {
-              "type": "text",
-              "value": "Config.HTTPS",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " ("
-            },
-            {
-              "type": "text",
-              "value": "config/prod.exs:0",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": ")"
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "Config findings are produced outside the "
-            },
-            {
-              "type": "text",
-              "value": "def_funs |> combine_skips()",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " pipeline, so "
-            },
-            {
-              "type": "text",
-              "value": "@sobelow_skip",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " is never consulted; "
-            },
-            {
-              "type": "text",
-              "value": "config/prod.exs:0",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " has no function to annotate at all."
-            }
+          "value": "mix-audit",
+          "marks": [
+            "code",
+            "strong"
           ]
-        ],
-        [
-          [
-            {
-              "type": "text",
-              "value": ".heex",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " "
-            },
-            {
-              "type": "text",
-              "value": "XSS.Raw",
-              "marks": [
-                "code"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "2",
-              "marks": [
-                "strong"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "layouts/bulldocs.html.heex:95",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": ", "
-            },
-            {
-              "type": "text",
-              "value": "layouts/quiz.html.heex:21",
-              "marks": [
-                "code"
-              ]
-            }
-          ],
-          [
-            {
-              "type": "text",
-              "value": "Parse.get_meta_template_funs/1",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " bypasses the reader that rewrites "
-            },
-            {
-              "type": "text",
-              "value": "# sobelow_skip",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": " into "
-            },
-            {
-              "type": "text",
-              "value": "@sobelow_skip",
-              "marks": [
-                "code"
-              ]
-            },
-            {
-              "type": "text",
-              "value": ", so a template's source never sees the substitution."
-            }
-          ]
-        ]
-      ]
-    },
-    {
-      "id": "b70",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "The "
         },
         {
           "type": "text",
-          "value": ".heex",
+          "value": ")",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " of this page’s roster. Their policy of record moved out to "
+        },
+        {
+          "type": "link",
+          "href": "security-gates.md",
+          "children": [
+            {
+              "type": "text",
+              "value": "security-gates.md"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "value": " under its own "
+        },
+        {
+          "type": "text",
+          "value": "canonical-for",
           "marks": [
             "code"
           ]
         },
         {
           "type": "text",
-          "value": " line numbers are part of each row's fingerprint, so read them off "
+          "value": ": the reviewed "
         },
         {
           "type": "text",
@@ -6846,617 +6302,7 @@
         },
         {
           "type": "text",
-          "value": ", never from memory — this table has carried a wrong one."
-        }
-      ]
-    },
-    {
-      "id": "b71",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "The third "
-        },
-        {
-          "type": "text",
-          "value": "XSS.Raw",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " entry ("
-        },
-        {
-          "type": "text",
-          "value": "controllers/error_html.ex:25",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": ") is a normal "
-        },
-        {
-          "type": "text",
-          "value": ".ex",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " function and "
-        },
-        {
-          "type": "text",
-          "value": "is",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " annotatable — it is not part of the floor. Re-evaluate the flip when the baseline contains nothing but those 9; do not re-evaluate on \"reaches 0\", which cannot happen."
-        }
-      ]
-    },
-    {
-      "id": "b72",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "The floor holds only while the findings still exist.",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " It is a count of "
-        },
-        {
-          "type": "text",
-          "value": "unannotatable",
-          "marks": [
-            "em"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " findings, not of "
-        },
-        {
-          "type": "text",
-          "value": "unfixable",
-          "marks": [
-            "em"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " ones — fixing the underlying code removes a row from the floor. Re-derive the floor from "
-        },
-        {
-          "type": "text",
-          "value": "api/.sobelow-skips",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " after any such fix; it is never a constant."
-        }
-      ]
-    },
-    {
-      "id": "b73",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "Topology: the S4 objection is DEAD as of wave 10 — one blocker remains.",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " This entry used to conclude \"no "
-        },
-        {
-          "type": "text",
-          "value": "security.yml",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " check can be required\", on two successive arguments that are both now retired. The first rested on \""
-        },
-        {
-          "type": "text",
-          "value": "main",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " has no branch protection\" — "
-        },
-        {
-          "type": "text",
-          "value": "false since 2026-07-28",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": ": protection is live with "
-        },
-        {
-          "type": "text",
-          "value": "enforce_admins: true",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " and the tracked file carries "
-        },
-        {
-          "type": "text",
-          "value": "\"enforced\": true",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": ". (Trap worth keeping: "
-        },
-        {
-          "type": "text",
-          "value": "gh api …/rulesets",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " → "
-        },
-        {
-          "type": "text",
-          "value": "[]",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " is a TRUE reading that produces the WRONG conclusion, because this repo's protection is not a ruleset.) The second rested on "
-        },
-        {
-          "type": "text",
-          "value": "S4",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": ", and wave 10 paid it:"
-        }
-      ]
-    },
-    {
-      "id": "b74",
-      "type": "list",
-      "ordered": false,
-      "items": [
-        [
-          {
-            "type": "text",
-            "value": "- "
-          },
-          {
-            "type": "text",
-            "value": "security.yml",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " "
-          },
-          {
-            "type": "text",
-            "value": "no longer carries a workflow-level ",
-            "marks": [
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": "paths:",
-            "marks": [
-              "code",
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " key",
-            "marks": [
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " on either"
-          },
-          {
-            "type": "text",
-            "value": " trigger, so it renders a check run on every head. Path decisions moved to"
-          },
-          {
-            "type": "text",
-            "value": " JOB level behind an always-running "
-          },
-          {
-            "type": "text",
-            "value": "changes",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " dispatcher — the elixir.yml /"
-          },
-          {
-            "type": "text",
-            "value": " console-harness.yml shim, transplanted. A job skipped by a job-level "
-          },
-          {
-            "type": "text",
-            "value": "if:",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " still publishes a "
-          },
-          {
-            "type": "text",
-            "value": "skipped",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " check run, and GitHub counts "
-          },
-          {
-            "type": "text",
-            "value": "skipped",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " as"
-          },
-          {
-            "type": "text",
-            "value": " satisfying a required context."
-          }
-        ],
-        [
-          {
-            "type": "text",
-            "value": "- The registrable name is "
-          },
-          {
-            "type": "text",
-            "value": "Security gate",
-            "marks": [
-              "code",
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": ": unmatrixed, "
-          },
-          {
-            "type": "text",
-            "value": "if: always()",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": ", and"
-          },
-          {
-            "type": "text",
-            "value": " it ASSERTS over every upstream result rather than echoing them."
-          }
-        ],
-        [
-          {
-            "type": "text",
-            "value": "- "
-          },
-          {
-            "type": "text",
-            "value": "sobelow",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " is deliberately "
-          },
-          {
-            "type": "text",
-            "value": "NOT in that aggregator's ",
-            "marks": [
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": "needs",
-            "marks": [
-              "code",
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": ". Measured: a"
-          },
-          {
-            "type": "text",
-            "value": " "
-          },
-          {
-            "type": "text",
-            "value": "continue-on-error: true",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " job that exits 1 concludes FAILURE and renders a"
-          },
-          {
-            "type": "text",
-            "value": " RED check run while "
-          },
-          {
-            "type": "text",
-            "value": "needs.<job>.result",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " reads "
-          },
-          {
-            "type": "text",
-            "value": "success",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " — byte-identical to"
-          },
-          {
-            "type": "text",
-            "value": " a genuine pass, and undecomposable, because the information is destroyed"
-          },
-          {
-            "type": "text",
-            "value": " before the aggregator's shell starts. There is no honest \"tolerate sobelow\""
-          },
-          {
-            "type": "text",
-            "value": " branch to write, so its own red check run is the only truthful signal it"
-          },
-          {
-            "type": "text",
-            "value": " has. "
-          },
-          {
-            "type": "text",
-            "value": "scripts/security-gate-shape.test.sh",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " forces this shape (deriving the"
-          },
-          {
-            "type": "text",
-            "value": " continue-on-error set FROM the workflow, so it self-corrects the day Sobelow"
-          },
-          {
-            "type": "text",
-            "value": " becomes blocking), and the unfiltered "
-          },
-          {
-            "type": "text",
-            "value": "gate-shape",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " job runs it on every head."
-          }
-        ],
-        [
-          {
-            "type": "text",
-            "value": "- **The remaining blocker is not topology, and it is no longer a live red"
-          },
-          {
-            "type": "text",
-            "value": " either — it is that "
-          },
-          {
-            "type": "text",
-            "value": "mix-audit",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " reads a LIVE advisory database.** History: "
-          },
-          {
-            "type": "link",
-            "href": "merge-gates-history.md#the-mix-audit-blocker-retracted",
-            "children": [
-              {
-                "type": "text",
-                "value": "merge-gates-history.md"
-              }
-            ]
-          },
-          {
-            "type": "text",
-            "value": ". The standing ground is forward-looking: a CVE published"
-          },
-          {
-            "type": "text",
-            "value": " tomorrow reds "
-          },
-          {
-            "type": "text",
-            "value": "Security gate",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " on every open PR with no change to this repo,"
-          },
-          {
-            "type": "text",
-            "value": " a permanently correct red no PR can clear, which is what branch protection"
-          },
-          {
-            "type": "text",
-            "value": " must never pin. Registering it needs its own wave — a written policy for"
-          },
-          {
-            "type": "text",
-            "value": " who clears a fleet-wide advisory red, plus a fresh"
-          },
-          {
-            "type": "text",
-            "value": " "
-          },
-          {
-            "type": "text",
-            "value": "scripts/registration-deadlock-sweep.sh",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " — not a silent promotion by the"
-          },
-          {
-            "type": "text",
-            "value": " next regeneration."
-          }
-        ]
-      ]
-    },
-    {
-      "id": "b75",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "So flipping "
-        },
-        {
-          "type": "text",
-          "value": "continue-on-error: true",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " → "
-        },
-        {
-          "type": "text",
-          "value": "false",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " on "
-        },
-        {
-          "type": "text",
-          "value": "sobelow",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " now DOES change the picture: the shape ratchet immediately demands it be added to the aggregator's "
-        },
-        {
-          "type": "text",
-          "value": "needs",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": ", and from then on a Sobelow regression reds "
+          "value": " baseline, the amended flip precondition and the 9-entry unannotatable floor, the "
         },
         {
           "type": "text",
@@ -7467,277 +6313,40 @@
         },
         {
           "type": "text",
-          "value": ". That is a consequence to intend, not a side effect to discover."
-        }
-      ]
-    },
-    {
-      "id": "b76",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "Sobelow's greenness therefore is not a branch-protection concern — it is still a real one.",
-          "marks": [
-            "strong"
-          ]
+          "value": " aggregator’s shape and why "
         },
         {
           "type": "text",
-          "value": " A permanently-red regression gate cannot report a regression: while it is red for residue, a genuinely new insecure pattern is indistinguishable from an old one. That is the reason to drain it, and the only honest one."
-        }
-      ]
-    },
-    {
-      "id": "b77",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "History: "
-        },
-        {
-          "type": "link",
-          "href": "merge-gates-history.md#provenance-d75-is-a-dangling-citation",
-          "children": [
-            {
-              "type": "text",
-              "value": "merge-gates-history.md"
-            }
-          ]
-        },
-        {
-          "type": "text",
-          "value": "."
-        }
-      ]
-    },
-    {
-      "id": "b78",
-      "type": "list",
-      "ordered": true,
-      "items": [
-        [
-          {
-            "type": "text",
-            "value": "mix-audit",
-            "marks": [
-              "code",
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " job",
-            "marks": [
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " — dependency CVE scan ("
-          },
-          {
-            "type": "text",
-            "value": "mix deps.audit",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": ", the "
-          },
-          {
-            "type": "text",
-            "value": "mix_audit",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " dep) over "
-          },
-          {
-            "type": "text",
-            "value": "mix.lock",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": ". "
-          },
-          {
-            "type": "text",
-            "value": "Blocking",
-            "marks": [
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " (no "
-          },
-          {
-            "type": "text",
-            "value": "continue-on-error",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": "). The 8"
-          },
-          {
-            "type": "text",
-            "value": " pre-existing CVEs were remediated by a version bump (task-726cab56d9a84551),"
-          },
-          {
-            "type": "text",
-            "value": " NOT by accepting them: mint 1.7.1→1.9.1 (×4 advisories), postgrex"
-          },
-          {
-            "type": "text",
-            "value": " 0.22.0→0.22.3, phoenix 1.8.5→1.8.9, decimal 2.3.0→3.1.1 (the last needed"
-          },
-          {
-            "type": "text",
-            "value": " ecto 3.13.5→3.13.6 + ex_json_schema 0.11.2→0.11.5 to relax decimal to"
-          },
-          {
-            "type": "text",
-            "value": " "
-          },
-          {
-            "type": "text",
-            "value": "~> 3.0",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": "). The 8th — "
-          },
-          {
-            "type": "text",
-            "value": "esaml GHSA-4g2h-vm7x-747c",
-            "marks": [
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " (XXE, local-file"
-          },
-          {
-            "type": "text",
-            "value": " disclosure/SSRF) — has "
-          },
-          {
-            "type": "text",
-            "value": "no upstream fix",
-            "marks": [
-              "strong"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " (every release ≤ 4.6.0 is"
-          },
-          {
-            "type": "text",
-            "value": " affected), so it is the single "
-          },
-          {
-            "type": "text",
-            "value": "--ignore-advisory-ids GHSA-4g2h-vm7x-747c",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " suppression in the audit step, justified because OTP 27+ neutralises the XXE"
-          },
-          {
-            "type": "text",
-            "value": " (xmerl disables external entities by default) and both CI (OTP 27.0) and"
-          },
-          {
-            "type": "text",
-            "value": " prod run OTP 27+. Every OTHER CVE must be fixed by a bump — never ignored."
-          },
-          {
-            "type": "text",
-            "value": " Protective proof: "
-          },
-          {
-            "type": "text",
-            "value": "mix deps.audit",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " exits 1 on the pre-bump lock and on any"
-          },
-          {
-            "type": "text",
-            "value": " new CVE; drop the esaml id the moment upstream ships a patch. To suppress"
-          },
-          {
-            "type": "text",
-            "value": " additional accepted advisories, mix_audit also takes "
-          },
-          {
-            "type": "text",
-            "value": "--ignore-file <path>",
-            "marks": [
-              "code"
-            ]
-          },
-          {
-            "type": "text",
-            "value": " (advisory IDs, one per line)."
-          }
-        ]
-      ]
-    },
-    {
-      "id": "b79",
-      "type": "paragraph",
-      "content": [
-        {
-          "type": "text",
-          "value": "Both deps are "
-        },
-        {
-          "type": "text",
-          "value": "only: [:dev, :test], runtime: false",
+          "value": "sobelow",
           "marks": [
             "code"
           ]
         },
         {
           "type": "text",
-          "value": " in "
+          "value": " is deliberately not in its "
         },
         {
           "type": "text",
-          "value": "api/mix.exs",
+          "value": "needs:",
           "marks": [
             "code"
           ]
         },
         {
           "type": "text",
-          "value": " — analysis tooling that never ships in the release."
+          "value": ", and the single esaml "
+        },
+        {
+          "type": "text",
+          "value": "--ignore-advisory-ids",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " suppression. Nothing was retired — the split was made because this page was 5 bytes under its 64000B cap and the remedy for overflow is to split, never to raise the cap. Read the two gates’ strengths there, not from memory."
         }
       ]
     },
@@ -8380,7 +6989,7 @@
       "id": "b97",
       "type": "heading",
       "level": 3,
-      "text": "The doc-gates roster (it is not two scripts — it is twenty-six)"
+      "text": "The doc-gates roster (it is not two scripts)"
     },
     {
       "id": "b98",
@@ -8410,7 +7019,7 @@
         },
         {
           "type": "text",
-          "value": "26 steps labelled ",
+          "value": "28 steps labelled ",
           "marks": [
             "strong"
           ]
@@ -8425,7 +7034,7 @@
         },
         {
           "type": "text",
-          "value": " plus 8 "
+          "value": " plus 10 "
         },
         {
           "type": "text",
@@ -8623,36 +7232,14 @@
       "content": [
         {
           "type": "text",
-          "value": "(The count read 17 until 2026-08-07 — "
-        },
-        {
-          "type": "text",
-          "value": "Never-cancel-main concurrency ratchet",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " and "
-        },
-        {
-          "type": "text",
-          "value": "Nil-polarity fail-closed gate",
-          "marks": [
-            "code"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " were missing from the table below. The 26 is derived by running, not transcribed:"
+          "value": "(The count read 17 until 2026-08-07, two steps short; it read 26 until #18707 added the doc-drift pair. The 28 is derived by running, not transcribed:"
         }
       ]
     },
     {
       "id": "b102",
       "type": "code",
-      "value": "grep -cE '^[[:space:]]*- name: .*\\(fails this job\\)' .github/workflows/doc-gates.yml   # → 26\ngrep -cE '^[[:space:]]*- name: .*\\(tripwire\\)'        .github/workflows/doc-gates.yml   # → 8"
+      "value": "grep -cE '^[[:space:]]*- name: .*\\(fails this job\\)' .github/workflows/doc-gates.yml\ngrep -cE '^[[:space:]]*- name: .*\\(tripwire\\)'        .github/workflows/doc-gates.yml"
     },
     {
       "id": "b103",
@@ -9672,6 +8259,104 @@
               "value": " self-test step; shrink-only counts of text-keyed inline leaves and malformed widget items per in-repo paper corpus, with a non-vacuity floor that REFUSES rather than greens)"
             }
           ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "27"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Doc drift — links, routes, placeholders, runnable examples"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "scripts/doc-drift-check.sh",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " (+ its "
+            },
+            {
+              "type": "text",
+              "value": "(tripwire)",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " self-test step; diff-scoped, landed by #18707 — see "
+            },
+            {
+              "type": "text",
+              "value": "When your PR touches a doc",
+              "marks": [
+                "em"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " below)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "28"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Charter-corpus marker hygiene"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "scripts/charter-corpus-hygiene-check.sh",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " ("
+            },
+            {
+              "type": "text",
+              "value": "--selftest",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": ", then the check) over the "
+            },
+            {
+              "type": "text",
+              "value": ".claude/workflows/*-charter.md",
+              "marks": [
+                "code"
+              ]
+            },
+            {
+              "type": "text",
+              "value": " corpus"
+            }
+          ]
         ]
       ]
     },
@@ -9715,7 +8400,7 @@
         },
         {
           "type": "text",
-          "value": " gates a fixed 31-row byte table (pinned by "
+          "value": " gates a hand-written byte table (pinned by "
         },
         {
           "type": "text",
@@ -9726,7 +8411,7 @@
         },
         {
           "type": "text",
-          "value": "), the 7 "
+          "value": " — re-derive the row count from the script, it moves), the 7 "
         },
         {
           "type": "text",
@@ -9737,7 +8422,7 @@
         },
         {
           "type": "text",
-          "value": ", and the pinned "
+          "value": ", the pinned "
         },
         {
           "type": "text",
@@ -9748,7 +8433,40 @@
         },
         {
           "type": "text",
-          "value": " onramp span — nothing else. Under "
+          "value": " onramp span, "
+        },
+        {
+          "type": "text",
+          "value": "and every other spine doc by HEADER DISCOVERY",
+          "marks": [
+            "strong"
+          ]
+        },
+        {
+          "type": "text",
+          "value": ": a declared "
+        },
+        {
+          "type": "text",
+          "value": "budget: Ntok",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " is enforced as "
+        },
+        {
+          "type": "text",
+          "value": "N * 4",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " bytes. Under "
         },
         {
           "type": "text",
@@ -9759,18 +8477,7 @@
         },
         {
           "type": "text",
-          "value": " that table now names "
-        },
-        {
-          "type": "text",
-          "value": "three",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " files of the twenty-one: "
+          "value": " the hand-written table names three files — "
         },
         {
           "type": "text",
@@ -9792,18 +8499,29 @@
         },
         {
           "type": "text",
-          "value": ". Every other "
+          "value": "; the rest are capped by their own headers, which is why "
         },
         {
           "type": "text",
-          "value": "docs/ops/*.md",
+          "value": "docs/ops/security-gates.md",
           "marks": [
             "code"
           ]
         },
         {
           "type": "text",
-          "value": " carries a G1 "
+          "value": " needed no new table row. The older reading — that a "
+        },
+        {
+          "type": "text",
+          "value": "docs/ops/",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": " header outside the table is a declaration no gate reads — is DEAD: discovery closed that hole, and the "
         },
         {
           "type": "text",
@@ -9814,18 +8532,7 @@
         },
         {
           "type": "text",
-          "value": " figure that "
-        },
-        {
-          "type": "text",
-          "value": "no gate reads",
-          "marks": [
-            "strong"
-          ]
-        },
-        {
-          "type": "text",
-          "value": " — on those files the header is a declaration, not a cap."
+          "value": " figure in a header is now the cap."
         }
       ]
     },

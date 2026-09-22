@@ -52,6 +52,18 @@ jobs:
           # clone makes `merge-base` unresolvable and the decision below would
           # silently degrade to "everything changed".
           fetch-depth: 0
+          # `filter: blob:none` — a BLOBLESS partial clone, and it is NOT
+          # shallowness. It fetches every commit and every tree and omits only
+          # blob CONTENTS; `git cat-file -e <base>^{commit}`, `git merge-base`
+          # and `git diff --name-only` read commits and trees, so this job's
+          # verdict is bit-identical. `fetch-depth: 0` above STAYS: drop it and
+          # actions/checkout falls back to depth 1, which has no merge base
+          # whether blobless or not. Equivalence is provable, not asserted:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # MEASURED on merged head b71d22875b (2026-09-17): this checkout step
+          # took 36s here, while the already-blobless dispatchers on the
+          # same head (elixir/cloud/ci/console/compose) took 13-15s.
+          filter: blob:none
 
       - name: Decide
         id: decide
@@ -168,8 +180,33 @@ jobs:
       # against the smoke's own stub corpus (no live instance, no credentials),
       # which is the honest version of the claim — parity-check's live-corpus
       # run is a deploy-time instrument, not a PR gate.
-      - name: Query-parity control (same tree, stub corpus)
+      - name: Query-parity control (same tree, COMMITTED baseline)
         working-directory: templates/astro-search-starter
+        # WHAT THIS STEP USED TO BE, AND WHY IT COULD NOT LOSE
+        # (task-4282890c59de377e). It ran parity-check `--write
+        # /tmp/parity-baseline.json` and then `--compare` that same file,
+        # against the same stub, in the same run. Nothing changed between the
+        # two calls, so the divergence arm (exit 2) and the determinism arm
+        # (exit 3) were structurally unreachable: MEASURED, `sameSet()`
+        # replaced by `return true` left both commands exiting 0 and printing
+        # "OK — every (query, engine) hit set matches …. Parity holds."
+        #
+        # Now the expectation is scripts/parity-stub-baseline.json, COMMITTED
+        # to the tree and produced by a deliberate human command (the file's
+        # own `_meta.note` carries it). This run cannot produce it: --compare
+        # refuses to write, so DELETING the fixture reds this step instead of
+        # regenerating it. --compare also re-fetches each pair and re-asserts
+        # determinism, so exit 3 is reachable from here too.
+        #
+        # And because a comparator that never diverges still passes a clean
+        # compare, the second command PROVES the comparator can lose:
+        # parity-check.test.mjs drives its own compare path against servers it
+        # controls and asserts exit 0 / 2 / 3 / 1 by number. Neuter sameSet()
+        # and this step reds on those two tests. Through the floor runner,
+        # never bare `node --test` — a glob that stops matching prints
+        # "# tests 0" and exits 0. `--floor 1` is a FILE count (the runner's
+        # own unit): one file must be discovered, and the runner's per-file
+        # zero-test floor then refuses a file that registers nothing.
         run: |
           set -eu
           node scripts/smoke-stub-api.mjs --port 4320 &
@@ -179,14 +216,13 @@ jobs:
           # otherwise race the listener.
           sleep 2
           node scripts/parity-check.mjs --base http://127.0.0.1:4320 \
-            --dataset smoke --type entry --write /tmp/parity-baseline.json
-          node scripts/parity-check.mjs --base http://127.0.0.1:4320 \
-            --dataset smoke --type entry --compare /tmp/parity-baseline.json
+            --dataset smoke --type entry --compare scripts/parity-stub-baseline.json
           kill "$stub" 2>/dev/null || true
+          node ../../scripts/node-test-floor.mjs --floor 1 'scripts/parity-check.test.mjs'
 
       # The other counter-control: the React-free seed-shape specs. Run through
       # the floor runner, never bare `node --test` — a bare run whose glob
       # matches nothing prints "# tests 0" and exits 0.
       - name: Seed-shape control
         working-directory: templates/astro-search-starter
-        run: node ../../scripts/node-test-floor.mjs --floor 5 'src/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs --floor 6 'src/**/*.test.ts'

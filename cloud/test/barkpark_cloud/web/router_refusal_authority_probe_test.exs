@@ -10,10 +10,13 @@ defmodule BarkparkCloud.Web.RouterRefusalAuthorityProbeTest do
 
   What is pinned here, and what is deliberately NOT:
 
-    1. FOUR REFUSALS NAME THEIR AUTHORITY — `required: "admin", scope: "team"`,
-       driven through the real router by a real member session. (SIX until
-       cch-w53-bl's env-var Option A deleted `POST`/`DELETE /v1/env-vars` with
-       the team env-var feature — the routes went, so their probes went.)
+    1. SIX REFUSALS NAME THEIR AUTHORITY — `required: "admin", scope: "team"`,
+       driven through the real router by a real member session. (SIX, then FOUR
+       when cch-w53-bl's env-var Option A deleted `POST`/`DELETE /v1/env-vars`
+       with the team env-var feature — the routes went, so their probes went —
+       and six again with cch-w44-bl's two member-management rows, which are a
+       DIFFERENT actor tier on the routes arm 2 already probes, not a return of
+       the env-var pair.)
     2. TWO REFUSALS NAME A CAUSE AND NEVER AN AUTHORITY — the member-management
        arms sit INSIDE `with_team_role(conn, "admin", …)`, so the caller already
        IS an admin. A static `required: "admin"` there would be a new lie, and
@@ -88,31 +91,58 @@ defmodule BarkparkCloud.Web.RouterRefusalAuthorityProbeTest do
 
   defp body(conn), do: Jason.decode!(conn.resp_body)
 
-  # A team with a plain member, and that member's session token.
+  # A team with a plain member, and that member's session token. The OWNER comes
+  # back too: the member-management entries in @named need a real target row in
+  # their path, and the owner is the target a plain member has least business
+  # touching.
   defp member_session do
     team = team_fixture()
-    _owner = member_of(team, "owner")
+    owner = member_of(team, "owner")
     member = member_of(team, "member")
-    {team, session(member)}
+    {team, owner, session(member)}
+  end
+
+  # Fill the runtime ids into a @named path template. Every static path passes
+  # through untouched — only the member-management rows carry tokens.
+  defp expand(path, team, owner) do
+    path
+    |> String.replace("{team}", to_string(team.id))
+    |> String.replace("{owner}", to_string(owner.id))
   end
 
   ## 1 — the refusals that name their authority
 
   # {label, method, path, body} — every one reachable by a plain member session.
+  # `{team}` / `{owner}` in a path are filled by `expand/3` at run time.
+  #
+  # THE LAST TWO ROWS ARE NOT A CONTRADICTION OF SECTION 2 BELOW, they are its
+  # precondition. Section 2 pins what the member-management arms say to an actor
+  # who has ALREADY passed `with_team_role(conn, "admin", …)`: a CAUSE, because
+  # the refusal there is rank-relative. These two rows pin the layer ABOVE that,
+  # which nothing in cloud/test/** asserted: a plain MEMBER never reaches those
+  # arms at all — `Auth.require_team_role/3` halts first and names the authority
+  # it wanted. So the same two routes answer with a `required` to a member and
+  # with a `reason` to an admin, and both halves need a witness. Drop the routes'
+  # gate to `with_team_role(conn, "member", …)` and only these rows can see it:
+  # the section-2 tests keep passing, because an admin's answer does not change.
   @named [
     {"POST /v1/fleet/supports", :post, "/v1/fleet/supports", %{name: "support-1"}},
     {"DELETE /v1/fleet/supports/:id", :delete,
      "/v1/fleet/supports/00000000-0000-0000-0000-000000000001", nil},
     {"POST /v1/tokens", :post, "/v1/tokens", %{name: "probe-pat", abilities: ["deploy"]}},
-    {"POST /v1/resurrect", :post, "/v1/resurrect", %{name: "box"}}
+    {"POST /v1/resurrect", :post, "/v1/resurrect", %{name: "box"}},
+    {"PATCH /v1/teams/:id/members/:user_id", :patch, "/v1/teams/{team}/members/{owner}",
+     %{role: "member"}},
+    {"DELETE /v1/teams/:id/members/:user_id", :delete, "/v1/teams/{team}/members/{owner}", nil}
   ]
 
   describe "a member's refusal names the authority it wanted" do
     for {label, method, path, req} <- @named do
       test "#{label} → 403 required:admin scope:team" do
-        {_team, token} = member_session()
+        {team, owner, token} = member_session()
 
-        conn = call(unquote(method), unquote(path), unquote(Macro.escape(req)), token)
+        url = expand(unquote(path), team, owner)
+        conn = call(unquote(method), url, unquote(Macro.escape(req)), token)
 
         assert conn.status == 403
         b = body(conn)

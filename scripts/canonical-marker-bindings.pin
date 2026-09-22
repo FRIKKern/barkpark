@@ -1,5 +1,6 @@
 agent-backup-state	NewBackupProbe
 audit-emit	emit
+bp-credential-server-pairing	resolveContextProv
 build-log-write-scrub	raw
 chat-stable-boundary	advance
 chat-stable-segments	advance
@@ -12,6 +13,7 @@ connector-tenant-routing	resolveTenantForEvent
 connector-webhook-demux	createWebhookRequestHandler
 console-authority-predicate	instanceAdminAuthority
 corpus-visible-schemas	visible_schemas
+criterion-shape-triage	ClassifyCriterion
 doc-backlinks	reverse_referencers
 draft-published-id	published_id
 engine-error-vocabulary	error_values
@@ -21,6 +23,7 @@ failure-caption-clamp	caption
 field-encryption	encrypted?
 field-encryption-chokepoint	encrypt_marked
 fleet-presence-staleness	roster
+gh-actions-builder-template	renderDeployWorkflow
 github-adopt	adopt
 github-inbound-intake	ingest
 github-mirror-reconcile	reconcile
@@ -33,6 +36,7 @@ if-none-match-compare	match?
 indx-index-identity	index_key
 instance-content-bootstrap	Run
 instrument-exit-vocabulary	createExitVocabulary
+ledger-enrichment-control	ControlEnrichment
 mcp-task-tools	registerTaskTools
 media-where-used	referrers
 merge-gate-criterion-predicate	merge_gated?
@@ -45,6 +49,7 @@ read-perspective-parse	parse
 read-perspective-validate	unsupported
 reference-title-resolution	reference_title
 release-boot-plugin-census	take
+runtime-claim-audit	RuntimeClaimFindings
 schema-resolution-for-redaction	get_schema_for_redaction
 schema-resolution-tenant-scoped	get_schema
 scope-project-resolution	scope_project_id
@@ -54,6 +59,7 @@ share-link-route-binding	binds_route_resource?
 share-scope-tenancy	declarable_scope?
 sheets-bg-sanitizer	sanitize_bg
 slug-resolve	resolve_doc
+stage-rerun-orphan-guard	guardStageRerunOrphan
 status-vocabulary	role_for_status
 studio-grant-write-target-gate	grant_target_denied?
 studio-nav-model	default_top_menu_entries

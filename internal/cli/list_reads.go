@@ -40,13 +40,19 @@ import (
 // same dispatch, and a list fence keyed on a JSON row array has nothing true to
 // say about it.
 var listReadCommands = map[string]bool{
-	"access.ls":             true, // access_controller.ex  -> grants
-	"access.mine":           true, // access_controller.ex  -> grants
-	"app_token.ls":          true, // app_token_controller.ex -> tokens
-	"chat.list_sessions":    true, // chat_controller.ex    -> sessions
-	"dataset.stats":         true, // analytics_controller.ex -> types
-	"doc.backlinks":         true, // query_controller.ex   -> result.backlinks
-	"doc.history":           true, // history_controller.ex  -> revisions
+	"access.ls":          true, // access_controller.ex  -> grants
+	"access.mine":        true, // access_controller.ex  -> grants
+	"app_token.ls":       true, // app_token_controller.ex -> tokens
+	"chat.list_sessions": true, // chat_controller.ex    -> sessions
+	"dataset.stats":      true, // analytics_controller.ex -> types
+	"doc.backlinks":      true, // query_controller.ex   -> result.backlinks
+	// doc.history was here until it became `paginated: true`
+	// (task-c59788170e244f51): declaring ?offset= alongside ?limit= moved it
+	// out of this map's population — non-paginated core reads — and under the
+	// paginated fence (runPaginatedAll + the unreadable_list_page refusal),
+	// whose envelope key for it is recorded in commandListEnvelopes. Leaving
+	// the row would make TestEveryNonPaginatedCoreReadIsClassified measure a
+	// command the API source no longer classifies this way.
 	"doc.related":           true, // query_controller.ex   -> result.related
 	"graph.corpus":          true, // tasks_controller.ex  -> nodes
 	"graph.dangling":        true, // tasks_controller.ex  -> dangling

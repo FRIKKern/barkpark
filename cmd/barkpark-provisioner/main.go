@@ -12,7 +12,7 @@
 // Usage:
 //
 //	barkpark-provisioner \
-//	  --control-url https://cloud.barkpark.dev \
+//	  --control-url https://barkpark.cloud \
 //	  --token-file  /etc/barkpark/worker.token \
 //	  --interval    5s
 //
@@ -115,7 +115,7 @@ func main() {
 func run(args []string) int {
 	fs := flag.NewFlagSet("barkpark-provisioner", flag.ContinueOnError)
 	var (
-		controlURL = fs.String("control-url", "", "control-plane origin (required), e.g. https://cloud.barkpark.dev")
+		controlURL = fs.String("control-url", "", "control-plane origin (required), e.g. https://barkpark.cloud")
 		token      = fs.String("token", "", "shared WORKER_TOKEN (or set WORKER_TOKEN env; --token-file takes precedence)")
 		tokenFile  = fs.String("token-file", "", "path to the WORKER_TOKEN file (overrides --token and $WORKER_TOKEN)")
 		interval   = fs.Duration("interval", provisioner.DefaultInterval, "claim-poll cadence when the queue is empty")

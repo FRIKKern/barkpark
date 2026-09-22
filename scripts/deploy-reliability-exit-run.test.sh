@@ -536,6 +536,40 @@ else
   grep -q 'scripts/deploy-reliability-exit-2026-08-10.md' "$ROOT/scripts/check-doc-budgets.sh" \
     && ok "the artefact has its own line in check-doc-budgets.sh (which does not scan scripts/ by pattern)" \
     || bad "the artefact is not in check-doc-budgets.sh's CAPS heredoc — its budget header would be decorative"
+
+  # ONE OWNER FOR THE RESIDUAL LIST. This file used to carry its own four-item
+  # paraphrase of the wave-34 residuals while the charter addendum carried seven;
+  # two copies of one list is the defect, and the shorter copy is the one that rots.
+  # Arm A reds if the pointer is deleted. Arm B reds if the charter's own text is
+  # copied back in. Arm C is the anti-vacuity control: without it, a file that had
+  # been emptied or renamed would pass B by finding nothing at all.
+  CHARTER="$ROOT/.claude/workflows/bp-deploy-reliability-charter.md"
+  grep -q 'THE SEVEN RESIDUALS, CLASSED AND RE-RUNNABLE' "$DOC" \
+    && ok "the artefact points at the charter addendum as the residual list's single owner" \
+    || bad "the artefact no longer names the charter addendum — the residual list has lost its owner"
+  if [ -f "$CHARTER" ]; then
+    grep -q 'THE SEVEN RESIDUALS, CLASSED AND RE-RUNNABLE' "$CHARTER" \
+      && ok "the pointed-at addendum heading still exists in the charter (pointer resolves)" \
+      || bad "the artefact points at a charter heading that no longer exists"
+  else
+    bad "the deploy-reliability charter is missing — the artefact's residual pointer cannot resolve"
+  fi
+  # Arm C: prove the probe below can find something in this very file before
+  # letting an empty result stand as an absence. 'UNVERIFIED' is checked live above.
+  if grep -q 'UNVERIFIED' "$DOC"; then
+    ok "residual-reintroduction probe is live against the artefact (control string found)"
+    RESID_BAD=0
+    for pat in 'never once' 'four producers' 'two lock families' 'names the wrong lock'; do
+      if grep -qi -- "$pat" "$DOC"; then
+        bad "the artefact reintroduced a superseded residual phrasing: '$pat' — the charter addendum owns this"
+        RESID_BAD=1
+      fi
+    done
+    [ "$RESID_BAD" -eq 0 ] \
+      && ok "no superseded residual phrasing (refuted reconcile claim, four-producer count) is back in the artefact"
+  else
+    bad "residual-reintroduction probe could not be controlled — the artefact read empty"
+  fi
 fi
 
 # ---------------------------------------------------------------------------

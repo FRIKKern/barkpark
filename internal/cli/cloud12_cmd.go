@@ -379,12 +379,6 @@ func finishLoginConnect(out *writer, cfg *Config) int {
 // token (GetCredentialsForTeam always mints/returns the current one).
 func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient.Barkpark) int {
 	target := fleetTarget(only.URL, only.Host)
-	if only.Team != nil && strings.EqualFold(strings.TrimSpace(only.Team.Role), "member") {
-		out.outf("")
-		out.outf("You're logged in. %q belongs to %s, where your member role cannot retrieve its admin token.", only.Name, fleetTeamName(only))
-		out.outf("Ask a team owner or admin for access, or connect with your own token:  bp setup --target cloud")
-		return exitOK
-	}
 
 	if active, ok := activeSavedServer(); ok && strings.TrimSpace(active.Server) != "" {
 		if normalizeServerURL(active.Server) != normalizeServerURL(target) {
@@ -397,18 +391,40 @@ func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient
 		// Same server → a reconnect: fall through to fetch a fresh token + re-save.
 	}
 
+	// AUTHORITY IS THE SERVER'S. bp does not pre-judge the caller's role here (it
+	// used to, on a local "not member" test that failed open on a nil Team and on
+	// an empty Role — see fleet_credential_refusal.go). Every role asks; the
+	// answer decides, and the three answers are told apart by the TYPED refusal,
+	// not by matching prose.
 	creds, gerr := client.GetCredentialsForTeam(cloudCtx(), only.ID, fleetTeamID(only))
 	if gerr != nil {
-		if strings.Contains(gerr.Error(), "no_admin_token") {
+		switch outcome, refusal := classifyFleetCredentialError(gerr); outcome {
+		case fleetCredNoAdminToken:
 			// No stored admin token (an older / ip-only provision): fall back to the
 			// manual-paste path — never a dead end.
 			out.outf("")
 			out.outf("%q has no stored admin token (an older or ip-only provision).", only.Name)
 			out.outf("Connect by pasting an admin token:  bp setup --target cloud")
 			return exitOK
+		case fleetCredForbidden:
+			// The server REFUSED this account. Say what the server said, and never
+			// restate it as a role bp inferred.
+			out.outf("")
+			out.outf("You're logged in. %s", fleetRefusalSentence(only, refusal))
+			if req := fleetRefusalRequirement(refusal); req != "" {
+				out.outf("%s", req)
+			}
+			if hint := fleetRefusalCLIHint(refusal); hint != "" {
+				out.outf("%s", hint)
+			}
+			out.outf("Ask a team owner or admin for access, or connect with your own token:  bp setup --target cloud")
+			return exitOK
+		default:
+			// Nothing was decided about authority: a blip, and it must not read as
+			// a refusal.
+			out.errf("logged in, but couldn't fetch credentials for %q (%v) — try `bp setup --target cloud`.", only.Name, gerr)
+			return exitOK
 		}
-		out.errf("logged in, but couldn't fetch credentials for %q (%v) — try `bp setup --target cloud`.", only.Name, gerr)
-		return exitOK
 	}
 
 	connectTarget := fleetTarget(creds.URL, creds.Host)

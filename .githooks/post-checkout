@@ -1,0 +1,7 @@
+#!/bin/sh
+# Golden Rule 8 observer. Logic + the full can/cannot statement live in
+# scripts/main-checkout-branch-guard.sh; this shim only locates it.
+# git IGNORES this hook's exit status — the guard says so loudly itself.
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -x "$ROOT/scripts/main-checkout-branch-guard.sh" ] || exit 0
+"$ROOT/scripts/main-checkout-branch-guard.sh" "$@"

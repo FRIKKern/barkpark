@@ -65,7 +65,11 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
 
   defp task!(id, title, content_extra \\ %{}) do
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => "open"
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
       |> Map.merge(content_extra)
 

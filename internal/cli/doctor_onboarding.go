@@ -259,7 +259,7 @@ func buildOnboardingReceipt(g globals, ctx manifest.Context, prov tokenProvenanc
 
 	r := onboardingReceipt{
 		Path:         onboardingPathCheck(),
-		CLI:          onboardingCLIFreshness(),
+		CLI:          onboardingCLIFreshness(m),
 		CloudSession: onboardingCloudSession(cfg),
 		Instance:     onboardingInstance(cfg, ctx),
 		Auth:         onboardingAuth(m, ctx, prov),
@@ -298,7 +298,7 @@ func buildOnboardingReceipt(g globals, ctx manifest.Context, prov tokenProvenanc
 func onboardingWhoamiSpine(g globals, ctx manifest.Context, cfg *Config, m *manifest.Manifest) map[string]any {
 	return map[string]any{
 		"instance": localInstance(cfg, ctx),
-		"cli":      whoamiCLIFreshness(),
+		"cli":      whoamiCLIFreshness(m),
 		"mcp": map[string]any{
 			"version": cliVersion,
 			"count":   len(mcpTaskToolNames),
@@ -326,7 +326,7 @@ func onboardingWhoamiSpine(g globals, ctx manifest.Context, cfg *Config, m *mani
 //
 // It never launders an absence into a green (up-to-date) or a false alarm
 // (behind): an unknown is reported as unknown.
-func whoamiCLIFreshness() onbCLICheck {
+func whoamiCLIFreshness(m *manifest.Manifest) onbCLICheck {
 	c := onbCLICheck{Installed: cliVersion, Status: onbCLIUnreported}
 	if cliVersion == "dev" {
 		// A COMMIT-STAMPED dev build (make cli-install) is comparable even
@@ -355,7 +355,13 @@ func whoamiCLIFreshness() onbCLICheck {
 	// THE RELEASE COMPARISON ONLY PROVES `cliVersion == newest cli-v* TAG`.
 	// It says nothing about whether that tag carries the CLI code, and when
 	// nobody cuts a tag it never will. Before printing a green nobody earned,
-	// take the one contrary reading available locally. See cli_staleness.go.
+	// take every contrary reading available — the SERVER's declaration first
+	// (it is the only one not sourced from the binary itself, and the only one
+	// that survives having no checkout), then the local git reading.
+	// See min_cli_gate.go and cli_staleness.go.
+	if r, ok := serverFloorStaleness(manifestServer(m), cache.Latest); ok {
+		return r
+	}
 	if r, ok := channelStaleness(cache.Latest); ok {
 		return r
 	}
@@ -413,7 +419,7 @@ func onboardingPathCheck() onbPathCheck {
 // A dev build is not "stale" — but it is not FRESH either: it cannot be compared,
 // so it reports onbCLIUnreported and names the one command that fixes it. The
 // same applies when the release feed cannot be resolved: no feed, no reading.
-func onboardingCLIFreshness() onbCLICheck {
+func onboardingCLIFreshness(m *manifest.Manifest) onbCLICheck {
 	c := onbCLICheck{Installed: cliVersion, Status: onbCLIUnreported}
 	if cliVersion == "dev" {
 		// A COMMIT-STAMPED dev build (make cli-install) is comparable even
@@ -446,8 +452,13 @@ func onboardingCLIFreshness() onbCLICheck {
 		c.Detail = "a newer CLI is available — run `bp upgrade`"
 		return c
 	}
-	// Same guard as whoamiCLIFreshness's, for the same reason: matching the
-	// newest tag is not carrying the code. See cli_staleness.go.
+	// Same guards as whoamiCLIFreshness's, in the same order and for the same
+	// reasons: the server's declaration about this client outranks any reading
+	// the client takes about itself, and matching the newest tag is not
+	// carrying the code. See min_cli_gate.go and cli_staleness.go.
+	if r, ok := serverFloorStaleness(manifestServer(m), latest); ok {
+		return r
+	}
 	if r, ok := channelStaleness(latest); ok {
 		return r
 	}

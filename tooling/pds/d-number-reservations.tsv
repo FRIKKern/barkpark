@@ -32,3 +32,13 @@ PDS-D746	2026-09-13T14:58:41Z	pds-bl-cond-d-job-blind-false-abort + task-373ca72
 PDS-D747	2026-09-16T18:36:08Z	pds-w29-bl-twin-policy-split
 PDS-D748	2026-09-16T18:36:08Z	pds-w29-bl-twin-policy-split
 PDS-D749	2026-09-16T18:36:08Z	pds-w29-bl-twin-policy-split
+PDS-D750	2026-09-16T23:44:21Z	task-778d9a95681c33bf (a rerun that cannot go red)
+PDS-D751	2026-09-17T00:13:14Z	task-c72dd1f2a09d91cf (a rerun is a property of its reason)
+PDS-D752	2026-09-17T01:07:03Z	pds-w44-bl-ledger-census-door-repriced (the ledger-census door is re-priced UP again and stays PRICE)
+PDS-D755	2026-09-17T07:36:46Z	pds-bl-w16-prewarm-warms-the-wrong-build-tree (r21 dw02)
+PDS-D756	2026-09-17T13:44:49Z	pds-bl-charter-d399-duplicate-identifier (r21 dw14) — duplicate census re-lensed 5 to 20, arm D ratchet
+PDS-D757	2026-09-17T13:54:39Z	pds-bl-charter-anchors-stale-vs-frozen-blob (r21 dw14) — frozen-blob criterion ruled superseded, content anchors + live guard
+PDS-D758	2026-09-17T15:46:18Z	pds-bl-charter-api-anchor-rot-rate (r21 dw21) — 2 breaks / 30h priced by replaying arm A across main; cite the HOME not the construct; signal gap recorded
+PDS-D759	2026-09-17T16:45:49Z	pds-bl-charter-freeze-ledger (r21 dw22) — the harness thaw ledger: blob OID joins a thaw to its PDS-D
+PDS-D760	2026-09-17T20:59:50Z	task-73fc9e5d14308997 dw40 arm E trigger-coverage ratchet
+PDS-D761	2026-09-20T12:18:47Z	deploy s25: retroactive thaw record for 406978270 (stat -f portability)

@@ -146,25 +146,26 @@ defmodule Barkpark.PluginFreeBootTest do
   # the list below. That is the shape a sanctioned coupling is supposed to
   # have — a shorter list, not a longer one.
   @coupling_guarded_runtime [
+    # THE `file_scope_opts/1` GROUP IS RETIRED (task-6bc5e1025154b6fb). Four
+    # entries — `media/delivery/asset_response.ex`,
+    # `media/storage/collections.ex`, `v1/media_controller.ex` and
+    # `v1/media_processing_controller.ex` — named the plugin for ONE reason: a
+    # pure two-field map from a `%MediaFile{}` to a scope keyword list. That
+    # mapping now lives in CORE as `Barkpark.Media.Storage.MediaFile`'s
+    # `scope_opts/1`, so those four files name no plugin at all and their
+    # sanctions are DELETED rather than joined by a ninth. The direction the
+    # list is supposed to move is SHORTER.
+    #
+    # The four Media entries that REMAIN below are NOT file_scope_opts reaches:
+    # each one calls a DB-touching `Assets` query over the plugin-declared
+    # `mediaAsset` document type (`find_by_media_file_id/3`,
+    # `find_by_media_file_ids/3`, `ensure_for_upload/1`, `delete_for_blob/3`,
+    # `scope_asset_dataset/3`, `scope_asset_workspace/3`). Those are a genuine
+    # reach into a plugin's own domain, not a pure helper, and retiring them
+    # would mean moving the asset-doc query layer itself — a different row.
     {"Barkpark.Plugins.Media", "lib/barkpark/media.ex"},
-    {"Barkpark.Plugins.Media", "lib/barkpark/media/delivery/asset_response.ex"},
-    # `V1.MediaController.asset_doc/2` (task-d55b02001cf589f0) calls the SAME
-    # `PluginAssets.file_scope_opts/1` the asset_response.ex reach directly
-    # above already sanctions — pure over the `%MediaFile{}` row (workspace_id/
-    # project_id -> a scope keyword list, no DB/network/config touch), so it is
-    # identical, not merely similar, under `:plugins []`.
-    {"Barkpark.Plugins.Media", "lib/barkpark_web/controllers/v1/media_controller.ex"},
-    # `V1.MediaProcessingController.callback/2` (task-51ee1a486ca8b9d4) calls
-    # the SAME pure `PluginAssets.file_scope_opts/1` as the two Media reaches
-    # above, for the same reason: confining the `mediaAsset` lookup and its
-    # write-back to the blob's own tenancy (the unscoped pair resolved the
-    # dataset STRING in the Default project and 404d every workspace-scoped
-    # asset). Two struct fields -> a scope keyword list, nils dropped; no
-    # DB/network/config touch, so it is identical under `:plugins []`.
-    {"Barkpark.Plugins.Media", "lib/barkpark_web/controllers/v1/media_processing_controller.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/processing.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/checkout.ex"},
-    {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/collections.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/relations.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark/content/sheets.ex"},
     {"Barkpark.Plugins.Bulldocs", "lib/barkpark/content/papers/block_ops.ex"},
@@ -636,8 +637,31 @@ defmodule Barkpark.PluginFreeBootTest do
 
       raw_token = "barkpark-plugin-free-wall-#{System.unique_integer([:positive])}"
 
+      # THE WORKSPACE IS NAMED, NOT FALLEN INTO (task-e0e6454b8b2045ae).
+      # This mint used to be bare 4-arity, and `Auth.create_token/5`'s own
+      # `|| default_workspace_id()` fallback silently handed the token a
+      # Tenancy.Membership in whatever workspace held the default seat. That
+      # fallback is gone, so a bare mint is now genuinely WORKSPACE-LESS and
+      # the (untouched, pre-existing) write-scope guard in
+      # `Barkpark.Content.WriteScope` refuses the flat /v1/data/mutate write
+      # `workspace_scope_required` with `details.workspaces => []` — before the
+      # core unknown_tag wall this test exists to prove is ever reached.
+      #
+      # THIS IS FIXTURE PLUMBING, NOT THE SUBJECT. The fresh-install admin mint
+      # (`Barkpark.Seeds.Clean.mint_admin_token!/2`) already passes
+      # `scope.workspace_id` explicitly, as does every other production caller
+      # of create_token/5, so no real fresh install can produce the empty
+      # `workspaces` list seen here — only a test that skipped the argument. The
+      # token is bound to the SAME workspace the fixture doc above was created
+      # in, which is what the bare mint was accidentally getting all along.
       {:ok, _} =
-        Barkpark.Auth.create_token(raw_token, "plugin-free-wall", "test", ["read", "write"])
+        Barkpark.Auth.create_token(
+          raw_token,
+          "plugin-free-wall",
+          "test",
+          ["read", "write"],
+          ws.id
+        )
 
       conn =
         BarkparkWeb.ConnCase.scoped_conn()

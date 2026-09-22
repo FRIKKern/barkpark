@@ -203,7 +203,34 @@ jobs:
                   echo == health ==
                   curl -fsS -m 10 -o /dev/null http://localhost:4000/api/schemas && echo HEALTH-OK || echo HEALTH-FAIL
                   echo == journal tail ==
-                  journalctl -u barkpark -n 25 --no-pager 2>/dev/null | tail -25
+                  # UNIT SET, DERIVED (not copied) from deploy/instance-deploy.sh
+                  # by grepping every systemd unit it installs / enables / starts:
+                  #   barkpark-slot@.service       install :1171, enable :580,:1480
+                  #                                -> barkpark-slot@blue|green (:478,:1157)
+                  #   barkpark-site@.service       install :1178, start  :1173
+                  #                                -> barkpark-site@<slug>__<slot>
+                  #   barkpark-agent.service       install :1503, enable :1509
+                  #   barkpark-mcp.service         install :1554, enable :1558
+                  #   barkpark-connectors.service  install :1689, enable :1691
+                  #   barkpark.service             NOT created here -- instance-deploy.sh
+                  #                                DISABLES it (:1482); it is written by
+                  #                                repo-root deploy.sh:312 / enabled :330,
+                  #                                i.e. the legacy mix box this op targets.
+                  #   (no .timer is installed by instance-deploy.sh: 0 matches for 'timer')
+                  # Every name is barkpark-prefixed and the SET GROWS (site@, mcp and
+                  # connectors were all added after slot@), so the derived query is the
+                  # PREDICATE barkpark* -- a hand-kept list goes stale on the next unit.
+                  # WHY NOT -u barkpark ALONE, even though :152 refuses a .slots box:
+                  # that guard is a [ -d ../.slots ] test, which reads FALSE on a slot box
+                  # whose marker is missing (provisioning died before instance-deploy.sh
+                  # :1179 mkdir, or the dir was removed) -- exactly the broken box whose
+                  # tail must not come back silent. barkpark* costs nothing on a legacy
+                  # box, where barkpark is the only match.
+                  # WHY :405 DIFFERS AND STAYS -u 'barkpark-slot@*': guerrilla-logs-grep
+                  # greps a KNOWN slot host for a request id, so slot-only is deliberate
+                  # noise control there, not an oversight. :153 in this same file already
+                  # uses the barkpark* form this line now matches.
+                  journalctl -u \"barkpark*\" -n 25 --no-pager 2>/dev/null | tail -25
                   echo == kernel oom check ==
                   journalctl -k -n 200 --no-pager 2>/dev/null | grep -iE \"out of memory|oom-kill\" | tail -5 || echo no-oom-in-recent-kernel-log
                   [ \"\$MIG\" -eq 0 ] || { echo \"MIGRATE-FAILED exit \$MIG\"; exit 1; }

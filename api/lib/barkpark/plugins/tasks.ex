@@ -133,7 +133,60 @@ defmodule Barkpark.Plugins.Tasks do
   # Publish wall: a task that cannot render as PortableDoc in the terminal is
   # not a publishable task. Draft authoring remains permissive; publication
   # gives every agent an actionable repair message.
-  defp portable_brief_gate(%{doc: %{"type" => "task"} = doc}) do
+  #
+  # ── WHY THE HEAD READS BOTH SPELLINGS (task-c1f155da34d3338f) ─────────────
+  #
+  # This clause used to be `%{doc: %{"type" => "task"} = doc}` — a STRING key.
+  # `:before_save` fires with the raw string-keyed write attrs, so the sibling
+  # `quality_gate/1` matches there and every test that hands this function a
+  # plain map went green. But `:before_publish` is fired by
+  # `Content.Lifecycle.publish_after_gate/5` with `doc: draft`, and `draft` is a
+  # `%Barkpark.Content.Document{}` STRUCT whose keys are ATOMS. A struct never
+  # matches a string-key pattern, so every publish fell through to the catch-all
+  # `portable_brief_gate(_payload), do: :ok` below: the wall was registered,
+  # fired, and inert. Measured live on guerrilla 2026-09-18 — a briefless task
+  # and a bogus-block-brief task BOTH published 200 through
+  # `POST /v1/data/mutate/:dataset`.
+  #
+  # Both shapes are read now, exactly as `Grip.reject_level_skipping_fact/1` and
+  # `Bulldocs.reject_hollow_paper_publish/1` already did on this same seam.
+  # `fetch/2` below was ALWAYS struct-safe (it falls back to the atom key), so
+  # the head was the whole defect and the body needed no change.
+  # ── SCOPE: FIRST PUBLISH ONLY (task-c1f155da34d3338f, ruling) ─────────────
+  #
+  # The wall applies to a task ENTERING the published corpus, not to every
+  # publish forever after. A row that is ALREADY published without a brief —
+  # 3 of 20 sampled on the live instance, all of them born before the brief
+  # composer existed — keeps publishing: arming a dormant wall must not make
+  # the existing corpus un-republishable, which would strand the mutate publish
+  # op and the GitHub draft-twin collapse on every legacy row.
+  #
+  # `published_doc` is `nil` exactly on a birth (`Content.Lifecycle`'s
+  # `read_incumbent/4`). A payload that does not carry the key at all reads as
+  # `nil` too, and that is the SAFE default: a hook fired with a bare map (the
+  # shape the plugin's own unit tests use) still gates.
+  #
+  # THE BOUNDARY, STATED SO NOBODY HAS TO INFER IT: on a re-publish this gate
+  # does not fire AT ALL. A malformed brief on an already-published task is
+  # therefore NOT refused here. That is deliberate — the scope is the row's
+  # entry into the corpus, not a running brief validator — and it is the price
+  # of grandfathering. `Barkpark.Tasks.Validation` still owns brief SHAPE at
+  # the 422 layer on every write.
+  #
+  # `task_doc?/1` (defined beside the edge helpers below) already reads all
+  # three spellings — `:type`, `"type"`, `"_type"` — so the head reuses it
+  # rather than growing a second, drift-prone copy of the same predicate.
+  defp portable_brief_gate(%{doc: doc} = payload) when is_map(doc) do
+    cond do
+      not task_doc?(doc) -> :ok
+      not is_nil(Map.get(payload, :published_doc)) -> :ok
+      true -> gate_task_brief(doc)
+    end
+  end
+
+  defp portable_brief_gate(_payload), do: :ok
+
+  defp gate_task_brief(doc) do
     with content when is_map(content) <- fetch(doc, "content"),
          brief when is_map(brief) <- fetch(content, "brief"),
          1 <- fetch(brief, "version"),
@@ -150,8 +203,6 @@ defmodule Barkpark.Plugins.Tasks do
            "PortableDoc {version: 1, blocks: [...]} so bp task tui can render it"}
     end
   end
-
-  defp portable_brief_gate(_payload), do: :ok
 
   defp validate_brief_blocks(blocks) do
     Enum.reduce_while(blocks, :ok, fn
@@ -330,7 +381,7 @@ defmodule Barkpark.Plugins.Tasks do
       list
       |> Enum.with_index()
       |> Enum.filter(fn {entry, _i} ->
-        merge_gate_worded?(entry) and not merge_gate_flagged?(entry)
+        merge_gate_worded?(entry) and not merge_gate_declared?(entry)
       end)
       |> Enum.map(fn {_entry, i} -> i end)
 
@@ -339,7 +390,8 @@ defmodule Barkpark.Plugins.Tasks do
         "acceptance_criteria #{inspect(unflagged)} open with the MERGE-GATED " <>
           "marker but carry no `merge_gate: true` — the close-time autostamp keys on the FLAG, not " <>
           "the wording, so a lead merge will not flip them. Add \"merge_gate\": true to each " <>
-          "gate entry (soft warning, save proceeds)"
+          "gate entry — or \"merge_gate\": false if the criterion merely MENTIONS merge-gating " <>
+          "and is not one (either explicit value silences this) (soft warning, save proceeds)"
 
       # Journal copy (grep-able in prod logs) AND the advisory channel: the
       # Logger line alone let 669 unflagged rows accumulate in silence — its
@@ -362,7 +414,27 @@ defmodule Barkpark.Plugins.Tasks do
     end
   end
 
-  defp merge_gate_flagged?(entry), do: Map.get(entry, "merge_gate") == true
+  # THREE STATES, NOT TWO — and the nag must read PRESENCE, not truth.
+  #
+  # This asked `Map.get(entry, "merge_gate") == true`, which folds an EXPLICIT
+  # `merge_gate: false` into the same bucket as an absent key, so the nag kept
+  # firing after the author had already answered it. `Criteria.merge_gated?/1`
+  # documents `false` as the per-row EXEMPTION DOOR: an author declaring that a
+  # marker-worded criterion merely TALKS about merge-gating (65 of 1853 corpus
+  # matches). The documented fix for a false positive therefore did not silence
+  # the instrument that manufactures them, and the only way to make the nag stop
+  # was to write `true` — converting a mention into a lead-only gate that `met`
+  # has no un-stamp for. MEASURED 2026-09-20 on task-e12850ea45a3d6a0.
+  #
+  #   key ABSENT        -> the author has not answered; nag.
+  #   `merge_gate` false -> answered "not a gate"; silent.
+  #   `merge_gate` true  -> answered "a gate"; silent.
+  #
+  # `fetch/2` (bottom of this file) exists for exactly this distinction: it
+  # returns `:absent` only when the key is missing from the map entirely.
+  # Nothing else changes — this widens no wording rule and halts nothing; it
+  # only stops nagging an author who has already declared an answer.
+  defp merge_gate_declared?(entry), do: fetch(entry, "merge_gate") != :absent
 
   # String-or-atom key fetch that distinguishes an ABSENT key from a present
   # nil/false value (write paths string-key their attrs; the atom fallback is
@@ -1438,7 +1510,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "supersede",
             type: "bool",
             summary:
-              "Allow --note to REPLACE a different non-blank content.disposition_reason already on the row. Without it that write is refused (409 note_would_supersede) and nothing changes — the refusal shows you the text you would have destroyed. Opt-in PER CALL, never sticky: the flag is you saying you read what is there and are replacing it on purpose. The displaced text stays recoverable from `bp task events --payload` as `payload.staged.superseded_note`. No effect without --note, over a blank/absent reason, or on a re-stage with the same text — none of those destroy anything, so none of them are refused."
+              "Allow --note to REPLACE a different non-blank content.disposition_reason already on the row. Without it that write is refused (409 note_would_supersede) and nothing changes — the refusal shows you the text you would have destroyed. Opt-in PER CALL, never sticky: the flag is you saying you read what is there and are replacing it on purpose. The displaced text stays recoverable from `bp task events --payload` as `payload.staged.superseded_note`. No effect without --note, over a blank/absent reason, or on a re-stage with the same text — none of those destroy anything, so none of them are refused. IT DOES NOT REACH THE RERUN: if the row carries a content.disposition_rerun, superseding its reason under that probe is separately refused (409 rerun_would_orphan) until the same call also says --rerun '<command>', --clear-rerun, or --keep-rerun. Two slots with one key to both locks is one slot wearing a costume."
           },
           %{
             name: "worker",
@@ -1462,7 +1534,13 @@ defmodule Barkpark.Plugins.Tasks do
             name: "rerun",
             type: "string",
             summary:
-              "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/D336(a)): a SHARED rerun over distinct rows is the honest shape."
+              "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/PDS-D336(a)): a SHARED rerun over distinct rows is the honest shape."
+          },
+          %{
+            name: "clear-rerun",
+            type: "bool",
+            summary:
+              "REMOVE content.disposition_rerun: after this stage the key is ABSENT (not null). The ONLY door that can subtract this field — `--rerun ''` is blank-is-absent, i.e. a no-op, and /v1/data/mutate refuses the key by name — and the precondition for PDS-D750's REMOVE arm, where a reason that is a pure ruling nothing can check is made honest by taking the probe away rather than by inventing one. It is also one of the three ways past the 409 rerun_would_orphan door (see --supersede). Sending it together with --rerun is a 422 (contradictory_rerun) and NOTHING is written: one re-binds the probe, the other removes it, and the writer must not pick for you. The removal is recoverable — the task.staged event carries disposition_rerun_cleared."
           },
           %{
             name: "instruction",
@@ -1715,6 +1793,7 @@ defmodule Barkpark.Plugins.Tasks do
       # invariant).
     ]
     |> Enum.map(&declare_dataset_on_doc_id_route/1)
+    |> Enum.map(&declare_dataset_on_index_scope_route/1)
   end
 
   # ── THE `?dataset=` DISAMBIGUATOR, DECLARED FROM THE ROUTE ──────────────
@@ -1756,27 +1835,110 @@ defmodule Barkpark.Plugins.Tasks do
   # bare `bp task get <ambiguous-id>` still sends no `?dataset=` and still gets
   # the honest 409. The refusal is what this makes followable, not what it
   # replaces.
-  @doc_id_dataset_flag %{
+  # THE RULE ITSELF LIVES IN THE TENANCY KERNEL (task-9a90596e9194f370),
+  # `Barkpark.Tenancy.CliDatasetFlag` — ONE definition of the flag literal and
+  # of the route predicate, reached INWARD by both of its application points:
+  #
+  #   * `Barkpark.Plugins.Registry.collect_cli_commands/1` applies it at
+  #     ASSEMBLY, over the manifest every plugin contributes to. That closes
+  #     the escape hatch this per-list map leaves open on its own:
+  #     `session.link-task` targets `POST /v1/tasks/:doc_id/sessions` but is
+  #     declared in `Barkpark.Plugins.Bulldocs`, so the map below never sees
+  #     it, while its route (`TasksController.sessions/2` →
+  #     `find_task_by_doc_id/2`) can answer the very 409 the flag exists to
+  #     make followable (task-4968634c648cda54).
+  #   * this call, KEPT so `Barkpark.Plugins.Tasks.cli_commands/0` stays
+  #     self-consistent when read on its own — tests and tooling do read it
+  #     directly, without going through the registry.
+  #
+  # The shared clause is idempotent, so applying it here and again at assembly
+  # appends nothing twice.
+  #
+  # WHY NOT DELEGATE TO THE REGISTRY, which is where the assembly-point rule
+  # was first written: this plugin and the plugins registry are two FEATURE
+  # concepts, and `tasks → registry` is a sideways edge. It reddened the
+  # advisory architecture Boundary gate on EVERY pull request from 2026-09-18
+  # (`new feature→feature sideways edge "tasks>registry" not present in
+  # baseline`) for authors who had touched neither file. A rule two features
+  # share belongs in the kernel they both already depend on, and `?dataset=`
+  # is a tenancy selector by its own nature.
+  defp declare_dataset_on_doc_id_route(cmd),
+    do: Barkpark.Tenancy.CliDatasetFlag.declare_on_task_doc_id_route(cmd)
+
+  # ── THE `?dataset=` SCOPE SELECTOR, DECLARED FROM THE ROUTE ─────────────
+  # (task-052c01b723ce1006)
+  #
+  # A SECOND rule, deliberately not folded into the one above. The predicate
+  # there is "this route can answer a 409 `ambiguous_dataset`, so the refusal's
+  # own remedy must be typeable". `GET /v1/tasks` can never answer that: it
+  # COLLAPSES/withholds cross-dataset twins (`Tasks.Query`
+  # `collapse_cross_dataset_twins/1`) instead of refusing. Bolting task.ls onto
+  # the `:doc_id` clause would have needed a hand-written exception, which is
+  # the same stale-by-construction shape both rules exist to avoid.
+  #
+  # THE RULE HERE IS: a command whose ROUTE READS `?dataset=` AS A SCOPE
+  # SELECTOR declares it. "Reads it as a scope selector" means the action binds
+  # the param and it changes WHICH ROWS come back — not that the param merely
+  # reaches the action.
+  #
+  # MEASURED, route by route, against that rule (api/lib/barkpark_web/
+  # controllers/tasks_controller.ex on the commit this landed):
+  #
+  #   * `GET /v1/tasks` (task.ls) — YES. `do_index/4` binds
+  #     `dataset = dataset_param(params)` and hands it to
+  #     `maybe_scope_index_dataset/2`: NAMED narrows the page to that dataset
+  #     (an empty dataset yields an EMPTY page), ABSENT spans every dataset in
+  #     scope and withholds twins. The envelope then NAMES the scope through
+  #     `put_dataset_scope/4` — `page.dataset` / `page.datasets` /
+  #     `page.dataset_scope` ("named" vs "all-datasets-in-scope") /
+  #     `page.dataset_ambiguous`. That is #18531's half; it has been unreachable
+  #     from `bp` because `globalQueryForwards` (internal/cli/globals.go) puts a
+  #     typed `-d` on the wire only for a command that DECLARES the flag
+  #     (`commandDeclaresFlag`, internal/cli/run.go) — so `bp task ls -d x`
+  #     silently returned the same global page. No Go change is needed; this
+  #     declaration IS the wiring.
+  #
+  #   * `GET /v1/tasks/prime` (task.prime) — NO, measured not assumed.
+  #     `prime/2` passes only `scope_opts(conn)` (workspace/project) to
+  #     `Tasks.prime/1` and `Tasks.ready/1`; nothing narrows by dataset. The one
+  #     place `prime` touches the param is `seal_docs/2` → `seal_ctx/1` →
+  #     `request_dataset/1`, which resolves the "task" SCHEMA for the
+  #     field-visibility redaction — it selects which schema redacts, never
+  #     which rows return. Declaring a flag there would advertise a narrowing
+  #     the route does not perform, which is the defect wearing the opposite
+  #     sign. task.prime therefore stays undeclared until its action binds the
+  #     param as a selector.
+  #
+  #   * `POST /v1/tasks/claim` (task.next) — NO. The queue picks by rank, never
+  #     by id or dataset.
+  #
+  #   * `GET /v1/tasks/ready` and `GET /v1/tasks/:doc_id/events` — already
+  #     declare their own dataset flag; the clause below is idempotent and
+  #     leaves an existing declaration exactly as written.
+  @index_dataset_flag %{
     name: "dataset",
     type: "string",
     summary:
-      "Name the dataset this doc_id lives in. THE DISAMBIGUATOR the 409 " <>
-        "`ambiguous_dataset` refusal names: one doc_id may live in two datasets of a " <>
-        "single workspace+project, and the task doors REFUSE such an id rather than " <>
-        "picking a dataset you did not name. Omit it and nothing is picked for you — " <>
-        "an unambiguous id reads normally and an ambiguous one is still refused."
+      "Narrow the listing to ONE dataset — THE INDEX SCOPE SELECTOR. Absent: the page " <>
+        "spans every dataset in the caller's workspace/project scope (`page.datasets` says " <>
+        "which) and a doc_id living in more than one of them is WITHHELD and named once in " <>
+        "`page.dataset_ambiguous`. Named: only that dataset's rows, `page.dataset_scope` " <>
+        "reads \"named\", and a dataset holding no rows answers with an EMPTY page rather " <>
+        "than the global one."
   }
 
-  defp declare_dataset_on_doc_id_route(%{http: %{path_template: path}, flags: flags} = cmd)
-       when is_binary(path) and is_list(flags) do
-    if String.contains?(path, ":doc_id") and not Enum.any?(flags, &(&1.name == "dataset")) do
-      %{cmd | flags: flags ++ [@doc_id_dataset_flag]}
-    else
+  defp declare_dataset_on_index_scope_route(
+         %{http: %{method: "GET", path_template: "/v1/tasks"}, flags: flags} = cmd
+       )
+       when is_list(flags) do
+    if Enum.any?(flags, &(&1.name == "dataset")) do
       cmd
+    else
+      %{cmd | flags: flags ++ [@index_dataset_flag]}
     end
   end
 
-  defp declare_dataset_on_doc_id_route(cmd), do: cmd
+  defp declare_dataset_on_index_scope_route(cmd), do: cmd
 
   @doc """
   Projects a task document's dependency + hierarchy edges into the content
@@ -1802,8 +1964,16 @@ defmodule Barkpark.Plugins.Tasks do
       real `:kind` (`"blocks"` | `"discovered-from"`) which is mapped STRAIGHT
       THROUGH — never hardcoded `"blocks"`. Both kinds are whitelisted in
       `Barkpark.Content.Edge`, so they pass changeset validation.
-    * `content.parent_id` — the hierarchy parent → one `parent` edge
-      (`from_id` = child, `to_id` = parent).
+    * `content.parent_id` — NOT projected here. The task schema declares
+      `parent_id` as a `"reference"` field, so the CORE extractor
+      (`Barkpark.Content.Edges.extract_edges/2`) already projects it as kind
+      `parent_id` — the source-field-name convention every reference edge
+      follows. This callback used to emit a SECOND edge for the same
+      relationship under kind `parent`, so every parented task carried two
+      rows to one parent (measured 2026-09-18: 7062 published tasks carry
+      `parent_id`). That clause is GONE; do not reintroduce it. The core edge
+      is the one with reach — it also drives `?expand=parent_id`, the Studio
+      typeahead and the dangling report.
     * `content.wave_paper` and `content.papers` — the paper this task cites →
       one edge per distinct target, `kind` = the source field name. Neither key
       reaches the CORE extractor as an edge (`wave_paper` is undeclared;
@@ -1818,8 +1988,8 @@ defmodule Barkpark.Plugins.Tasks do
   When `doc.task_edges` is absent (an un-hydrated payload — e.g. a task saved
   outside the projector worker, or a non-task doc), NO dependency edge is
   emitted: the dead `content.dependencies` key is NEVER read, so an un-hydrated
-  task simply contributes only its `parent` edge until the worker re-hydrates it
-  on the next rebuild. The core Projector pass resolves dangling targets; this
+  task simply contributes only its paper-citation edges until the worker
+  re-hydrates it on the next rebuild. The core Projector pass resolves dangling targets; this
   callback never does. Guards a `nil` `ctx.doc` (the `{nil, nil, nil, :none}`
   entry skips the registration-time fingerprint, so a nil-doc crash would only
   surface at collection time) → returns `prev` unchanged.
@@ -1843,10 +2013,9 @@ defmodule Barkpark.Plugins.Tasks do
       from_id = Barkpark.Content.published_id(doc_id)
 
       dep_edges = dep_edges_from_task_edges(doc, from_id)
-      parent_edges = parent_edge(content, from_id)
       paper_edges = paper_citation_edges(content, from_id)
 
-      dep_edges ++ parent_edges ++ paper_edges
+      dep_edges ++ paper_edges
     else
       []
     end
@@ -1887,27 +2056,10 @@ defmodule Barkpark.Plugins.Tasks do
     end
   end
 
-  defp parent_edge(content, from_id) do
-    case Map.get(content, "parent_id") do
-      parent when is_binary(parent) and parent != "" ->
-        [
-          %{
-            from_id: from_id,
-            to_id: Barkpark.Content.published_id(parent),
-            kind: "parent",
-            plugin_source: "tasks"
-          }
-        ]
-
-      _ ->
-        []
-    end
-  end
-
   # ── Paper citations: `wave_paper` + `papers` (graph-papers) ────────────────
   #
-  # A task cites the Paper that drives it through THREE keys, and until this
-  # function existed only ONE of them reached the graph:
+  # A task points at a Paper through FOUR keys, not three. Any census that
+  # enumerates three is wrong — this is the list:
   #
   #   * `design_doc` — declared `"type" => "reference"` on the task schema, so
   #     `Content.Edges.extract_edges/2` projects it. Untouched here.
@@ -1917,6 +2069,18 @@ defmodule Barkpark.Plugins.Tasks do
   #   * `wave_paper` — not declared on the task schema at all, so it is never in
   #     the `fields` list the core extractor folds over. The epic-cycle harness
   #     is its only writer.
+  #   * `parent_id` — the FOURTH channel, and the one every earlier census
+  #     missed. It is a declared `"reference"` (kind `parent_id`, projected by
+  #     the core extractor, NOT here), nominally `refType: "task"`, but it is
+  #     legitimately used to hang a task off a PAPER as an epic anchor.
+  #     MEASURED on the live corpus 2026-09-18: of 293 distinct `parent_id`
+  #     targets, 7 are published papers — `authoring-excellence` (54 children),
+  #     `theme-system` (20), `preview-contract` (8), `sp-cond-format` (6),
+  #     `important-paper-quality-wave-2-paper-2026-07-31` (5), `sp-sort-filter`
+  #     (3), `barkpark-chronicle` (2). Five of those seven doc_ids ALSO name a
+  #     published task, so only two are paper-ONLY targets; the schema field
+  #     carries `"refTypeTolerant" => true` so neither shape false-flags
+  #     dangling (see `Barkpark.Content.Edges`).
   #
   # MEASURED on the live corpus (2026-08-24, 7249 published tasks / 1015
   # published papers): 213 tasks carry `design_doc`, 412 carry `papers`, 4320
@@ -1924,15 +2088,16 @@ defmodule Barkpark.Plugins.Tasks do
   # 24; the three keys together cite 564. Every wave paper the epic-cycle
   # harness has written was disconnected from its own wave.
   #
-  # WHY HERE AND NOT ON THE SCHEMA. `parent_id` is the precedent directly above:
-  # a plain content key the plugin knows names a document, projected by this
-  # pure callback rather than by a schema `reference` declaration. Taking that
-  # route keeps two properties the schema route would break — `papers` stays the
+  # WHY HERE AND NOT ON THE SCHEMA. Taking the plugin-callback route keeps two
+  # properties the schema route would break — `papers` stays the
   # v1 read-only array whose sole writer is `POST /v1/tasks/:id/papers` (and its
   # `check_optional_string_list` validation), and `wave_paper` stays undeclared,
   # so declaring it does not hand 4320 rows an editable Studio input on a field
   # the harness owns. `design_doc` also stays the ONE single-reference field, so
-  # `?expand=design_doc` is unaffected.
+  # `?expand=design_doc` is unaffected. `parent_id` went the OTHER way for the
+  # opposite reason: it is already a schema `reference` whose declaration buys
+  # `?expand=parent_id` and the Studio typeahead, so the plugin's duplicate
+  # clause was the one to retire.
   #
   # `kind` IS the source field name, matching the graph-edge-seam convention the
   # core extractor follows, so `Tasks.Expectations.driven_tasks/2` reports the

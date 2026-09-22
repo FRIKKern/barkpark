@@ -26,25 +26,45 @@
      value the current markup can tell apart — the markup changes.
    word-break: break-word ............. A LEGACY ALIAS WITH NO RULING. It behaves
      like `anywhere` (min-content lowered), not like `break-word`, despite the
-     name. Do not add new ones; the SEVEN that exist are a POPULATION to triage
-     with a fixture each (cch-w24-bl-word-break-alias-remaining-seven), never a
-     to-do list to convert. `word-break: break-all` is a different declaration
+     name. Do not add new ones; the FOUR that exist are a POPULATION that has
+     been triaged with a fixture each (cch-w24-bl-word-break-alias-remaining-
+     seven drove all seven at 320 under a 78-char legal-maximum host and
+     converted the THREE the fixture could separate — `.bp-console-line`,
+     `.deploy-console-line`, `.wh-del-err`, each to `anywhere`), never a
+     to-do list to convert. The four that stayed each carry, one line from the
+     declaration, the numbers showing all three values measure identically
+     there and that DELETING the declaration does not — which is the assertion
+     overflow-guard.mjs W24-word-break-alias-population ships.
+     `word-break: break-all` is a different declaration
      and stays where it is: on opaque tokens (secrets, env keys, URLs) where
      breaking mid-token IS the reading aid — five sites.
    min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
      A flex item and a grid track both floor at their content's min-content, so
      a wrap on the child without this on the parent yields a SPILL, not a wrap.
-     56 of this file's 62 `min-width` declarations are this escape, and none of
+     64 of this file's 71 `min-width` declarations are this escape, and none of
      them had a written ruling until this block.
 
    EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
    without one is how two irreconcilable numbers get cited as a pair: comments
-   STRIPPED, then declarations counted — 12 `word-break` (7 break-word, 5
-   break-all), 62 `min-width` (66 occurrences less the FOUR that are `@media
-   (min-width: …)` preludes, which are not declarations at all), and 24
-   `overflow-wrap`. The raw line greps are higher (18 / 103 / 38) because this
-   block and the per-site comments name them in prose. Re-derive with a
-   comment-stripping pass, never a bare `grep -c`.
+   STRIPPED, then declarations counted — 9 `word-break` (4 break-word, 5
+   break-all), 71 `min-width` (75 occurrences less the FOUR that are `@media
+   (min-width: …)` preludes, which are not declarations at all), and 34
+   `overflow-wrap`. The raw line greps are higher, and are deliberately NOT
+   quoted here: this block and the per-site comments name the properties in
+   prose, so any raw-grep figure counts its own paragraph and moves whenever a
+   comment anywhere in the file is edited. There is no honest constant to state,
+   so none is stated. Re-derive with a comment-stripping pass, never a bare
+   `grep -c`.
+
+   AND “DERIVED” IS NOW ENFORCED RATHER THAN ASSERTED. Every integer in this
+   block is re-derived from this file and compared against the words you are
+   reading, by `cloud/test/web/wrap_vocabulary_header_test.exs`. Change a wrap
+   in this file without changing these numbers — or change a number here without
+   the file — and that test reds and prints both sides. It FAILS, never skips,
+   when it cannot find a figure to check: a sentence it can no longer parse is
+   itself a red, so rewording this paragraph past its reach is not a way to go
+   quiet. That is the whole difference between a count that is derived and a
+   count that merely says it is.
 
    AND THE PART THAT IS NOT A DECLARATION: none of the four is provable by
    reading. Every wrap in this file that is load-bearing carries a MEASUREMENT
@@ -578,6 +598,7 @@ a:hover { text-decoration: underline; }
 .inst-tab:focus-visible,
 .affix-btn:focus-visible,
 .btn-link:focus-visible,
+.plan-more:focus-visible,
 .modal-x:focus-visible,
 .toast-close:focus-visible,
 .topbar-link:focus-visible {
@@ -721,15 +742,71 @@ select.form-input {
 }
 .notice .btn { margin-left: auto; }
 
-/* destructive action button (e.g. Remove instance) — rides the solid button
-   fill tokens (white label both themes; dark uses a deeper red than the
-   status text colour); the pairing is contrast-gated in __css_check.mjs. */
+/* destructive action button (e.g. Remove instance, Delete site, Delete
+   webhook).
+
+   DEFECT-B (accent matrix re-review, 2026-09-20; task-b96e83407f325986) — this
+   rule USED to paint a solid `--btn-danger-bg` fill with a white label, and at
+   the EMBER identity that put a solid warm red next to the solid warm orange
+   `.btn-primary` wears. Measured on origin/main 537bca5a0 in a real Chrome at
+   1440, ember/light: `.btn-primary` background rgb(179,78,30), `.btn-danger`
+   background rgb(178,54,54) — CIE76 dE 21.0, against 82.9 (fjord) / 91.7
+   (evergreen) / 100.1 (iris) for the same pair at the other identities. A 4-5x
+   outlier, and the reason Delete and the primary action were told apart only by
+   position.
+
+   WHY THE FIX IS NOT A HUE MOVE. `--ok-hsl`/`--primary-hsl` track the brand for
+   every identity by GR6, and GR90 ruled in writing that `--ok-hsl` is NOT to be
+   touched; `--danger-hsl` is pinned at hue 0. Both ends of the pair are
+   therefore fixed by doctrine, so the separation has to come off a NON-HUE
+   axis — exactly the move GR77/GR90 made for the `.vf-chip` wash collision
+   (see that rule above: separated on ALPHA, not hue, so it works identically in
+   all five identities).
+
+   THE LIGHTNESS ROUTE WAS MEASURED AND REJECTED, not assumed away: deepening
+   the danger fill to hsl(0 62% 32%) moves ember/light from dE 21.0 to only
+   26.1, and even an unusable near-maroon hsl(0 62% 24%) reaches 35.8 — still
+   less than half the 82.9-100.1 band the other four identities already sit in.
+   Darkening the fill cannot buy the separation.
+
+   THE FIX — a WEIGHT discriminator. The destructive tier stops being a SOLID
+   accent-weight fill and becomes an OUTLINED danger object: the soft danger
+   tint as ground, full-strength `--danger` as border AND label. The primary
+   stays a solid accent fill. So the two controls now differ in the thing a
+   glance reads first — filled vs outlined — and that difference is identical at
+   all five identities.
+
+   It cannot get worse anywhere, and that is arithmetic rather than hope: the
+   BORDER still resolves to `--danger`, i.e. exactly the colour the background
+   used to be, so the border-channel distance at every identity is byte-for-byte
+   what the background-channel distance was before. The background channel is
+   pure gain: white-ish tint vs ember's solid orange measures dE 80.9, inside
+   the band the other identities already had.
+
+   CONTRAST is not a new risk and is not newly waived: `--danger` on
+   `--danger-soft` over `--surface` at min 4.5 is ALREADY a row in
+   __css_check.mjs's CONTRAST_PAIRS (it gates .wh-del-status--danger and
+   .tlv-badge--verify-fail), and it is checked in both themes. The white-label
+   pairing `--btn-danger-fg` / `--btn-danger-bg` stays live and stays gated
+   because :hover still commits to the solid fill — hovering a destructive
+   control is the moment it should shout, and that is where the full-weight red
+   now lives.
+
+   Pinned by __preview__/accent-role-separation.mjs, which reads the COMPUTED
+   background and border of the destructive and primary controls on
+   webhooks-panel / rollback / shell-site in a real browser at all five accents.
+   It reds on the pre-fix bytes. */
 .btn-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.btn-danger:hover {
   background: var(--btn-danger-bg);
   color: var(--btn-danger-fg);
   border-color: var(--btn-danger-bg);
+  filter: brightness(1.08);
 }
-.btn-danger:hover { background: var(--btn-danger-bg); filter: brightness(1.08); }
 
 /* instance/site detail-head inline actions (retry / remove) */
 .detail-actions { display: inline-flex; gap: 8px; margin-left: 8px; }
@@ -1455,25 +1532,29 @@ select.form-input {
 }
 .toast-close:hover { color: var(--text); }
 
-/* ===================================================== PROVIDER PICKER */
-.choice-list { display: flex; flex-direction: column; gap: 8px; }
-.choice {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 12px 14px;
-  text-align: left;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  font: inherit;
-  color: var(--text);
-  transition: border-color var(--t), background var(--t);
-}
-.choice:hover:not(:disabled) { border-color: var(--dim); background: var(--muted-surface); }
-.choice:disabled { opacity: 0.5; cursor: not-allowed; }
+/* ============================================= PROVIDER BRAND TILE (.choice-ico)
+   TOMBSTONE. This block used to be the PROVIDER PICKER. cch-w26-s4 deleted
+   openProviderPicker() — its only forward caller, #cred-back, was rewired to
+   the launch wizard — and that function was the ONLY producer of .choice-list,
+   .choice, .choice-main, .choice-name, .choice-sub, .choice-chev and
+   .choice-tag. app.css was outside that slice's file fence, so eleven rules
+   outlived their markup by a whole epic. Seven heads are gone here; ONE STAYS.
+
+   .choice-ico IS LIVE and must not follow them. It paints through
+   openProviderCredential()'s .modal-head tile and the providers roster
+   mini-tile, and both of its `choice-ico` ALLOW_PREFIXES waivers in
+   __css_check.mjs are earned by those two emission sites (E19 would red if
+   they were not). Re-derive, never inherit — the census is a PREDICATE over
+   the heads THIS FILE declares, not a list:
+
+     grep -oE '\.choice[a-z0-9-]*' app.css | sed 's/^\.//' | sort -u
+
+   and for each head, count the occurrences inside a STRING LITERAL in app.js
+   or a class="..." attribute in index.html / styleguide.html. Prose is not a
+   producer: the bare token `choice` has 16 raw hits in app.js and ZERO of them
+   are emissions. The live arm that keeps this honest is
+   cloud/test/web/choice_family_producer_test.exs — it reds if any .choice*
+   rule here has no producer, and stays quiet for .choice-ico. */
 .choice-ico {
   width: 32px; height: 32px;
   flex: 0 0 auto;
@@ -1482,11 +1563,6 @@ select.form-input {
   color: #fff; font-weight: 700; font-size: 13px;
 }
 .choice-ico.sm { width: 24px; height: 24px; font-size: 11px; display: inline-grid; vertical-align: middle; margin-right: 8px; }
-.choice-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.choice-name { font-size: 14px; font-weight: 600; }
-.choice-sub { font-size: 12px; color: var(--muted-text); margin-top: 1px; }
-.choice-chev { color: var(--dim); font-size: 18px; line-height: 1; }
-.choice-tag { font-size: var(--text-xs); color: var(--muted-text); background: var(--muted-surface); padding: 2px 8px; border-radius: var(--pill); }
 
 /* brand tiles — provider colours, not shipped logos. Hetzner + Azure read from
    the shared --provider-* identity tokens (S4) so the picker tile, the fleet
@@ -1635,7 +1711,24 @@ select.form-input {
 .plan-feats { list-style: none; padding: 0; margin: 18px 0 22px; display: flex; flex-direction: column; gap: 10px; }
 .plan-feats li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .plan-feats .ck { color: var(--success); font-weight: 700; }
-.plan-more { display: block; text-align: center; margin: 14px 0 0; font-size: 13px; color: var(--muted-text); cursor: pointer; }
+/* gr-r21m-defect-jk (DEFECT-K, screen `billing-cancelling`). RULED: this is a
+   READ/DISCLOSURE affordance by design — the GR33 comment at its emitter
+   (`grep -n '"See all plans" stays' app.js`) makes the card STATE-ONLY and keeps
+   the grid toggle as the one thing it owns — so "the primary action renders as
+   plain body text" mis-classifies it: it is not an action tier at all, and it
+   must NOT be promoted to `.btn-primary` beside the real billing CTAs.
+   THE RESIDUAL WAS REAL AND IS FIXED HERE: it shipped as a bare `<a>` with no
+   href, no role and no tabindex, so the one control this card owns was not
+   keyboard reachable and announced as nothing. It is now a `<button
+   type="button">`; these three declarations (`font: inherit`, no background, no
+   border, `width: 100%`) reproduce the anchor's box EXACTLY under
+   `display: block` + `text-align: center`, and the shared `:focus-visible` ring
+   above now lists it. */
+.plan-more {
+  display: block; text-align: center; margin: 14px 0 0; font-size: 13px;
+  color: var(--muted-text); cursor: pointer;
+  font: inherit; font-size: 13px; width: 100%; background: none; border: 0; padding: 0;
+}
 .plan-more:hover { color: var(--text); }
 #billing-tiers { margin-top: 24px; }
 /* cch-w49-s7 — the sentence that replaces an omitted Subscribe. #billing-tiers
@@ -1734,6 +1827,16 @@ select.form-input {
 .rail-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
 .rail-row:first-of-type { border-top: none; }
 .rail-row .k { font-size: 12px; color: var(--muted-text); flex: 0 0 auto; }
+/* cch-w24-bl-word-break-alias-remaining-seven — KEPT, and the filing's stated
+   reason ("min-width: 0 is present, so the escape is here") is MEASURABLY WRONG:
+   delete the break declaration and the page drags to 668 against a 320 viewport
+   WITH that `min-width: 0` still in place. What is true is that no fixture makes
+   this site heterogeneous. At 320 on `failed` with a 78-char legal-maximum host
+   in the value, `word-break: break-word`, `overflow-wrap: break-word` and
+   `overflow-wrap: anywhere` are all box 230.2 in a 254px parent, 4 line boxes,
+   108px, page 320/320 — identical to the decimal. Converting would be a rename
+   no fixture could have refused; the containment IS asserted (deleting it reds)
+   by overflow-guard.mjs W24-word-break-alias-population. */
 .rail-row .v { font-size: 12px; font-weight: 500; font-family: var(--mono); text-align: right; word-break: break-word; min-width: 0; }
 .rail-row .v.plain { font-family: var(--font); }
 .rail-row .v.copy { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
@@ -1833,25 +1936,31 @@ select.form-input {
 
 /* ── S11b lifecycle action row — the persistent "operate this box" cluster ─────
    Previously UNSTYLED (raw inline spans); rendered here as one compact cluster:
-   a state pill + the verb controls, with a single "via the bp CLI" caption. The
-   pill mirrors .status-pill; the .bp-inst--<state> class tints its colour and the
-   dot reads that hue through currentColor while the label stays neutral. */
+   a state pill + the verb controls, with a single "via the bp CLI" caption.
+
+   cch-r21l: THE `.inst-life-pill` FAMILY IS RETIRED — absorbed into the one
+   `.status-pill` family (parent decision 24 / GR11), same sweep that retired
+   `.dep-*`. What stood here: `.inst-life-pill` (inline-flex, gap 7px, height
+   24px, padding 0 11px, 1px border, var(--pill) radius, var(--muted-surface),
+   12px — i.e. `.status-pill`'s box re-typed, differing only in font-weight
+   600 vs 500), plus `.inst-life-dot` and `.inst-life-label`. The chip said the
+   SAME thing the fleet row's `.status-pill` already said (this box's lifecycle
+   state), in a second dialect, and it was additionally RE-CLASSED by hand in
+   the decommission handler — a second author no static check could see.
+   Where each look went: the box is `.status-pill`'s, the dot is
+   `.status-pill-dot`, the label is `.status-pill-label`, and the state hue is
+   the ROLE the state maps to — provisioning → `--info`, live → `--ok`,
+   degraded → `--warn`, stopped/Suspended → `--neutral --stopped`,
+   decommissioned → `--danger`. That mapping is not this comment's to keep: it
+   is LIFECYCLE_PILL_ROLE in app.js (grep -n 'LIFECYCLE_PILL_ROLE' app.js),
+   which __css_check E13 reads and holds total over LIFECYCLE_PILL_LABEL — and
+   E13 also reds if an `.inst-life-pill` / `.inst-life-dot` / `.inst-life-label`
+   rule or class literal returns, so re-forking the grammar fails the gate.
+   The `.bp-inst--<state>` token still rides on the chip as an extra class; it
+   is the S4 identity, not the paint. Every other `.inst-life-*` rule survives:
+   they are the row's LAYOUT and copy, never pills. */
 .inst-lifecycle-actions { margin: 18px 0 4px; }
 .inst-life-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; }
-.inst-life-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 24px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--pill);
-  background: var(--muted-surface);
-  font-size: 12px;
-  font-weight: 600;
-}
-.inst-life-dot { width: 7px; height: 7px; border-radius: var(--pill); background: currentColor; flex: 0 0 auto; }
-.inst-life-label { color: var(--text); }
 .inst-life-status { display: inline-flex; align-items: center; gap: 8px; }
 .inst-life-note { font-size: 12px; color: var(--muted-text); }
 .inst-life-note--warn { color: var(--warn-strong); }
@@ -2125,6 +2234,16 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 12px;
   color: var(--muted-text);
   margin-top: 4px;
+  /* cch-w24-bl-word-break-alias-remaining-seven — KEPT. Driven at 320 on
+     `deploy-detail-cruel` with a 78-char legal-maximum host inside the caption:
+     `word-break: break-word`, `overflow-wrap: break-word` and `overflow-wrap:
+     anywhere` all measure box 155.05 in a 155.05px parent, 4 line boxes, 108px,
+     page 320/320 — the `-webkit-line-clamp` + `overflow: hidden` below make this
+     box its own bound, so nothing consults min-content and no fixture can tell
+     the three apart. Deleting the declaration DOES separate them (scrollWidth
+     588 against 155), which is the containment W24-word-break-alias-population
+     asserts. The vertical story is the next comment's, and is a different
+     defect. */
   word-break: break-word;
   /* cch-deploy-detail-render-has-no-cap — THE ONLY BOUND THIS CAPTION HAS.
      `deployments.detail` was widened from varchar(255) to :text (cch-w34-s5),
@@ -2230,7 +2349,18 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font: 12px/1.55 var(--mono);
   scroll-behavior: smooth;
 }
-.deploy-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+/* cch-w24-bl-word-break-alias-remaining-seven: `overflow-wrap: anywhere`, for
+   the reason spelt out on `.bp-console-line` — same flex shape, same
+   `flex: 1 1 auto` text column with no `min-width` escape. Measured at 320 with
+   the same 78-char legal-maximum host, on BOTH deploy fixtures:
+     deploy-detail-cruel   was/anywhere 230/230 (4 lines, 93px)  ·
+                           overflow-wrap:break-word 658/230  · deleted 658/230
+     site-deploy-rail-live was/anywhere 230/230 (3 lines, 111.6px) ·
+                           overflow-wrap:break-word 583/230  · deleted 583/230
+   Page 320/320 in every one of those four tracks: the cost of the alias here was
+   never horizontal, and the cheap remedy is the one that opens it. Guard:
+   overflow-guard.mjs W24-word-break-alias-population. */
+.deploy-console-line { display: flex; gap: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .deploy-console-line.dim { color: var(--console-dim); } /* dim on the dark console = its own theme-invariant token (5.21:1) */
 .deploy-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .deploy-console-text { flex: 1 1 auto; }
@@ -3266,6 +3396,16 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--muted-text);
   padding-left: 14px;
   position: relative;
+  /* cch-w24-bl-word-break-alias-remaining-seven — KEPT. The filing said no
+     fixture mounts a probe row; that is true of `theaterFailedSteps` on /new and
+     FALSE of the instance rail, where `failedSteps` carries two `status:
+     "progress"` entries and the `failed` scenario paints them. Driven there at
+     320 with a 78-char legal-maximum host in the probe text, all three values
+     measure box 250 in a 250px parent, 3 line boxes, 54.6px, page 320/320: the
+     instance rail is a fixed track, so nothing consults min-content and the
+     choice is unobservable. Deleting the declaration is NOT unobservable — 630
+     against a 250px box and the page to 665/320 — and that is what
+     overflow-guard.mjs W24-word-break-alias-population asserts. */
   word-break: break-word;
 }
 .new-step-probe::before {
@@ -3338,8 +3478,34 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-env-row .btn { flex: 0 0 auto; }
 
 .new-golive { border-top: 1px solid var(--border); padding-top: 16px; }
-.new-golive-row { display: flex; gap: 8px; margin-top: 8px; }
-.new-golive-row .form-input { flex: 1; }
+/* console-r21m DEFECT-F — THE ROW HAD NO FLOOR, SO THE FIELD PAID FOR THE
+   REFUSAL. `flex: 1` is `flex: 1 1 0%`: a ZERO flex base size, so the field
+   contributes nothing to the line's hypothetical width and absorbs every
+   pixel its sibling asks for. That is invisible while the sibling is a
+   BUTTON — `theater-ready-github` measured field 305.23 / button 150.77 in a
+   464px row — and it collapses the moment the sibling is the D428
+   disable-and-explain arm: `theater-ready-github-member` routes
+   adminWriteControlHtml's refusal arm into this same row, and that arm is a
+   `.inst-life-disabled` flex box carrying FORBIDDEN_ROLE_COPY.admin's whole
+   sentence beside the button. Measured on origin/main d5bea4de9, light,
+   1440: `.inst-life-disabled` took 430 of the 464px row and
+   `#new-gh-name` was left 26px — an empty ~40px outlined square with the
+   greyed "Create GitHub repo" label sitting outside it, which is the shape
+   the accent-matrix re-review filed as a collapsed button. The button is
+   fine; the FIELD is the casualty, and nothing on this screen said so.
+   THE REMEDY IS A FLOOR PLUS A WRAP, NOT A WIDTH ON THE SIBLING. A cap on
+   `.inst-life-disabled` would truncate the server's own refusal sentence —
+   the thing D428 exists to SHOW — so instead the field declares a real flex
+   base size and the line is allowed to break. Line breaking reads the flex
+   BASE size, so 220 + 430 + 8 > 464 puts the refusal arm on its own line and
+   hands the field the full 464; in the grant arm 220 + 151 + 8 < 464 keeps
+   one line and the field still grows to the identical 305.23px. MEASURED
+   BOTH WAYS by overflow-guard.mjs --defect W21m-wizard-refusal-row-field-floor:
+   member 26 -> 464 (row height 38 -> 82), owner 305.23 -> 305.23 (row height
+   38 -> 38, zero pixels moved). The second half is the point: this may not
+   cost the screen everybody reaches anything. */
+.new-golive-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.new-golive-row .form-input { flex: 1 1 220px; }
 .new-gh { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: left; }
 .new-gh .label { display: block; margin-bottom: 4px; }
 .new-gh-steps { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
@@ -3491,7 +3657,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font: 12px/1.55 var(--mono);
   scroll-behavior: smooth;
 }
-.bp-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+/* cch-w24-bl-word-break-alias-remaining-seven: `overflow-wrap: anywhere`, which
+   is NOT interchangeable with the `overflow-wrap: break-word` its sibling
+   `.new-console-line` carries. Measured at 320 on `failed`
+   (#instance/…b2), a 78-char host — a 63-octet DNS label, the legal maximum —
+   substituted into the console TEXT nodes only (never the timestamp column,
+   which is `flex: 0 0 auto` and would manufacture the spill):
+     word-break: break-word (was)  224/224, 5 line boxes, 120.8px, page 320/320
+     overflow-wrap: anywhere       224/224, 5 line boxes, 120.8px, page 320/320
+     overflow-wrap: break-word     scrollWidth 735 against clientWidth 224
+     no break declaration at all   scrollWidth 735 against clientWidth 224
+   `anywhere` is the alias's own min-content lowering under the name D299 rules;
+   `break-word` preserves min-content and `.bp-console-text` (`flex: 1 1 auto`,
+   no `min-width` escape) then floors at the token. A console line IS a machine
+   string, so D299 picks `anywhere` on the string's kind as well as on the
+   numbers. Guard: overflow-guard.mjs W24-word-break-alias-population. */
+.bp-console-line { display: flex; gap: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .bp-console-empty { color: var(--console-dim); }
 .bp-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .bp-console-text { flex: 1 1 auto; }
@@ -3774,7 +3955,38 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
        .instance-card-head detail 3754/164 -> 164/164 @320, 3754/496 -> 496/496 @900
      Every host is fixed and there is nothing left to refuse — but ONE of them
      needed a second declaration OUTSIDE this block to make the wrap bind at all:
-     see `.fleet-status`'s `max-width: 100%` at :983 and the note there. */
+     see `.fleet-status`'s `max-width: 100%` at :983 and the note there.
+
+     ───────────────────────────────────────────────────────────────────────
+     console-r21m DEFECT-I — FILED AS "THE STATUS PILL HAS NO LENGTH CAP AND
+     BALLOONS TO SIX LINES". IT STAYS, AND THE REASON IS D267 ABOVE, RE-READ
+     AT origin/main d5bea4de9 RATHER THAN REMEMBERED.
+     The accent-matrix re-review (2026-09-20, `fleet-cruel-content`) is
+     looking at `overflow-wrap: anywhere` WORKING. The detail it saw is
+     `bp.provision_error` verbatim — a machine capture with no ceiling
+     anywhere between the worker socket and this box — and before cch-w23-s1
+     the SAME string painted 3754px THROUGH its own box and dragged
+     #overview to a documentElement.scrollWidth of 3860 against a 320px
+     viewport. Six lines inside the card is the remedy's own output: the
+     string is now inside the box it belongs to, at every width, in every
+     one of the three descendant scopes measured above.
+     THE FILED REMEDY — a length cap — IS THE ONE D267 ADJUDICATED AND
+     REFUSED, on measurement rather than taste: a 1648-char WORD-BROKEN
+     capture is completely clean at 320 and 390, while 512 characters in ONE
+     UNBROKEN TOKEN takes the page to 3555/320. The defect is TOKEN SHAPE,
+     not length, so any cap loose enough to keep a real capture readable
+     still lets one token paint through, and any cap tight enough to stop
+     the token truncates the only diagnostic the operator has for a failed
+     provision. A cap would therefore trade a bounded, ugly six lines for a
+     shredded error message AND an unfixed page-drag — strictly worse on
+     both axes.
+     THE REAL RESIDUAL IS VERTICAL, NOT HORIZONTAL, AND IT IS NOT THIS
+     BLOCK'S: a six-line detail is a long string rendered honestly. Bounding
+     the pill's HEIGHT (a line clamp with the full text still reachable) is a
+     separate remedy with a separate cost — it hides the tail of an error —
+     and it is not what the row asked for. Filing it as its own row is the
+     honest disposition; overturning D267 by stealth inside an F/H fix is
+     not. NO BYTES CHANGE HERE, deliberately. */
   overflow-wrap: anywhere;
 }
 .status-pill-detail::before { content: "·"; margin-right: 6px; color: var(--dim); }
@@ -4039,6 +4251,39 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .attention-row { flex-wrap: wrap; row-gap: 10px; }
   .attention-main { min-width: 12rem; }
   .attention-acts { margin-left: auto; }
+  /* cch-w20-bl: THE WRAP POINT IS A RULE, NOT A REASON STRING. The three
+     declarations above make the row wrap; they do not say WHERE, and the
+     answer they left behind was arithmetic over a fixture: the action cluster
+     yields only once `pill + gap + 12rem` no longer fits, so the pill's width
+     — which is `statusOf(bp).detail`, a sentence — decided it per row. DRIVEN
+     on the bytes above at 800 on `mixed-fleet`, content box 482px: rows 0 and
+     1 carry 325.11px and 332.58px of pill and break AFTER the chip, row 2
+     carries 200.75px and keeps chip+name inline (200.75 + 14 + 192 = 406.75 <=
+     482). One card, two row shapes, and which shape a row wears is a property
+     of its reason sentence.
+
+     ONE DECLARATION, AND IT IS A FLEX-LINE RULE RATHER THAN A WIDTH. `flex: 0
+     0 100%` makes the pill's outer hypothetical main size the whole content
+     box, so nothing can ever share its flex line — at EVERY width in the band,
+     for EVERY reason string, present or future. A `min-width` floor was the
+     other candidate and was refused: it only reaches uniformity while the
+     floor out-measures the longest sentence in the corpus (21rem clears
+     today's 332.58px and nothing clears tomorrow's), so it re-decides the
+     shape by string the moment a longer reason ships. This is uniform BY
+     CONSTRUCTION, which is what the row asked for.
+
+     IT CANNOT ROB cch-w20-s6 (that row's host, and the failure mode s9 refused
+     when it priced the floor-only candidate at 165/165 -> 0/165). The pill is
+     the only element this touches and the rule only ever WIDENS it — from its
+     natural width to the full content box — so `.attention-row
+     .status-pill-detail` gains room or keeps what it had; it can never lose
+     any. The W20-attention-band-wrap-uniform leg measures that before/after
+     across s6's own cells rather than asserting it.
+
+     BOUNDED TO THE BAND, as its three siblings are. Below 769 the GR109 stack
+     already gives every child its own line; above 904 the row is a row and the
+     pill sits inline beside a name the ellipsis bounds. */
+  .attention-row .status-pill { flex: 0 0 100%; }
 }
 /* v4 instances grid — auto-fill cards. */
 .overview-instances { margin-top: 4px; }
@@ -4490,6 +4735,31 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .wh-del-hint { font-size: 12px; }
 .wh-del-empty { font-size: 13px; padding: 6px 0; }
 .wh-del-heading { font-size: 13px; font-weight: 600; color: var(--text); }
+/* gr-backlog-operator-digest-send — the Operator console's Send-one-now block,
+   above the fleet-digest log. It sits apart from the log rather than inside the
+   card chrome, because the log is a RECORD and this is an ACT: one bordered
+   region reading as a single object would invite the button to be read as a
+   filter over the rows beneath it. */
+.op-digest-send {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.op-digest-send > .set-purpose {
+  margin: 0;
+  /* off-ladder: design/tokens.json carries no measure ladder at all — its `type`
+     section holds only the chrome and reading SIZE ladders (`jq -r '.type|keys[]'
+     design/tokens.json` prints `_units`, `chrome`, `reading`; `grep -n 'ch"'
+     design/tokens.json` is empty). So there is no rung to tokenize a reading-measure
+     cap against. 62ch is the file's established measure for a prose column — the
+     same value is hand-stamped at `.dunning-body` and at the `.set-purpose` cap
+     under the settings pane (`grep -n '62ch' cloud/priv/static/app.css`) — and this
+     declaration stays on it rather than inventing a one-site rung. */
+  max-width: 62ch;
+}
+
 .wh-del-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -4553,7 +4823,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    __css_check's E15 to police. */
 .wh-del-proof {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--muted-text);
   white-space: nowrap;
   overflow: hidden;
@@ -4583,7 +4853,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-family: var(--mono);
   font-size: var(--text-xs);
   color: var(--danger);
-  word-break: break-word;
+  /* cch-w24-bl-word-break-alias-remaining-seven: `overflow-wrap: anywhere`, and
+     the wrong conversion here is VISIBLE TEXT LOSS rather than a scrollbar.
+     `last_error_text` is verbatim machine output (D299's MACHINE STRING), and
+     this span is `flex-basis: 100%` inside a wrapping `.wh-del-row` whose
+     `.wh-del-card` ancestor carries `overflow: hidden`. Measured at 320 on
+     `webhooks-autodisabled` with a 78-char legal-maximum host substituted in:
+       word-break: break-word (was)  box 220 in a 248px parent, 3 lines, 54px
+       overflow-wrap: anywhere       box 220 in a 248px parent, 3 lines, 54px
+       overflow-wrap: break-word     box 561.61 in that same 248px parent —
+                                     562/562, so 313px of the error a person
+                                     needs is clipped away by the card
+       no break declaration at all   box 561.61, identical clip
+     Page stayed 320/320 in all four: the card eats the overflow instead of the
+     page, which is exactly why no page-level instrument could ever have seen
+     this. Guard: overflow-guard.mjs W24-word-break-alias-population. */
+  overflow-wrap: anywhere;
 }
 
 .wh-error { margin: 0; }
@@ -4809,6 +5094,15 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-radius: var(--radius-sm);
   overflow-x: auto;
   white-space: pre-wrap;
+  /* cch-w24-bl-word-break-alias-remaining-seven — KEPT. `overflow-x: auto` makes
+     this <pre> a scroll container, whose automatic minimum size is already 0, so
+     the alias's min-content lowering is consulted by nothing: at 320 with a
+     78-char legal-maximum host in the payload, all three values measure box 262
+     in a 288px parent, 3 line boxes, page 320/320 — on `activity` (110px tall)
+     and on `timeline` (182px) alike. Deleting it is what a person would feel:
+     scrollWidth 618 (activity) / 704 (timeline) against a 262px box, i.e. the
+     raw payload becomes a sideways scroll on a phone. That containment is
+     asserted by overflow-guard.mjs W24-word-break-alias-population. */
   word-break: break-word;
 }
 
@@ -6089,6 +6383,27 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    Trial state (countdown chip + ratified CTA), the GR17 dunning banner, the
    quota line on tier cards, and the GR20 topbar billing chip. Append-only tail;
    new rules ride the v4 ladder (--cc-*) directly — no new legacy-alias uses. */
+/* gr-r21m-defect-jk RULING (DEFECT-J, RETRACTED AS FILED). The re-review read
+   this chip, `.billing-chip--trial`, `.am-link`, `.invite-ico--info` and
+   `.tlv-coalesce-toggle` as "a fixed blue that ignores the accent" and asked for
+   them to be routed through the accent variable. THEY MUST NOT BE. GR57 is the
+   standing ruling: `.btn-link` colours itself `var(--primary)`, which IS the
+   user-selectable accent (redefined in ten `[data-bp-theme]` blocks across five
+   identities), so an accent-routed link renders terracotta under ember and
+   orchid under charple. `--info` = `--cc-blue` is declared ONLY in `:root` and
+   `[data-theme="dark"]` — accent-independent BY CONSTRUCTION — and GR57 says in
+   so many words: "Ship a scoped variant, never repurpose `--primary`." The
+   charter already records one builder retracting this exact finding
+   (gr-p5r7-reshoot-verify). `__css_check` E21 now holds the invariant in BOTH
+   directions so the next reviewer meets a gate instead of re-deriving it.
+
+   WHAT WAS ACTUALLY WRONG, and it is the whole of DEFECT-J's true content: this
+   rule and `.billing-chip--trial` were the only two CONSUMER rules in the file
+   that reached past the role token `--info` to the raw ramp token `--cc-blue`.
+   Same pixels today (the alias is 1:1), but a ramp token with consumers is a
+   second front door: retune `--info` for contrast and these two chips silently
+   do not follow. Both now read `var(--info)`, which is the token their own
+   background and border already used, and E21 arm (b) reds if a third appears. */
 .trial-chip {
   font-family: var(--mono);
   font-size: var(--text-xs);
@@ -6096,7 +6411,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   letter-spacing: 0.02em;
   padding: 3px 9px;
   border-radius: var(--pill);
-  color: var(--cc-blue);
+  color: var(--info);
   background: hsl(var(--info-hsl) / 0.12);
   border: 1px solid hsl(var(--info-hsl) / 0.3);
   white-space: nowrap;
@@ -6186,8 +6501,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   text-overflow: ellipsis;
 }
 .billing-chip:hover { text-decoration: none; }
+/* Reads the ROLE token, not the ramp — see the gr-r21m-defect-jk ruling on
+   `.trial-chip` above; `__css_check` E21 arm (b) holds it. */
 .billing-chip--trial {
-  color: var(--cc-blue);
+  color: var(--info);
   background: hsl(var(--info-hsl) / 0.1);
   border: 1px solid hsl(var(--info-hsl) / 0.3);
 }
@@ -6395,6 +6712,43 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      0/24 cells (12 widths x 2 themes) have `deSw > deCw`. */
   .detail-head--inst { flex-direction: column; align-items: stretch; }
   .detail-head--inst .detail-actions { justify-content: flex-start; }
+}
+
+/* THE MEMBER HEADER'S OWN ROW (task-4f071458f1c59358). Above the stack the head
+   is a flex ROW, and `.detail-head--inst .detail-actions` above is authored
+   `flex: 0 0 auto` while its own box carries `flex-wrap: wrap`. A wrapping flex
+   container's flex BASE size is its max-content width — every chip PLUS the
+   whole sentence on one line — and `flex-shrink: 0` forbids it to give any of
+   that back. For an OWNER that base is a few chips wide and nothing is wrong.
+   For a MEMBER the strip also carries `.inst-life-reason`, the server's own
+   team-admin sentence (D428 disable-and-explain), and the sibling
+   `.detail-head-main` carries `min-width: 0` — so it absorbs the ENTIRE
+   deficit and the instance name wraps toward its min-content width.
+
+   MEASURED on origin/main bytes, headless Chrome, both themes, via
+   overflow-guard.mjs --defect W21m-member-head-title-floor: at 1440
+   `instance-behind-member` painted the name "Staging" over SEVEN line boxes
+   (H1 273px, `.detail-head-main` 2px beside a 966px strip) with 434px of empty
+   header under the strip; `panel-overview-member` and `timeline-events-only`
+   read 2 lines / 131px dead at 1440 and collapsed to TEN line boxes / 533px
+   dead / `.detail-head-main` 0px at 1024 and 900, where the page also dragged
+   96-346px sideways. Post-fix every one of those 24 row-band cells reads a
+   1-2 line title, a dead band under one row, and `scrollWidth == clientWidth`.
+
+   THE TWO DECLARATIONS ARE BOTH LOAD-BEARING, and neither alone is the fix:
+   `flex: 0 1 auto` on the strip lets the sentence wrap instead of holding the
+   row open; `flex: 1 1 360px` gives the title column a FLOOR it is grown from
+   rather than a zero it is shrunk from, so the name keeps a readable measure
+   at every width in the band.
+
+   SCOPED ABOVE THE STACK ON PURPOSE. Below 900 the block above turns the head
+   into a COLUMN, where a `flex-basis` is a HEIGHT basis — an unscoped
+   `flex: 1 1 360px` would buy the wide band by forcing a 360px-tall title
+   column on every tablet and phone. The 768 cell is this leg's committed
+   no-regression control for exactly that. */
+@media (min-width: 900px) {
+  .detail-head--inst .detail-head-main { flex: 1 1 360px; }
+  .detail-head--inst .detail-actions { flex: 0 1 auto; min-width: 0; }
 }
 
 /* ==========================================================================
@@ -7281,4 +7635,58 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .modal-root:has(#cancel-go) .modal-card { min-width: 0; }
   .modal-root:has(#support-form) .modal-actions,
   .modal-root:has(#cancel-go) .modal-actions { flex-wrap: wrap; row-gap: var(--space-2); }
+}
+
+/* ═══ PDF-D11 GROUP VIEW (pdf-bl-fleet-group-view) — a main plus its supports
+   as one surface, under the 7-state catalogue
+   (empty|roster-conflict|blocked|offline|provisioning|cap-hit|working). The per-row
+   status cell reuses .fleet-presence above: the group view paints no chip of
+   its own, because "online" has exactly one renderer as it has exactly one
+   deriver. One static class per state (__css_check E3). ═══ */
+.group-view { display: flex; flex-direction: column; gap: 10px; }
+.group-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.group-title { margin: 0; }
+.group-detail { margin: 0; color: var(--muted-text); font-size: 13px; }
+.group-empty { margin: 0; color: var(--muted-text); font-size: 13.5px; }
+
+/* The group's ONE state badge. */
+.group-state {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; padding: 2px 8px;
+  border-radius: 999px; border: 1px solid var(--border);
+}
+.group-state--empty { color: var(--muted-text); }
+.group-state--roster-conflict { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.group-state--blocked { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.group-state--offline { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+.group-state--provisioning { color: var(--info); background: var(--info-soft); border-color: transparent; }
+.group-state--cap-hit { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.group-state--working { color: var(--ok); background: var(--ok-soft); border-color: transparent; }
+.group-state--unknown { color: var(--muted-text); }
+
+/* The per-support table. A CSS grid rather than a <table> so the status cell
+   can carry the presence chip's own inline-flex layout unchanged. */
+/* The unmatched-roster-row observation. Muted, under the table: it names
+   listener sessions this server's supports do not account for, and it is
+   deliberately NOT a state badge — nothing reads it as a verdict. */
+.group-others { margin: 0; color: var(--muted-text); font-size: 12.5px; }
+.group-table { display: flex; flex-direction: column; }
+.group-row {
+  display: grid; gap: 10px; align-items: center;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
+  border-top: 1px solid var(--border); padding: 8px 0;
+}
+.group-row--head { border-top: 0; color: var(--muted-text); font-size: 12px; font-weight: 600; }
+.group-cell { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.group-cell--name { font-weight: 600; color: var(--text); text-decoration: none; }
+.group-cell--name:hover { text-decoration: underline; }
+.group-cell--status { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.group-cell--cap { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted-text); }
+.group-cell--beat { color: var(--muted-text); font-size: 12.5px; }
+.group-cell--task { color: var(--muted-text); }
+
+/* Narrow: the five-column grid becomes stacked pairs rather than five slivers. */
+@media (max-width: 899px) {
+  .group-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .group-row--head { display: none; }
 }

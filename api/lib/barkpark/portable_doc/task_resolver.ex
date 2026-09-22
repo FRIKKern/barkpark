@@ -422,6 +422,20 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   design language turns on); `open` WITH blockers stays `open` (backlog).
   Everything else maps straight through (`blocked`/`in_progress`/`done`/
   `cancelled`). A `phase:`/`wave:` label becomes the row's phase group.
+
+  DRAFT DISCRIMINATOR (PDS-D749, task-b258d691989c7a99). The paper task-snapshot
+  board is a reader that CAN show a `drafts.` twin (the scope leak is filed
+  separately as task-b10e10b944f6f55b), and this projection is the LAST place the
+  `drafts.` SPELLING still exists: every downstream painter sees only this row.
+  So the spelling is read HERE, off `doc_id`, and carried forward as an explicit
+  `"draft" => true` boolean — the discriminator PDS-D749's label contract needs.
+
+  The key is emitted ONLY for a draft row (`prune/1` drops the nil), so every
+  published row is BYTE-IDENTICAL to what it was before: the shared
+  `<type>.golden.json` component-parity fixtures and the JS twin emitter are
+  untouched by this change. Painting the marker is the painters' half of the
+  row and does NOT ship here; `Components.task_board_html/1` carries the note on
+  why (its JS twin is byte-pinned, so both painters must land together).
   """
   def row_from_task(task) when is_map(task) do
     %{
@@ -430,7 +444,8 @@ defmodule Barkpark.PortableDoc.TaskResolver do
       "priority" => get(task, "priority") |> stringish(),
       "worker" => worker_of(task),
       "criteria" => criteria_of(task),
-      "phase" => phase_of(task)
+      "phase" => phase_of(task),
+      "draft" => draft_of(task)
     }
     |> prune()
   end
@@ -448,6 +463,18 @@ defmodule Barkpark.PortableDoc.TaskResolver do
       "open" -> "ready"
       "" -> if deps > 0, do: "open", else: "ready"
       other -> other
+    end
+  end
+
+  # The `drafts.` spelling, read off the doc's OWN id before any published-id
+  # normalisation can strip it. `DraftId.draft?/1` is the one owner of the
+  # prefix test — never a second `String.starts_with?("drafts.")` here.
+  # Returns `true` for a draft and `nil` otherwise, so `prune/1` omits the key
+  # on a published row (byte-stable snapshot) rather than emitting `false`.
+  defp draft_of(task) do
+    case task |> get("doc_id") |> stringish() do
+      nil -> nil
+      id -> if Barkpark.Content.DraftId.draft?(id), do: true, else: nil
     end
   end
 

@@ -1659,6 +1659,13 @@ defmodule Barkpark.Sites.DeployRunner do
       :ok ->
         spawn_run(state, req)
 
+      # An external-source site: the Provisioner deliberately did NOT touch
+      # <slug>/src (it is a clone / unpacked artifact, not ours to overwrite).
+      # The deploy proceeds exactly as it does after a marker-fresh no-op — the
+      # source is expected to already be on the box.
+      {:ok, :external_source_preserved} ->
+        spawn_run(state, req)
+
       {:error, {:provision_failed, reason}} ->
         described = describe_provision_reason(reason)
 
@@ -1931,6 +1938,23 @@ defmodule Barkpark.Sites.DeployRunner do
               "--property=WorkingDirectory=#{run_cd()}",
               "--property=EnvironmentFile=#{env_file}",
               "--property=MemoryMax=#{memory_max()}",
+              # Deploy-reliability charter D611 (the constructive half of D118).
+              # Under cgroup v2 `memory.swap.max` defaults to `max`, so a build
+              # held to MemoryMax RSS can still push an unbounded number of pages
+              # into the box's swapfile, and the pages it displaces are the
+              # serving BEAM's. This is a BLAST-RADIUS bound, not a reclaim one:
+              # the 2026-08-06 guerrilla steady-state budget
+              # (`tooling/grip/ledger/guerrilla-steady-state-memory-budget-2026-08-06.md:70-73`)
+              # measured build processes holding ~9 MB of swap in total while the
+              # box held 2,160 MB — refusing it outright frees approximately
+              # nothing and costs the build approximately nothing; what it buys
+              # is removing the build from the set of processes that can be the
+              # one that tips the API into the global OOM killer. Literal `0`,
+              # not a knob: D611(c) prescribes no other number, and a non-zero
+              # ceiling would have to be derived from the build unit's own
+              # MemorySwapPeak. D118 forbids this property on the SERVING slot;
+              # the per-build transient unit is its only permitted home.
+              "--property=MemorySwapMax=0",
               "--property=CPUQuota=#{cpu_quota()}",
               "--collect",
               engine_path
@@ -3688,7 +3712,12 @@ defmodule Barkpark.Sites.DeployRunner do
   # holding the line.
   # Reachability: `dir` is `run_state_dir()`; every candidate is a `*.log` entry
   # inside it, never a caller-supplied path.
-  # sobelow_skip ["Traversal.FileModule"]
+  # NO `sobelow_skip` HERE, DELIBERATELY: this body makes no `File.` call of its
+  # own — every filesystem touch happens in `build_log_entries/1`,
+  # `active_log_paths/1`, `evict_build_log/2` and `prune_terminal_records/2`,
+  # each of which carries its own waiver. A waiver on this def suppressed
+  # nothing and read as a risk somebody had weighed here. If you add a direct
+  # `File.` call below, the waiver belongs with it — not back up here.
   defp prune_build_logs(dir) do
     caps = retention_caps()
     protected = active_log_paths(dir)

@@ -273,6 +273,7 @@ templates/search-starter/public/bp-graph.js
 templates/astro-search-starter/public/bp-graph.js
 js/packages/react/src/status-vocab.gen.ts
 web/lib/status-ladder.gen.ts
+apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts
 templates/search-starter/app/globals.css
 templates/astro-search-starter/src/styles/globals.css
 scripts/console-path-escape-check.sh
@@ -444,7 +445,32 @@ tag_lits() {
 file_lits() {
   local p="$REPO_ROOT/$1"
   #  (1) the literal idiom: path.join(REPO_ROOT, "…") / join(REPO, '…')
-  { grep -Eoh "(REPO_ROOT|REPO)[[:space:]]*,[[:space:]]*['\"][^'\"]*['\"]" "$p" || true; } \
+  #      THE `join(` PREFIX IS LOAD-BEARING, NOT DECORATION. This grep used to
+  #      be spelled `(REPO_ROOT|REPO),[[:space:]]*"…"` — a bare TOKEN PAIR with
+  #      no call shape around it — and a token pair also describes an ARGV
+  #      ARRAY: `execFileSync('git', ['-C', REPO, 'rev-parse', …])` in
+  #      __preview__/seal-predicate.mjs fed `rev-parse`, `show`, `merge-base`,
+  #      `--guard-cmd`, `--successor`, `--epic`, `--ladder-only`, `.git` and
+  #      `.github` into this idiom. Every one of them was harmless BY
+  #      COINCIDENCE — dropped by the `[ -f ]` existence filter or by the
+  #      explicit `.git` exclusion — never by construction.
+  #
+  #      That coincidence stopped being tolerable when literal-join became one
+  #      of the three idioms that MAY ADMIT BARE WORDS (see the bare-word rule
+  #      in scan_files). A bare word is exactly the shape of a git subcommand
+  #      AND exactly the shape of a repo-root file: the day an argv token
+  #      collides with a top-level name — `git archive`, `git bundle`, a flag
+  #      value spelled `Makefile` — the ratchet reds on a path nothing reads,
+  #      and the fix would look like adding an exemption for a read that does
+  #      not exist.
+  #
+  #      So the match must sit inside a `join(...)` CALL, which is the shape
+  #      (1b) already requires, and which is the only thing in the source text
+  #      that says "this literal is a PATH SEGMENT under that root" rather than
+  #      "this literal is the next element of a list". Non-path uses of REPO
+  #      cannot spell themselves that way. The bare-word admission rule for this
+  #      idiom is unchanged — it is now merely earned instead of assumed.
+  { grep -Eoh "join[[:space:]]*\([[:space:]]*(REPO_ROOT|REPO)[[:space:]]*,[[:space:]]*['\"][^'\"]*['\"]" "$p" || true; } \
     | tag_lits literal-join
   #  (1b) THE GENERIC JOIN IDIOM: `join(<anyIdentifier>, "…")`. (1) is spelled
   #      against ONE naming convention — `(REPO_ROOT|REPO)`, case-sensitive —

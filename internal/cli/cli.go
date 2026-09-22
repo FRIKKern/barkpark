@@ -120,6 +120,17 @@ func Execute(args []string) int {
 	// onboarding doctor) all read prov rather than re-deriving the precedence.
 	ctx, prov := resolveContextProv(g)
 
+	// The binding's receipt. resolveContextProv has ALREADY withheld the saved
+	// credential by this point — the notice is not the guard, it is the reason
+	// the operator gets to read. It prints HERE because the very next thing that
+	// happens is the /v1/capabilities fetch, which is the first request that
+	// would have carried the credential; on stderr, so `-o json` stdout stays a
+	// single parseable document.
+	if n := prov.withheldNotice(ctx.Server); n != "" {
+		out.userErr("%s", n)
+		out.errf("%s", prov.withheldFix())
+	}
+
 	// VERB-LEVEL built-ins (`task create`, `task frontier`, `server ls`,
 	// `mcp serve`, `context pack`, …) dispatch from ONE registry —
 	// nounBuiltins in noun_builtins.go — which is also what every noun's help
@@ -709,7 +720,7 @@ func Execute(args []string) int {
 	}
 
 	// `bp task close` and `bp task pulse` — the SAME read-back `bp task stamp`
-	// got in wave 26 (PDS-D359/D361), extended to its two siblings on this
+	// got in wave 26 (PDS-D359/PDS-D361), extended to its two siblings on this
 	// ledger. close is the seal and pulse writes the board's now-line; both
 	// reported success on an exit code alone. The POST is unchanged — each
 	// wrapper only adds the second read and renders the verdict from what the
@@ -769,6 +780,7 @@ func resolveContext(g globals) manifest.Context {
 // redirects the server, the saved token is for somewhere else and no shadow is
 // claimed. Whether that shadow is a PROBLEM is decided by the caller, which
 // knows whether the server actually refused the env token.
+// @canonical capability:bp-credential-server-pairing aka:token binding,withheld credential,mismatched server,credential leak,saved credential,server-credential pairing,TestResolvedCredentialIsNotBoundToTheResolvedServer
 func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 	// Persisted config is the ActiveContext layer. A missing/empty config is a
 	// no-op (empty ActiveContext); a malformed one is non-fatal here — we fall
@@ -895,6 +907,52 @@ func resolveContextProv(g globals) (manifest.Context, tokenProvenance) {
 	}
 	if ctx.Token == "" {
 		prov.Source = tokenSourceNone
+	}
+
+	// THE BINDING — a saved credential is paired to the server it was saved for.
+	//
+	// THE MEASUREMENT THAT FORCED THIS (task-c05d0f7fa7bef688, reproduced live
+	// 2026-09-16 against a header-recording server): Server and Token are picked
+	// by two INDEPENDENT precedence walks with nothing comparing them, so a
+	// credential saved for host A rode `-s http://other.host` and
+	// BARKPARK_API_URL=http://other.host alike — and it left on the FIRST
+	// request, the /v1/capabilities manifest fetch, before any command dispatch.
+	// That is a bearer token disclosed to a host that was never meant to have it.
+	//
+	// THE DECISION, and it is a decision with a named loser. bp BINDS the saved
+	// credential and WITHHOLDS it on a mismatch. The predicate is deliberately
+	// narrow — it fires ONLY when the token won at the ACTIVE layer (the saved
+	// config / the repo file's saved entry), which is the only layer that RECORDS
+	// which server its credential belongs to. A --token typed on this command
+	// line, or a BARKPARK_API_TOKEN exported in this shell, is the operator
+	// pairing the two THEMSELVES in this invocation and is never touched; a
+	// `bp -s <saved-name>` carries the entry's server AND token together, so it
+	// matches by construction.
+	//
+	// WHAT IT COSTS, stated rather than discovered. The loser is the operator who
+	// deliberately points a saved credential at a host they did not save it for:
+	// they must now say so, with --token or BARKPARK_API_TOKEN. The dev flow that
+	// the earlier builder declined to break — BARKPARK_API_URL=http://localhost:4000
+	// on top of a saved remote config — does NOT break, because the withheld
+	// credential falls to bakedDefaults().Token ("barkpark-dev-token") rather
+	// than to EMPTY. Falling to empty is what would have manufactured the exact
+	// false-404 shape hq-doc-get-auth-tier-gap existed to kill; falling to the
+	// dev floor is what a localhost instance wants anyway. The floor is a public
+	// well-known constant, not a secret, so sending it is not the leak this
+	// block closes.
+	//
+	// WHAT IT DOES NOT DECIDE: whether an ANONYMOUS mode should exist at all.
+	// bakedDefaults() still floors the token and no invocation resolves an empty
+	// one — TestNoCLIInvocationResolvesAnEmptyToken still pins that, deliberately
+	// unchanged, because an anonymous tier is a separate contract change.
+	if srcs.Token == manifest.LayerActive && active.Server != "" && ctx.Server != "" &&
+		normalizeServerURL(active.Server) != normalizeServerURL(ctx.Server) {
+		prov.WithheldFrom = active.Server
+		prov.WithheldTail = tokenTail(ctx.Token)
+		ctx.Token = bakedDefaults().Token
+		srcs.Token = manifest.LayerDefault
+		prov.Source = tokenSourceDefault
+		prov.Tail = tokenTail(ctx.Token)
 	}
 
 	// The shadow: an env token in front of a DIFFERENT saved/repo token for the

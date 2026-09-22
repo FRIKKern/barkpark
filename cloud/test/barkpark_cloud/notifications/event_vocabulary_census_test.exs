@@ -215,6 +215,9 @@ defmodule BarkparkCloud.Notifications.EventVocabularyCensusTest do
     "deploy_rate_alert.ex" => {:no_vocabulary, "rate thresholds"},
     "deploy_rate_alert_state.ex" => {:no_vocabulary, "rate-alert state row"},
     "digest_run.ex" => {:no_vocabulary, "digest run bookkeeping"},
+    "receipt_loss.ex" =>
+      {:no_vocabulary,
+       "receipt-reduction ladder; keys on the refused changeset's fields and a :lost residue, never on an event name"},
     "safe_url.ex" => {:no_vocabulary, "SSRF fence on channel URLs"},
     "site_publish_waiting_alert.ex" =>
       {:no_vocabulary, "publish-wait alert; dispatches through Notifications"},

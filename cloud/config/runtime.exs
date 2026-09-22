@@ -220,6 +220,19 @@ if config_env() == :prod do
   config :barkpark_cloud, BarkparkCloud.Azure.Pricing,
     http_client: &BarkparkCloud.Billing.HttpClient.request/1
 
+  # azure-transport-wiring (task-2772b2cdd5001bfc): wire the REAL transport for
+  # the CREDENTIAL Azure client too. Without this key,
+  # `BarkparkCloud.Azure.RealClient.request/1` fell closed with
+  # :http_client_not_configured in EVERY environment — so in prod
+  # `Azure.verify/1` and `Azure.list_catalog/1` could never succeed and
+  # GET /v1/providers/azure/overview and …/catalog were a flat 502
+  # catalog_unavailable for every connected azure provider. Same built-in
+  # verified-TLS :httpc client as the billing/oauth/github/pricing seams (no new
+  # dep). No credential is threaded here: the service principal comes per-call
+  # from the team's vault, so this wires only the WIRE, never an identity.
+  config :barkpark_cloud, BarkparkCloud.Azure,
+    http_client: &BarkparkCloud.Billing.HttpClient.request/1
+
   # portable-archives (S14/D39): wire the S3 read conduit's credentials + bucket
   # in prod from env. The location defaults to fsn1 (Hetzner Object Storage). The
   # transport defaults to the module's own verified-TLS :httpc client — no new

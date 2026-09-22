@@ -20,6 +20,45 @@ pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
 check() { if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
 
+# ── Digest: resolve ONE tool up front, then REFUSE on failure ───────────────
+# `shasum` is the macOS-canonical digest tool; GNU coreutils ships `sha256sum`
+# and `shasum` only arrives with perl. RESOLUTION falls back (that is a probe);
+# EXECUTION does not — a silent fallback hides a broken canonical tool exactly
+# the way a silent skip does. A failed or empty digest is a REFUSAL, never an
+# empty string: `x="$(shasum …)"` does not trip `set -e`, and two empty
+# captures compare EQUAL, so the assertion prints PASS having measured nothing.
+DIGEST_BIN=""
+if DIGEST_BIN="$(command -v shasum 2>/dev/null)" && [ -n "$DIGEST_BIN" ]; then
+  DIGEST_DESC="$DIGEST_BIN -a 256"
+  digest_run() { "$DIGEST_BIN" -a 256 "$@"; }
+elif DIGEST_BIN="$(command -v sha256sum 2>/dev/null)" && [ -n "$DIGEST_BIN" ]; then
+  DIGEST_DESC="$DIGEST_BIN"
+  digest_run() { "$DIGEST_BIN" "$@"; }
+else
+  echo "CANNOT MEASURE: no digest tool on PATH (need shasum or sha256sum)" >&2
+  exit 2
+fi
+digest() {
+  local out rc
+  out="$(digest_run "$@" 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "CANNOT MEASURE: digest tool '$DIGEST_DESC' failed (exit $rc) on: $* -- $out" >&2
+    return 1
+  fi
+  if [ -z "$out" ]; then
+    echo "CANNOT MEASURE: digest tool '$DIGEST_DESC' produced an EMPTY digest for: $*" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+die_digest() {
+  echo "CANNOT MEASURE: $* — refusing to compare unmeasured digests" >&2
+  exit 2
+}
+# Compare two already-captured digests WITHOUT re-entering `eval`, so no call
+# site can smuggle an unguarded `$( … )` back into an equality assertion.
+check_eq() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 (digests differ)"; fi; }
+
 TMP="$(mktemp -d)"
 cleanup() { chmod -R u+w "$TMP" 2>/dev/null || true; find "$TMP" -depth -delete 2>/dev/null || true; }
 trap cleanup EXIT
@@ -111,18 +150,20 @@ check "only curl fetches were logged (no other dangerous command)" \
   "grep -q '^curl ' '$DANGER_LOG' && ! grep -qv '^curl ' '$DANGER_LOG'"
 
 echo "== re-run is idempotent: rc stanza is NOT double-appended =="
-before_sha="$(shasum -a 256 "$RC1" | awk '{print $1}')"
+before_sha="$(digest "$RC1")" || die_digest "rc file before re-run"
+before_sha="${before_sha%% *}"
 marker_count_before="$(grep -cF 'barkpark-bp path' "$RC1")"
 : > "$DANGER_LOG"
 run_install "$H1" "$BIN1" "$TMP/out2.txt"
 rc=$?
 marker_count_after="$(grep -cF 'barkpark-bp path' "$RC1")"
-after_sha="$(shasum -a 256 "$RC1" | awk '{print $1}')"
+after_sha="$(digest "$RC1")" || die_digest "rc file after re-run"
+after_sha="${after_sha%% *}"
 check "re-run exits 0" "[ '$rc' = 0 ]"
 check "(c) marker appears exactly once before and after re-run" \
   "[ '$marker_count_before' = 1 ] && [ '$marker_count_after' = 1 ]"
-check "(c) rc file is byte-identical after re-run (no double-append)" \
-  "[ '$before_sha' = '$after_sha' ]"
+check_eq "(c) rc file is byte-identical after re-run (no double-append)" \
+  "$before_sha" "$after_sha"
 check "re-run still resolves bp in a fresh child shell" \
   "child_shell_resolves_bp '$H1'"
 
@@ -132,13 +173,16 @@ mkdir -p "$H3" "$BIN3"
 # Pre-seed .profile with the export already present (simulating a prior install
 # or a user who set it up by hand): installer must NOT re-patch.
 printf '# barkpark-bp path (added by install-cli)\nexport PATH="%s:$PATH"\n' "$BIN3" > "$H3/.profile"
-seed_sha="$(shasum -a 256 "$H3/.profile" | awk '{print $1}')"
+seed_sha="$(digest "$H3/.profile")" || die_digest "seeded rc file before install"
+seed_sha="${seed_sha%% *}"
 : > "$DANGER_LOG"
 run_install "$H3" "$BIN3" "$TMP/out3.txt"
 rc=$?
 check "seeded-rc install exits 0" "[ '$rc' = 0 ]"
-check "(b) pre-satisfied PATH leaves the rc file untouched" \
-  "[ '$seed_sha' = \"\$(shasum -a 256 '$H3/.profile' | awk '{print \$1}')\" ]"
+seed_sha_after="$(digest "$H3/.profile")" || die_digest "seeded rc file after install"
+seed_sha_after="${seed_sha_after%% *}"
+check_eq "(b) pre-satisfied PATH leaves the rc file untouched" \
+  "$seed_sha" "$seed_sha_after"
 check "seeded-rc install does NOT re-announce a patch" \
   "! grep -qF 'added $BIN3 to PATH' '$TMP/out3.txt'"
 check "seeded-rc install still prints the GUI-agent caveat" \

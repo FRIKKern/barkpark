@@ -32,8 +32,8 @@ Nothing in this record claims a rung passed.
 | scratch home | `/tmp/pds-w14.c7528814` — `scratch.env` PRESENT (766 B), `up --verify` → `---- verify: PASS` |
 | scratch pointer | `/tmp/pds-scratch.pds-w14.c7528814.last` |
 | `attempts_read` | `4` (host-authoritative, PDS-D156) |
-| `budget_exported` | `PDS_FULL_EXPORT_BUDGET=6` (`4 + 2`, PDS-D224/D249; asserted `6 > 4`) |
-| floor | **2200 MiB, UNMODIFIED.** `PDS_FULL_EXPORT_MIN_MEM_MB` and `PDS_LAUNCH_MEM_FLOOR_MIB` both left UNSET (PDS-D257/D267) |
+| `budget_exported` | `PDS_FULL_EXPORT_BUDGET=6` (`4 + 2`, PDS-D224/PDS-D249; asserted `6 > 4`) |
+| floor | **2200 MiB, UNMODIFIED.** `PDS_FULL_EXPORT_MIN_MEM_MB` and `PDS_LAUNCH_MEM_FLOOR_MIB` both left UNSET (PDS-D257/PDS-D267) |
 | `max_draws` | `2160` |
 | `interval_s` | `10` |
 | resulting window | `2160 × 10 s = 6 h` → `15:17:59Z` → `21:17:59Z` |
@@ -112,7 +112,7 @@ parked full-default.tar.meta    : served_sha 8eeaf688fff03986da63e54bfc5cb323b53
 /tmp/pds-full-export/attempts   : 4
 ```
 
-The mismatch means `acquire_full_bundle`'s PDS-D20/D223 provenance gate REFUSES the parked
+The mismatch means `acquire_full_bundle`'s PDS-D20/PDS-D223 provenance gate REFUSES the parked
 1.4 GB bundle, so rungs 3/4 take a **fresh export, spending one attempt**. `FULL_BUDGET`
 defaults to 1 and `attempts` is already 4, so gate (c) `spent < budget` would fail unless the
 budget is set: the launcher computes `PDS_FULL_EXPORT_BUDGET = spent + 2 = 6` at fire time
@@ -122,7 +122,7 @@ attempt count. No cached sha was quoted; the HEAD above is a live read from this
 
 ---
 
-## 4. The floor stayed at 2200 — a decision, not an oversight (PDS-D257/D267)
+## 4. The floor stayed at 2200 — a decision, not an oversight (PDS-D257/PDS-D267)
 
 `PDS_LAUNCH_MEM_FLOOR_MIB` and `PDS_FULL_EXPORT_MIN_MEM_MB` were **both left unset**. The
 launcher's own 2200 default governs; the transcript carries **no asterisk**. The arm banner

@@ -1,39 +1,39 @@
 
- barkpark · tasks                                         ⇄ 127.0.0.1  ● live · T↔  ────────────────────────────────────────
- ▎ Harbor lights epic ························································· 1/4│ │ Harbor lights epic                     │
- ├─ ⠿ Dredge the north channel                                                     │ │ ○ open · P1 · C4/7 · task              │
- │    C4/7 · P1 · 1/2 · fixture-worker · T · T                                   │ │                                        │
- ├─ ○ Paint the pier bollards                                       C4/7 P2 0/1 T│ │ criteria 1/4                           │
- ├─ ○ Replace the fog bell                                          C4/7 P3 0/1 T│ │   ✓ north channel dredged              │
- └─ ✓ Retire the old winch                                              C4/7 1/1 T│ │     ↳ fixture                          │
-                                                                                   │ │   ○ pier bollards painted              │
-   Orchard rows epic ·························································· 0/3│ │   ○ fog bell replaced                  │
- ├─ ⠿ Mulch the seedling beds                                                      │ │   ○ old winch retired                  │
- │    C4/7 · P2 · 0/1 · fixture-worker-two · T · T                               │ │                                        │
- ├─ ! Net the cherry rows                                   C5/7 P2 0/1 T blocked│ │ purpose · derived                      │
- └─ ○ Graft the pear stock                                          C4/7 P1 0/2 T│ │   part of   standalone task            │
-                                                                                   │ │   impact    blocks 0 · blocked by 0    │
-   (no epic) ·································································· 1/2│ │   does      Harbor lights epic         │
-                                                                                   │ │   why       Why this task is worth     │
-                                                                                   │ │             doing is not recorded.     │
-                                                                                   │ │   endgame   Complete this task and its │
-                                                                                   │ │             4 direct children.         │
-                                                                                   │ │   important 90/100 — Derived from P1   │
-                                                                                   │ │             queue priority.            │
-                                                                                   │ │   relevant  50/100 — Default score;    │
-                                                                                   │ │             task is present on this    │
-                                                                                   │ │             board.                     │
-                                                                                   │ │   proof     Recorded task intent —     │
-                                                                                   │ │             Harbor lights epic —       │
-                                                                                   │ │             document.title             │
-                                                                                   │ │   proof     Acceptance contract — 4    │
-                                                                                   │ │             recorded criteria —        │
-                                                                                   │ │             content.acceptance_criteri │
-                                                                                   │ │             a                          │
-                                                                                   │ │   derived from recorded task facts · … │
-                                                                                   │ │                                        │
-                                                                                   │ │ created T ago (Aug 01, 09:00)        │
-                                                                                   │ │ updated T ago (Aug 10, 09:00)         │
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ │                                        │
- ⠿ 2 in flight · ○ 4 ready · ✓ 2 done · 4/18 criteria · 9 stale                 18%│ │   Fixture epic: relight the harbor.    │
- jk move · enter open · esc back · c claim · x close · o studio · M mouse          │ │   ↓ more below                         │
+ barkpark · tasks                                         ⇄ 127.0.0.1  ● live · T↔ Harbor lights epic
+ ▎ Harbor lights epic ························································· 1/4│ ○ open · P1 · C4/7 · task
+ ├─ ⠿ Dredge the north channel                                                     │
+ │    C4/7 · P1 · 1/2 · fixture-worker · T · T                                 │ criteria 1/4
+ ├─ ○ Paint the pier bollards                                       C4/7 P2 0/1 T│   ✓ north channel dredged
+ ├─ ○ Replace the fog bell                                          C4/7 P3 0/1 T│     ↳ fixture
+ └─ ✓ Retire the old winch                                             C4/7 1/1 T│   ○ pier bollards painted
+                                                                                   │   ○ fog bell replaced
+   Orchard rows epic ·························································· 0/3│   ○ old winch retired
+ ├─ ⠿ Mulch the seedling beds                                                      │
+ │    C4/7 · P2 · 0/1 · fixture-worker-two · T · T                             │ purpose · derived
+ ├─ ! Net the cherry rows                                   C5/7 P2 0/1 T blocked│   part of   standalone task
+ └─ ○ Graft the pear stock                                          C4/7 P1 0/2 T│   impact    blocks 0 · blocked by 0
+                                                                                   │   does      Harbor lights epic
+   Salt marsh epic ···························································· 1/6│   why       Why this task is worth doing
+ ├─ ○ Recalibrate the tide counter                                  C4/7 P2 0/1 T│             is not recorded.
+ ├─ ○ Reseed the upper saltings                                     C4/7 P1 0/1 T│   endgame   Complete this task and its 4
+ ├─ ⠿ Rebuild the birdwatcher hide                                                 │             direct children.
+ │    C4/7 · P3 · 0/1 · fixture-worker-sm · T · T                              │   important 90/100 — Derived from P1 queue
+ ├─ ○ Rehang the tidal sluice                                       C4/7 P1 0/1 T│             priority.
+ └─ ✓ Retension the stock fence                                        C4/7 1/1 T│   relevant  50/100 — Default score; task
+   +1 more                                                                         │             is present on this board.
+                                                                                   │   proof     Recorded task intent — Harbor
+   Quarry road epic ··························································· 1/6│             lights epic — document.title
+ ├─ ○ Clear the roadside ditch                                      C4/7 P2 0/1 T│   proof     Acceptance contract — 4
+ ├─ ○ Repost the weight-limit signage                               C4/7 P1 0/1 T│             recorded criteria —
+ ├─ ⠿ Rehang the quarry gate                                                       │             content.acceptance_criteria
+ │    C4/7 · P3 · 0/1 · fixture-worker-qr · T · T                              │   derived from recorded task facts · add …
+ ├─ ○ Rebuild the washed culvert                                    C4/7 P1 0/1 T│
+ └─ ✓ Relevel the cattle grid                                          C4/7 1/1 T│ created T ago (Aug 01, 09:00)
+   +1 more                                                                         │ updated T ago (Aug 10, 09:00)
+                                                                                   │
+   Bell tower epic ···························································· 1/6│   Fixture epic: relight the harbor.
+ ├─ ○ Shim the oak bell frame                                       C4/7 P2 0/1 T│
+   ↓ 7 more below                                                                  │ children 1/4 done
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│   ⠿ Dredge the north channel  T
+ ⠿ 5 in flight · ○ 16 ready · ✓ 5 done · 7/45 criteria · 27 stale               16%│   ○ Paint the pier bollards  T
+ jk move · enter open · esc back · c claim · x close · o studio · M mouse          │   ↓ more below

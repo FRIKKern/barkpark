@@ -69,6 +69,7 @@ defmodule BarkparkWeb.TasksControllerTest do
     content =
       %{
         "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
         "lifecycle_status" => "open",
         "acceptance_criteria" => @fixture_criterion
       }
@@ -167,6 +168,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       Map.merge(
         %{
           "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
           "acceptance_criteria" => [
             %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
           ],

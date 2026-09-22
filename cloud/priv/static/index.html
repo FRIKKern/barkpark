@@ -401,6 +401,12 @@
               <h1>Notifications</h1>
               <p class="dim">How your fleet reaches you &mdash; email, chat channels, and what each event routes to.</p>
             </div>
+            <!-- gr-r21m-defect-jk (DEFECT-K, screen `notif-configured`). RULED the
+                 ghost tier BY DESIGN — the same ruling as providerRosterHtml's
+                 Disconnect (grep -n 'gr-r21m-defect-jk (DEFECT-K, screen .providers-connected' app.js).
+                 A header-row test action is secondary by construction: the
+                 screen's primary is the channel save below it, and this button
+                 is admin-gated and hidden outright for a member. -->
             <button class="btn btn-ghost btn-sm" id="notif-test" type="button" hidden>Send test email</button>
           </header>
 

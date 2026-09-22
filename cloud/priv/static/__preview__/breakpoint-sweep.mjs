@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  135 scenarios, 24 rendered, 111 in a COMMITTED residue literal.
+//   SCENARIO  144 scenarios, 25 rendered, 119 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -210,7 +210,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
 //  costs roughly a second per cell (0.73s measured). The full render leg is
-//  25 cells x 2 themes x ONE height x 21 boundary widths = 1050 renders: budget
+//  26 cells x 2 themes x ONE height x 21 boundary widths = 1092 renders: budget
 //  MINUTES. The height axis multiplies that and is therefore OPT-IN — all three
 //  declared HEIGHTS make it 2700 renders (32.9 min), the number that decided
 //  the default loop (HEIGHT_REASONS[800]). The width numeral here is
@@ -333,7 +333,42 @@ const BASE = `http://127.0.0.1:${PORT}`;
 export function boundaryWalk(breakpoints) {
   const out = new Set();
   for (const b of breakpoints) { out.add(b - 1); out.add(b); out.add(b + 1); }
-  return [...out].sort((a, b) => a - b);
+  const walk = [...out].sort((a, b) => a - b);
+  // ASSERTED, NOT ASSUMED (cch-w15-bl-target-reuse-ascending-order-pin). The
+  // sort above is what MAKES this ascending, and a caller cannot tell the
+  // difference between "sorted" and "happens to arrive sorted" by reading the
+  // export. Under target reuse the ascending order is a PRECONDITION of the
+  // measurement — a reused document inherits the previous width's
+  // geometry-derived classes — so the property this file's own axis relies on
+  // is checked here, at the only place that constructs it.
+  const bad = ascendingViolation(walk);
+  if (bad) throw new Error(`boundaryWalk produced a non-ascending axis at index ${bad.index} (${bad.prev} then ${bad.next}): [${walk.join(",")}]`);
+  return walk;
+}
+
+// THE ORDER PIN'S PURE HALF. Returns null when `widths` is STRICTLY ascending
+// (equal neighbours are a violation too: driving the same width twice in a
+// reused document measures the second one against the first one's settled
+// state, which is the same inheritance the descending case exposes), otherwise
+// the first offending pair with its index.
+export function ascendingViolation(widths) {
+  for (let i = 1; i < widths.length; i++) {
+    if (!(widths[i] > widths[i - 1])) return { index: i, prev: widths[i - 1], next: widths[i] };
+  }
+  return null;
+}
+
+// The refusal SENTENCE, kept beside the predicate so the test file can pin the
+// wording without driving a browser. It names the offending list verbatim —
+// a refusal that says "not ascending" without printing what it read makes the
+// operator guess which of their two `--widths` runs was rejected.
+export function nonAscendingRefusal(widths, bad) {
+  return `--widths ${widths.join(",")} is NOT strictly ascending: position ${bad.index} goes ${bad.prev} -> ${bad.next}.\n` +
+    `   Target reuse drives every width of a (cell, theme, height) group into ONE document, so a width is measured against the\n` +
+    `   geometry the PREVIOUS width left behind. Ascending is the order this equivalence was established at; any other order\n` +
+    `   silently measures a different console (wave 15: driven descending, the fleet cell lost every one of its is-nav-clipped\n` +
+    `   CUE_STUCK observations while overview-fleet, same class and same widths, kept them — non-uniform, i.e. racy).\n` +
+    `   Sort the list, or pass --fresh-targets to open a fresh target per (cell, width) and drive any order you like.`;
 }
 
 // W17-S6 ADDED 830. `@media (max-width: 830px)` is where GR116's topbar tighten
@@ -426,6 +461,13 @@ export const CELLS = [
   { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", sentinel: "#instance-tabpanel .metrics-grid" },
   { name: "inst-webhooks", scen: "webhooks-panel", hash: `#instance/${INST}/webhooks`, view: "view-instance", sentinel: "#instance-tabpanel .wh-card" },
   { name: "inst-update-refused", scen: "instance-update-credential-refused", hash: `#instance/${REFUSED}`, view: "view-instance", sentinel: '#instance-tabpanel .update-badge[data-update-state="unknown"]' },
+  // A CELL rather than a hash:#instance residue entry, and the difference is
+  // geometry the other instance cells do not have: `.group-table` is a FIVE
+  // column grid that collapses to two at 640 (`grep -n "group-row" app.css`),
+  // the only such table on the instance route. Its sentinel is the painted
+  // table, which exists only after the browser-direct roster read lands — so
+  // this cell also proves the route's async paint in a real browser.
+  { name: "inst-group", scen: "fleet-group-view", hash: `#instance/${INST}/group`, view: "view-instance", sentinel: "#instance-tabpanel .group-table" },
   { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
   { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
 ];
@@ -450,7 +492,7 @@ export const HEIGHTS = [390, 667, 800];
 export const HEIGHT_REASONS = {
   390: "LANDSCAPE. 720x390 is the binding height for the fold bar — the shipped 34vh cap read 0.4836 of H here while passing casual inspection at 800, so a height set without it cannot see the defect cch-w15-s1 fixed.",
   667: "SHORT PORTRAIT. iPhone SE / small-phone portrait: the shortest height at which the folded shell is a normal reading posture rather than an edge case.",
-  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 25 cells x 2 themes x 1 height x 21 widths = 1050 renders (12.8 min at the measured 0.73s/cell) to 3150 (38.3 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
+  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 26 cells x 2 themes x 1 height x 21 widths = 1092 renders (13.3 min at the measured 0.73s/cell) to 3276 (39.9 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
 };
 // THE EPIC'S HEIGHTS DISAGREE, AND THIS IS THE DISAGREEMENT STATED RATHER THAN
 // HIDDEN: modal-oracle/overflow-guard commit to 900, the fold identity is
@@ -497,10 +539,10 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 96
 // name-keyed entries below, which is what makes a 121st scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 30 vary the CONTENT of a panel already rendered at all 18 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
-  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 12 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all), and cch-w12-followup-login-fixture-gap's `activity-identity-change` (the corpus's ONLY successful-login fixture, a DRIVE through three states rather than a screen — smoke.mjs steps it from Activity to signed out to signed in as another team, and a transition is not a width) — over a grid already walked at all 18 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
+  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 34 vary the CONTENT of a panel already rendered at all 18 widths — a new geometry only if the panel's own shape changes, which the five cells would see. The last two (task-499cab525e65018b) vary it by putting a DIALOG over it: `instance-pin-version` and `instance-update-conflict` are `instance-behind`'s fixture with a declared `modal` driver, so the panel beneath each one is the very panel the five cells already walk at all 18 widths, and the dialog's own geometry is modal-oracle's axis — the same split the account family and cch-w45-bl's render-state fixtures are already explained by.",
+  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 13 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all), and cch-w12-followup-login-fixture-gap's `activity-identity-change` (the corpus's ONLY successful-login fixture, a DRIVE through three states rather than a screen — smoke.mjs steps it from Activity to signed out to signed in as another team, and a transition is not a width) — over a grid already walked at all 18 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 14 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 18 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 3 routes (cruel + kind control + the classified caption), by overflow-guard's W25-deploy-rail-fail-wrap leg. `site-deploy-rail-failed-classified` (task-877bfc465162e104) is the third of those routes and the family's FOURTH instrument fixture: it renders the same `.deploy-rail-fail` box carrying the one capture in this corpus whose caption MOVES between the box and the browser (`FailureCopy.humanize/1` classifies it; the wave-26 pair passes through unchanged), and its classified sentence is a DIFFERENT length from both, which is content length again — overflow-guard's axis, not this sweep's. `deploy-detail-cruel` (cch-deploy-detail-render-has-no-cap) is the family's OTHER cruel twin and is here for the same reason wearing the other axis: its 2,000-character live sub-caption is bounded VERTICALLY, and a fixture built to be 81 line-boxes tall would red every width of the walk for a height this sweep does not measure. It is driven at 320/390/620/900/1024/1440 x 2 themes by overflow-guard's W34-deploy-detail-render-bound leg. `site-deploy-rail-live` (cch-w29-bl) is the family's THIRD instrument fixture and the only one that is not cruel at all: it renders the rail's OTHER footer — `.deploy-rail-live`, which no scenario in this harness had ever produced — carrying the site's ordinary 55-character live URL. It is here rather than in a cell because what it exists to measure is one ANCHOR's wrap against its own container at phone widths, which is overflow-guard's axis and not a width walk over a .detail-grid the two cells already sweep at all 18 widths. It is driven at 320/360/390 x 2 themes by overflow-guard's W29-deploy-rail-live-url-wrap leg.",
-  "hash:#settings": "The settings screens are swept by EIGHT cells across billing/providers/notifications/tokens/members. These 9 are member-role, ACTOR-IDENTITY, empty-state and cruel-content variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 18 widths, and a row with fewer buttons is strictly narrower than the one they walk. The followup's `members-self-role-drift` varies one CHIP WORD on one row (Member -> Owner, the shorter string becoming the longer by one character) against a roster the members cells already walk at every width.",
+  "hash:#settings": "The settings screens are swept by EIGHT cells across billing/providers/notifications/tokens/members. These 10 are member-role, ACTOR-IDENTITY, empty-state, cruel-content and dialog-over-the-same-panel variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 18 widths, and a row with fewer buttons is strictly narrower than the one they walk. The followup's `members-self-role-drift` varies one CHIP WORD on one row (Member -> Owner, the shorter string becoming the longer by one character) against a roster the members cells already walk at every width.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner. `account-modal-cruel-identity` (cch-w23-bl-cruel-identity-own-scenario) is the family's CRUEL twin, wearing the same axis `fleet-cruel-content` and `deploy-detail-cruel` do: its `.am-name` is a 158-character email local part at the server's own `validate_length(:email, max: 160)` cap, and content length is overflow-guard's axis, not this sweep's. It is driven at 320/360/390/430/620/900/1440 x 2 themes by overflow-guard's W23-account-modal-identity-bounded leg, beside `account-modal` as the kind control.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
@@ -508,7 +550,7 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 9 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers`, cch-w50-s4's two never-before-minted billing ACTORS (`billing-free-owner`, the unsubscribed owner renderPlanState routes to the upsell card, and `billing-support-plus`, the third catalog tier rendering as a CURRENT plan) and cch-w50-bl's `billing-forever` (the admin-granted comp tier: a NON-catalog plan rendering as the current plan, whose Manage panel carries prose and no button) inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, and the upsell card is the same .card.plan-card the trial-tiers cell already walks at all 18 widths, one .plan-rec badge and one full-width button wider than nothing.",
   "hash:#operator": "The operator console is swept by two cells (console, halted). These 5 vary zero-staging / denied / route-unreadable / me-unreadable / me-recovers states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 18 widths, and cch-w37-bl's `operator-me-recovers` is a CLICK fixture: it boots into that same empty-state block and, after the press smoke.mjs drives, settles on the console geometry the `console` cell already sweeps. Neither end state is new to this sweep; only the transition between them is, and a transition is not a width.",
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
-  "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
+  "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 4 vary CONTENT or ACTOR over those same two tables: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg. `fleet-archives-member` (cch-w47-rv-bl) is `fleet-archives-stored`'s fixture with ONE field changed — the actor is a plain member — so the archives panel it paints is the `fleet-archives` cell's own geometry minus one button and plus one `.archives-note` line, strictly less horizontal demand at every width that cell already walks. What it carries that no width can score is an AUTHORITY answer, and smoke.mjs drives it there. `cmdk-palette` (task-5ffdec2b609404bc) is `mixed-fleet`'s fixture plus one declared `modal` field: the command palette opens over the very table the `fleet` cell walks at all 18 widths, and the dialog's own geometry belongs to modal-oracle, not to this sweep.",
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
   "hash:#activity": "The Activity feed is swept by the `activity` cell at all 18 widths. cch-w36-bl's `activity-denied` is the plain-MEMBER twin of that same screen, and it renders STRICTLY LESS: /v1/audit answers 403, so loadActivity replaces the whole coalesced feed with ONE .empty-state block — the identical geometry the refusal fixtures in `hash:#operator` and `hash:#billing` already occupy, and narrower at every width than the grid the cell walks. What it exists to measure is an AUTHORITY answer, not a width: it was the first fixture in this corpus able to reach that refusal arm at all, because the only other #activity scenario is an owner and the only other auditDenied fixture sits on the instance timeline, where the same 403 degrades to events-only instead of taking over the view.",
 };
@@ -525,8 +567,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 135 scenarios · 25 cells over 24 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 111 · 14 families.
+// THE CENSUS THIS RECONCILES AGAINST: 144 scenarios · 26 cells over 25 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 119 · 14 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -682,6 +724,49 @@ export const RESIDUE_FAMILY_REASONS = {
 // "members-self-role-drift" (family hash:#settings)` until the entry below was
 // written, and its own `>> scenarios` line printed the pair.
 //
+// cch-w20-bl moved it by ONE: `overview-attention-long-name` — the first
+// fixture in this corpus to hand `.attention-name` a string its own column
+// cannot seat, and so the first able to make that ellipsis ENGAGE rather than
+// merely never be needed — is the 138th scenario and the 114th residue entry
+// (family `hash:#overview`). RESIDUE, not a cell: it is `overview-attention`
+// with ONE string lengthened, so it paints the same #overview grid at the same
+// widths, and what it carries that no width walk can score — a rendered run
+// measurably shorter than the full name — is content length, which is
+// overflow-guard's axis (the W20-attention-name-column leg drives it at eleven
+// widths x 2 themes, beside `overview-attention` as the kind control). The
+// family count does not move; `hash:#overview` already had twelve. Both
+// numerals were RE-READ from a RUN of `node breakpoint-sweep.mjs --census` on
+// this branch, never by adding one: the sweep exited 2 with `UNLISTED scenario
+// "overview-attention-long-name" (family hash:#overview)` until the entry below
+// was written.
+//
+// cch-w47-rv-bl moved it by ONE: `fleet-archives-member` — the first fixture in
+// this corpus to render the archives panel as a plain MEMBER, and so the first
+// able to show that the authority answer travels from the archives render site
+// into the pure helpers at all — is the 139th scenario and the 115th residue
+// entry (family `hash:#fleet`). RESIDUE, not a cell: it is
+// `fleet-archives-stored`'s fixture field for field with ONE difference, the
+// actor, so it paints the same archive rows at the same widths, minus one
+// button and plus one `.archives-note` line — strictly less horizontal demand
+// than the `fleet-archives` cell already walks at all 18 widths. What it
+// carries that no width walk can score is an AUTHORITY answer, driven by
+// smoke.mjs's own `fleet-archives-member` expectation. The family count does
+// not move; `hash:#fleet` already had two entries. Both numerals were RE-READ
+// from a RUN of `node breakpoint-sweep.mjs` on this branch, never by adding
+// one: the sweep exited 2 with `UNLISTED scenario "fleet-archives-member"
+// (family hash:#fleet)` until the entry below was written.
+//
+// pdf-bl-fleet-group-route moved it by one, and it is the first move in a long
+// while that adds a CELL rather than a residue entry: `fleet-group-view` is the
+// 144th scenario and the 26th cell (distinct covered 24 -> 25), because the
+// PDF-D11 group tab paints `.group-table` — a five-column grid that collapses
+// to two at 640 — which is geometry no other instance cell walks. Residue (119)
+// and families (14) are DELIBERATELY UNMOVED: a cell is not residue, and adding
+// one creates no family. Every integer was RE-DERIVED by RUNNING
+// `node breakpoint-sweep.mjs` and reading the `>> scenarios` line it PRINTED
+// (`144 scenarios · 25 distinct covered by 26 cells · 119 residue over 14
+// families`), never by adding one.
+//
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527; recut by
 // cch-w48-bl-the-scenario-census-five-numerals-cannot-lose). The old header here
 // read "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed
@@ -698,7 +783,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
 // below is now recounted, either from `scenarioReport` or from these same
 // committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
-//   * 135 / 25 / 24 / 111 / 14 — "the census five in breakpoint-sweep.mjs's
+//   * 144 / 26 / 25 / 119 / 14 — "the census five in breakpoint-sweep.mjs's
 //     prose are recounted from the derived report", which reads BOTH typed
 //     copies out of the committed bytes (this bullet and "THE CENSUS THIS
 //     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
@@ -758,7 +843,7 @@ export const RESIDUE_FAMILY_REASONS = {
 //     until cch-w47-s4 this file was carrying two of them: `hash:#billing — 3`
 //     over four entries, and a `These 9` over ten.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 30
+  // hash:#instance — 34
   "sites-on-instance": "hash:#instance",
   "panel-overview-member": "hash:#instance",
   "instance-cruel-detail": "hash:#instance",
@@ -794,6 +879,16 @@ export const SCENARIO_RESIDUE = {
   "instance-behind": "hash:#instance",
   "instance-remove-failed": "hash:#instance",
   "verify-no-credentials": "hash:#instance",
+  // task-499cab525e65018b — `instance-behind`'s fixture with a declared `modal`
+  // driver, one per dialog. They are the first two scenarios in this corpus to
+  // reach `openPinModal` and `openUpdateConflictModal`, the two openModal call
+  // sites PR #19581's enumeration filed as having NO scenario at all. Residue
+  // rather than a cell for the reason the account family's entry gives: the
+  // screen UNDER each dialog is the instance-detail layout the five cells above
+  // already walk at every declared breakpoint, and modal geometry has its own
+  // instrument (modal-oracle), which drives both of these.
+  "instance-pin-version": "hash:#instance",
+  "instance-update-conflict": "hash:#instance",
   // cch-w38-s1-fu (task-8cf413b005cbcd40) — the MEMBER arm of the three states
   // directly above. Same argument, and it is the argument for a residue entry
   // rather than a cell TWICE OVER: each one paints the instance-detail layout
@@ -820,7 +915,18 @@ export const SCENARIO_RESIDUE = {
   // 320/390/620/900/1440 x 2 themes beside the kind control that renders the
   // SAME fixture with a 200.
   "instance-sites-unreadable": "hash:#instance",
-  // hash:#overview — 12
+  // cch-w45-s5-fu (the Updates strip's still-checking arm) — the two /v1/me
+  // UNREADABLE fixtures, on a SUSPENDED box and on a LIVE behind box. Residue
+  // rather than a cell for the same reason as the block above: each paints the
+  // instance-detail layout every hash:#instance cell already walks at all 18
+  // widths, and the only thing either moves is ONE strip's contents — the
+  // Updates row swaps its resolved control for the still-checking arm plus its
+  // own exit, geometry the `update-refused` cell already samples. What they
+  // carry that no width can score is whether that arm OFFERS an exit at all,
+  // which is smoke.mjs's and __app.test.mjs's axis.
+  "instance-suspended-me-unreadable": "hash:#instance",
+  "instance-behind-me-unreadable": "hash:#instance",
+  // hash:#overview — 13
   "loggedout": "hash:#overview",
   "empty": "hash:#overview",
   "fleet-usage": "hash:#overview",
@@ -831,6 +937,15 @@ export const SCENARIO_RESIDUE = {
   "overview-trial-runway": "hash:#overview",
   "overview-attention": "hash:#overview",
   "overview-never-reported": "hash:#overview",
+  // cch-w20-bl — the ORDINARY LONG NAME. Residue rather than a cell for the
+  // reason its two siblings directly above are residue and one of its own: it
+  // paints the #overview grid both cells already walk at all 18 widths, and the
+  // only thing it moves is ONE string's LENGTH. Content length is
+  // overflow-guard's axis, not this sweep's. It is driven at 320/430/768/769/
+  // 800/830/860/890/900/905/1000 x 2 themes by overflow-guard's
+  // W20-attention-name-column leg, beside `overview-attention` as the kind
+  // control — engaged there, never needed here.
+  "overview-attention-long-name": "hash:#overview",
   "overview-member-empty-fleet": "hash:#overview",
   // cch-w12-followup-login-fixture-gap — a DRIVE fixture, not a screen. It boots
   // the same #overview grid the two cells already walk at all 18 widths and then
@@ -862,7 +977,7 @@ export const SCENARIO_RESIDUE = {
   // family its own deepLink (`#site/<id>`) has always named. Its geometry is the
   // .detail-grid the `rollback` and `states` cells already walk at all 18 widths.
   "env-editor": "hash:#site",
-  // hash:#settings — 9
+  // hash:#settings — 10
   "members-admin-actor": "hash:#settings",
   "members-self-role-drift": "hash:#settings",
   "members-peer-owner": "hash:#settings",
@@ -870,6 +985,11 @@ export const SCENARIO_RESIDUE = {
   "tokens-empty": "hash:#settings",
   "tokens-revoke": "hash:#settings",
   "tokens-reveal": "hash:#settings",
+  // task-5ffdec2b609404bc — `tokens-revoke`'s fixture with ONE field added
+  // (`modal: "revoke-token"`), so it paints the SAME #settings/tokens list this
+  // family is already explained by, plus the confirm sheet over it. Modal
+  // geometry is modal-oracle's axis, exactly as the account family's is.
+  "tokens-revoke-confirm": "hash:#settings",
   "providers-unverified": "hash:#settings",
   "providers-member": "hash:#settings",
   // hash:# — 6
@@ -926,9 +1046,15 @@ export const SCENARIO_RESIDUE = {
   // hash:#notifications — 2
   "notif-empty": "hash:#notifications",
   "notif-member": "hash:#notifications",
-  // hash:#fleet — 2
+  // hash:#fleet — 4
   "fleet-v4": "hash:#fleet",
   "fleet-cruel-content": "hash:#fleet",
+  "fleet-archives-member": "hash:#fleet",
+  // task-5ffdec2b609404bc — `mixed-fleet`'s fixture with ONE field added
+  // (`modal: "cmdk"`), so the fleet table beneath it is the one the `fleet` cell
+  // already walks at all 18 widths; what is new is the command palette over it,
+  // and a dialog's geometry is modal-oracle's axis, not this sweep's.
+  "cmdk-palette": "hash:#fleet",
   // hash:#signup — 1
   "loggedout-signup": "hash:#signup",
   // hash:#activity — 1
@@ -2376,11 +2502,55 @@ async function legRender(rep) {
   if (!heightNames.length) refuse(`--height "${heightFilter}" selected no height. Known: ${HEIGHTS.join(", ")}`);
   const heights = heightFilter ? heightNames.map(Number) : [...RENDER_HEIGHTS_DEFAULT];
 
+  // ── TARGET REUSE ACROSS THE WIDTH AXIS ONLY ─────────────────────────────────
+  //  (cch-w15-bl-target-reuse-ascending-order-pin)
+  //
+  //  A group is (cell, theme, height). Under reuse ONE target is opened per
+  //  group, navigated ONCE, and then walked across the widths with
+  //  Emulation.setDeviceMetricsOverride — which is where the speedup lives: the
+  //  per-width cost stops being a cross-document load and becomes a resize.
+  //
+  //  THE WIDTH AXIS IS THE ONLY ONE REUSED, AND THAT IS DELIBERATE. Theme is a
+  //  FRESH `?theme=` LOAD (the flip is a measured lie — see the block by the
+  //  url below) and height is a FRESH group for the same reason a theme is:
+  //  reuse across HEIGHTS IS UNTESTED AND ASSUMED UNSAFE. Nothing here has
+  //  diffed a height-reused record against a fresh one, so the loop does not
+  //  do it, and this comment is the reason rather than an oversight.
+  //
+  //  THE ORDER PIN. A reused document carries the previous width's settled
+  //  geometry into the next measurement, so the width order is part of the
+  //  measurement. Ascending is the order equivalence was established at, and a
+  //  non-ascending --widths under reuse is REFUSED rather than silently
+  //  measured. --fresh-targets restores the old fresh-target-per-(cell,width)
+  //  path so the equivalence can be re-run by anyone, and it accepts any order.
+  const freshTargets = has("--fresh-targets");
+  if (!freshTargets) {
+    const bad = ascendingViolation(widths);
+    if (bad) refuse(nonAscendingRefusal(widths, bad));
+  }
+
+  // The raw per-cell record sink. `--records <path>` writes ONE JSON line per
+  // driven cell carrying the Q1/Q2/Q3 measurement verbatim, so the reuse path
+  // and the fresh path can be diffed BYTE-FOR-BYTE rather than compared by
+  // eye through the report's prose. It is an instrument for the equivalence
+  // argument, not a report: nothing in CI reads it.
+  const recordsPath = valOf("--records");
+  if (has("--records") && (recordsPath == null || recordsPath.startsWith("--"))) {
+    refuse(`--records was given no path. A record sink with no file writes nowhere and would report a byte-identical diff over ZERO records.`);
+  }
+  if (recordsPath) fs.writeFileSync(recordsPath, "");
+  const record = (obj) => { if (recordsPath) fs.appendFileSync(recordsPath, JSON.stringify(obj) + "\n"); };
+
   return withBrowser(async ({ cdp, evalJs, navSettle, openCell, closeCell, die }) => {
     const total = cells.length * themes.length * heights.length * widths.length;
     out(`\n>> render     ${cells.length} cells x ${themes.length} themes x ${heights.length} height${heights.length > 1 ? "s" : ""} [${heights.join(",")}] x ${widths.length} widths = ${total} renders — MINUTES, not seconds\n`);
+    // WHICH PATH RAN, SAID OUT LOUD. The two paths cost an order of magnitude
+    // apart and a wall-clock number with no path label is unreadable.
+    out(freshTargets
+      ? `              targets    FRESH per (cell, width) — ${total} cross-document loads. Any --widths order is accepted. This is the equivalence path.\n`
+      : `              targets    REUSED across the WIDTH axis — ${cells.length * themes.length * heights.length} group(s) of (cell, theme, height), each ONE load then ${widths.length} metrics override(s), widths ASCENDING [${widths.join(",")}]. Theme and height stay FRESH loads; reuse across heights is untested and assumed unsafe. --fresh-targets restores the per-width path.\n`);
     if (!heightFilter) {
-      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x21 = 1050 renders (12.8 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 3150 (38.3 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
+      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 26x2x1x21 = 1092 renders (13.3 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 3276 (39.9 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
     }
     const dead = [], q1f = [], q2f = [], q3f = [], notes = [], honest = [];
     // The shell's own pin, alongside Q3's screen number — this row's whole
@@ -2398,15 +2568,30 @@ async function legRender(rep) {
      for (const theme of themes) {
       for (const height of heights) {
       const row = [];
+      // ONE target per (cell, theme, height) under reuse; one per width under
+      // --fresh-targets. `navigated` is what makes the first width of a reused
+      // group pay for the cross-document load and the rest pay for a resize.
+      let group = null, navigated = false;
+      if (!freshTargets) {
+        group = await openCell();
+        // cch-bl-tier-card — installed on the GROUP's target, before the single
+        // navigation, for the same reason the fresh path installs it before its
+        // own: Page.addScriptToEvaluateOnNewDocument only reaches a document
+        // that has not been created yet.
+        if (cell.name === "billing-trial") {
+          await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, group.sessionId);
+        }
+      }
+      try {
       for (const width of widths) {
-        const { targetId, sessionId } = await openCell();
+        const { targetId, sessionId } = freshTargets ? await openCell() : group;
         try {
           // cch-bl-tier-card — the hook receiver for the tier-CTA tense probe
           // below, installed BEFORE app.js parses and ONLY for the cell that
           // uses it (an accessor, not an assignment: see TIERS5_HOOK_TAP for the
           // measured reason mock.js would otherwise overwrite it). Every other
           // cell renders exactly as it did before.
-          if (cell.name === "billing-trial") {
+          if (freshTargets && cell.name === "billing-trial") {
             await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, sessionId);
           }
           await cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
@@ -2422,10 +2607,26 @@ async function legRender(rep) {
           const url = `${BASE}/?scen=${cell.scen}&theme=${theme}${cell.hash}`;
           let m = null;
           try {
-            await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`);
+            if (freshTargets || !navigated) {
+              await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`);
+              navigated = true;
+            } else {
+              // A REUSED DOCUMENT AT A NEW WIDTH. The override lands
+              // asynchronously and the console recomputes its geometry-derived
+              // classes from a resize listener, so the probe must not read the
+              // same frame the override arrives in. The eval between the two
+              // sleeps is a forced layout flush, NOT a delay: it makes the
+              // reflow happen inside this await rather than inside the probe.
+              // A double-requestAnimationFrame settle HANGS under headless=new
+              // (see navSettle's 16ms note), which is why this is sleeps.
+              await sleep(16);
+              await evalJs(sessionId, "document.documentElement.offsetWidth");
+              await sleep(16);
+            }
             m = await evalJs(sessionId, cellProbeJs(cell));
           } catch (err) {
             dead.push({ cell: cell.name, theme, width, why: err.message.slice(0, 160), present: [] });
+            record({ cell: cell.name, theme, height, width, dead: true });
             row.push(`${width}:DEAD`);
             continue;
           }
@@ -2438,6 +2639,7 @@ async function legRender(rep) {
               cell: cell.name, theme, width, present: [],
               why: `asked for ?theme=${theme} and the document loaded data-theme=${m.themeState.attr} — the fresh load did not take, so this cell measured the wrong mode.`,
             });
+            record({ cell: cell.name, theme, height, width, dead: true });
             row.push(`${width}:DEAD`);
             continue;
           }
@@ -2455,6 +2657,7 @@ async function legRender(rep) {
               cell: cell.name, theme, width, present: [],
               why: `asked for a ${height}px viewport and the document reported window.innerHeight ${m.q3.vh} — the height override did not take, so this cell measured a viewport nobody chose.`,
             });
+            record({ cell: cell.name, theme, height, width, dead: true });
             row.push(`${width}:DEAD`);
             continue;
           }
@@ -2474,9 +2677,15 @@ async function legRender(rep) {
                 (weakWouldPass ? `\n     CLAUSE 3 IS WHY THIS IS DEAD: clauses 1+2 alone (right view, hidden:${L.hidden}, h:${L.h}, textLen:${L.textLen}) would have PASSED this cell and measured an empty state.` : ""),
               present: L.present,
             });
+            record({ cell: cell.name, theme, height, width, dead: true });
             row.push(`${width}:DEAD`);
             continue;
           }
+          // THE RAW RECORD, before any accumulation shapes it. This is the
+          // artefact the reuse/fresh equivalence is argued from — it carries
+          // the probe's Q1/Q2/Q3 verbatim, so a divergence shows up as a diff
+          // line rather than as a changed summary number.
+          record({ cell: cell.name, theme, height, width, q1: m.q1, q2: m.q2, q3: m.q3 });
           if (m.q1.over) q1f.push({ cell: cell.name, theme, width, sw: m.q1.sw, cw: m.q1.cw });
           for (const f of m.q2) {
             if (f.kind === "CUE_STUCK") notes.push({ cell: cell.name, theme, width, ...f });
@@ -2519,9 +2728,12 @@ async function legRender(rep) {
           }
           row.push(`${width}:${m.q1.sw}${m.q1.over ? "!" : ""}`);
         } finally {
-          await closeCell(targetId);
+          if (freshTargets) await closeCell(targetId);
           done++;
         }
+      }
+      } finally {
+        if (group) await closeCell(group.targetId);
       }
       out(`   ${`${cell.name}/${theme}@${height}`.padEnd(30)} ${row.join(" ")}\n`);
       }

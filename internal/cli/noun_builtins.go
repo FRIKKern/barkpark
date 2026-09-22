@@ -25,10 +25,15 @@ import (
 // manifest verbs, and `bp capabilities` points at it. The drift guard
 // TestDispatchedVerbLiteralsAreRegisteredOrManifest (noun_builtins_test.go)
 // keeps a future hand-written `if verb == "…"` intercept from re-opening the
-// hole: every verb literal in cli.go's dispatch must be EITHER registered here
-// (help lists it as a built-in) OR a real manifest verb of that noun (help
-// lists it from the manifest). There is no exemption list — both branches are
-// self-justifying.
+// hole: it reads EVERY non-test .go file in internal/cli — cli.go alone would
+// miss an intercept written here, in lookupNounBuiltin, which is where cli.go
+// delegates verb-level dispatch — and every verb literal it judges must be
+// EITHER registered here (help lists it as a built-in) OR a real manifest verb
+// of that noun (help lists it from the manifest). There is no exemption list;
+// what it judges is a predicate (see the test), not a list of blessed files:
+// a literal under a WHOLE-NOUN built-in is out of scope because that built-in
+// renders its own help, and the guard logs each such literal rather than
+// dropping it silently.
 //
 // WHOLE-NOUN built-ins (`bp tasks`, `bp cmux`, `bp paper`, …) are NOT in this
 // table: their noun is not a manifest noun and they own their whole help. This
@@ -93,6 +98,51 @@ var nounBuiltins = []nounBuiltin{
 		Summary: "Advisory nudge: workable leaves carrying no authored area: label (always exits 0).",
 		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
 			return runTaskLint(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun: "task",
+		Verb: "resume",
+		// A purely LOCAL read: it rebuilds what a crashed predecessor held from
+		// the manifest `bp task claim` wrote and prints a crash brief. There is
+		// no server verb behind it, and REGISTERING it here rather than
+		// hand-writing an `if` in Execute is why `bp task --help` and
+		// `bp capabilities` can name it — a resume verb nobody can discover is
+		// the flight recorder's whole point thrown away.
+		Summary: "Rebuild a crashed agent's loadout from its claim-time manifest and print a crash brief (reads only).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskResume(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun: "task",
+		Verb: "history",
+		// The CLI half of flight-recorder P3 (task-b3045c0a79510f28). REGISTERED
+		// rather than special-cased in Execute for the same reason `resume` is:
+		// a timeline verb that `bp task --help` and `bp capabilities` deny the
+		// existence of is a flight recorder nobody can find.
+		Summary: "The per-mutation timeline for one task row, with WHO as the store answered it (reads only).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskHistory(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun:    "task",
+		Verb:    "enrichment",
+		Summary: "Controlled read of the close_reason absence enrichment (always exits 0).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskEnrichment(out, g, ctx, tail)
+		},
+	},
+	{
+		Noun: "task",
+		Verb: "runtime-claims",
+		// The false-done class `bp task enrichment` cannot see: a SEALED
+		// criterion asserting a property of the RUNNING system, proved only by
+		// code presence. Advisory, read-only, exits 0.
+		Summary: "Sealed criteria asserting runtime properties proved only by code presence (always exits 0).",
+		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {
+			return runTaskRuntimeClaims(out, g, ctx, tail)
 		},
 	},
 	{

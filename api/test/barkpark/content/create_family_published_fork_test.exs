@@ -71,6 +71,7 @@ defmodule Barkpark.Content.CreateFamilyPublishedForkTest do
   defp task_content(extra) do
     %{
       "kind" => "task",
+      "brief" => Barkpark.TaskBriefFixtures.brief(),
       "lifecycle_status" => "open",
       "description" => "create-fork fixture #{System.unique_integer([:positive])}",
       "acceptance_criteria" => [%{"criterion" => "the fixture publishes", "met" => false}]

@@ -348,7 +348,16 @@ defmodule BarkparkWeb.Studio.StudioBetaGaugeListEditingTest do
 
   defp mount_beta(conn, doc_id) do
     raw = "beta-gauge-list-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "Beta gauge-list editing", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "Beta gauge-list editing",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
     path = scoped_studio("/d/#{@dataset}/studio/#{@doc_type}/#{doc_id}")
     {:ok, view, _html} = live(conn, path)

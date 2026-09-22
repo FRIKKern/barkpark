@@ -22,10 +22,22 @@ defmodule BarkparkWeb.TaskCreatorAttributionTest do
 
   setup do
     {:ok, alpha} =
-      Barkpark.Auth.create_token("tca-alpha-token", "alpha", @dataset, ["read", "write", "admin"])
+      Barkpark.Auth.create_token(
+        "tca-alpha-token",
+        "alpha",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, beta} =
-      Barkpark.Auth.create_token("tca-beta-token", "beta", @dataset, ["read", "write", "admin"])
+      Barkpark.Auth.create_token(
+        "tca-beta-token",
+        "beta",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     %{alpha: alpha, beta: beta}
   end
@@ -131,7 +143,12 @@ defmodule BarkparkWeb.TaskCreatorAttributionTest do
           %{
             "doc_id" => "tca-legacy-row",
             "title" => "Creator-stamp legacy fixture",
-            "content" => %{"kind" => "task", "lifecycle_status" => "open", "priority" => 2}
+            "content" => %{
+              "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
+              "lifecycle_status" => "open",
+              "priority" => 2
+            }
           },
           @dataset,
           source: :api
@@ -261,6 +278,7 @@ defmodule BarkparkWeb.TaskCreatorAttributionTest do
                    "title" => "Creator-stamp principal-less birth",
                    "content" => %{
                      "kind" => "task",
+                     "brief" => Barkpark.TaskBriefFixtures.brief(),
                      "lifecycle_status" => "open",
                      "priority" => 3
                    }
@@ -291,6 +309,7 @@ defmodule BarkparkWeb.TaskCreatorAttributionTest do
                    "title" => "Creator-stamp replication fixture",
                    "content" => %{
                      "kind" => "task",
+                     "brief" => Barkpark.TaskBriefFixtures.brief(),
                      "lifecycle_status" => "open",
                      "priority" => 3,
                      "created_by" => upstream
@@ -339,7 +358,12 @@ defmodule BarkparkWeb.TaskCreatorAttributionTest do
           "title" => title_for(id),
           "content" =>
             Map.merge(
-              %{"kind" => "task", "lifecycle_status" => "open", "priority" => 2},
+              %{
+                "kind" => "task",
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
+                "lifecycle_status" => "open",
+                "priority" => 2
+              },
               content_extra
             )
         }
@@ -406,6 +430,7 @@ defmodule BarkparkWeb.TaskCreatorAttributionTest do
           "title" => title,
           "content" => %{
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "priority" => 2,
             # The authoring wall refuses a publish without one; this fixture has

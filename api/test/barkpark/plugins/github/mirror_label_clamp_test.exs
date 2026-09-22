@@ -97,7 +97,14 @@ defmodule Barkpark.Plugins.Github.MirrorLabelClampTest do
           "title" => Map.get(content, "title", doc_id),
           "content" =>
             LabelFixtures.with_registered_labels(
-              Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content),
+              Map.merge(
+                %{
+                  "kind" => "task",
+                  "brief" => Barkpark.TaskBriefFixtures.brief(),
+                  "lifecycle_status" => "open"
+                },
+                content
+              ),
               @dataset
             )
         },

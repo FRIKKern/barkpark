@@ -7,8 +7,10 @@
   // tsup pins its output names via an explicit `entry` map, so dist/ is
   // unaffected.
   //
-  // This config is the ESLINT + editor project. `pnpm typecheck` runs
-  // `tsconfig.typecheck.json`, which is this file minus one quarantined test.
+  // This is the ONE project for the package: eslint, the editor and
+  // `pnpm typecheck` all read it. The `tsconfig.typecheck.json` that once
+  // quarantined tests/template-pins.test.ts is gone — the four
+  // `noUncheckedIndexedAccess` faults it existed for are fixed at the source.
   "include": ["src/**/*", "tests/**/*", "tsup.config.ts", "vitest.config.ts"],
   "compilerOptions": {
     "rootDir": ".",

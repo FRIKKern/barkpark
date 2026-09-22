@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 //
-// PREPARE THE PINNED ARTIFACT — the hard prerequisite of `pnpm test` in this
-// package (package.json runs this BEFORE vitest; turbo.json declares the
-// ordering too). A cold checkout therefore cannot produce a vacuous pass: if
-// this script cannot materialise a real tarball it exits non-zero and vitest
-// never runs, and if it somehow produced nothing the suite's own preflight
-// throws rather than skipping.
+// PREPARE THE PINNED ARTIFACT — the hard prerequisite of this package's suite.
+// It is invoked from `vitest.globalSetup.ts`, wired as `globalSetup` on this
+// package's own vitest config, so it runs on EVERY invocation path (the package
+// script, the monorepo root `npx vitest run`, `--project=`, an IDE runner) and
+// not just from a package.json script chain. A cold checkout therefore cannot
+// produce a vacuous pass: if this script cannot materialise a real tarball it
+// exits non-zero and vitest never runs, and if it somehow produced nothing the
+// suite's own preflight throws rather than skipping.
 //
 // WHAT IS PINNED. Every other parity package in this monorepo consumes
 // `@barkpark/react` as `workspace:^` — always-current SOURCE, re-transpiled by

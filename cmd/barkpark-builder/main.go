@@ -9,7 +9,7 @@
 // Usage:
 //
 //	barkpark-builder \
-//	  --control-url https://cloud.barkpark.dev \
+//	  --control-url https://barkpark.cloud \
 //	  --token-file  /etc/barkpark/builder.token \
 //	  --worker-id   builder-host-1 \
 //	  --cache-dir   /var/lib/barkpark-builder/images \

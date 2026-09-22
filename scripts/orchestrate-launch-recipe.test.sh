@@ -142,10 +142,24 @@ else
   bad "DECISIONS-FROM-MAIN.md's ownership is unstated — a reader cannot tell whether it was renamed"
 fi
 
-echo "== arm 8: both helper selftests pass, run to EOF (never piped to head/tail)"
-for h in session-files launch-headless-builder; do
+echo "== arm 8: the hermetic helper selftests pass, run to EOF (never piped to head/tail)"
+# pulse-loop.sh and held-liveness.sh joined this list for task-9afe7e0d6c901dbc: the two helpers
+# share a wire format (the pulse log's leading timestamp) and drifted apart for eight days, during
+# which held-liveness.sh printed STALE LOG about every live loop on the campaign. held-liveness's
+# own selftest now RUNS pulse-loop.sh and measures the line it wrote, so that drift cannot recur
+# silently -- but a selftest nothing invokes is a written finding, and a written finding does not
+# fire by itself. This loop is the trigger. Only HERMETIC selftests belong here: every helper
+# listed stubs its own `bp` and touches no network.
+# lane-open-prs and ci-advisory-sweep joined for task-c767be8a820a9300. Both gained a COUNT
+# IDENTITY over a `while read` loop whose body runs a child that inherits fd 0, and arms that red
+# under a stdin-reading stub and go green under the same stub minus the read. ci-advisory-sweep
+# had no --selftest at all until that task, which also means `--selftest` on the OLD file was an
+# unrecognised argument and the file went on to run the LIVE sweep: a flag this loop would have
+# passed to it. Both are hermetic — each stubs its own `gh` (and `bp`) first on PATH and touches
+# no network. A selftest nothing invokes is a written finding, and this loop is the trigger.
+for h in session-files launch-headless-builder pulse-loop held-liveness lane-open-prs ci-advisory-sweep; do
   out=$(bash "$SKILL/helpers/$h.sh" --selftest 2>&1); rc=$?
-  if [ "$rc" -eq 0 ]; then ok "$h.sh --selftest: $(printf '%s' "$out" | grep -E 'passed, .* failed' | tail -1)"
+  if [ "$rc" -eq 0 ]; then ok "$h.sh --selftest: $(printf '%s' "$out" | grep -E 'passed, .* failed|all arms passed' | tail -1)"
   else bad "$h.sh --selftest exited $rc"; printf '%s\n' "$out" | sed 's/^/       /'; fi
 done
 

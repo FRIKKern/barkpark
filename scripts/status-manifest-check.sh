@@ -35,10 +35,16 @@
 #     from design/status-manifest.json and byte-compares the committed files, so a
 #     HAND-EDIT of either generated file (or a manifest edit without a regen) reds
 #     the design-token drift gate instead of this one.
-#   Part 5b — apps/mobile: the ONE remaining hand-maintained JS/TS twin (it is a
-#     React Native surface outside the emitter's reach — four Records/arrays, not
-#     one array-of-objects). It is byte-checked below against the manifest, with
-#     the manifest's OWN platform_overrides as the adjudicated exception.
+#   Part 5b — apps/mobile: NO LONGER A HAND COPY EITHER. taskboard.tsx now reads
+#     design/emit.mjs' "mobile status vocabulary" artifact
+#     (apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts), so the last
+#     hand-typed JS/TS vocabulary in the repo is gone. What survives here is a
+#     FRESHNESS assertion plus the two things design/check.mjs Part A structurally
+#     cannot make: the DERIVATION LOCK (taskboard.tsx still reads the projection
+#     rather than retyping one) and OVERRIDE HONESTY (the manifest's own
+#     platform_overrides ruling must name a real role, actually differ, carry a
+#     reason, and be exhaustive — the emitter APPLIES that ruling, so a byte-parity
+#     check agrees with whatever it says).
 #
 # The Elixir emitters need no check here: Render.StatusVocab reads THIS manifest
 # at compile time, so they cannot diverge by construction.
@@ -63,11 +69,14 @@ cd "$(dirname "$0")/.."
 MANIFEST="design/status-manifest.json"
 CSS="api/assets/paper-surface/paper-surface.css"
 GO="internal/pdrender/gridblocks.go"
-# apps/mobile is the LAST hand-maintained JS/TS copy (the react + web twins are
-# generated — see the Part 5 note above). It was absent from this gate entirely
-# until mob-bl-status-manifest-mobile-gate. Its shape is four Records/arrays
-# rather than one array-of-objects, so Part 5b parses it with its own reader.
+# apps/mobile: the surface that READS the generated vocabulary. It was absent
+# from this gate entirely until mob-bl-status-manifest-mobile-gate, then a hand
+# copy byte-checked here, and is now a consumer of the emitter like react and web.
 MOBILE_TSX="apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
+# …and the GENERATED projection it reads (design/emit.mjs artifact "mobile status
+# vocabulary"). Part 5b asserts THIS file is fresh vs the manifest and that
+# MOBILE_TSX still derives from it rather than retyping a copy.
+MOBILE_GEN_TS="apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
 # `MODE="${1:-check}"` used to pass ANY argument straight through to the Python,
 # which treats everything that is not `--write` as check mode — so a typo, or a
 # `--selftest` this gate did not have, ran the ordinary check and exited 0.
@@ -102,6 +111,7 @@ root, kind = sys.argv[1], sys.argv[2]
 CSS  = root + "/api/assets/paper-surface/paper-surface.css"
 GO   = root + "/internal/pdrender/gridblocks.go"
 MOB  = root + "/apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
+MOBG = root + "/apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
 MAN  = root + "/design/status-manifest.json"
 
 def rd(p): return open(p).read()
@@ -143,17 +153,34 @@ elif kind == "go-glyph":
     txt = rd(GO); out, note = go_first_value(txt, "roleGlyph", "¤"); path = GO
 elif kind == "go-label":
     txt = rd(GO); out, note = go_first_value(txt, "roleLabel", "drifted"); path = GO
-elif kind == "mobile-label":
-    txt = rd(MOB)
-    am = re.search(r"(?:export\s+)?const\s+ROLE_LABEL\b[^=]*=\s*\{(.*?)\n\}", txt, re.DOTALL)
+elif kind == "mobile-gen-label":
+    # THE FRESHNESS ARM: hand-edit the GENERATED projection. Part 5b must catch a
+    # generated file that no longer matches the manifest (the same edit
+    # design/check.mjs Part A catches from the byte-parity side).
+    txt = rd(MOBG)
+    am = re.search(r"(?:export\s+)?const\s+MANIFEST_ROLE_LABEL\b[^=]*=\s*\{(.*?)\n\}", txt, re.DOTALL)
     if not am:
-        print("PLANT FAILED: ROLE_LABEL object not found", file=sys.stderr); sys.exit(3)
+        print("PLANT FAILED: MANIFEST_ROLE_LABEL object not found", file=sys.stderr); sys.exit(3)
     em = re.search(r"([A-Za-z_][A-Za-z0-9_]*\s*:\s*.)([^\x27\"]*)(.\s*,)", am.group(1))
     if not em:
-        print("PLANT FAILED: no entry inside ROLE_LABEL", file=sys.stderr); sys.exit(3)
+        print("PLANT FAILED: no entry inside MANIFEST_ROLE_LABEL", file=sys.stderr); sys.exit(3)
     s, e = am.start(1) + em.start(2), am.start(1) + em.end(2)
     out = txt[:s] + "Drifted" + txt[e:]
-    note = "hand-drifted the first ROLE_LABEL value to Drifted"; path = MOB
+    note = "hand-drifted the first MANIFEST_ROLE_LABEL value in the GENERATED file to Drifted"
+    path = MOBG
+elif kind == "mobile-retype":
+    # THE DERIVATION-LOCK ARM: put a hand-typed copy BACK into taskboard.tsx. This
+    # is the edit that would make every freshness check above vacuous — the surface
+    # would stop reading the projection and nothing downstream would notice.
+    txt = rd(MOB)
+    am = re.search(r"(export const ROLE_LABEL: Record<string, string> = \{)(.*?)(\n\})", txt, re.DOTALL)
+    if not am:
+        print("PLANT FAILED: ROLE_LABEL spread declaration not found", file=sys.stderr); sys.exit(3)
+    man = json.load(open(MAN))
+    body = "\n" + "\n".join("  %s: 'Retyped'," % r["role"] for r in man["roles"]) + "\n  unknown: 'Unknown',"
+    out = txt[:am.start(2)] + body + txt[am.end(2):]
+    note = "retyped the whole ROLE_LABEL table beside the manifest instead of reading the projection"
+    path = MOB
 else:
     print("PLANT FAILED: unknown plant kind %r" % kind, file=sys.stderr); sys.exit(3)
 
@@ -175,6 +202,7 @@ st_selftest() {
     "api/assets/paper-surface/paper-surface.css"
     "internal/pdrender/gridblocks.go"
     "apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
+    "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
   )
 
   say() {
@@ -249,7 +277,8 @@ st_selftest() {
   arm "part 2 missing glyph"     missing-glyph  "part 2: FAILED"
   arm "part 3 Go roleGlyph"      go-glyph       "part 3: FAILED"
   arm "part 4 Go roleLabel"      go-label       "part 4: FAILED"
-  arm "part 5b mobile label"     mobile-label   "part 5: FAILED"
+  arm "part 5b generated drift"  mobile-gen-label  "part 5: FAILED"
+  arm "part 5b retyped table"    mobile-retype     "part 5: FAILED"
 
   # ARG DISPATCH — an unknown flag is still a refusal (2), not a silent check.
   local rc=0
@@ -275,11 +304,12 @@ if [ "$MODE" = "selftest" ]; then
   exit $?
 fi
 
-python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$MOBILE_TSX" <<'PY'
+python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$MOBILE_TSX" "$MOBILE_GEN_TS" <<'PY'
 import json, re, sys
 
 manifest_path, css_path, mode, go_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 mobile_path = sys.argv[5]
+mobile_gen_path = sys.argv[6]
 m = json.load(open(manifest_path))
 css = open(css_path).read()
 
@@ -501,32 +531,34 @@ print("status-manifest-check part 5: RETIRED — the react + web vocabulary twin
       "GENERATED from this manifest (design/emit.mjs -> status-vocab.gen.ts / "
       "status-ladder.gen.ts); design/check.mjs Part A byte-checks them.")
 
-# ── Part 5b: apps/mobile — the THIRD hand-maintained twin ────────────────────
-# It was absent from this gate entirely until mob-bl-status-manifest-mobile-gate,
-# so mobile's copy of the whole vocabulary had no drift check at all; the file's
-# own header said the guard was a comment.
+# ── Part 5b: apps/mobile — a FRESHNESS assertion over the GENERATED twin ─────
+# It used to byte-check a hand-typed copy. That copy is gone: apps/mobile now
+# reads design/emit.mjs' `mobile status vocabulary` artifact,
+# apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts, exactly as the
+# react and web surfaces read theirs (the Part 5 retirement above).
 #
-# WHY ITS OWN READER. react and web each hold ONE array-of-objects that
-# parse_ts_ladder can walk. Mobile holds FOUR separate literals — STATUS_TO_ROLE
-# and ROLE_GLYPH and ROLE_LABEL as `Record<string, string>` maps, plus a
-# BOARD_ROLES string array — because a React Native block renderer resolves a
-# status to a role and then looks up glyph/label/hue separately. Forcing that
-# into the array reader would mean reshaping the shipped source to suit the gate.
-#
-# THE TWO SANCTIONED DIFFERENCES, both mechanical and both CHECKED, not skipped:
-#   1. GLYPH: `progress` diverges, and the divergence is ADJUDICATED IN THE
-#      MANIFEST (platform_overrides) rather than hardcoded here — the manifest
-#      gives it an empty glyph with spinner:true because the web CSS-animates
-#      Braille frames, and a pure D50 renderer would paint a blank cell. The
-#      override is held honest below: it must name a real role, must ACTUALLY
-#      differ, and the set of roles that diverge must EQUAL the set declared —
-#      so a second drift can never hide behind the sanctioned one.
-#   2. LABEL: mobile renders labels as column headings and sentence-cases the
-#      first character ("in progress" -> "In progress"). That is a mechanical
-#      relation, not a licence to diverge: asserting it still catches
-#      "In Progress", a renamed label, or a dropped role.
-# The JS-only `unknown` sentinel (D11) is the one sanctioned non-manifest role,
-# exactly as for the other two twins.
+# WHY THIS PART STILL EXISTS AT ALL. A byte-check of a generated file against its
+# own source is a tautology, and design/check.mjs Part A already re-emits this
+# artifact and byte-compares the committed bytes. What Part A does NOT do is hold
+# design/status-manifest.json's own `platform_overrides` honest — the ruling that
+# lets mobile diverge on `progress` lives in the MANIFEST, is applied BY the
+# emitter, and would therefore be self-consistent with any value someone typed
+# into it. So this part now asserts three things Part A cannot:
+#   1. FRESHNESS — the committed generated file is in lockstep with the manifest
+#      (statuses, role set, manifest ORDER, glyphs incl. overrides, sentence-cased
+#      labels, default_role). This is the direction .github/workflows/mobile.yml
+#      cannot see: it triggers on apps/mobile/**, never on design/**.
+#   2. THE DERIVATION LOCK — apps/mobile's taskboard.tsx still READS the generated
+#      projection instead of retyping it. A hand-typed role table coming back is
+#      precisely the drift this gate exists to catch, and it is the edit that
+#      would make every check above vacuous.
+#   3. OVERRIDE HONESTY — every recorded override names a real role, ACTUALLY
+#      differs from the manifest glyph, carries a stated reason, and the set of
+#      roles that genuinely diverge EQUALS the set declared. Nothing hides behind
+#      a sanctioned exception, and an exception that stops earning its keep reds.
+# The JS-only `unknown` sentinel (D11) is the one sanctioned non-manifest role.
+# It is NOT in the generated file — taskboard.tsx appends it, which is why it is
+# the one role literal the derivation lock below permits there.
 
 def parse_ts_record(txt, var, path):
     """Extract the ordered [(key, value), ...] from a `const <var>: T = { ... }`
@@ -550,6 +582,25 @@ def parse_ts_record(txt, var, path):
     return rows
 
 
+def parse_ts_record_optional(txt, var):
+    """parse_ts_record, but a MISSING literal is the healthy case, not a failure:
+    taskboard.tsx's tables are spreads of the generated Records now, so there IS no
+    `{...}` literal to read there unless someone retyped one. Returns [] when the
+    declaration carries no object literal."""
+    am = re.search(r"(?:export\s+)?const\s+" + re.escape(var) + r"\b[^=]*=\s*\{(.*?)\n\}", txt, re.DOTALL)
+    if am is None:
+        return []
+    rows = []
+    for line in am.group(1).split("\n"):
+        line = line.strip()
+        if line.startswith("//") or line.startswith("*") or line.startswith("/*"):
+            continue
+        km = re.match(r"^['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?\s*:\s*['\"](.*)['\"]\s*,?\s*$", line)
+        if km:
+            rows.append((km.group(1), km.group(2)))
+    return rows
+
+
 def parse_ts_decl_body(txt, var, path):
     """Extract the raw right-hand side of a `const <var>[: T] = ...` declaration,
     up to the line that closes it. Used where the value is DERIVED (an expression)
@@ -563,106 +614,106 @@ def parse_ts_decl_body(txt, var, path):
     return am.group(1)
 
 
-def parse_ts_string_array(txt, var, path):
-    """Extract the ordered [value, ...] from a `const <var>: T = [ ... ]` TS array
-    literal of plain strings."""
-    am = re.search(r"(?:export\s+)?const\s+" + re.escape(var) + r"\b[^=]*=\s*\[(.*?)\n\]", txt, re.DOTALL)
-    if am is None:
-        print(f"status-manifest-check part 5: FAILED — `{var} = [...]` array literal "
-              f"not found in {path}.", file=sys.stderr)
-        sys.exit(1)
-    return re.findall(r"['\"]([^'\"]+)['\"]", am.group(1))
-
-
+gen_txt = open(mobile_gen_path).read()
 mobile_txt = open(mobile_path).read()
-mob_status_to_role = parse_ts_record(mobile_txt, "STATUS_TO_ROLE", mobile_path)
-mob_glyph = parse_ts_record(mobile_txt, "ROLE_GLYPH", mobile_path)
-mob_label = parse_ts_record(mobile_txt, "ROLE_LABEL", mobile_path)
-# BOARD_ROLES is DERIVED on mobile, not a literal: it folds ROLE_LABEL's key order
-# (pinned to manifest order above) with the terminal rung moved last. A python
-# regex cannot evaluate TS, so this gate checks the DERIVATION — that no hand-typed
-# lane list came back — and apps/mobile/__tests__/statusManifestParity.test.ts
-# checks the resulting VALUE by importing the real constant. Retyping the list
-# beside the manifest reds here; getting the derived order wrong reds there.
-mob_board_decl = parse_ts_decl_body(mobile_txt, "BOARD_ROLES", mobile_path)
+
+p5b = []
+
+# 0. ATTRIBUTION. The generated file must SAY it is generated, and name both the
+#    emitter and the source — a file that loses its header is a file the next
+#    reader hand-edits in good faith.
+gen_head = "\n".join(gen_txt.split("\n")[:3])
+if "Code generated by design/emit.mjs" not in gen_head or "design/status-manifest.json" not in gen_head:
+    p5b.append(f"  {mobile_gen_path}: the first 3 lines do not carry the generated-by header "
+               f"naming design/emit.mjs AND design/status-manifest.json.")
+
+gen_s2r = dict(parse_ts_record(gen_txt, "MANIFEST_STATUS_TO_ROLE", mobile_gen_path))
+gen_glyph_rows = parse_ts_record(gen_txt, "MANIFEST_ROLE_GLYPH", mobile_gen_path)
+gen_label_rows = parse_ts_record(gen_txt, "MANIFEST_ROLE_LABEL", mobile_gen_path)
+gen_glyph = dict(gen_glyph_rows)
+gen_label = dict(gen_label_rows)
+
+dm = re.search(r"export const MANIFEST_DEFAULT_ROLE\s*=\s*['\"]([^'\"]*)['\"]", gen_txt)
+if dm is None:
+    p5b.append(f"  {mobile_gen_path}: MANIFEST_DEFAULT_ROLE not found.")
+elif dm.group(1) != m["default_role"]:
+    p5b.append(f"  MANIFEST_DEFAULT_ROLE = {dm.group(1)!r} != manifest default_role "
+               f"{m['default_role']!r} — STALE, re-run `node design/emit.mjs --write`.")
+
+if not gen_glyph or not gen_label or not gen_s2r:
+    p5b.append(f"  {mobile_gen_path}: parsed ZERO entries from one of the three Records — "
+               f"the generated shape changed.")
+
+# 1. FRESHNESS: statuses map, verbatim.
+for status, role in m["statuses"].items():
+    if status not in gen_s2r:
+        p5b.append(f"  MANIFEST_STATUS_TO_ROLE: MISSING manifest status {status!r} (-> {role!r})")
+    elif gen_s2r[status] != role:
+        p5b.append(f"  MANIFEST_STATUS_TO_ROLE[{status!r}] = {gen_s2r[status]!r} != manifest {role!r}")
+for status in gen_s2r:
+    if status not in m["statuses"]:
+        p5b.append(f"  MANIFEST_STATUS_TO_ROLE: non-manifest status {status!r} — STALE regen?")
+
+# 1b. FRESHNESS: the role set and its ORDER, in both tables. The generated file
+#     carries the manifest rungs and NOTHING else — the sentinel is appended by
+#     taskboard.tsx, so it must NOT appear here.
+for var, rows in (("MANIFEST_ROLE_GLYPH", gen_glyph_rows), ("MANIFEST_ROLE_LABEL", gen_label_rows)):
+    seq = [k for k, _ in rows]
+    if seq != man_roles_order:
+        p5b.append(f"  {var}: role keys {seq} != manifest roles in manifest ORDER "
+                   f"{man_roles_order} — STALE, re-run `node design/emit.mjs --write`.")
+    for r in seq:
+        if r in SANCTIONED_EXTRA:
+            p5b.append(f"  {var}: carries the {r!r} sentinel — it is NOT a manifest rung and "
+                       f"belongs in taskboard.tsx, which appends it.")
 
 overrides = (m.get("platform_overrides") or {}).get(mobile_surface, {})
 overrides = {k: v for k, v in overrides.items() if not k.startswith("$")}
 
-p5b = []
-if not mob_glyph or not mob_label or not mob_status_to_role:
-    p5b.append(f"  {mobile_path}: parsed ZERO entries from one of STATUS_TO_ROLE / "
-               f"ROLE_GLYPH / ROLE_LABEL — the literal shape changed.")
-
-mob_glyph_by = dict(mob_glyph)
-mob_label_by = dict(mob_label)
-mob_s2r = dict(mob_status_to_role)
-
-# STATUS -> ROLE: exactly the manifest's statuses map, aliases and terminals included.
-for status, role in m["statuses"].items():
-    if status not in mob_s2r:
-        p5b.append(f"  STATUS_TO_ROLE: MISSING manifest status {status!r} (-> {role!r})")
-    elif mob_s2r[status] != role:
-        p5b.append(f"  STATUS_TO_ROLE[{status!r}] = {mob_s2r[status]!r} != manifest {role!r}")
-for status in mob_s2r:
-    if status not in m["statuses"]:
-        p5b.append(f"  STATUS_TO_ROLE: non-manifest status {status!r} (hand-added?)")
-
-# ROLE SET, in both tables: the manifest roles plus the ONE sanctioned sentinel.
-for var, table in (("ROLE_GLYPH", mob_glyph_by), ("ROLE_LABEL", mob_label_by)):
-    for r in man_roles_order:
-        if r not in table:
-            p5b.append(f"  {var}: MISSING manifest role {r!r}")
-    for r in table:
-        if r not in p5_glyph and r not in SANCTIONED_EXTRA:
-            p5b.append(f"  {var}: non-manifest role {r!r} not in the sanctioned set "
-                       f"{sorted(SANCTIONED_EXTRA)} (hand-added?)")
-    # ORDER: the manifest roles, in the order they appear, must equal manifest order.
-    seq = [k for k, _ in (mob_glyph if var == "ROLE_GLYPH" else mob_label) if k in p5_glyph]
-    if seq != man_roles_order:
-        p5b.append(f"  {var}: manifest roles OUT OF ORDER — got {seq}, want {man_roles_order}")
-
-# GLYPH: byte-equal to the manifest, or to the manifest's own recorded override.
+# 1c. FRESHNESS: glyph == the manifest's, or the manifest's OWN recorded override.
 for r in man_roles_order:
-    if r not in mob_glyph_by:
+    if r not in gen_glyph:
         continue
     want = overrides[r]["glyph"] if r in overrides else p5_glyph[r]
-    if mob_glyph_by[r] != want:
+    if gen_glyph[r] != want:
         where = "platform_overrides" if r in overrides else "manifest"
-        p5b.append(f"  ROLE_GLYPH[{r!r}] = {mob_glyph_by[r]!r} != {where} {want!r}")
+        p5b.append(f"  MANIFEST_ROLE_GLYPH[{r!r}] = {gen_glyph[r]!r} != {where} {want!r}")
 
-# THE OVERRIDES ARE HELD HONEST — a sanctioned exception that stops earning its
-# keep, or one that hides a second drift, reds here.
-for r, ov in overrides.items():
-    if r not in p5_glyph:
-        p5b.append(f"  platform_overrides[{mobile_surface!r}][{r!r}]: not a manifest role")
-        continue
-    if ov.get("glyph") == p5_glyph[r]:
-        p5b.append(f"  platform_overrides[{mobile_surface!r}][{r!r}]: override equals the "
-                   f"manifest glyph {p5_glyph[r]!r} — it no longer earns its exemption, delete it")
-    if len((ov.get("reason") or "").strip()) < 40:
-        p5b.append(f"  platform_overrides[{mobile_surface!r}][{r!r}]: a ruling needs a reason "
-                   f"(>=40 chars) saying why conforming would be WRONG")
-diverging = sorted(r for r in man_roles_order
-                   if r in mob_glyph_by and mob_glyph_by[r] != p5_glyph[r])
-if diverging != sorted(overrides):
-    p5b.append(f"  platform_overrides[{mobile_surface!r}]: the roles that ACTUALLY diverge "
-               f"{diverging} != the roles declared {sorted(overrides)} — every divergence is a "
-               f"ruling or it is drift; nothing hides behind a sanctioned one")
-
-# LABEL: the manifest label, sentence-cased. Mechanical, and still byte-exact.
+# 1d. FRESHNESS: label == the manifest label, sentence-cased (mobile renders them
+#     as column headings). Mechanical, and still byte-exact.
 for r in man_roles_order:
-    if r not in mob_label_by:
+    if r not in gen_label:
         continue
     lab = p5_label[r]
     want = lab[:1].upper() + lab[1:]
-    if mob_label_by[r] != want:
-        p5b.append(f"  ROLE_LABEL[{r!r}] = {mob_label_by[r]!r} != sentence-cased manifest {want!r}")
+    if gen_label[r] != want:
+        p5b.append(f"  MANIFEST_ROLE_LABEL[{r!r}] = {gen_label[r]!r} != sentence-cased manifest {want!r}")
+
+# 2. THE DERIVATION LOCK. taskboard.tsx must READ the projection, not retype it.
+if not re.search(r"from\s+['\"]\./status-vocab\.gen['\"]", mobile_txt):
+    p5b.append(f"  {mobile_path}: no import from './status-vocab.gen' — the surface no longer "
+               f"reads the generated projection, so nothing derives it from the manifest.")
+for var, gen_name in (("STATUS_TO_ROLE", "MANIFEST_STATUS_TO_ROLE"),
+                      ("ROLE_GLYPH", "MANIFEST_ROLE_GLYPH"),
+                      ("ROLE_LABEL", "MANIFEST_ROLE_LABEL")):
+    decl = parse_ts_decl_body(mobile_txt, var, mobile_path)
+    if gen_name not in decl:
+        p5b.append(f"  {mobile_path}: `const {var}` does not read {gen_name} from the generated "
+                   f"projection — it was RETYPED beside the manifest.")
+    manifest_keys = set(p5_glyph) | set(m["statuses"])
+    retyped = sorted({k for k, _ in parse_ts_record_optional(mobile_txt, var)
+                      if k in manifest_keys and k not in SANCTIONED_EXTRA})
+    if retyped:
+        p5b.append(f"  {mobile_path}: `const {var}` names manifest keys {retyped} as LITERALS. "
+                   f"The only literal key this surface may carry is the {sorted(SANCTIONED_EXTRA)} "
+                   f"sentinel, which is not a manifest rung; everything else comes from "
+                   f"{gen_name}.")
 
 # BOARD LANES: the value is checked in the mobile suite (it imports the real
 # constant); what reds HERE is the shape — a hand-typed lane list beside the
 # manifest, which is precisely the drift this gate exists to catch. A derivation
 # names no manifest roles at all; a retyped list names several.
+mob_board_decl = parse_ts_decl_body(mobile_txt, "BOARD_ROLES", mobile_path)
 hardcoded_lanes = [r for r in man_roles_order if f"'{r}'" in mob_board_decl or f'"{r}"' in mob_board_decl]
 hardcoded_lanes = [r for r in hardcoded_lanes if r not in MOBILE_TERMINAL_ROLES]
 if hardcoded_lanes:
@@ -675,23 +726,44 @@ if "ROLE_LABEL" not in mob_board_decl:
     p5b.append("  BOARD_ROLES: the declaration does not read ROLE_LABEL — it is no longer "
                "derived from the manifest-ordered role table.")
 
+# 3. THE OVERRIDES ARE HELD HONEST — a sanctioned exception that stops earning its
+#    keep, or one that hides a second drift, reds here. design/check.mjs Part A
+#    cannot do this: the emitter APPLIES the override, so the generated file agrees
+#    with any value the manifest states.
+for r, ov in overrides.items():
+    if r not in p5_glyph:
+        p5b.append(f"  platform_overrides[{mobile_surface!r}][{r!r}]: not a manifest role")
+        continue
+    if ov.get("glyph") == p5_glyph[r]:
+        p5b.append(f"  platform_overrides[{mobile_surface!r}][{r!r}]: override equals the "
+                   f"manifest glyph {p5_glyph[r]!r} — it no longer earns its exemption, delete it")
+    if len((ov.get("reason") or "").strip()) < 40:
+        p5b.append(f"  platform_overrides[{mobile_surface!r}][{r!r}]: a ruling needs a reason "
+                   f"(>=40 chars) saying why conforming would be WRONG")
+diverging = sorted(r for r in man_roles_order
+                   if r in gen_glyph and gen_glyph[r] != p5_glyph[r])
+if diverging != sorted(overrides):
+    p5b.append(f"  platform_overrides[{mobile_surface!r}]: the roles that ACTUALLY diverge "
+               f"{diverging} != the roles declared {sorted(overrides)} — every divergence is a "
+               f"ruling or it is drift; nothing hides behind a sanctioned one")
+
 if p5b:
-    print("status-manifest-check part 5: FAILED — the apps/mobile status-vocabulary twin is "
-          "STALE vs design/status-manifest.json:", file=sys.stderr)
+    print("status-manifest-check part 5: FAILED — the apps/mobile status vocabulary is STALE "
+          "vs design/status-manifest.json, or no longer derived from it:", file=sys.stderr)
     for f in p5b:
         print(f, file=sys.stderr)
-    print(f"\n  Fix: edit {mobile_path} to match design/status-manifest.json — "
-          f"STATUS_TO_ROLE mirrors `statuses`; ROLE_GLYPH and ROLE_LABEL carry every "
-          f"manifest role in manifest ORDER plus the `unknown` sentinel; labels are the "
-          f"manifest label sentence-cased; BOARD_ROLES is DERIVED from ROLE_LABEL's keys "
-          f"with the terminal rung(s) {MOBILE_TERMINAL_ROLES} moved last. "
-          f"A glyph that MUST differ on this platform is a "
-          f"RULING and belongs in the manifest's platform_overrides with its reason — never "
+    print(f"\n  Fix: the vocabulary is GENERATED — run `node design/emit.mjs --write` to "
+          f"re-emit {mobile_gen_path} from design/status-manifest.json, and never hand-edit "
+          f"either that file or the tables in {mobile_path} (which must read it). A glyph "
+          f"that MUST differ on this platform is a RULING and belongs in the manifest's "
+          f"platform_overrides with its reason — never as a literal in the surface and never "
           f"as a silent skip here. The sibling pin that runs inside the mobile suite is "
-          f"apps/mobile/__tests__/statusManifestParity.test.ts.", file=sys.stderr)
+          f"apps/mobile/__tests__/statusManifestParity.test.ts; the byte-parity of the "
+          f"generated file itself is design/check.mjs Part A.", file=sys.stderr)
     sys.exit(1)
-print(f"status-manifest-check part 5b: PASS — apps/mobile vocab twin in lockstep "
-      f"({len(mob_s2r)} statuses, {len(mob_glyph_by)} roles, BOARD_ROLES derived from "
-      f"ROLE_LABEL with {MOBILE_TERMINAL_ROLES} last; "
-      f"{len(overrides)} recorded platform override(s)).")
+print(f"status-manifest-check part 5b: PASS — apps/mobile reads the GENERATED vocabulary "
+      f"({mobile_gen_path}: {len(gen_s2r)} statuses, {len(gen_glyph)} rungs in manifest order, "
+      f"default_role {m['default_role']!r}); taskboard.tsx derives all three tables from it and "
+      f"BOARD_ROLES from ROLE_LABEL with {MOBILE_TERMINAL_ROLES} last; "
+      f"{len(overrides)} recorded platform override(s) held honest.")
 PY

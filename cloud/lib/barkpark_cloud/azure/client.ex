@@ -61,8 +61,11 @@ defmodule BarkparkCloud.Azure.FakeClient do
   network, no service principal, no cost. Deterministic:
 
     * a well-formed credential blob whose `client_secret` is NOT the reject
-      sentinel authenticates; `verify/1` echoes the subscription id and a stub
-      resource count;
+      sentinel authenticates; `verify/1` echoes the subscription id — and
+      NOTHING ELSE. Its meta map is key-for-key the `RealClient.verify/1` meta
+      (charter D898): a key the fake emits and the real client does not is a
+      shape that is green in the suite and nil in prod, so the two are only ever
+      widened TOGETHER. `azure_identity_confirmation_test.exs` holds that line;
     * the sentinel `unauthorized_secret/0` always fails `:unauthorized`, so the
       connect endpoint's verify-before-save path has a known-bad credential
       without any tenant;
@@ -88,7 +91,7 @@ defmodule BarkparkCloud.Azure.FakeClient do
         {:error, :unauthorized}
 
       true ->
-        {:ok, %{subscription_id: Map.get(creds, "subscription_id"), resource_count: 1}}
+        {:ok, %{subscription_id: Map.get(creds, "subscription_id")}}
     end
   end
 
@@ -167,10 +170,26 @@ defmodule BarkparkCloud.Azure.RealClient do
   Same seam as `GitHub.Real` / `Billing.StripeGateway`: `request/1` resolves a
   1-arity client fn from config
   (`config :barkpark_cloud, BarkparkCloud.Azure, http_client: &m.f/1`) and calls
-  it with the `%{method, url, headers, body}` map. In prod that is
-  `Billing.HttpClient` (Erlang `:httpc`, verified TLS). In dev/test there is no
-  client, so any callback that would hit the wire returns
-  `{:error, :http_client_not_configured}` — it can NEVER silently call Azure.
+  it with the `%{method, url, headers, body}` map. Absent a client, any callback
+  that would hit the wire returns `{:error, :http_client_not_configured}` — it
+  can NEVER silently call Azure.
+
+  **PROD WIRES THAT KEY; NOTHING ELSE DOES** (task-2772b2cdd5001bfc).
+  `cloud/config/runtime.exs` sets `config :barkpark_cloud, BarkparkCloud.Azure,
+  http_client: &BarkparkCloud.Billing.HttpClient.request/1` inside the
+  `config_env() == :prod` block — the same verified-TLS `:httpc` transport the
+  billing/oauth/github/pricing seams use. `cloud/config/config.exs` keeps the
+  key at `nil` for dev/test, so outside prod this client still fails closed.
+  That is safe there because dev AND test select `Azure.FakeClient` at the
+  module seam (`:azure_http_client`) and never reach this key at all.
+  `cloud/test/barkpark_cloud/config/azure_transport_wiring_test.exs` evaluates
+  the real `runtime.exs` prod block and reds if the key goes missing again.
+
+  Before that wiring, the key was set in NO environment, so `verify/1` and
+  `list_catalog/1` failed closed in prod too and
+  `GET /v1/providers/azure/overview` and `…/catalog` were a flat 502 — which is
+  why charter D898 declined to price a fifth ARM call onto a path whose first
+  three could not fire.
   """
   @behaviour BarkparkCloud.Azure.Client
 

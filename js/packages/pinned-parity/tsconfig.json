@@ -6,6 +6,6 @@
     "types": ["node"],
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["tests/**/*.ts", "vitest.config.ts"],
+  "include": ["tests/**/*.ts", "vitest.config.ts", "vitest.globalSetup.ts"],
   "exclude": ["node_modules", ".pinned"]
 }

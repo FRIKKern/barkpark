@@ -383,6 +383,40 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
     end
   end
 
+  describe "the member-management route's ALLOW cells (cch-w44-bl)" do
+    # The B1 describe above is all REFUSALS. These are the two ALLOWS on the
+    # same routes that nothing in cloud/test/** drove end-to-end: the context
+    # tests prove `remove_member_as/3` and `update_member_role_as/4` say yes,
+    # and the route tests prove the ROUTE says 403 when they say no — but
+    # neither shows the success path threading through. The DELETE route in
+    # particular passes `conn.assigns.current_team_role` into the context, a
+    # wiring only a route-level allow can exercise.
+
+    test "an owner may evict an ADMIN → 200, and that admin's token now 401s" do
+      team = team_fixture()
+      {_owner, owner_token} = member_with_token(team, "owner")
+      {admin, admin_token} = member_with_token(team, "admin")
+
+      conn = call(:delete, "/v1/teams/#{team.id}/members/#{admin.id}", nil, owner_token)
+      assert conn.status == 200
+
+      assert call(:get, "/v1/me", nil, admin_token).status == 401
+    end
+
+    test "an ADMIN may promote a member to ADMIN → 200 (equal-rank grant)" do
+      team = team_fixture()
+      {_owner, _} = member_with_token(team, "owner")
+      {_admin, admin_token} = member_with_token(team, "admin")
+      {member, _} = member_with_token(team, "member")
+
+      conn =
+        call(:patch, "/v1/teams/#{team.id}/members/#{member.id}", %{role: "admin"}, admin_token)
+
+      assert conn.status == 200
+      assert json_body(conn)["member"]["role"] == "admin"
+    end
+  end
+
   describe "RBAC gate regression on privileged routes" do
     test "POST /v1/billing/checkout as a member → 403; as admin reaches billing" do
       team = team_fixture()

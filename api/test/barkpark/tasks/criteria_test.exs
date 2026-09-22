@@ -107,7 +107,7 @@ defmodule Barkpark.Tasks.CriteriaTest do
     end
   end
 
-  # ─── The close gate's own predicates (PDS-D288/D289/D290) ─────────────────
+  # ─── The close gate's own predicates (PDS-D288/PDS-D289/PDS-D290) ─────────────────
   #
   # `Tasks.Close` seats these three in `do_close_txn/10`'s `with` chain, on the
   # doc read under the per-task advisory lock. They are pure over content, so

@@ -154,7 +154,12 @@ defmodule Barkpark.Tasks.EventsLandedPayloadTest do
       [row] = rows_for(since, doc.doc_id, "task.landed")
 
       assert Map.keys(row) |> Enum.sort() == [:at, :doc_id, :event, :id, :payload, :rev]
-      assert Map.keys(row.payload) == ["landed_mark"]
+      # EXACT, and the list GREW BY ONE on purpose (task-56adb45f973e242f):
+      # `caller` is the server-measured principal, a typed stamp that projects
+      # BECAUSE it is not an audit key. Still exact, so an envelope key leaking
+      # into the projection reds this arm exactly as it did before.
+      assert Enum.sort(Map.keys(row.payload)) == ["caller", "landed_mark"]
+      assert row.payload["caller"]["id"] == "tok-abc"
       refute Map.has_key?(row, :document)
 
       # The audit stamp WAS written on this event (that is what makes this arm

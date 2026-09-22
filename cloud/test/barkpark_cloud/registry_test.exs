@@ -963,6 +963,9 @@ defmodule BarkparkCloud.RegistryTest do
     end
 
     test "get_team_site/2 returns nil for a non-UUID id instead of raising" do
+      # Still nil — but now because no site of this team is SLUGGED "not-a-uuid",
+      # not because the ref failed a uuid cast. The no-500 guarantee is
+      # unchanged; the slug arm below is what makes the nil meaningful.
       assert Registry.get_team_site(team_fixture(), "not-a-uuid") == nil
     end
 
@@ -1017,6 +1020,60 @@ defmodule BarkparkCloud.RegistryTest do
                }
              ] =
                steps
+    end
+  end
+
+  # task-6e6b76f60997dad6: every slug-addressed site verb used to pay an extra
+  # list-ALL `GET /v1/sites` (measured ~0.4 s, Apple M4, N=10, live CP) because
+  # `with_team_site` routes accepted a uuid and nothing else. These tests pin
+  # both halves of the fallback: it RESOLVES a team-scoped slug, and it does not
+  # widen the tenancy fence while doing so.
+  describe "get_team_site/2 resolves a team-scoped slug (task-6e6b76f60997dad6)" do
+    test "a slug owned by the team resolves to the same row as its uuid" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "Blog", slug: "slug-arm-blog"})
+
+      # REDS if the slug fallback is removed: without it uuid_or_nil/1 returns
+      # nil for "slug-arm-blog" and get_team_site/2 answers nil.
+      found = Registry.get_team_site(team, "slug-arm-blog")
+      assert found
+      assert found.id == site.id
+
+      # Control: the uuid arm is untouched and agrees with the slug arm.
+      assert Registry.get_team_site(team, site.id).id == site.id
+    end
+
+    test "CONTROL: the same slug owned by ANOTHER team is nil (404), not a cross-tenant read" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, _mine} = Registry.create_site(bp, %{name: "Blog", slug: "shared-name"})
+
+      other_team = team_fixture()
+      other_bp = barkpark_fixture(other_team)
+      {:ok, theirs} = Registry.create_site(other_bp, %{name: "Blog", slug: "shared-name"})
+
+      # Each team sees only its own row under the identical slug...
+      assert Registry.get_team_site(team, "shared-name").team_id == team.id
+      assert Registry.get_team_site(other_team, "shared-name").team_id == other_team.id
+      refute Registry.get_team_site(team, "shared-name").id == theirs.id
+
+      # ...and a third team, which owns no such slug, sees nothing.
+      assert Registry.get_team_site(team_fixture(), "shared-name") == nil
+    end
+
+    test "CONTROL: a foreign team's uuid is still nil — the slug arm did not open the uuid arm" do
+      team = team_fixture()
+      other_team = team_fixture()
+      other_bp = barkpark_fixture(other_team)
+      {:ok, theirs} = Registry.create_site(other_bp, %{name: "Blog", slug: "foreign-uuid-arm"})
+
+      assert Registry.get_team_site(team, theirs.id) == nil
+      assert Registry.get_team_site(team, "foreign-uuid-arm") == nil
+    end
+
+    test "an unknown slug is nil, not a raise" do
+      assert Registry.get_team_site(team_fixture(), "no-such-site-anywhere") == nil
     end
   end
 

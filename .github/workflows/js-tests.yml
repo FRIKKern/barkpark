@@ -42,6 +42,31 @@ on:
       - "api/test/support/fixtures/section-boundary-rules.json"
       - "api/test/support/fixtures/inline-code-source.json"
       - "api/test/support/fixtures/sdk-capabilities-parity.json"
+      # The Elixir filter-op vocabulary. @barkpark/core's query-builder parity
+      # suite (packages/core/tests/filter-op-parity.test.ts) reads this fixture
+      # DIRECTLY across the tree ('../../../../api/test/fixtures/filter_ops.json')
+      # and is the only thing that proves the SDK's operator set matches the
+      # engine's. An engine-side vocabulary change regenerates it and touches no
+      # js/ path, so without this entry the suite was never DISPATCHED on the one
+      # change it exists to catch. MEASURED: appending one op to that fixture
+      # makes `vitest run tests/filter-op-parity.test.ts` fail 2 of 7 — the guard
+      # works; only its trigger was missing.
+      - "api/test/fixtures/filter_ops.json"
+      # Two more cross-tree fixtures js/ tests read DIRECTLY (same class as
+      # filter_ops.json above): packages/react/tests/table-typed-cols.parity.test.ts
+      # reads table-col-types.json; status-manifest-parity.test.ts and
+      # taskboard-cancel-lane.test.ts read design/status-manifest.json. Neither
+      # matched any entry here, so an engine-side regen never dispatched js-tests.
+      - "api/test/support/fixtures/table-col-types.json"
+      - "design/status-manifest.json"
+      # The Phoenix paper-surface stylesheet. @barkpark/react ships
+      # dist/paper-surface.css as a byte-for-byte COPY of it, and
+      # packages/react/tests/paper-surface-asset.test.ts is the ONLY guard on
+      # that copy. An api-side edit to the stylesheet touches no js/ path, so
+      # without this entry the drift guard was never DISPATCHED on the exact
+      # change it exists to catch — the stylesheet could drift from the shipped
+      # asset and every js PR after it would stay green on the stale copy.
+      - "api/assets/paper-surface/**"
   pull_request:
     paths:
       - "js/**"
@@ -70,6 +95,31 @@ on:
       - "api/test/support/fixtures/section-boundary-rules.json"
       - "api/test/support/fixtures/inline-code-source.json"
       - "api/test/support/fixtures/sdk-capabilities-parity.json"
+      # The Elixir filter-op vocabulary. @barkpark/core's query-builder parity
+      # suite (packages/core/tests/filter-op-parity.test.ts) reads this fixture
+      # DIRECTLY across the tree ('../../../../api/test/fixtures/filter_ops.json')
+      # and is the only thing that proves the SDK's operator set matches the
+      # engine's. An engine-side vocabulary change regenerates it and touches no
+      # js/ path, so without this entry the suite was never DISPATCHED on the one
+      # change it exists to catch. MEASURED: appending one op to that fixture
+      # makes `vitest run tests/filter-op-parity.test.ts` fail 2 of 7 — the guard
+      # works; only its trigger was missing.
+      - "api/test/fixtures/filter_ops.json"
+      # Two more cross-tree fixtures js/ tests read DIRECTLY (same class as
+      # filter_ops.json above): packages/react/tests/table-typed-cols.parity.test.ts
+      # reads table-col-types.json; status-manifest-parity.test.ts and
+      # taskboard-cancel-lane.test.ts read design/status-manifest.json. Neither
+      # matched any entry here, so an engine-side regen never dispatched js-tests.
+      - "api/test/support/fixtures/table-col-types.json"
+      - "design/status-manifest.json"
+      # The Phoenix paper-surface stylesheet. @barkpark/react ships
+      # dist/paper-surface.css as a byte-for-byte COPY of it, and
+      # packages/react/tests/paper-surface-asset.test.ts is the ONLY guard on
+      # that copy. An api-side edit to the stylesheet touches no js/ path, so
+      # without this entry the drift guard was never DISPATCHED on the exact
+      # change it exists to catch — the stylesheet could drift from the shipped
+      # asset and every js PR after it would stay green on the stale copy.
+      - "api/assets/paper-surface/**"
 
 concurrency:
   group: js-tests-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
@@ -100,13 +150,66 @@ jobs:
       - name: Setup Node (pnpm store cached on the lockfile)
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           # cache: pnpm needs pnpm on PATH first, hence the reorder above
           cache: pnpm
           cache-dependency-path: js/pnpm-lock.yaml
 
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: "The Node pin above satisfies engines.node and the root vitest config can load under it (task-a9c4b827881d71bd)"
+        run: node scripts/check-node-floor.mjs --selftest && node scripts/check-node-floor.mjs
+
+      # COVERAGE for the `size` and `test` steps below, in front of both
+      # (task-3cd40ebba5ab106a, task-d4c973367c0d1a76). `turbo run <task>`
+      # scores a package with NO SCRIPT for that task as a SUCCESS, so
+      # "N successful, N total" counts the packages that OPTED IN and says
+      # nothing about the workspace. MEASURED on 6744725c58d6657b0e: a 4000-key
+      # object appended to packages/nextjs-query/src/index.ts took
+      # dist/index.mjs from 291 B to 238114 B and `turbo run size` still
+      # printed "14 successful, 14 total", EXIT=0 — nextjs-query declared no
+      # `size` script. The same hole swallowed a package with a deliberately
+      # failing test file and no `test` script ("20 successful, 20 total").
+      # This step derives the package set from pnpm-workspace.yaml and demands
+      # a byte ceiling of every published library and a runnable suite of every
+      # package that ships test files. No step below can be trusted without it:
+      # a green Bundle budget means "the budgeted packages are within budget",
+      # and only this step says which packages those are. Runs on the manifests
+      # alone, so it is placed before Build and costs seconds.
+      - name: "Turbo task coverage selftest (proves the coverage gate can still lose)"
+        run: node scripts/check-turbo-task-coverage.mjs --selftest
+
+      - name: "Turbo task coverage (every published package has a byte ceiling; every test-shipping package runs its tests)"
+        run: node scripts/check-turbo-task-coverage.mjs
+
+      # COVERAGE for js/scripts/ ITSELF (task-c0bde7ffbabafb07). The step above
+      # proves every PACKAGE has a runnable task; this one proves every SCRIPT in
+      # js/scripts/ is actually run by something. check-no-node-imports.selftest.sh
+      # sat in that directory with no caller at all and rotted to 10 of 13 cases
+      # failing, while reading to anyone grepping like a second layer of proof for
+      # the edge gate. The two repo censuses that hunt this class
+      # (shell-harnesses.yml, posix-vacuous-green-census.yml) are scoped to the
+      # ROOT scripts/ and reach nothing under js/. Manifest-and-workflow reading
+      # only, so it costs seconds and sits before Build with its sibling.
+      #
+      # The selftest arm is a POSITIVE CONTROL, not decoration: a coverage guard
+      # whose scan enumerates nothing reports no orphans and exits 0. It points
+      # the same audit at a fixture tree with a planted orphan of every shape and
+      # requires it to NAME each one.
+      - name: "Harness wiring selftest (proves the coverage scan can SEE its population)"
+        run: node scripts/check-harness-wiring.mjs --selftest
+
+      - name: "Harness wiring (every script under js/scripts is run by a workflow step, or waived with a reason)"
+        run: node scripts/check-harness-wiring.mjs
+
+      # The changelog gate's own offline selftest. It was DECLARED in
+      # js/package.json as `selftest:changesets` and run by nothing — the second
+      # member of the same un-run class, still green today only because nobody had
+      # yet changed .changeset/changelog-github-batched.cjs under it. A
+      # declaration is not an invocation; this step is the invocation, and
+      # check-harness-wiring above reds if it is ever removed again.
+      - name: "Changeset changelog selftest (concurrency cap + transport-vs-semantic retry, offline)"
+        run: pnpm run selftest:changesets
 
       - name: Cache turbo task outputs (js/.turbo)
         # turbo 2 replays build/test/lint/typecheck for packages whose inputs did not
@@ -196,6 +299,19 @@ jobs:
         # coverage artifact ever existed. One blocking run, no coverage flag;
         # real coverage is its own row.
         run: pnpm exec turbo run test ${{ steps.scope.outputs.filter }}
+
+      # REGISTRATION for js/scripts/check-vitest-projects.mjs, added by the PR
+      # that creates it. Execution floor for every project js/vitest.config.mts
+      # declares: it asks vitest for the declared set, runs them, and reds if
+      # any executed ZERO tests. #19085 was one instance — react-browser
+      # inherited a setupFiles path above the repo root, printed "Tests no
+      # tests" on every run, and nothing here noticed, because the steps above
+      # never invoke the root config's projects at all. Runs AFTER Test so the
+      # build + browser install are in place. Asserts on COUNTS, never on
+      # vitest's exit code — see the emptiness note above: in projects mode an
+      # empty project exits 0.
+      - name: "Every declared vitest project actually executed (#19085 class)"
+        run: node scripts/check-vitest-projects.mjs
 
       # @barkpark/core advertises edge/worker runtime support, and the two files
       # that look like the proof of that claim were the two that never ran: `pnpm
@@ -331,7 +447,7 @@ jobs:
       - name: Setup Node (pnpm store cached on the lockfile)
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           # cache: pnpm needs pnpm on PATH first, hence the reorder above
           cache: pnpm
           cache-dependency-path: js/pnpm-lock.yaml

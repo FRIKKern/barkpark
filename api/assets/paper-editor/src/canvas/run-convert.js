@@ -91,18 +91,32 @@ function isNoteType(t) {
 //   ingress  → an inline `content` array (the shared inline serializer)
 //   pullquote→ an inline `content` array (the shared inline serializer)
 // KEEP LOCKSTEP with paper_canvas.ex @canvas_role_types.
-const CANVAS_ROLE_TYPES = new Set(["eyebrow", "byline", "ingress", "pullquote"]);
+// `blockquote` is the plain quote (inline content + an optional `cite` the canvas
+// carries but never patches) — a role in shape, not in chrome; see role-nodes.js.
+const CANVAS_ROLE_TYPES = new Set(["eyebrow", "byline", "ingress", "pullquote", "blockquote"]);
 const ROLE_BODY_MODEL = {
   eyebrow: "text",
   byline: "items",
   ingress: "inline",
   pullquote: "inline",
+  blockquote: "inline",
 };
 
 // True when a portable-doc BLOCK type (and, since node.type === bpType, a NODE type)
 // is an article-chrome role block.
 function isCanvasRoleType(t) {
   return CANVAS_ROLE_TYPES.has(t);
+}
+
+// Prose/role kinds a block can be turned into inside the canvas (block menu, chords, Backspace
+// lifts, `> ` shorthand). A same-id block whose kind changed is REPLACED, since patch-block
+// keeps `type` immutable.
+const CONVERTIBLE_NODE_KIND = { paragraph: "paragraph", heading: "heading", bulletList: "list", orderedList: "list", taskList: "list" };
+const CONVERTIBLE_KINDS = new Set(["paragraph", "heading", "list", "pullquote", "blockquote", "eyebrow", "byline", "ingress"]);
+const LIST_KIND_ALIASES = new Set(["list", "bulletList", "bullet_list", "bullet-list", "bulletedList", "bulleted_list", "bulleted-list", "orderedList", "ordered-list", "ordered_list", "numbered_list", "numberedList"]);
+function blockKind(block) {
+  const t = block && block.type;
+  return LIST_KIND_ALIASES.has(t) ? "list" : t;
 }
 
 // The `table` block as FOUR hand-rolled NESTED nodes (bpTable > bpTableRow >
@@ -1157,16 +1171,25 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
       ? roleNodeToPatch(nextChild)
       : null;
   }
-  if (cls.isAtom || cls.isReadOnlyAtom || cls.isFleet || cls.isOpaque) {
-    // No interior to patch — a divider / sheet / embed / fleet / opaque child never
-    // reports a content change (identical child-id sequence + verbatim carry).
+  if (cls.isReadOnlyAtom) {
+    // A nested sheet / embed child can be retargeted exactly like a top-level one —
+    // the node-view is the same factory wherever the atom sits — so the one interior
+    // change it can report is diffed here too. null for any other read-only atom.
+    return readOnlyAtomRetargetPatch(cls.bpType, prevChild, nextChild);
+  }
+  if (cls.isAtom || cls.isFleet || cls.isOpaque) {
+    // No interior to patch — a divider / fleet / opaque child never reports a content
+    // change (identical child-id sequence + verbatim carry).
     return null;
   }
   // Prose child (paragraph / heading / list).
   if (proseNodeChanged(prevChild, nextChild)) {
     const bpType =
       cls.bpType || (prevChild && prevChild.attrs && prevChild.attrs.bpType);
-    return buildPatchBlockOp(nodeToDocEnvelope(nextChild), cid, bpType).patch;
+    const patch = buildPatchBlockOp(nodeToDocEnvelope(nextChild), cid, bpType).patch;
+    // A checklist turned back into a plain list must clear task (patch-block merges keys).
+    if (bpType === "list" && prevBlock && prevBlock.task === true && patch.task !== true) patch.task = false;
+    return patch;
   }
   return null;
 }
@@ -2123,6 +2146,11 @@ function bylineDisplay(block) {
 //   inline→ inlineArrayToTiptap(block.content) (the shared serializer; may be empty).
 function roleBlockToNode(block, bpId, bpType) {
   const attrs = { bpId, bpType };
+  // A quote's attribution rides on the node so a same-id replace keeps it; ops never patch it.
+  if (bpType === "blockquote") {
+    const cite = block && (block.cite ?? block.attribution);
+    if (typeof cite === "string" && cite.trim() !== "") attrs.cite = cite;
+  }
   const model = ROLE_BODY_MODEL[bpType];
   const node = { type: bpType, attrs };
 
@@ -2148,11 +2176,14 @@ function roleNodeToBlock(node, id) {
   const bpType = (node && node.type) || "eyebrow";
   const model = ROLE_BODY_MODEL[bpType];
   if (model === "inline") {
-    return {
+    const block = {
       id,
       type: bpType,
       content: tiptapInlineToPd((node && node.content) || []),
     };
+    const cite = node && node.attrs && node.attrs.cite;
+    if (bpType === "blockquote" && typeof cite === "string" && cite !== "") block.cite = cite;
+    return block;
   }
   if (model === "items") {
     return { id, type: bpType, items: splitBylineItems(roleNodeText(node)) };
@@ -2735,6 +2766,58 @@ function readOnlyAtomNodeToBlock(node, id) {
   return { id, type: bpType };
 }
 
+// ── pd-ee-sheet-embed-retarget: the ONE op a read-only atom can emit ──────────
+//
+// The read-only-never-patches guarantee above holds for everything a read-only atom
+// RESOLVES — a sheet's cells, an embed's transcluded prose. It gains exactly ONE
+// exception per atom: the REFERENCE the author authors, now editable in-canvas
+// through the reference picker the node-view mounts (embed-node.js,
+// mountAtomRetarget). A retarget mutates the carried block, so the diff below sees it
+// and emits a single patch-block. An atom with no entry in the key map below (a future
+// read-only atom) keeps the original zero-ops-by-construction guarantee.
+//
+// THE TWO ATOMS PATCH DIFFERENT KEY SETS, and the difference is not cosmetic:
+//
+//   sheet → { ref, snapshot: null }. `snapshot` is a cached projection of the OLD
+//     sheet; shipping only `ref` would leave patch.ex's shallow merge holding the
+//     previous sheet's cells under the new sheet's name — the stale-snapshot hazard.
+//     Clearing costs nothing: Barkpark.Content.Sheets' hydrate_sheet_embed_snapshots
+//     runs PRE-WRITE on the same save (content/writer.ex) and re-projects the grid for
+//     the NEW ref, and PortableDoc.Render.Compose reads `Map.get(b, "snapshot") || %{}`,
+//     so an unresolved ref paints an empty grid instead of another sheet's numbers.
+//   embed → { target }. An embed caches NOTHING: its transclusion is resolved fresh on
+//     every render (Papers.resolve_embeds_in_blocks → walk.ex embed/2 reads
+//     `pal.embeds[target]`), so there is no stale projection to clear and a
+//     `snapshot: null` here would write a key the embed block does not own.
+//
+// NEITHER IS VALIDATED. An embed target that resolves to nothing still saves — the
+// reader has an unresolved-fallback branch and notes get renamed under drafts that
+// point at them.
+
+// The key each read-only atom's retarget authors on the carried block. Absent ⇒ that
+// atom emits no ops at all.
+const READ_ONLY_ATOM_RETARGET_KEY = { sheet: "ref", embed: "target" };
+
+// The reference carried by a read-only atom node, as a comparable string ("" for an
+// absent/nulled value).
+function readOnlyAtomRef(node, key) {
+  const block = (node && node.attrs && node.attrs.bpBlock) || {};
+  const value = block[key];
+  return value == null ? "" : String(value);
+}
+
+// The retarget patch for a read-only atom whose carried reference CHANGED, or null.
+// Any other difference in the carried block (a server re-projected snapshot, say) is
+// NOT an authored edit and emits nothing.
+function readOnlyAtomRetargetPatch(bpType, prevNode, nextNode) {
+  const key = READ_ONLY_ATOM_RETARGET_KEY[bpType];
+  if (!key) return null;
+  const next = readOnlyAtomRef(nextNode, key);
+  if (readOnlyAtomRef(prevNode, key) === next) return null;
+  // sheet also clears the OLD ref's cached grid; embed has no cached projection.
+  return bpType === "sheet" ? { ref: next, snapshot: null } : { target: next };
+}
+
 // ── fleet ⇄ canvas server-painted read-only atom node (pdd-t8) ────────────────
 //
 // The component-fleet blocks ({ id, type:"tasks"|"cards"|"pipeline"|"form"|…, … })
@@ -3056,7 +3139,7 @@ function childNodeToBlock(childNode) {
   if (type === "divider") return { type: "divider" };
   const env = nodeToDocEnvelope(childNode);
   if (type === "heading") return { type: "heading", ...tiptapToBlock(env, null, "heading") };
-  if (type === "bulletList" || type === "orderedList") {
+  if (type === "bulletList" || type === "orderedList" || type === "taskList") {
     return { type: "list", ...tiptapToBlock(env, null, "list") };
   }
   return { type: "paragraph", ...tiptapToBlock(env, null, "paragraph") };
@@ -3181,7 +3264,7 @@ function terminalChildNodeToBlock(childNode) {
   if (type === "divider") return { type: "divider" };
   const env = nodeToDocEnvelope(childNode);
   if (type === "heading") return { type: "heading", ...tiptapToBlock(env, null, "heading") };
-  if (type === "bulletList" || type === "orderedList") {
+  if (type === "bulletList" || type === "orderedList" || type === "taskList") {
     return { type: "list", ...tiptapToBlock(env, null, "list") };
   }
   return { type: "paragraph", ...tiptapToBlock(env, null, "paragraph") };
@@ -3457,9 +3540,18 @@ function classifyNode(node) {
             : isStage
               ? "stage"
               : node.type);
+  // A list the person just created (input rule, toggle, paste) has no bpType attr yet: its
+  // node name is bulletList/orderedList, but the portable-doc kind is "list". Without this the
+  // new block was emitted as {type:"bulletList", content:[]} and its items were lost on save.
+  const listAware = bpType === "bulletList" || bpType === "orderedList" || bpType === "taskList" ? "list" : bpType;
+  // Turn-into (heading ⇄ paragraph ⇄ list ⇄ pullquote…) keeps the node's stamped bpType attr,
+  // so for the kinds the canvas converts between the NODE TYPE is the truth, not the attr.
+  // Kinds the canvas cannot represent natively keep their stamped bpType untouched.
+  const nodeKind = isRole ? node.type : CONVERTIBLE_NODE_KIND[node.type];
+  const resolved = nodeKind && (!listAware || CONVERTIBLE_KINDS.has(listAware)) ? nodeKind : listAware;
   return {
     node,
-    bpType,
+    bpType: resolved,
     isOpaque,
     isAtom,
     isContent,
@@ -3706,19 +3798,28 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
   // A surviving opaque node is a no-op (opaque blocks just round-trip).
   // A surviving canvas ATOM (S3: divider) is likewise a no-op: a content-free leaf
   // has no interior to change, so it NEVER reports an interior patch.
-  // A surviving canvas READ-ONLY ATOM (S3.6: sheet / embed) is ALSO a no-op: it is a
-  // REFERENCE carrying the whole block verbatim — nothing is edited in the editor, so
-  // it NEVER emits a value/content patch (the read-only-never-patches guarantee).
+  // A surviving canvas READ-ONLY ATOM (S3.6: sheet / embed) carries the whole block
+  // verbatim and its RESOLVED content is never edited here. Each has ONE authored
+  // field — a sheet's `ref`, an embed's `target` — which the canvas now retargets
+  // through the reference picker, so an atom whose reference CHANGED emits exactly one
+  // patch-block and one whose reference did not emits nothing.
   for (const entry of nextSeq) {
-    if (
-      entry.isNew ||
-      entry.isOpaque ||
-      entry.isAtom ||
-      entry.isReadOnlyAtom
-    )
-      continue;
+    if (entry.isNew || entry.isOpaque || entry.isAtom) continue;
+    // A read-only atom with no retargetable reference keeps the original
+    // zero-ops-by-construction guarantee.
+    if (entry.isReadOnlyAtom && !(entry.bpType in READ_ONLY_ATOM_RETARGET_KEY)) continue;
     const prevBlock = prevById.get(entry.id);
     const prevNode = runToTiptap([prevBlock]).content[0];
+
+    if (entry.isReadOnlyAtom) {
+      // RETARGET: one patch-block carrying the new reference (plus, for a sheet, the
+      // explicit clear of the old ref's cached grid). An untouched atom emits NOTHING
+      // (the D3 byte stability guarantee is unchanged for every block nobody
+      // retargeted).
+      const patch = readOnlyAtomRetargetPatch(entry.bpType, prevNode, entry.node);
+      if (patch) ops.push({ op: "patch-block", id: entry.id, patch });
+      continue;
+    }
 
     if (entry.isTable) {
       // Canvas table (nested node tree): diff the grid; emit one COARSE whole-table
@@ -3983,6 +4084,17 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
           patch: actionNodeToPatch(entry.node),
         });
       }
+      continue;
+    }
+
+    // A same-id block whose KIND changed (turn-into, Backspace lift, `> ` on an existing
+    // paragraph): patch-block cannot change `type`, so replace the block wholesale, same id.
+    const prevKind = prevBlock ? blockKind(prevBlock) : null;
+    if (prevBlock && prevKind !== entry.bpType && CONVERTIBLE_KINDS.has(prevKind) && CONVERTIBLE_KINDS.has(entry.bpType)) {
+      const fields = entry.isRole
+        ? roleNodeToPatch(entry.node)
+        : tiptapToBlock(nodeToDocEnvelope(entry.node), entry.id, entry.bpType);
+      ops.push({ op: "replace-block", id: entry.id, block: { ...fields, id: entry.id, type: entry.bpType } });
       continue;
     }
 

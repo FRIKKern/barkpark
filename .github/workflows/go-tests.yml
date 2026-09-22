@@ -117,6 +117,26 @@ on:
       # (#17878). An edit to stage.ex with no .go change must dispatch the Go leg
       # or the lock cannot fire on the PR that breaks it.
       - "api/lib/barkpark/tasks/stage.ex"
+      # internal/cli/errors_close_refusal_coverage_test.go parses the close/stamp
+      # REFUSAL VOCABULARY out of these two modules and requires every reason they
+      # mint to hold an exit bucket in internal/cli/errors.go codeExit (or a named
+      # exclusion) — the arm that catches a NEW refusal reaching users at exit 2,
+      # the malformed-command-line code (task-d10d9eb47f2cc5e4; five reasons have
+      # arrived in that state one at a time). The reasons are minted HERE with no
+      # .go diff, so an edit must dispatch the Go leg or the arm cannot fire on the
+      # very PR that grows the vocabulary (same rule as stage.ex above).
+      - "api/lib/barkpark/tasks/close.ex"
+      - "api/lib/barkpark/tasks/stamp.ex"
+      # internal/cli/tasks_brief_strip_server_pin_test.go reads this module
+      # (const serverBriefMirrorPath) as the CROSS-FENCE TRIPWIRE on the
+      # purpose-copy strip: the Go reader-side tolerance
+      # briefPurposeStripLegacyThreePass is a COPY of BriefMirror's three-pass
+      # strip_markdown/1, and the arm reds when the shape it imitates changes
+      # (task-8ba550b59141bccb; the remedy lands under task-b641646addba4bdf).
+      # The whole point is that a strip change here with NO .go diff must
+      # dispatch the Go leg, or the tripwire cannot fire on the very PR that
+      # trips it (same rule as stage.ex / close.ex / stamp.ex above).
+      - "api/lib/barkpark/tasks/brief_mirror.ex"
       # internal/cli/mcp_serve_test.go reads these two Studio-loopback spawn
       # sites (studioLoopbackSpawnSites) and pushes the `--tools <word>` they
       # build through the REAL Go parseToolsSelector — the cross-surface lock on
@@ -244,6 +264,21 @@ on:
       # locks the Go struct's tags against it in serializer order, so an edit to
       # the producer's key set must dispatch the Go job (task-801c6c33769ca01d).
       - "cloud/lib/barkpark_cloud/sites/build_log_bytes.ex"
+      # box_error_envelope.ex: the SAME producer_contract_test.go resolves
+      # build_log_bytes.ex's `BoxErrorEnvelope.fields(body)` call through to THIS
+      # module and reads the three keys fields/1 emits (box_error,
+      # box_error_message, box_error_request_id), so the Go decoders are locked
+      # against the reducer rather than against a hand-typed copy of it. A key
+      # added or renamed here carries no .go diff, so the edit must dispatch the
+      # Go job or the lock cannot fire on the very PR that breaks it
+      # (task-bb5b44bcc5e233af; same rule as build_log_bytes.ex above).
+      - "cloud/lib/barkpark_cloud/sites/box_error_envelope.ex"
+      # registry/site.ex: internal/cli/cloud_site_prebuilt_nonstatic_predicate_test.go
+      # reads the control plane's OWN `@kinds ~w(...)` from DISK and enrols every
+      # non-static member as a site `bp cloud site deploy --prebuilt` must refuse.
+      # A kind added there is a kind the prebuilt guard will meet, so the edit
+      # that adds it must dispatch the Go job (ssw9-bl-node-prebuilt).
+      - "cloud/lib/barkpark_cloud/registry/site.ex"
       # Onramp corpus: internal/cli/movement_doctrine_test.go reads all ten of
       # these docs from DISK and asserts each carries the movement doctrine
       # verbatim; onramp_cmd_test.go additionally pins the ZED.md json stanza and
@@ -267,6 +302,10 @@ on:
       # build emits. Exact files, never deploy/**.
       - "deploy/site-runtime-install.sh"
       - "deploy/systemd/barkpark-agent.service"
+      # deploy/site-deploy-node.sh: internal/cli/cloud_site_prebuilt_node_abi_test.go
+      # extracts the engine's own abi_decl_value awk reader out of it and runs it
+      # over the packer's emitted .bp-node-abi bytes (task-486a81da02b65557).
+      - "deploy/site-deploy-node.sh"
       # Starter manifests: internal/template/template_test.go's TestRealManifests
       # loads and validates every checked-in barkpark.template.json and asserts
       # its referenced schema/seed paths exist. templates/place-directory is
@@ -283,6 +322,19 @@ on:
       # with no .go diff at all, and without this entry the very PR that
       # narrows the filter dispatches nothing.
       - ".github/workflows/doc-gates.yml"
+      # `bp make workflow` (internal/cli/make_workflow.go) emits the GitHub
+      # Actions builder TEMPLATE for a user's own repo, and
+      # internal/cli/make_workflow_test.go reads three trees from DISK to keep it
+      # honest: TestWorkflowPatValidityMatchesTheControlPlane reads
+      # user_token.ex's @pat_default_validity_days (the template PRINTS that
+      # number, so a drifted default makes the template lie), and
+      # TestWorkflowTemplateIsNotDuplicated WALKS both starter trees to enforce
+      # the template's single-owner rule. All three change with no .go diff, so
+      # without these entries the guards are unreachable on the very PR that
+      # breaks them — same #963->#969-class gap as the carve-outs above.
+      - "cloud/lib/barkpark_cloud/accounts/user_token.ex"
+      - "cloud/priv/templates/**"
+      - "js/packages/create-barkpark-app/templates/**"
   pull_request:
     # NO `paths:` KEY, EVER — see THE SKIP SHIM above. The path decision for a
     # pull_request is made by the `changes` job below, which derives it from the

@@ -15,6 +15,28 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
     * PluginSettingsController.update/2 (settings map + "write" audit row)
     * PluginSettingsController.delete/2 delete (row gone + "delete" audit row)
 
+  EVERY ENTRY ABOVE IS A SYMBOL, AND THAT IS THE POINT (task-2e0ad8b4e06b9b40).
+  This list once held four `file.ex:<line>` citations beside two
+  `Module.function/arity` ones. Same block, same author, same subject matter —
+  four of four line-anchored citations had rotted (by 53, 26, ~40 and ~21 lines)
+  and zero of two symbol citations had. The only variable was the citation FORM.
+  The repair is always to DROP the number and keep path + symbol; re-pointing at
+  today's line only resets a clock that rots again.
+
+  WHY THE ROT STAYS SILENT, AND WHY THE LANE THAT TRIPS THE GUARD IS NOT THE LANE
+  THAT BROKE THE CITATION. The repo-wide citation guard
+  (`tooling/doc-truth/lineref-sweep.mjs`, verifier `verifyLinerefAgainst/2` in
+  `tooling/doc-truth/verify-docs.mjs`) confirms a citation when ANY harvested
+  anchor word sits within ±3 lines of the cited line — `const WINDOW = 3`. An
+  INCIDENTAL token near the cited line is therefore enough to keep a badly-wrong
+  citation green indefinitely. `search_controller.ex:316` above was 53 lines
+  stale and passing, propped up by an unrelated `"documents"` string literal that
+  happened to sit at line 318. When #16886 added a net four lines the literal
+  moved to 322, out of the window, and the guard reddened — so the guard did not
+  detect a defect that PR introduced, it detected one that PR stopped hiding. The
+  window is deliberately NOT widened: widen it and every citation confirms
+  against a neighbour, which is a guard that looks busy and finds nothing.
+
   Every stored-row assertion reads Postgres DIRECTLY through `Repo`. Reading it
   back through a second HTTP endpoint would only prove receipt-vs-receipt: two
   sentences agreeing with each other is not a post-condition.
@@ -33,7 +55,15 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
   @token "barkpark-pds-groupc-admin"
 
   setup do
-    {:ok, _} = Auth.create_token(@token, "pds-groupc", "test", ["read", "write", "admin"])
+    {:ok, _} =
+      Auth.create_token(
+        @token,
+        "pds-groupc",
+        "test",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     :ok
   end
 

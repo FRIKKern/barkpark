@@ -361,8 +361,8 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "THE D136 delivery estimator, ROUTED AT LAST. Its UNREACHABLE row said \"PR #10401 adds the caller; when it merges this row moves to :reachable and the move is the proof\" — this is that move. `Web.Router.deploy_census_json/2` (router.ex:9489) puts it on the operator census envelope, so `renderDeployDelivery`'s `d == nil` \"NOT MEASURED\" arm stops being the only arm that ever executes."},
     {:rate, 2, :reachable,
      "the D34 rate constructor. WAS :internal_only (three uses inside census/3 and delivery/3, public only because the payload census pairs it with the Go `DeployRate` struct); dr-w10-s1 gives it an external caller. `Web.Router`'s `no_deploy_surface/0` builds the all-nil `deploy_rate` sentinel with `DeployLedger.rate(0, 0)` rather than hand-writing a map, so the sentinel a consumer destructures is the SAME SHAPE as a real refusing rate BY CONSTRUCTION — hand-writing it is how a sentinel and its measured twin drift apart, which is the defect `@unmetered_pressure`'s own shape test exists to catch."},
-    {:box_rates, 3, :reachable,
-     "THE PER-BOX DEPLOY VITAL (dr-w10-s1). Its ONE caller is `Web.Router`'s GET /v1/barkparks handler, which prefetches it beside the pmap/dmap/hmap/qmap trio and threads it into `barkpark_json/6` — so the number that says a box is failing 46.28% of its terminal deploys reaches the fleet row instead of sitting one JOIN away in the same database, read by nothing. It is public for that route and for nothing else; its bucket is :reachable from the day it lands, which is the whole D136 point (server key + Go field + rendered column in ONE PR)."},
+    {:box_rates, 4, :reachable,
+     "THE PER-BOX DEPLOY VITAL (dr-w10-s1), TENANT-SCOPED (dr-w10-bl-team-scoped-box-rate — the arity moved 3 -> 4 and the fourth argument is the scope, not decoration: a box is a HOST and `sites` carries its own `team_id`, so the unscoped fold folded a foreign team's deploys into the caller's own rate, surface count and absorption without ever naming their site; `:team_ids` narrows INSIDE the query, and `router_box_rate_tenancy_test.exs` reds at pct 25.0 -> 62.5 when the narrowing is removed). Its ONE caller is `Web.Router`'s GET /v1/barkparks handler, which prefetches it beside the pmap/dmap/hmap/qmap trio and threads it into `barkpark_json/6` — so the number that says a box is failing 46.28% of its terminal deploys reaches the fleet row instead of sitting one JOIN away in the same database, read by nothing. It is public for that route and for nothing else; its bucket is :reachable from the day it lands, which is the whole D136 point (server key + Go field + rendered column in ONE PR)."},
     {:min_sample, 0, :reachable,
      "THE REFUSAL FLOOR, CALLED AT LAST (dr-bl-rate-notice). Its UNREACHABLE row read \"TWO test references and ZERO lib callers; `census/3` reads the `@min_sample` ATTRIBUTE directly, and `router.ex:3534` names the function only in a COMMENT\" — this is the move that closes it. `Notifications.DeployRateAlert.body/2` interpolates `DeployLedger.min_sample()` into the sentence a human reads (\"A RATE REFUSES ITSELF BELOW n = 200\"), and `deploy_rate_alert_worker_test.exs` asserts the rate node's `min_sample` EQUALS this accessor — so the floor the email quotes and the floor the census enforces are one value, and a change to `@min_sample` cannot leave a stale number in an operator's inbox."},
     {:content_on_web?, 1, :reachable,
@@ -377,6 +377,10 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
      "WHO a failure class accuses (D148/D242). WAS :internal_only (`class_rows/3` reads it while building the census class table, so the accusation rides the same row as the count and reaches an operator through `Web.Router.deploy_census_json/2`'s existing whole-map serialisation). dr-w15-bl-failure-copy-has-no-agency gives it an EXTERNAL caller: `FailureCopy.fault_line/1` (failure_copy.ex) derives the CUSTOMER's fault sentence from this function and from nothing else — before that seam, no class token crossed into the copy layer at all and an agency ruling could not reach a customer even in principle. This is the row that says the ONE token crosses: if `fault_line/1` ever grows its own regex over `failure_reason`, this row goes back to :internal_only and the move is visible in the diff."},
     {:label, 1, :reachable,
      "class -> human one-liner. WAS :internal_only (used once while building the census class table); dr-w32-bl gives it an external caller: `Notifications.BoxUnreachableEpisodeAlert.body/1` interpolates `DeployLedger.label(@class)` into the episode notice a human reads, so the sentence the alert quotes and the one-liner the census table carries are ONE string and cannot drift."},
+    {:refusal_boundary, 0, :reachable,
+     "THE ONE BOUNDARY THAT REFUSES ANYTHING, as a VALUE (dr-w27-s8-f1-seven-day-door-refuses-until-boundary-ages-out). `census/3` already carries all four boundaries on the wire under `boundaries` and names this one verbatim inside each refused rate's `reason` prose — neither form is usable by a renderer that must answer the reader's next question, because the prose has to be parsed and the wire list does not mark which member refuses. Its ONE external caller is `Notifications.DigestEmail`'s `boundary_horizon_clause/1`, which adds `instant + that door's own span` to a boundary-refused digest line so a non-operator reads \"this door measures again from 2026-08-12 21:13 UTC\" instead of guessing the pipeline is broken. Public so the instant is READ and never re-typed: a renderer that scraped the sentence would go silent the day the sentence is reworded, and a renderer that hard-coded the date would outlive the constant. REACHABLE from the day it lands."},
+    {:straddles_refusal_boundary?, 2, :reachable,
+     "THE REFUSAL PREDICATE, EXPORTED (dr-w27-s8-f1). The same test `census/3` refuses ratios on (`straddled_boundary/2`), so a caller holding an already-refused rate node can tell a BOUNDARY STRADDLE apart from the other reasons a rate refuses — too small a sample, an unreadable ledger — WITHOUT reading prose. Its ONE external caller is `Notifications.DigestEmail`'s `boundary_horizon_clause/1`, which keys the horizon sentence on this predicate rather than on `refused: true`: a rate refused for a short sample must NOT collect a date the reader waits on for nothing, because a sample does not grow because a boundary aged out. The `?`-trap the header names is why this row's bucket is measured by the AST walker and not by grep. REACHABLE from the day it lands."},
 
     # -- INTERNAL_ONLY — over-public, alive ------------------------------------
     {:classify, 2, :internal_only,
@@ -420,14 +424,45 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   ]
 
   # ---------------------------------------------------------------------------
-  # ANTI-VACUITY FLOORS — a walker that quietly stopped matching reports a clean
+  # ANTI-VACUITY GAUGES — a walker that quietly stopped matching reports a clean
   # tree and passes, which is the failure mode this whole file exists to not
-  # have. Both floors are set EQUAL to the measured population, not comfortably
-  # under it, and a legitimate change RAISES them in the same commit — where the
-  # set-equality assertions red on that same change anyway, so a floor can never
-  # be the only thing a change has to satisfy.
-  @publics_floor 23
-  @call_sites_floor 23
+  # have.
+  #
+  # THEY ARE NOT `>=` FLOORS ANY MORE, AND THE PUBLICS ONE IS NOT A LITERAL.
+  # A `>=` floor has only ONE failure direction: it reds when the world gets
+  # WORSE and stays silent when the world gets BETTER than its record, so it
+  # drifts below the population it guards and nothing says so. Measured on
+  # origin/main at b0d986ac6: the pair sat at `>= 23 / >= 23` while the tree
+  # held 28 publics and 49 call sites — the publics number trailed by 5 and the
+  # call-sites number by 26, both silently, because `>=` cannot see up. The
+  # comment that used to sit here claimed "a legitimate change RAISES them in
+  # the same commit"; that claim is DELETED rather than restated, because no
+  # control ever proved it and the 26-site gap disproves it. Same shape #17194
+  # fixed for the classes gauge.
+  #
+  # PUBLICS — DERIVED, so it cannot be stale. `@declared` is the committed
+  # bucket table, and "the DECLARED table and the module's public surface are
+  # the SAME SET, both directions" already reds on any public that is not in it.
+  # Reading the gauge off `@declared` makes the floor move WITH that table for
+  # free; there is no second number to forget. A dead walker still reds: it
+  # measures 0 publics against a table of #{length(@declared)}.
+  #
+  # CALL SITES — an EQUALITY pin, because nothing in the tree derives it. It
+  # reds in BOTH directions: a lost call site (a broken walker, a deleted
+  # caller) and a GAINED one (the drift this row was filed for). Re-measure with
+  # the census arm below — `mix test test/barkpark_cloud/deploy_ledger_reachability_test.exs`
+  # prints `CENSUS: <n> publics / <n> call sites` on every run — and move the
+  # pin in the same commit as the caller, quoting that printed line.
+  #
+  # MEASURED, NOT INHERITED. The row that asked for this fix carried "23 publics
+  # / 36 call sites", read off a BRANCH on 2026-09-10. Re-measured on origin/main
+  # by the arm below at b0d986ac6, the tree answers 28 publics / 49 call sites
+  # over 168 `.ex` files — so the filed pair was ALSO stale and copying it would
+  # have re-created this row. The denominator is AST NODES (external + internal
+  # call sites summed by `total_sites/1`), never grep lines: one source line
+  # carrying two calls counts twice, which `grep -c` cannot see.
+  @publics_floor length(@declared)
+  @call_sites_floor 49
 
   # ---------------------------------------------------------------------------
 
@@ -612,24 +647,47 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
   # The instrument can lose
   # ---------------------------------------------------------------------------
 
-  test "ANTI-VACUITY FLOOR: a broken walker REFUSES rather than reporting a clean tree" do
+  test "THE CENSUS PRINTS WHAT IT SCANNED — the arm that re-measures the pins" do
     {entries, callers} = measured()
 
-    assert length(entries) >= @publics_floor,
-           "only #{length(entries)} public def(s) collected, floor is #{@publics_floor} — the " <>
-             "EXTRACTOR is broken, not the module shrunk. Check Census.collect_defs/1 for a " <>
-             "def syntax it does not match before touching the floor."
+    # The gauges are re-derivable from a RUN, not from memory or from a grep.
+    # This line is what a commit that adds a public or a caller quotes when it
+    # moves `@call_sites_floor`; without it the only way to learn the measured
+    # population is to read a failure message, which means guessing first.
+    IO.puts(
+      "\nCENSUS: #{length(entries)} publics / #{total_sites(callers)} call sites " <>
+        "(pinned: #{@publics_floor} publics [derived from @declared] / " <>
+        "#{@call_sites_floor} call sites) — #{length(Census.ex_files(@lib))} .ex files scanned"
+    )
 
-    assert total_sites(callers) >= @call_sites_floor,
-           "only #{total_sites(callers)} call site(s) collected, floor is #{@call_sites_floor}"
+    # Non-vacuous: it scanned a real tree, not an empty one.
+    assert length(Census.ex_files(@lib)) > 100
+    assert length(entries) > 0
+    assert total_sites(callers) > 0
+  end
 
-    # And the floor can LOSE: the identical assertion against a walker that
+  test "ANTI-VACUITY GAUGES: EQUALITY, so a pin that trails the population REDS" do
+    {entries, callers} = measured()
+
+    assert length(entries) == @publics_floor,
+           "measured #{length(entries)} public def(s), the @declared table holds #{@publics_floor} — " <>
+             "if measured is LOWER the EXTRACTOR is broken, not the module shrunk (check " <>
+             "Census.collect_defs/1 for a def syntax it does not match); if measured is HIGHER a " <>
+             "public arrived without a @declared row. Either way the fix is not a bigger number."
+
+    assert total_sites(callers) == @call_sites_floor,
+           "measured #{total_sites(callers)} call site(s), pinned at #{@call_sites_floor}. " <>
+             "This pin is an EQUALITY on purpose (both directions): FEWER means the walker lost a " <>
+             "call shape, MORE means a caller was added — move the pin in the same commit as the " <>
+             "caller and quote the CENSUS line this suite prints. Do not widen it to `>=`."
+
+    # And the gauge can LOSE: the identical assertion against a walker that
     # matches no call shape — what a future syntax looks like from in here.
     broken = Census.callers(entries, @lib, @ledger, walker: :broken)
     assert total_sites(broken) == 0
 
     assert_raise ExUnit.AssertionError, fn ->
-      assert total_sites(broken) >= @call_sites_floor
+      assert total_sites(broken) == @call_sites_floor
     end
 
     # With the walker dead, EVERY public reads unreachable — i.e. a silent

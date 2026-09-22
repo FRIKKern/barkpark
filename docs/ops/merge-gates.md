@@ -311,7 +311,7 @@ is harmless:
   is not required, not `needs:`-ed by any required aggregator, and structurally
   ineligible to be required because go-format.yml is paths-filtered (the venue
   rule below). Its `(blocking)` means *blocking inside its own workflow*,
-  the same sense as doc-gates' 26 `(fails this job)` steps below (that label
+  the same sense as doc-gates' `(fails this job)` steps below (that label
   replaced `(blocking)` there in #12631). It is now filed under
   **S4 PATHS-FILTERED**, and until 2026-08-08 it appeared in **neither**
   `.github/required-checks.json` nor this page. `required-checks.json` is
@@ -658,135 +658,16 @@ neither, never a skip.
 ## Security gates (Sobelow + mix_audit)
 
 `.github/workflows/security.yml` (filed by `task-a41fc4590b2c2eb1`) adds two
-Elixir security gates, path-triggered on `api/**`:
-
-9. **`sobelow` job** — Phoenix-aware static analysis (XSS.Raw / SendResp,
-   SQL injection, unsafe `String.to_atom`, missing CSRF/CSP, hardcoded secrets,
-   `binary_to_term`, directory traversal…). **Advisory** (`continue-on-error:
-   true`) because the reviewed baseline is not drained — see the amended flip
-   verdict below. What *is* unstable is the
-   **line number**, which is inside the hash: a pure renumber invalidates every
-   waiver in the file. That is a reason to migrate waivers to AST-bound inline
-   annotations, not a reason to stay advisory.
-   `mix sobelow --skip --exit Low` reads the reviewed `api/.sobelow-skips`
-   baseline and reds on a fresh unskipped finding. CI also runs a pinned
-   Elixir 1.18.1/OTP27 reconcile in the only safe order: `--clear-skip`, then
-   `--mark-skip-all`; it uploads the regenerated baseline and diff as an
-   artifact for human review. CI never auto-commits it, and a developer-box
-   regeneration must never be committed. After review, a separate change may
-   update the tracked baseline. The fresh-finding guard plants a non-controller
-   `String.to_atom` call and requires Sobelow to exit 1, preventing blanket
-   suppression while the job remains advisory.
-
-   **Flip verdict 2026-07-21 — STAY ADVISORY**, and **amended 2026-07-28 (D139)**
-   because the precondition as first written was unsatisfiable. History: [merge-gates-history.md](merge-gates-history.md#the-sobelow-flip-precondition-as-first-written).
-
-   **Live count — RE-DERIVE, never quote.** The count is drained by every
-   annotation wave, so any number written here is stale on arrival. Run:
-
-   ```
-   $ grep -c '^[A-Za-z]' api/.sobelow-skips
-   $ grep '^[A-Za-z]' api/.sobelow-skips | sed 's/:.*//' | sort | uniq -c | sort -rn
-   ```
-
-   History: [merge-gates-history.md](merge-gates-history.md#sobelow-baseline-and-floor-derivations-2026-07-28-onward).
-
-   **Amended precondition — the floor is 9, not 0.** The flip is gated on the
-   baseline holding **ONLY entries that provably cannot carry an inline
-   `# sobelow_skip` annotation**, enumerated by type and count. The floor is a
-   property of sobelow 0.14.1's architecture, not of the baseline's size: it is
-   **9** today, out of the baseline that
-   `grep -c '^[A-Za-z]' api/.sobelow-skips` prints — **35** rows read at
-   a333e4b58 on 2026-09-11, a dated snapshot and not a live fact — in two
-   mechanical classes.
-   Derive both numbers rather than quoting this paragraph; it has already gone
-   stale once by being quoted instead of re-derived:
-
-   | Class | Count | Entries | Why no annotation can ever reach it |
-   |---|---|---|---|
-   | `Sobelow.Config.*` | **7** | 6 `Config.CSRF` + 1 `Config.HTTPS` (`config/prod.exs:0`) | Config findings are produced outside the `def_funs |> combine_skips()` pipeline, so `@sobelow_skip` is never consulted; `config/prod.exs:0` has no function to annotate at all. |
-   | `.heex` `XSS.Raw` | **2** | `layouts/bulldocs.html.heex:95`, `layouts/quiz.html.heex:21` | `Parse.get_meta_template_funs/1` bypasses the reader that rewrites `# sobelow_skip` into `@sobelow_skip`, so a template's source never sees the substitution. |
-
-   The `.heex` line numbers are part of each row's fingerprint, so read them off
-   `api/.sobelow-skips`, never from memory — this table has carried a wrong one.
-
-   The third `XSS.Raw` entry (`controllers/error_html.ex:25`) is a normal `.ex`
-   function and **is** annotatable — it is not part of the floor. Re-evaluate
-   the flip when the baseline contains nothing but those 9; do not re-evaluate
-   on "reaches 0", which cannot happen.
-
-   **The floor holds only while the findings still exist.** It is a count of
-   *unannotatable* findings, not of *unfixable* ones — fixing the underlying
-   code removes a row from the floor. Re-derive the floor from
-   `api/.sobelow-skips` after any such fix; it is never a constant.
-
-   **Topology: the S4 objection is DEAD as of wave 10 — one blocker remains.**
-   This entry used to conclude "no `security.yml` check can be required", on two
-   successive arguments that are both now retired. The first rested on "`main`
-   has no branch protection" — **false since 2026-07-28**: protection is live
-   with `enforce_admins: true` and the tracked file carries `"enforced": true`.
-   (Trap worth keeping: `gh api …/rulesets` → `[]` is a TRUE reading that
-   produces the WRONG conclusion, because this repo's protection is not a
-   ruleset.) The second rested on **S4**, and wave 10 paid it:
-
-   - `security.yml` **no longer carries a workflow-level `paths:` key** on either
-     trigger, so it renders a check run on every head. Path decisions moved to
-     JOB level behind an always-running `changes` dispatcher — the elixir.yml /
-     console-harness.yml shim, transplanted. A job skipped by a job-level `if:`
-     still publishes a `skipped` check run, and GitHub counts `skipped` as
-     satisfying a required context.
-   - The registrable name is **`Security gate`**: unmatrixed, `if: always()`, and
-     it ASSERTS over every upstream result rather than echoing them.
-   - `sobelow` is deliberately **NOT in that aggregator's `needs`**. Measured: a
-     `continue-on-error: true` job that exits 1 concludes FAILURE and renders a
-     RED check run while `needs.<job>.result` reads `success` — byte-identical to
-     a genuine pass, and undecomposable, because the information is destroyed
-     before the aggregator's shell starts. There is no honest "tolerate sobelow"
-     branch to write, so its own red check run is the only truthful signal it
-     has. `scripts/security-gate-shape.test.sh` forces this shape (deriving the
-     continue-on-error set FROM the workflow, so it self-corrects the day Sobelow
-     becomes blocking), and the unfiltered `gate-shape` job runs it on every head.
-   - **The remaining blocker is not topology, and it is no longer a live red
-     either — it is that `mix-audit` reads a LIVE advisory database.** History: [merge-gates-history.md](merge-gates-history.md#the-mix-audit-blocker-retracted). The standing ground is forward-looking: a CVE published
-     tomorrow reds `Security gate` on every open PR with no change to this repo,
-     a permanently correct red no PR can clear, which is what branch protection
-     must never pin. Registering it needs its own wave — a written policy for
-     who clears a fleet-wide advisory red, plus a fresh
-     `scripts/registration-deadlock-sweep.sh` — not a silent promotion by the
-     next regeneration.
-
-   So flipping `continue-on-error: true` → `false` on `sobelow` now DOES change
-   the picture: the shape ratchet immediately demands it be added to the
-   aggregator's `needs`, and from then on a Sobelow regression reds `Security
-   gate`. That is a consequence to intend, not a side effect to discover.
-
-   **Sobelow's greenness therefore is not a branch-protection concern — it is
-   still a real one.** A permanently-red regression gate cannot report a
-   regression: while it is red for residue, a genuinely new insecure pattern is
-   indistinguishable from an old one. That is the reason to drain it, and the
-   only honest one.
-
-   History: [merge-gates-history.md](merge-gates-history.md#provenance-d75-is-a-dangling-citation).
-
-10. **`mix-audit` job** — dependency CVE scan (`mix deps.audit`, the `mix_audit`
-    dep) over `mix.lock`. **Blocking** (no `continue-on-error`). The 8
-    pre-existing CVEs were remediated by a version bump (task-726cab56d9a84551),
-    NOT by accepting them: mint 1.7.1→1.9.1 (×4 advisories), postgrex
-    0.22.0→0.22.3, phoenix 1.8.5→1.8.9, decimal 2.3.0→3.1.1 (the last needed
-    ecto 3.13.5→3.13.6 + ex_json_schema 0.11.2→0.11.5 to relax decimal to
-    `~> 3.0`). The 8th — **esaml GHSA-4g2h-vm7x-747c** (XXE, local-file
-    disclosure/SSRF) — has **no upstream fix** (every release ≤ 4.6.0 is
-    affected), so it is the single `--ignore-advisory-ids GHSA-4g2h-vm7x-747c`
-    suppression in the audit step, justified because OTP 27+ neutralises the XXE
-    (xmerl disables external entities by default) and both CI (OTP 27.0) and
-    prod run OTP 27+. Every OTHER CVE must be fixed by a bump — never ignored.
-    Protective proof: `mix deps.audit` exits 1 on the pre-bump lock and on any
-    new CVE; drop the esaml id the moment upstream ships a patch. To suppress
-    additional accepted advisories, mix_audit also takes `--ignore-file <path>`
-    (advisory IDs, one per line).
-
-Both deps are `only: [:dev, :test], runtime: false` in `api/mix.exs` — analysis
-tooling that never ships in the release.
+Elixir security gates, path-triggered on `api/**` — items **9 (`sobelow`)** and
+**10 (`mix-audit`)** of this page's roster. Their policy of record moved out to
+[security-gates.md](security-gates.md) under its own `canonical-for`: the
+reviewed `api/.sobelow-skips` baseline, the amended flip precondition and the
+unannotatable floor, the `Security gate` aggregator's shape and why
+`sobelow` is deliberately not in its `needs:`, and the single esaml
+`--ignore-advisory-ids` suppression. Nothing was retired — the split was made
+because this page was 5 bytes under its 64000B cap and the remedy for overflow
+is to split, never to raise the cap. Read the two gates' strengths there, not
+from memory.
 
 ## Platform checks (not ours — GitHub App checks)
 
@@ -852,10 +733,10 @@ because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
 gate scripts themselves and to the workflow file.
 
-### The doc-gates roster (it is not two scripts — it is twenty-six)
+### The doc-gates roster (it is not two scripts)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **26 steps labelled `(fails this job)`** plus 8
+undersells it: it runs **30 steps labelled `(fails this job)`** plus the
 `(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
 PR touching one `.ex` file runs all of them.
 
@@ -873,12 +754,14 @@ JOB on the PRs where it runs, and that red is visible on the PR; **none of it
 stops a merge**, and `doc-gates` **cannot block a merge** by itself. That is the
 whole of its authority.
 
-(The count read 17 until 2026-08-07, two steps short. The 26 is derived by
+(The count read 17 until 2026-08-07, two steps short; it read 26 until #18707
+added the doc-drift pair, and 28 until #19266 added the charter adoption
+census. The current count is derived by
 running, not transcribed:
 
 ```bash
-grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 26
-grep -cE '^[[:space:]]*- name: .*\(tripwire\)'        .github/workflows/doc-gates.yml   # → 8
+grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml
+grep -cE '^[[:space:]]*- name: .*\(tripwire\)'        .github/workflows/doc-gates.yml
 ```
 
 §20 CLAUSE
@@ -886,7 +769,7 @@ grep -cE '^[[:space:]]*- name: .*\(tripwire\)'        .github/workflows/doc-gate
 below, and the workflow drift apart, and it counts the UNION of both labels so a
 revert to the old name is still counted rather than read as zero. RESIDUE, named
 rather than left to be tripped over: the unanchored `grep -c '(fails this job)'`
-returns **28**, because `.github/workflows/doc-gates.yml` quotes both labels
+returns MORE, because `.github/workflows/doc-gates.yml` quotes both labels
 inside its own corrective header — anchor on `- name:`, as above. §20 CLAUSE
 11's pass message also still spells the label `(blocking)`; it compares NUMBERS,
 so its verdict is unaffected.) In workflow order:
@@ -919,6 +802,10 @@ so its verdict is unaffected.) In workflow order:
 | 24 | Silencer growth ratchet | `scripts/silencer-growth-ratchet.sh` |
 | 25 | repo-papers snapshot freshness | `node scripts/repo-papers-freshness.mjs` (+ its `(tripwire)` self-test step; added by #17151, 2026-09-09) |
 | 26 | Paper dialect ratchet | `scripts/paper-dialect-ratchet.sh` (+ its `(tripwire)` self-test step; shrink-only counts of text-keyed inline leaves and malformed widget items per in-repo paper corpus, with a non-vacuity floor that REFUSES rather than greens) |
+| 27 | Doc drift — links, routes, placeholders, runnable examples | `scripts/doc-drift-check.sh` (+ its `(tripwire)` self-test step; diff-scoped, landed by #18707 — see *When your PR touches a doc* below) |
+| 28 | Charter-corpus marker hygiene | `scripts/charter-corpus-hygiene-check.sh` (`--selftest`, then the check) over the `.claude/workflows/*-charter.md` corpus |
+| 29 | Charter adoption census | `deploy/charter-adoption-check.sh` (`--selftest`, then the check; the deploy-reliability charter's declared adoption set vs the set derived from `.github/workflows/`, red in both directions — D620) |
+| 30 | bp-command doc parse over docs/cli | `node tooling/doc-truth/verify-bp-commands.mjs` (`--selftest`, then the gate over `docs/cli/*.md`; the step carries its own glob FLOOR of 3 files, so a glob that expands to nothing FAILS and can never read as a pass) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s
@@ -927,13 +814,17 @@ retired; it was fixed in #4473).
 
 ### What step 1 covers under `docs/ops/` — and what this page's own header means
 
-`scripts/check-doc-budgets.sh` gates a fixed 31-row byte table (pinned by
-`CAPS_ROWS_EXPECTED`), the 7 `docs/cards/*.md`, and the pinned
-`docs/setup/CODEX.md` onramp span — nothing else. Under `docs/ops/` that table
-now names **three** files of the twenty-one: `docs/ops/PROD_OPS.md`, this page,
-and `docs/ops/branch-protection-and-overrides.md`. Every other `docs/ops/*.md`
-carries a G1 `budget:` figure that **no gate reads** — on those files the header
-is a declaration, not a cap.
+`scripts/check-doc-budgets.sh` gates a hand-written byte table (pinned by
+`CAPS_ROWS_EXPECTED` — re-derive the row count from the script, it moves), the 7
+`docs/cards/*.md`, the pinned `docs/setup/CODEX.md` onramp span, **and every
+other spine doc by HEADER DISCOVERY**: a declared `budget: Ntok` is enforced as
+`N * 4` bytes. Under `docs/ops/` the hand-written table names three files —
+`docs/ops/PROD_OPS.md`, this page, and
+`docs/ops/branch-protection-and-overrides.md`; the rest are capped by their own
+headers, which is why `docs/ops/security-gates.md` needed no new table row. The
+older reading — that a `docs/ops/` header outside the table is a declaration no
+gate reads — is DEAD: discovery closed that hole, and the `budget:` figure in a
+header is now the cap.
 
 History: [merge-gates-history.md](merge-gates-history.md#the-budget-header-that-enforced-nothing). The registration / break-glass / recorded-override runbook
 moved out to `docs/ops/branch-protection-and-overrides.md` under its own
@@ -948,6 +839,58 @@ was never an option — G1 in `scripts/docs-anchors-check.sh` requires
 `budget: [0-9]+tok` on every active doc. Adding a page to the CAPS table remains
 a deliberate two-line `scripts/` edit: the row, plus the `CAPS_ROWS_EXPECTED`
 bump.
+
+### When your PR touches a doc — three contributor rules
+
+These are the rules a reviewer applies to the DOC half of an ordinary PR. They
+are enforced, where they are enforced at all, by `scripts/doc-drift-check.sh`
+(step 27 of the roster above, wired into `.github/workflows/doc-gates.yml` on
+both the `push` and `pull_request` arms) — reviewed and landed in **PR #18707**.
+
+1. **A new durable fact goes into its CANONICAL OWNER.** `canonical-for` in the
+   G1 header is unique repo-wide, so every topic has exactly one document that
+   owns it; adding the fact to a second doc is how one topic ends up with two
+   answers that disagree, and the reader has no way to tell which is current.
+   `scripts/docs-anchors-check.sh` enforces the uniqueness of the topic, not the
+   placement of the fact — that part is a reviewer's job. If the owner is at its
+   byte ceiling, **split it or retire content** (this page's own Security-gates
+   section was split out to `docs/ops/security-gates.md` for exactly that
+   reason); writing the fact somewhere else instead is the failure this rule
+   exists to stop, and raising the cap is not an option.
+2. **An INDEPENDENT READER reviews the doc change, not just the code change.** A
+   second reader asks a different question: the author already knows what the
+   sentence was meant to say, so the author cannot be the one who checks that it
+   says it. Name what you want checked — that the route in the link is the one
+   you meant, that the example is the one you actually ran. No gate can do this,
+   and none pretends to; it is a review rule, not a check.
+3. **RE-RUN the supported startup paths a doc names.** If your change touches a
+   file an allowlisted example depends on, declare it —
+   put an HTML comment reading `doc-exec: allowlisted deps=path/one,path/two`
+   on the line above the fence (spelled out rather than reproduced here: the
+   checker matches that literal LINE-WISE, so a marker quoted in prose with no
+   fence under it is itself a red) — and the drift check
+   re-runs that example on YOUR PR instead of leaving it to rot until someone
+   else's. Unmarked fences are never run, so an example you want PROTECTED has
+   to say so.
+
+**Actual check coverage — what is mechanised and what is not.** Rules 1 and 3
+are partly mechanised; rule 2 is not mechanised at all.
+
+| Rule | What a check actually does | Deliberately silent about |
+|---|---|---|
+| 1 · canonical ownership | `docs-anchors-check.sh` reds on a duplicate `canonical-for` topic and on a missing G1 header; `check-doc-budgets.sh` reds when an owner overflows its byte cap | whether a given FACT landed in the right owner — no gate reads meaning |
+| 2 · independent reader | nothing | everything — this rule is carried by review alone |
+| 3 · rerun startup paths | `doc-drift-check.sh` re-runs a fence carrying the `doc-exec: allowlisted` marker comment and reds on a non-zero exit, diff-scoped: yours when your diff touches the doc or a declared `deps=` file | every unmarked fence; cold-tier docs, `_attic/`, `fixtures/` trees and `tooling/grip/ledger/` are out of the corpus |
+| (carried along) links + placeholders | `doc-drift-check.sh` reds on a relative link target that resolves nowhere, and on `FIXME` / `TBD` / `TODO:` / `<PLACEHOLDER>` / `REPLACE_ME` standing as prose | `http(s)`, absolute, anchor-only and templated targets; a bare extensionless route a `.md`, a directory or an `index.md` serves; the same placeholder words inside a fence or code span, which are quotation, not assertion |
+
+**The strength of that coverage, said negatively.** Every one of those checks
+runs inside the single `Doc budgets + anchors` job, which is an S4
+paths-filtered exclusion in `.github/required-checks.json` and **cannot block a
+merge** — a red is visible on the PR and nothing more. So rules 1–3 are
+REVIEW rules with partial mechanical assistance, never a merge wall. Run them
+yourself before pushing: `bash scripts/doc-drift-check.sh` (scoped to
+`origin/main...HEAD`) and `bash scripts/doc-drift-check.test.sh` for its twelve
+regression arms. Mechanism detail lives in `tooling/doc-truth/README.md`.
 
 ### Touching `api/lib/barkpark_web/layouts/root.html.heex`
 

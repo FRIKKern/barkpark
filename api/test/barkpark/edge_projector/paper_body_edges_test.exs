@@ -80,7 +80,13 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
   defp publish!(type, doc_id, scope) do
     # Task docs carry the core-validated task content shape.
     content =
-      if type == "task", do: %{"kind" => "task", "lifecycle_status" => "open"}, else: %{}
+      if type == "task",
+        do: %{
+          "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
+          "lifecycle_status" => "open"
+        },
+        else: %{}
 
     {:ok, _} =
       Content.create_document(

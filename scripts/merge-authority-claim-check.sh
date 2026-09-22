@@ -49,8 +49,11 @@
 # ── WHAT COUNTS AS AN UNRESOLVED CLAIM ───────────────────────────────────────
 #
 # A comment line that asserts merge authority in a scope the COMMITTED SPEC
-# (.github/required-checks.json) denies. Scope is resolved FROM the spec — the
-# 4 required contexts and the 25 exclusion rows — never from a list typed here:
+# (.github/required-checks.json) denies. Scope is resolved FROM the spec — its
+# required contexts and its exclusion rows, both read at run time and neither
+# counted in this comment; the `25 exclusion rows` that stood here was 7x low
+# by the time anyone read it (`jq '.exclusions|length'` is the producer) —
+# never from a list typed here:
 #
 #   * A job is AUTHORITATIVE when its rendered name is a required context, or
 #     when it is in the transitive `needs` closure of one, inside its own file.
@@ -65,7 +68,11 @@
 #   * A DENIAL. Prose whose job is to say a context has NO authority ("but
 #     NEVER blocks the merge", "is not required", "advisory") is the CURE, not
 #     the disease. Reddening a correction is the fastest way to get a guard
-#     switched off — required-checks-verify.sh:608 learned that first.
+#     switched off — the comment block above BLOCKING_HEADER_UNRESOLVED_BASELINE
+#     in scripts/required-checks-verify.sh learned that first, and says so in
+#     those words (`grep -n "Reddening a correction" scripts/*.sh`). The line
+#     number that stood here pointed into `rendered_names`, which is about
+#     nothing of the kind: a citation is correct exactly once.
 #   * The repo's existing escape hatch, `spec-authority: advisory-ok — <reason>`
 #     anywhere in the same contiguous comment block. The reason text is
 #     MANDATORY and non-empty: a bare token is a silencer, a reason is a
@@ -76,9 +83,12 @@
 # Main is not clean on this vocabulary, and pretending otherwise would mean
 # either narrowing the vocabulary (defeating the point) or shipping a red that
 # no PR can clear. So the guard forbids the count from RISING, exactly as
-# BLOCKING_HEADER_UNRESOLVED_BASELINE=3 does one file over. A new claim reds; a
-# removed one prints a note asking for the baseline to come down, because a
-# guard that reds on its own repair is a trap.
+# BLOCKING_HEADER_UNRESOLVED_BASELINE does one file over (that constant sits
+# beside `blocking_authority_check` in scripts/required-checks-verify.sh; this
+# comment asserted a value of 3 for it long after a ratchet took it to 0, and
+# pointed at a line in the deadlock detector — grep the name, never a line).
+# A new claim reds; a removed one prints a note asking for the baseline to come
+# down, because a guard that reds on its own repair is a trap.
 #
 #   BASELINE DERIVED 2026-08-19 against origin/main @ 2b8605d082, by running:
 #       bash scripts/merge-authority-claim-check.sh --print-baseline   ->  9
@@ -91,28 +101,33 @@
 #   count, so drift is visible before it is fatal, and `--list` prints every
 #   row with its file, scope and line.
 #
-#   THE 16, so the next reader inherits a ledger and not a number. None is a
-#   phantom warrant of the #12631 kind — each is prose that discusses merge
+#   THE FOURTEEN, so the next reader inherits a ledger and not a number. None is
+#   a phantom warrant of the #12631 kind — each is prose that discusses merge
 #   authority in a denied scope, which the vocabulary cannot tell apart from
 #   asserting it, and each is cheaper to leave at the baseline than to reword
-#   under a guard that would then red on its own repair:
-#     absent-context-census.yml:26           "become eligible to gate a merge"
-#     astro-search-finder-test.yml:19        "Gates a PR only once registered as a required check"
-#     connectors.yml:65                      a note ABOUT a merge-authority claim that was corrected
-#     connectors.yml:163 (shim-confinement)  "This comment said BLOCKING until 2026-08-19"
-#     connectors.yml:173 (shim-confinement)  "BLOCKING — it is one of the three held at"
-#     connectors.yml:174 (shim-confinement)  "BLOCKING_HEADER_UNRESOLVED_BASELINE=3 in"
-#     connectors.yml:226 (test)              "THIS COMMENT OPENED BLOCKING, unlike js-tests.yml's"
-#     doc-gates.yml:15                       quotes the "(blocking)" names #12631 deleted
-#     go-format.yml:22                       "gofmt drift ceiling (blocking)` is a"
-#     required-checks-drift.yml:68           "the human gate `hg-…`. When that lands,"
-#     scaffy-catalog-drift.yml:19            "gate a merge pre-merge: drift is a serve-side condition"
-#     security.yml:358 (sobelow-inline-overlap) "BLOCKING as of wave 24" (excluded aggregator job)
-#     shell-harnesses.yml:11                 "the fleet's merge verb"
-#     shell-harnesses.yml:180                "MERGE-GATE AUTOSTAMP BRIDGE (task-8fb6aa7b6d57f737)"
-#     shell-harnesses.yml:827 (doc-gates-paths-parity) same bridge banner, second job
-#     docs/ops/merge-gates.md:214            "`gofmt drift ceiling (blocking)` … is a real,"
-#   A SEVENTEENTH reds. That is the contract.
+#   under a guard that would then red on its own repair. Located by file and
+#   scope, never by line — `--list` prints the live line for every row, and a
+#   line typed here is a lie one insertion later (two of the rows this list
+#   carried were exactly that):
+#     absent-context-census.yml     header                     "become eligible to gate a merge"
+#     astro-search-finder-test.yml  header                     "Gates a PR only once registered as a required check"
+#     connectors.yml                header                     a note ABOUT a claim that was corrected
+#     connectors.yml                job:shim-confinement       quotes the claim it retracts, dated 2026-08-19
+#     connectors.yml                job:test                   quotes the claim it retracts, dated 2026-08-19
+#     doc-gates.yml                 header                     quotes the "(blocking)" names #12631 deleted
+#     go-format.yml                 header                     "gofmt drift ceiling (blocking)` is a"
+#     required-checks-drift.yml     header                     "the human gate `hg-…`. When that lands,"
+#     scaffy-catalog-drift.yml      header                     "gate a merge pre-merge: drift is a serve-side condition"
+#     security.yml                  job:sobelow-inline-overlap "BLOCKING as of wave 24" (excluded aggregator job)
+#     shell-harnesses.yml           header                     "the fleet's merge verb"
+#     shell-harnesses.yml           header                     MERGE-GATE AUTOSTAMP BRIDGE banner
+#     shell-harnesses.yml           job:doc-gates-paths-parity same bridge banner, second job
+#     merge-gates.md                denied-context             "`gofmt drift ceiling (blocking)` … is a real,"
+#   RE-DERIVED 2026-09-17 against this tree -> 14: connectors.yml's header
+#   overclaim was corrected (the old row for it, and a second row that cited a
+#   constant and line number that were both wrong, are gone; one new row is the
+#   retraction that replaced them).
+#   A FIFTEENTH reds. That is the contract.
 #
 # ── USAGE ────────────────────────────────────────────────────────────────────
 #
@@ -135,7 +150,7 @@ REPO_ROOT="$(cd -- "$HERE/.." && pwd)"
 # THE COMMITTED BASELINE. See the derivation block above. Lower it freely;
 # raising it requires saying, in the commit message, which new claim was
 # accepted and why the committed spec cannot back it.
-MERGE_AUTHORITY_CLAIM_BASELINE=16
+MERGE_AUTHORITY_CLAIM_BASELINE=14
 
 SPEC_PATH="$REPO_ROOT/.github/required-checks.json"
 WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"

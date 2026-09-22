@@ -1674,6 +1674,158 @@ if [ -f "$FP" ]; then
 fi
 rm -rf "$TMP"
 
+echo "== Case: the maintenance 503 RENDERS as HTML, and a healthy upstream never sees it (task-65493b2183c3bf91) =="
+# TWO DIFFERENT CLAIMS, asserted separately and labelled, because conflating
+# them is how this defect survived:
+#   STATUS-IS-HONEST — during a backend gap EVERY path, /assets/*.css included,
+#     answers 503 + Retry-After. It always did; these arms exist so a future
+#     change that "fixes" rendering by handing back a 200 reds here.
+#   RENDERS-CORRECTLY — the body is delivered as text/html, not text/plain.
+#     `respond` with a body and no Content-Type defaults to
+#     `text/plain; charset=utf-8` (Caddy 2.11.4), so the browser painted the raw
+#     `<!doctype html>…` source. THIS is what the change fixes.
+# And the counter-arm: a maintenance handler that 503s HEALTHY traffic is a
+# worse bug than the one being fixed, so a live backend is booted and proved to
+# pass through untouched.
+setup_case
+rc="$(run_deploy 200 newsha)"
+check "maint/shape: exit 0"                      "[ '$rc' = '0' ]"
+check "maint/shape: Content-Type armed exactly once" \
+  "[ \"\$(grep -c 'header Content-Type \"text/html; charset=utf-8\"' '$CADDY')\" = '1' ]"
+check "maint/shape: it sits INSIDE the handle_errors block (after Retry-After)" \
+  "[ \"\$(grep -n 'header Content-Type' '$CADDY' | head -1 | cut -d: -f1)\" -eq \"\$(( \$(grep -n 'header Retry-After \"15\"' '$CADDY' | head -1 | cut -d: -f1) + 1 ))\" ]"
+check "maint/shape: the armed Caddyfile is still caddy-valid" \
+  "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"
+check "maint/shape: still exactly ONE maintenance handler" \
+  "[ \"\$(grep -c 'handle_errors 502 503 504 {' '$CADDY')\" = '1' ]"
+check "maint/shape: the block carries no slot-port token (port-flip-safe)" \
+  "! grep -qE 'localhost:(4000|4001)' <(sed -n '/handle_errors 502 503 504 {/,/^\t}$/p' '$CADDY')"
+
+# ---- LIVE. A real Caddy on the deploy's OWN armed config. Only the site
+# address is rewritten to a loopback port (no TLS, no public DNS); the armed
+# block is byte-identical. UPSTREAM_PORT has nothing listening = the blue/green
+# gap. If caddy cannot come up we FAIL rather than skip: a silent skip here is
+# exactly the vacuous green this case exists to prevent.
+# PORT PRECONDITION, learned the hard way: a stale listener left by an earlier
+# run squatted UPORT, the stand-in silently failed to bind, and the front Caddy
+# proxied that stranger's 500 — which is NOT an error Caddy raises, so
+# handle_errors never fired and all seven live arms went red for a reason that
+# had nothing to do with the handler. Pick a pair nothing answers on, and ASSERT
+# we found one rather than trusting a hardcoded number.
+MPORT=""; UPORT=""
+_port_free() { ! curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$1/" 2>/dev/null; }
+for _b in $(seq 39270 4 39420); do
+  if _port_free "$_b" && _port_free "$((_b + 1))"; then MPORT="$_b"; UPORT="$((_b + 1))"; break; fi
+done
+check "maint/LIVE PRECONDITION: found a free loopback port pair (nothing already listening)" \
+  "[ -n '$MPORT' ] && [ -n '$UPORT' ]"
+[ -n "$MPORT" ] || { MPORT=39270; UPORT=39271; }
+mlive="$TMP/live.caddy"
+sed -e "s|^guerrilla.barkpark.cloud {|http://127.0.0.1:$MPORT {|" \
+    -e "s|reverse_proxy localhost:4001|reverse_proxy 127.0.0.1:$UPORT|" \
+    -e "s|reverse_proxy localhost:4000|reverse_proxy 127.0.0.1:$UPORT|" "$CADDY" > "$mlive"
+printf '{\n\tadmin off\n\tauto_https off\n}\n' | cat - "$mlive" > "$mlive.g" && mv "$mlive.g" "$mlive"
+check "maint/LIVE: the rewritten config (armed block byte-identical) is caddy-valid" \
+  "caddy validate --adapter caddyfile --config '$mlive' >/dev/null 2>&1"
+check "maint/LIVE: the rewrite changed ONLY the address, not the handler" \
+  "[ \"\$(grep -c 'header Content-Type \"text/html; charset=utf-8\"' '$mlive')\" = '1' ]"
+caddy run --config "$mlive" --adapter caddyfile > "$TMP/caddy.live.log" 2>&1 &
+mcpid=$!
+mup=0
+for _ in $(seq 1 100); do
+  if curl -s -o /dev/null "http://127.0.0.1:$MPORT/" 2>/dev/null; then mup=1; break; fi
+  sleep 0.1
+done
+check "maint/LIVE: the real Caddy came up on the armed config (no skip)" "[ '$mup' = '1' ]"
+# hdrs <path> -> status + headers, one probe, never through a pipe into the check
+mhdr() { curl -s -D - -o "$TMP/live.body" "http://127.0.0.1:$MPORT$1" > "$TMP/live.hdr" 2>/dev/null; }
+
+mhdr /papers/cmux-bridge
+check "maint/LIVE STATUS-IS-HONEST: a dynamic path during the gap is 503" \
+  "grep -qi '^HTTP/1.1 503 ' '$TMP/live.hdr'"
+check "maint/LIVE STATUS-IS-HONEST: it carries Retry-After" \
+  "grep -qi '^Retry-After: 15' '$TMP/live.hdr'"
+check "maint/LIVE RENDERS-CORRECTLY: the dynamic 503 body is text/html, NOT text/plain" \
+  "grep -qi '^Content-Type: text/html' '$TMP/live.hdr'"
+check "maint/LIVE RENDERS-CORRECTLY: it is the branded page" \
+  "grep -q 'Back in a moment' '$TMP/live.body'"
+
+mhdr /assets/bp-paper-editor.css
+check "maint/LIVE STATUS-IS-HONEST: a CSS request during the gap is ALSO 503 (never a 200)" \
+  "grep -qi '^HTTP/1.1 503 ' '$TMP/live.hdr'"
+check "maint/LIVE STATUS-IS-HONEST: the CSS 503 is not dressed up as text/css" \
+  "! grep -qi '^Content-Type: text/css' '$TMP/live.hdr'"
+check "maint/LIVE RENDERS-CORRECTLY: the CSS-path 503 body is text/html too" \
+  "grep -qi '^Content-Type: text/html' '$TMP/live.hdr'"
+
+# ---- THE COUNTER-ARM. Boot a real upstream on UPORT and prove the maintenance
+# handler is INERT for healthy traffic: 200, the upstream's own body and its own
+# Content-Type, no Retry-After, no holding page. This is the arm that must stay
+# QUIET; it reds if the handler ever starts swallowing live requests.
+ucfg="$TMP/upstream.caddy"
+# ARGUMENT ORDER IS `respond <body> <status>`, not `respond <status> <body>`.
+# A `respond 200 "STANDIN-UPSTREAM-OK"` stand-in parses "200" as the BODY and
+# then fails to Atoi the text as a status, so it answers 500 with an empty body
+# while still accepting connections — a fixture that looks alive, proxies a 500
+# the front Caddy does not treat as its own error, and therefore reds every arm
+# below for a reason that has nothing to do with the maintenance handler. The
+# FIXTURE CONTROL right after the boot loop is what catches that.
+printf '{\n\tadmin off\n\tauto_https off\n}\nhttp://127.0.0.1:%s {\n\theader Content-Type "text/css"\n\trespond "STANDIN-UPSTREAM-OK" 200\n}\n' "$UPORT" > "$ucfg"
+check "maint/HEALTHY: the stand-in upstream config is caddy-valid" \
+  "caddy validate --adapter caddyfile --config '$ucfg' >/dev/null 2>&1"
+caddy run --config "$ucfg" --adapter caddyfile > "$TMP/caddy.up.log" 2>&1 &
+ucpid=$!
+uup=0
+for _ in $(seq 1 100); do
+  if curl -sf -o "$TMP/up.probe" "http://127.0.0.1:$UPORT/" 2>/dev/null \
+     && grep -q 'STANDIN-UPSTREAM-OK' "$TMP/up.probe"; then uup=1; break; fi
+  sleep 0.1
+done
+# FIXTURE CONTROL, not a readiness poll: "the port answered" was not enough —
+# a 500 answers too. This demands the exact 200 body, so a broken stand-in reds
+# here (loudly, on its own line) instead of reddening the two arms below.
+check "maint/HEALTHY FIXTURE CONTROL: the stand-in serves its own 200 body" "[ '$uup' = '1' ]"
+mhdr /assets/bp-paper-editor.css
+check "maint/HEALTHY: a healthy upstream answers 200, NOT the 503" \
+  "grep -qi '^HTTP/1.1 200 ' '$TMP/live.hdr'"
+check "maint/HEALTHY: the upstream's own Content-Type survives (no text/html rewrite)" \
+  "grep -qi '^Content-Type: text/css' '$TMP/live.hdr'"
+check "maint/HEALTHY: no Retry-After leaks onto a healthy response" \
+  "! grep -qi '^Retry-After' '$TMP/live.hdr'"
+check "maint/HEALTHY: the body is the upstream's, not the holding page" \
+  "grep -q 'STANDIN-UPSTREAM-OK' '$TMP/live.body' && ! grep -q 'Back in a moment' '$TMP/live.body'"
+kill "$ucpid" 2>/dev/null || true; kill "$mcpid" 2>/dev/null || true
+wait "$ucpid" 2>/dev/null || true; wait "$mcpid" 2>/dev/null || true
+
+# ---- The already-armed UPGRADE path. A box armed BEFORE this change has the
+# handler but no Content-Type, and the marker guard forbids a re-arm, so it can
+# only ever be fixed in place. Strip the header from the armed file and redeploy.
+sed -i.bak '/header Content-Type "text\/html; charset=utf-8"/d' "$CADDY" && rm -f "$CADDY.bak"
+check "maint/upgrade PRECONDITION: the header really is gone before the redeploy" \
+  "! grep -q 'header Content-Type' '$CADDY'"
+check "maint/upgrade PRECONDITION: the handler itself is still armed (marker present)" \
+  "grep -q 'BARKPARK_MAINTENANCE' '$CADDY'"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(run_deploy 200 newsha_upgrade)"
+check "maint/upgrade: the redeploy still exits 0"      "[ '$rc' = '0' ]"
+check "maint/upgrade: the in-place upgrade restored the header exactly once" \
+  "[ \"\$(grep -c 'header Content-Type \"text/html; charset=utf-8\"' '$CADDY')\" = '1' ]"
+check "maint/upgrade: it did NOT re-arm a second handler" \
+  "[ \"\$(grep -c 'handle_errors 502 503 504 {' '$CADDY')\" = '1' ]"
+check "maint/upgrade: the upgrade is logged honestly" \
+  "grep -q 'set Content-Type: text/html on the already-armed maintenance handler' '$TMP/out.log'"
+check "maint/upgrade: the upgraded Caddyfile is caddy-valid"    \
+  "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"
+check "maint/upgrade: no leftover .bak.maint-ctype backup on success" \
+  "[ -z \"\$(ls '$TMP'/Caddyfile.bak.maint-ctype.* 2>/dev/null)\" ]"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(run_deploy 200 newsha_upgrade2)"
+check "maint/upgrade: a THIRD deploy is a no-op (still exactly one header)" \
+  "[ \"\$(grep -c 'header Content-Type \"text/html; charset=utf-8\"' '$CADDY')\" = '1' ]"
+check "maint/upgrade: the no-op deploy logs 'already armed', not another upgrade" \
+  "grep -q 'caddy maintenance page already armed' '$TMP/out.log'"
+rm -rf "$TMP"
+
 echo
 echo "[selftest] $((TESTS - fails))/$TESTS checks passed"
 # --- deploy/README.md count guard (ssw8-selftest-count-guard) ---------------

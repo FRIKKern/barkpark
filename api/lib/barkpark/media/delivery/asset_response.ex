@@ -12,7 +12,6 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
   alias Barkpark.Media.Delivery.Cdn
   alias Barkpark.Media.Delivery.Urls
   alias Barkpark.Media.Storage.MediaFile
-  alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Plugins.Registry
 
   @doc "Render a unified asset map from a blob row and optional linked document."
@@ -43,7 +42,7 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
                      doc_id,
                      "mediaAsset",
                      dataset,
-                     PluginAssets.file_scope_opts(file)
+                     MediaFile.scope_opts(file)
                    ) do
                 {:ok, doc} -> doc
                 _ -> nil

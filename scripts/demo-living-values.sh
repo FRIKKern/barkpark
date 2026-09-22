@@ -73,7 +73,9 @@ DATASET="production"
 METRIC="$PREFIX-metrics"; PAPER_A="$PREFIX-paper-a"; PAPER_B="$PREFIX-paper-b"; TASK="$PREFIX-task"
 AUTH=(-H "Authorization: Bearer $BP_TOKEN")
 JSON=(-H "Content-Type: application/json")
-COOKIES="$(mktemp -t lvd-cookies)"
+# PORTABLE mktemp (explicit path + XXXXXX): `-t NAME` without XXXXXX is BSD-only.
+COOKIES="$(mktemp "${TMPDIR:-/tmp}/lvd-cookies.XXXXXX")" || {
+  echo "demo-living-values: REFUSING — mktemp failed; no cookie jar" >&2; exit 2; }
 PASS=0; FAIL=0; SKIP=0
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }

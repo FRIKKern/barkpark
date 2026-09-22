@@ -1819,6 +1819,40 @@ defmodule BarkparkCloud.DeployLedger do
     }
   end
 
+  @doc """
+  THE ONE BOUNDARY THAT REFUSES ANYTHING, as a value a caller can compute with.
+
+  `census/3` already carries every boundary on the wire under `boundaries`, and
+  the refusal reason names this one verbatim in prose. Neither is usable by a
+  renderer that wants to answer the reader's next question — "is this door
+  broken, or is it just waiting?" — because the prose has to be parsed and the
+  wire list is a list of four whose refusing member is not marked.
+
+  So the instant is READ, never re-typed: a renderer that computes "this window
+  measures again from X" off this function cannot drift from the constant
+  `straddled_boundary/2` actually tests against. Pure, no DB, no clock.
+  """
+  @spec refusal_boundary() :: %{
+          subject: String.t(),
+          instant: DateTime.t(),
+          method: String.t(),
+          source: String.t(),
+          voids: String.t()
+        }
+  def refusal_boundary, do: @deferred_status_boundary
+
+  @doc """
+  Does the window `from`..`to` STRADDLE the refusal boundary — i.e. is every
+  RATIO over it a blend of two vocabularies?
+
+  The same predicate `census/3` refuses on, exported so a caller that already
+  holds a refused node can tell a boundary straddle apart from the other reasons
+  a rate refuses (too small a sample, an unreadable ledger) WITHOUT reading the
+  prose. `false` for a window wholly on either side.
+  """
+  @spec straddles_refusal_boundary?(DateTime.t(), DateTime.t()) :: boolean()
+  def straddles_refusal_boundary?(from, to), do: not is_nil(straddled_boundary(from, to))
+
   # A window STRADDLES a boundary when the boundary instant falls strictly
   # inside it. A window wholly on one side is internally consistent — every row
   # in it was labelled by the same vocabulary — and refusing it too would make
@@ -3325,19 +3359,45 @@ defmodule BarkparkCloud.DeployLedger do
   A barkpark with NO sites at all is absent from the returned map — the caller
   renders its own "nothing to deploy" sentinel rather than this module inventing
   a rate for a box that cannot have one.
+
+  ## THE SCOPE IS APPLIED BEFORE THE RATE, NEVER AFTER IT (dr-w10-bl)
+
+  `:team_ids` narrows the FOLD, not the output map. That ordering is the whole
+  safety argument and it is not decoration: a box hosts sites, and `sites` carries
+  its OWN `team_id` alongside `barkpark_id`. Fold first and filter after and the
+  caller's box node has already absorbed a foreign team's failures into its
+  numerator and its denominator — a leak that never names the other team's site
+  and is therefore invisible to every id-shaped check. The same hazard
+  #18607 tested for on the per-site census row, one level up.
+
+  Omitting the option is the UNSCOPED fleet fold — the question an operator asks
+  ("is this box sick, counting everything on it"). Both modes are ONE
+  computation: the same query, the same `box_node/3`, the same `rate_basis/3`
+  refusal — an OPT on the one entry point rather than a second entry point, the
+  same idiom `census/3` already carries for `:site_ids`.
+
+  Today `create_site/2` derives `team_id` from the `%Barkpark{}` argument
+  (`Map.put`, never `put_new`), so the mixed-tenant box is not reachable through
+  the create door. That is a property of ONE function, not of the schema — the
+  column pair exists and `Site.changeset/2` casts both — so the fold is scoped
+  here rather than left resting on a neighbour's invariant.
   """
-  @spec box_rates([Ecto.UUID.t()], DateTime.t(), DateTime.t()) :: %{Ecto.UUID.t() => map()}
-  def box_rates(barkpark_ids, from, to)
+  @spec box_rates([Ecto.UUID.t()], DateTime.t(), DateTime.t(), keyword()) :: %{
+          Ecto.UUID.t() => map()
+        }
+  def box_rates(barkpark_ids, from, to, opts \\ [])
 
-  def box_rates([], %DateTime{} = _from, %DateTime{} = _to), do: %{}
+  def box_rates([], %DateTime{} = _from, %DateTime{} = _to, _opts), do: %{}
 
-  def box_rates(barkpark_ids, %DateTime{} = from, %DateTime{} = to) when is_list(barkpark_ids) do
+  def box_rates(barkpark_ids, %DateTime{} = from, %DateTime{} = to, opts)
+      when is_list(barkpark_ids) do
+    team_ids = Keyword.get(opts, :team_ids)
     # LEFT join, and the window bound lives in the ON clause: moved to WHERE it
     # would become an inner join and a box whose sites simply did not deploy in
     # the window would vanish — reading as "no deploy surface" (verdict
     # unchanged) instead of "asked too little to score" (a silence), which is
     # exactly the conflation this slice exists to end.
-    Repo.all(
+    base =
       from(s in Site,
         left_join: d in Deployment,
         on: d.site_id == s.id and d.inserted_at >= ^from and d.inserted_at < ^to,
@@ -3352,7 +3412,16 @@ defmodule BarkparkCloud.DeployLedger do
           count: count(d.id)
         }
       )
-    )
+
+    # THE TENANT NARROWING, INSIDE THE FOLD. It sits on `sites`, so a foreign
+    # team's site on this box contributes NOTHING — not a row to the denominator,
+    # not a site to the SURFACE count, not a deferral to absorption. Move this
+    # filter out of the query and onto the returned map and every one of those
+    # four quantities is already wrong by the time it is read.
+    scoped =
+      if is_list(team_ids), do: where(base, [s], s.team_id in ^team_ids), else: base
+
+    Repo.all(scoped)
     |> Enum.map(fn g -> Map.put(g, :class, classify(g)) end)
     |> Enum.group_by(& &1.barkpark_id)
     |> Map.new(fn {barkpark_id, groups} ->
@@ -3410,7 +3479,7 @@ defmodule BarkparkCloud.DeployLedger do
   # finding: the SAME corpus reads 695 journeys segmented by run and a different,
   # smaller number segmented by `content_rev`, because one rev went live ELEVEN
   # times in 61 minutes.
-  @journey_segmentation "a maximal RUN of rows for ONE `site_id`, ordered by `inserted_at` ASC (`id` breaks ties), terminated by the next `live`/`failed` row. Never a `content_rev` group: D162 rules that column is not a revision, it is not injective, and it recurs — one rev went live 11 times in 61 minutes, so a rev group is a content EPOCH and not a release"
+  @journey_segmentation "a maximal RUN of rows for ONE `(site_id, environment)` QUEUE, ordered by `inserted_at` ASC (`id` breaks ties), terminated by the next `live`/`failed` row ON THAT QUEUE. The environment is part of the key because `deployments_active_site_env_index` is: production and preview are two INDEPENDENT queues on one site, a preview build never contends with a production build and never touches `sites.current_deployment_id`, so a `site_id`-only key splices two queues into one journey and lets a preview `live` row close a production run. Never a `content_rev` group: D162 rules that column is not a revision, it is not injective, and it recurs — one rev went live 11 times in 61 minutes, so a rev group is a content EPOCH and not a release"
 
   # WHAT THIS METRIC IS, AND — LOUDLY — WHAT IT IS NOT. `delivery/3`'s @doc
   # rejects run-keying for the WAIT clock and it is right to: a `failed` row
@@ -3509,7 +3578,7 @@ defmodule BarkparkCloud.DeployLedger do
   # the superseding row is usually outside it, and bounding the probe by the
   # window would manufacture strandings out of the window edge for the second
   # time in one node.
-  @deferred_only_supersession "a deferred-only publish is SUPERSEDED when a later `live` row exists for the same site (probed BEYOND the window's end, up to `as_of`): charter D212's benign supersession, the publish was overtaken and the site is serving. UNSUPERSEDED means no later live row exists — the only cohort here a reader may read as loss, and the one D212 does not cover"
+  @deferred_only_supersession "a deferred-only publish is SUPERSEDED when a later `live` row exists for the same site AND THE SAME environment (probed BEYOND the window's end, up to `as_of`). The environment clause is load-bearing and in the ONLY direction that matters: a preview build answers on its own host and never touches `sites.current_deployment_id`, so crediting a later preview `live` row as supersession of a stranded PRODUCTION publish reads loss as safe: charter D212's benign supersession, the publish was overtaken and the site is serving. UNSUPERSEDED means no later live row exists — the only cohort here a reader may read as loss, and the one D212 does not cover"
 
   @doc """
   ATTEMPTS PER RELEASE over a PINNED window, segmented by RUN.
@@ -3611,14 +3680,16 @@ defmodule BarkparkCloud.DeployLedger do
           select: %{
             id: d.id,
             site_id: d.site_id,
+            environment: d.environment,
             inserted_at: d.inserted_at,
             status: d.status,
             content_rev: d.content_rev,
             run_no:
               fragment(
-                "coalesce(sum(case when ? in ('live','failed') then 1 else 0 end) over (partition by ? order by ? asc, ? asc rows between unbounded preceding and 1 preceding), 0)",
+                "coalesce(sum(case when ? in ('live','failed') then 1 else 0 end) over (partition by ?, ? order by ? asc, ? asc rows between unbounded preceding and 1 preceding), 0)",
                 d.status,
                 d.site_id,
+                d.environment,
                 d.inserted_at,
                 d.id
               )
@@ -3628,7 +3699,7 @@ defmodule BarkparkCloud.DeployLedger do
 
     journeys =
       rows
-      |> Enum.group_by(&{&1.site_id, &1.run_no})
+      |> Enum.group_by(&{&1.site_id, &1.environment, &1.run_no})
       |> Enum.map(fn {_key, run} -> journey_row(run) end)
 
     superseding = superseding_live(journeys, as_of)
@@ -3646,8 +3717,17 @@ defmodule BarkparkCloud.DeployLedger do
   end
 
   # ONE query for the whole D212 split: the LATEST `live` row at or before
-  # `as_of` for every site that owns a deferred-only run, keyed by site. A run is
-  # superseded when that instant is strictly after the run's last row.
+  # `as_of` for every `(site_id, environment)` QUEUE that owns a deferred-only
+  # run, keyed by that pair. A run is superseded when that instant is strictly
+  # after the run's last row.
+  #
+  # KEYED ON THE PAIR, NEVER ON THE SITE ALONE. `deployments_active_site_env_index`
+  # is `(site_id, environment)`, and a preview deployment "NEVER touches
+  # `sites.current_deployment_id` / `sites.port`" (`Registry.Deployment`'s own
+  # @moduledoc). A site-keyed probe therefore lets a later PREVIEW build mark a
+  # stranded PRODUCTION publish as D212 benign supersession — it reports the site
+  # as served when the production content never reached the web, which is the
+  # comforting direction and the one this node exists to refuse.
   #
   # DELIBERATELY UNBOUNDED ABOVE BY THE WINDOW. The superseding row is normally
   # outside the pinned window — that is what "a later publish overtook it" means
@@ -3663,13 +3743,21 @@ defmodule BarkparkCloud.DeployLedger do
       site_ids ->
         floor_at = candidates |> Enum.map(& &1.ended_at) |> Enum.min(DateTime)
 
+        environments = candidates |> Enum.map(& &1.environment) |> Enum.uniq()
+
+        # The `in` pair is a COARSE pre-filter — Postgres is asked for the cross
+        # product of the sites and the environments in play, and the `group_by`
+        # then hands back one row PER QUEUE. `superseded?/2` looks the run up by
+        # its own `(site_id, environment)` pair, so a live row on a queue no
+        # candidate belongs to simply never matches a key anyone reads.
         Repo.all(
           from(d in Deployment,
             where:
-              d.site_id in ^site_ids and d.status == "live" and d.inserted_at > ^floor_at and
+              d.site_id in ^site_ids and d.environment in ^environments and
+                d.status == "live" and d.inserted_at > ^floor_at and
                 d.inserted_at <= ^as_of,
-            group_by: d.site_id,
-            select: {d.site_id, max(d.inserted_at)}
+            group_by: [d.site_id, d.environment],
+            select: {{d.site_id, d.environment}, max(d.inserted_at)}
           )
         )
         |> Map.new()
@@ -3693,6 +3781,7 @@ defmodule BarkparkCloud.DeployLedger do
 
     %{
       site_id: head.site_id,
+      environment: head.environment,
       attempts: length(sorted),
       head_rev: head.content_rev,
       metered: journey_metered?(head.content_rev),
@@ -3787,8 +3876,11 @@ defmodule BarkparkCloud.DeployLedger do
     }
   end
 
-  defp superseded?(%{site_id: site_id, ended_at: ended_at}, superseding) do
-    case Map.get(superseding, site_id) do
+  defp superseded?(
+         %{site_id: site_id, environment: environment, ended_at: ended_at},
+         superseding
+       ) do
+    case Map.get(superseding, {site_id, environment}) do
       nil -> false
       latest_live -> DateTime.compare(latest_live, ended_at) == :gt
     end

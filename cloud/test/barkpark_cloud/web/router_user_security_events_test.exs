@@ -384,9 +384,27 @@ defmodule BarkparkCloud.Web.RouterUserSecurityEventsTest do
 
       assert files == [
                "accounts.ex",
+               "accounts/erasure.ex",
                "accounts/user_security_event.ex",
                "web/router.ex"
              ]
+
+      # `accounts/erasure.ex` is on that list as PROSE ONLY, and this arm is
+      # what makes the distinction hold. It names the table in its moduledoc —
+      # the account-erasure contract has to say that the user's own security
+      # trail is DELETED rather than anonymised, and a contract that could not
+      # name the table would be a worse contract. It carries no code reference:
+      # no alias, no schema use, no query. Strip the comments and the prose, and
+      # the literal is gone. A real reader or writer arriving in that file reds
+      # here, exactly as one arriving in a fourth file reds above.
+      erasure_code =
+        Path.join(root, "accounts/erasure.ex")
+        |> File.read!()
+        |> String.replace(~r/^\s*#.*$/m, "")
+        |> String.replace(~r/@moduledoc\s+"""(?s).*?"""/, "")
+        |> String.replace(~r/@doc\s+"""(?s).*?"""/, "")
+
+      refute erasure_code =~ ~r/UserSecurityEvent|user_security_events/
 
       router = File.read!(Path.join(root, "web/router.ex"))
 

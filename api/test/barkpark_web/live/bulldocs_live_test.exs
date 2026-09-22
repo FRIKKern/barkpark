@@ -340,6 +340,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
             "content" =>
               Barkpark.LabelFixtures.with_labels(%{
                 "kind" => "task",
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
                 "lifecycle_status" => "open",
                 "design_doc" => @dt_paper,
                 "acceptance_criteria" => [
@@ -1174,6 +1175,132 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert reject.branch == "simplified-1"
       assert rendered =~ "Rejected simplified-1"
       refute rendered =~ ~s(phx-click="simplify-reject")
+    end
+
+    # ── task-cefcbf5b3a9b1665 — the requester<->accepter identity tie ──────
+    #
+    # Accept/Reject used to name only a BRANCH: any principal's click wrote a
+    # `simplify-accept` row that a downstream automation could not distinguish
+    # from the requester's own. These exercise the UNAUTHORIZED PATH itself —
+    # a live socket pushing the decision with somebody else's request id —
+    # rather than asserting a guard clause exists.
+
+    # The paper document as stored, so a refused decision can be proven to
+    # have mutated nothing.
+    defp stored_paper(slug) do
+      Content.get_paper(slug)
+    end
+
+    test "the requester's OWN accept is tied to her request and marked authorized",
+         %{conn: conn} do
+      seed_simplify_paper()
+      {:ok, view, _html} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
+
+      view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+
+      request =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-request"))
+
+      assert request.actor_kind == "token"
+      assert is_binary(request.actor_id)
+
+      view |> element(~s(button[phx-click="simplify-accept"])) |> render_click()
+
+      accept =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-accept"))
+
+      assert accept.request_event_id == request.id
+      assert accept.actor_id == request.actor_id
+      assert accept.authorization == "authorized"
+      assert Events.authoritative_decision?(accept)
+    end
+
+    test "a DIFFERENT principal pushing accept with the requester's request id is refused, writes no row, and mutates no content",
+         %{conn: conn} do
+      seed_simplify_paper()
+
+      # Alice requests.
+      {:ok, alice, _} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
+      alice |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+
+      request =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-request"))
+
+      before_events = Events.list_for_paper(@simplify_slug)
+      before_paper = stored_paper(@simplify_slug)
+
+      # Mallory — a DIFFERENT, fully identified principal — mounts the same
+      # public reader and pushes the decision naming ALICE's request id. This
+      # is the forgery the row describes; it must be refused.
+      {:ok, mallory, _} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
+
+      rendered =
+        render_click(mallory, "simplify-accept", %{"request-id" => request.id})
+
+      assert rendered =~ "not yours to decide"
+
+      # No `simplify-accept` row exists at all …
+      refute Enum.any?(
+               Events.list_for_paper(@simplify_slug),
+               &(&1.event_type == "simplify-accept")
+             )
+
+      # … the event history is byte-for-byte the same length …
+      assert length(Events.list_for_paper(@simplify_slug)) == length(before_events)
+
+      # … and the paper document itself is untouched.
+      assert stored_paper(@simplify_slug).content == before_paper.content
+      assert stored_paper(@simplify_slug).rev == before_paper.rev
+    end
+
+    test "REPLAY: re-pushing the same accept after it landed is refused and writes no second row",
+         %{conn: conn} do
+      seed_simplify_paper()
+      {:ok, view, _html} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
+
+      view |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+
+      request =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-request"))
+
+      view |> element(~s(button[phx-click="simplify-accept"])) |> render_click()
+
+      # A captured click, replayed on the SAME socket with the SAME id.
+      rendered = render_click(view, "simplify-accept", %{"request-id" => request.id})
+
+      assert rendered =~ "already been decided"
+
+      accepts =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.filter(&(&1.event_type == "simplify-accept"))
+
+      assert length(accepts) == 1
+    end
+
+    test "an ANONYMOUS socket pushing accept with a real request id is refused and writes no row",
+         %{conn: conn} do
+      seed_simplify_paper()
+
+      {:ok, alice, _} = live(reader_conn(conn), "/papers/#{@simplify_slug}")
+      alice |> element(~s(button[phx-click="simplify-request"])) |> render_click()
+
+      request =
+        Events.list_for_paper(@simplify_slug)
+        |> Enum.find(&(&1.event_type == "simplify-request"))
+
+      # No credential at all — `conn`, not `reader_conn(conn)`.
+      {:ok, anon, _} = live(conn, "/papers/#{@simplify_slug}")
+
+      render_click(anon, "simplify-accept", %{"request-id" => request.id})
+
+      refute Enum.any?(
+               Events.list_for_paper(@simplify_slug),
+               &(&1.event_type == "simplify-accept")
+             )
     end
 
     test "a paper WITHOUT a goal_id renders NO Simplify button", %{conn: conn} do

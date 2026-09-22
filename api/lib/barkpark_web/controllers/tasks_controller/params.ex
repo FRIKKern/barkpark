@@ -156,11 +156,60 @@ defmodule BarkparkWeb.TasksController.Params do
   # ─── Render / shape ─────────────────────────────────────────────────────
 
   # axi-s1 (R1): parse the optional `?view=` request param into a render view.
-  # ONLY the exact string "brief" opts in; absent, unknown, or non-string
-  # values (Phoenix array/map params) all fall back to :full — the server
-  # default STAYS full so SDK/Studio/taskboard consumers are untouched.
+  # ONLY the exact strings "brief" and "board" opt in; absent, unknown, or
+  # non-string values (Phoenix array/map params) all fall back to :full — the
+  # server default STAYS full so SDK/Studio/taskboard consumers are untouched.
+  #
+  # THE THREE VIEWS, and what each one is FOR:
+  #
+  #   * `full` (default) — the bd-compatible card with the whole `content`
+  #     echo. `bp task get` and every consumer that reads a task's prose.
+  #   * `brief` — the AXI brief card v2: a different KEY SET (criteria_met /
+  #     criteria_total, no `type`, no `dependency_count`), a deliberate diet
+  #     for agent list reads.
+  #   * `board` — the FULL card with the `content` echo REMOVED, and nothing
+  #     else changed. See `render_doc/2`'s `:board` clause for why this is a
+  #     subtraction and not a third key set.
+  @views ~w(full brief board)
+
   def parse_view("brief"), do: :brief
+  def parse_view("board"), do: :board
   def parse_view(_), do: :full
+
+  @doc """
+  The declared `?view=` value set, in manifest order. ONE owner, read by the
+  index route's strict parser below and by the contract tests that pin the
+  accepted set — so a fourth view cannot be added at the renderer and stay
+  invisible to the refusal.
+  """
+  def views, do: @views
+
+  @doc """
+  STRICT `?view=` for `GET /v1/tasks` only: an undeclared value is
+  `{:error, {:unknown_view, value}}` (a named 400 at the controller), never a
+  silent fall back to `:full`.
+
+  WHY THE INDEX AND NOT EVERY ROUTE. A typo'd view on THIS route is the
+  expensive mistake: `?view=boad` silently serves the full corpus echo —
+  measured at ~11 MB per page on the live ledger, which is the exact defect
+  `board` exists to remove — and the caller reads a 200 it cannot tell from a
+  cheap one. It is also the only route where `reject_unknown_flat_params/2`
+  already closed the FLAT namespace, so a strict value check is the same door's
+  other half rather than a new rule.
+
+  `/v1/tasks/ready` and `/v1/tasks/prime` keep the lenient fallback ON PURPOSE:
+  `tasks_controller_test.exs`, "absent and unknown view both return the full
+  shape unchanged", pins `ready?view=bogus` → full today. Flipping that is a
+  wider contract decision (it can break a live CLI), not something to smuggle
+  in beside a projection. The asymmetry is stated here so the next reader finds
+  a decision, not an oversight.
+  """
+  def parse_index_view(%{"view" => v}) when is_binary(v) do
+    if v in @views, do: {:ok, parse_view(v)}, else: {:error, {:unknown_view, v}}
+  end
+
+  def parse_index_view(%{"view" => v}), do: {:error, {:unknown_view, inspect(v)}}
+  def parse_index_view(_), do: {:ok, :full}
 
   # Render a Document into the bd-compatible shape the `bp task` CLI consumes.
   # Keep the field set tight enough that it still maps cleanly onto the
@@ -295,6 +344,49 @@ defmodule BarkparkWeb.TasksController.Params do
     # single canonical owner (Barkpark.Tasks.Criteria). Key OMITTED when
     # criteria are absent/empty (wire §4: omit the segment, never "0/0").
     |> put_criteria_progress(content)
+  end
+
+  # ─── `?view=board` — the FULL card MINUS the content echo ───────────────
+  #
+  # task-1ca34359dc0805df. `bp tasks` re-lists the whole corpus whenever the
+  # ledger moves, and the ledger never stops moving; measured on guerrilla, one
+  # exhaustive walk is ~100 MB over ~10 pages. Almost all of it is ONE key:
+  # `content`, which carries `description`, `operating_instruction` and the
+  # `acceptance_criteria` array with its `evidence` blocks and up-to-five
+  # `attempts` notes per criterion — multi-kilobyte prose per row that the
+  # BOARD does not render. The board draws a row from `doc_id`, `rev`, `title`,
+  # `lifecycle_status`, `kind`, `parent_id`, `priority`, `labels`, `claim`,
+  # `criteria_progress`, `dependency_count`/`dependent_count` and the two
+  # timestamps (`internal/taskboard/fetch.go`, `taskWire`), and fetches a row's
+  # prose separately when a pane opens.
+  #
+  # WHY A SUBTRACTION AND NOT A THIRD KEY SET. `:brief` already exists and is a
+  # DIFFERENT SHAPE — it renames the criteria pair to `criteria_met` /
+  # `criteria_total`, drops `type`, `rev`, `kind` and both dependency counts,
+  # and caps `title` at 96 graphemes. A board built on it would be a client
+  # rewrite plus a truncation-honesty problem, which is why the earlier ruling
+  # on this row (lead-cli-r19, 2026-09-15) recorded that `?view=brief` "is the
+  # two-level-board redesign, not a param flip". `:board` is defined as
+  # `:full` with `content` deleted, so EVERY OTHER KEY IS BYTE-IDENTICAL to the
+  # default card, key for key and value for value: the existing `taskWire`
+  # decode reads it unchanged, and its `Content` field simply arrives absent
+  # (a zero `json.RawMessage`, which `toDetail` already degrades over).
+  #
+  # WHAT IS LOST, SAID OUT LOUD: `content` and everything a caller reads out of
+  # it — `description`, `acceptance_criteria` (texts, evidence, attempts),
+  # `operating_instruction`, `tags`, `engagement`, `disposition`, and any
+  # content field this card does not already promote to the top level. `labels`,
+  # `papers`, `sessions`, `kind`, `lifecycle_status`, `priority`, `assignee`,
+  # `parent_id`, `execution_policy`, `queue_gate`, `execution_class` and
+  # `claim` ARE promoted by `render_doc/2` :full, so they survive. A caller that
+  # needs the prose asks for the row: `GET /v1/tasks/:doc_id`, which is always
+  # full.
+  #
+  # NOT THE DEFAULT, and not proposed as one. The default view is a contract a
+  # great many readers depend on; this is an opt-in the caller that knows it
+  # renders a board asks for by name.
+  def render_doc(%Document{} = doc, :board) do
+    doc |> render_doc(:full) |> Map.delete(:content)
   end
 
   # axi-w2-s2 (charter decisions 15+16): brief card v2 — the nine measured
@@ -543,8 +635,42 @@ defmodule BarkparkWeb.TasksController.Params do
     doc
     |> render_doc(:brief)
     |> Map.put(:child_count, total)
+    |> put_brief_marker(content)
     |> put_brief_dispatch(total, live_child_counts, key)
     |> put_brief_upstream(content, live_parents)
+  end
+
+  # ── THE AUTHOR-WRITTEN HALF OF THE SAME KEY (task-46e82dc40c385ed2) ──────
+  #
+  # `put_brief_dispatch/4` and `put_brief_upstream/3` below both INFER a
+  # verdict from an edge. This one reads an imperative the row's author wrote
+  # AT a dispatcher — "DO NOT commission a builder for c0", "OWNER-GATED" —
+  # which until now lived only under `content.*` and was therefore invisible to
+  # every lead triaging off `bp task ready`, whose projection carries no
+  # `content` at all. That is the whole defect: 9 of 22 unclaimed ready rows on
+  # one fence carried such a marker, and a builder was dispatched at one of
+  # them and had to refuse.
+  #
+  # FIRST IN THE CHAIN, AND IT OUTRANKS BOTH EDGE RULES. An author's explicit
+  # refusal is a stronger statement than an inferred `delegated`, and the two
+  # functions below now both no-op on a card that already carries the key, so
+  # one card is one verdict. `Barkpark.Tasks.Dispatchability` owns the rule and
+  # the vocabulary lives in ONE file (`api/priv/tasks/dispatch_markers.json`),
+  # read at compile time there and byte-pinned to the Go copy from the CLI
+  # side — this function only decides whether the key rides.
+  #
+  # ADDITIVE, and that is the negative arm: `classify_markers/1` answers nil
+  # for every row with no marker (136 of 150 open rows measured 2026-09-22), so
+  # those cards stay byte-identical. The hostile 50-card byte tripwire below is
+  # untouched in the WORST CASE too: the key is shared, so a card can still
+  # carry exactly one dispatch value, and `"forbidden"` is the same 9
+  # characters as the `"delegated"` that tripwire already prices (`"deferred"`
+  # is 8, one shorter than that).
+  defp put_brief_marker(map, content) do
+    case Dispatchability.classify_markers(content) do
+      nil -> map
+      class -> Map.put(map, :dispatch, class)
+    end
   end
 
   # THE UMBRELLA MARKER (task-52f4f3aff99c64d5), additive and pruned, same law
@@ -574,6 +700,11 @@ defmodule BarkparkWeb.TasksController.Params do
   # not measure. nil means UNMEASURED and omits the key entirely — a caller
   # that has not paid for the live query says nothing rather than something
   # false.
+  # task-46e82dc40c385ed2: an author-written marker already on the card WINS —
+  # `put_brief_marker/2` ran first and its verdict is not an inference. Same
+  # law `put_brief_upstream/3` already carries one clause down.
+  defp put_brief_dispatch(%{dispatch: _} = map, _total, _live_child_counts, _key), do: map
+
   defp put_brief_dispatch(map, _total, nil, _key), do: map
 
   defp put_brief_dispatch(map, total, live_child_counts, key) do
@@ -690,7 +821,11 @@ defmodule BarkparkWeb.TasksController.Params do
     }
   end
 
-  def maybe_put_brief_truncation_help(base, _docs, :full), do: base
+  # `:board` joins `:full` here: it truncates NOTHING (it is the full card with
+  # one key removed), so charter law 2's honesty line would point at a cut the
+  # reader cannot find. The clause is explicit rather than a catch-all so a
+  # fourth view has to decide.
+  def maybe_put_brief_truncation_help(base, _docs, view) when view in [:full, :board], do: base
 
   def maybe_put_brief_truncation_help(base, docs, :brief) do
     if Enum.any?(docs, &brief_truncated?/1),
@@ -1002,6 +1137,16 @@ defmodule BarkparkWeb.TasksController.Params do
     |> Map.put(:dependent_count, dependent_count)
     |> Map.put(:comment_count, 0)
     |> Map.put(:child_count, Map.get(child_counts, strip_draft_prefix(doc.doc_id), 0))
+  end
+
+  # The `?view=board` LIST card: `render_doc_with_counts/3` — the SAME function
+  # the default view uses, so `dependency_count`, `dependent_count`,
+  # `comment_count` and `child_count` are computed by one owner — with the
+  # `content` echo removed. Defined as a wrapper rather than a forked builder
+  # precisely so a future key added to the full card reaches the board card for
+  # free; the ONLY difference between the two is the deleted key.
+  def render_board_with_counts(%Document{} = doc, counts, child_counts \\ %{}) do
+    doc |> render_doc_with_counts(counts, child_counts) |> Map.delete(:content)
   end
 
   # C2: a lightweight child summary — just enough to render the rail without
@@ -1775,7 +1920,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # Stamp (and any future holder-gated verb) on a task with no live claim —
   # mirror the invalid_lifecycle wire shape instead of leaking inspect() output.
   def reason_to_string({:not_in_progress, s}), do: "not_in_progress:#{s}"
-  # Close honesty gates (PDS-D288/D289/D290). Each gets a STABLE wire token —
+  # Close honesty gates (PDS-D288/PDS-D289/PDS-D290). Each gets a STABLE wire token —
   # `inspect/1` on the tuple would leak Elixir syntax (`{:not_holder, "w"}`) into
   # a JSON `reason` field that the bp CLI and the pr-task gate both string-match.
   def reason_to_string({:not_holder, held}), do: "not_holder:#{held || "?"}"
@@ -1974,7 +2119,7 @@ defmodule BarkparkWeb.TasksController.Params do
     do:
       ~s|that criterion index is past the end of acceptance_criteria. The index is 0-BASED: the FIRST criterion is 0. Nothing was written.|
 
-  # Close honesty gates (PDS-D288/D289/D290). Same law as the D56 hints above:
+  # Close honesty gates (PDS-D288/PDS-D289/PDS-D290). Same law as the D56 hints above:
   # a refusal that does not teach the escape hatch is just a wall. Each names the
   # exact body field to add — both overrides are plain close-body params, so on
   # the CLI they ride `--set <field>="<reason>"`.
@@ -2677,6 +2822,33 @@ defmodule BarkparkWeb.TasksController.Params do
   @spec stage_supersede(map()) :: true | nil
   def stage_supersede(params) do
     if stamp_flag?(Map.get(params, "supersede")), do: true, else: nil
+  end
+
+  @doc """
+  `--clear-rerun`: the SUBTRACTION door on `content.disposition_rerun`
+  (task-fcc590f205433209). Read the same way as the two supersession overrides
+  and kept separate from both — removing the probe and replacing the reason are
+  different acts, and a caller must say which one they mean. Absent → `nil`, so
+  `put_opt/3` leaves the opt off and `Tasks.Stage` leaves the field alone.
+  """
+  @spec stage_clear_rerun(map()) :: true | nil
+  def stage_clear_rerun(params) do
+    flag = Map.get(params, "clear_rerun") || Map.get(params, "clear-rerun")
+
+    if stamp_flag?(flag), do: true, else: nil
+  end
+
+  @doc """
+  `--keep-rerun`: the deliberate-KEEP door. The caller stating that the
+  `content.disposition_rerun` already on the row still binds the reason they are
+  writing — the shared/kept shape PDS-D391b(b) and PDS-D336(a) rule honest.
+  Writes nothing; it only satisfies `rerun_would_orphan`. Absent → `nil`.
+  """
+  @spec stage_keep_rerun(map()) :: true | nil
+  def stage_keep_rerun(params) do
+    flag = Map.get(params, "keep_rerun") || Map.get(params, "keep-rerun")
+
+    if stamp_flag?(flag), do: true, else: nil
   end
 
   @doc """

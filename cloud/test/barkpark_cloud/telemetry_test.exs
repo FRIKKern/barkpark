@@ -41,6 +41,12 @@ defmodule BarkparkCloud.TelemetryTest do
       "cpu_cores" => 2,
       "req_per_s" => 12,
       "p95_ms" => 140,
+      # The other two numbers off the same request-stats ring. Before
+      # am-w2-per-class-carriage the normalizer read the first two and dropped
+      # these, so the console could not render a 5xx rate the agent measured or
+      # bound a rate to the window it came out of.
+      "err_5xx_per_s" => 0.22,
+      "window_s" => 60,
       "backup_state" => "ok",
       "backup_ok" => true,
       "backup_detail" => "daily backup 2h ago",
@@ -74,6 +80,8 @@ defmodule BarkparkCloud.TelemetryTest do
                cores: 2,
                req_per_s: 12,
                p95_ms: 140,
+               err_5xx_per_s: 0.22,
+               window_s: 60,
                backup: %{state: :ok, ok: true, detail: "daily backup 2h ago"},
                checks: %{pass: 3, skipped: 0, total: 3, failing: []},
                dirty_tree: false,
@@ -105,6 +113,8 @@ defmodule BarkparkCloud.TelemetryTest do
         |> Map.merge(%{"cpu_percent" => -1, "load1" => -1})
         |> Map.delete("req_per_s")
         |> Map.delete("p95_ms")
+        |> Map.delete("err_5xx_per_s")
+        |> Map.delete("window_s")
         |> Telemetry.normalize()
 
       # -1 rides verbatim (the meter builder, not the normalizer, reads it as "not
@@ -116,6 +126,8 @@ defmodule BarkparkCloud.TelemetryTest do
       # … and an absent signal (an older instance runtime) is honestly nil.
       assert env.req_per_s == nil
       assert env.p95_ms == nil
+      assert env.err_5xx_per_s == nil
+      assert env.window_s == nil
     end
   end
 
@@ -134,6 +146,8 @@ defmodule BarkparkCloud.TelemetryTest do
                cores: nil,
                req_per_s: nil,
                p95_ms: nil,
+               err_5xx_per_s: nil,
+               window_s: nil,
                backup: %{state: :unknown, ok: nil, detail: nil},
                checks: %{pass: 0, skipped: 0, total: 0, failing: []},
                dirty_tree: nil,
@@ -162,6 +176,8 @@ defmodule BarkparkCloud.TelemetryTest do
         "cpu_cores" => "two",
         "req_per_s" => [],
         "p95_ms" => "slow",
+        "err_5xx_per_s" => %{},
+        "window_s" => "a minute",
         "backup_ok" => "yes",
         "backup_detail" => 500,
         "dirty_tree" => 1,
@@ -186,6 +202,8 @@ defmodule BarkparkCloud.TelemetryTest do
                cores: nil,
                req_per_s: nil,
                p95_ms: nil,
+               err_5xx_per_s: nil,
+               window_s: nil,
                backup: %{state: :unknown, ok: nil, detail: nil},
                checks: %{pass: 0, skipped: 0, total: 0, failing: []},
                dirty_tree: nil,

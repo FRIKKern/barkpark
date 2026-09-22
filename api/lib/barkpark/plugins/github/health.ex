@@ -431,7 +431,7 @@ defmodule Barkpark.Plugins.Github.Health do
   end
 
   defp zero_unacknowledged do
-    %{total: 0, closed: 0, open: 0, no_criterion: 0, rows: []}
+    %{total: 0, closed: 0, open: 0, no_criterion: 0, sealed: 0, rows: []}
   end
 
   # ---------------------------------------------------------------------------

@@ -47,6 +47,33 @@ type Context struct {
 	WorkspaceExplicit bool
 	ProjectExplicit   bool
 
+	// AmbientCredentialsOK reports whether this Context was resolved FOR THE
+	// OPERATOR OF THIS PROCESS — i.e. whether a credential lying in the process
+	// environment is a credential the requester is entitled to. It gates exactly
+	// one thing: the `auth_tier: ingest` credential lookup (ingestSecret,
+	// internal/cli/run.go), which is the one tier whose secret has never come
+	// from ctx.Token in the first place and so reaches around every per-request
+	// token seam by reading BARKPARK_INGEST_TOKEN / PAPERFLOW_INGEST_TOKEN
+	// directly.
+	//
+	// A credential taken from the process environment is AMBIENT AUTHORITY: it
+	// authorises whoever can reach the process, not whoever proved anything. For
+	// a local `bp …` invocation the two are the same person and the env var is
+	// simply the operator's own key. For `bp mcp serve --http` they are NOT: the
+	// requester is any peer that reached the socket, and substituting the
+	// server's env secret for a credential that peer never presented is the
+	// confused-deputy shape this flag closes.
+	//
+	// FALSE IS THE ZERO VALUE AND IT IS THE FAIL-CLOSED ONE, deliberately and in
+	// the opposite direction from the flags above. A Context built as a literal —
+	// a test, or a FUTURE remote transport whose author never read this file —
+	// grants no ambient ingest authority; it must present its own credential. The
+	// single place that turns it on is ResolveWithSources, which is by definition
+	// the operator-local resolution, and the single place that turns it back OFF
+	// after such a resolve is newMCPHTTPHandler (internal/cli/mcp_serve.go),
+	// beside the `base.Token = ""` scrub it belongs with.
+	AmbientCredentialsOK bool
+
 	// WorkspaceFromServerEntry / ProjectFromServerEntry / DatasetFromServerEntry
 	// record that the value at FLAG precedence was not typed by the operator on
 	// this invocation — it was INJECTED by `bp -s <saved-name>` out of that saved
@@ -292,6 +319,13 @@ func ResolveWithSources(flags map[string]string, env apiclient.Config, active Ac
 
 		WorkspaceExplicit: stated(FlagWorkspace, env.Workspace, active.Workspace),
 		ProjectExplicit:   stated(FlagProject, env.Project, active.Project),
+
+		// Operator-local resolution: flags this operator typed, this operator's
+		// env, this operator's saved config. The process environment IS their
+		// credential store, so ambient ingest lookup is theirs to use. Any
+		// context NOT produced here (a literal, a per-request remote build)
+		// stays false and must carry its own ingest credential.
+		AmbientCredentialsOK: true,
 
 		// Read off the layer that actually WON, not off a second walk of the
 		// precedence — srcDataset is the by-product of the same pick that chose

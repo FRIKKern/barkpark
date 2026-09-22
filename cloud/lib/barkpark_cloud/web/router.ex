@@ -52,6 +52,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/account/sessions         user  list live sessions (current flagged)
       DELETE  /v1/account/sessions/:id     user  revoke one session by id (own only)
       DELETE  /v1/account/sessions         user  sign out everywhere except this tab
+      DELETE  /v1/account                 user  ERASE the account (password reconfirm; 409 sole_owner)
       PUT     /v1/account/password         user  change password ⇒ sign out everywhere
       GET     /v1/me/security-events       user  the caller's OWN security trail (password/2FA/session/email), newest first
       GET     /v1/subscription     user      {subscription | nil} — current plan
@@ -72,6 +73,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/retry admin  re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin; a PAT must also hold `root`)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
+      POST    /v1/auth/studio-signin        user   instance-initiated Studio entry by public host → {url}
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
       DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, EMPTY (never {token:""}) for logout-everywhere (wave 2; admin token stays server-side)
       POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
@@ -105,6 +107,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/operator/autoupdate/halt operator  halt fleet autoupdate (console brake)
       POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
+      POST    /v1/operator/digest/send operator  send ONE fleet digest now (scope REQUIRED: {"scope":"fleet"} or {"team_id":"…"}; 2/min/operator; 422 `scope_required` on a bodyless call)
       GET     /v1/operator/warm-pool operator  warm-pool status (console read)
       GET     /v1/operator/barkparks/without-agent-token operator  boxes holding NO live agent token (disarmed vs down), each row with its remedy
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
@@ -119,6 +122,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/providers/:kind  admin     disconnect a cloud provider
       GET     /v1/providers/:kind/catalog user  a provider's allowlisted action catalog
       GET     /v1/providers/:kind/overview user  a provider's server-side estate snapshot
+      GET     /v1/providers/:kind/identity user  WHICH cloud account a connection points at
       GET     /v1/providers/capabilities user  per-provider capability matrix (SPA gating)
       GET     /v1/hetzner/catalog  user      the allowlisted Hetzner action catalog (resource/verb/tier/params)
       GET     /v1/hetzner/overview admin     server-side Hetzner estate snapshot (token never reaches the browser)
@@ -142,6 +146,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/teams/:id/invitations/:inv_id admin  revoke a pending invitation
       PATCH   /v1/teams/:id/members/:user_id admin  change a member's role
       DELETE  /v1/teams/:id/members/:user_id admin  remove a member from the team
+      DELETE  /v1/teams/:id owner    ERASE the team (409 instances_present while it owns a box or site)
       GET     /v1/teams/:id/tokens admin  list every PAT minted against the team (holder named; no secrets)
       DELETE  /v1/teams/:id/tokens/:token_id admin  revoke a team member's PAT (foreign id → 404)
       GET     /v1/invitations/:token —         preview an invitation by token (public accept page)
@@ -304,7 +309,7 @@ defmodule BarkparkCloud.Web.Router do
     Webhooks
   }
 
-  alias BarkparkCloud.Accounts.{Authz, Team, TwoFactorRateLimiter, UserToken}
+  alias BarkparkCloud.Accounts.{Authz, Erasure, Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
   alias BarkparkCloud.Registry.AgentKeyStash
   alias BarkparkCloud.Registry.AzureCatalog
@@ -312,6 +317,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Registry.HetznerCatalog
   alias BarkparkCloud.Registry.InstanceApiCatalog
   alias BarkparkCloud.Sites
+  alias BarkparkCloud.Sites.RollbackAttribution
   alias BarkparkCloud.Web.Auth
 
   # Recover the REAL client IP from X-Forwarded-For BEFORE anything reads
@@ -2264,6 +2270,55 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # DELETE /v1/account {password} → 200 {ok: true} | 401 invalid_password |
+  # 409 {error: "sole_owner", teams: [slug]}.
+  #
+  # HARD ACCOUNT ERASURE, self-serve. Session-gated like its /v1/account
+  # siblings, and REAUTHENTICATED with the account password on top: a live token
+  # proves the browser was authenticated once, not that the person at the
+  # keyboard is the account holder, and this is the one write an operator cannot
+  # undo. A wrong password and an OAuth-only account (no usable hash) are the
+  # same 401 at the same cost — `Accounts.valid_password?/2` burns a hash on both
+  # misses.
+  #
+  # THE 409 IS A REFUSAL WITH A ROUTE OUT. `team_memberships` cascades, so
+  # erasing the last owner of a live team would leave it with instances, a
+  # subscription and members and nobody able to administer, pay for, or delete
+  # it. The response names the team slugs; the holder promotes another owner
+  # (PATCH /v1/teams/:id/members/:user_id) or erases the team first
+  # (DELETE /v1/teams/:id). Being one of several owners never blocks.
+  #
+  # NO SECURITY-EVENT ROW, deliberately, and for the same reason the team arm
+  # writes no audit row: `user_security_events.user_id` cascades, so the row
+  # would be destroyed by the delete that produced it. What DOES survive is the
+  # team-side audit trail with `actor_user_id` NULLED (`ON DELETE SET NULL`) —
+  # the person is removed from the team's history, the team's history is not.
+  delete "/v1/account" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      user = conn.assigns.current_user
+      password = to_string(conn.body_params["password"])
+
+      if Accounts.valid_password?(user, password) do
+        case Erasure.delete_user(user) do
+          {:ok, :erased} ->
+            json(conn, 200, %{ok: true, status: "erased"})
+
+          {:error, {:sole_owner, slugs}} ->
+            json(conn, 409, %{error: "sole_owner", teams: slugs})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
+        end
+      else
+        json(conn, 401, %{error: "invalid_password"})
+      end
+    end
+  end
+
   # PUT /v1/account/password {current_password, new_password} → 200 {ok: true,
   # token: <fresh>} | 401 wrong current | 422 weak new. On success EVERY other
   # session + all reachable agent tokens are revoked; the response carries a
@@ -2460,7 +2515,28 @@ defmodule BarkparkCloud.Web.Router do
       # on, and the same width `bp cloud status` already asks the census for.
       deploy_to = DateTime.utc_now()
       deploy_from = DateTime.add(deploy_to, -24, :hour)
-      rmap = DeployLedger.box_rates(ids, deploy_from, deploy_to)
+      #
+      # `team_ids:` IS THE AUTHORITY HALF (dr-w10-bl). `ids` names the caller's
+      # OWN boxes, which bounds WHICH boxes appear — it does not bound whose
+      # sites are folded INTO each box node, because `sites` carries its own
+      # `team_id` and a box is a host, not a tenant. Without this the caller's
+      # own box row would carry a rate, a surface count and an absorption figure
+      # computed over another team's deploys, and no id in the response would
+      # ever say so. The narrowing rides INSIDE the fold; see `box_rates/4`.
+      #
+      # `scope=all` passes every team the caller is a MEMBER of, so the widening
+      # is exactly their own membership and never more.
+      scope_team_ids =
+        if all_teams? do
+          barkparks |> Enum.map(& &1.team_id) |> Enum.uniq()
+        else
+          case conn.assigns.current_team do
+            nil -> []
+            team -> [team.id]
+          end
+        end
+
+      rmap = DeployLedger.box_rates(ids, deploy_from, deploy_to, team_ids: scope_team_ids)
 
       json(conn, 200, %{
         barkparks:
@@ -3744,6 +3820,109 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/auth/studio-signin → 200 {url} — "Sign in with Barkpark Cloud",
+  # the INSTANCE-INITIATED twin of /v1/barkparks/:id/studio-link.
+  #
+  # WHAT IS TRUSTED, AND BY WHOM. The instance's login page trusts NOTHING new:
+  # the thing it finally consumes is a single-use 60s login ticket that the
+  # instance MINTED ITSELF, off its own admin token, at the control plane's
+  # server-side request — exactly the artefact studio-link already produces. No
+  # Cloud-signed assertion, no new verifying key on the box, no new fail-open
+  # surface. All of the trust sits HERE, on the control plane, which is the only
+  # party that can answer "is this browser a live Cloud session, and is that
+  # Cloud user a member of the team that owns this box".
+  #
+  # THE TWO REFUSALS THIS DOOR EXISTS FOR (the revocation half):
+  #
+  #   * a REVOKED Cloud session — `Auth.require_user/2` runs
+  #     `Accounts.verify_user_session_token/2`, which finds no live row once the
+  #     session is signed out / revoked, so the request is 401 before any lookup.
+  #   * a Cloud user REMOVED FROM THE TEAM — `Accounts.get_membership/2` is
+  #     checked against the RESOLVED ROW'S `team_id`, not against
+  #     `conn.assigns.current_team`. That distinction is the whole gate: the
+  #     current_team assign falls back to the user's PRIMARY team when no
+  #     `x-barkpark-team` header is sent, and this browser arrives from an
+  #     instance with no team context at all, so comparing against it would
+  #     compare against a team the caller chose. The membership row is the
+  #     authority and it is read per-request, so an ex-member's next attempt is
+  #     refused with no revocation list and no cache to invalidate.
+  #
+  # NO EXISTENCE ORACLE: an unregistered host, a typo'd host and a host owned by
+  # somebody else's team are the SAME 404 `not_found`, so this route cannot be
+  # walked to enumerate which names are Cloud-hosted or who owns them. (That is
+  # also why `Registry.get_barkpark_by_public_host/1` is deliberately not
+  # team-scoped — resolution is separated from authorization, and authorization
+  # is what answers.)
+  #
+  # FAILS CLOSED in every direction, including "the Cloud is unreachable": a
+  # control plane that does not answer mints no ticket, so the instance's own
+  # login form is simply what remains. There is no path here that hands back a
+  # session without a live membership row.
+  #
+  # The `barkpark.studio_link_minted` verb is reused deliberately — the audited
+  # FACT is identical (a redeemable Studio entry was minted for this box by this
+  # actor) and a second verb for the same fact would split the operator's
+  # register by entry point. `entry: "studio-signin"` distinguishes the door.
+  post "/v1/auth/studio-signin" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      user = conn.assigns.current_user
+      host = conn.body_params["host"]
+
+      # The TEAM is laundered through `Accounts.get_team/1` BEFORE the grant is
+      # read, so `get_membership/2` receives a real `%Team{}` and never a raw
+      # id — guard form (3) of the Authz call-site census
+      # (`authz_call_site_census_test.exs` ARM 2, which reds on an id-shaped
+      # team argument). A row whose team has vanished therefore refuses at the
+      # resolve, one step before the grant question is even asked.
+      with %Barkpark{} = bp <- Registry.get_barkpark_by_public_host(host || ""),
+           %Team{} = team <- Accounts.get_team(bp.team_id),
+           %{} <- Accounts.get_membership(team, user.id) do
+        case Registry.mint_studio_link(bp, user.email) do
+          {:ok, url} ->
+            audit_lifecycle_trigger(conn, team, bp.id, "barkpark.studio_link_minted", %{
+              name: bp.name,
+              entry: "studio-signin"
+            })
+
+            json(conn, 200, %{url: url})
+
+          {:error, :suspended} ->
+            conn = audit_suspended_refusal(conn, team, bp, "studio-signin")
+
+            json(conn, 409, %{
+              error: "suspended",
+              detail:
+                "This instance is suspended. Studio access is closed until the " <>
+                  "suspension is cleared."
+            })
+
+          {:error, :not_live} ->
+            json(conn, 409, %{error: "not_live"})
+
+          {:error, :no_admin_token} ->
+            json(conn, 404, %{
+              error: "no_admin_token",
+              detail:
+                "No admin token is stored for this instance yet. It is captured at " <>
+                  "provision time — a pre-existing instance may need a re-provision."
+            })
+
+          {:error, :decrypt_failed} ->
+            json(conn, 500, %{error: "decrypt_failed"})
+
+          {:error, :instance_error} ->
+            json(conn, 502, %{error: "instance_unreachable"})
+        end
+      else
+        _ -> json(conn, 404, %{error: "not_found"})
+      end
+    end
+  end
+
   # POST /v1/barkparks/:id/app-token → 200 {token, workspace_id, permissions,
   # expires_at} — the member-reachable app-token exchange (mobile charter D4).
   # The control plane uses the STORED per-instance admin token server-side to
@@ -4784,8 +4963,11 @@ defmodule BarkparkCloud.Web.Router do
   # definition of operator-ness — isu-backlog-operator-principal inherits both).
   # Zero new business logic: every handler is a thin read/toggle over an existing
   # Registry/Notifications function, mirroring the /v1/admin/autoupdate* trio
-  # above. NO digest-send route here (GR40 cut it — gr-backlog-operator-digest-
-  # send is the successor). The require_worker routes stay untouched (GR9/GR39).
+  # above. The digest-send route GR40 cut now EXISTS, below
+  # (gr-backlog-operator-digest-send, the successor row GR40 named) — and it is
+  # the one handler in this seam that is not a read or a toggle, so it carries a
+  # rate limit and a required scope the others do not need. The require_worker
+  # routes stay untouched (GR9/GR39).
   get "/v1/operator/autoupdate" do
     conn = Auth.require_platform_operator(conn, [])
 
@@ -4903,6 +5085,181 @@ defmodule BarkparkCloud.Web.Router do
 
       json(conn, 200, tally)
     end
+  end
+
+  # POST /v1/operator/digest/send → 200 <send accounting> — THE SEND-NOW BUTTON'S
+  # ROUTE (gr-backlog-operator-digest-send, the successor GR40 named when it cut
+  # the designed button because no route called `deliver_fleet_digest/1`).
+  #
+  # THIS IS THE ONLY HANDLER IN THIS SEAM THAT PUTS MAIL IN A STRANGER'S INBOX.
+  # Every other /v1/operator/* route reads a table or flips a boolean this plane
+  # owns; this one fans out one email per member of every covered team, over the
+  # platform's own return address, to people who did not ask for it in that
+  # minute. Three gates follow from that, in this order:
+  #
+  #   1. `Auth.require_platform_operator` — 401 with no session, 403 for a
+  #      non-operator session, and 403 `allowlist: "unconfigured"` when
+  #      PLATFORM_ADMIN_EMAILS is unset (which it is, in production). It FAILS
+  #      CLOSED: an unconfigured allowlist admits nobody rather than everybody.
+  #      An operator-only send route reachable by anyone is a spam cannon.
+  #   2. `digest_send:<user_id>` — 2/60s (DeviceAuth.RateLimiter). The smallest
+  #      bucket in that table, per USER, for the reason its moduledoc gives.
+  #   3. THE SCOPE IS REQUIRED AND THERE IS NO DEFAULT. A bodyless or malformed
+  #      POST is 422 `scope_required`; it never falls back to "everybody". The
+  #      whole fleet is reachable, but only by ASKING for it in words
+  #      (`{"scope":"fleet"}`), so no fat finger, retried fetch or half-built
+  #      client can mail the platform by accident. `{"team_id":"…"}` sends one
+  #      team's own digest and nobody else's.
+  #
+  # NOT A NEW PRODUCER (charter D14). This adds no schedule, no toggle and no
+  # recurring job — it is one operator-initiated shot down the rail
+  # `DailyDigestWorker` already rides, which is why it calls
+  # `Notifications.deliver_fleet_digest/2` rather than growing a second sender.
+  # Same recipient resolution, same per-team payload tenancy, same transport
+  # seam, and therefore the same `notification_deliveries` receipt carrying
+  # `content_sha256` / `content_subject` / `content_counts` (dr-w34, dr-w29) — a
+  # manual send that recorded less than the cron send would be a send nobody
+  # could prove.
+  #
+  # WHAT THE 200 CLAIMS, AND WHAT IT DOES NOT. `accepted` is
+  # `deliver_fleet_digest/2`'s own `sent` count, which is the number of Swoosh
+  # deliveries that returned `{:ok, _}` — the relay answered at the submission
+  # hop, AFTER the provider spoke. It is not a delivery claim, and
+  # `status_meaning` is the sentence that says so, read from
+  # `Delivery.status_meaning/1` rather than restated here. NO RECIPIENT ADDRESS
+  # IS RETURNED: this is a cross-team response and `DigestRun`'s ruling — counts,
+  # never addresses — applies to the wire for the same disclosure reason it
+  # applies to the row.
+  post "/v1/operator/digest/send" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      operator = conn.assigns.current_user
+
+      case DeviceAuthRateLimiter.check("digest_send:" <> operator.id) do
+        {:error, :rate_limited} ->
+          json(conn, 429, %{
+            error: "rate_limited",
+            remedy:
+              "a fleet digest send was already accepted for you in this minute — " <>
+                "wait for the window to pass rather than re-sending, every hit mails real people"
+          })
+
+        :ok ->
+          case digest_send_scope(conn.body_params) do
+            {:error, body} -> json(conn, 422, body)
+            {:ok, scope} -> operator_digest_send(conn, operator, scope)
+          end
+      end
+    end
+  end
+
+  # THE SCOPE PARSER, and it REFUSES by default. There is no clause that returns
+  # a fleet scope from an absent key: `{"scope":"fleet"}` is the only way to
+  # reach the whole fleet and `{"team_id":"<id>"}` the only way to reach one
+  # team. Everything else — an empty body, `{}`, `{"scope":"all"}`, a non-binary
+  # team_id, or BOTH keys at once — lands on the catch-all 422. Both keys
+  # together is refused rather than silently resolved because the caller has said
+  # two different things and guessing which they meant is the fan-out this
+  # refusal exists to prevent.
+  defp digest_send_scope(%{"scope" => "fleet"} = params) do
+    if Map.has_key?(params, "team_id") do
+      {:error, digest_scope_refusal("scope and team_id are both present, and they disagree")}
+    else
+      {:ok, :fleet}
+    end
+  end
+
+  defp digest_send_scope(%{"team_id" => team_id}) when is_binary(team_id) and team_id != "" do
+    {:ok, {:team, team_id}}
+  end
+
+  defp digest_send_scope(_params), do: {:error, digest_scope_refusal(nil)}
+
+  defp digest_scope_refusal(detail) do
+    base = %{
+      error: "scope_required",
+      accepts: ["scope", "team_id"],
+      remedy:
+        "name the audience explicitly: {\"scope\":\"fleet\"} mails every covered team, " <>
+          "{\"team_id\":\"<id>\"} mails one. There is no default — a send with no scope " <>
+          "would have to guess, and the only guess that could be wrong is everybody."
+    }
+
+    if detail, do: Map.put(base, :detail, detail), else: base
+  end
+
+  # The send itself. One call over `Notifications.deliver_fleet_digest/2`; the
+  # scope narrows the ROWS handed in, never the audience rule, so the per-team
+  # partitioning that decides who may see which instance is still made in exactly
+  # one place.
+  defp operator_digest_send(conn, operator, scope) do
+    case digest_send_rows(scope) do
+      :no_such_team ->
+        json(conn, 404, %{error: "not_found", scope: "team"})
+
+      {:ok, scope_word, team_id, rows} ->
+        result =
+          Notifications.deliver_fleet_digest(rows,
+            trigger: "operator",
+            actor_user_id: operator.id
+          )
+
+        json(conn, 200, digest_send_json(result, scope_word, team_id, length(rows)))
+    end
+  end
+
+  defp digest_send_rows(:fleet), do: {:ok, "fleet", nil, Registry.all_barkparks()}
+
+  defp digest_send_rows({:team, team_id}) do
+    if is_nil(Accounts.get_team(team_id)) do
+      :no_such_team
+    else
+      rows = Enum.filter(Registry.all_barkparks(), &(&1.team_id == team_id))
+      {:ok, "team", team_id, rows}
+    end
+  end
+
+  # `{:ok, :no_admins}` is NOT an error and is not rendered as one: it is the
+  # counted zero — the fleet was read and no covered team had a member to mail.
+  # It answers 200 with `recipients: 0` and its own reason, because a 500 would
+  # say the send broke and a bare 200 with no numbers would say it worked.
+  defp digest_send_json({:ok, :no_admins}, scope_word, team_id, instances) do
+    %{
+      scope: scope_word,
+      team_id: team_id,
+      instances: instances,
+      recipients: 0,
+      accepted: 0,
+      failed: 0,
+      reason: "no_team_recipients",
+      status_meaning:
+        "Nothing was mailed: no team in this scope has a member to send to, so there was " <>
+          "nobody to accept anything on behalf of."
+    }
+  end
+
+  defp digest_send_json(
+         {:ok, %{sent: sent, recipients: recipients}},
+         scope_word,
+         team_id,
+         instances
+       ) do
+    %{
+      scope: scope_word,
+      team_id: team_id,
+      instances: instances,
+      recipients: length(recipients),
+      accepted: sent,
+      failed: length(recipients) - sent,
+      reason: if(sent < length(recipients), do: "partial_send"),
+      # The word the receipt uses, from the receipt's own vocabulary. `accepted`
+      # is the mail relay answering at the submission hop; it is not delivery and
+      # this sentence is what stops the console from claiming otherwise.
+      status_meaning: BarkparkCloud.Notifications.Delivery.status_meaning("sent")
+    }
   end
 
   # POST /v1/operator/teams/:id/billing/resume -> 200 {resumed: true, ...} — THE
@@ -5928,6 +6285,28 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted, do: conn, else: providers_overview(conn, conn.params["kind"])
   end
 
+  # GET /v1/providers/:kind/identity → 200 {provider:{kind,label,identity}} —
+  # WHICH cloud account this connection points at, and NOTHING else.
+  #
+  # WHY A SECOND ROUTE INSTEAD OF WIDENING /overview (D899). `/overview` is a
+  # CATALOG route: it reads @neutral_kinds and 404s unknown_kind before any
+  # build clause runs, and its identity rides out of `build_provider_catalog/2`
+  # — which spends upstream round trips and closes `else: _ -> {:error,
+  # :unavailable}` → 502 catalog_unavailable. Two consequences that decide the
+  # shape: (1) cloudflare is CONNECTABLE but not catalog-backed, so it can never
+  # reach that handler at all; (2) an upstream hiccup blanks an identity that is
+  # sitting in the stored blob and needs no network to read. This route reads
+  # @connectable_kinds and makes ZERO upstream calls: decrypt, read a field,
+  # answer. An identity is a local fact and must not be hostage to a menu fetch.
+  #
+  # Auth.require_user only — same as /overview: any authenticated team member,
+  # and the provider is resolved through `conn.assigns.current_team`, so a
+  # member only ever reads their OWN team's connection.
+  get "/v1/providers/:kind/identity" do
+    conn = Auth.require_user(conn, [])
+    if conn.halted, do: conn, else: providers_identity(conn, conn.params["kind"])
+  end
+
   # GET /v1/providers/capabilities → 200
   #   {providers: {<kind>: {tier, capabilities, gaps}},
   #    edge:      {<kind>: {capabilities, gaps, unknown}}}
@@ -6583,6 +6962,16 @@ defmodule BarkparkCloud.Web.Router do
   # the failures that happen to be in the newest 50. A filter value outside the
   # closed vocabulary matches nothing rather than being dropped — a dropped
   # filter would silently show MORE than was asked for.
+  #
+  # cch-w32-bl: the EMPTY or RARE result used to be the expensive one — a filter
+  # that never fills the LIMIT made the planner abandon
+  # `notification_deliveries_team_id_inserted_at_index` and bitmap-scan the whole
+  # team partition (1153 buffers, `Rows Removed by Filter: 50000`, measured on a
+  # 250k-row corpus). One `(team_id, <axis>, inserted_at)` index per axis
+  # (migration 20260918110000) takes that to 3-12 buffers. No vocabulary gate was
+  # added and none is wanted: the unknown-value case is now 3 buffers, and a gate
+  # could not have helped the RARE-but-real value or the free-text `event` axis
+  # this page renders as a text input.
   get "/v1/notifications/deliveries" do
     conn = Auth.require_user(conn, [])
 
@@ -6681,6 +7070,45 @@ defmodule BarkparkCloud.Web.Router do
   get "/v1/teams/:id/members" do
     with_team_role(conn, "member", fn conn, team ->
       json(conn, 200, %{members: Enum.map(Accounts.list_team_members(team), &member_json/1)})
+    end)
+  end
+
+  # DELETE /v1/teams/:id → 200 {ok: true} | 409 {error: "instances_present", …}.
+  #
+  # HARD TEAM ERASURE. Owner-only (`with_team_role(conn, "owner", …)`, the
+  # `:delete_team` capability Authz has reserved since day one and nothing
+  # implemented). A non-member gets the same 404 as a nonexistent team.
+  #
+  # THE 409 IS THE POINT, not an edge case. `barkparks.team_id` is
+  # `ON DELETE CASCADE`, so deleting a team with instances would drop every
+  # instance ROW while the billed Hetzner/Azure server it names keeps running —
+  # and the row is the only thing that still says what to tear down. The route
+  # refuses while the team owns any instance or site and hands back the counts
+  # (`{barkparks: N, sites: M}`) so the console can say what is in the way rather
+  # than "something went wrong". The owner decommissions the fleet first
+  # (DELETE /v1/barkparks/:id runs the real deprovision path) and comes back.
+  #
+  # NO AUDIT ROW, deliberately. `audit_events.team_id` is NOT NULL and cascades:
+  # a `team.deleted` row would be written and then destroyed by the same
+  # transaction's cascade, which is a lie shaped like a record. The erasure is
+  # attested by the response and by the team's absence, not by a row that cannot
+  # outlive its subject.
+  delete "/v1/teams/:id" do
+    with_team_role(conn, "owner", fn conn, team ->
+      case Erasure.delete_team(team) do
+        {:ok, :erased} ->
+          json(conn, 200, %{ok: true, status: "erased"})
+
+        {:error, {:instances_present, blockers}} ->
+          json(conn, 409, %{
+            error: "instances_present",
+            barkparks: blockers.barkparks,
+            sites: blockers.sites
+          })
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+      end
     end)
   end
 
@@ -8493,7 +8921,9 @@ defmodule BarkparkCloud.Web.Router do
   # `content_binding` verdict the control plane actually OBSERVED: `bound` (the
   # site read its own content, with the count) or `unverified` (with the reason it
   # could not be checked). A binding the site provably CANNOT read is refused 422
-  # `content_binding_empty` at the door, with the menu of types it can read.
+  # `content_binding_empty` at the door, with the menu of types it can read. The
+  # refusal `detail` is SURFACE-NEUTRAL (cch-w69-bl): the terminal re-run rides
+  # its own `cli_hint` key, so no consumer has to cut CLI voice back out of prose.
   post "/v1/sites" do
     conn = Auth.require_user(conn, [])
 
@@ -8618,8 +9048,9 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 422, %{
               error: "content_binding_required",
               detail:
-                "a static site builds FROM your content — bind it with " <>
-                  "`--dataset <workspace>/<project>/<dataset>` (missing: #{Enum.join(missing, ", ")})"
+                "a static site builds FROM your content — name the workspace, project and " <>
+                  "dataset it reads (missing: #{Enum.join(missing, ", ")})",
+              cli_hint: "--dataset <workspace>/<project>/<dataset>"
             })
 
           {:error, :ports_exhausted} ->
@@ -8637,11 +9068,11 @@ defmodule BarkparkCloud.Web.Router do
           # Refuse at the door with the real menu (what that token could actually
           # read) and the exact re-run, rather than 201ing a site whose first
           # build dies on a message naming neither the type nor the dataset.
-          {:error, {:binding_empty, detail, menu}} ->
+          {:error, {:binding_empty, detail, menu, cli_hint}} ->
             json(
               conn,
               422,
-              %{error: "content_binding_empty", detail: detail}
+              %{error: "content_binding_empty", detail: detail, cli_hint: cli_hint}
               |> maybe_put_menu(menu)
             )
 
@@ -8906,8 +9337,9 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 422, %{
           error: "content_binding_required",
           detail:
-            "a static site builds FROM your content — bind it with " <>
-              "`--dataset <workspace>/<project>/<dataset>` (missing: #{Enum.join(missing, ", ")})"
+            "a static site builds FROM your content — name the workspace, project and " <>
+              "dataset it reads (missing: #{Enum.join(missing, ", ")})",
+          cli_hint: "--dataset <workspace>/<project>/<dataset>"
         })
 
       :unknown ->
@@ -8922,11 +9354,11 @@ defmodule BarkparkCloud.Web.Router do
       {:error, {:mint_failed, detail}} ->
         json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
 
-      {:error, {:binding_empty, detail, menu}} ->
+      {:error, {:binding_empty, detail, menu, cli_hint}} ->
         json(
           conn,
           422,
-          %{error: "content_binding_empty", detail: detail}
+          %{error: "content_binding_empty", detail: detail, cli_hint: cli_hint}
           |> maybe_put_menu(menu)
         )
 
@@ -9454,6 +9886,16 @@ defmodule BarkparkCloud.Web.Router do
   # rebuild of content that may since have changed). Container sites keep the
   # promote route; rollback is the static verb.
   post "/v1/sites/:id/rollback" do
+    # THE STOPWATCH STARTS BEFORE AUTH (rollback-latency c0). A live rollback
+    # spends 1.4-3.4s server-side against a 25ms symlink flip, and the relay's own
+    # attribution (PR #18130) can only see the middle of that — it starts after
+    # the team-scoped site lookup and the box row read have already happened, and
+    # stops before the site-pointer write, the audit row, the console push and the
+    # render. Opening here puts BOTH ends of the route inside the sum, so the
+    # journal line can say "the route", "the relay" or "the box" rather than
+    # leaving two of the three unmeasured.
+    RollbackAttribution.open(conn.path_params["id"])
+
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
       cond do
         # site-spawner W7 (charter D67): a NODE site rolls back the SAME way a
@@ -9473,7 +9915,13 @@ defmodule BarkparkCloud.Web.Router do
         true ->
           bp = Registry.get_barkpark(site.barkpark_id)
 
-          case Sites.Deploy.rollback(site, bp) do
+          # Everything above this mark is route work: auth, the team-scoped site
+          # read, the kind check, the box row read.
+          RollbackAttribution.deploy_begins()
+          outcome = Sites.Deploy.rollback(site, bp)
+          RollbackAttribution.deploy_ends()
+
+          case outcome do
             {:ok, result} ->
               case Accounts.record_audit(%{
                      team_id: site.team_id,
@@ -9492,13 +9940,20 @@ defmodule BarkparkCloud.Web.Router do
 
               push_event(site.team_id, "deployments")
 
-              json(conn, 200, %{
-                ok: true,
-                status: "rolled_back",
-                deployment_id: result.deployment_id,
-                previous_deployment_id: result.previous_deployment_id,
-                url: result.url
-              })
+              resp =
+                json(conn, 200, %{
+                  ok: true,
+                  status: "rolled_back",
+                  deployment_id: result.deployment_id,
+                  previous_deployment_id: result.previous_deployment_id,
+                  url: result.url
+                })
+
+              # AFTER the render, not before it: the audit write and the two
+              # console pushes above are route work a caller waits for, and
+              # closing early would hide exactly the seam this measures.
+              RollbackAttribution.close("rolled_back")
+              resp
 
             # A TYPED refusal (cch-w63-s3 / D763): the plane measured WHICH refusal
             # this is, so the wire carries that word instead of the flat
@@ -9507,10 +9962,14 @@ defmodule BarkparkCloud.Web.Router do
             # failure at all. The STATUS still comes from `Sites.Deploy`; this
             # route only relays it.
             {:error, status, detail, code} ->
-              json(conn, status, %{ok: false, error: code, detail: detail})
+              resp = json(conn, status, %{ok: false, error: code, detail: detail})
+              RollbackAttribution.close(code)
+              resp
 
             {:error, status, detail} ->
-              json(conn, status, %{ok: false, error: "rollback_failed", detail: detail})
+              resp = json(conn, status, %{ok: false, error: "rollback_failed", detail: detail})
+              RollbackAttribution.close("rollback_failed")
+              resp
           end
       end
     end)
@@ -12898,6 +13357,12 @@ defmodule BarkparkCloud.Web.Router do
   # what lets cloudflare connect without leaking a menu route it can't serve.
   @connectable_kinds ~w(hetzner azure cloudflare)
 
+  # Identity-absence copy that must read the same wherever it is emitted. A
+  # stored blob we cannot JSON-decode is NOT "no account" — we say what we
+  # actually know, which is that the stored shape did not name one.
+  @unreadable_blob_reason "This connection's stored credential doesn't name one."
+  @cloudflare_bare_token_reason "This connection stored a bare API token, which doesn't name an account."
+
   # The Hetzner Cloud API host. Lives HERE (the impure call site), never in the
   # pure catalog and never in any response. Defined above the first use (module
   # attributes are read at their point of reference).
@@ -13282,6 +13747,74 @@ defmodule BarkparkCloud.Web.Router do
     end)
   end
 
+  # GET /v1/providers/:kind/identity handler — the connection header alone, with
+  # NO catalog and NO upstream call. Deliberately NOT routed through
+  # with_provider_catalog/3: that helper's kind gate is @neutral_kinds and its
+  # failure mode is 502 catalog_unavailable, both wrong for a fact read out of
+  # the already-stored credential. The 404 vocabulary is kept identical
+  # (unknown_kind / no_provider) so a client reads one contract across the three
+  # provider routes.
+  defp providers_identity(conn, kind) do
+    cond do
+      kind not in @connectable_kinds ->
+        json(conn, 404, %{error: "unknown_kind"})
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "no_provider"})
+
+      true ->
+        case provider_of_kind(conn.assigns.current_team, kind) do
+          nil ->
+            json(conn, 404, %{error: "no_provider"})
+
+          provider ->
+            case stored_provider_identity(kind, provider) do
+              {:ok, identity} ->
+                json(conn, 200, %{
+                  provider: %{kind: provider.kind, label: provider.label, identity: identity}
+                })
+
+              {:error, :unreadable} ->
+                json(conn, 502, %{error: "credential_unreadable"})
+            end
+        end
+    end
+  end
+
+  # Decrypt the stored credential and read the identity out of it. The ONLY
+  # failure here is a credential this control plane cannot decrypt — an
+  # infrastructure fault, not an absent identity, so it is a 502 rather than an
+  # identity whose `value` is nil: "we could not read your credential" and "your
+  # credential does not name an account" are different sentences and must not be
+  # collapsed into one. No key of the blob other than the identity field is ever
+  # read here, so `api_token` / `client_secret` cannot reach the response.
+  defp stored_provider_identity(kind, provider) do
+    case Registry.reveal_provider_token(provider) do
+      {:ok, credential} -> {:ok, stored_identity(kind, credential)}
+      _ -> {:error, :unreadable}
+    end
+  end
+
+  # Per-kind: decode the stored credential into whatever provider_identity/2's
+  # clause for that kind expects. hetzner stores a bare token; azure and the
+  # cloudflare BLOB form store JSON; cloudflare may ALSO store a bare API-token
+  # string (the common paste), which names no account.
+  defp stored_identity("hetzner", token), do: provider_identity("hetzner", token)
+
+  defp stored_identity("azure", credential) do
+    case Jason.decode(credential) do
+      {:ok, creds} when is_map(creds) -> provider_identity("azure", creds)
+      _ -> identity_absent("Subscription", @unreadable_blob_reason)
+    end
+  end
+
+  defp stored_identity("cloudflare", credential) do
+    case Jason.decode(credential) do
+      {:ok, creds} when is_map(creds) -> provider_identity("cloudflare", creds)
+      _ -> identity_absent("Account", @cloudflare_bare_token_reason)
+    end
+  end
+
   # Shared resolve → build → serve for both neutral catalog routes. 404
   # unknown_kind for a kind we don't host; 404 no_provider when the team has
   # none connected (connect-first empty state); 502 catalog_unavailable when the
@@ -13364,11 +13897,12 @@ defmodule BarkparkCloud.Web.Router do
   # carrying its own reason (`value: nil`), never a silently omitted key the
   # client would paint as a blank that looks known.
   #
-  # Only the @neutral_kinds reach here (with_provider_catalog 404s anything
-  # else), so cloudflare — whose stored blob may carry an account_id — has no
-  # clause: it owns no catalog route, and the console's provider picker has no
-  # cloudflare entry at all, so a clause here would be unreachable code rather
-  # than a rendered fact.
+  # REACHED FROM TWO PLACES, AND THE SETS DIFFER. Through
+  # build_provider_catalog/2 only the @neutral_kinds arrive (with_provider_catalog
+  # 404s anything else); through providers_identity/2 the whole
+  # @connectable_kinds set arrives, which is why "cloudflare" has a clause at
+  # all. Before D899 it did not, and adding one would have been unreachable dead
+  # code — the route is what makes it a rendered fact.
   defp provider_identity("azure", creds) do
     case creds |> Map.get("subscription_id") |> to_string() |> String.trim() do
       "" ->
@@ -13386,6 +13920,26 @@ defmodule BarkparkCloud.Web.Router do
   # project or organization identifier. So we say that, rather than guessing.
   defp provider_identity("hetzner", _token),
     do: identity_absent("Project", "Hetzner doesn't report which project this token belongs to.")
+
+  # Cloudflare API tokens are ACCOUNT-scoped but the token itself does not name
+  # its account, and NOTHING in this tree asks Cloudflare whose account it is:
+  # `Cloudflare.Client` declares exactly five callbacks — verify_token,
+  # upsert_dns_record, delete_dns_record, ensure_zone_proxied,
+  # create_origin_ca_cert — and `verify_token/1` returns `%{status: ...}` off
+  # `GET /user/tokens/verify`, a token-liveness answer with no account
+  # in it. So the ONLY account we can name is the `account_id` the person typed
+  # at connect time and we stored (`cloudflare_credential_blob/1` keeps it when
+  # supplied). `source: "stored"` says exactly that; this is an ECHO and the
+  # console must never call it verified.
+  defp provider_identity("cloudflare", creds) when is_map(creds) do
+    case creds |> Map.get("account_id") |> to_string() |> String.trim() do
+      "" ->
+        identity_absent("Account", "This connection didn't store an account ID.")
+
+      account_id ->
+        %{label: "Account", value: account_id, source: "stored", reason: nil}
+    end
+  end
 
   defp identity_absent(label, reason),
     do: %{label: label, value: nil, source: "unavailable", reason: reason}
@@ -13784,7 +14338,7 @@ defmodule BarkparkCloud.Web.Router do
   # Team-scoped lookup: only the owning team's instance resolves; everything else
   # (another team's id, an unknown id, a non-UUID string) is `nil` → the same
   # 404. `Registry.get_barkpark/1` already guards the `:binary_id` cast, so a
-  # malformed id never raises an `Ecto.CastError` here.
+  # malformed id never raises an `Ecto.Query.CastError` here.
   defp resolve_team_barkpark(team, id) do
     case Registry.get_barkpark(id) do
       %Barkpark{team_id: tid} = bp when tid == team.id -> bp
@@ -15238,6 +15792,48 @@ defmodule BarkparkCloud.Web.Router do
 
           {:cont, bound_site}
         else
+          # Cloudflare ACCEPTED the PATCH (2xx) but answered `proxied: false`:
+          # the orange cloud did not stick. `Client.ensure_zone_proxied/3` is
+          # specced `{:ok, %{proxied: boolean()}}` — `false` is a DECLARED
+          # return, not an error term — so before this clause existed the
+          # `{:ok, %{proxied: true}}` head fell through to an else covering only
+          # `{:error, _}` and the request died with a `WithClauseError` (a 500
+          # with a stacktrace, and NO honest answer about the record just
+          # written). Fail CLOSED like every other arm here: the binding is NOT
+          # persisted, so the site keeps serving standalone and `serving_mode:
+          # "cf_proxied"` never becomes a lie about a grey record. Deliberately
+          # NOT retried — a re-PATCH of the same body gets the same answer; the
+          # causes (a non-proxiable record type/name, a zone plan that forbids
+          # proxying that hostname) are all standing conditions an operator has
+          # to clear. The wire code stays `cloudflare_bind_failed` — the client
+          # contract is "the bind did not happen, the box is still standalone",
+          # which is exactly true — and only the bounded `detail` distinguishes.
+          #
+          # The pattern binds `proxied` rather than matching the literal `false`
+          # on purpose. `Real.ensure_zone_proxied/3` lifts the value straight out
+          # of the Cloudflare body (`%{"result" => %{"proxied" => proxied}}`)
+          # WITHOUT checking it is a boolean, so a body carrying `"proxied": null`
+          # (or any non-boolean) yields an `{:ok, _}` the `boolean()` spec does
+          # not describe and a `false`-literal clause would miss — the same crash
+          # one field-value away. Anything not `true` is "not proxied", and this
+          # arm swallows no error term: `{:error, _}` still owns the clauses below.
+          {:ok, %{proxied: proxied}} ->
+            Logger.error(
+              "cloudflare_bind_not_proxied: #{domain} -> #{origin} Cloudflare accepted the " <>
+                "proxy PATCH but the record is not proxied (proxied=#{inspect(proxied)}); " <>
+                "refusing to persist a cf_proxied binding. The A record written above is " <>
+                "LEFT IN PLACE, unproxied."
+            )
+
+            {:halt,
+             json(conn, 502, %{
+               error: "cloudflare_bind_failed",
+               detail:
+                 "Cloudflare accepted the proxy change but the record is still unproxied " <>
+                   "(grey cloud) — the box is still serving standalone. Check that the zone " <>
+                   "plan allows proxying this hostname, then try again."
+             })}
+
           {:error, {:orphan_cleaned, cleaned_domain}} ->
             Logger.error(
               "cloudflare_bind_orphan_cleaned: #{cleaned_domain} deprovisioned mid-write, the A record just written was deleted again"
@@ -16121,18 +16717,34 @@ defmodule BarkparkCloud.Web.Router do
   defp query_total(%{"total" => total}) when is_integer(total), do: total
   defp query_total(_body), do: nil
 
-  # The refusal: name what is wrong, what this site CAN read, and the exact re-run.
+  # The refusal: name what is wrong and what this site CAN read — and NOTHING
+  # about how the caller got here.
+  #
+  # cch-w69-bl (charter D846's sequel): `detail` used to END with a literal
+  # `bp cloud site create … --doc-type <type>` re-run line, because ONE sentence
+  # served two surfaces and the CLI is the one that wanted it. The console then
+  # had to CUT that clause back off by matching the prose
+  # (`siteDetailWithoutCliReRun`, app.js) — a coupling that breaks silently the
+  # moment anybody rewords this string, with no test on either side failing.
+  #
+  # So the voice stops being the producer's choice. `detail` carries the FACTS
+  # (what is wrong, what is readable) in nobody's accent, and the terminal
+  # incantation moves to its OWN key, `cli_hint`, which a terminal renders and a
+  # modal ignores. Neither surface string-matches the other's copy any more, and
+  # a reword of either is now a reword of one audience's sentence alone.
   defp refuse_empty_binding(bp, ws, proj, ds, token, why) do
     menu = readable_type_menu(bp, ws, proj, ds, token)
 
     detail =
       "this site would build from nothing — #{why}. " <>
         menu_sentence(menu, ds) <>
-        " Re-run naming a type this site can read: " <>
-        "`bp cloud site create <name> --kind static --framework astro " <>
-        "--dataset #{ws}/#{proj}/#{ds} --doc-type <type>`"
+        " Name a content type this site can read."
 
-    {:error, {:binding_empty, detail, menu}}
+    cli_hint =
+      "bp cloud site create <name> --kind static --framework astro " <>
+        "--dataset #{ws}/#{proj}/#{ds} --doc-type <type>"
+
+    {:error, {:binding_empty, detail, menu, cli_hint}}
   end
 
   # The honest menu is the INTERSECTION: the instance admin token lists what EXISTS

@@ -281,7 +281,7 @@ func successClaimRegistry() []claimSite {
 			Contradicted: &hcloud.Server{ID: 42, Name: "web-1", Status: hcloud.ServerStatusOff},
 		},
 		{
-			// PDS-D405/D423 REPAIR. The pre-repair row varied its pair on ID 9→10
+			// PDS-D405/PDS-D423 REPAIR. The pre-repair row varied its pair on ID 9→10
 			// and Name data-1→data-2 — the two fields an attach CANNOT change — so
 			// it was an IDENTITY ECHO: two different volumes printed two different
 			// lines, which proves nothing about whether the attach took. hzResDone
@@ -644,7 +644,7 @@ func successClaimRegistry() []claimSite {
 
 		// ── tasks_stamp_cmd.go — the LEDGER ROW the store actually holds ────────
 		{
-			// PDS-D359/D361, wave 26. `bp task stamp` is the verb every acceptance
+			// PDS-D359/PDS-D361, wave 26. `bp task stamp` is the verb every acceptance
 			// criterion in this epic is written with, and it was observed returning
 			// exit 0 on a write the store never took. Its receipt is now rendered
 			// from the SECOND READ: the request is held fixed (stampVerdictReq) and

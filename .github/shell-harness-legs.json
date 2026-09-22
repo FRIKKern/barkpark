@@ -1,0 +1,1737 @@
+[
+  {
+    "slug": "task-dup-sweep",
+    "name": "task-dup-sweep calibration + vacuity arms",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "22",
+    "arms": [
+      {
+        "name": "task-dup-sweep.mjs syntax check",
+        "run": "node --check scripts/task-dup-sweep.mjs",
+        "env": {}
+      },
+      {
+        "name": "calibration + vacuity arms (frozen 243-row fixture, no bp, no network)",
+        "run": "node scripts/task-dup-sweep.mjs --selftest",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "node-test-floor",
+    "name": "node-test-floor.mjs mutation matrix",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "22",
+    "arms": [
+      {
+        "name": "node-test-floor.test.sh syntax check",
+        "run": "bash -n scripts/node-test-floor.test.sh",
+        "env": {}
+      },
+      {
+        "name": "node-test-floor mutation matrix (hermetic mktemp fixtures, no network)",
+        "run": "bash scripts/node-test-floor.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "doctor-matrix",
+    "name": "doctor-matrix",
+    "timeout": 15,
+    "fetch_depth": 0,
+    "node": "",
+    "arms": [
+      {
+        "name": "doctor.sh syntax check",
+        "run": "bash -n scripts/doctor.sh",
+        "env": {}
+      },
+      {
+        "name": "doctor.sh section-2 verdict matrix",
+        "run": "bash scripts/doctor.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "merge-verb-table",
+    "name": "merge-verb-table",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "bp-merge.sh syntax check",
+        "run": "bash -n scripts/bp-merge.sh",
+        "env": {}
+      },
+      {
+        "name": "bp-merge refusal-string table (captured fixtures, no live GitHub)",
+        "run": "bash scripts/bp-merge.test.sh",
+        "env": {}
+      },
+      {
+        "name": "merge-check.sh syntax check",
+        "run": "bash -n scripts/merge-check.sh",
+        "env": {}
+      },
+      {
+        "name": "merge-check arm suite (offline; hold-label arms A17..A17m)",
+        "run": "bash scripts/merge-check.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "the shared check-run reader survives a feed larger than an argument",
+        "run": "bash scripts/lib/check-runs.test.sh",
+        "env": {}
+      },
+      {
+        "name": "required-checks-verify selftest (every clause mutation-proven)",
+        "run": "bash scripts/required-checks-verify.sh --selftest",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "release-scan-verdict",
+    "name": "release-scan.sh CI-verdict derivation",
+    "timeout": 15,
+    "fetch_depth": 0,
+    "node": "",
+    "arms": [
+      {
+        "name": "release-scan.sh syntax check",
+        "run": "bash -n scripts/release-scan.sh",
+        "env": {}
+      },
+      {
+        "name": "release-scan.sh verdict matrix (recorded fixtures, no network)",
+        "run": "bash scripts/release-scan.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "release-curator-draft-guard",
+    "name": "release-curator-draft.sh drafts only (no tag, no publish)",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "release-curator-draft.sh syntax check",
+        "run": "bash -n scripts/release-curator-draft.sh",
+        "env": {}
+      },
+      {
+        "name": "draft-only invariant matrix (fake gh, real git, no network)",
+        "run": "bash scripts/release-curator-draft.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "zero-criteria-census",
+    "name": "epic-zero-criteria-census.sh self-test",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 is present (the classifier is python3; absence would be exit 2)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image — add actions/setup-python\" >&2\n  exit 1\n}\npython3 --version\n",
+        "env": {}
+      },
+      {
+        "name": "syntax check (both rails)",
+        "run": "bash -n scripts/epic-zero-criteria-census.sh\nbash -n scripts/ledger-epic-roster.sh\n",
+        "env": {}
+      },
+      {
+        "name": "census self-test (26 assertions over 9 arms, mktemp fixtures, no bp/network)",
+        "run": "bash scripts/epic-zero-criteria-census.sh --self-test",
+        "env": {}
+      },
+      {
+        "name": "token-free reader self-test (25 assertions, stubbed ledger, no network)",
+        "run": "bash scripts/ledger-epic-roster.sh --self-test",
+        "env": {}
+      },
+      {
+        "name": "the census no longer needs bp (the reason it could never be required)",
+        "run": "set +e\nset -u\nif command -v bp >/dev/null 2>&1; then\n  echo \"bp is unexpectedly ON this runner — this control cannot measure what it claims\" >&2\n  exit 1\nfi\necho \"control: bp is absent from this runner, as expected\"\n\nbash scripts/epic-zero-criteria-census.sh --via-bp task-fb4fb869490b4213 >/dev/null 2>via-bp.err\nrc=$?\nif [ \"$rc\" != \"2\" ]; then\n  echo \"expected the LEGACY rail to exit 2 without bp, got $rc\" >&2; cat via-bp.err >&2; exit 1\nfi\nif ! grep -q \"bp is not on PATH\" via-bp.err; then\n  echo \"the legacy rail red for some OTHER reason:\" >&2; cat via-bp.err >&2; exit 1\nfi\necho \"legacy rail: exit 2, 'bp is not on PATH' — the original defect, still reproducible\"\n\n# The token-free rail must get PAST the bp check. It is deliberately\n# NOT asserted green here: this step must not depend on the ledger\n# being up (see the promotion note in scripts/ledger-epic-roster.sh).\n# Reaching the ledger at all — or failing with the reader's OWN\n# outage wording — both prove bp is out of the path.\nbash scripts/epic-zero-criteria-census.sh task-fb4fb869490b4213 >/dev/null 2>token-free.err\nrc=$?\nif grep -q \"bp is not on PATH\" token-free.err; then\n  echo \"the token-free rail STILL asks for bp — the port did not land\" >&2; cat token-free.err >&2; exit 1\nfi\necho \"token-free rail: exit ${rc}, and it never asked for bp\"\ncat token-free.err\nexit 0\n",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "webhook-fanout-guard",
+    "name": "webhook-fanout-watch.sh mutation matrix",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "jq is present (the row parser is jq; absence would be exit 3)",
+        "run": "command -v jq >/dev/null || {\n  echo \"jq missing on the runner image — the webhook row parser needs it\" >&2\n  exit 1\n}\njq --version\n",
+        "env": {}
+      },
+      {
+        "name": "webhook-fanout-watch.sh syntax check",
+        "run": "bash -n scripts/webhook-fanout-watch.sh",
+        "env": {}
+      },
+      {
+        "name": "webhook-fanout-watch.test.sh syntax check",
+        "run": "bash -n scripts/webhook-fanout-watch.test.sh",
+        "env": {}
+      },
+      {
+        "name": "live-row guard mutation matrix (hermetic fixtures, no bp/network)",
+        "run": "bash scripts/webhook-fanout-watch.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "seal-run-guard",
+    "name": "seal-run.sh probe matrix",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "node is present (seal-run.test.sh exits 2 without it)",
+        "run": "command -v node >/dev/null || {\n  echo \"node missing on the runner image — seal-run.test.sh drives a node predicate\" >&2\n  exit 1\n}\nnode --version\n",
+        "env": {}
+      },
+      {
+        "name": "seal-run.sh syntax check",
+        "run": "bash -n scripts/seal-run.sh",
+        "env": {}
+      },
+      {
+        "name": "seal-run.test.sh syntax check",
+        "run": "bash -n scripts/seal-run.test.sh",
+        "env": {}
+      },
+      {
+        "name": "seal-run probe matrix (hermetic, offline, stand-in predicate)",
+        "run": "bash scripts/seal-run.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "registration-sample-bar",
+    "name": "registration-sample.sh mutation matrix",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "registration-sample.sh syntax check",
+        "run": "bash -n scripts/registration-sample.sh",
+        "env": {}
+      },
+      {
+        "name": "registration-sample.test.sh syntax check",
+        "run": "bash -n scripts/registration-sample.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the sampler can still REFUSE (control + 3 plants + 2 traps)",
+        "run": "bash scripts/registration-sample.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "deploy-convergence",
+    "name": "deploy-convergence-check.sh ancestry + strand matrix",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "deploy-convergence-check.sh syntax check",
+        "run": "bash -n scripts/deploy-convergence-check.sh",
+        "env": {}
+      },
+      {
+        "name": "the real deploy.yml still yields BOTH per-target filters",
+        "run": "bash scripts/deploy-convergence-check.sh filters",
+        "env": {}
+      },
+      {
+        "name": "ancestry beats wall clock, and a real strand still reds",
+        "run": "bash scripts/deploy-convergence-check.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "the convergence job CONCLUDES on its verdict (task-103b5cc5ec4a8ccd)",
+        "run": "bash scripts/deploy-convergence-check.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "deploy-concurrency",
+    "name": "a queued deploy or main gate run cannot be evicted (per-sha groups + already-covered exit)",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 + PyYAML are present (both subjects are yaml-PARSED, not grepped)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image\" >&2\n  exit 1\n}\npython3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml\npython3 -c \"import yaml; print('PyYAML', yaml.__version__)\"\n",
+        "env": {}
+      },
+      {
+        "name": "deploy-concurrency-check.sh syntax check",
+        "run": "bash -n scripts/deploy-concurrency-check.sh",
+        "env": {}
+      },
+      {
+        "name": "deploy-concurrency-check.test.sh syntax check",
+        "run": "bash -n scripts/deploy-concurrency-check.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the gate can still LOSE (16 cases incl. the verbatim pre-fix stanza)",
+        "run": "bash scripts/deploy-concurrency-check.test.sh",
+        "env": {}
+      },
+      {
+        "name": "then the live deploy.yml stanza itself",
+        "run": "bash scripts/deploy-concurrency-check.sh",
+        "env": {}
+      },
+      {
+        "name": "deploy-supersede-exit.sh syntax check",
+        "run": "bash -n scripts/deploy-supersede-exit.sh",
+        "env": {}
+      },
+      {
+        "name": "deploy-supersede-exit.test.sh syntax check",
+        "run": "bash -n scripts/deploy-supersede-exit.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the classifier can still LOSE (11-arm ancestry matrix)",
+        "run": "bash scripts/deploy-supersede-exit.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "the exit-at-start wiring both directions + the live deploy.yml",
+        "run": "bash scripts/deploy-supersede-exit.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the main-run gate can still LOSE (discovery, both directions)",
+        "run": "bash scripts/main-run-concurrency-check.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "every main-triggered workflow keeps one group per main sha",
+        "run": "bash scripts/main-run-concurrency-check.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "console-path-ratchet",
+    "name": "console-path-escape-check.sh classification matrix",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "console-path-escape-check.sh syntax check",
+        "run": "bash -n scripts/console-path-escape-check.sh",
+        "env": {}
+      },
+      {
+        "name": "console path classification + console-harness.yml skip-shim invariants",
+        "run": "bash scripts/console-path-escape-check.test.sh",
+        "env": {}
+      },
+      {
+        "name": "python3 + PyYAML are present (the shape ratchet yaml-PARSES three workflows)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image\" >&2\n  exit 1\n}\npython3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml\npython3 -c \"import yaml; print('PyYAML', yaml.__version__)\"\n",
+        "env": {}
+      },
+      {
+        "name": "cloud.yml + console-harness.yml aggregator shape (73 assertions, 22 planted mutants)",
+        "run": "bash scripts/cloud-console-gate-shape.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "console-harness-pin",
+    "name": "console-harness.sh reads CI's pin (it must be able to LOSE)",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "console-harness-pin.test.sh syntax check",
+        "run": "sh -n scripts/console-harness-pin.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the local gate's pin is READ from console-harness.yml, and arm 3 points it at a fixture carrying a DIFFERENT pin so a derivation that always answers one number LOSES",
+        "run": "sh scripts/console-harness-pin.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "console-refusal-capture",
+    "name": "console-refusal-capture.mjs controls",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "the capture module parses",
+        "run": "node --check scripts/console-refusal-capture.mjs",
+        "env": {}
+      },
+      {
+        "name": "console-refusal-capture.test.mjs (measured 0 s / 9 tests, hermetic)",
+        "run": "node --test scripts/console-refusal-capture.test.mjs",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "weekly-changelog-backfill-guard",
+    "name": "weekly-changelog-backfill.test.sh drift check",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 + PyYAML is present (the harness parses the workflow with it)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image\" >&2\n  exit 1\n}\npython3 -c \"import yaml\" || {\n  echo \"PyYAML missing on the runner image — the harness parses weekly-changelog.yml with it\" >&2\n  exit 1\n}\n",
+        "env": {}
+      },
+      {
+        "name": "weekly-changelog-backfill.test.sh syntax check",
+        "run": "bash -n scripts/weekly-changelog-backfill.test.sh",
+        "env": {}
+      },
+      {
+        "name": "weekly-changelog-backfill.test.sh (pins weekly-changelog.yml's fixed collection shape)",
+        "run": "bash scripts/weekly-changelog-backfill.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "pds-harnesses",
+    "name": "PDS census / parity / scratch-target harnesses",
+    "timeout": 15,
+    "fetch_depth": 0,
+    "node": "",
+    "arms": [
+      {
+        "name": "jq is present (pds-record-parity.test.sh exits 99 without it)",
+        "run": "command -v jq >/dev/null || {\n  echo \"jq missing on the runner image — the PDS fixtures are built with jq\" >&2\n  exit 1\n}\njq --version\n",
+        "env": {}
+      },
+      {
+        "name": "pds-ledger-census ordering + response-shape matrix",
+        "run": "bash scripts/pds-ledger-census_test.sh",
+        "env": {}
+      },
+      {
+        "name": "pds-record-parity 108-check matrix",
+        "run": "bash scripts/pds-record-parity.test.sh",
+        "env": { "PDS_PARITY_DYNAMIC": "1" }
+      },
+      {
+        "name": "pds-secret-scan count identity (5 arms, psql stubbed — no DB, no network)",
+        "run": "bash scripts/pds-secret-scan_test.sh",
+        "env": {}
+      },
+      {
+        "name": "pds-scratch-target two-root coexistence + teardown",
+        "run": "bash scripts/pds-scratch-target_test.sh",
+        "env": {}
+      },
+      {
+        "name": "pds-read-preflight-audit census ratchet + crown-stamp refusal/read-back pairs (stub bp, no server)",
+        "run": "bash scripts/pds-read-preflight-audit_test.sh",
+        "env": {}
+      },
+      {
+        "name": "pds-threshold-move-guard 15-arm mutation matrix (hermetic git fixture)",
+        "run": "bash scripts/pds-threshold-move-guard_test.sh",
+        "env": {}
+      },
+      {
+        "name": "pds-charter-anchors 14-arm matrix (PDS-D299 content anchors)",
+        "run": "bash scripts/pds-charter-anchors-check_test.sh",
+        "env": {}
+      },
+      {
+        "name": "pds-charter-anchors live check — the REAL charter, not a fixture",
+        "run": "bash scripts/pds-charter-anchors-check.sh",
+        "env": {}
+      },
+      {
+        "name": "PDS citation precedes merge — 10-case paired test (throwaway git repos, no network)",
+        "run": "bash scripts/pds-citation-precedes-merge_test.sh",
+        "env": {}
+      },
+      {
+        "name": "pds-artifact-retention keep-N harness (35 arms, hermetic, no network)",
+        "run": "bash scripts/pds-artifact-retention.test.sh",
+        "env": {}
+      },
+      {
+        "name": "personal-local cold-reader smoke — the --dry-run arm (no boot)",
+        "run": "bash scripts/pds-personal-local-smoke_test.sh --dry-run",
+        "env": {}
+      },
+      {
+        "name": "mktemp portability guard — selftest (6 controls incl. a planted RED), tree scan, and the personal-local doc-anchor tally asserted NON-ZERO",
+        "run": "set -uo pipefail\n\n# WHY THIS ARM EXISTS, and why it runs on THIS runner and not a Mac.\n# `mktemp -t NAME` with a template carrying fewer than three consecutive X is a\n# BSD/macOS-only form. GNU coreutils — this ubuntu runner — refuses it:\n#     mktemp: too few X's in template 'NAME'\n# The LOUD sites red their arm. The SILENT ones do not: a failing command\n# substitution inside an assignment does NOT trip `set -e`, so the variable\n# becomes the EMPTY string and the script runs on, redirecting into \"\".\n# scripts/pds-personal-local-smoke_test.sh did exactly that — run 35435212884\n# printed `0 of  doc anchor(s) resolved` and its leg still reported SUCCESS.\n# A guard whose own home is a Mac would never have seen it.\n\necho \"── 1. the guard proves it can SEE (positive control) ──\"\nbash scripts/mktemp-portability-check.sh --selftest\n\necho \"── 2. the guard over the tracked tree ──\"\nbash scripts/mktemp-portability-check.sh\n\n# 3. THE ORIGINAL VACUOUS GREEN, asserted by its NUMBER and not by an exit code.\n# The regression's signature was a PASSING run that measured nothing, so the\n# only honest assertion is that the count is non-zero.\necho \"── 3. personal-local --dry-run resolves a NON-ZERO number of doc anchors ──\"\nout=\"$(bash scripts/pds-personal-local-smoke_test.sh --dry-run 2>&1)\" || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: pds-personal-local-smoke_test.sh --dry-run exited non-zero\" >&2\n  exit 1\n}\nprintf '%s\\n' \"$out\" | grep -E 'doc anchor\\(s\\) resolved' || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: the run printed no doc-anchor tally at all\" >&2\n  exit 1\n}\nn=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) of \\([0-9][0-9]*\\) doc anchor(s) resolved.*/\\1/p' | tail -1)\"\ntot=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) of \\([0-9][0-9]*\\) doc anchor(s) resolved.*/\\2/p' | tail -1)\"\n[ -n \"${n:-}\" ] && [ -n \"${tot:-}\" ] || {\n  echo \"RED: could not parse the tally; a 0-of-EMPTY denominator is exactly the bug\" >&2\n  exit 1\n}\necho \"  parsed: $n of $tot doc anchor(s) resolved\"\n[ \"$tot\" -gt 0 ] || { echo \"RED: denominator is 0 — the plan file was never written\" >&2; exit 1; }\n[ \"$n\" -gt 0 ]   || { echo \"RED: 0 anchors resolved — a green that measured nothing\" >&2; exit 1; }\n",
+        "env": {}
+      },
+      {
+        "name": "stat portability guard — selftest (8 controls incl. a planted RED), tree scan, and the pds-artifact-retention arm tally asserted BY NUMBER",
+        "run": "set -uo pipefail\n\n# WHY THIS ARM EXISTS, and why only this runner can prove it.\n# `-f` means OPPOSITE things in the two stats:\n#     BSD / macOS    stat -f FORMAT path   \"render path with this FORMAT\"\n#     GNU coreutils  stat -f path          \"print FILE SYSTEM status\" (format is -c)\n# So the common defensive idiom, written BSD-first:\n#     mtime=\"$(stat -f %m \"$p\" 2>/dev/null || stat -c %Y \"$p\")\"\n# does NOT skip the fallback. The first command POLLUTES STDOUT with a\n# filesystem report and only then fails, so the fallback appends the RIGHT\n# number to the WRONG text and every comparison downstream is against garbage.\n# Nothing reports an error. Measured: run 35504059438 / job 106061128225 —\n# scripts/pds-artifact-retention.test.sh was 24 passed / 11 FAILED on ubuntu\n# while the identical tree was 35/0 on macOS.\n#\n# That harness could not run here AT ALL until #19419 (a GNU mktemp refusal\n# killed it at startup, exit 99), so those eleven failures had never been seen.\n# A guard whose own home is a Mac cannot see either defect.\n\necho \"-- 1. the guard proves it can SEE (positive control) --\"\nbash scripts/stat-portability-check.sh --selftest\n\necho \"-- 2. the guard over the tracked tree --\"\nbash scripts/stat-portability-check.sh\n\n# 3. THE SUBJECT, asserted by its NUMBERS and not by an exit code.\n# This regression's signature is a harness that runs and quietly measures the\n# wrong thing, so the honest assertion names the pass and failure counts.\necho \"-- 3. pds-artifact-retention.test.sh arm tally, asserted by number --\"\nout=\"$(bash scripts/pds-artifact-retention.test.sh 2>&1)\" || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: pds-artifact-retention.test.sh exited non-zero\" >&2\n  exit 1\n}\nprintf '%s\\n' \"$out\" | grep -E '[0-9]+ pass\\(es\\), [0-9]+ failure\\(s\\)' >/dev/null || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: the run printed no arm tally at all -- it never reached its summary\" >&2\n  exit 1\n}\np=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) pass(es), \\([0-9][0-9]*\\) failure(s).*/\\1/p' | tail -1)\"\nf=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) pass(es), \\([0-9][0-9]*\\) failure(s).*/\\2/p' | tail -1)\"\n[ -n \"${p:-}\" ] && [ -n \"${f:-}\" ] || {\n  echo \"RED: could not parse the tally; an EMPTY count is exactly this bug's shape\" >&2\n  exit 1\n}\necho \"  parsed: $p pass(es), $f failure(s)\"\n[ \"$f\" -eq 0 ] || { printf '%s\\n' \"$out\"; echo \"RED: $f arm(s) failed\" >&2; exit 1; }\n[ \"$p\" -gt 0 ] || { echo \"RED: 0 arms passed -- a green that measured nothing\" >&2; exit 1; }\n",
+        "env": {}
+      },
+      {
+        "name": "pds-citation-expand 4-arm harness (the guard's 16 selftest arms + its LIVE --check over the PDS fence)",
+        "run": "bash scripts/pds-citation-expand.test.sh\n",
+        "env": {}
+      },
+      {
+        "name": "pds-idle-sampler --selftest — 3 arms (killed-mid-window, clean cleanup, KEEP control); fake ssh on PATH, no host",
+        "run": "bash scripts/pds-idle-sampler.sh --selftest\n",
+        "env": {}
+      },
+      {
+        "name": "PDS-D allocation arbiter: --check-alloc and --axis a, --axis d, --axis f over the merged tree",
+        "run": "set -uo pipefail\n\nCHARTER=.claude/workflows/bp-pds-charter.md\nALLOC=tooling/pds/d-number-reservations.tsv\n\nfor f in \"$CHARTER\" \"$ALLOC\"; do\n  [ -f \"$f\" ] || { echo \"RED: $f is missing from this tree -- the arbiter has nothing to compare\" >&2; exit 1; }\ndone\n\n# The definition lens, byte-for-byte charter_defined_numbers() from\n# scripts/pds-record-parity.sh: bold-lead bullet UNION own-line heading.\n# NOT \"any PDS-D anywhere\" -- the charter's prose names the synthetic\n# fixtures PDS-D777/PDS-D999 and a looser lens would read them as a\n# high-water mark of 999.\ncharter_hw=$( { grep -oE '^[[:space:]]*([-*][[:space:]]+)?\\*\\*PDS-D[0-9]+' \"$CHARTER\" || true\n                grep -oE '^#+[[:space:]]+PDS-D[0-9]+([[:space:]]|$)' \"$CHARTER\" || true\n              } | grep -oE 'PDS-D[0-9]+' | sed 's/^PDS-D//' | sort -n -u | tail -1 )\nledger_hw=$(awk -F'\\t' '$1 ~ /^PDS-D[0-9]+$/ { sub(/^PDS-D/, \"\", $1); print $1 }' \"$ALLOC\" | sort -n -u | tail -1)\nres_count=$(awk -F'\\t' '$1 ~ /^PDS-D[0-9]+$/ { print $1 }' \"$ALLOC\" | sort -u | wc -l | tr -d ' ')\nseed=$(awk -F'\\t' '$1 == \"SEED\" { print $2; exit }' \"$ALLOC\")\n\necho \"── the three counts this step compares (derived HERE, from this tree) ──\"\necho \"  charter high-water:  PDS-D${charter_hw:-<none>}   (highest number DEFINED in $CHARTER)\"\necho \"  ledger  high-water:  PDS-D${ledger_hw:-<none, only the SEED row>}   (highest number RESERVED in $ALLOC)\"\necho \"  reservations:        ${res_count} number(s) reserved above the seed\"\necho \"  seed:                ${seed:-<none>}   (at or below it predates the arbiter, not scored)\"\n[ -n \"${charter_hw:-}\" ] || { echo \"RED: the charter defines no PDS-D at all -- the lens is measuring itself, not the corpus\" >&2; exit 1; }\n\nrc_total=0\n# `--axis d` joins the loop: it is PURE-TREE like --check-alloc (charter\n# + the PDS scripts, no network, no git walk), so it runs everywhere\n# --axis a does and cannot go UNCHECKED on a shallow checkout.\n#\n# `--axis f` joins it too, and on a DIFFERENT warrant from d's, because it\n# is NOT pure-tree: it walks every commit that has ever touched\n# scripts/pds-pull-proof.sh and runs `git merge-base --is-ancestor`, so it\n# needs the full graph. This leg declares \"fetch_depth\": 0, which is why it\n# may run HERE and not wherever a shallow checkout is taken -- and if the\n# graph is ever short, f returns rc 2 UNCHECKED, which the case below already\n# scores RED rather than passing. It is offline (no curl, no bp, no http) and\n# it ran 2.6s locally against this leg's 15-minute budget. Until now it ran in\n# no job at all: a guard nothing executes is a guard that decays in silence.\nfor arm in --check-alloc \"--axis a\" \"--axis d\" \"--axis f\"; do\n  echo \"── bash scripts/pds-record-parity.sh $arm ──\"\n  # `|| rc=$?` and NOT a bare call followed by `rc=$?`: the default\n  # shell for a `run:` block is `bash -e {0}`, which would exit on the\n  # non-zero BEFORE the case below ever classified it -- the step would\n  # still be red, but the log would never say DIVERGENT or UNCHECKED.\n  rc=0\n  # shellcheck disable=SC2086\n  bash scripts/pds-record-parity.sh $arm || rc=$?\n  case \"$rc\" in\n    0) echo \"  rc=0 PARITY\" ;;\n    1) echo \"  rc=1 DIVERGENT -- RED. The charter, the reservation ledger and the commit corpus disagree; see above.\" >&2; rc_total=1 ;;\n    2) echo \"  rc=2 UNCHECKED -- RED, NOT A PASS. The arm could not look (truncated walk, missing charter, no SEED row).\" >&2; rc_total=1 ;;\n    3) echo \"  rc=3 USAGE -- RED. This step invoked the script wrongly.\" >&2; rc_total=1 ;;\n    *) echo \"  rc=$rc UNKNOWN -- RED.\" >&2; rc_total=1 ;;\n  esac\ndone\nexit \"$rc_total\"\n",
+        "env": {}
+      },
+      {
+        "name": "D allocation arbiter (deploy-reliability charter): --check-alloc over the merged tree",
+        "run": "set -uo pipefail\n\nCHARTER=.claude/workflows/bp-deploy-reliability-charter.md\nALLOC=deploy/d-number-reservations.tsv\nARBITER=deploy/d-number-arbiter.sh\n\nfor f in \"$CHARTER\" \"$ALLOC\" \"$ARBITER\"; do\n  [ -f \"$f\" ] || { echo \"RED: $f is missing from this tree -- the arbiter has nothing to compare\" >&2; exit 1; }\ndone\n\n# charter_defined_numbers() from scripts/pds-record-parity.sh, with the\n# D prefix: bold-lead bullet UNION own-line heading. NOT \"any D anywhere\".\ncharter_hw=$( { grep -oE '^[[:space:]]*([-*][[:space:]]+)?\\*\\*D[0-9]+' \"$CHARTER\" || true\n                grep -oE '^#+[[:space:]]+D[0-9]+([[:space:]]|$)' \"$CHARTER\" || true\n              } | grep -oE 'D[0-9]+' | sed 's/^D//' | sort -n -u | tail -1 )\nledger_hw=$(awk -F'\\t' '$1 ~ /^D[0-9]+$/ { sub(/^D/, \"\", $1); print $1 }' \"$ALLOC\" | sort -n -u | tail -1)\nres_count=$(awk -F'\\t' '$1 ~ /^D[0-9]+$/ { print $1 }' \"$ALLOC\" | sort -u | wc -l | tr -d ' ')\nseed=$(awk -F'\\t' '$1 == \"SEED\" { print $2; exit }' \"$ALLOC\")\n\necho \"-- the three counts this step compares (derived HERE, from this tree) --\"\necho \"  charter high-water:  D${charter_hw:-<none>}   (highest number DEFINED in $CHARTER)\"\necho \"  ledger  high-water:  D${ledger_hw:-<none, only the SEED row>}   (highest number RESERVED in $ALLOC)\"\necho \"  reservations:        ${res_count} number(s) reserved above the seed\"\necho \"  seed:                ${seed:-<none>}   (at or below it predates the arbiter, not scored)\"\n[ -n \"${charter_hw:-}\" ] || { echo \"RED: the charter defines no D at all -- the lens is measuring itself, not the corpus\" >&2; exit 1; }\n\necho \"-- bash deploy/d-number-arbiter.sh --check-alloc --\"\nrc=0\nbash deploy/d-number-arbiter.sh --check-alloc || rc=$?\ncase \"$rc\" in\n  0) echo \"  rc=0 PARITY\"; exit 0 ;;\n  1) echo \"  rc=1 DIVERGENT -- RED. A D-number was minted by reading the charter instead of reserving it; it is NAMED as UNRESERVED-MINT above. Reserve it with: bash deploy/d-number-arbiter.sh --allocate-d 1 --for \\\"task-... <who>\\\"\" >&2 ;;\n  2) echo \"  rc=2 UNCHECKED -- RED, NOT A PASS. The arm could not look (missing charter, missing ledger, no SEED row).\" >&2 ;;\n  3) echo \"  rc=3 USAGE -- RED. This step invoked the arbiter wrongly.\" >&2 ;;\n  *) echo \"  rc=$rc UNKNOWN -- RED.\" >&2 ;;\nesac\nexit 1\n",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "ci-failure-issue-filer",
+    "name": "file-ci-failure-issue.sh behaviour matrix",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "file-ci-failure-issue.sh syntax check",
+        "run": "bash -n scripts/file-ci-failure-issue.sh",
+        "env": {}
+      },
+      {
+        "name": "issue-filer matrix (fake gh on PATH, no live GitHub)",
+        "run": "bash scripts/file-ci-failure-issue.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "distribution-harnesses",
+    "name": "install-cli / fetch-prebuilt / site-runtime-install harnesses",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "install-cli.sh syntax check",
+        "run": "bash -n scripts/install-cli.sh",
+        "env": {}
+      },
+      {
+        "name": "install-cli replay matrix (fake curl, temp HOME, no network)",
+        "run": "bash scripts/install-cli.test.sh",
+        "env": {}
+      },
+      {
+        "name": "fetch-prebuilt.sh syntax check",
+        "run": "bash -n scripts/fetch-prebuilt.sh",
+        "env": {}
+      },
+      {
+        "name": "fetch-prebuilt replay matrix (fake curl, no network)",
+        "run": "bash scripts/fetch-prebuilt.test.sh",
+        "env": {}
+      },
+      {
+        "name": "deploy-rebuild.sh syntax check",
+        "run": "bash -n scripts/deploy-rebuild.sh",
+        "env": {}
+      },
+      {
+        "name": "deploy-rebuild behavior matrix (fake mix/systemctl, no service touched)",
+        "run": "bash scripts/deploy-rebuild.test.sh",
+        "env": {}
+      },
+      {
+        "name": "site-runtime-install.sh syntax check",
+        "run": "bash -n deploy/site-runtime-install.sh",
+        "env": {}
+      },
+      {
+        "name": "site-runtime-install replays (fake-only PATH, no box touched)",
+        "run": "bash deploy/site-runtime-install_test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "tooling-harnesses",
+    "name": "reland-check / fleet-run-verdict / paper-reader-audit harnesses",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 is present (reland_check.py is the classifier)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image — add actions/setup-python\" >&2\n  exit 1\n}\npython3 --version\n",
+        "env": {}
+      },
+      {
+        "name": "reland_check damper matrix",
+        "run": "bash tooling/task-obsession/reland_check.test.sh",
+        "env": {}
+      },
+      {
+        "name": "reland-check loud-fail matrix (HTTP error, truncation, zero digest)",
+        "run": "# The sim reads reland-check.yml itself, so PyYAML is load-bearing here.\npython3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml\nbash tooling/task-obsession/reland_loudfail.test.sh\n",
+        "env": {
+          "RELAND_REQUIRE_YAML": "1"
+        }
+      },
+      {
+        "name": "go-path-escape-check.test.sh syntax check",
+        "run": "bash -n scripts/go-path-escape-check.test.sh",
+        "env": {}
+      },
+      {
+        "name": "go-tests' Dispatch job gives a stale head a path verdict and NAMES the missing ratchet",
+        "run": "python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml\nbash scripts/go-path-escape-check.test.sh\n",
+        "env": {}
+      },
+      {
+        "name": "relandcheck-diff-producer.test.sh syntax check",
+        "run": "bash -n scripts/relandcheck-diff-producer.test.sh",
+        "env": {}
+      },
+      {
+        "name": "reland-check.yml's changed-file producer keeps quote-bearing paths and rename sources",
+        "run": "python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml\nbash scripts/relandcheck-diff-producer.test.sh\n",
+        "env": {}
+      },
+      {
+        "name": "main-red-breaker.sh syntax + harness (stub curl + fixtures, no network)",
+        "run": "bash -n scripts/main-red-breaker.sh\nbash scripts/main-red-breaker.test.sh\n",
+        "env": {}
+      },
+      {
+        "name": "stale-tree CI wiring (job, job-level if, concurrency, breaker arm, Decide step)",
+        "run": "python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml\nbash -n scripts/stale-tree-regression-check.sh\nbash scripts/stale-tree-ci-wiring.test.sh\n",
+        "env": {}
+      },
+      {
+        "name": "STEP_NAMES maps match their gate steps (every breaker-wired workflow)",
+        "run": "python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml\nbash -n scripts/breaker-step-names-drift.test.sh\nbash scripts/breaker-step-names-drift.test.sh\n",
+        "env": {}
+      },
+      {
+        "name": "fleet-run verdict matrix",
+        "run": "bash tooling/fleet/fleet-run-verdict-test.sh",
+        "env": {}
+      },
+      {
+        "name": "spend-aggregate arms (orchestrator cap-gate total)",
+        "run": "bash tooling/fleet/spend-aggregate.test.sh",
+        "env": {}
+      },
+      {
+        "name": "audit-paper-readers.sh syntax check",
+        "run": "bash -n scripts/audit-paper-readers.sh",
+        "env": {}
+      },
+      {
+        "name": "gate-map: the composed slice gate still finds __css_check over breakpoint-sweep.mjs",
+        "run": "node --check tooling/gate-map/gate-map.mjs\nnode tooling/gate-map/gate-map.mjs --verify\nnode --test tooling/gate-map/gate-map.test.mjs\n",
+        "env": {}
+      },
+      {
+        "name": "console-slice-gate: an axis-blind CSS slice gate is REFUSED, not merely listed",
+        "run": "node --check scripts/console-slice-gate.mjs\nnode --test scripts/console-slice-gate.test.mjs\n",
+        "env": {}
+      },
+      {
+        "name": "paper-reader audit fixture",
+        "run": "bash scripts/audit-paper-readers-test.sh",
+        "env": {}
+      },
+      {
+        "name": "paper_structure.py audit unit suite",
+        "run": "python3 scripts/paper_structure_test.py -v",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "launcher-boot-selftest",
+    "name": "bin/barkpark up/stop differential selftest",
+    "timeout": 15,
+    "fetch_depth": 0,
+    "node": "",
+    "arms": [
+      {
+        "name": "the pinned pre-fix reference blob is readable",
+        "run": "git cat-file -e 0bff57e4f500e9c9fc99424fa2635ca9988be725:bin/barkpark",
+        "env": {}
+      },
+      {
+        "name": "bin/barkpark syntax check",
+        "run": "bash -n bin/barkpark",
+        "env": {}
+      },
+      {
+        "name": "up/stop selftest (6 differential fixtures, 2 controls, no postgres)",
+        "run": "bash scripts/barkpark-boot-selftest.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "workflow-portability",
+    "name": ".claude/workflows engines load on a machine that is not this one",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "node is present (clauses P/M1/M2/C/W are node-parsed)",
+        "run": "command -v node >/dev/null || {\n  echo \"node missing on the runner image — the workflow engines are parsed with it\" >&2\n  exit 1\n}\nnode --version\n",
+        "env": {}
+      },
+      {
+        "name": "workflow-portability-check.sh syntax check",
+        "run": "bash -n scripts/workflow-portability-check.sh",
+        "env": {}
+      },
+      {
+        "name": "workflow-portability-check.test.sh syntax check",
+        "run": "bash -n scripts/workflow-portability-check.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the tripwire can still LOSE (19 mutation cases, hermetic git fixtures)",
+        "run": "bash scripts/workflow-portability-check.test.sh",
+        "env": {}
+      },
+      {
+        "name": "workflow-module-exec-smoke.sh syntax check",
+        "run": "bash -n scripts/workflow-module-exec-smoke.sh",
+        "env": {}
+      },
+      {
+        "name": "workflow-module-exec-smoke.test.sh syntax check",
+        "run": "bash -n scripts/workflow-module-exec-smoke.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the EXECUTION gate can still LOSE (TDZ + schema-tripwire mutants)",
+        "run": "bash scripts/workflow-module-exec-smoke.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the live corpus LOADS (module scope executes, fenced at first spend)",
+        "run": "bash scripts/workflow-module-exec-smoke.sh",
+        "env": {}
+      },
+      {
+        "name": "the live corpus is portable",
+        "run": "bash scripts/workflow-portability-check.sh .claude/workflows",
+        "env": {}
+      },
+      {
+        "name": "workflow-run-shell-check.sh syntax check",
+        "run": "bash -n scripts/workflow-run-shell-check.sh",
+        "env": {}
+      },
+      {
+        "name": "the run-body gate can still LOSE (13 arms, hermetic fixtures)",
+        "run": "bash scripts/workflow-run-shell-check.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "every workflow run: body parses as shell, and no piped script exits mid-write",
+        "run": "bash scripts/workflow-run-shell-check.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "breaker-measure-precondition",
+    "name": "the breaker measurement's preconditions can still be UNMET",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 is present (judge_mapping's envelope is python3-shaped)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image - add actions/setup-python\" >&2\n  exit 1\n}\npython3 --version\n",
+        "env": {}
+      },
+      {
+        "name": "breaker-measure-precondition.sh syntax check",
+        "run": "bash -n scripts/breaker-measure-precondition.sh",
+        "env": {}
+      },
+      {
+        "name": "breaker-measure-precondition.test.sh syntax check",
+        "run": "bash -n scripts/breaker-measure-precondition.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the precondition detector can still red, go quiet, and REFUSE (6 arms, offline)",
+        "run": "bash scripts/breaker-measure-precondition.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "exit-runner-guard",
+    "name": "deploy-reliability-exit-run.sh mutation matrix",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 is present (the census stub's envelope is python3-shaped)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image — add actions/setup-python\" >&2\n  exit 1\n}\npython3 --version\n",
+        "env": {}
+      },
+      {
+        "name": "deploy-reliability-exit-run.sh syntax check",
+        "run": "bash -n scripts/deploy-reliability-exit-run.sh",
+        "env": {}
+      },
+      {
+        "name": "deploy-reliability-exit-run.test.sh syntax check",
+        "run": "bash -n scripts/deploy-reliability-exit-run.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the exit runner's refusals can still LOSE (96 assertions, offline)",
+        "run": "bash scripts/deploy-reliability-exit-run.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "cloud-static-gz",
+    "name": "cloud-static-gz-guard.sh (uncommitted siblings, both halves wired)",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "cloud-static-gz-guard.sh syntax check",
+        "run": "bash -n scripts/cloud-static-gz-guard.sh",
+        "env": {}
+      },
+      {
+        "name": "the gz guard can still LOSE, then the live tree passes",
+        "run": "bash scripts/cloud-static-gz-guard.sh --selftest\nbash scripts/cloud-static-gz-guard.sh\n",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "pds-hetzner-offline",
+    "name": "pds-live-hetzner-placement-group.sh --selftest-offline",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 is present (the manifest emitter and its validators are python3)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image — the manifest emitter is python3\" >&2\n  exit 1\n}\npython3 --version\n",
+        "env": {}
+      },
+      {
+        "name": "pds-live-hetzner-placement-group.sh syntax check",
+        "run": "bash -n scripts/pds-live-hetzner-placement-group.sh",
+        "env": {}
+      },
+      {
+        "name": "the credential-free arm (ONLY --selftest-offline is CI-able)",
+        "run": "bash scripts/pds-live-hetzner-placement-group.sh --selftest-offline",
+        "env": {}
+      },
+      {
+        "name": "pds-live-hetzner-placement-group_test.sh (offline diagnostic harness, stub bp, no credential)",
+        "run": "bash scripts/pds-live-hetzner-placement-group_test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "task-lease-renew",
+    "name": "task-lease-renew response classification",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 is present (the response reader is python3)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image — task-lease-renew's response reader needs it\" >&2\n  exit 1\n}\npython3 --version\n",
+        "env": {}
+      },
+      {
+        "name": "task-lease-renew.sh + harness syntax check",
+        "run": "bash -n scripts/task-lease-renew.sh\nbash -n scripts/task-lease-renew.test.sh\nbash -n scripts/task-lease-sweep.sh\nbash -n scripts/task-lease-sweep.test.sh\n",
+        "env": {}
+      },
+      {
+        "name": "every response class lands on its verdict (stub curl, no network)",
+        "run": "bash scripts/task-lease-renew.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the 20-min sweep drives the whole chain per open PR (stub curl + stub gh, no network)",
+        "run": "bash scripts/task-lease-sweep.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "landed-mark",
+    "name": "landed-mark.sh selftest + idempotency mutation",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 is present (the row reader and patch builder are python3)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image — landed-mark's row reader needs it\" >&2\n  exit 1\n}\npython3 --version\n",
+        "env": {}
+      },
+      {
+        "name": "landed-mark.sh + harness syntax check",
+        "run": "bash -n scripts/landed-mark.sh\nbash -n scripts/landed-mark.test.sh\n",
+        "env": {}
+      },
+      {
+        "name": "the selftest is green, then its idempotency arm is DISARMED and reds",
+        "run": "bash scripts/landed-mark.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the instrument reproduces the 2026-09-01 finding from its fixture",
+        "run": "set -uo pipefail\nout=\"$(bash scripts/landed-mark.sh --list-open \\\n  --fixture scripts/fixtures/landed-mark/2026-09-01T2000Z)\"\necho \"$out\"\nfor want in task-b68092d5bac508e0 task-9009e2e4f0e5b5b6 task-076ca42e29836029; do\n  grep -q \"$want\" <<<\"$out\" || { echo \"the fixture no longer reproduces $want\" >&2; exit 1; }\ndone\n# The negative direction. A listing that only ever lists is not a\n# measurement: this row was sealed and must be WITHHELD.\nif grep -q task-a4ad081d07a2e203 <<<\"$out\"; then\n  echo \"a SEALED row was listed — the instrument stopped discriminating\" >&2\n  exit 1\nfi\ngrep -q \"scanned 5 commit(s); 3 row(s)\" <<<\"$out\" || {\n  echo \"the scan count moved — the fixture and the instrument disagree\" >&2; exit 1; }\n",
+        "env": {}
+      },
+      {
+        "name": "landed-open-report.sh + harness syntax check",
+        "run": "bash -n scripts/landed-open-report.sh\nbash -n scripts/landed-open-report.test.sh\nbash -n scripts/landed-open-report-schedule.sh\nbash -n scripts/landed-open-report-schedule.test.sh\npython3 -c \"import ast,sys; ast.parse(open('scripts/lib/landed_open_report.py').read())\"\n",
+        "env": {}
+      },
+      {
+        "name": "the READER's selftest is green, then nine arms are DISARMED and red",
+        "run": "bash scripts/landed-open-report.sh --selftest\nbash scripts/landed-open-report.test.sh\n",
+        "env": {}
+      },
+      {
+        "name": "a comment whose CLAIM the repo contradicts, where it cites a PR",
+        "run": "bash scripts/stale-pr-citation-detector.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "the CONSUMER refuses a failed read, and that refusal is load-bearing",
+        "run": "bash scripts/landed-open-report-schedule.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "doc-gates-paths-parity",
+    "name": "doc-gates.yml push.paths == pull_request.paths",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 + PyYAML are present (the workflow is yaml-PARSED, not grepped)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image\" >&2\n  exit 1\n}\npython3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml\npython3 -c \"import yaml; print('PyYAML', yaml.__version__)\"\n",
+        "env": {}
+      },
+      {
+        "name": "doc-gates-paths-parity-check.sh syntax check",
+        "run": "bash -n scripts/doc-gates-paths-parity-check.sh",
+        "env": {}
+      },
+      {
+        "name": "the parity guard can still LOSE, then the live doc-gates.yml passes",
+        "run": "bash scripts/doc-gates-paths-parity-check.sh --selftest\nbash scripts/doc-gates-paths-parity-check.sh\n",
+        "env": {}
+      },
+      {
+        "name": "shell-harnesses.yml push.paths == pull_request.paths (same guard, second target)",
+        "run": "bash scripts/doc-gates-paths-parity-check.sh",
+        "env": {
+          "DOC_GATES_PATHS_PARITY_TARGET": ".github/workflows/shell-harnesses.yml",
+          "DOC_GATES_PATHS_PARITY_PINS": ""
+        }
+      }
+    ]
+  },
+  {
+    "slug": "merge-gate-bridge",
+    "name": "merge-gate-bridge",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "subscription-parity syntax check",
+        "run": "bash -n scripts/github-webhook-subscription-parity.sh",
+        "env": {}
+      },
+      {
+        "name": "liveness syntax check",
+        "run": "bash -n scripts/merge-gate-autostamp-liveness.sh",
+        "env": {}
+      },
+      {
+        "name": "consumed events are subscribed events (code vs App manifest vs runbook)",
+        "run": "bash scripts/github-webhook-subscription-parity.sh",
+        "env": {}
+      },
+      {
+        "name": "parity tripwire mutation proofs (incl. the real pre-fix tree)",
+        "run": "bash scripts/github-webhook-subscription-parity.test.sh",
+        "env": {}
+      },
+      {
+        "name": "liveness detector proofs (hermetic fixtures, no gh/bp/network)",
+        "run": "bash scripts/merge-gate-autostamp-liveness.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "principal-gate-harnesses",
+    "name": "media-smoke / pdf-proof principal-gate matrices",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 is present (the gate parses the receipt with it)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image — the principal gate parses URLs and receipts with it\" >&2\n  exit 1\n}\npython3 --version\n",
+        "env": {}
+      },
+      {
+        "name": "principal-gate library syntax check",
+        "run": "bash -n scripts/lib/principal-gate.sh",
+        "env": {}
+      },
+      {
+        "name": "media-smoke.sh syntax check",
+        "run": "bash -n scripts/media-smoke.sh",
+        "env": {}
+      },
+      {
+        "name": "media-smoke principal gate (4 arms, fake curl, no network)",
+        "run": "bash scripts/media-smoke.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "pdf-efficiency-proof.sh syntax check",
+        "run": "bash -n scripts/pdf-efficiency-proof.sh",
+        "env": {}
+      },
+      {
+        "name": "pdf-efficiency-proof principal gate (5 arms, no scratch boot)",
+        "run": "bash scripts/pdf-efficiency-proof.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "pdf-kill-listener-proof.sh syntax check",
+        "run": "bash -n scripts/pdf-kill-listener-proof.sh",
+        "env": {}
+      },
+      {
+        "name": "pdf-kill-listener-proof principal gate (5 arms, no scratch boot)",
+        "run": "bash scripts/pdf-kill-listener-proof.sh --selftest",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "merge-sweep-review-hold",
+    "name": "an open review holds a PR from the unattended merge sweep",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "jq and python3 are present (both stubs exit 2 without them)",
+        "run": "command -v jq >/dev/null || { echo \"jq missing — the gh stub applies the sweep's own --jq with it\" >&2; exit 1; }\ncommand -v python3 >/dev/null || { echo \"python3 missing — merge-sweep.sh reads title/body with it\" >&2; exit 1; }\njq --version; python3 --version\n",
+        "env": {}
+      },
+      {
+        "name": "merge-sweep.sh syntax check",
+        "run": "bash -n .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh",
+        "env": {}
+      },
+      {
+        "name": "merge-sweep.test.sh syntax check",
+        "run": "bash -n .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the trailer + review-hold decision table (hermetic, no gh)",
+        "run": "ORCH=\"$RUNNER_TEMP\" bash .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "one sweep run REFUSES the reviewed PR and MERGES the identical one",
+        "run": "bash .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "fleet-coordination-harnesses",
+    "name": "already-fixed / branch-owner / pr-overlap harnesses",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 is present (two subjects exit 2 without it)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image — pr-overlap and branch-owner parse timestamps with it\" >&2\n  exit 1\n}\npython3 --version\n",
+        "env": {}
+      },
+      {
+        "name": "already-fixed.sh syntax check",
+        "run": "bash -n scripts/already-fixed.sh",
+        "env": {}
+      },
+      {
+        "name": "already-fixed.test.sh syntax check",
+        "run": "bash -n scripts/already-fixed.test.sh",
+        "env": {}
+      },
+      {
+        "name": "content beats a merged flag (hermetic, git and gh stubbed)",
+        "run": "bash scripts/already-fixed.test.sh",
+        "env": {}
+      },
+      {
+        "name": "branch-owner.sh syntax check",
+        "run": "bash -n scripts/branch-owner.sh",
+        "env": {}
+      },
+      {
+        "name": "branch-owner.test.sh syntax check",
+        "run": "bash -n scripts/branch-owner.test.sh",
+        "env": {}
+      },
+      {
+        "name": "claim-freshness matrix (hermetic, git and gh and bp stubbed)",
+        "run": "bash scripts/branch-owner.test.sh",
+        "env": {}
+      },
+      {
+        "name": "pr-overlap.sh syntax check",
+        "run": "bash -n scripts/pr-overlap.sh",
+        "env": {}
+      },
+      {
+        "name": "pr-overlap.test.sh syntax check",
+        "run": "bash -n scripts/pr-overlap.test.sh",
+        "env": {}
+      },
+      {
+        "name": "a failed gh call must HOLD and print no map",
+        "run": "bash scripts/pr-overlap.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "compose-smoke-dispatcher",
+    "name": "compose-smoke dispatcher covers the census roots",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "harness syntax check",
+        "run": "bash -n scripts/compose-smoke-dispatch.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the dispatcher can fire on every root the census reads",
+        "run": "bash scripts/compose-smoke-dispatch.test.sh",
+        "env": {}
+      },
+      {
+        "name": "Syntax-check the green-arm cause harness",
+        "run": "bash -n scripts/compose-smoke.test.sh",
+        "env": {}
+      },
+      {
+        "name": "Green-arm cause attribution",
+        "run": "bash scripts/compose-smoke.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "workflow-trigger-coverage",
+    "name": "every workflow path filter matches something",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "subject syntax check",
+        "run": "bash -n scripts/workflow-trigger-coverage.sh",
+        "env": {}
+      },
+      {
+        "name": "harness syntax check",
+        "run": "bash -n scripts/workflow-trigger-coverage.test.sh",
+        "env": {}
+      },
+      {
+        "name": "prove the check can lose (hermetic, synthetic trees)",
+        "run": "bash scripts/workflow-trigger-coverage.test.sh",
+        "env": {}
+      },
+      {
+        "name": "no declared path alternative is dead",
+        "run": "bash scripts/workflow-trigger-coverage.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "scheduled-arm-health",
+    "name": "a cron that has never succeeded is visible",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "subject syntax check",
+        "run": "bash -n scripts/scheduled-arm-health.sh",
+        "env": {}
+      },
+      {
+        "name": "harness syntax check",
+        "run": "bash -n scripts/scheduled-arm-health.test.sh",
+        "env": {}
+      },
+      {
+        "name": "prove the reader can lose (hermetic, fixture payloads)",
+        "run": "bash scripts/scheduled-arm-health.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "undispatched-target",
+    "name": "every declared dispatch target actually dispatches",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "subject syntax check",
+        "run": "bash -n scripts/undispatched-target-check.sh",
+        "env": {}
+      },
+      {
+        "name": "prove the check can lose (hermetic, synthetic trees)",
+        "run": "bash scripts/undispatched-target-check.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "no declared target is undispatched",
+        "run": "bash scripts/undispatched-target-check.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "dispatch-selftest",
+    "name": "shell-harnesses dispatcher partition + fixture matrix",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 + PyYAML are present (the workflow is yaml-PARSED, not grepped)",
+        "run": "command -v python3 >/dev/null || {\n  echo \"python3 missing on the runner image\" >&2\n  exit 1\n}\npython3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml\npython3 -c \"import yaml; print('PyYAML', yaml.__version__)\"\n",
+        "env": {}
+      },
+      {
+        "name": "harness + dispatcher syntax check",
+        "run": "bash -n scripts/shell-harnesses-dispatch.test.sh\nbash -n scripts/shell-harness-dispatch.sh\n",
+        "env": {}
+      },
+      {
+        "name": "the dispatcher's own hermetic selftest (8 arms over mktemp git repos)",
+        "run": "# THE DISPATCHER IS A FILE NOW (task-ca50ed283930706a), because an\n# interpolated `run:` scalar is compiled into ONE expression capped at\n# 21000 chars and the roster had 32 bytes of headroom. A file that no\n# arm executes is how that move would trade a byte wall for a silent\n# rot, so it carries its own selftest and this arm runs it.\nbash scripts/shell-harness-dispatch.sh --selftest\n",
+        "env": {}
+      },
+      {
+        "name": "partition invariants + dispatcher fixture matrix (incl. mutation arm)",
+        "run": "bash scripts/shell-harnesses-dispatch.test.sh",
+        "env": {}
+      },
+      {
+        "name": "check-run name census: the workflow publishes exactly the baselined set",
+        "run": "# THE COLLAPSE'S ONLY REAL SAFETY NET. 53 sibling jobs became one\n# matrix job; a matrix job without an explicit `name:` renders\n# `<job> (<leg>)` and would have renamed 53 check runs at once,\n# breaking every pin and watcher that names one. This arm enumerates\n# what the workflow publishes TODAY and diffs it against the committed\n# baseline taken from the pre-collapse tree. Offline: no second ref, no\n# network, so it runs on this shallow checkout.\nbash scripts/shell-harness-name-census.sh --compare-file .github/shell-harness-check-runs.txt\n",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "orphan-harnesses",
+    "name": "orphan harnesses (local-update · pdf-efficiency-proof · refute-on-absence)",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "local-update.test.sh (measured 0 s / 18 assertions)",
+        "run": "bash scripts/local-update.test.sh",
+        "env": {}
+      },
+      {
+        "name": "pdf-efficiency-proof.test.sh (measured 1 s / 22 assertions, hermetic stub)",
+        "run": "bash scripts/pdf-efficiency-proof.test.sh",
+        "env": {}
+      },
+      {
+        "name": "refute-on-absence-capture-log-check.test.sh (measured 4 s / 9 arms)",
+        "run": "bash scripts/refute-on-absence-capture-log-check.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the GATE itself, over the real api/test tree",
+        "run": "bash scripts/refute-on-absence-capture-log-check.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "mix-test-strict",
+    "name": "mix-test-strict.sh refusal + pass-through matrix",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "mix-test-strict.sh syntax check",
+        "run": "bash -n scripts/mix-test-strict.sh",
+        "env": {}
+      },
+      {
+        "name": "refusal + pass-through + mutation matrix (mktemp fixtures, no mix, no database)",
+        "run": "bash scripts/mix-test-strict.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "workflow-owner",
+    "name": "workflow-owner-check.sh named-owner guard",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "syntax",
+        "run": "bash -n scripts/workflow-owner-check.sh\nbash -n scripts/ci-pr-checkrun-floor.sh\n",
+        "env": {}
+      },
+      {
+        "name": "workflow-owner-check.sh --selftest (6 refusal arms + 2 quiet + control)",
+        "run": "bash scripts/workflow-owner-check.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "ci-pr-checkrun-floor.sh --selftest (hermetic: required-context map + the completeness control both ways)",
+        "run": "bash scripts/ci-pr-checkrun-floor.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "LIVE: every workflow off the PR path has a named owner",
+        "run": "bash scripts/workflow-owner-check.sh",
+        "env": {}
+      },
+      {
+        "name": "watcher cadence (reported, not enforced — the watcher is not this file's to fix)",
+        "run": "bash scripts/workflow-owner-check.sh --cadence",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "which-gates",
+    "name": "which-gates.sh gate-list deriver",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "which-gates.sh syntax check",
+        "run": "bash -n scripts/which-gates.sh",
+        "env": {}
+      },
+      {
+        "name": "which-gates.test.sh (both file sets + the renamed-primitive mutation)",
+        "run": "bash scripts/which-gates.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "selftest-wiring-census",
+    "name": "selftest wiring census",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "Prove the census can fail (--selftest)",
+        "run": "bash scripts/selftest-wiring-census.sh --selftest",
+        "env": {}
+      },
+      {
+        "name": "The census over this tree",
+        "run": "bash scripts/selftest-wiring-census.sh --list",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "registry-impact-check",
+    "name": "registry impact check harness",
+    "timeout": 15,
+    "fetch_depth": 0,
+    "node": "",
+    "arms": [
+      {
+        "name": "registry-impact-check harness (two historical replays + controls)",
+        "run": "bash scripts/registry-impact-check.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "claim-health",
+    "name": "claim-health resolves the claim by shape (16 arms)",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "claim-health.sh syntax check",
+        "run": "bash -n scripts/ledger/claim-health.sh",
+        "env": {}
+      },
+      {
+        "name": "claim-health-selftest.sh syntax check",
+        "run": "bash -n scripts/ledger/claim-health-selftest.sh",
+        "env": {}
+      },
+      {
+        "name": "the suite (16 arms: real shape, doc envelope, legacy compat, 2 disjoint mutations, 3 controls)",
+        "run": "bash scripts/ledger/claim-health-selftest.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "exit-laundering-sweep",
+    "name": "exit-laundering predicate (planted controls, both directions)",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "exit-laundering-sweep.sh syntax check",
+        "run": "bash -n scripts/exit-laundering-sweep.sh",
+        "env": {}
+      },
+      {
+        "name": "Prove the predicate can lose (--selftest)",
+        "run": "bash scripts/exit-laundering-sweep.sh --selftest",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "deploy-receipt-honesty",
+    "name": "deploy receipts descend from a measurement (or refuse)",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "the three subjects parse",
+        "run": "bash -n Makefile 2>/dev/null || true\nbash -n .githooks/post-merge\nbash -n scripts/deploy-rebuild.sh\n",
+        "env": {}
+      },
+      {
+        "name": "deploy-receipt-failure.test.sh syntax check",
+        "run": "bash -n scripts/deploy-receipt-failure.test.sh",
+        "env": {}
+      },
+      {
+        "name": "make deploy / post-merge / deploy-rebuild.sh receipt matrix (hermetic: stub PATH, no network, no build, no service)",
+        "run": "bash scripts/deploy-receipt-failure.test.sh",
+        "env": {}
+      },
+      {
+        "name": "merged-at-committer-tripwire.sh syntax check",
+        "run": "bash -n scripts/merged-at-committer-tripwire.sh",
+        "env": {}
+      },
+      {
+        "name": "merged-at-committer-tripwire.test.sh syntax check",
+        "run": "bash -n scripts/merged-at-committer-tripwire.test.sh",
+        "env": {}
+      },
+      {
+        "name": "merged_at's NULL arm can still LOSE (30 cases, incl. the mutated committer literal)",
+        "run": "bash scripts/merged-at-committer-tripwire.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "bp-curl",
+    "name": "bp-curl.sh 429 backoff matrix",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "python3 is present (the fake server is python3; absence would be exit 2)",
+        "run": "command -v python3 >/dev/null || { echo \"::error::python3 is not on PATH; the bp-curl harness cannot run its fake server\"; exit 1; }\n",
+        "env": {}
+      },
+      {
+        "name": "bp-curl.sh syntax check",
+        "run": "bash -n scripts/lib/bp-curl.sh",
+        "env": {}
+      },
+      {
+        "name": "bp-curl.test.sh syntax check",
+        "run": "bash -n scripts/lib/bp-curl.test.sh",
+        "env": {}
+      },
+      {
+        "name": "bp-curl backoff matrix (48 assertions, fake loopback server, ~12s of measured sleeps)",
+        "run": "bash scripts/lib/bp-curl.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "place-directory-install",
+    "name": "place-directory install.sh read-back claims",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "install.sh syntax check (POSIX sh)",
+        "run": "sh -n templates/place-directory/install.sh",
+        "env": {}
+      },
+      {
+        "name": "harness syntax check",
+        "run": "bash -n scripts/place-directory-install.test.sh",
+        "env": {}
+      },
+      {
+        "name": "place-directory-install.test.sh (27 assertions, 4 arms incl. the mutation)",
+        "run": "bash scripts/place-directory-install.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "sunset-route-consumers",
+    "name": "sunset-route health consumers survive 2027-01-01",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "harness syntax check",
+        "run": "bash -n scripts/sunset-route-consumers.test.sh",
+        "env": {}
+      },
+      {
+        "name": "sunset-route-consumers.test.sh (11 assertions incl. both fixture controls, hermetic loopback server)",
+        "run": "bash scripts/sunset-route-consumers.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "main-workflow-rollup",
+    "name": "every workflow's main verdict (roll-up denominator + grace window)",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "subject syntax check",
+        "run": "bash -n scripts/main-workflow-rollup.sh",
+        "env": {}
+      },
+      {
+        "name": "harness syntax check",
+        "run": "bash -n scripts/main-workflow-rollup.test.sh",
+        "env": {}
+      },
+      {
+        "name": "both directions on fixtures + the three named mutations (staleness, roster, spec label)",
+        "run": "bash scripts/main-workflow-rollup.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "migration-version-collision",
+    "name": "migration version collision matrix",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "migration-version-collision-check.sh syntax check",
+        "run": "bash -n scripts/migration-version-collision-check.sh",
+        "env": {}
+      },
+      {
+        "name": "migration-version-collision-check.test.sh syntax check",
+        "run": "bash -n scripts/migration-version-collision-check.test.sh",
+        "env": {}
+      },
+      {
+        "name": "collision mutation matrix (plant two files on one version, red naming both; remove, green)",
+        "run": "bash scripts/migration-version-collision-check.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the Cloud gate still runs this check BEFORE mix test",
+        "run": "set -euo pipefail\nf=.github/workflows/cloud.yml\ncall=$(grep -n 'migration-version-collision-check.sh' \"$f\" | cut -d: -f1 | sed -n '1p')\nif [ -z \"$call\" ]; then\n  echo \"::error::$f no longer invokes scripts/migration-version-collision-check.sh\"\n  exit 1\nfi\ntest_line=$(grep -n '^        run: mix test$' \"$f\" | cut -d: -f1 | sed -n '1p')\nif [ -z \"$test_line\" ]; then\n  echo \"::error::$f has no 'run: mix test' step; this assertion cannot bind and refuses rather than passing\"\n  exit 1\nfi\nif [ \"$call\" -ge \"$test_line\" ]; then\n  echo \"::error::the collision check (line $call) runs at or AFTER mix test (line $test_line); a silent no-op would reach a green suite\"\n  exit 1\nfi\necho \"cloud.yml: collision check at line $call, mix test at line $test_line — ordered correctly\"\n",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "scratchpad-reaper",
+    "name": "scratchpad-reaper.sh skip-gate + floor matrix",
+    "timeout": 15,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "scratchpad-reaper.sh syntax check",
+        "run": "bash -n scripts/scratchpad-reaper.sh",
+        "env": {}
+      },
+      {
+        "name": "scratchpad-reaper.test.sh syntax check",
+        "run": "bash -n scripts/scratchpad-reaper.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the reaper's skip gates can still LOSE (49 checks, 3 differential controls, mktemp git fixtures)",
+        "run": "bash scripts/scratchpad-reaper.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the free-space guard the reaper delegates its verdict to still bites",
+        "run": "bash scripts/disk-headroom-guard.sh --self-test",
+        "env": {}
+      },
+      {
+        "name": "--floor refuses ON THIS RUNNER above its measured free space, and passes below it",
+        "run": "# `set +e` is LOAD-BEARING and its absence failed this step on\n# 2026-09-13: GitHub runs every `run:` body as `bash -e {0}`, so the\n# deliberate non-zero REFUSAL below aborted the step before\n# `rc_refuse=$?` could read it — the step reporting a failure for\n# doing exactly what it was asserting. `set -uo pipefail` does not\n# cancel an inherited -e.\nset +e\nset -uo pipefail\navail_gb=$(df -P -k . | awk 'NR==2 {print int($4/1024/1024)}')\ncase \"$avail_gb\" in\n  ''|*[!0-9]*)\n    echo \"::error::CANNOT READ — df gave no GiB figure for the workspace; refusing to report a floor verdict it did not measure\"\n    exit 1 ;;\nesac\nabove=$((avail_gb + 1000))\nbash scripts/scratchpad-reaper.sh --floor \"$above\" .\nrc_refuse=$?\nbash scripts/scratchpad-reaper.sh --floor 0 .\nrc_pass=$?\necho \"measured: ${avail_gb} GiB free · floor ${above} GiB -> rc=${rc_refuse} · floor 0 GiB -> rc=${rc_pass}\"\nif [ \"$rc_refuse\" != \"2\" ]; then\n  echo \"::error::a floor above the measured free space returned $rc_refuse, not the REFUSED code 2\"\n  exit 1\nfi\nif [ \"$rc_pass\" != \"0\" ]; then\n  echo \"::error::a floor of 0 GiB returned $rc_pass, not OK\"\n  exit 1\nfi\necho \"the floor is distinguishable: REFUSED=2, OK=0, on the same path.\"\n",
+        "env": {}
+      }
+    ]
+  },
+  {
+    "slug": "orchestrate-launch-recipe",
+    "name": "orchestrate-tasks launch recipe + per-session lane files",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "harness + helper syntax check",
+        "run": "bash -n scripts/orchestrate-launch-recipe.test.sh\nbash -n .claude/skills/orchestrate-tasks/helpers/session-files.sh\nbash -n .claude/skills/orchestrate-tasks/helpers/launch-headless-builder.sh\n",
+        "env": {}
+      },
+      {
+        "name": "orchestrate-launch-recipe.test.sh (21 assertions incl. the env-var mutation)",
+        "run": "bash scripts/orchestrate-launch-recipe.test.sh",
+        "env": {}
+      }
+    ]
+    },
+  {
+    "slug": "echo-json-parse",
+    "name": "echo-into-jq corruption + the session-skill recipe guard",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "echo-json-parse-guard.test.sh syntax check",
+        "run": "bash -n scripts/echo-json-parse-guard.test.sh",
+        "env": {}
+      },
+      {
+        "name": "echo vs printf over a frozen captured bp row, per shell (hermetic, no bp, no network)",
+        "run": "bash scripts/echo-json-parse-guard.test.sh",
+        "env": {}
+      }
+    ]
+  }
+]

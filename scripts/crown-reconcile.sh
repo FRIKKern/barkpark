@@ -626,7 +626,11 @@ SERVING_AT_OVERRIDE=""
 # probe is blind to it. A live run reads the real clock at the real instant.
 ROWS_AT_OVERRIDE=""
 
-WORK="$(mktemp -d 2>/dev/null || mktemp -d -t crown-reconcile)"
+# PORTABLE mktemp: a `-t NAME` template with no XXXXXX is a BSD-only form; GNU
+# coreutils (every ubuntu CI runner) refuses it with "too few X's in template".
+# The explicit-path form below behaves identically on both.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/crown-reconcile.XXXXXX")" || {
+  echo "crown-reconcile: REFUSING — mktemp -d failed; no work directory" >&2; exit 2; }
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 
@@ -1014,15 +1018,43 @@ if [ -z "$CID" ]; then
   if [ "$CP_SEEN" = "1" ]; then echo "CR_ERROR=empty_worker_token"; else echo "CR_ERROR=no_control_plane_container"; fi
   exit 0
 fi
-CODE="$(curl -s -o /tmp/cr-body.json -w '%{http_code}' --max-time 30 -H "authorization: Bearer $WT" "https://barkpark.cloud/v1/deliveries?$QS")"
+# THE BODY FILE IS PRIVATE TO THIS INVOCATION, AND THAT IS THE WHOLE POINT.
+# This used to be the fixed path `/tmp/cr-body.json` on the control plane, and
+# that one line manufactured FALSE `BEHIND` accusations for months. The reader
+# is driven from crown-reconcile.yml, whose concurrency group is per-SHA on main
+# (`crown-reconcile-${github.sha}`), so several runs reconcile AT ONCE — on
+# 2026-09-16 five of them overlapped inside three minutes — and each one makes
+# ~55 sequential `ssh root@CP_HOST` reads that all landed on the SAME file:
+#
+#   reader A   curl -o /tmp/cr-body.json      (writes the body for sha X)
+#   reader B   curl -o /tmp/cr-body.json      (truncates it, writes sha Y)
+#   reader A   tr -d '\n' < /tmp/cr-body.json (reads sha Y's body, or a
+#                                              half-written file, or nothing
+#                                              at all if B's `rm -f` won)
+#
+# A body for sha Y is valid JSON and HTTP 200, so nothing upstream noticed: the
+# BEHIND arm selected `.sha == X`, found none, and printed "delivered, never
+# recorded" about a sha the crown had held for HOURS. Five main-tip reds on
+# 2026-09-16 (runs 35150456276, 35150479314, 35152425747, 35152522140,
+# 35152536095) each accused a DIFFERENT sha, and every one of the five was in
+# the crown at the time it was accused — 3635e345d (recorded 13:03:07Z),
+# d03949d90 (13:41:09Z), 9dbd4ab9c (07:56:39Z), f703ffa87 (16:02:04Z) and
+# baf2c2538 (19:25:04Z). That is why the verdict "cleared itself" three minutes
+# later with nothing fixed: the next run's reads did not collide.
+#
+# `mktemp` is the fix, with a PID fallback for a box that has none. The trap
+# removes it on EVERY exit path, so the reader still leaves nothing behind —
+# but it can only ever remove its OWN file, which is the property the fixed path
+# did not have.
+BODY="$(mktemp /tmp/cr-body.XXXXXXXX 2>/dev/null || echo "/tmp/cr-body.$$.json")"
+trap 'rm -f "$BODY"' EXIT
+CODE="$(curl -s -o "$BODY" -w '%{http_code}' --max-time 30 -H "authorization: Bearer $WT" "https://barkpark.cloud/v1/deliveries?$QS")"
 echo "CR_HTTP=$CODE"
 if [ "$CODE" = "200" ]; then
   echo "CR_VIA=route"
-  echo "CR_BODY=$(tr -d '\n' < /tmp/cr-body.json)"
-  rm -f /tmp/cr-body.json
+  echo "CR_BODY=$(tr -d '\n' < "$BODY")"
   exit 0
 fi
-rm -f /tmp/cr-body.json
 # A 401/403 HERE IS THE VERDICT, NOT A DETOUR. GET /v1/deliveries takes
 # `require_user_or_pat_or_worker` + `require_ability("read")` since PR #14979,
 # and WORKER_TOKEN — the only credential deploy.yml's crown step carries, and the
@@ -1039,6 +1071,46 @@ if [ "$CODE" = "401" ] || [ "$CODE" = "403" ]; then
 fi
 echo "CR_ERROR=http_$CODE"
 REMOTE
+}
+
+# THE ANSWER MUST ANSWER THE QUESTION THAT WAS ASKED, and a body that cannot be
+# parsed is an UNREAD rather than an empty crown. Both halves of that sentence
+# were missing, and their absence is what turned a temp-file collision on the
+# control plane into five FALSE main-tip reds on 2026-09-16 (see the remote
+# reader's own note above): a 200 carrying ANOTHER sha's rows sailed through
+# here, the BEHIND arm selected `.sha == <the sha we asked about>`, found none,
+# and printed "delivered, never recorded" about a row the crown had held for
+# hours. The route echoes the sha it filtered on in every body it returns
+# (cloud/lib/barkpark_cloud/web/router.ex, `GET /v1/deliveries` answers
+# `%{deliveries:, count:, sha:, limit:, scope:}`), so the identity is free to
+# check and there is no excuse for reading an answer to someone else's question.
+#
+# It REFUSES, it does not tolerate: a mismatch goes through reason() into rc 2
+# SILENCE. A read that did not happen must never be able to buy either a green
+# or an accusation.
+#
+# The fixture reader is not put through this: its envelope is synthesised here
+# from a bare array and carries no `.sha` to compare, so the check is applied on
+# the two transports that talk to the live route and to nothing else.
+answers_the_question() {
+  local qs="$1" out="$2" asked got shape
+  shape="$(jq -r 'if (.deliveries | type) == "array" then "array" else "not-array" end' "$out" 2>/dev/null)"
+  if [ "$shape" != "array" ]; then
+    reason "the crown's answer to ?$qs is not a readable delivery envelope — \`.deliveries\` is ${shape:-unparseable}, not an array. A body this script cannot parse is an UNREAD, never zero rows"
+    return 2
+  fi
+  case "$qs" in
+    sha=*)
+      asked="${qs#sha=}"
+      asked="${asked%%&*}"
+      got="$(jq -r '.sha // ""' "$out" 2>/dev/null)"
+      if [ "$got" != "$asked" ]; then
+        reason "asked the crown ?$qs and the body came back stamped sha '${got:-<none>}' — the answer does not answer the question, so it is REFUSED rather than read as zero rows for $asked. This is the crosstalk shape that produced five false BEHIND accusations on 2026-09-16"
+        return 2
+      fi
+      ;;
+  esac
+  return 0
 }
 
 # crown_read <query-string> <out-file> -> 0 read / 2 could not read
@@ -1061,6 +1133,10 @@ crown_read() {
         return 2
       fi
       cp "$WORK/body.json" "$out"
+      if ! answers_the_question "$qs" "$out"; then
+        READS_FAILED=$((READS_FAILED + 1))
+        return 2
+      fi
       READS_ROUTE=$((READS_ROUTE + 1))
       return 0
       ;;
@@ -1101,6 +1177,10 @@ crown_read() {
       if [ "$via" != "route" ]; then
         READS_FAILED=$((READS_FAILED + 1))
         reason "the crown read for ?$qs came back claiming reader '${via:-<none>}' (HTTP ${http:-<none>}) — since PR #14979 the WORKER principal reads GET /v1/deliveries directly and this script has NO substitute reader; a body from anything else is refused, not counted clean"
+        return 2
+      fi
+      if ! answers_the_question "$qs" "$out"; then
+        READS_FAILED=$((READS_FAILED + 1))
         return 2
       fi
       READS_ROUTE=$((READS_ROUTE + 1))
@@ -1481,7 +1561,19 @@ while IFS=' ' read -r id sha at; do
   fi
   if crown_read "sha=$sha" "$WORK/rows-$sha.json"; then
     n="$(jq --arg sha "$sha" '[.deliveries[] | select(.sha == $sha)] | length' "$WORK/rows-$sha.json" 2>/dev/null)"
-    [ -n "$n" ] || n=0
+    # AN UNCOUNTABLE BODY IS NOT A CROWN WITH NO ROW. This line used to read
+    # `[ -n "$n" ] || n=0` — a jq that errored, on a body that was not the
+    # envelope it expected, was silently rewritten into "the crown holds nothing
+    # for this sha" and went straight out as `delivered, never recorded`. That is
+    # an accusation manufactured out of a failure to read, the exact inversion
+    # this script refuses everywhere else. crown_read's `answers_the_question`
+    # now catches the shape upstream; this is the second door on the same room,
+    # and it lands in BEHIND_UNREADABLE (rc 2 SILENCE) rather than in BEHIND.
+    if [ -z "$n" ]; then
+      BEHIND_UNREADABLE=$((BEHIND_UNREADABLE + 1))
+      reason "the crown's rows for $sha (delivered by run $id) could not be COUNTED — the body parsed as an envelope but the count failed, so this run is NOT counted as reconciled and is NOT accused either"
+      continue
+    fi
     if [ "$n" -eq 0 ]; then
       BEHIND=$((BEHIND + 1))
       printf '%s %s\n' "$sha" "$id" >> "$WORK/behind.txt"

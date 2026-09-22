@@ -32,6 +32,10 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
   use ExUnit.Case, async: false
 
   alias Barkpark.Application, as: App
+  alias Barkpark.BootModeSandbox
+
+  # The api/ project root, for the source-reading guards below.
+  @test_root Path.expand(Path.join([__DIR__, "..", ".."]))
 
   # Stand-ins for the three list ARGUMENTS `:one_shot` drops. Deliberately
   # recognisable atoms rather than real child specs: what is asserted is that
@@ -160,69 +164,846 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
 
   describe "boot_mode/0 knows :one_shot" do
     test ":one_shot is an accepted mode, and a typo is still refused" do
-      # RESTORE BY DELETION when it was unset. `put_env(:boot_mode, nil)` is NOT
-      # the same state as "never set": `Barkpark.ApplicationBootModeTest`
-      # asserts `fetch_env(:barkpark, :boot_mode) == :error`, and a nil restore
-      # reddened it from this file. `fetch_env` is what distinguishes the two.
-      original = Application.fetch_env(:barkpark, :boot_mode)
+      # THE WRITE IS SANDBOXED, NOT MERELY UNDONE (task-086261728f14c078).
+      # This test is the ONLY in-VM writer of `:barkpark, :boot_mode` in
+      # api/test, and on 2026-09-18 its value reached
+      # `Barkpark.ApplicationBootModeTest` 43 modules later and reddened two
+      # assertions there. The previous guard — `async: false` plus an `on_exit`
+      # keyed off `fetch_env` — was already in place when that happened.
+      #
+      # `Barkpark.BootModeSandbox.sandboxed/1` restores in a `try … after`,
+      # synchronously, in this process, and then ASSERTS the key came back. Its
+      # moduledoc carries the measurement for why both sides must be
+      # `persistent: true`. There is no raw `Application.put_env` here any more,
+      # and the predicate guard below makes that a property of the TREE rather
+      # than of this file.
+      BootModeSandbox.sandboxed(fn set ->
+        set.(:one_shot)
+        assert App.boot_mode() == :one_shot
 
-      on_exit(fn ->
-        case original do
-          {:ok, mode} -> Application.put_env(:barkpark, :boot_mode, mode)
-          :error -> Application.delete_env(:barkpark, :boot_mode)
-        end
+        set.(:one_shot_typo)
+        assert_raise ArgumentError, fn -> App.boot_mode() end
       end)
 
-      Application.put_env(:barkpark, :boot_mode, :one_shot)
-      assert App.boot_mode() == :one_shot
+      # The escape this whole row is about, asserted at its source: by the time
+      # the writer's test returns, the node-global key is back. A reader that
+      # runs next cannot see `:one_shot`.
+      assert BootModeSandbox.current() == :error,
+             "the sandbox returned with :boot_mode still set — this is the leak"
+    end
 
-      Application.put_env(:barkpark, :boot_mode, :one_shot_typo)
-      assert_raise ArgumentError, fn -> App.boot_mode() end
+    test "the sandbox restores even when the block RAISES" do
+      # A restore that only runs on the happy path is not a restore. The
+      # `on_exit` this replaces did run on failure; a `try … after` must too, or
+      # the swap is a downgrade. Asserted, not assumed.
+      assert BootModeSandbox.current() == :error
+
+      assert_raise RuntimeError, "boom", fn ->
+        BootModeSandbox.sandboxed(fn set ->
+          set.(:one_shot)
+          raise "boom"
+        end)
+      end
+
+      assert BootModeSandbox.current() == :error,
+             "the sandbox leaked :boot_mode when its block raised"
+    end
+
+    test "a PRE-EXISTING value is put back, not deleted" do
+      # The restore is `fetch_env`-shaped for a reason: `put_env(:boot_mode, nil)`
+      # is NOT the same state as "never set", and the reader module asserts
+      # `fetch_env(...) == :error` for an ordinary boot. Both directions are
+      # measured here, on the same helper, so a restore-by-deletion that is
+      # correct for one and wrong for the other cannot pass.
+      assert BootModeSandbox.current() == :error
+
+      BootModeSandbox.sandboxed(fn set ->
+        set.(:seed)
+
+        # Inside a sandbox whose `original` is {:ok, :seed}: the inner block
+        # must be put BACK to :seed, not deleted.
+        BootModeSandbox.sandboxed(fn inner -> inner.(:one_shot) end)
+
+        assert BootModeSandbox.current() == {:ok, :seed},
+               "a nested sandbox deleted a value it was supposed to restore"
+      end)
+
+      assert BootModeSandbox.current() == :error,
+             "the outer sandbox left :boot_mode behind"
+    end
+
+    test "absent/1 ESTABLISHES the key's absence rather than observing it" do
+      BootModeSandbox.sandboxed(fn set ->
+        set.(:one_shot)
+
+        # The state the 2026-09-18 readers were in when they reddened: the node
+        # holds :one_shot. `absent/1` must not care.
+        assert BootModeSandbox.absent(fn -> App.boot_mode() end) == :full
+
+        assert BootModeSandbox.current() == {:ok, :one_shot},
+               "absent/1 did not put back the value it displaced"
+      end)
+
+      assert BootModeSandbox.current() == :error
     end
   end
 
-  describe "the one-shot mix tasks use it" do
-    # The four tasks the row names. A source-level guard, because no `mix test`
-    # run can observe what `Mix.Task.run("app.start")` does — the test node
-    # always has the full tree up. This is the arm that keeps the defect from
-    # reopening under a green suite.
-    @one_shot_tasks ~w(
-      barkpark.edges.backfill
-      barkpark.media.backfill
-      barkpark.paper.backfill_block_ids
-      barkpark.paper.composition_migrate
-    )
+  describe "the restore is PERSISTENT, and that is a measured requirement" do
+    # A NEGATIVE RESULT, STATED RATHER THAN HIDDEN (task-086261728f14c078):
+    # dropping `persistent: true` from the sandbox's restore and running this
+    # whole file leaves it GREEN — 31 tests, 0 failures, measured 2026-09-20.
+    # No `mix test` run loads `:barkpark` again, so the resurrection never
+    # happens in-VM and no assertion about `:barkpark` can see it.
+    #
+    # An unmeasurable requirement decays into a style preference and gets
+    # "simplified" away. So it is measured HERE, on a throwaway application, on
+    # the only thing that can actually show it: the OTP semantics themselves.
+    @probe_app :bp_boot_mode_persistence_probe
 
-    test "each names Barkpark.OneShot.boot!() and none calls app.start" do
-      for task <- @one_shot_tasks do
-        path =
-          Path.join([__DIR__, "..", "..", "lib", "mix", "tasks", task <> ".ex"]) |> Path.expand()
+    defp probe_spec do
+      {:application, @probe_app,
+       [
+         {:description, ~c"boot-mode persistence probe"},
+         {:vsn, ~c"1"},
+         {:modules, []},
+         {:registered, []},
+         {:applications, []},
+         {:env, []}
+       ]}
+    end
 
-        assert File.regular?(path),
-               "#{task} no longer lives at #{path} — this guard is not reading it"
+    setup do
+      on_exit(fn ->
+        Application.delete_env(@probe_app, :k, persistent: true)
+        Application.unload(@probe_app)
+      end)
 
-        source = File.read!(path)
+      :ok
+    end
 
-        assert source =~ "Barkpark.OneShot.boot!()",
-               "#{task} does not boot through Barkpark.OneShot — it will start the full tree"
+    test "a NON-persistent delete does not retract a PERSISTENT write — it is resurrected by load" do
+      Application.put_env(@probe_app, :k, :one_shot, persistent: true)
 
-        refute source =~ ~S<Mix.Task.run("app.start")>,
-               "#{task} is back on app.start: on a live box its endpoint binds the serving slot's port"
+      # Non-persistent delete, the shape the restore would have without the
+      # flag. It LOOKS clean...
+      Application.delete_env(@probe_app, :k)
+
+      assert Application.fetch_env(@probe_app, :k) == :error,
+             "precondition: the delete must read as clean, or this proves nothing"
+
+      # ...until the next load re-applies OTP's own persistent record.
+      :application.load(probe_spec())
+
+      assert Application.fetch_env(@probe_app, :k) == {:ok, :one_shot},
+             "the persistent record was NOT resurrected — OTP's semantics changed and " <>
+               "the `persistent: true` on the sandbox's restore can be reconsidered"
+
+      Application.unload(@probe_app)
+    end
+
+    test "control: a PERSISTENT delete does retract it, and load brings nothing back" do
+      # The arm that makes the one above a statement about PERSISTENCE rather
+      # than about `load/1` inventing values. Same writes, same load, one flag
+      # different, opposite answer.
+      Application.put_env(@probe_app, :k, :one_shot, persistent: true)
+      Application.delete_env(@probe_app, :k, persistent: true)
+
+      assert Application.fetch_env(@probe_app, :k) == :error
+
+      :application.load(probe_spec())
+
+      assert Application.fetch_env(@probe_app, :k) == :error,
+             "a persistent delete left a record behind"
+
+      Application.unload(@probe_app)
+    end
+
+    test "the sandbox's every :boot_mode write carries persistent: true" do
+      # The source-level half. `Barkpark.OneShot.boot!/0` — the PRODUCTION
+      # writer — is persistent, so a restore that is not persistent cannot undo
+      # what it does. Read off disk, so a future edit that drops the flag reds
+      # here instead of in a nightly three weeks later.
+      source = File.read!(Path.join(@test_root, "test/support/boot_mode_sandbox.ex"))
+
+      writes =
+        ~r/Application\.(?:put_env|delete_env)\(:barkpark, :boot_mode[^\n]*/
+        |> Regex.scan(source)
+        |> Enum.map(&hd/1)
+
+      # Control: the scan found the writes at all. Without this an empty list
+      # passes the loop below on nothing.
+      assert length(writes) >= 3,
+             "found #{length(writes)} :boot_mode write(s) in the sandbox — the scan is blind"
+
+      for w <- writes do
+        assert w =~ "persistent: true",
+               "a sandbox write of :boot_mode is not persistent, so it cannot undo " <>
+                 "Barkpark.OneShot.boot!/0: #{w}"
+      end
+    end
+  end
+
+  describe "no test outside the sandbox may write :boot_mode" do
+    # A PREDICATE OVER THE TREE, not a fix to one file (the same shape as the
+    # app.start guard below, and for the same reason). The 2026-09-18 escape
+    # needed exactly one raw `Application.put_env(:barkpark, :boot_mode, …)` in
+    # a test, and the NEXT one someone writes would be born outside any fix
+    # applied here. The rule is: `Barkpark.BootModeSandbox` is the only module
+    # under api/test that writes the key.
+    @sandbox "test/support/boot_mode_sandbox.ex"
+    @write_re ~r/Application\.(put_env|delete_env)\(\s*:barkpark\s*,\s*:boot_mode/
+
+    defp test_sources do
+      Path.wildcard(Path.join(@test_root, "test/**/*.{ex,exs}"))
+      |> Enum.map(&Path.relative_to(&1, @test_root))
+      |> Enum.sort()
+    end
+
+    # COMMENTS ARE NOT CODE. Three files in this walk DISCUSS the write in
+    # prose — including this one, two lines above — and a predicate that counts
+    # prose reports a violation nobody committed, gets waived, and the waiver
+    # becomes the policy. Strip `#`-leading lines before matching, exactly as
+    # the app.start guard's sibling does ("the parser reads commands, not
+    # prose"). The control test below is what proves the stripping did not also
+    # blind the match.
+    defp writes_boot_mode?(rel) do
+      @test_root
+      |> Path.join(rel)
+      |> File.read!()
+      |> String.split("\n")
+      |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+      |> Enum.join("\n")
+      |> String.match?(@write_re)
+    end
+
+    test "the walk is reading a real, populated test tree" do
+      # PRECONDITION. Every assertion below is about a SET, and an empty set
+      # satisfies all of them vacuously — a moved directory would otherwise turn
+      # this describe block green.
+      files = test_sources()
+
+      assert length(files) > 100,
+             "only #{length(files)} test source(s) under #{@test_root}/test — the walk is blind"
+
+      assert @sandbox in files, "#{@sandbox} is not in the walk"
+      assert "test/barkpark/application_one_shot_boot_mode_test.exs" in files
+    end
+
+    test "control: the pattern finds a write where one really is" do
+      # An absence assertion needs a positive specimen, or it can pass because
+      # the regex is wrong rather than because the tree is clean.
+      assert writes_boot_mode?(@sandbox),
+             "the sandbox itself no longer writes :boot_mode — the predicate below measures nothing"
+
+      refute writes_boot_mode?("test/barkpark/application_boot_mode_test.exs"),
+             "the reader module writes :boot_mode directly again"
+
+      # The comment-stripping arm, measured on a file that NAMES the call in
+      # prose and does not make it. Without this the control above passes while
+      # the predicate reads documentation.
+      refute writes_boot_mode?("test/barkpark/application_one_shot_boot_mode_test.exs"),
+             "this file's PROSE is being read as a write — the comment stripping is broken"
+    end
+
+    test "Barkpark.BootModeSandbox is the ONLY writer under api/test" do
+      writers = Enum.filter(test_sources(), &writes_boot_mode?/1)
+
+      assert writers == [@sandbox],
+             """
+             these test sources write the NODE-GLOBAL `:barkpark, :boot_mode` directly:
+
+                 #{writers |> List.delete(@sandbox) |> Enum.join("\n    ")}
+
+             That value is ONE value for the WHOLE NODE. A direct write makes an
+             unrelated module fail later, chosen by the ExUnit seed — which is
+             how elixir-nightly 35323296944 reddened two assertions in
+             application_boot_mode_test.exs on 2026-09-18.
+
+             Go through `Barkpark.BootModeSandbox.sandboxed/1` (or `absent/1`),
+             which restores in a `try … after` and asserts the restore landed.
+             """
+    end
+  end
+
+  describe "a test that BOOTS a one-shot mix task must route it through the sandbox" do
+    # THE DEFECT THIS CLOSES, and it is the one the row was filed for.
+    #
+    # The describe above asks "does any test source WRITE :boot_mode?" and the
+    # answer was, honestly, no — and the key still leaked. PR #19480's own
+    # end-of-suite probe caught it in run 35509163543: `value left behind:
+    # :one_shot`, on a tree where every raw write already went through the
+    # sandbox.
+    #
+    # The writer is `Barkpark.OneShot.boot!/0` (api/lib), whose first line is a
+    # PERSISTENT put_env of :one_shot and which nothing in api/lib puts back —
+    # an operator one-shot exits, so it never needs to. Seven `mix barkpark.*`
+    # tasks call it. A test that calls such a task's `run/1` is therefore a
+    # writer of the node-global key WITHOUT TYPING A WRITE, which is exactly why
+    # a grep of api/test read the tree as clean.
+    #
+    # DERIVED, NOT LISTED. The task set is read out of api/lib on every run, so
+    # a task that starts calling `OneShot.boot!/0` tomorrow is in scope the same
+    # day. A hardcoded list would have been correct on 2026-09-20 and stale by
+    # the next one.
+    @one_shot_boot_re ~r/Barkpark\.(OneShot\.boot!|Release\.seed_boot!)\(\)/
+    @sandbox_marker "BootModeSandbox"
+
+    defp strip_comments(source) do
+      source
+      |> String.split("\n")
+      |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+      |> Enum.join("\n")
+    end
+
+    # Every `Mix.Tasks.…` module under api/lib whose CODE boots a narrowed tree.
+    defp one_shot_task_modules do
+      Path.join(@test_root, "lib/mix/tasks/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.map(&{&1, strip_comments(File.read!(&1))})
+      |> Enum.filter(fn {_path, src} -> src =~ @one_shot_boot_re end)
+      |> Enum.flat_map(fn {_path, src} ->
+        case Regex.run(~r/^defmodule\s+(Mix\.Tasks\.[A-Za-z0-9_.]+)\s+do/m, src) do
+          [_, mod] -> [mod]
+          nil -> []
+        end
+      end)
+      |> Enum.sort()
+    end
+
+    # THE BLIND SPOT THIS REPLACED (task-198d289bafabd06a). The first predicate
+    # asked one question: does the source name the module AND call `run(` on the
+    # module's LAST SEGMENT? That is a name-keyed question about a shape-keyed
+    # defect. `alias Mix.Tasks.Bokbasen.List, as: ListTask` binds the module to
+    # `ListTask`, so every call site reads `ListTask.run(` and the last-segment
+    # arm never fires: the `String.contains?(mod)` half passed (the alias line
+    # names it), the regex half did not, and the guard reported
+    # test/barkpark/plugins/onixedit/tasks/bokbasen_list_test.exs — six
+    # unsandboxed `run/1` calls into a task that boots `Barkpark.OneShot.boot!/0`
+    # — as CLEAN. Measured on origin/main ab36b3bcd: 37 tests, 0 failures, exit 0.
+    #
+    # THE RULE NOW, derived from the call SHAPE. A module is reachable in a
+    # source under whatever NAME the source's own `alias` directives bound it
+    # to. So: parse EVERY alias directive in the file into {bound_name,
+    # full_module} pairs (see `alias_bindings/1` — it handles the plain form,
+    # the `, as:` form and the `A.B.{C, D}` group form by PARSING, not by
+    # listing), keep the pairs whose full_module is one of the derived one-shot
+    # tasks, and ask whether `run(` is called on any name the module is
+    # reachable under. A fifth alias spelling added tomorrow is caught by
+    # extending `parse_alias/1`, which is a rule over the directive's grammar —
+    # there is no list of module names or of bound names anywhere in this path.
+    #
+    # STRICT SUPERSET, DELIBERATELY. The last-segment arm is KEPT as a second
+    # disjunct rather than replaced. A guard that trades one blind spot for
+    # another is the obvious failure of this fix, and a union cannot lose a site
+    # the old predicate saw — including shapes no alias directive explains at
+    # all (a module attribute holding the module, an `import`, an alias written
+    # across a line break). The guard must see MORE, not refuse less.
+    #
+    # PURE, so the controls below can feed it a specimen instead of hoping one
+    # exists in the tree.
+    defp unsandboxed_one_shot_invocations(source, modules) do
+      stripped = strip_comments(source)
+
+      if String.contains?(stripped, @sandbox_marker) do
+        []
+      else
+        bindings = alias_bindings(stripped)
+
+        Enum.filter(modules, fn mod ->
+          calls_run?(stripped, mod, bindings)
+        end)
       end
     end
 
-    test "control: the guard's own predicate finds app.start where it really is" do
+    # Every NAME under which `mod` can be called in this source: its full name,
+    # whatever its own alias directives bound it to, and — as the superset arm
+    # above — its last segment when the source names the module at all.
+    defp reachable_names(stripped, mod, bindings) do
+      last = mod |> String.split(".") |> List.last()
+
+      aliased = for {bound, full} <- bindings, full == mod, do: bound
+
+      legacy = if String.contains?(stripped, mod), do: [last], else: []
+
+      Enum.uniq([mod | aliased] ++ legacy)
+    end
+
+    defp calls_run?(stripped, mod, bindings) do
+      stripped
+      |> reachable_names(mod, bindings)
+      |> Enum.any?(fn name ->
+        stripped =~ ~r/(?<![A-Za-z0-9_.])#{Regex.escape(name)}\.run\(/
+      end)
+    end
+
+    # Parse the file's `alias` directives into {bound_name, full_module} pairs.
+    # A GRAMMAR, not an enumeration: each branch below is one production of
+    # Elixir's `alias` syntax, so any module written in that syntax is bound
+    # correctly whether or not anyone has heard of it.
+    defp alias_bindings(stripped) do
+      stripped
+      |> String.split("\n")
+      |> Enum.flat_map(fn line ->
+        case Regex.run(~r/^\s*alias\s+(\S.*)$/, line) do
+          [_, rest] -> parse_alias(String.trim(rest))
+          nil -> []
+        end
+      end)
+    end
+
+    defp parse_alias(rest) do
+      group = Regex.run(~r/^([A-Z][A-Za-z0-9_.]*)\.\{([^}]*)\}/, rest)
+      as_form = Regex.run(~r/^([A-Z][A-Za-z0-9_.]*)\s*,\s*as:\s*([A-Z][A-Za-z0-9_.]*)/, rest)
+      plain = Regex.run(~r/^([A-Z][A-Za-z0-9_.]*)/, rest)
+
+      cond do
+        # `alias A.B.{C, D}` — each member binds under its own last segment.
+        group ->
+          [_, prefix, inner] = group
+
+          inner
+          |> String.split(",")
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.map(fn seg ->
+            {seg |> String.split(".") |> List.last(), prefix <> "." <> seg}
+          end)
+
+        # `alias A.B.C, as: D` — THE SHAPE THAT WAS INVISIBLE.
+        as_form ->
+          [_, full, bound] = as_form
+          [{bound, full}]
+
+        # `alias A.B.C` — binds under `C`.
+        plain ->
+          [_, full] = plain
+          [{full |> String.split(".") |> List.last(), full}]
+
+        true ->
+          []
+      end
+    end
+
+    test "the derived task set is real and populated" do
+      # PRECONDITION. Every assertion below quantifies over this set, and an
+      # empty set satisfies all of them vacuously.
+      modules = one_shot_task_modules()
+
+      assert length(modules) >= 5,
+             "only #{length(modules)} one-shot mix task(s) derived from api/lib — the walk is blind"
+
+      assert "Mix.Tasks.Barkpark.Preview.Backfill" in modules
+      assert "Mix.Tasks.Barkpark.Workspace.ProvisionSchemas" in modules
+    end
+
+    test "control: the predicate FLAGS a call with no sandbox, and clears the same call with one" do
+      modules = ["Mix.Tasks.Barkpark.Preview.Backfill"]
+
+      leaky = """
+      defmodule SomeTest do
+        alias Mix.Tasks.Barkpark.Preview.Backfill
+        test "x" do
+          Backfill.run([])
+        end
+      end
+      """
+
+      assert unsandboxed_one_shot_invocations(leaky, modules) == modules,
+             "the predicate cannot see an unsandboxed call — the guard below measures nothing"
+
+      fixed =
+        String.replace(
+          leaky,
+          "Backfill.run([])",
+          "BootModeSandbox.protecting(fn -> Backfill.run([]) end)"
+        )
+
+      assert unsandboxed_one_shot_invocations(fixed, modules) == [],
+             "the predicate flags a SANDBOXED call too — it is reporting the call, not the leak"
+
+      # Prose is not code: a file that only DISCUSSES the call is clean.
+      prose = "# Backfill.run([]) would leak\nalias Mix.Tasks.Barkpark.Preview.Backfill\n"
+
+      assert unsandboxed_one_shot_invocations(prose, modules) == [],
+             "comment stripping is broken — prose is being read as a call"
+    end
+
+    test "control: the predicate sees a call through an `as:` ALIAS — the shape that was invisible" do
+      # THE RED-BEFORE, TURNED INTO A STANDING ARM (task-198d289bafabd06a).
+      # This specimen is the shape of
+      # test/barkpark/plugins/onixedit/tasks/bokbasen_list_test.exs, which the
+      # previous predicate reported CLEAN: the module is named only on the alias
+      # line, and every call site reads `ListTask.run(`, never `List.run(`.
+      modules = ["Mix.Tasks.Bokbasen.List"]
+
+      aliased = """
+      defmodule SomeTest do
+        alias Mix.Tasks.Bokbasen.List, as: ListTask
+        test "x" do
+          capture_io(fn -> ListTask.run(["--limit", "3"]) end)
+        end
+      end
+      """
+
+      assert unsandboxed_one_shot_invocations(aliased, modules) == modules,
+             "an `as:` alias still hides the call — the blind spot this arm exists for is back"
+
+      # The remedy clears it, so the arm reports the LEAK and not the call.
+      fixed =
+        String.replace(
+          aliased,
+          "ListTask.run([\"--limit\", \"3\"])",
+          "BootModeSandbox.protecting(fn -> ListTask.run([\"--limit\", \"3\"]) end)"
+        )
+
+      assert unsandboxed_one_shot_invocations(fixed, modules) == [],
+             "the sandboxed aliased call is still flagged — the arm reports the call, not the leak"
+    end
+
+    test "control: alias binding is parsed from the GRAMMAR, so every alias form is reachable" do
+      # A PREDICATE, NOT A LIST. Each specimen below is a different production of
+      # Elixir's `alias` syntax over the SAME module. None of them is special-cased
+      # anywhere in the predicate: `parse_alias/1` reads the directive's shape.
+      modules = ["Mix.Tasks.Bokbasen.List"]
+
+      forms = [
+        {"full name, no alias", "Mix.Tasks.Bokbasen.List.run([])"},
+        {"plain alias", "alias Mix.Tasks.Bokbasen.List\nList.run([])"},
+        {"as: alias", "alias Mix.Tasks.Bokbasen.List, as: ListTask\nListTask.run([])"},
+        {"as: alias, unusual bound name", "alias Mix.Tasks.Bokbasen.List, as: Zzz\nZzz.run([])"},
+        {"group alias", "alias Mix.Tasks.Bokbasen.{List, Status}\nList.run([])"},
+        {"group alias with an as:-shaped sibling",
+         "alias Mix.Tasks.Bokbasen.{Status, List}\nList.run([])"}
+      ]
+
+      for {label, source} <- forms do
+        assert unsandboxed_one_shot_invocations(source, modules) == modules,
+               "the predicate cannot see a call through the #{label} form"
+      end
+
+      # And the negative direction: a bound name that is NOT this module must not
+      # be flagged, or the guard is flagging on `.run(` alone.
+      other = "alias Some.Other.Thing, as: ListTask\nListTask.run([])"
+
+      assert unsandboxed_one_shot_invocations(other, modules) == [],
+             "a `run/1` call on an unrelated alias was flagged — the predicate is matching `.run(` alone"
+    end
+
+    test "control: the predicate is a SUPERSET of the last-segment rule it replaced" do
+      # THE OBVIOUS FAILURE OF THIS FIX is trading one blind spot for another.
+      # Reconstructed here rather than referenced, so this arm keeps measuring if
+      # the real one is deleted: everything the OLD rule flagged must still be
+      # flagged by the new one.
+      modules = ["Mix.Tasks.Bokbasen.List", "Mix.Tasks.Barkpark.Preview.Backfill"]
+
+      old_rule = fn source, mods ->
+        stripped = strip_comments(source)
+
+        Enum.filter(mods, fn mod ->
+          last = mod |> String.split(".") |> List.last()
+
+          String.contains?(stripped, mod) and
+            stripped =~ ~r/(?<![A-Za-z0-9_.])#{Regex.escape(last)}\.run\(/ and
+            not String.contains?(stripped, @sandbox_marker)
+        end)
+      end
+
+      specimens = [
+        "alias Mix.Tasks.Bokbasen.List\nList.run([])",
+        "alias Mix.Tasks.Bokbasen.List, as: ListTask\nListTask.run([])",
+        "Mix.Tasks.Barkpark.Preview.Backfill.run([])",
+        "alias Mix.Tasks.Barkpark.Preview.Backfill\nBackfill.run([])",
+        "@task Mix.Tasks.Bokbasen.List\nList.run([])",
+        "alias Mix.Tasks.Bokbasen.List\nBootModeSandbox.protecting(fn -> List.run([]) end)",
+        "nothing to see here"
+      ]
+
+      # The real tree is the subject c1 names; these specimens are the arm that
+      # keeps the property from silently regressing between runs of it.
+      for source <- specimens do
+        old = old_rule.(source, modules)
+        new = unsandboxed_one_shot_invocations(source, modules)
+
+        assert Enum.all?(old, &(&1 in new)),
+               """
+               the new predicate LOST a site the last-segment rule saw:
+                   source:  #{inspect(source)}
+                   old:     #{inspect(old)}
+                   new:     #{inspect(new)}
+               """
+      end
+    end
+
+    test "positive control: the offender scan reads a real, non-empty population" do
+      # ANTI-VACUITY FOR THE SCAN ITSELF (task-198d289bafabd06a c2). The guard
+      # below asserts `offenders == []`. That is satisfied vacuously by a walk
+      # that reads ZERO files — a renamed directory, a changed wildcard, a
+      # Path.relative_to/2 that stops matching. A guard against a silent gap must
+      # prove it can see, or it is theatre.
+      scanned = Path.wildcard(Path.join(@test_root, "test/**/*.{ex,exs}"))
+
+      refute scanned == [],
+             "the offender walk under #{@test_root}/test read ZERO files — every `offenders == []` below is vacuous"
+
+      assert length(scanned) > 200,
+             "the offender walk read only #{length(scanned)} test source(s) — the wildcard is not reaching the tree"
+
+      # NAMED, not just counted: the file whose shape this whole block exists for
+      # must actually be inside the population being scanned.
+      relative = Enum.map(scanned, &Path.relative_to(&1, @test_root))
+
+      assert "test/barkpark/plugins/onixedit/tasks/bokbasen_list_test.exs" in relative,
+             "the aliased-call file is not in the scanned population — the guard cannot see it however good the predicate is"
+
+      # And the predicate must actually FIRE on something in that population when
+      # a known one-shot invocation is present. Read the real file, strip its
+      # sandbox if it has one, and require a flag: this proves the end-to-end
+      # path (walk -> read -> predicate) rather than the predicate alone.
+      source =
+        Path.join(@test_root, "test/barkpark/plugins/onixedit/tasks/bokbasen_list_test.exs")
+        |> File.read!()
+        |> String.replace(@sandbox_marker, "SandboxRemovedForThisControl")
+
+      modules = one_shot_task_modules()
+
+      refute unsandboxed_one_shot_invocations(source, modules) == [],
+             "with its sandbox removed, the real aliased file is STILL read as clean — the scan-to-predicate path measures nothing"
+    end
+
+    test "no test invokes a one-shot mix task outside Barkpark.BootModeSandbox" do
+      modules = one_shot_task_modules()
+
+      offenders =
+        Path.join(@test_root, "test/**/*.{ex,exs}")
+        |> Path.wildcard()
+        |> Enum.sort()
+        |> Enum.flat_map(fn path ->
+          case unsandboxed_one_shot_invocations(File.read!(path), modules) do
+            [] -> []
+            mods -> [{Path.relative_to(path, @test_root), mods}]
+          end
+        end)
+
+      assert offenders == [],
+             """
+             these test sources invoke a one-shot mix task with no sandbox in the file:
+
+                 #{Enum.map_join(offenders, "\n    ", fn {f, m} -> "#{f} -> #{Enum.join(m, ", ")}" end)}
+
+             `run/1` calls `Barkpark.OneShot.boot!/0`, which writes the NODE-GLOBAL
+             `:barkpark, :boot_mode` PERSISTENTLY and never puts it back. The module
+             that does this makes `Barkpark.ApplicationBootModeTest` fail `left:
+             :one_shot` later in the same run — measured in elixir-nightly
+             35323296944 and again in run 35509163543.
+
+                 BootModeSandbox.protecting(fn -> SomeTask.run(argv) end)
+
+             HONEST LIMIT, stated rather than implied: this is a FILE-level rule.
+             It proves the sandbox is present in a file that invokes such a task,
+             not that every call site in it is wrapped. What proves THAT is the
+             runtime arm — `Barkpark.BootModeLeakFormatter` reds the run and names
+             the module whose `:module_finished` found the key still set.
+             """
+    end
+  end
+
+  describe "the one-shot mix task guard is a PREDICATE over the shape" do
+    # A source-level guard, because no `mix test` run can observe what
+    # `Mix.Task.run("app.start")` does — the test node always has the full tree
+    # up. This is the arm that keeps the defect from reopening under a green
+    # suite.
+    #
+    # A PREDICATE, NOT A LIST (task-12b07c13e3cc08b6). The first version of this
+    # guard enumerated the four tasks #18596 moved, so it was a SNAPSHOT: ten
+    # more `app.start` one-shots were live in the tree the day it was written
+    # and the guard said nothing about any of them, and the NEXT one-shot
+    # someone writes would be born outside it. The rule below is: EVERY mix task
+    # under `lib/mix/tasks` that calls `Mix.Task.run("app.start")` is a defect,
+    # unless it is in @full_boot_allowed WITH a reason. Adding a one-shot cannot
+    # slip past it; adding a genuinely-full-boot task costs one line and a
+    # sentence saying why.
+    #
+    # Scope is the whole directory, read off DISK at test time — not a compiled
+    # list — so a file added, renamed or deleted moves the guard with it.
+    @tasks_dir Path.expand(Path.join([__DIR__, "..", "..", "lib", "mix", "tasks"]))
+
+    # Each entry: task file basename => why a FULL boot is correct for it.
+    # These are build/inspection tasks, not operator one-shots against a live
+    # box: nothing here runs on a node whose port is already held, and each
+    # needs a part of the tree `:one_shot` drops.
+    @full_boot_allowed %{
+      # The manifest is generated by READING the running plugin `Registry`
+      # exactly as a served `GET /v1/capabilities` would, and the checked-in
+      # artifact must match what a FULL node answers — including the routes the
+      # Endpoint owns. Narrowing the tree here would silently generate a
+      # DIFFERENT contract than the one the server serves. Stated in its own
+      # @moduledoc: "app.start is required because the manifest reads the
+      # running plugin Registry".
+      "barkpark.openapi.ex" =>
+        "generates the checked-in OpenAPI/capabilities artifact off the FULL running tree; " <>
+          "a narrowed tree would generate a contract the served node does not match",
+
+      # NOT ALLOWLISTED, and the row's wording said they would be: the
+      # `gen_golden_*` / `gen_*_parity` generators
+      # (barkpark.chat.gen_golden_toolrows, barkpark.chat.gen_golden_transcript,
+      # barkpark.paper_components.gen_golden_parity,
+      # barkpark.sheets.gen_golden_parity, barkpark.portable_doc.gen_pd_parity,
+      # barkpark.preview.gen_parity) call `Mix.Task.run("app.start")` NOWHERE.
+      # Exempting them would be an exemption for a violation none of them
+      # commits — dead allowlist weight that overstates the real exposure. The
+      # "every allowlist entry is live" test below is what caught it: six
+      # entries written from the row's wording all failed on first run.
+
+      # AUDITED 2026-09-17 (task-12b07c13e3cc08b6) and deliberately NOT moved.
+      # Each reason is a MEASURED property of the task's write path, not a
+      # resemblance argument — the edges precedent (dropping SchemaBootstrap
+      # took the projected edge count from 962 to ZERO while still exiting 0)
+      # is why "looks like one that moved" is not evidence.
+      "barkpark.tags.seed.ex" =>
+        "writes through `Content.create_document/4` — the full writer, whose " <>
+          "post-mutation fan-out reaches `Oban.insert/1` (webhooks.ex). `:one_shot` " <>
+          "drops Oban OUTRIGHT, so narrowing this would raise (or silently drop the " <>
+          "fan-out). Moving it needs an Oban decision first, not a boot swap.",
+      "barkpark.sheets.rehydrate_embeds.ex" =>
+        "`Content.Sheets.refresh_sheet_embeds/1` ends in `Broadcast.tap_broadcast/5` — " <>
+          "SSE + webhook dispatch by DESIGN, and a failed delivery schedules its retry " <>
+          "with `Oban.insert/1`. Same Oban decision as tags.seed; also has no dry run, " <>
+          "so there is no read-only way to prove a narrowed run still does its job.",
+      "barkpark.codelists.seed.ex" =>
+        "path analysis says narrowing is correct (`Content.Codelists.register/3` is a " <>
+          "plain `Repo.transaction`, and `:one_shot`'s suppression of the BOOT codelist " <>
+          "seeders is exactly what this task then does explicitly) — but it needs a " <>
+          "publisher-supplied EDItEUR XML snapshot to run at all, and with none on this " <>
+          "box the move could not be proven by a RUN. Unproven, therefore unmoved.",
+      "barkpark.epic_fleet.export.ex" =>
+        "path analysis says narrowing is correct (`Barkpark.EpicFleet` is pure Repo — no " <>
+          "endpoint read, no Oban insert), but `epic_benchmark_experiments` holds 0 rows " <>
+          "on the dev corpus, so there was no experiment to export and no run to show. " <>
+          "Unproven, therefore unmoved.",
+      "barkpark.epic_fleet.import.ex" =>
+        "same as epic_fleet.export: pure-Repo path, but nothing to round-trip on this " <>
+          "corpus and importing a fabricated payload proves the fabrication, not the move.",
+      "barkpark.rotate_public_read.ex" =>
+        "path analysis says narrowing is correct (`Auth.PublicRead` is pure Repo), but " <>
+          "the task MINTS a token, rewrites the token file and PURGES aged rows — there " <>
+          "is no dry run, and running it to prove the move would mutate real credential " <>
+          "state. Unproven by a safe run, therefore unmoved.",
+
+      # Plugin-owned operator tasks, AUDITED 2026-09-19 (task-e2c484370ef8fb51).
+      # The nine that task-12b07c13e3cc08b6 left unaudited and exempted: seven
+      # were moved onto `Barkpark.OneShot.boot!/0` on a RUN each (identical
+      # report under both boots on the dev corpus; frt.seed re-seeded a fresh
+      # database to the same content_hash) — bokbasen.list, bokbasen.status,
+      # frt.export, frt.seed, onix.export_proof, codelists.staleness,
+      # search.eval. These two stay, for the same Oban reason as tags.seed:
+      "bokbasen.replay.ex" =>
+        "its non-dry-run arm IS an `Oban.insert/1` (`PublishWorker.new/1 |> Oban.insert()`, " <>
+          "the task's whole job is to enqueue the publish) — `:one_shot` drops Oban OUTRIGHT, " <>
+          "so a narrowed run would raise on the one thing the operator asked for. The " <>
+          "`--dry-run` arm alone is pure `Export.to_iodata/1`, but the file is one task. " <>
+          "Moving it needs an Oban-accepting one-shot mode (`:seed` keeps an inert Oban), " <>
+          "not a boot swap.",
+      "onix.import.ex" =>
+        "writes through `Content.create_document/4` / `Content.delete_document/4` — the " <>
+          "full writer, whose post-mutation fan-out reaches `Oban.insert/1` (webhooks.ex). " <>
+          "Same Oban decision as tags.seed. Its `--dry-run` arm already boots NOTHING " <>
+          "(the `app.start` is behind `unless dry_run`), so there is no narrowed run to " <>
+          "prove either."
+    }
+
+    @app_start ~S<Mix.Task.run("app.start")>
+
+    defp task_files do
+      @tasks_dir
+      |> File.ls!()
+      |> Enum.filter(&String.ends_with?(&1, ".ex"))
+      |> Enum.sort()
+    end
+
+    defp calls_app_start?(file) do
+      @tasks_dir |> Path.join(file) |> File.read!() |> String.contains?(@app_start)
+    end
+
+    test "the guard is reading a real, non-empty task directory" do
+      # PRECONDITION, not decoration: every assertion below is a statement about
+      # a SET, and an empty set satisfies all of them vacuously. A renamed
+      # directory would otherwise turn this whole describe block green.
+      files = task_files()
+
+      assert length(files) > 20,
+             "only #{length(files)} mix task file(s) under #{@tasks_dir} — the guard is not reading the tree"
+
+      assert "barkpark.edges.backfill.ex" in files
+    end
+
+    test "no mix task calls app.start unless it is allowlisted with a reason" do
+      offenders = Enum.filter(task_files(), &calls_app_start?/1)
+      unexpected = offenders -- Map.keys(@full_boot_allowed)
+
+      assert unexpected == [],
+             """
+             mix task(s) still boot the FULL tree with `#{@app_start}`:
+
+                 #{Enum.join(unexpected, "\n    ")}
+
+             On a live box a full boot binds the SERVING slot's port ("port 4001
+             already in use"), puts up a second Oban on the live queues, and runs
+             the onixedit codelist seeders against the 60 s statement_timeout.
+
+             Either boot it through `Barkpark.OneShot.boot!()` (after
+             `Mix.Task.run("app.config")`), or add the file to @full_boot_allowed
+             in this test WITH the reason a full boot is correct for it.
+             """
+    end
+
+    test "control: the predicate finds app.start where it really is" do
       # An absence assertion needs a positive specimen or it can pass because
-      # the pattern is wrong. `barkpark.openapi` is a build-time task whose full
-      # boot is intended and which is NOT in @one_shot_tasks.
-      path =
-        Path.join([__DIR__, "..", "..", "lib", "mix", "tasks", "barkpark.openapi.ex"])
-        |> Path.expand()
+      # the pattern is wrong. `barkpark.openapi` is the allowlisted build-time
+      # task whose full boot is intended.
+      assert calls_app_start?("barkpark.openapi.ex"),
+             "no mix task in the tree calls app.start any more — the predicate above measures nothing"
 
-      assert File.regular?(path)
+      refute calls_app_start?("barkpark.edges.backfill.ex"),
+             "the predicate matches a task that was MOVED off app.start — it is matching the wrong text"
+    end
 
-      assert File.read!(path) =~ ~S<Mix.Task.run("app.start")>,
-             "no mix task in the tree calls app.start any more — the refute above measures nothing"
+    test "every allowlist entry is live, and carries a non-trivial reason" do
+      # A ratchet in the OTHER direction: an allowlist entry for a file that no
+      # longer calls app.start (or no longer exists) is dead weight that makes
+      # the exemption list look bigger than the real exposure.
+      files = task_files()
+
+      for {file, reason} <- @full_boot_allowed do
+        assert file in files, "@full_boot_allowed names #{file}, which is not in #{@tasks_dir}"
+
+        assert calls_app_start?(file),
+               "@full_boot_allowed still exempts #{file}, but it no longer calls app.start — drop the entry"
+
+        assert is_binary(reason) and String.length(reason) > 30,
+               "@full_boot_allowed[#{file}] needs a real reason, got: #{inspect(reason)}"
+      end
+    end
+
+    test "the tasks moved onto OneShot name it, and none of them calls app.start" do
+      # The positive half. Derived, not enumerated: every task file that names
+      # `Barkpark.OneShot.boot!()` must also have stopped calling app.start, and
+      # the set must be non-empty.
+      moved =
+        Enum.filter(task_files(), fn file ->
+          @tasks_dir
+          |> Path.join(file)
+          |> File.read!()
+          |> String.contains?("Barkpark.OneShot.boot!()")
+        end)
+
+      assert length(moved) >= 15,
+             "only #{length(moved)} task(s) boot through Barkpark.OneShot — expected the #18596 four, " <>
+               "#19173's four and task-e2c484370ef8fb51's seven"
+
+      for file <- moved do
+        refute calls_app_start?(file),
+               "#{file} boots through OneShot AND still calls app.start — the old boot is still live"
+      end
     end
   end
 

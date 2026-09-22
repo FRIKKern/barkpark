@@ -104,8 +104,8 @@ func TestRunOnceFullCycle(t *testing.T) {
 	if cp.gotReport.AgentStatus != "online" {
 		t.Errorf("report AgentStatus = %q, want online", cp.gotReport.AgentStatus)
 	}
-	if cp.gotReport.Version != Version {
-		t.Errorf("report Version = %q, want %q", cp.gotReport.Version, Version)
+	if cp.gotReport.Version != AgentVersion() {
+		t.Errorf("report Version = %q, want the binary's own stamp %q", cp.gotReport.Version, AgentVersion())
 	}
 	if cp.gotReport.GitCommit != "deadbeef" {
 		t.Errorf("report GitCommit = %q, want deadbeef", cp.gotReport.GitCommit)

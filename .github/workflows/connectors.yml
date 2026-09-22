@@ -1,7 +1,17 @@
 name: connectors
 
-# The connectors/ bridge's merge gate (charter D45). BLOCKING — no
-# continue-on-error anywhere in this file, on purpose.
+# The connectors/ bridge's proof suite (charter D45). No `continue-on-error`
+# anywhere in this file, on purpose — every failure reds its own job.
+#
+# THAT IS JOB-LEVEL STRICTNESS, NOT MERGE AUTHORITY. Until 2026-09-17 this
+# header opened with the all-caps word for the latter, as though a red here
+# stopped a merge. Neither context this file publishes is required by
+# .github/required-checks.json — the same correction the shim-confinement and
+# test jobs already carry below, which this header outlived because the guard
+# that catches the claim (blocking_authority_check in
+# scripts/required-checks-verify.sh) could not see a header written under the
+# `name:` key. It can now, so the word is not written here again: spelling it
+# out would re-arm the very clause this correction clears.
 #
 # Why this workflow had to exist: the state-layer proofs (schema isolation,
 # resolveOrMint idempotency, tenant install resolution) can only be proven
@@ -166,14 +176,24 @@ jobs:
       # Vercel)`, and that string appears in NEITHER of the two places that
       # decide anything in .github/required-checks.json: not among the four
       # required contexts (`Cloud gate`, `Console gate`, `Elixir gate`, `PR
-      # references an active task`), and not among the 25 exclusion rows that
-      # classify the rest. Stated negatively: a red here reds THIS JOB, and the
-      # red is visible on the PR; it stops no merge, and branch protection has
-      # never heard of this context. RESIDUE: line 3's file header still opens
-      # "BLOCKING" — it is one of the three held at
-      # BLOCKING_HEADER_UNRESOLVED_BASELINE=3 in
-      # scripts/required-checks-verify.sh:645, and is filed as
-      # cgsiw-s1-followup-header-baseline-ratchet.
+      # references an active task`), and not among the exclusion rows that
+      # classify the rest (`jq '.exclusions[].context'` over that file — the
+      # count is not written down here, because a figure typed into a comment
+      # has no producer and goes stale in its own commit). Stated negatively: a
+      # red here reds THIS JOB, and the red is visible on the PR; it stops no
+      # merge, and branch protection has never heard of this context.
+      #
+      # THE RESIDUE THAT STOOD HERE IS GONE, and how it survived is the lesson.
+      # This paragraph used to excuse the file header above by naming a constant
+      # in scripts/required-checks-verify.sh, a value for it, and a line number
+      # for where it lived. All three were wrong: the value had been ratcheted
+      # away by cgsiw-s1-followup-header-baseline-ratchet, the line pointed into
+      # the deadlock detector instead, and the header was not held at any
+      # baseline at all, because the clause's header window closed on line 1's
+      # `name:` key and never reached the prose. An excuse is where a reader
+      # stops looking, which is why a false one outlives the thing it excuses.
+      # The header is corrected in place above and the window is widened; grep
+      # the constant by name to read its current value and its reasoning.
       - name: Live-turn driver self-test (W35, D270)
         run: |
           shellcheck -S error scripts/connectors/w35-live-turn-driver.sh
@@ -237,7 +257,7 @@ jobs:
       # in order to tell the reader that this one really blocks — about a
       # context branch protection has never heard of. The deciding structure:
       # this job's name, `Typecheck + tests (real Postgres, zero skips)`,
-      # appears in neither the four required contexts nor the 25 exclusion rows
+      # appears in neither the four required contexts nor the exclusion rows
       # of .github/required-checks.json. Said negatively: a red here reds THIS
       # JOB on the PRs whose paths render it; it stops no merge. What survives
       # the correction is the STRICTNESS claim, which is real and is about this

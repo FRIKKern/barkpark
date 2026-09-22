@@ -63,6 +63,14 @@ type apiError struct {
 	// away. Set from the dispatched request's headers (run.go), so it is a fact
 	// about what was sent, not a guess from config.
 	credentialSent bool
+	// datasetRemedy is the inbound half of the scope-honesty contract: the
+	// `ambiguous_dataset` refusal's remedy, restated in the dialect the operator
+	// can actually type. Derived at the dispatch site (handleResponseHinted),
+	// because it needs the COMMAND — whether `-d` is typeable here is a manifest
+	// question, not an error-code one. "" for every other refusal. It is purely
+	// additive: it never touches the exit ladder and never edits serverHint,
+	// which stays the headline because the server knows most.
+	datasetRemedy string
 }
 
 // codeExit is the SINGLE canonical error.code -> exit mapping (contract spine
@@ -211,8 +219,56 @@ var codeExit = map[string]int{
 	// task-650d7844d8fe7199: a `cancelled` close with a blank reason. Same code
 	// as its siblings — the request is wrong and re-sending it cannot help.
 	"cancel_reason_required": exitValidation,
-	"rate_limited":           exitRateLimit,
-	"internal_error":         exitServer,
+	// ── The rest of the close/stamp refusal vocabulary (task-d10d9eb47f2cc5e4) ──
+	//
+	// A FIFTH reason (criteria_raised_on_abandon, PR #16891) arrived at exit 2
+	// after the 2026-08-24 sweep fixed four — which is the argument that the
+	// sweep was never the fix. The durable answer is the arm in
+	// errors_close_refusal_coverage_test.go, which reads the vocabulary out of
+	// api/lib/barkpark/tasks/{close,stamp}.ex and reds on any member with no
+	// bucket here. These six are what it found on its first run; every one of
+	// them was landing on exitUsage (2) — the malformed-command-line code —
+	// because the tasks controller answers {"ok":false,"reason":…} and THAT
+	// branch falls back to exit 2, not to exitForCode's exitGeneric (1).
+	//
+	//   criteria_raised_on_abandon:<i,j>
+	//     a `cancelled`/`blocked` close that would RAISE an acceptance
+	//     criterion's met from false to true (tasks/close.ex). Main's ruling: a
+	//     cancel may ABANDON criteria, it may never assert them. VALIDATION:
+	//     nothing moved under the caller — no lease, no rev — and re-sending
+	//     the identical command can never succeed. There is deliberately NO
+	//     override flag on this gate, so unlike its four siblings there is no
+	//     `--set <key>_override=` escape: the fix is an act OUTSIDE the request
+	//     (drop the met flips and re-run the cancel, or prove the criterion
+	//     with `bp task stamp` first). Minted WITH a `:<indices>` suffix, so it
+	//     reaches this table through reasonKey's family lookup.
+	//   invalid_criteria
+	//     the stamp's criteria payload is the wrong shape (tasks/stamp.ex
+	//     build_update/4). A different payload is a different request.
+	//   evidence_required
+	//     a `--met` stamp with no evidence (tasks/stamp.ex). Type the evidence.
+	//   observed_rev_required
+	//     a withdrawal or post-close --miss on a row with no live claim, so
+	//     there is no epoch to fence it against (tasks/stamp.ex). Pin the rev
+	//     with `--observed-rev <rev>` — a different request.
+	"criteria_raised_on_abandon": exitValidation,
+	"invalid_criteria":           exitValidation,
+	"evidence_required":          exitValidation,
+	"observed_rev_required":      exitValidation,
+	// CONFLICT, not validation: the close lost a concurrent rev-CAS race
+	// (tasks/close.ex — the fenced write matched 0 rows). The world moved under
+	// the caller, so re-reading and re-sending is exactly the right reflex —
+	// the retryable half of the 5/6 split, beside stale_claim.
+	"stale_rev": exitConflict,
+	// NOT-FOUND, not conflict: the row is gone. The controller's
+	// find_task_by_doc_id normally 404s first, so this is the race window where
+	// the document disappeared between the lookup and the close — but it still
+	// reaches the caller as {"ok":false,"reason":"unknown_task"} at 409, and
+	// exit 4 is the honest answer: no retry of any shape brings the row back,
+	// and the remedy is to fix the id.
+	"unknown_task":   exitNotFound,
+	"rate_limited":   exitRateLimit,
+	"internal_error": exitServer,
 
 	// ── The API-parity backfill (task-2a774c5536503306) ───────────────────
 	//
@@ -747,7 +803,28 @@ func renderErrorEnvelope(out *writer, code, msg, requestID, hint string) bool {
 // details is omitted, so renderErrorEnvelope's ~60 detail-less call sites emit
 // byte-identical bytes through this delegation.
 func renderErrorEnvelopeDetailed(out *writer, code, msg, requestID, hint string, details json.RawMessage) bool {
+	return renderErrorEnvelopeRemedy(out, code, msg, requestID, hint, details, "")
+}
+
+// renderErrorEnvelopeRemedy is renderErrorEnvelopeDetailed plus `bp_remedy` —
+// the CLIENT's restatement of the refusal in the dialect this CLI speaks.
+//
+// It is a SEPARATE key from `hint`, never an edit of it. `hint` is the server's
+// own words and a parser that keys on it must keep reading exactly what the
+// server said; `bp_remedy` is the CLI's own, and is emitted only when the CLI
+// has something to add. Omitted when empty, so all ~60 existing call sites emit
+// byte-identical bytes.
+//
+// It has to exist at all because the human branch below is not the branch most
+// callers reach: `bp` renders the error ENVELOPE by default, so a remedy that
+// lived only on the stderr line would be invisible to the operator who typed
+// the plain command. Measured live 2026-09-16 — a bare `bp task get <twin>`
+// prints this envelope on stdout and nothing on stderr.
+func renderErrorEnvelopeRemedy(out *writer, code, msg, requestID, hint string, details json.RawMessage, remedy string) bool {
 	errObj := map[string]any{"code": code, "message": msg}
+	if remedy != "" {
+		errObj["bp_remedy"] = remedy
+	}
 	if requestID != "" {
 		errObj["request_id"] = requestID
 	}

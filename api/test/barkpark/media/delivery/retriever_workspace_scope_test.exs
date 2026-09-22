@@ -133,6 +133,72 @@ defmodule Barkpark.Media.Delivery.RetrieverWorkspaceScopeTest do
              "join_scope_dataset/3 was strict-ened and the shape changed"
   end
 
+  # ── THE PROJECT RUNG (task-96d8720de593d82a) ───────────────────────────────
+  #
+  # `join_scope_workspace/3`'s is_binary/is_binary clause stacks TWO rungs in
+  # one parenthesis:
+  #
+  #     is_nil(d.workspace_id) or
+  #       (d.workspace_id == ^workspace_id and
+  #          (is_nil(d.project_id) or d.project_id == ^project_id))
+  #
+  # Every test ABOVE drives the DATASET resolution and asserts POSITIVELY about
+  # workspace A's own row, so none of them stands on the wrong side of the inner
+  # parenthesis. Appending `or not is_nil(d.project_id)` to it — making it
+  # unconditionally true while leaving the workspace rung byte-identical — left
+  # all 366 media-fence tests green. The filename was the false reassurance: the
+  # function is NOT dead (dropping it entirely reds two tests), the PROJECT RUNG
+  # specifically had nothing occupying it.
+  test "PROJECT RUNG — a SIBLING PROJECT's asset doc inside the caller's OWN workspace never joins",
+       %{ws_a: ws_a, proj_a: proj_a} do
+    proj_foreign = create_project!(ws_a)
+    {:ok, ds_foreign} = Tenancy.get_or_create_dataset(proj_foreign, @dataset)
+
+    token = "zqxrung#{System.unique_integer([:positive])}"
+
+    {:ok, file_foreign} =
+      create_media_file_in!(ws_a, proj_foreign, %{dataset_id: ds_foreign.id}, @dataset)
+
+    # dataset_id NULL is LOAD-BEARING in the opposite direction from the setup
+    # above: a STAMPED foreign dataset_id is refused by `join_scope_dataset/3`
+    # before the workspace envelope is ever consulted, so the project rung would
+    # again never be the discriminator (the assets_scope_test shape,
+    # task-7faee37433ed92be). NULL + a stamped `dataset` STRING is what a
+    # projectless write actually produces and it sails through the join's
+    # NULL-tolerant leg.
+    doc_foreign =
+      insert_asset_doc!(file_foreign.id, "#{token} skyline", %{
+        workspace_id: ws_a.id,
+        project_id: proj_foreign.id,
+        dataset_id: nil
+      })
+
+    assert is_nil(doc_foreign.dataset_id),
+           "FIXTURE NOT ARMED: a stamped dataset_id is refused by join_scope_dataset/3 " <>
+             "first, so the project rung is not the discriminator"
+
+    assert doc_foreign.workspace_id == ws_a.id,
+           "FIXTURE NOT ARMED: the foreign doc must share the caller's workspace, or the " <>
+             "WORKSPACE rung is the excluder and the project rung stays untested"
+
+    refute doc_foreign.project_id == proj_a.id
+
+    # ARMED — with the project dropped, `join_scope_workspace/3` takes its
+    # 2-arg clause, which has NO project rung, and the very same doc joins. So
+    # everything except the project rung admits this row. The blob itself
+    # carries no text match (its filename is `fixture-N.png`), so its id can
+    # only arrive through the joined doc's title.
+    assert file_foreign.id in matched_ids(token, workspace_id: ws_a.id, project_id: nil),
+           "FIXTURE NOT ARMED: the foreign asset doc does not join even with the project " <>
+             "dropped, so its absence below proves nothing about the project rung"
+
+    refute file_foreign.id in matched_ids(token, workspace_id: ws_a.id, project_id: proj_a.id),
+           "CROSS-PROJECT METADATA LEAK: a SIBLING PROJECT's mediaAsset title matched in " <>
+             "a read scoped to project A inside the same workspace. Only the project rung " <>
+             "of join_scope_workspace/3 can refuse that row — the workspace rung admits it " <>
+             "by construction and join_scope_dataset/3 admits it on its NULL leg."
+  end
+
   test "NEVER-WORSE — an unscoped read still resolves the dataset authoritatively",
        %{file_a: file_a, token: token} do
     # No workspace at all: the resolver MUST keep its Default-project fallback

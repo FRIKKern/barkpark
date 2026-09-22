@@ -363,7 +363,7 @@ defmodule Barkpark.Media.Storage.Collections do
       @asset_type,
       attrs,
       dataset,
-      [source: :api] ++ Barkpark.Plugins.Media.Assets.file_scope_opts(file)
+      [source: :api] ++ MediaFile.scope_opts(file)
     )
   end
 
@@ -393,7 +393,7 @@ defmodule Barkpark.Media.Storage.Collections do
       @asset_type,
       attrs,
       dataset,
-      [source: :api] ++ Barkpark.Plugins.Media.Assets.file_scope_opts(file)
+      [source: :api] ++ MediaFile.scope_opts(file)
     )
   end
 

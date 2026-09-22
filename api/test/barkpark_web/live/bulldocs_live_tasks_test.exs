@@ -51,6 +51,9 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
           "content" =>
             Barkpark.LabelFixtures.with_labels(%{
               "kind" => "task",
+              # The brief wall (task-c1f155da34d3338f) now fires on first
+              # publish, and mk_published_task!/4 below publishes these.
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
               "lifecycle_status" => lifecycle,
               "parent_id" => epic
             })

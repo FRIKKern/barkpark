@@ -161,6 +161,119 @@ export const STAMP_GUARD = /MERGE[-\s]GATED|MERGE[-\s]GATE\b/i;
 export const NON_TERMINAL = Object.freeze(["considering", "researching", "open", "in_progress", "blocked"]);
 export const TERMINAL = Object.freeze(["done", "cancelled"]);
 
+// ─── THE RE-ARM: quoting a retired gate puts the marker back ─────────────────
+// THE MECHANISM, written down because it defeated its own authors. Six
+// `jf-w1-*` criteria were CORRECTED on 2026-08-20 to RETIRE a merge gate that
+// could never be met. Each correction quotes the retired wording verbatim —
+// `ORIGINAL WORDING, verbatim: "... (merge-gated; the lead closes this ...)"` —
+// so `STAMP_GUARD` still matches the criterion, `Criteria.merge_gated?/1` still
+// returns true, and the builder still cannot stamp. The retraction RE-ARMED the
+// tripwire it was undoing. A retraction quotes what it retracts, so it matches
+// its own retraction.
+//
+// THE RULE, NOT THE LIST. The six are a snapshot (five have since closed; only
+// `jf-w1-revendor-honest-media#4` is still non-terminal as of 2026-09-17). The
+// durable form is a PREDICATE: a criterion whose marker appears ONLY inside a
+// quoted span is quoting a gate, not declaring one. Strip the quotations; if the
+// guard no longer matches, every match it had was borrowed from the quote.
+//
+// THE FIX IS THE FLAG, NEVER A REWORD. Do not paraphrase the quote to dodge the
+// regex — the verbatim quote is the evidence the correction exists for, and a
+// reworded quote is a falsified record. Set `"merge_gate": false` on the
+// criterion: it is the documented one-field veto (criteria.ex:77-81), it wins
+// over the prose arm outright, and it leaves the quotation byte-identical.
+const QUOTED_SPAN = /"[^"]*"|“[^”]*”|'[^'\n]*'/g;
+
+/** Text with every quoted span removed. */
+export function stripQuoted(text) {
+  return typeof text === "string" ? text.replace(QUOTED_SPAN, " ") : "";
+}
+
+/**
+ * True when the merge-gate marker appears ONLY inside a quotation — the
+ * signature of a criterion that QUOTES a retired gate rather than declaring one.
+ * These are MENTIONs: they belong on the `merge_gate: false` side of the
+ * two-directional backfill.
+ */
+export function quotesRetiredGateOnly(text) {
+  if (typeof text !== "string" || !STAMP_GUARD.test(text)) return false;
+  return !STAMP_GUARD.test(stripQuoted(text));
+}
+
+// ─── THE HAND CLASSIFICATION (2026-09-17, gates-r21-w4) ──────────────────────
+// `stamp_blocked` is ONE set with TWO remedies, and no text rule separates them
+// — that is this row's central finding, and the reason a one-directional
+// backfill is refused: `merge_gate: true` on a mere MENTION makes an innocent
+// criterion permanently lead-only, and `met` has no un-stamp.
+//
+//   GATE    → write `merge_gate: true`   (a real lead-only gate missing its flag)
+//   MENTION → write `merge_gate: false`  (a row whose SUBJECT is merge-gating)
+//
+// Classified BY HAND against the full stored wording of all 25, read live.
+// Re-derived at execution time, NOT inherited: the row records 55 criteria
+// across 46 rows (2026-08-24) split 19 GATE / 36 MENTION. Live today: 25 across
+// 24 rows, split 19 GATE / 6 MENTION. The population DRAINED — all seven rows
+// the filing named as "structurally stuck" have since closed (4 done, 3
+// cancelled). The 19 matching the recorded 19 is a COINCIDENCE of drainage; it
+// is not the same 19.
+//
+// THIS TABLE IS A SNAPSHOT AND IS GUARDED AS ONE. `--plan` refuses loudly on any
+// live stamp-blocked criterion missing from it, and reports every entry that has
+// since drained. It is never consulted without that reconciliation.
+// A SECOND READER (gates-r21d-w11, 2026-09-18) asked a DIFFERENT question of the
+// same 22 live criteria than the first pass did. The first pass asked "is this
+// criterion the LEAD's to close?"; the second asked "is the thing this criterion
+// ASSERTS genuinely `this PR merged with its required contexts green`?". Those
+// questions agree on 20 of 22 and diverge on exactly the shape where the merge
+// is a CONJUNCT or a MARKER rather than the whole assertion — which is the
+// fabrication direction this row exists to prevent, because `merge_gate:true`
+// makes `merge_gate_synthetics/3` autostamp the WHOLE criterion on a lead merge
+// close, including the half no merge proves. HOLD is the third verdict those two
+// need: classified (so the staleness guard stays satisfied and cannot rot into
+// silence), but NEVER planned as a write in either direction. An unflagged
+// criterion is merely inconvenient; a wrongly-permitted one is a fabricated done.
+export const VERDICT = Object.freeze({ GATE: "GATE", MENTION: "MENTION", HOLD: "HOLD" });
+
+export const CLASSIFICATION = Object.freeze({
+  // ── GATE (19): the criterion IS this row's merge gate.
+  "tgw-bl-l4-artifact-inventory#3":               [VERDICT.GATE, "declares the gate: PR merged to main, gates green"],
+  "tgw3-decide-stages-foreign-rows#3":            [VERDICT.GATE, "declares the gate: PR merged to origin/main"],
+  "tgw4-bl-plainrule-flag-audit#6":               [VERDICT.GATE, "declares the gate: PR merged to origin/main"],
+  "tgw-census-reach-triage#3":                    [VERDICT.GATE, "declares the gate: PR merged to origin/main"],
+  "hgw4-bl-automerge-artifact-side-head-recheck#3":[VERDICT.GATE, "LEAD closes: PR merged, or declined with the decision recorded"],
+  "connectors-telegram-webhook-wire#2":           [VERDICT.GATE, "declares the gate: PR merged; connectors.yml green"],
+  "task-e7bd4b127aaee4fc#2":                      [VERDICT.GATE, "THE LEAD CLOSES THIS: PR merged with the merge SHA recorded"],
+  "pds-bl-guerrilla-stale-build-prod-trap#3":     [VERDICT.GATE, "declares the gate: PR merged to origin/main"],
+  "tgw-bl-wild-bulk-roster-floor#3":              [VERDICT.GATE, "declares the gate: PR merged to main, gates green"],
+  "tgw-bl-fanout-floor-harness#3":                [VERDICT.GATE, "declares the gate: PR merged to main, gates green"],
+  "tgw-bl-epic-cycle-minitems-comment#2":         [VERDICT.GATE, "declares the gate: PR merged to main, gates green"],
+  "task-97750fc8b61c45cc#6":                      [VERDICT.GATE, "lead-owned: merge-base --is-ancestor against origin/main"],
+  "task-6f12ce2edd4be65a#4":                      [VERDICT.GATE, "declares the gate: merged to main with its gates green"],
+  "wbt-jwt-bl-wire-p7-doc-gates#4":               [VERDICT.GATE, "THE LEAD closes, never the builder: PR merged with the Task: trailer"],
+  "tgw9-bl-epic-cycle-digest-demotion-prose#2":   [VERDICT.GATE, "THE LEAD closes: the PR is merged to main"],
+  "task-c7e10834d493da6f#2":                      [VERDICT.GATE, "THE LEAD closes: PR merged to main"],
+  "task-5753ff3072d00b67#4":                      [VERDICT.GATE, "THE LEAD closes: PR merged, required contexts green"],
+
+  // ── MENTION (6): the row's SUBJECT is the merge-gate machinery.
+  // The first is derived, not asserted: `quotesRetiredGateOnly` returns true for
+  // it, and the `--plan` cross-check reds if that ever stops being so.
+  "jf-w1-revendor-honest-media#4":                [VERDICT.MENTION, "RETIRED gate quoted verbatim inside a 2026-08-20 correction; the quote re-arms the prose arm"],
+  "cchi-w46-bl-lapsed-claim-arrears-close-path#1":[VERDICT.MENTION, "describes HOW to stamp merge-gated rows; not itself gated"],
+  "cchi-w46-bl-lapsed-claim-arrears-close-path#2":[VERDICT.MENTION, "requires per-row verification of OTHER rows' merge gates; not itself gated"],
+  "task-0ed428e843b83382#0":                      [VERDICT.MENTION, "about the CREATE path setting merge_gate:true; meta"],
+  "task-616789a3afe59364#1":                      [VERDICT.MENTION, "about merge-gate-autostamp-liveness.sh exiting 0; meta"],
+  "task-60703ce4dd41a5a0#3":                      [VERDICT.MENTION, "about hand-classifying worded-but-unflagged criteria; meta"],
+
+  // -- HOLD (2): merge-SHAPED but not merge-EXHAUSTED. Both were GATE in the
+  // first pass. Neither is written in either direction; both are the owner's call.
+  "pds-w20-crown-collect-and-seal#5":             [VERDICT.HOLD, "marker says LEAD-closes, but the ASSERTION is 'the crown seals 12/12 under one RUN_ID, OR a named refusal is recorded in the wave paper' — a merge proves neither disjunct, so merge_gate:true would autostamp a crown that never sealed"],
+  "task-f56d553a70a4bba8#4":                      [VERDICT.HOLD, "a CONJUNCTION: 'the atomic PR is merged to main with all required contexts green, AND the first five post-flip campaign PRs render five required contexts in pr-required.sh (5/5)'. The merge proves the first conjunct only; merge_gate:true would autostamp the 5/5 half no merge can witness"],
+});
+
+// The two blind-sample MENTIONs main's 2026-09-07 deferral named by hand
+// (`cchi-w46-…#1` and `#2`) are both present above with the same verdict — an
+// independent reader reaching the same call on the same two criteria.
+
 export const CATEGORY = Object.freeze({
   FLAGGED: "FLAGGED",                 // merge_gate === true — already machine-readable
   VETOED: "VETOED",                   // merge_gate === false — an explicit author veto, never touched
@@ -419,6 +532,51 @@ export function buildReport(rows, meta) {
   };
 }
 
+// ─── THE TWO-DIRECTIONAL PLAN (dry-run only; this module never applies it) ───
+// Reconciles the live stamp-blocked set against CLASSIFICATION and emits the
+// write each criterion needs. It DOES NOT WRITE, and there is no flag here that
+// makes it write: applying is a serialized, post-campaign run, and main's
+// 2026-09-07 ruling on bl-merge-gate-flag-backfill-two-directions defers it out
+// of any campaign in which many leads close rows concurrently.
+//
+// A snapshot guarded by a predicate: an UNCLASSIFIED live criterion is a hard
+// refusal (exit 2), never a quiet omission — the table cannot rot into silence.
+export function buildPlan(report) {
+  const live = report.stamp_blocked;
+  const unclassified = live.filter((k) => !CLASSIFICATION[k]);
+  const drained = Object.keys(CLASSIFICATION).filter((k) => !live.includes(k));
+  // HOLD is CLASSIFIED but NEVER WRITTEN. It must be filtered out BEFORE the
+  // map, not inside it: `merge_gate: verdict === VERDICT.GATE` would silently
+  // turn a HOLD into a `merge_gate:false` write, which is the same fabrication
+  // in the other direction. The PLAN selftest arm reds if a HOLD ever reaches
+  // `writes`.
+  const held = live
+    .filter((k) => CLASSIFICATION[k] && CLASSIFICATION[k][0] === VERDICT.HOLD)
+    .map((k) => ({ key: k, why: CLASSIFICATION[k][1] }));
+  const writes = live
+    .filter((k) => CLASSIFICATION[k] && CLASSIFICATION[k][0] !== VERDICT.HOLD)
+    .map((k) => {
+      const [verdict, why] = CLASSIFICATION[k];
+      const [doc_id, idx] = [k.slice(0, k.lastIndexOf("#")), Number(k.slice(k.lastIndexOf("#") + 1))];
+      return { key: k, doc_id, index: idx, verdict, merge_gate: verdict === VERDICT.GATE, why };
+    });
+  return {
+    generated_at: new Date().toISOString(),
+    applied: false,
+    apply_deferred_by: "main, 2026-09-07 — post-campaign, single lane, serialized",
+    live_stamp_blocked: live.length,
+    classified: writes.length + held.length,
+    planned_writes: writes.length,
+    held_for_owner: held.length,
+    held,
+    gate_writes: writes.filter((w) => w.merge_gate === true).length,
+    mention_writes: writes.filter((w) => w.merge_gate === false).length,
+    unclassified,
+    drained_since_classification: drained,
+    writes,
+  };
+}
+
 function compare(pathA, pathB) {
   const a = JSON.parse(readFileSync(pathA, "utf8"));
   const b = JSON.parse(readFileSync(pathB, "utf8"));
@@ -568,6 +726,62 @@ function selftest() {
         eq("STAMP-BLOCKED: reported per CRITERION (id#index), not per row", sbrep.stamp_blocked, ["s1#0", "s1#2"]);
         eq("STAMP-BLOCKED: the row roll-up is deduped", sbrep.stamp_blocked_rows, ["s1"]);
 
+        // ── THE RE-ARM PREDICATE (c4) ─────────────────────────────────────
+        const RETIRED = 'CORRECTED 2026-08-20 by the board-reconciliation audit. ORIGINAL WORDING, verbatim: "PR merged into jarl-website main (merge-gated; the lead closes this criterion).". THE CORRECT REQUIREMENT: verifiably present on main, NOT by a merge notification.';
+        eq("RE-ARM: the retired quote still trips the stamp guard (this IS the defect)", STAMP_GUARD.test(RETIRED), true);
+        eq("RE-ARM: the marker is borrowed from the quotation only", quotesRetiredGateOnly(RETIRED), true);
+        eq("RE-ARM: a real declaration is NOT a quote-only match", quotesRetiredGateOnly("MERGE-GATED (the LEAD closes this): PR merged to main"), false);
+        eq("RE-ARM: a declaration that also quotes something is NOT quote-only",
+           quotesRetiredGateOnly('MERGE-GATED (lead closes): PR merged, per "the usual rules"'), false);
+        eq("RE-ARM: text with no marker at all is not a quote-only match", quotesRetiredGateOnly('he said "hello"'), false);
+        eq("RE-ARM: non-string is refused, not thrown on", quotesRetiredGateOnly(null), false);
+        eq("RE-ARM: the live specimen is classified MENTION, and the predicate agrees",
+           [CLASSIFICATION["jf-w1-revendor-honest-media#4"][0], quotesRetiredGateOnly(RETIRED)], [VERDICT.MENTION, true]);
+
+        // ── THE CLASSIFICATION TABLE ──────────────────────────────────────
+        eq("CLASSIFY: every entry carries a verdict and a reason",
+           Object.values(CLASSIFICATION).every((v) => Object.values(VERDICT).includes(v[0]) && typeof v[1] === "string" && v[1].length > 0), true);
+        eq("CLASSIFY: the split is 17 GATE / 6 MENTION / 2 HOLD after the 2026-09-18 second read",
+           [Object.values(CLASSIFICATION).filter((v) => v[0] === VERDICT.GATE).length,
+            Object.values(CLASSIFICATION).filter((v) => v[0] === VERDICT.MENTION).length], [17, 6]);
+        eq("CLASSIFY: the second reader's HOLD bucket exists and is non-empty",
+           Object.values(CLASSIFICATION).filter((v) => v[0] === VERDICT.HOLD).length, 2);
+        eq("CLASSIFY: every key is <doc_id>#<index>",
+           Object.keys(CLASSIFICATION).every((k) => /^[^#]+#\d+$/.test(k)), true);
+
+        // ── THE PLAN, AND ITS STALENESS GUARD ─────────────────────────────
+        const planRep = (blocked) => ({ stamp_blocked: blocked });
+        const allKeys = Object.keys(CLASSIFICATION);
+        const pFull = buildPlan(planRep(allKeys));
+        eq("PLAN: writes both directions, never one", [pFull.gate_writes, pFull.mention_writes], [17, 6]);
+        eq("PLAN: it is a plan — nothing is applied", pFull.applied, false);
+        eq("PLAN: a GATE entry plans merge_gate:true", pFull.writes.find((w) => w.key === "task-c7e10834d493da6f#2").merge_gate, true);
+        eq("PLAN: a MENTION entry plans merge_gate:false — the one-field veto, not a reword",
+           pFull.writes.find((w) => w.key === "jf-w1-revendor-honest-media#4").merge_gate, false);
+        eq("PLAN: the key splits on the LAST # so a doc_id may contain one",
+           buildPlan(planRep([])).writes.length === 0 &&
+           pFull.writes.every((w) => `${w.doc_id}#${w.index}` === w.key), true);
+        const pNew = buildPlan(planRep([...allKeys, "brand-new-row#0"]));
+        eq("PLAN: an UNCLASSIFIED live criterion is named, never silently dropped", pNew.unclassified, ["brand-new-row#0"]);
+        const pDrain = buildPlan(planRep(allKeys.slice(1)));
+        eq("PLAN: a criterion that drained since classification is named too", pDrain.drained_since_classification, [allKeys[0]]);
+        eq("PLAN: a drained entry is NOT planned as a write", pDrain.writes.some((w) => w.key === allKeys[0]), false);
+
+        // ── HOLD: CLASSIFIED, NEVER WRITTEN ───────────────────────────────
+        // The failure this guards is not an omission but a SILENT DOWNGRADE:
+        // `merge_gate: verdict === VERDICT.GATE` maps HOLD to `false`, so a HOLD
+        // that reaches `writes` is planned as a veto nobody decided on.
+        const holdKeys = Object.keys(CLASSIFICATION).filter((k) => CLASSIFICATION[k][0] === VERDICT.HOLD);
+        eq("HOLD: a held criterion is NEVER planned as a write, in either direction",
+           pFull.writes.some((w) => holdKeys.includes(w.key)), false);
+        eq("HOLD: every held criterion is surfaced by name for the owner",
+           pFull.held.map((h) => h.key).sort(), holdKeys.slice().sort());
+        eq("HOLD: a held criterion is CLASSIFIED, so the staleness guard stays quiet",
+           pFull.unclassified.length, 0);
+        eq("HOLD: classified counts writes AND holds; planned_writes counts only writes",
+           [pFull.classified, pFull.planned_writes, pFull.held_for_owner],
+           [Object.keys(CLASSIFICATION).length, Object.keys(CLASSIFICATION).length - holdKeys.length, holdKeys.length]);
+
         console.log(fails === 0 ? "\nSELFTEST PASS" : `\nSELFTEST FAIL (${fails})`);
         process.exit(fails === 0 ? 0 : 1);
       }));
@@ -639,6 +853,33 @@ async function main(argv) {
   }
 
   if (argv.includes("--twice")) return runTwice(argv);
+
+  if (argv.includes("--plan")) {
+    const r = await sweepNonTerminal(livePageFor, { pageSize: PAGE_SIZE });
+    const rep = buildReport(r.rows, {
+      mode: "PLAN (DRY-RUN)", pageSize: PAGE_SIZE, effectivePageSize: r.effectivePageSize,
+      pages: r.pages, notes: r.notes, statuses: r.statuses, perStatus: r.perStatus,
+    });
+    const plan = buildPlan(rep);
+    console.log(`live stamp-blocked: ${plan.live_stamp_blocked}   classified: ${plan.classified}`);
+    console.log(`PLAN  merge_gate:true  -> ${plan.gate_writes}`);
+    console.log(`PLAN  merge_gate:false -> ${plan.mention_writes}`);
+    console.log(`HOLD  no write either way -> ${plan.held_for_owner}`);
+    for (const w of plan.writes) console.log(`  ${w.merge_gate ? "TRUE " : "FALSE"}  ${w.key}  ${w.why}`);
+    for (const h of plan.held) console.log(`  HOLD   ${h.key}  ${h.why}`);
+    if (plan.drained_since_classification.length) {
+      console.log(`DRAINED since classification (${plan.drained_since_classification.length}): ${plan.drained_since_classification.join(" ")}`);
+    }
+    const pi = argv.indexOf("--out");
+    if (pi !== -1) { writeFileSync(argv[pi + 1], JSON.stringify(plan, null, 2)); console.log(`wrote ${argv[pi + 1]}`); }
+    if (plan.unclassified.length) {
+      console.error(`REFUSING: ${plan.unclassified.length} live stamp-blocked criteria are UNCLASSIFIED — classify them BY HAND before any apply:`);
+      for (const k of plan.unclassified) console.error(`  ${k}`);
+      process.exit(2);
+    }
+    console.log("NOT APPLIED — " + plan.apply_deferred_by);
+    return;
+  }
 
   const oi = argv.indexOf("--out");
   const psi = argv.indexOf("--page-size");

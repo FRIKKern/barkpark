@@ -1937,10 +1937,29 @@ cat > "$FAKE/ssh" <<'SH'
 # scripts/crown-reconcile.sh's own remote.sh emits. CR_FAKE_VIA empty means the
 # refusal shape — a code and an error name, and NO body and NO sentence, so any
 # naming downstream is the script's own.
+#
+# THE ENVELOPE IS STAMPED WITH THE SHA IT WAS ASKED ABOUT, because the live route
+# stamps it (`GET /v1/deliveries` answers `sha:` beside `deliveries:`) and the
+# subject now CHECKS it. A fake that omitted the stamp would make that check
+# vacuous here and leave it unmeasured everywhere.
+#   CR_FAKE_SHA_ECHO  — stamp THIS sha instead of the one asked about, which is
+#                       the crosstalk shape: a 200 carrying another sha's rows.
+#   CR_FAKE_ENVELOPE  — emit a body whose `.deliveries` is not an array at all.
 echo "CR_HTTP=$CR_FAKE_HTTP"
 if [ -n "${CR_FAKE_VIA:-}" ]; then
   echo "CR_VIA=$CR_FAKE_VIA"
-  echo "CR_BODY={\"deliveries\":$(cat "$CR_FAKE_ROWS")}"
+  if [ -n "${CR_FAKE_ENVELOPE:-}" ]; then
+    echo "CR_BODY=$CR_FAKE_ENVELOPE"
+    exit 0
+  fi
+  asked="$(printf '%s ' "$@" | grep -oE 'sha=[0-9a-f]{40}' | head -1)"
+  asked="${asked#sha=}"
+  [ -n "${CR_FAKE_SHA_ECHO:-}" ] && asked="$CR_FAKE_SHA_ECHO"
+  if [ -n "$asked" ]; then
+    echo "CR_BODY={\"deliveries\":$(cat "$CR_FAKE_ROWS"),\"sha\":\"$asked\"}"
+  else
+    echo "CR_BODY={\"deliveries\":$(cat "$CR_FAKE_ROWS"),\"sha\":null}"
+  fi
 else
   echo "CR_ERROR=http_${CR_FAKE_HTTP}_worker_principal"
 fi
@@ -1963,6 +1982,7 @@ run_fake() { # <expected-rc> <label> <http> <via>
     CR_FAKE_RUNS="$RUNS_FAKE" CR_FAKE_JOBS="$TMP/jobs-fake.json" \
     CR_FAKE_ROWS="$TMP/rows-fake.json" CR_FAKE_HEALTH="$HEALTH_FAKE" \
     CR_FAKE_HTTP="$http" CR_FAKE_VIA="$via" CROWN_STATE_FILE="$state" \
+    CR_FAKE_SHA_ECHO="${CR_FAKE_SHA_ECHO:-}" CR_FAKE_ENVELOPE="${CR_FAKE_ENVELOPE:-}" \
     bash "$CR" --now "$NOW" --window-hours 24 2>&1)"
   rc=$?
   printf '%s\n' "$out" > "$TMP/last.out"
@@ -1995,6 +2015,42 @@ saw "NO substitute reader" "the sentence states the rule it enforced"
 not_saw "answered by postgres-container" "the deleted reader is not a name this script can print"
 not_saw "read by postgres-container" "and it cannot ride a green sentence either"
 not_saw "answered by route" "the transport did not decide the answer — the three runs report DIFFERENT outcomes"
+
+section "(o1b) AN ANSWER THAT ANSWERS ANOTHER QUESTION IS REFUSED, NEVER READ AS ZERO ROWS"
+# THE ROW THIS ARM OWNS: task-797898cb365506b5. On 2026-09-16 crown-reconcile
+# printed "BEHIND: … delivered, never recorded" on main FIVE times inside 23
+# minutes (runs 35150456276, 35150479314, 35152425747, 35152522140, 35152536095)
+# and every red cleared itself minutes later with nothing fixed. Each of the five
+# accused a DIFFERENT sha, and all five were ALREADY IN THE CROWN when they were
+# accused — probed against the live route the next morning: 3635e345d recorded
+# 2026-09-16T13:03:07Z, d03949d90 13:41:09Z, 9dbd4ab9c 07:56:39Z, f703ffa87
+# 16:02:04Z, baf2c2538 19:25:04Z. Not a late write and not a shifting
+# denominator: concurrent runs' reads were colliding on the control plane's fixed
+# `/tmp/cr-body.json`, so a reader could read ANOTHER reader's body — HTTP 200,
+# valid JSON, the wrong sha's rows — and the BEHIND arm turned that into an
+# accusation. The collision is fixed in the remote reader ((o2b) below); this arm
+# is the second door, and it is the one that would have made the first red say
+# what was actually wrong.
+#
+# CONTROL FIRST, so "it refuses" is a difference and not the only thing this
+# fake can produce.
+run_fake 0 "an envelope stamped with the sha that was asked about is read normally" 200 route
+saw "RECONCILED" "the control run reaches a green — the identity check is not a blanket refusal"
+not_saw "does not answer the question" "and nothing is refused when the answer matches the question"
+
+CR_FAKE_SHA_ECHO="$SHA_B" \
+  run_fake 2 "a 200 whose envelope is stamped with ANOTHER sha is REFUSED" 200 route
+saw "does not answer the question" "the refusal says the answer did not answer the question"
+saw "COULD NOT FULLY READ" "…and it lands in SILENCE (rc 2), not in a verdict about the crown"
+not_saw "delivered, never recorded" "THE WHOLE POINT: crosstalk is never printed as a missing row"
+not_saw "BEHIND:" "…and never counted into BEHIND"
+unset CR_FAKE_SHA_ECHO
+
+CR_FAKE_ENVELOPE='{"deliveries":{"sha":"x"},"sha":"'"$SHA_A"'"}' \
+  run_fake 2 "a 200 whose .deliveries is not an array is an UNREAD, not an empty crown" 200 route
+saw "not a readable delivery envelope" "the refusal names the shape it could not parse"
+not_saw "delivered, never recorded" "an unparseable body never becomes an accusation either"
+unset CR_FAKE_ENVELOPE
 
 section "(o2) THE REMOTE READER ITSELF — a 401 names the principal and NEVER reaches psql"
 # (o) drives the script with `ssh` faked, so it proves what the LOCAL half does
@@ -2098,6 +2154,78 @@ if grep -qE 'psql|platform_deliveries' "$TMP/remote-code.sh"; then
   grep -nE 'psql|platform_deliveries' "$TMP/remote-code.sh" >&2
 else
   ok "no executable line of the remote reader mentions psql or platform_deliveries — the detour is deleted, not skipped"
+fi
+
+section "(o2b) TWO READERS ON ONE BOX MUST NOT READ EACH OTHER'S BODY"
+# THE OUTAGE THIS ARM OWNS is the same one (o1b) names, at its source. The reader
+# used to write its response to the FIXED path `/tmp/cr-body.json` on the control
+# plane. crown-reconcile.yml's concurrency group is per-SHA on main
+# (`crown-reconcile-${{ github.sha }}`), so several runs reconcile at once — five
+# overlapped inside three minutes on 2026-09-16 — and each makes ~55 sequential
+# ssh reads to the SAME box. Two of them land between each other's `curl -o` and
+# `tr -d` and one reads the other's body: HTTP 200, valid JSON, the WRONG sha.
+#
+# The fake curl below reproduces exactly that interleaving: it writes the body
+# for the sha it was asked about, and THEN plants another reader's body at the
+# old fixed path, which is what a concurrent `curl -o /tmp/cr-body.json` does.
+# Against the reader as it stands the plant is inert. Against the reader with its
+# body path put back to `/tmp/cr-body.json` the plant IS the output, this arm
+# reds, and the red says so.
+RFAKE2="$TMP/rfake2"; mkdir -p "$RFAKE2"
+cat > "$RFAKE2/docker" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"name=cloud-control_plane_"*) echo "cp-container-in-effigy" ;;
+  *"printenv WORKER_TOKEN"*)     echo "worker-token-in-effigy" ;;
+esac
+SH
+cat > "$RFAKE2/curl" <<'SH'
+#!/usr/bin/env bash
+out=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+asked="$(printf '%s ' "$@" | grep -oE 'sha=[0-9a-f]{40}' | head -1)"; asked="${asked#sha=}"
+[ -n "$out" ] && printf '{"deliveries":[],"sha":"%s"}' "$asked" > "$out"
+# The OTHER reader's curl, landing after ours. Only meaningful if our body path
+# is the shared one — which is the property under test.
+[ -n "${CR_CROSSTALK:-}" ] && printf '{"deliveries":[],"sha":"%s"}' "$CR_CROSSTALK" > "$CR_SHARED_PATH"
+printf 200
+SH
+chmod +x "$RFAKE2/docker" "$RFAKE2/curl"
+# The literal path the old reader used. Named once, here, so this arm cannot
+# drift away from the thing it is testing.
+CR_SHARED_PATH="/tmp/cr-body.json"
+
+remote_run2() { # <crosstalk-sha-or-empty>
+  rm -f "$CR_SHARED_PATH"
+  PATH="$RFAKE2:$SANDBOX_PATH" CR_CROSSTALK="$1" CR_SHARED_PATH="$CR_SHARED_PATH" \
+    bash "$REMOTE_SH" "sha=$SHA_A" > "$TMP/last.out" 2>&1
+  rm -f "$CR_SHARED_PATH"
+}
+
+# CONTROL: with nobody else on the box the reader reports its own body.
+remote_run2 ""
+saw "CR_HTTP=200" "the reader reports the code it got"
+saw "\"sha\":\"$SHA_A\"" "with no concurrent reader it returns the body for the sha it asked about"
+
+# THE ARM: another reader writes the shared path between our write and our read.
+remote_run2 "$SHA_B"
+saw "\"sha\":\"$SHA_A\"" "a concurrent write to the OLD fixed path does not change what this reader returns"
+not_saw "\"sha\":\"$SHA_B\"" "THE WHOLE POINT: the reader never hands back another reader's body"
+
+# …and the static half, because "it happens not to collide today" is not the
+# claim. Comments are stripped first (the fix's own rationale names the old path)
+# and the strip is proven non-empty so this cannot pass by grepping nothing.
+grep -v '^[[:space:]]*#' "$REMOTE_SH" > "$TMP/remote-code2.sh"
+if [ -s "$TMP/remote-code2.sh" ]; then
+  ok "the reader has code left after its comments are stripped — the check below is not vacuous"
+else
+  bad "stripping comments emptied the reader — the shared-path check below would pass on nothing"
+fi
+if grep -qF -- "-o $CR_SHARED_PATH" "$TMP/remote-code2.sh" || grep -qF -- "-o \"$CR_SHARED_PATH\"" "$TMP/remote-code2.sh"; then
+  bad "the remote reader still writes its body to the SHARED path $CR_SHARED_PATH — concurrent runs read each other"
+  grep -nF -- "$CR_SHARED_PATH" "$TMP/remote-code2.sh" >&2
+else
+  ok "no executable line of the remote reader writes its body to the shared path $CR_SHARED_PATH"
 fi
 
 section "(o3) THE CONTAINER IS FOUND BY A STABLE IDENTITY, NOT A MOVING IMAGE TAG"

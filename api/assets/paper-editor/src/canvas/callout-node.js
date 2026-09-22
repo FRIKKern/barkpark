@@ -89,21 +89,35 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 
-// Tone → modifier class, mirroring walk.ex `callout_tone_class/1` (walk.ex:
-// 1321-1326) EXACTLY: the five knowns pass through, anything else → info. This is
-// DELIBERATELY not the tone.js alias-normalizer — that alias-expands note→info /
-// warn→warning / error→danger, which the reader does NOT do, so reusing it would
-// silently drift the tone (and thus the --bp-tone-<tone>-* token pair) on an
-// aliased input. Colour is bound entirely through the `bp-callout--<tone>` class
-// resolving `--bp-tone-<tone>-{bg,fg}` (light + dark) — NO inline paint, NO icon.
+// The callout tone vocabulary, mirroring walk.ex `callout_tone_class/1`
+// (walk.ex:1676-1683) and the JS SDK's own copy (the tone list in
+// js/packages/react/src/blocks/core.ts) EXACTLY: a known tone passes through,
+// anything else → info.
+//
+// SEVEN words, not five. `loss` and `peace` are the two SEMANTIC VERDICT tones
+// (design/tokens.json color.verdict — pe-bl-verdict-accent-tokens). They ride
+// the SAME `tone` field as the five system tones but a DIFFERENT token family:
+// `--bp-verdict-{loss,peace}` / `-soft` rather than `--bp-tone-<tone>-{bg,fg}`.
+// They were added to the reader and to the SDK and NOT here, so the editor
+// collapsed an authored `loss` callout onto `bp-callout--info` and showed no
+// rail at all where /papers paints terracotta. __callout_parity.test.mjs (d)
+// derives this vocabulary from walk.ex every run, so the next tone cannot ship
+// half-wired the way these two did.
+//
+// This list is DELIBERATELY not the tone.js alias-normalizer — that alias-expands
+// note→info / warn→warning / error→danger, which the reader does NOT do, so
+// reusing it would silently drift the tone on an aliased input. Colour is bound
+// entirely through the `bp-callout--<tone>` class — NO inline paint, NO icon.
 export function calloutToneClass(tone) {
-  return ["success", "warning", "danger", "neutral", "info"].includes(tone)
+  return ["success", "warning", "danger", "neutral", "loss", "peace", "info"].includes(
+    tone,
+  )
     ? tone
     : "info";
 }
 
 // Summary text for a collapsed <details>, mirroring walk.ex `callout_summary/1`
-// + `tone_label/1` (walk.ex:1349-1361): the title when present, else the tone
+// + `tone_label/1` (walk.ex:1714-1720): the title when present, else the tone
 // label so the disclosure is never empty. Uses the RAW tone (unknown → "Info"),
 // exactly as tone_label/1 does.
 function toneLabel(tone) {
@@ -116,6 +130,10 @@ function toneLabel(tone) {
       return "Danger";
     case "neutral":
       return "Neutral";
+    case "loss":
+      return "Loss";
+    case "peace":
+      return "Peace";
     default:
       return "Info";
   }

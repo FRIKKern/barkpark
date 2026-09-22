@@ -33,6 +33,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
   alias BarkparkCloud.BoxCapacityRefusalFixture
   alias BarkparkCloud.Registry.Deployment
   alias BarkparkCloud.Sites.Deploy
+  alias BarkparkCloud.UnknownDeploymentStatus
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -2248,10 +2249,18 @@ defmodule BarkparkCloud.DeployLedgerTest do
     end
 
     # THE RESIDUE CAN GO UP — the D8 discipline applied to statuses.
-    # `deployments.status` is a CHECK-less varchar (pg_constraint contype='c'
-    # returns zero rows for this table), so a producer can invent a status
-    # tomorrow. The honest answer is a number that RISES and says "the census
-    # does not name this", never a success count that quietly absorbs it.
+    #
+    # `deployments.status` WAS a CHECK-less varchar; migration 20260916080000
+    # closed the vocabulary in the database, so a fresh row can no longer carry
+    # an invented status. `residual` does not retire with it: the 31k rows
+    # already on cloud-db-1 were written with no constraint at all, and a CHECK
+    # is droppable, widenable and restorable-around. The honest answer for a
+    # status the census cannot name is a number that RISES and says so, never a
+    # success count that quietly absorbs it.
+    #
+    # `without_status_constraint/1` drops the CHECK inside this test's sandbox
+    # transaction (see the helper for why that is safe) so the fixture can reach
+    # the shape the schema now refuses.
     test "an UNKNOWN status is residue, loudly — it is not folded into `live`", %{site: site} do
       from = ~U[2026-07-26 00:00:00Z]
       to = ~U[2026-07-27 00:00:00Z]
@@ -2274,14 +2283,16 @@ defmodule BarkparkCloud.DeployLedgerTest do
       end
 
       # A status no arm of this census has ever been taught.
-      for i <- 1..3 do
-        deployment!(site, %{
-          status: "quarantined",
-          stage: "SWITCH",
-          failure_reason: nil,
-          inserted_at: DateTime.add(from, 200 + i, :second)
-        })
-      end
+      UnknownDeploymentStatus.without_status_constraint(fn ->
+        for i <- 1..3 do
+          deployment!(site, %{
+            status: "quarantined",
+            stage: "SWITCH",
+            failure_reason: nil,
+            inserted_at: DateTime.add(from, 200 + i, :second)
+          })
+        end
+      end)
 
       census = DeployLedger.census(from, to)
 
@@ -4605,7 +4616,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
       # A GENUINE waiter: in flight, no live mark. The alert SHOULD see this.
       deployments!(waiting_site, [
-        %{status: "in_flight", inserted_at: DateTime.add(@dw_from, 1_000, :second)}
+        %{status: "deferred", inserted_at: DateTime.add(@dw_from, 1_000, :second)}
       ])
 
       # A site whose every row was stopped by hand. The alert must NEVER see it.

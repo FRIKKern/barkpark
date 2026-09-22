@@ -128,6 +128,9 @@ defmodule Barkpark.Plugins.Registry.Discovery do
     name_set
   end
 
+  # The manifest path is built from a discovery root we own plus a directory
+  # entry enumerated from that root — no caller-supplied segment reaches it.
+  # sobelow_skip ["Traversal.FileModule"]
   defp manifest_names_for_module(module) do
     default_paths()
     |> Enum.flat_map(&plugin_dirs_in/1)
@@ -143,6 +146,9 @@ defmodule Barkpark.Plugins.Registry.Discovery do
     end)
   end
 
+  # The manifest path is built from a discovery root we own plus a directory
+  # entry enumerated from that root — no caller-supplied segment reaches it.
+  # sobelow_skip ["Traversal.FileModule"]
   defp try_register_plugin_dir_in_whitelist(dir, whitelist) do
     manifest_path = Path.join(dir, "plugin.json")
 
@@ -205,6 +211,9 @@ defmodule Barkpark.Plugins.Registry.Discovery do
     end
   end
 
+  # The manifest path is built from a discovery root we own plus a directory
+  # entry enumerated from that root — no caller-supplied segment reaches it.
+  # sobelow_skip ["Traversal.FileModule"]
   defp try_register_plugin_dir(dir) do
     manifest_path = Path.join(dir, "plugin.json")
 

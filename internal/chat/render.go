@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/pdrender"
+	"github.com/FRIKKern/barkpark/internal/taskboard"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -998,7 +999,7 @@ func (m Model) workflowPanelLines() []string {
 			// Studio pane (#3959). Additive under wfAgentDetail: an idle or a
 			// phase-only panel is byte-identical to before this level existed.
 			if m.wfAgentDetail {
-				lines = append(lines, renderWorkflowAgentDetail(m.width, j, m.now(), m.wfPhase, m.wfAgent, stallOK)...)
+				lines = append(lines, renderWorkflowAgentDetail(m.width, j, m.now(), m.wfPhase, m.wfAgent, stallOK, m.agentTaskJoin)...)
 			}
 		}
 		// D43: the terminal result box — the panel bottom once the rail entry has
@@ -1074,7 +1075,7 @@ func (m Model) cachedEpic() *EpicGoal {
 // line, and the result ARE the honest window; every absent field is omitted, not
 // fabricated. nil when the selection resolves to no agent (a detail-less phase),
 // so the pane never paints an empty gutter.
-func renderWorkflowAgentDetail(width int, j WorkflowJourney, now time.Time, selPhase, selAgent int, stallOK bool) []string {
+func renderWorkflowAgentDetail(width int, j WorkflowJourney, now time.Time, selPhase, selAgent int, stallOK bool, join agentTaskJoinLookup) []string {
 	if selPhase < 0 || selPhase >= len(j.Phases) {
 		return nil
 	}
@@ -1138,8 +1139,40 @@ func renderWorkflowAgentDetail(width int, j WorkflowJourney, now time.Time, selP
 		}
 		out = append(out, indent+line)
 	}
+
+	// ── the bp TASK this agent advances (task wsc-bl-agent-task-join) ────────
+	// The agent row and its ledger obligation become ONE reading: the claimed
+	// row's live pulse now-line, how many of its criteria are sealed, and the
+	// Studio route that opens it. The join is taskboard.JoinAgentTask — the SAME
+	// rule Studio's Doing strip uses — and it answers "nothing" for a label that
+	// names no task, an ambiguous label, and an unfetched/failed row set alike.
+	// Nothing is painted then: no placeholder, no "task unknown". A wrong task
+	// line would attach a builder's live evidence to somebody else's work.
+	if join != nil {
+		if tj, ok := join(a.Label); ok {
+			// WRAPPED, never truncated: the deep link is the LAST segment of the
+			// summary, so a truncate at the pane width cuts off exactly the part
+			// the line exists to hand over. labeledWrap is the same 'about'/'done'
+			// block shape, so the task line reads as one more honest field.
+			summary := taskboard.AgentTaskSummary(tj, now)
+			// The link is ONE unbreakable token: no wrap can split it, so on a pane
+			// narrower than the link it would overrun the frame. Drop it there
+			// rather than truncate it — a cut URL is a broken URL, and the doc id
+			// the line still carries IS the actionable handle (`bp task get <id>`).
+			if lipgloss.Width(tj.DeepLink) > w-lipgloss.Width(indent) {
+				summary = strings.TrimSuffix(summary, " · "+tj.DeepLink)
+			}
+			out = append(out, labeledWrap(indent, "task", summary, w)...)
+		}
+	}
 	return out
 }
+
+// agentTaskJoinLookup resolves an agent label to the task it advances. It is a
+// FUNCTION, not the row slice, so renderWorkflowAgentDetail stays pure and the
+// byte-locked agent-detail tests that pass nil keep rendering exactly the bytes
+// they locked — the task line is strictly additive.
+type agentTaskJoinLookup func(label string) (taskboard.AgentTaskJoin, bool)
 
 // labeledWrap emits a dim-labeled, wrapped text block indented under the agent
 // header — 'about <brief>' / 'done <result>'. The label dims; continuation lines

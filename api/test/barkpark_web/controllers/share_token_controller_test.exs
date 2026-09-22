@@ -55,9 +55,22 @@ defmodule BarkparkWeb.ShareTokenControllerTest do
 
   setup %{conn: conn} do
     {:ok, admin_token} =
-      Auth.create_token(@admin, "tok-admin", @dataset, ["read", "write", "admin"])
+      Auth.create_token(
+        @admin,
+        "tok-admin",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
-    {:ok, _} = Auth.create_token(@junior, "tok-junior", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @junior,
+        "tok-junior",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     ws = create_workspace!("tok-ws")
     proj = create_project!(ws, "tok-proj")

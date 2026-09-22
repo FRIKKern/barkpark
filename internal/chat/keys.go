@@ -463,6 +463,10 @@ func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 				if visible, _, _ := visibleAgents(j.Phases[m.wfPhase]); len(visible) > 0 && agentHasDetail(visible[0]) {
 					m.wfAgent = 0
 					m.wfAgentDetail = true
+					// The join's candidate rows are fetched HERE and nowhere else —
+					// the first drill into an agent is the first moment the answer
+					// can be shown, so it is the first moment worth a call.
+					return m, m.maybeLoadJoinTasks(), true
 				}
 			}
 		}

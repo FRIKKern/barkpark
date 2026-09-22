@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -179,7 +180,16 @@ func runCloudOpen(out *writer, g globals, args []string) int {
 		}
 		id = rid
 	case kind == "site" && ref != "":
-		rid, rerr := resolveOpenSiteID(cfg, ref)
+		// THE VERIFYING RESOLVER, DELIBERATELY, and the one place the slug
+		// passthrough is wrong. This verb's product is a URL, not a request: it
+		// mints `#site/<ref>` and hands it to a browser, so nothing downstream of
+		// `bp` ever reports back. Skipping the read would make `bp cloud open site
+		// no-such-thing` exit 0 with a dead deep link instead of exit 4
+		// (not_found) — the exact outcome TestRunCloudOpenNotFoundNameSpelling-
+		// AuthToken pins. The site VERBS pay no such read: they address the
+		// control plane, which answers 404 for an unknown slug on the real
+		// request (resolveOpenSiteID, below).
+		rid, rerr := lookupSiteIDByListing(cfg, ref)
 		if rerr != nil {
 			return openResolveFail(out, rerr)
 		}
@@ -283,9 +293,71 @@ func resolveOpenBarkparkID(cfg *Config, ref string) (string, error) {
 	return "", openNotFoundErr("no Barkpark matches %q (see `bp cloud status`)", ref)
 }
 
-// resolveOpenSiteID turns a site id-or-name into its id, mirroring
-// resolveOpenBarkparkID over GET /v1/sites.
+// siteSlugFormat mirrors the control plane's OWN slug rule, character for
+// character: cloud/lib/barkpark_cloud/registry/site.ex declares
+// `@slug_format ~r/^[a-z0-9][a-z0-9-]*$/` with `validate_length(:slug, min: 1,
+// max: 63)`. It is deliberately a copy of that rule and not a looser "no spaces"
+// guess: a ref this predicate accepts is one `Registry.get_team_site/2` can look
+// up by slug, and a ref it rejects is one only the list read can resolve.
+var siteSlugFormat = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// looksLikeSiteSlug reports whether ref has the shape of a team-scoped site
+// slug, which is what lets resolveOpenSiteID hand it to the control plane
+// unresolved. It says nothing about whether such a site EXISTS — a slug that
+// names nothing 404s at the real request, one round trip later, instead of
+// failing a list scan one round trip earlier.
+func looksLikeSiteSlug(ref string) bool {
+	if ref == "" || len(ref) > 63 {
+		return false
+	}
+	return siteSlugFormat.MatchString(ref)
+}
+
+// resolveOpenSiteID turns a site id-or-name into a ref the control plane can
+// address: a uuid and a team-scoped slug both pass through with NO network, and
+// only a display name still costs the list-ALL GET /v1/sites.
 func resolveOpenSiteID(cfg *Config, ref string) (string, error) {
+	if strings.TrimSpace(ref) == "" {
+		return "", fmt.Errorf("site needs an <id-or-name>")
+	}
+	if looksLikeUUID(ref) {
+		return ref, nil
+	}
+	if !cfg.HasCloudToken() {
+		return "", openAuthErr("not logged in — run `bp login` to resolve %q by name (or pass its id), or set BARKPARK_CLOUD_TOKEN for a CI job", ref)
+	}
+	// THE CONTROL PLANE RESOLVES A SLUG ITSELF NOW, so a slug-shaped ref costs no
+	// round trip at all. `Registry.get_team_site/2` (cloud/lib/barkpark_cloud/
+	// registry.ex) runs a non-uuid ref through a `(team_id, slug)` lookup, which
+	// the schema's unique index makes unambiguous, and EVERY route this id is
+	// handed to goes through it: GET/PATCH/DELETE /v1/sites/:id, and the
+	// deploy / rollback / promote / deployments / previews / doctor /
+	// domain-status children. The dashboard deep link `#site/<ref>` resolves the
+	// same way — the SPA hands the hash segment straight to GET /v1/sites/:id
+	// (cloud/priv/static/app.js loadSite).
+	//
+	// FAILURE DIRECTION, stated because it is the whole reason this is a SHAPE
+	// test and not an unconditional passthrough: the list read also matched a
+	// site's display NAME, which the control plane cannot resolve. A name is only
+	// slug-shaped when it already looks like its own slug, so anything with a
+	// capital, a space, a dot or an underscore still takes the list path below
+	// and keeps working. What a slug-shaped ref loses is the narrow case of a
+	// site NAMED `my-site` whose slug is something else (`my-site-2`, say) when
+	// no site has the slug `my-site` — that now 404s where it used to resolve.
+	// The old pass was ambiguous in that case anyway (one loop tested ID, Slug
+	// and Name together, so list order decided), whereas (team_id, slug) names at
+	// most one row.
+	if looksLikeSiteSlug(ref) {
+		return ref, nil
+	}
+	return lookupSiteIDByListing(cfg, ref)
+}
+
+// lookupSiteIDByListing is the OLD resolveOpenSiteID body, unchanged: the
+// list-ALL GET /v1/sites read that turns any ref — id, slug or display name —
+// into a uuid. It is what a display name still needs, and what `bp cloud open
+// site` uses for every ref because a deep link has no later chance to 404.
+func lookupSiteIDByListing(cfg *Config, ref string) (string, error) {
 	if strings.TrimSpace(ref) == "" {
 		return "", fmt.Errorf("site needs an <id-or-name>")
 	}

@@ -139,6 +139,48 @@ FAIL=0
 
 TMX() { tmux -L "$SOCK" "$@"; }
 
+# PIN THE COLOR PROFILE THE WAY WE PIN THE GEOMETRY. The board resolves its
+# lipgloss profile from the PANE's environment (termenv ColorProfile: TERM +
+# COLORTERM + TERM_PROGRAM), and tmux hands a pane whatever `default-terminal`
+# says — plain "screen" when no ~/.tmux.conf sets otherwise. termenv maps a bare
+# "screen" to **Ascii**, so on such a host the board paints with NO SGR AT ALL
+# and every style-keyed assert here is silently unmeasurable — it compares two
+# unstyled rows and reports "no response" rather than "I could not see".
+#
+# MEASURED on ubuntu-latest (PR #18858's first advisory run): capture-pane -e
+# returned the header row with ZERO escape sequences, and G7 read {} responding
+# columns on a healthy gutter. Darwin hosts pass only because the developer's
+# tmux.conf happens to set a 256color default-terminal.
+#
+# So the harness pins it: COLORTERM=truecolor + TERM_PROGRAM=tmux take termenv's
+# truecolor branch for a "screen*" TERM, and terminal-features RGB keeps tmux
+# from downsampling the 38;2;r;g;b it stores and re-emits. Same bytes on every
+# host — the same reason -x/-y is pinned rather than inherited.
+# MEASURED, in this order, on ubuntu-latest: tmux's own `default-terminal`
+# option plus `new-session -e` did NOT style the pane; forcing TERM/COLORTERM on
+# the app's command line did NOT either. The actual gate is `CI`:
+#
+#   termenv.go:28  func (o *Output) isTTY() bool {
+#   termenv.go:32    if len(o.environ.Getenv("CI")) > 0 { return false }
+#
+# and ColorProfile() returns Ascii the moment isTTY() is false — before TERM or
+# COLORTERM is read at all. Every GitHub runner exports CI=true, so the board
+# painted with zero SGR and every style-keyed assert here was unmeasurable.
+#
+# The pane genuinely IS a tty, so `env -u CI` is the honest correction, not a
+# workaround: it tells termenv the truth about the thing it is asking about.
+# TERM/COLORTERM/TERM_PROGRAM stay pinned so the profile is TrueColor rather
+# than whatever the host's tmux.conf happens to imply, and terminal-features RGB
+# keeps tmux from downsampling the 38;2;r;g;b it stores and re-emits — the same
+# captured bytes on every host. BP_ENV is the launch prefix every new-session
+# uses.
+pin_pane_color() {
+  TMX set-option -g  default-terminal  screen-256color >/dev/null 2>&1 || true
+  TMX set-option -ga terminal-features ",*:RGB"        >/dev/null 2>&1 || true
+}
+PANE_ENV=(-e COLORTERM=truecolor -e TERM_PROGRAM=tmux -e TERM=screen-256color)
+BP_ENV="env -u CI TERM=screen-256color COLORTERM=truecolor TERM_PROGRAM=tmux"
+
 cleanup() {
   if [ "${BP_DRIVE_KEEP:-}" = "" ]; then
     TMX kill-server 2>/dev/null || true
@@ -222,6 +264,12 @@ normalize() {
 
 save_frame()      { snap "$1"  | normalize >"$EVID/$2"; }
 save_row()        { snap "$1"  | sed -n "$2p" >"$EVID/$3"; }
+# save_row's normalized twin. A raw row save is only byte-stable if the row
+# carries no churn — a CLAIMED row paints a live braille spinner, so saving one
+# raw makes two otherwise identical hermetic runs differ by one glyph (measured:
+# ⠧ vs ⠦ on the same assert). Any row save that can land on a claimed task goes
+# through normalize().
+save_row_norm()   { snap "$1"  | sed -n "$2p" | normalize >"$EVID/$3"; }
 save_row_styled() { snape "$1" | sed -n "$2p" >"$EVID/$3"; }
 
 # 1-based line number of the compose header row. The header sheds its
@@ -240,8 +288,73 @@ arrow_col() {
     'my $i=0; for my $ch (split //){ $i++; if (ord($ch)==0x2194){ print $i; exit } }'
 }
 
+# THE STYLED DIVIDER CELL of a captured header row: the ↔ affordance together
+# with the SGR state that applies to it. Compose paints the ENTIRE divider —
+# every gutter cell, every row — with ONE style (compose.go: dividerRestStyle,
+# swapped for dividerHoverStyle when m.wideDividerHover, dividerGrabbedStyle
+# while dragging), so this one cell is a complete and faithful readout of the
+# gutter hit-test's answer for the whole gutter.
+#
+# WHY G7 READS THIS AND NOT THE WHOLE HEADER ROW. The header row's TAIL is the
+# reading pane's preview heading, and that heading reverts from the hovered
+# board row's title to the cursor's title the instant the pointer leaves the
+# board. A whole-row diff therefore calls EVERY off-board column "responding",
+# accent or not: col boardW+2 sits inside the reader pane, carries no hover
+# accent SGR at all, and still differed from the off-gutter baseline — by the
+# heading alone ("Harbor lights epic" vs "Mulch the seedling beds") — so a
+# healthy 2-cell gutter measured as three responding columns. That is churn
+# coupling, the one thing this harness's evidence law forbids (it is why G1/G2/
+# G3/G4/G8 are banished to live mode). The fix is to narrow what the probe
+# MEASURES, never to widen paneGutter2 to satisfy it.
+#
+# Reads one styled row on stdin, prints "<active SGR><↔>", or NO-DIVIDER when
+# the row carries no affordance. It never exits early mid-pipe: a `grep -q`-
+# shaped SIGPIPE under this script's pipefail is exactly how a probe lies (see
+# snap_has above).
+divider_cell_styled() {
+  perl -CSD -Mutf8 -ne '
+    chomp;
+    my $s = $_;
+    my @st;
+    my $cell = "NO-DIVIDER";
+    while (length $s) {
+      if ($s =~ s/^\e\[([0-9;]*)m//) {
+        my $p = $1;
+        if ($p eq "" || $p eq "0") { @st = () } else { push @st, "\e[" . $p . "m" }
+        next;
+      }
+      $s =~ s/^(.)//s;
+      if (ord($1) == 0x2194) { $cell = join("", @st) . $1; last }
+    }
+    print $cell, "\n";
+  '
+}
+
 # 1-based line number of the ▎ selection marker
 marker_line() { snap "$1" | grep -n '▎' | head -1 | cut -d: -f1; }
+
+# 1-based line numbers of the BOARD spine's COUNTED overflow affordances —
+# windowSpine's "↑ N more above" / "↓ N more below" (render.go). The count is
+# what distinguishes them from the reading/preview pane's COUNTLESS "↑ more
+# above" / "↓ more below" affordance (rightPaneMarkerAt), which is a different
+# thing entirely: the counted board markers are click-targets that step the
+# cursor (D119, wideBoardMarkerAt -> moveCursor), the countless ones are not.
+# The `^ *` anchor keeps the match on the board side of the gutter — the reader
+# pane's marker is always indented past the divider.
+board_down_marker_line() { snap "$1" | grep -nE '^ *↓ [0-9]+ more below' | head -1 | cut -d: -f1; }
+board_up_marker_line()   { snap "$1" | grep -nE '^ *↑ [0-9]+ more above' | head -1 | cut -d: -f1; }
+
+# press a key literally and let the board settle
+key() { sgr "$1" "$2"; sleep 0.4; }
+
+# drive the cursor to the very top: moveCursor clamps at row 0, so N k-presses
+# for any N past the spine length is an idempotent "go home" — used to restore
+# the pre-gesture state so the asserts that follow see the same board.
+cursor_home() {
+  local i=0
+  while [ "$i" -lt 60 ]; do sgr "$1" "k"; i=$((i+1)); done
+  sleep 0.6
+}
 
 # 1-based line number of the first child task row (├─ / └─ spine row)
 leaf_line() { snap "$1" | grep -n '^ *[├└]─' | head -1 | cut -d: -f1; }
@@ -367,8 +480,9 @@ if [ -z "$BP" ]; then
 fi
 
 TMX kill-server 2>/dev/null || true
-TMX new-session -d -x 130 -y 40 -s "$WIDE" "$BP tasks"
-TMX new-session -d -x 70 -y 24 -s "$NARROW" "$BP tasks"
+pin_pane_color
+TMX new-session -d "${PANE_ENV[@]}" -x 130 -y 40 -s "$WIDE" "$BP_ENV $BP tasks"
+TMX new-session -d "${PANE_ENV[@]}" -x 70 -y 24 -s "$NARROW" "$BP_ENV $BP tasks"
 
 geo=$(TMX display -p -t "$WIDE" '#{window_width}x#{window_height}')
 if [ "$geo" = "130x40" ]; then ok "wide session geometry is 130x40 detached"; else bad "wide geometry: got $geo, want 130x40"; fi
@@ -403,9 +517,125 @@ save_frame "$WIDE" baseline-wide.txt
 HL=$(header_line "$WIDE")
 note "wide header located on line $HL"
 
+# ── G9+G10 (hermetic): the COUNTED spine overflow markers paint, and a click
+# ── on one steps the cursor exactly one row (D119, D130) ─────────────────────
+# PRECONDITION, not decoration: windowSpine paints these affordances only while
+# len(spineLines) > avail. The 11-doc fixture corpus did not overflow the wide
+# spine at 130x40, so before ttw22-fixture-overflow-enrichment grew it these
+# asserts could not have fired AT ALL — and a gesture class that cannot fire is
+# indistinguishable from one that passes. The enriched corpus (fixture/main.go,
+# floors in auditCorpus) makes the overflow a boot-time fact, and the first
+# assert below is the tripwire that says so out loud if it ever stops being one.
+#
+# "Exactly one step" is measured DIFFERENTIALLY, against the keyboard: one `j`
+# is the definition of one step, so the marker click is required to land on the
+# SAME task one `j` lands on — no line arithmetic, no assumption about which row
+# follows which, and immune to the window scrolling under the gesture.
+if [ "$MODE" = hermetic ]; then
+  MK_DOWN=$(board_down_marker_line "$WIDE")
+  MK_UP=$(board_up_marker_line "$WIDE")
+  if [ -n "$MK_DOWN" ]; then
+    save_row_norm "$WIDE" "$MK_DOWN" g9-marker-down-boot.txt
+    ok "G9 wide spine OVERFLOWS at 130x40: counted '$(snap "$WIDE" | sed -n "${MK_DOWN}p" | sed 's/│.*$//; s/^ *//; s/ *$//')' painted on board line $MK_DOWN"
+  else
+    bad "G9 no counted '↓ N more below' on the wide board — the fixture corpus no longer overflows the spine, so every marker assert below is measuring nothing"
+  fi
+  # At boot the window is pinned at the top (slideTop top=0), so the UP marker
+  # must be ABSENT. This is the quiet arm: it says the markers track the window
+  # rather than being unconditional chrome.
+  if [ -z "$MK_UP" ]; then
+    ok "G9 no counted '↑ N more above' at boot (window pinned at top=0 — the markers track the window, they are not unconditional chrome)"
+  else
+    bad "G9 counted up-marker painted at boot on line $MK_UP (window should be pinned at top=0)"
+  fi
+
+  # ── G10: click the DOWN marker == one `j` ──────────────────────────────────
+  M0=$(marker_line "$WIDE"); T0=$(row_ident "$WIDE" "$M0")
+  key "$WIDE" "j"
+  MJ=$(marker_line "$WIDE"); TJ=$(row_ident "$WIDE" "$MJ")
+  key "$WIDE" "k"
+  MB=$(marker_line "$WIDE"); TB=$(row_ident "$WIDE" "$MB")
+  if [ -n "$TJ" ] && [ "$TJ" != "$T0" ] && [ "$TB" = "$T0" ]; then
+    note "G10 calibrated one keyboard step: \"$T0\" -j-> \"$TJ\" -k-> \"$TB\""
+  else
+    bad "G10 keyboard calibration failed (\"$T0\" -j-> \"${TJ:-none}\" -k-> \"${TB:-none}\") — the click comparison below would be vacuous"
+  fi
+  MK_DOWN=$(board_down_marker_line "$WIDE")
+  if [ -n "$MK_DOWN" ] && [ -n "$TJ" ] && [ "$TJ" != "$T0" ]; then
+    click "$WIDE" 8 "$MK_DOWN"
+    MC=$(marker_line "$WIDE"); TC=$(row_ident "$WIDE" "$MC")
+    save_row_norm "$WIDE" "$MC" g10-marker-click-selected-row.txt
+    if [ "$TC" = "$TJ" ]; then
+      ok "G10 click on the counted ↓ overflow marker (line $MK_DOWN) stepped the cursor EXACTLY one row: \"$T0\" -> \"$TC\", the same task one \`j\` selects (D119 wideBoardMarkerAt -> moveCursor)"
+    else
+      bad "G10 ↓ marker click did not step exactly one row (\"$T0\" -> \"${TC:-none}\", one \`j\` gives \"$TJ\")"
+    fi
+  else
+    bad "G10 could not run: down-marker line '${MK_DOWN:-none}', keyboard step \"$T0\" -> \"${TJ:-none}\""
+  fi
+
+  # ── G10b: scroll the window off the top, then click the UP marker == one `k` ─
+  # Walk DOWN from the top one row at a time until the window first slides —
+  # the instant the ↑ marker appears, top has just left 0 while the spine tail
+  # is still hidden, so BOTH counted markers are on screen. Walking to the
+  # condition is a PREDICATE; a hard-coded press count would be a guess that
+  # silently lands on the wrong window the moment the corpus or the pane
+  # geometry changes (and at the spine's bottom only the ↑ marker paints, so
+  # "press a lot" is not the same gesture at all).
+  cursor_home "$WIDE"
+  i=0
+  MK_UP=$(board_up_marker_line "$WIDE")
+  while [ "$i" -lt 60 ] && [ -z "$MK_UP" ]; do
+    sgr "$WIDE" "j"; sleep 0.2; i=$((i+1))
+    MK_UP=$(board_up_marker_line "$WIDE")
+  done
+  MK_DOWN=$(board_down_marker_line "$WIDE")
+  note "G9 walked $i rows down from the top before the window first slid"
+  if [ -n "$MK_UP" ] && [ -n "$MK_DOWN" ]; then
+    save_row_norm "$WIDE" "$MK_UP" g9-marker-up-scrolled.txt
+    ok "G9 both counted markers paint once the window has scrolled off the top (↑ line $MK_UP, ↓ line $MK_DOWN)"
+  else
+    bad "G9 scrolled window did not paint both counted markers (↑ '${MK_UP:-none}', ↓ '${MK_DOWN:-none}')"
+  fi
+  MS=$(marker_line "$WIDE"); TS=$(row_ident "$WIDE" "$MS")
+  key "$WIDE" "k"
+  MK=$(marker_line "$WIDE"); TK=$(row_ident "$WIDE" "$MK")
+  key "$WIDE" "j"
+  MK_UP=$(board_up_marker_line "$WIDE")
+  if [ -n "$MK_UP" ] && [ -n "$TK" ] && [ "$TK" != "$TS" ]; then
+    click "$WIDE" 8 "$MK_UP"
+    MU=$(marker_line "$WIDE"); TU=$(row_ident "$WIDE" "$MU")
+    if [ "$TU" = "$TK" ]; then
+      ok "G10b click on the counted ↑ overflow marker (line $MK_UP) stepped the cursor EXACTLY one row BACK: \"$TS\" -> \"$TU\", the same task one \`k\` selects"
+    else
+      bad "G10b ↑ marker click did not step exactly one row back (\"$TS\" -> \"${TU:-none}\", one \`k\` gives \"$TK\")"
+    fi
+  else
+    bad "G10b could not run: up-marker line '${MK_UP:-none}', keyboard step \"$TS\" -> \"${TK:-none}\""
+  fi
+
+  # Restore the pre-gesture board: every assert after this one was written
+  # against the boot cursor position.
+  cursor_home "$WIDE"
+  MH=$(marker_line "$WIDE"); TH=$(row_ident "$WIDE" "$MH")
+  if [ "$TH" = "$T0" ]; then
+    ok "G10 board restored to its boot cursor row (\"$T0\") — the asserts that follow see the baseline board"
+  else
+    bad "G10 board not restored after the marker gestures (▎ on \"${TH:-none}\", want \"$T0\")"
+  fi
+fi
+
 # ── G5+G7: divider hover accent + exact 2-col gutter bounds ──────────────────
 # The ↔ affordance recolors and the gutter │ lights on hover; the responding
 # column set, probed from behavior, must be EXACTLY the 2 gutter cells.
+#
+# G7's per-column probe reads the STYLED DIVIDER CELL (divider_cell_styled),
+# not the whole header row — see that helper for why the whole-row form was a
+# churn-coupled probe that read a healthy 2-cell gutter as three. G5's restore
+# assert below DOES keep the whole-row comparison on purpose: "the accent
+# restored exactly" is a claim about the entire painted row, and both of its
+# captures are taken from the same parked pointer position, so no heading churn
+# separates them.
 A=$(arrow_col "$WIDE")
 if [ -n "$A" ]; then
   ok "header ↔ divider affordance located at col $A"
@@ -416,15 +646,28 @@ fi
 hover "$WIDE" 10 12   # park off-gutter
 REST=$(snape "$WIDE" | sed -n "${HL}p")
 printf '%s\n' "$REST" >"$EVID/g5-hover-header-rest.txt"
+# PRECONDITION, LOUD AND NAMED. The divider hover accent is a STYLE, so a
+# capture carrying no SGR at all cannot answer G7 either way — it would report
+# an empty responding set, which reads exactly like "the hit-test responds
+# nowhere" and is in fact "this probe could not see". That is precisely how the
+# unstyled-pane defect hid: on a host whose tmux hands the pane a bare "screen"
+# TERM, termenv resolves Ascii and the board paints with zero escapes. An
+# absence is never caught by inspecting the result; assert the precondition.
+if grep -q $'\033\[' <<<"$REST"; then
+  ok "G7 precondition: the captured header row carries SGR — the pane is styled, so a hover-accent probe can see"
+else
+  bad "G7 precondition: the captured header row carries NO SGR — the pane is UNSTYLED (termenv resolved Ascii; check the pane's TERM/COLORTERM, pin_pane_color) and every style-keyed assert below is unmeasurable, not merely failing"
+fi
 RESPOND=""
 for c in $((A-2)) $((A-1)) "$A" $((A+1)) $((A+2)); do
   hover "$WIDE" 10 12
-  base=$(snape "$WIDE" | sed -n "${HL}p")
+  base=$(snape "$WIDE" | sed -n "${HL}p" | divider_cell_styled)
   hover "$WIDE" "$c" 12
-  cur=$(snape "$WIDE" | sed -n "${HL}p")
+  currow=$(snape "$WIDE" | sed -n "${HL}p")
+  cur=$(printf '%s\n' "$currow" | divider_cell_styled)
   if [ "$cur" != "$base" ]; then
     RESPOND="$RESPOND $c"
-    printf '%s\n' "$cur" >"$EVID/g5-hover-header-col$c.txt"
+    printf '%s\n' "$currow" >"$EVID/g5-hover-header-col$c.txt"
   fi
 done
 hover "$WIDE" 10 12
@@ -436,13 +679,13 @@ GUTL=$A
 if [ "$NRESP" = "2" ]; then
   first=${RESPOND%% *}; second=${RESPOND##* }
   if [ "$second" = "$((first+1))" ]; then
-    ok "G7 divider hover bounds: exactly 2 contiguous cols respond ($RESPOND); neighbours $((first-1)) and $((second+1)) do not"
+    ok "G7 divider hover bounds: exactly 2 contiguous cols light the divider cell ($RESPOND); neighbours $((first-1)) and $((second+1)) do not"
     GUTL=$first
   else
-    bad "G7 hover-responding cols not contiguous: $RESPOND"
+    bad "G7 divider-cell-lighting cols not contiguous: $RESPOND"
   fi
 else
-  bad "G7 divider hover bounds: responding cols {$RESPOND} (want exactly 2)"
+  bad "G7 divider hover bounds: cols lighting the divider cell {$RESPOND} (want exactly 2)"
 fi
 if [ "$OFF" = "$REST" ]; then
   ok "G5 hover accent paints on gutter hover and restores exactly when the pointer leaves (styled header row diff)"
@@ -638,7 +881,8 @@ else
   bad "G6 prefs not rewritten on release ($RATIO_BEFORE -> $RATIO_AFTER)"
 fi
 TMX kill-session -t "$WIDE"
-TMX new-session -d -x 130 -y 40 -s "$WIDE" "$BP tasks"
+pin_pane_color
+TMX new-session -d "${PANE_ENV[@]}" -x 130 -y 40 -s "$WIDE" "$BP_ENV $BP tasks"
 if wait_ready "$WIDE"; then
   HL=$(header_line "$WIDE")
   A2=$(arrow_col "$WIDE")
@@ -736,6 +980,48 @@ if [ "$MODE" = hermetic ]; then
     ok "hermetic '● live' still pinned at run end (held-open stream survived the G6 relaunch; no polling fallback)"
   else
     bad "hermetic '● live' lost by run end (header: '$(snap "$WIDE" | sed -n "1p")')"
+  fi
+fi
+
+# ── README floor arm (hermetic only) ──────────────────────────────
+# A number written into a doc rots the moment someone adds an assert, and this
+# README's floor had rotted by SEVEN (it said 18 while the run gave 25) before a
+# human noticed. So the floor stops being prose the reader has to trust: the
+# README states it as the literal phrase "<N>-assert hermetic floor", and this
+# arm compares every occurrence of that phrase against the assert total THIS
+# run actually produced.
+#
+# It is not counted as an assert of its own (no `ok`), so the floor it checks
+# stays the number of BOARD asserts in the table and cannot chase its own tail.
+# On disagreement it calls `bad`, which reds the run through the normal verdict
+# — the local law and the advisory CI job both refuse a drifted README.
+#
+# Three ways it reds, all named:
+#   - the phrase is absent or appears fewer than twice (someone deleted the
+#     number instead of correcting it, which must not read as "no drift");
+#   - two occurrences disagree with EACH OTHER (the heading says one thing and
+#     THE LAW another);
+#   - the stated floor disagrees with PASS+FAIL from this run.
+# Hermetic only: the live matrix is server-shaped and has no fixed floor to pin.
+if [ "$MODE" = hermetic ]; then
+  DRIVE_README="$SCRIPT_DIR/README.md"
+  TOTAL_ASSERTS=$((PASS + FAIL))
+  if [ ! -f "$DRIVE_README" ]; then
+    bad "README floor arm: $DRIVE_README is missing — the floor this run measured ($TOTAL_ASSERTS) is pinned by nothing"
+  else
+    # No `grep -q`, no early-exit pipe: capture whole, then match (pipefail).
+    FLOOR_HITS=$(grep -oE '[0-9]+-assert hermetic floor' "$DRIVE_README" || true)
+    FLOOR_N=$(printf '%s' "$FLOOR_HITS" | grep -c . || true)
+    FLOOR_VALS=$(printf '%s\n' "$FLOOR_HITS" | sed 's/-assert hermetic floor//' | sort -u | tr '\n' ' ' | sed 's/ *$//')
+    if [ "${FLOOR_N:-0}" -lt 2 ]; then
+      bad "README floor arm: scripts/taskboard-drive/README.md carries ${FLOOR_N:-0} occurrence(s) of the literal '<N>-assert hermetic floor' (want at least 2 — THE LAW block and the floor section). This run measured $TOTAL_ASSERTS asserts. A deleted number is drift, not the absence of drift."
+    elif [ "$(printf '%s' "$FLOOR_VALS" | tr ' ' '\n' | grep -c .)" -ne 1 ]; then
+      bad "README floor arm: the README states MORE THAN ONE hermetic floor ($FLOOR_VALS) — its own occurrences disagree. This run measured $TOTAL_ASSERTS."
+    elif [ "$FLOOR_VALS" != "$TOTAL_ASSERTS" ]; then
+      bad "README floor arm: README says the hermetic floor is $FLOOR_VALS, this run measured $TOTAL_ASSERTS asserts ($PASS pass, $FAIL fail). Re-measure and correct scripts/taskboard-drive/README.md — both the '<N>-assert hermetic floor' phrases AND the per-assert table."
+    else
+      note "README floor arm: scripts/taskboard-drive/README.md states a $FLOOR_VALS-assert hermetic floor at $FLOOR_N places and this run measured $TOTAL_ASSERTS — agreed"
+    fi
   fi
 fi
 

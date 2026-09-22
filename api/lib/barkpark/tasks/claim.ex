@@ -13,7 +13,7 @@ defmodule Barkpark.Tasks.Claim do
       fenced_content_write: 4,
       current_epoch: 1,
       insert_mutation_event!: 5,
-      caller_stamp: 1,
+      caller_stamp: 2,
       actor_stamp: 2,
       task_broadcast: 4,
       emit_broadcasts: 1
@@ -25,6 +25,7 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Repo
   alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.CriteriaExemption
+  alias Barkpark.Tasks.FlightRecorder
   alias Barkpark.Tasks.SessionId
   alias Barkpark.Tasks.TwinResolver
   alias Barkpark.Tasks.{ExecutionPolicy, Queue, QueueGate, Validation, WorkDigest}
@@ -462,7 +463,8 @@ defmodule Barkpark.Tasks.Claim do
           Keyword.get(opts, :caller_token_id),
           snapshot,
           override_reason,
-          Keyword.get(opts, :session)
+          Keyword.get(opts, :session),
+          Keyword.get(opts, :priming_start)
         )
 
       {:error, errors} ->
@@ -496,7 +498,8 @@ defmodule Barkpark.Tasks.Claim do
          caller_token_id,
          snapshot,
          override_reason,
-         session
+         session,
+         priming_start
        ) do
     observed_rev = doc.rev
     new_rev = generate_rev()
@@ -549,6 +552,14 @@ defmodule Barkpark.Tasks.Claim do
       # fences on `worker + epoch` only. A sessionless caller (every client
       # that predates this) writes NO key and its claim stays byte-identical.
       |> SessionId.put_session_origin(session)
+      # THE FLIGHT RECORDER'S OPENING FRAME (task-a42dccec2fe4a406). The schema=1
+      # manifest the CLI already writes locally, now on the LEASE it describes.
+      # Absent stays ABSENT: `FlightRecorder.put_priming_start/2` has no arm that
+      # writes a placeholder, so a claim that carries no manifest produces the
+      # byte-identical map it produced before this line existed. That control is
+      # the criterion, not a nicety — a `{}` or a `null` here would turn "nobody
+      # measured" into a measurement of nothing.
+      |> FlightRecorder.put_priming_start(priming_start)
 
     new_content =
       doc.content
@@ -571,7 +582,7 @@ defmodule Barkpark.Tasks.Claim do
             # audit reconstructing "who held this row when" needs. Surfaces on
             # `bp task events --payload` as `payload.actor` with no reader edit
             # (Tasks.Events projects `document` minus envelope minus audit).
-            caller_stamp(caller_token_id)
+            caller_stamp(caller_token_id, session)
             |> Map.merge(actor_stamp(worker_id, next_epoch))
             |> Map.merge(SessionId.session_stamp(session))
           )
@@ -650,7 +661,7 @@ defmodule Barkpark.Tasks.Claim do
             # audit reconstructing "who held this row when" needs. Surfaces on
             # `bp task events --payload` as `payload.actor` with no reader edit
             # (Tasks.Events projects `document` minus envelope minus audit).
-            caller_stamp(caller_token_id)
+            caller_stamp(caller_token_id, session)
             |> Map.merge(actor_stamp(worker_id, next_epoch))
             |> Map.merge(SessionId.session_stamp(session))
           )

@@ -14,10 +14,12 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerEnqueueTest do
 
   alias Barkpark.EdgeProjector.ProjectorWorker
 
-  # Two assertions below read the WHOLE queue rather than filtering it
-  # (`assert [job] = all_enqueued(worker: ProjectorWorker)`), so they are only
-  # true if this test's own inserts are the only ProjectorWorker rows the
-  # sandbox can see. That is a PRECONDITION, and it does not hold for free: the
+  # No assertion below reads the WHOLE queue as an exact match any more: every
+  # `assert [job] = ...` filters by the enqueuing test's own args (the last
+  # unfiltered one, in "type-list ORDER cannot defeat the dedup", was filtered
+  # by scope on 2026-09-17). The two remaining unfiltered reads use `Enum.any?`
+  # and are therefore tolerant of extra rows. The DELETE below stays anyway,
+  # because a leftover queue is still noise the sandbox should not inherit: the
   # SQL sandbox rolls back what a test writes, but `oban_jobs` rows COMMITTED by
   # an earlier non-sandboxed run are ordinary visible reads inside the
   # transaction, with nothing to roll back. On 2026-09-10 the unpartitioned
@@ -124,10 +126,55 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerEnqueueTest do
     end
 
     test "type-list ORDER cannot defeat the dedup (types normalised at enqueue)" do
-      assert {:ok, _} = ProjectorWorker.enqueue("production", types: ["post", "page"])
-      assert {:ok, _} = ProjectorWorker.enqueue("production", types: ["page", "post"])
+      # Filter the read by THIS test's own scope, not by the whole
+      # ProjectorWorker queue. `assert [job] = all_enqueued(worker:
+      # ProjectorWorker)` asserted "one ProjectorWorker row exists ANYWHERE the
+      # transaction can see", which is a statement about the database, not about
+      # enqueue/2. The setup `delete_all` covers rows committed BEFORE this
+      # test's sandbox transaction opened; it cannot cover a row committed by a
+      # concurrent unboxed suite AFTER it, and it cannot cover a foreign row
+      # written inside the transaction. The scope is unique per run, so the
+      # filter selects exactly the two enqueues below and nothing else — the
+      # dedup claim (two enqueues, one job) is unchanged.
+      scope = "ds-order-#{System.unique_integer([:positive])}"
 
-      assert [job] = all_enqueued(worker: ProjectorWorker)
+      assert {:ok, _} = ProjectorWorker.enqueue(scope, types: ["post", "page"])
+      assert {:ok, _} = ProjectorWorker.enqueue(scope, types: ["page", "post"])
+
+      assert [job] = all_enqueued(worker: ProjectorWorker, args: %{"scope" => scope})
+      assert job.args["types"] == ["page", "post"]
+    end
+
+    test "a foreign ProjectorWorker row does not defeat the ORDER dedup assertion" do
+      # MUTATION ARM for the assertion above. A contaminating row reaches that
+      # assertion as an ordinary visible ProjectorWorker row this test never
+      # enqueued; insert one directly so the shape is reproduced deterministically
+      # instead of waiting for another agent's leak. `Repo.insert` runs inside the
+      # per-test sandbox transaction, so the row is rolled back and never reaches
+      # the shared `barkpark_test` database — this arm cannot become the very
+      # pollution it guards against.
+      scope = "ds-order-#{System.unique_integer([:positive])}"
+
+      assert {:ok, _foreign} =
+               Barkpark.Repo.insert(
+                 ProjectorWorker.new(%{
+                   "op" => "rebuild",
+                   "scope" => "ds-foreign-#{System.unique_integer([:positive])}",
+                   "types" => ["page", "post"],
+                   "perspective" => "published",
+                   "workspace_id" => "ws-foreign-contaminant"
+                 })
+               )
+
+      assert {:ok, _} = ProjectorWorker.enqueue(scope, types: ["post", "page"])
+      assert {:ok, _} = ProjectorWorker.enqueue(scope, types: ["page", "post"])
+
+      # The unfiltered read the assertion above used to make: two rows, so
+      # `assert [job] = ...` would raise a MatchError on this queue state.
+      assert length(all_enqueued(worker: ProjectorWorker)) == 2
+
+      # The filtered read is indifferent to the foreign row.
+      assert [job] = all_enqueued(worker: ProjectorWorker, args: %{"scope" => scope})
       assert job.args["types"] == ["page", "post"]
     end
   end

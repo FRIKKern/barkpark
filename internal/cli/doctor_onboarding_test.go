@@ -737,7 +737,7 @@ func TestWhoamiCLIFreshnessColdCacheUnreported(t *testing.T) {
 		return "", errors.New("must not be reached")
 	}))
 
-	c := whoamiCLIFreshness()
+	c := whoamiCLIFreshness(nil)
 	if c.Status != onbCLIUnreported || c.UpToDate != nil {
 		t.Fatalf("cold cache leg = %+v, want unreported + nil up_to_date", c)
 	}
@@ -756,7 +756,7 @@ func TestWhoamiCLIFreshnessReadsFreshCache(t *testing.T) {
 	if err := writeReleaseCache("1.15.0"); err != nil {
 		t.Fatalf("writeReleaseCache: %v", err)
 	}
-	c := whoamiCLIFreshness()
+	c := whoamiCLIFreshness(nil)
 	if c.Status != onbCLIBehind || c.Latest != "1.15.0" {
 		t.Fatalf("behind leg = %+v, want status behind latest 1.15.0", c)
 	}
@@ -766,7 +766,7 @@ func TestWhoamiCLIFreshnessReadsFreshCache(t *testing.T) {
 
 	// Up-to-date: installed now equals the cached latest.
 	withCLIVersion(t, "1.15.0")
-	c = whoamiCLIFreshness()
+	c = whoamiCLIFreshness(nil)
 	if c.Status != onbCLIUpToDate {
 		t.Fatalf("up-to-date leg = %+v, want status up-to-date", c)
 	}
@@ -794,7 +794,7 @@ func TestWhoamiCLIFreshnessStaleCacheUnreported(t *testing.T) {
 		t.Fatalf("write stale cache: %v", err)
 	}
 
-	c := whoamiCLIFreshness()
+	c := whoamiCLIFreshness(nil)
 	if c.Status != onbCLIUnreported || c.UpToDate != nil {
 		t.Fatalf("stale cache leg = %+v, want unreported (a stale reading must not become a verdict)", c)
 	}
@@ -811,7 +811,7 @@ func TestWhoamiCLIFreshnessDevBuildUnreported(t *testing.T) {
 	if err := writeReleaseCache("1.15.0"); err != nil { // even WITH a fresh cache
 		t.Fatalf("writeReleaseCache: %v", err)
 	}
-	c := whoamiCLIFreshness()
+	c := whoamiCLIFreshness(nil)
 	if c.Status != onbCLIUnreported || c.UpToDate != nil {
 		t.Fatalf("dev build leg = %+v, want unreported", c)
 	}
@@ -833,7 +833,7 @@ func TestDoctorRefreshesCacheForWhoami(t *testing.T) {
 	}
 
 	// The doctor's freshness leg pays the network cost and refreshes the cache.
-	if leg := onboardingCLIFreshness(); leg.Status != onbCLIBehind {
+	if leg := onboardingCLIFreshness(nil); leg.Status != onbCLIBehind {
 		t.Fatalf("doctor cli leg = %+v, want behind (1.14.0 < 1.15.0)", leg)
 	}
 	rc, fresh := readReleaseCache()
@@ -847,7 +847,7 @@ func TestDoctorRefreshesCacheForWhoami(t *testing.T) {
 		t.Error("whoami re-resolved the release over the network — it must read the doctor-refreshed cache")
 		return "", errors.New("must not be reached")
 	}))
-	c := whoamiCLIFreshness()
+	c := whoamiCLIFreshness(nil)
 	if c.Status != onbCLIBehind || c.Latest != "1.15.0" {
 		t.Fatalf("whoami leg after doctor refresh = %+v, want behind latest 1.15.0", c)
 	}
@@ -868,7 +868,7 @@ func TestDoctorRefreshesCacheForWhoami(t *testing.T) {
 func TestOnboardingDevBuildFreshnessIsUnreported(t *testing.T) {
 	withCLIVersion(t, "dev")
 
-	b, err := json.Marshal(onboardingCLIFreshness())
+	b, err := json.Marshal(onboardingCLIFreshness(nil))
 	if err != nil {
 		t.Fatalf("marshal cli leg: %v", err)
 	}
@@ -938,7 +938,7 @@ func TestDevBuildVerdictAgreesAcrossDoctorAndUpgrade(t *testing.T) {
 		Status   string `json:"status"`
 		UpToDate *bool  `json:"up_to_date"`
 	}
-	b, _ := json.Marshal(onboardingCLIFreshness())
+	b, _ := json.Marshal(onboardingCLIFreshness(nil))
 	if err := json.Unmarshal(b, &doctorLeg); err != nil {
 		t.Fatalf("decode doctor cli leg: %v (%s)", err, b)
 	}

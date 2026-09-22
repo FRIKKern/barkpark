@@ -293,7 +293,13 @@ defmodule BarkparkCloud.Web.RouterSiteRebindTest do
       body = json_body(conn)
       assert body["error"] == "content_binding_required"
       assert body["detail"] =~ "missing: workspace, project"
-      assert body["detail"] =~ "--dataset <workspace>/<project>/<dataset>"
+      # cch-w69-bl — STILL create's own words, and the split is create's too: the
+      # `--dataset` flag left `detail` (which two surfaces read) for `cli_hint`
+      # (which only a terminal reads). The rebind arm is byte-identical to
+      # create's, so this pin moves with it or the "one refusal, one wording"
+      # claim stops being checked on this route.
+      refute body["detail"] =~ "--dataset"
+      assert body["cli_hint"] == "--dataset <workspace>/<project>/<dataset>"
 
       # THE ATOMICITY: not one column moved, and no credential was minted.
       row = Registry.get_site(site.id)

@@ -80,6 +80,25 @@ defmodule BarkparkCloud.Web.AgentKeyCustodyTest do
     |> Repo.update!()
   end
 
+  # THE TWIN FIXTURE for the `not_live` tenancy guard. `team` is the ONLY free
+  # variable: both the in-team control and the foreign twin come through this
+  # one function, so the rows differ in `team_id` and in nothing a caller chose.
+  #
+  # FORCED differences, each with the constraint that forces it:
+  #   · `slug` / `url` — `barkparks_url_unique_idx` is a GLOBAL unique index on
+  #     `url` (and `url` is derived from the slug), so two rows cannot share a
+  #     slug even across teams; `live_support_fixture/1` mints a fresh
+  #     `System.unique_integer` per call.
+  #   · `fleet_parent_id` — a support binds to a main, and the main must live in
+  #     ITS OWN team, so the foreign twin necessarily hangs off a different main
+  #     row. The route never reads the parent.
+  #   · `id` / `fleet_token_id` — per-row identity.
+  # Everything the arm actually matches on — `fleet_role: "support"` and
+  # `host: nil` — is identical.
+  defp not_live_support_fixture(team) do
+    live_support_fixture(team) |> Ecto.Changeset.change(host: nil) |> Repo.update!()
+  end
+
   defp call(method, path, body, token) do
     conn =
       case body do
@@ -194,6 +213,73 @@ defmodule BarkparkCloud.Web.AgentKeyCustodyTest do
       conn = call(:post, "/v1/barkparks/#{support.id}/agent-key", %{key: @key}, token)
       assert conn.status == 409
       assert %{"error" => "not_live"} = decode(conn)
+    end
+
+    # THE SHADOWED GUARD (task-ffc1d481a2371058). Until this test, no fixture in
+    # the suite was BOTH foreign and host-nil, so `when tid == team.id` on the
+    # `not_live` arm was never exercised against a cross-team row that could
+    # otherwise reach it. The measured answer on unmodified router.ex is 404
+    # `not_found` — clause order already routes the foreign row past both
+    # in-team arms to the catch-all, so this is COVERAGE, not a fix.
+    #
+    # The IN-TEAM CONTROL in the same body is what makes the 404 mean "the
+    # tenancy guard refused" rather than "the arm is dead": the identical row in
+    # the caller's own team still answers 409 not_live.
+    test "a FOREIGN host-nil support is a 404, not the in-team 409 not_live (the shadowed tenancy guard)" do
+      {_user, team, token} = user_with_role("admin")
+      other_team = team_fixture()
+
+      foreign = not_live_support_fixture(other_team)
+      mine = not_live_support_fixture(team)
+
+      # The only difference between the two rows the arm can see.
+      assert foreign.fleet_role == "support" and mine.fleet_role == "support"
+      assert is_nil(foreign.host) and is_nil(mine.host)
+      refute foreign.team_id == mine.team_id
+
+      conn = call(:post, "/v1/barkparks/#{foreign.id}/agent-key", %{key: @key}, token)
+
+      assert conn.status == 404,
+             "a foreign host-nil support answered #{conn.status} — the not_live arm's " <>
+               "`when tid == team.id` guard let a cross-team row through"
+
+      assert %{"error" => "not_found"} = decode(conn)
+
+      # CONTROL: the same shape in the caller's own team still reaches the arm.
+      control = call(:post, "/v1/barkparks/#{mine.id}/agent-key", %{key: @key}, token)
+      assert control.status == 409
+      assert %{"error" => "not_live"} = decode(control)
+
+      # Team-scoped, never a global Repo.aggregate — every agent shares one
+      # test database, so a global count is another lane's row.
+      assert Repo.all(from(j in ProvisionJob, where: j.barkpark_id in ^[foreign.id, mine.id])) ==
+               []
+    end
+
+    # The ADJACENT clause, `%Barkpark{team_id: tid} when tid == team.id -> 422
+    # not_a_support`. Same twin discipline: a foreign MAIN against the in-team
+    # MAIN the 422 case is built from.
+    test "a FOREIGN main is a 404, not the in-team 422 not_a_support (the adjacent tenancy guard)" do
+      {_user, team, token} = user_with_role("admin")
+      other_team = team_fixture()
+
+      foreign = main_fixture(other_team)
+      mine = main_fixture(team)
+
+      assert foreign.fleet_role == "main" and mine.fleet_role == "main"
+      refute foreign.team_id == mine.team_id
+
+      conn = call(:post, "/v1/barkparks/#{foreign.id}/agent-key", %{key: @key}, token)
+
+      assert conn.status == 404,
+             "a foreign main answered #{conn.status} — the not_a_support arm's " <>
+               "`when tid == team.id` guard let a cross-team row through"
+
+      assert %{"error" => "not_found"} = decode(conn)
+
+      control = call(:post, "/v1/barkparks/#{mine.id}/agent-key", %{key: @key}, token)
+      assert control.status == 422
+      assert %{"error" => "not_a_support"} = decode(control)
     end
 
     test "an out-of-shape key is refused WITHOUT being echoed; an unknown var is refused" do

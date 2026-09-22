@@ -293,6 +293,19 @@ defmodule Barkpark.Webhooks do
   def next_probe_at(%Webhook{} = w),
     do: DateTime.add(w.auto_disabled_at, cooldown_seconds(w.consecutive_failures), :second)
 
+  @doc """
+  How long this endpoint has been dark — `nil` for an endpoint that is active,
+  or one a person disabled by hand (a hand-disabled endpoint has no automatic
+  dark interval to measure). Mirrors `Barkpark.Audit.Export.sink_health/1`'s
+  `:dark_for_seconds` so the two latch surfaces read alike.
+  """
+  def dark_for_seconds(webhook, now \\ DateTime.utc_now())
+  def dark_for_seconds(%Webhook{active: true}, _now), do: nil
+  def dark_for_seconds(%Webhook{auto_disabled_at: nil}, _now), do: nil
+
+  def dark_for_seconds(%Webhook{auto_disabled_at: at}, now),
+    do: DateTime.diff(now, at, :second)
+
   defp probe_due?(%Webhook{active: true}, _now), do: true
   defp probe_due?(%Webhook{auto_disabled_at: nil}, _now), do: false
 

@@ -90,11 +90,16 @@
 # boot. Full record, incl. how to hold a pre-booted SPARE target (drives the
 # miss cost to ~0): scripts/pds-scratch-target-cost-2026-07-20.md.
 #
-# NAMED RESIDUE: the runtime preflight warning in `cmd_up` (search
-# "api/_build is empty") still branches on the coarse `ls -A api/_build` test,
-# so it stays SILENT in the COLD-PROD case. Deliberately not fixed here — this
-# slice is docs-and-comments only (PDS-D241) and changing that branch would
-# change a verb's output. Filed as a follow-up task.
+# THE RUNTIME PREFLIGHT MIRRORS ALL THREE REGIMES (was NAMED RESIDUE). The
+# warning in `cmd_up` (search "api/_build is empty") used to branch ONLY on the
+# coarse `ls -A api/_build` test, so it stayed SILENT in exactly the COLD-PROD
+# case this header describes — an operator with dev+test but no prod was told
+# nothing and then paid ~156s. It now has a second arm, keyed on
+# `[ ! -d "$API_DIR/_build/prod" ]`, that names the measured 155.72s figure and
+# the CC=/usr/bin/clang pre-warm line. The fully-cold arm is unchanged and still
+# tested FIRST, because two compiles is the worse regime and must not be
+# downgraded to the one-compile message. WARM stays silent. Cost record and
+# figures: PDS-D241.
 
 set -euo pipefail
 # shellcheck disable=SC1091
@@ -545,6 +550,8 @@ cmd_up() {
 
   if [ ! -d "$API_DIR/_build" ] || [ -z "$(ls -A "$API_DIR/_build" 2>/dev/null)" ]; then
     warn "api/_build is empty — COLD tree: two full compiles (MIX_ENV=dev for secrets, MIX_ENV=prod for the server), expect >10 minutes. WARM (populated api/_build) is a different regime entirely: 32.7s first boot of a session, 9.8s after, 20.2s for a full teardown+respawn cycle — measured 2026-07-20, see scripts/pds-scratch-target-cost-2026-07-20.md."
+  elif [ ! -d "$API_DIR/_build/prod" ]; then
+    warn "api/_build/prod is absent — COLD-PROD tree: api/_build looks populated (dev and/or test), but \`up\` boots the server under MIX_ENV=prod, so THIS run pays one full MIX_ENV=prod compile — measured 2026-07-21 at 155.72s wall (134.47s user + 30.44s system, 105% CPU, CPU-bound: mix deps.get returned in 0.228s, every dep Unchanged). That is 4.75x the 32.7s WARM first boot. Pre-warm it OFF the clock before any timed window: cd api && CC=/usr/bin/clang MIX_ENV=prod mix compile — CC is NOT optional, \`cc\` resolves to the Claude CLI wrapper and argon2_elixir dies with: unknown option '-g'. See scripts/pds-scratch-target-cost-2026-07-20.md (PDS-D241)."
   fi
 
   # TRAP 1 — bin/barkpark cmd_up only checks `command -v mix`; on a fresh

@@ -99,6 +99,28 @@
 #                          selftest, which has no compiled build.
 set -euo pipefail
 
+# INTERPRETER GUARD — must stay POSIX-parseable and must stay ABOVE the first
+# process substitution (the `comm` at line ~300). bash reads a script
+# incrementally, so anything a guard sits AFTER is code a POSIX-mode shell has
+# already run. Under `sh` this file dies on that token with a bare
+# `syntax error near unexpected token (` and prints NOTHING on stdout, while
+# bash prints `ALL` — and its stdout IS the selection `elixir.yml` consumes
+# (`out="$(... | bash scripts/elixir-impacted-tests.sh --select)"`). An empty
+# selection reads exactly like "this diff impacts no tests", which is the
+# vacuous green scripts/posix-vacuous-green-census.sh exists to prevent. Every
+# caller in this repo already invokes it as `bash scripts/...`, so this refusal
+# is unreachable in production and changes no behaviour there.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "elixir-impacted-tests.sh: needs bash (this script uses process substitution); run: bash scripts/elixir-impacted-tests.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "elixir-impacted-tests.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/elixir-impacted-tests.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${BP_IMPACTED_ROOT:-$(cd -- "$SCRIPT_DIR/.." && pwd)}"
 API_DIR="${BP_IMPACTED_XREF_DIR:-$REPO_ROOT/api}"
@@ -157,10 +179,34 @@ API_DIR="${BP_IMPACTED_XREF_DIR:-$REPO_ROOT/api}"
 #       If that ratchet is ever wrong, it is wrong for the dispatcher too — the
 #       whole suite is already skipped on such a path today.
 #
-#   (d) in the TEST-ONLY set but NOT in the census -> ALL. The set says the
-#       suite reads it; the census cannot say WHO reads it (a computed path, a
-#       shelled-out binary). Unknown reader, so unknown impact, so everything.
-#       `cloud/test/**` and `web/node_modules/**` land here.
+#   (d1) in the TEST-ONLY set, no census row, but the census's OWN SOURCE FILES
+#       name it ONE HOP FURTHER -> those rows' readers ARE the impact, exactly
+#       as in (b). This is the documented blind spot of the census, not a new
+#       policy: list_escapes resolves the path literals it finds IN api/lib and
+#       api/test, so an api test that shells a repo-root script gets a row for
+#       THE SCRIPT and none for what the script itself opens.
+#       `scripts/elixir-path-escape-check.sh` states the case in full at its
+#       `cloud/test/**` entry: async_global_seam_guard_test.exs requires
+#       `../../../scripts/async_env_seam_scan.exs` (a literal the census DOES
+#       resolve) and that scanner reads `Path.join(repo_root(), "cloud/test")`
+#       (a literal the census CANNOT). `extended_census` takes that one step:
+#       for every census source file, its own quoted repo-root path literals
+#       that EXIST ON DISK inherit that source's readers. It is derived from
+#       the tree on every run, so a reader added tomorrow is in the net
+#       tomorrow, with no registration step and no list to rot.
+#       MEASURED 2026-09-20 on 769c39bd6: `cloud/test/**` went from ALL (1,892
+#       api test files) to 3 derived readers plus the ALWAYS set.
+#       ONE SELF-EXCLUSION, and it is a self-reference rather than a list: the
+#       census producer itself (`elixir-path-escape-check.sh`) DECLARES every
+#       path in both sets, and declaring a path is not reading it. Its own
+#       direct census rows are untouched.
+#
+#   (d2) in the TEST-ONLY set and named by NEITHER the census nor its one-hop
+#       extension -> ALL. The set says the suite reads it; nothing can say WHO
+#       (a path computed at runtime, a shelled-out binary, a name assembled
+#       from parts). Unknown reader, so unknown impact, so everything.
+#       `internal/taskboard/board.go` — a sibling of three censused files, but
+#       itself unread — and `web/node_modules/**` land here.
 #
 # Branch (c) is the only one that can shrink a selection on a path nobody
 # classified, and it shrinks it to "no tests OF ITS OWN" — the ALWAYS set still
@@ -196,6 +242,79 @@ census_readers() {
       row = $1
       if (row == p || index(p, row "/") == 1 || index(row, p "/") == 1) print $2
     }' <<<"$CENSUS" | LC_ALL=C sort -u
+}
+
+
+# ── THE ONE-HOP EXTENSION OF THE CENSUS — branch (d1) ─────────────────────
+# `--list-escapes` resolves the repo-root path literals it finds IN api/lib and
+# api/test. An api test that hands its reading to a repo-root script therefore
+# gets a row for THE SCRIPT and no row at all for what the script opens, and
+# the path the script opens is exactly the one a PR changes. That is not a
+# scanner bug; elixir-path-escape-check.sh names the class at its
+# `cloud/test/**` entry and pays for it with a declared full-suite trigger.
+#
+# THE HOP, and why it is a rule rather than a list: a file the census names as
+# a SOURCE, which itself writes this path as a quoted literal, is reading it on
+# its readers' behalf — so that source's readers are this path's readers.
+# Derived from the tree on every call, against the census computed on every
+# call: a scanner that grows a third root, or an api test that starts requiring
+# a new script, is covered the day it lands, with no registration step.
+#
+# THREE THINGS KEEP IT TIGHT, so this cannot become "everything reads
+# everything":
+#   * exactly ONE hop. The extension is never fed back into itself.
+#   * the literal must be one of THIS PATH'S OWN ANCESTORS and must EXIST on
+#     disk. `"cloud/test"` covering cloud/test/foo_test.exs qualifies; a URL, a
+#     module name, a glob (`cloud/test/**` is not a file) and a prose fragment
+#     do not, and neither does a SIBLING — internal/taskboard/components.go
+#     being censused says nothing about internal/taskboard/board.go.
+#   * the census producer is excluded as a SOURCE. elixir-path-escape-check.sh
+#     literally contains every declared path in both sets, and DECLARING a path
+#     is not READING it — a self-reference, not a skip list. Its own direct
+#     census rows are untouched.
+#
+# COST. This runs at most once per selector process, and only when a TEST-set
+# path with no direct census row shows up — i.e. never on an ordinary api/ PR.
+# It is ONE `grep -l` over the census's ~60 distinct source files, not a grep
+# per file and not a scan of the tree.
+transitive_readers() {
+  local p="$1" d self n nf srcs files hits
+  load_census
+  [ -n "$CENSUS" ] || return 0
+
+  # p's own ancestors, each written the way a source would write it, and only
+  # the ones that exist on disk.
+  nf="$(mktemp "${TMPDIR:-/tmp}/bp-impacted-needles.XXXXXX")" || return 0
+  d="$p"
+  while [ -n "$d" ] && [ "$d" != "." ] && [ "$d" != "/" ]; do
+    [ -e "$REPO_ROOT/$d" ] && printf '"%s"\n' "$d" >>"$nf"
+    case "$d" in */*) d="${d%/*}" ;; *) break ;; esac
+  done
+  if [ ! -s "$nf" ]; then rm -f -- "$nf"; return 0; fi
+
+  self="$(basename -- "$SCRIPT_DIR")/elixir-path-escape-check.sh"
+  srcs="$(printf '%s\n' "$CENSUS" | cut -f1 | LC_ALL=C sort -u | sed '/^$/d' | grep -vxF -- "$self" || true)"
+  files=""
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    [ -f "$REPO_ROOT/$n" ] || continue
+    files="$files $n"
+  done <<EOT
+$srcs
+EOT
+  if [ -z "$files" ]; then rm -f -- "$nf"; return 0; fi
+
+  # ONE grep, and `-l` so a multi-megabyte source stops at its first hit. Census
+  # source paths carry no spaces (they are repo-root paths resolved from Elixir
+  # string literals), so the unquoted expansion here is the file list and not a
+  # word-splitting accident.
+  hits="$( (cd -- "$REPO_ROOT" 2>/dev/null && grep -laF -f "$nf" -- $files 2>/dev/null) </dev/null || true)"
+  rm -f -- "$nf"
+  [ -n "$hits" ] || return 0
+
+  # back to the readers of every source that matched.
+  awk -F'\t' 'NR == FNR { hit[$0] = 1; next } ($1 in hit) { print $2 }' \
+    <(printf '%s\n' "$hits") <(printf '%s\n' "$CENSUS") | LC_ALL=C sort -u
 }
 
 is_narrowable_lib() { case "$1" in api/lib/*.ex) return 0 ;; *) return 1 ;; esac; }
@@ -310,7 +429,7 @@ compile_closure() {
   # kill the selector instead of falling back to ALL — the exact inversion this
   # file is written against. `|| rc=$?` keeps the failure a value.
   rc=0
-  out="$(cd -- "$API_DIR" && mix xref graph --sink "$rel" --label compile-connected --format plain 2>&1)" || rc=$?
+  out="$(cd -- "$API_DIR" && mix xref graph --sink "$rel" --label compile-connected --format plain 2>&1 </dev/null)" || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "elixir-impacted-tests: mix xref failed (rc=$rc) for ${rel} — falling back to ALL." >&2
     return 1
@@ -362,7 +481,7 @@ xref_probe() {
     echo "elixir-impacted-tests: the xref positive control ${probe} is gone — no way to tell a leaf from a blind instrument, falling back to ALL." >&2
     return 1
   fi
-  out="$(cd -- "$API_DIR" && mix xref graph --sink "$probe" --label compile-connected --format plain 2>&1)" || rc=$?
+  out="$(cd -- "$API_DIR" && mix xref graph --sink "$probe" --label compile-connected --format plain 2>&1 </dev/null)" || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "elixir-impacted-tests: the xref positive control exited rc=${rc} — falling back to ALL." >&2
     return 1
@@ -634,9 +753,55 @@ select_tests() {
     return 0
   fi
 
+  # ── WHY THE CHANGED LIST IS NOT ON STDIN (task-627ab62e43790c0e) ─────────
+  #
+  # This loop used to be fed `done <<EOF\n$changed\nEOF`, which puts the list
+  # on the loop body's fd 0. Every child started inside the body inherits it,
+  # and a child that reads stdin EATS THE REST OF THE LIST. `read` then returns
+  # EOF and the loop ends early — silently, with no non-zero status, no stderr
+  # and no `ALL`: the remaining paths are never classified, so the ones that
+  # would have widened the selection (a changed *_test.exs, an `api/**` path
+  # that forces ALL) are simply not there. The selector narrows over a file set
+  # it never read, which is the exact fault this whole file is written against.
+  #
+  # MEASURED, NOT IMAGINED. #19303 (e58d8bbcd) changed 40 paths: two
+  # `api/lib/**.ex` files, 37 `*_test.exs`, and `api/test/support/
+  # task_brief_fixtures.ex` — that last one is neither a lib .ex nor a
+  # *_test.exs, so the `api/*` arm below MUST have emitted ALL. The gate's own
+  # uploaded selection artifact (run 35432412311, job 105870352514) instead
+  # holds 596 narrowed files, with NO `ALL` token and NOT ONE stderr line from
+  # this script. Every changed path after the two lib files is missing from it —
+  # including `test/barkpark_web/controllers/mutate_task_brief_gate_test.exs`,
+  # which the PR ADDED and which `is_narrowable_test` selects unconditionally.
+  # The only commands between path 2 and path 3 are the `mix xref` calls in
+  # `xref_probe`/`compile_closure`; on the runner the BEAM drains the pipe that
+  # bash 5.x backs a here-document with. The required Elixir gate went green;
+  # elixir-nightly found 31 failures 23 hours later.
+  #
+  # TWO THINGS FIX IT, and the second one is the one that lasts:
+  #
+  #   1. The list is read from a dedicated fd (9), never fd 0, and every child
+  #      in the body gets `</dev/null`. No child can reach the data.
+  #   2. THE COUNT IDENTITY, below: the loop must classify exactly as many
+  #      paths as it was handed. That is a PREDICATE over this run's own input,
+  #      not a list of known-bad children, so it holds for the NEXT stdin-eating
+  #      child too — one nobody has thought of, in a helper added next year.
+  #      A truncated read is then structurally unable to look like a narrow
+  #      answer: it emits ALL, loudly, on stderr.
   local closure_all="" mods_here readers r
-  while IFS= read -r p; do
+  local _in_count=0 _seen_count=0 _feed
+  _in_count="$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+  _feed="$(mktemp "${TMPDIR:-/tmp}/bp-impacted-feed.XXXXXX")" || {
+    echo "elixir-impacted-tests: cannot create the changed-path feed file — selecting ALL." >&2
+    echo "ALL"
+    return 0
+  }
+  printf '%s\n' "$changed" | sed '/^$/d' >"$_feed"
+  exec 9<"$_feed"
+  rm -f -- "$_feed"
+  while IFS= read -r p <&9; do
     [ -n "$p" ] || continue
+    _seen_count=$((_seen_count + 1))
     if is_narrowable_test "$p"; then
       sel="${sel}${p#api/}
 "
@@ -689,9 +854,35 @@ select_tests() {
       echo "ALL"
       return 0
     fi
+    local is_test_path=0
+    in_set "$p" test && is_test_path=1
     readers="$(census_readers "$p")"
+    if [ -z "$readers" ] && [ "$is_test_path" -eq 1 ]; then
+      # BRANCH (d1). The census has no row for this path, but a file the census
+      # DOES have rows for opens it one hop further. Those rows' readers are the
+      # impact, and they are classified below by exactly the same rules as a
+      # direct census reader — no separate, weaker path through this function.
+      readers="$(transitive_readers "$p")"
+      if [ -n "$readers" ]; then
+        echo "elixir-impacted-tests: ${p} has no direct census row, but the census's own source files open it one hop further; its DERIVED readers are: $(printf '%s' "$readers" | tr '\n' ' ')" >&2
+      fi
+    fi
     if [ -n "$readers" ]; then
-      while IFS= read -r r; do
+      # Same fd discipline as the outer loop: this body calls `compile_closure`,
+      # which starts `mix`. On fd 0 the reader list would be drained the same
+      # way, and a half-read reader list narrows just as silently.
+      local _r_in=0 _r_seen=0 _r_feed
+      _r_in="$(printf '%s\n' "$readers" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+      _r_feed="$(mktemp "${TMPDIR:-/tmp}/bp-impacted-readers.XXXXXX")" || {
+        echo "elixir-impacted-tests: cannot create the reader feed file — selecting ALL." >&2
+        echo "ALL"
+        return 0
+      }
+      printf '%s\n' "$readers" | sed '/^$/d' >"$_r_feed"
+      exec 8<"$_r_feed"
+      rm -f -- "$_r_feed"
+      while IFS= read -r r <&8; do
+        _r_seen=$((_r_seen + 1))
         [ -n "$r" ] || continue
         case "$r" in
           api/test/*_test.exs) sel="${sel}${r#api/}
@@ -717,22 +908,39 @@ select_tests() {
             return 0
             ;;
         esac
-      done <<EOF
-$readers
-EOF
+      done
+      exec 8<&-
+      if [ "$_r_seen" -ne "$_r_in" ]; then
+        echo "elixir-impacted-tests: classified ${_r_seen} of ${_r_in} census readers of ${p} — the reader list was TRUNCATED mid-loop. Selecting ALL." >&2
+        echo "ALL"
+        return 0
+      fi
       continue
     fi
-    if in_set "$p" test; then
-      echo "elixir-impacted-tests: ${p} is in the TEST path set but the escape census names no reader for it — unknown reader, unknown impact, selecting ALL." >&2
+    if [ "$is_test_path" -eq 1 ]; then
+      # BRANCH (d2), the unchanged fail-safe: in the TEST set, and named by
+      # NEITHER the census nor its one-hop extension.
+      echo "elixir-impacted-tests: ${p} is in the TEST path set but neither the escape census nor its one-hop extension names a reader for it — unknown reader, unknown impact, selecting ALL." >&2
       echo "ALL"
       return 0
     fi
     # Branch (c). Dispatched on by neither set, named by no census row: the
     # path-escape ratchet's guarantee is that nothing in this suite reads it.
     echo "elixir-impacted-tests: ${p} is in NEITHER path set and in no census row — nothing in the suite reads it; it contributes no tests." >&2
-  done <<EOF
-$changed
-EOF
+  done
+  exec 9<&-
+
+  # THE COUNT IDENTITY. Every path handed in must have been classified. A short
+  # count means the loop stopped before the end of the list — a drained fd, a
+  # read error, a `read` that met a NUL — and whatever the cause, the paths it
+  # did not see cannot be assumed harmless: the one that widens to ALL is
+  # exactly the one most likely to be missing. This is the assertion that makes
+  # a FAILED read impossible to mistake for a narrow answer.
+  if [ "$_seen_count" -ne "$_in_count" ]; then
+    echo "elixir-impacted-tests: classified ${_seen_count} of ${_in_count} changed paths — the changed-path list was TRUNCATED mid-loop, so ${_in_count} minus ${_seen_count} paths were never classified and any one of them could have widened this selection. Selecting ALL." >&2
+    echo "ALL"
+    return 0
+  fi
 
   closure_all="$(printf '%s\n' "$closure_all" | sed '/^$/d' | LC_ALL=C sort -u)"
   if [ -n "$closure_all" ]; then

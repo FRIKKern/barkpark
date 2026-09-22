@@ -51,7 +51,15 @@ defmodule Mix.Tasks.Bokbasen.Status do
 
   @impl Mix.Task
   def run(argv) do
-    Mix.Task.run("app.start")
+    # Narrowed boot (task-e2c484370ef8fb51), not `app.start` — see
+    # `Barkpark.OneShot`. MEASURED: both modes are Repo reads
+    # (`Repo.all` over `documents`, `Content.get_document/3` which is one
+    # scoped `Repo.one`) plus `BokbasenStatus.read/1`, a pure map read. No
+    # Content writer, no Oban insert, no endpoint read. The dev corpus prints
+    # the identical summary (13 books, 2 failed) and the identical detail
+    # block under both boots (see the PR body).
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     opts =
       try do

@@ -104,8 +104,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPoolDeadlineTest do
       collect_all_documents/3        up to max_pages = 50   PER TYPE
                                      (projector_worker.ex:248; the 50 bound at
                                      :495-500, page_size 1000 at :482-489)
-      hydrate_edges_batch/1                             2   (tasks.ex:1977 and
-                                     :1989 — one task_edges query over every
+      hydrate_edges_batch/1                             2   (tasks.ex, in
+                                     `hydrate_edges_batch/1` — one task_edges query over every
                                      task PK + one Document id->doc_id map)
       bind_from_ids/3 -> typed_pks/3                    1   (projector.ex:345)
       rebuild_scope/3 transaction                       1   (projector.ex:188;
@@ -115,10 +115,11 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPoolDeadlineTest do
       TOTAL  ~= 50 * types + 4       = 54 for a single-type rebuild (UPPER
       bound: a corpus under page_size * max_pages walks fewer pages)
 
-  AGAINST: `POOL_SIZE` 10 (`config/runtime.exs:898-922`), shared by 29 Oban
+  AGAINST: `POOL_SIZE` 10 (`config/runtime.exs`, the `POOL_SIZE` repo `pool_size:`
+  default and the sizing commentary above it), shared by 29 Oban
   queue slots and all HTTP traffic; `:edge_projector` runs concurrency 2.
 
-    * BEFORE (#8405^ / `8d99e98ef^`: `projector_worker.ex:91` `@snooze_seconds
+    * BEFORE (#8405^ / `8d99e98ef^`: `projector_worker.ex` `@snooze_seconds
       60`, rescue returning `{:snooze, @snooze_seconds}`). Oban's `snooze_job`
       does `inc: [max_attempts: 1]`, exactly refunding fetch's
       `inc: [attempt: 1]`, so `max_attempts: 5` was decorative: a rebuild that

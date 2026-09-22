@@ -1131,6 +1131,120 @@ fi
 rm -f "$FX_CHAIN/api/test/barkpark/chain_ok_test.exs"
 echo
 
+# ── case 3k: SHAPE 8 — an ATTRIBUTE-INDIRECTED literal is seen ──────────────
+# `@mirrors ["nowhere/attr.json"]` + `Path.join(@repo_root, m)`. Every door
+# before this one needs the literal AT the call site, so one binding of
+# indirection took the read out of the census entirely: MEASURED on 974d3d2cb,
+# the attribute form resolved 66 reads and printed OK at rc=0 while the SAME
+# read written inline resolved 67 and redded — a false OK inside the REQUIRED
+# Elixir gate (task-5a00c588a808f523 / task-c605ea24bbe5066c).
+#
+# FOUR ARMS, because this door's whole risk is the opposite of blindness:
+#   (a) the join form reds and is TAGGED (the positive control — a non-zero
+#       test-rootattr count, so the door cannot go vacuous);
+#   (b) the `"../…" <> var` expand form reds the same way;
+#   (c) the door is LOAD-BEARING — disarm the pre-scan's `I` stream and the
+#       same read greens;
+#   (d) the ARMING is load-bearing too: the same attribute literals with NO
+#       indirect join site in the file must NOT red. A door that reported
+#       every attribute literal in every file would be a false-RED machine in
+#       a required gate, which costs more than the blindness it removes.
+echo "case 3k: SHAPE 8 — an attribute-indirected literal is seen, tagged test-rootattr"
+FX_ATTR="$TMPROOT/attr"
+make_fixture "$FX_ATTR"
+mkdir -p "$FX_ATTR/nowhere"
+: >"$FX_ATTR/nowhere/attr.json"
+cat >"$FX_ATTR/api/test/barkpark/attr_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @mirrors [
+    "nowhere/attr.json"
+  ]
+  def read_all, do: Enum.map(@mirrors, fn m -> File.read!(Path.join(@repo_root, m)) end)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTR" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on an attribute-indirected uncovered read"
+else
+  no "PASSED with an attribute-indirected uncovered read — shape 8 is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  ok "names the path the attribute held"
+else
+  no "did not name the attribute-held path: $out"
+fi
+if has "$out" "read from: api/test/barkpark/attr_test.exs"; then
+  ok "attributes the indirected read to its file"
+else
+  no "did not attribute the indirected read: $out"
+fi
+# THE POSITIVE CONTROL: the tag must actually carry a count. `test-rootattr: 0`
+# next to a red would mean some OTHER door caught this and shape 8 measured
+# nothing — the vacuous pass this case exists to refuse.
+if has "$out" "idiom test-rootattr: [1-9]"; then
+  ok "test-rootattr resolved a non-zero count — the door itself saw the read"
+else
+  no "test-rootattr is zero (or missing) while the read redded — shape 8 proved nothing: $out"
+fi
+# ARM (b): the `Path.expand("../…" <> var, __DIR__)` form of the same fault.
+FX_ATTRC="$TMPROOT/attrconcat"
+make_fixture "$FX_ATTRC"
+mkdir -p "$FX_ATTRC/nowhere"
+: >"$FX_ATTRC/nowhere/attr.json"
+cat >"$FX_ATTRC/api/test/barkpark/attrconcat_test.exs" <<'EX'
+  @mirrors ["nowhere/attr.json"]
+  def read_all, do: Enum.map(@mirrors, fn rel -> File.read!(Path.expand("../../../" <> rel, __DIR__)) end)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTRC" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  ok "the \"../..\" <> var expand form reds on the same read"
+else
+  no "the concatenated-prefix expand form did not red (rc=$rc): $out"
+fi
+# ARM (c): LOAD-BEARING. Disarm the pre-scan's `I` stream — the rows still get
+# collected, but under a tag nothing drains — and the same read must green.
+MUT_ATTR="$TMPROOT/mutant-no-indirect.sh"
+python3 - "$SCRIPT" "$MUT_ATTR" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src).read().splitlines(keepends=True)
+target = None
+for i, line in enumerate(lines):
+    if "awk -v t=I " in line:
+        target = i
+        break
+assert target is not None, "the shape-8 `I` pre-scan stream was not found — mutation would prove nothing"
+lines[target] = lines[target].replace("awk -v t=I ", "awk -v t=Z ")
+open(dst, "w").writelines(lines)
+PY
+if ! cmp -s "$MUT_ATTR" "$SCRIPT"; then
+  ok "the indirect-join mutation applied (the I stream really changed)"
+else
+  no "the indirect-join mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTR" bash "$MUT_ATTR" 2>&1)" && rc=0 || rc=$?
+if has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  no "the indirected read was still reported with the I stream disarmed — case 3k proves nothing: $out"
+else
+  ok "without the I stream the read goes dark again — shape 8's door is load-bearing"
+fi
+# ARM (d): the ARMING is load-bearing. Same attribute, NO indirect join site.
+FX_ATTRQ="$TMPROOT/attrquiet"
+make_fixture "$FX_ATTRQ"
+mkdir -p "$FX_ATTRQ/nowhere"
+: >"$FX_ATTRQ/nowhere/attr.json"
+cat >"$FX_ATTRQ/api/test/barkpark/attrquiet_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @mirrors ["nowhere/attr.json"]
+  def names, do: @mirrors
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTRQ" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && ! has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  ok "an attribute with NO indirect join site stays quiet — no false red"
+else
+  no "shape 8 redded on an attribute nothing joins (rc=$rc) — a false red in a required gate: $out"
+fi
+echo
+
 # ── case 4: THE UNTRACKED CASE — the measured vacuous pass ──────────────────
 # Same mutation, but inside a real git repo where the offending fixture is
 # present on disk and NOT tracked. A `git ls-files` enumeration reports clean
@@ -1447,6 +1561,207 @@ while IFS= read -r g; do
 done <<EOF
 $("$SCRIPT" --print-set compile)
 EOF
+echo
+
+# ── case 6b: a glob-consumed family is dispatched WHOLE ────────────────────
+# task-ac7392fa242a09ef. The sets used to name nine `scripts/pds-*` files one
+# at a time while scripts/pds-door-census.sh — the program
+# api/test/barkpark/pds_door_census_test.exs shells — enumerates
+# `scripts/pds-*.sh` / `scripts/pds-*.exs` / `tooling/pds/*.mjs` from the tree.
+# deploy #19577 added the tenth file, the dispatcher answered `test=false`,
+# mix-test SKIPPED and the required `Elixir gate` reported SUCCESS over zero
+# tests (run 35532446963) while that same test reddened main's push arm.
+#
+# EVERY ARM HERE PROBES A PATH THAT IS NOT ON DISK. Asking about a file the
+# tree already holds is the assertion a nine-file hand list passes, which is
+# how the hole survived: the dispatcher answers about a RULE, not about a
+# directory listing, and only an absent member can tell the two apart.
+#
+# DERIVED, never typed: the families come back out of `--print-families`, so
+# retiring a program retires its arms and no arm can certify a family nobody
+# enumerates. Deriving ZERO is itself a failure — the loop would otherwise
+# pass vacuously the day the extractor goes blind.
+echo "case 6b: glob-consumed families are dispatched whole"
+fams="$("$SCRIPT" --print-families 2>/dev/null || true)"
+if [ -z "$fams" ]; then
+  no "derived ZERO glob-consumed families — the derivation went blind and every arm below would pass vacuously"
+else
+  nfam=0
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    prog="${row%%	*}"
+    fam="${row#*	}"
+    nfam=$((nfam + 1))
+    probe="$(sed -e 's,\*\*,zz-harness-absent-member,g' -e 's,\*,zz-harness-absent-member,g' <<<"$fam")"
+    if [ -e "$REAL_ROOT/$probe" ]; then
+      no "$fam: the probe member $probe EXISTS on disk — this arm would prove nothing"
+    elif [ "$(m "$probe" test)" = true ]; then
+      ok "$fam (enumerated by $prog): an absent member $probe -> test true"
+    else
+      no "$fam (enumerated by $prog): an absent member $probe -> test FALSE — the family is only partially declared"
+    fi
+  done <<EOF
+$fams
+EOF
+  ok "derived $nfam family row(s) from the programs themselves"
+fi
+# THE INCIDENT'S OWN PATHS, named because a class that cannot reproduce its
+# founding case is a class nobody checked. Both are real scripts/pds-* names;
+# the first landed in #19577 and matched NOTHING on 97271476d.
+check_match "scripts/pds-secret-scan_test.sh" test true
+check_match "scripts/pds-zz-new.sh" test true
+check_match "scripts/pds-zz-new.exs" test true
+check_match "tooling/pds/zz-new.mjs" test true
+# …and the family is a FAMILY, not a licence for the tree it lives in. A
+# scripts/ path no api test consumes must still skip the suite, or the fix has
+# bought coverage by dispatching everything, which is the over-inclusion the
+# templates/** and tooling/** notes in the ratchet refuse.
+check_match "scripts/deploy-rebuild.sh" test false
+check_match "scripts/which-gates.sh" test false
+check_match "tooling/scaffy-duels/zz-unrelated.txt" test false
+# The `*` is single-segment: it must not eat a `/`.
+check_match "scripts/pds-nested/inner.sh" test false
+echo
+
+# ── case 6c: the derivation cannot silently go empty ───────────────────────
+# Two different failures, deliberately given two different answers, because
+# conflating them is what a first cut of this got wrong:
+#
+# (a) PROGRAMS READ, ZERO FAMILIES — the extractor rotted. Nothing survives
+#     this: every mode exits 2 before it can answer. Mutated by blinding the
+#     enumeration-verb regex, the one line between the credited families and
+#     the unfiltered form that swallowed `scripts/**` out of the ratchet's own
+#     prose.
+# (b) THE PRODUCTION SHAPE. elixir.yml runs the PINNED script out of
+#     `$RUNNER_TEMP/elixir-dispatcher-pinroot` — a directory holding exactly one
+#     file — with its CWD on the head checkout. The families must still derive
+#     there, or the fix is inert in the only place it ships. Asserted with the
+#     absent member, not an on-disk one.
+# (c) NO PROGRAM TO READ AT ALL — a fixture tree. `--check` REFUSES (it only
+#     ever runs against the real checkout, from elixir.yml's unfiltered
+#     path-escape job), while `--match` says so on stderr and contributes no
+#     derived half. Forcing `true` here instead would make every dispatcher
+#     fixture below answer `test=true` for a docs-only diff, i.e. certify the
+#     shim can never skip — a green bought by measuring nothing.
+echo "case 6c: a blind derivation refuses rather than answering quietly"
+BLINDDIR="$TMPROOT/blind"
+mkdir -p "$BLINDDIR"
+sed -e "s|^ELIXIR_FAMILY_ENUM_VERBS=.*|ELIXIR_FAMILY_ENUM_VERBS='zzzz-no-such-verb-zzzz'|" \
+  "$SCRIPT" >"$BLINDDIR/blinded.sh"
+if ! grep -q "zzzz-no-such-verb-zzzz" "$BLINDDIR/blinded.sh"; then
+  no "could not blind ELIXIR_FAMILY_ENUM_VERBS — the mutation did not apply and (a) would be vacuous"
+else
+  out="$(ELIXIR_FAMILY_ROOT="$REAL_ROOT" bash "$BLINDDIR/blinded.sh" --match test <<<'api/lib/barkpark.ex' 2>&1)" && rc=0 || rc=$?
+  if [ "${rc:-0}" = 2 ]; then
+    ok "(a) a blinded extractor exits 2 rather than answering"
+  else
+    no "(a) a blinded extractor exited ${rc:-0} and answered '$out'"
+  fi
+  if has "$out" "ZERO path families derived"; then
+    ok "(a) names the blindness"
+  else
+    no "(a) did not name the blindness: $out"
+  fi
+fi
+# (b) the pin root, built exactly as elixir.yml builds it, run from the real
+#     checkout — the shipped invocation.
+PINROOT="$TMPROOT/pinroot"
+rm -rf "$PINROOT"
+mkdir -p "$PINROOT/scripts"
+cp "$SCRIPT" "$PINROOT/scripts/elixir-path-escape-check.sh"
+out="$(cd "$REAL_ROOT" && bash "$PINROOT/scripts/elixir-path-escape-check.sh" --match test <<<'scripts/pds-zz-new.sh' 2>&1)" && rc=0 || rc=$?
+if [ "$out" = true ]; then
+  ok "(b) the PINNED script, run from the checkout, still dispatches an absent family member"
+else
+  no "(b) the pinned script answered '$out' (rc=${rc:-0}) — the fix is inert in the shipped invocation"
+fi
+# (c) a tree with no declared program in it.
+NOPROG="$TMPROOT/noprog"
+rm -rf "$NOPROG"
+mkdir -p "$NOPROG/scripts"
+out="$(ELIXIR_FAMILY_ROOT="$NOPROG" bash "$SCRIPT" --match test <<<'docs/setup/SETUP.md' 2>&1)" && rc=0 || rc=$?
+if has "$out" "NO declared program found under"; then
+  ok "(c) --match names a family root it cannot derive from"
+else
+  no "(c) degraded without naming the reason: $out"
+fi
+out="$(ELIXIR_FAMILY_ROOT="$NOPROG" bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "${rc:-0}" != 0 ]; then
+  ok "(c) --check refuses a family root it can derive nothing from (exit ${rc:-0})"
+else
+  no "(c) --check PASSED against a tree it could derive nothing from — vacuous"
+fi
+echo
+
+# ── case 6d: the two halves of the test set answer different questions ─────
+# WHY THIS EXISTS, AND IT IS AN INCIDENT AND NOT A STYLE. When case 6b's
+# derivation landed, `--match test` began answering `true` for every member of
+# `scripts/pds-*.{sh,exs}` and `tooling/pds/*.mjs`. scripts/pds-door-census.sh
+# reads that answer as its leg B and its DEAD-DECLARATION class means "somebody
+# TYPED this path into a list and no ExUnit case executes it" — so 43
+# ledger-disposed instruments were reclassified DEAD-DECLARATION in one commit
+# and every one of their dispositions then read as ORPHANED, five arms of
+# api/test/barkpark/pds_door_census_test.exs red. The set did not become wrong;
+# it started answering a QUESTION its consumer was not asking. `--literal` is
+# the narrow half, and these arms are what keeps the two from re-merging.
+echo "case 6d: --literal is the typed half, the bare form is the dispatched whole"
+ml() { "$SCRIPT" --match "$2" --literal <<<"$1"; }
+check_literal() {
+  # $1 path, $2 want-whole, $3 want-literal
+  local gw gl
+  gw="$(m "$1" test)"
+  gl="$(ml "$1" test)"
+  if [ "$gw" = "$2" ] && [ "$gl" = "$3" ]; then
+    ok "'$1' -> whole=$2 literal=$3"
+  else
+    no "'$1' -> whole=$gw literal=$gl, wanted whole=$2 literal=$3"
+  fi
+}
+# A FAMILY MEMBER NOBODY TYPED: gated, and NOT a typed declaration. This is the
+# row the census must not call DEAD-DECLARATION. It is an ABSENT path on
+# purpose — asking about a file the tree already holds is the assertion a hand
+# list passes too.
+check_literal "scripts/pds-zz-new.sh" true false
+check_literal "tooling/pds/zz-new.mjs" true false
+# A TYPED ENTRY: identical under both halves, which is what makes the arm above
+# a discriminator rather than a blanket `literal=false`.
+check_literal "api/lib/barkpark.ex" true true
+# A PATH IN NEITHER HALF stays false under both — the narrow half is a subset,
+# never an independent set that could answer true where the whole set says no.
+check_literal "scripts/deploy-rebuild.sh" false false
+# THE FLAG IS NOT A NO-OP, ASSERTED AS A SET DIFFERENCE AND NOT AS ONE PATH:
+# --print-set test --literal must be a STRICT subset of --print-set test, and
+# the difference must be exactly what --print-families derived. A --literal that
+# silently kept the derived half would pass every check_literal above only if
+# every probe were typed; this arm reds even then.
+# FILES, NOT PROCESS SUBSTITUTION: bash 3.2 — what macOS ships and therefore
+# what the local gate runs — segfaults on `<(...)` inside a command
+# substitution, and that is a RUN-time crash, not a parse error.
+"$SCRIPT" --print-set test | LC_ALL=C sort -u >"$TMPROOT/set-whole.txt"
+"$SCRIPT" --print-set test --literal | LC_ALL=C sort -u >"$TMPROOT/set-literal.txt"
+"$SCRIPT" --print-families | cut -f2 | LC_ALL=C sort -u >"$TMPROOT/set-families.txt"
+fam_set="$(cat "$TMPROOT/set-families.txt")"
+only_lit="$(comm -23 "$TMPROOT/set-literal.txt" "$TMPROOT/set-whole.txt")"
+diff_set="$(comm -13 "$TMPROOT/set-literal.txt" "$TMPROOT/set-whole.txt")"
+if [ -n "$only_lit" ]; then
+  no "--literal returned globs the whole set does not contain: $only_lit"
+elif [ -z "$diff_set" ]; then
+  no "--literal and the bare form returned the SAME set — the flag is a no-op and the census's leg B halves are still one thing"
+elif [ "$diff_set" = "$fam_set" ]; then
+  ok "whole - literal == the derived families exactly ($(printf '%s\n' "$fam_set" | wc -l | tr -d ' ') glob(s))"
+else
+  no "whole - literal is not the derived family set. difference: $(printf '%s' "$diff_set" | tr '\n' ' ') / families: $(printf '%s' "$fam_set" | tr '\n' ' ')"
+fi
+# AND AN UNKNOWN FLAG IN THAT SLOT REFUSES. It printed its complaint to stderr
+# and then answered `false` with rc=0 the first time this was written: the
+# refusal lived in a command substitution, i.e. a subshell, whose exit status
+# the caller discarded. A refusal that still answers is worse than none.
+out="$("$SCRIPT" --match test --bogus <<<'api/lib/barkpark.ex' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "an unknown flag after --match SET exits $rc"
+else
+  no "an unknown flag after --match SET answered '$out' with rc=0"
+fi
 echo
 
 # ── case 7: a bad set name is an error, not a silent false ──────────────────
@@ -2242,6 +2557,136 @@ git -C "$DR" -c user.email=t@t -c user.name=t commit -qm orphan >/dev/null 2>&1
 dispatch "a base with no common ancestor" 1 - - pull_request "$BASE_SHA"
 gate_says "share NO common ancestor" "  …and names the condition, not a raw git fatal"
 gate_says "refusing a two-dot fallback" "  …and refuses the fallback that sweeps in the whole base"
+echo
+
+
+# ── case 11: a ZERO-CENSUS door must PROVE itself or the run refuses ─────────
+# The floor table cannot judge a zero population: `0 < 0` is false however
+# broken the door is, and twelve idioms sit at floor 0 AND population 0 on the
+# real tree. --check therefore proves each such door on a synthetic fixture
+# before it is allowed to succeed (ELIXIR_ESCAPE_IDIOM_FIXTURE).
+#
+# The proof runs on a SELF-SCAN, so these cases give it one: the script is
+# COPIED into a fixture tree's own scripts/ directory and run from there, which
+# makes that tree its checkout without ELIXIR_PATH_ESCAPE_ROOT. That is also
+# what lets the mutation arms below delete a door for real.
+echo "case 11: a zero-census idiom proves its detector on a synthetic case, or the run refuses"
+FX_PROVE="$TMPROOT/prove"
+make_fixture "$FX_PROVE"
+mkdir -p "$FX_PROVE/scripts"
+cp "$SCRIPT" "$FX_PROVE/scripts/elixir-path-escape-check.sh"
+
+out="$(bash "$FX_PROVE/scripts/elixir-path-escape-check.sh" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "case 11a: a self-scan of a clean fixture checkout is green"
+else
+  no "case 11a: the clean fixture self-scan redded — every arm below would prove nothing: $out"
+fi
+if has "$out" "detector PROVEN on a synthetic case"; then
+  ok "case 11a: the zero-census doors are PROVEN, not assumed"
+else
+  no "case 11a: no proof line — the zero-census arm never ran: $out"
+fi
+if has "$out" "idiom lib-rootattr: 0 live read(s), detector PROVEN"; then
+  ok "case 11a: lib-rootattr — the one idiom with no arm anywhere in this harness — is proven"
+else
+  no "case 11a: lib-rootattr is still unproven: $out"
+fi
+
+# --- 7b: a BLINDED door must be named, not counted -------------------------
+# The sigil door is the mutation subject: it is the one whose deletion leaves
+# every other tag intact, so a red here cannot be a collapse in disguise.
+MUT_PROVE="$FX_PROVE/scripts/elixir-path-escape-check.sh"
+cp "$SCRIPT" "$MUT_PROVE"
+perl -0pi -e "s/      case \"\\\$lit\" in\n        '~'\\*\\)/      case \"\\\$lit\" in\n        'ZZNEVERZZ'*)/" "$MUT_PROVE"
+if grep -q 'ZZNEVERZZ' "$MUT_PROVE"; then
+  ok "case 11b: the sigil-door mutation applied (the fixture really changed)"
+else
+  no "case 11b: the sigil-door mutation did NOT apply — this case would prove nothing"
+fi
+out="$(bash "$MUT_PROVE" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "case 11b: exit $rc (non-zero) with the sigil door blinded"
+else
+  no "case 11b: a blinded door still greened — the proof is inert: $out"
+fi
+if has "$out" "idiom 'test-sigildir' resolved 0 reads on this tree AND did not fire on its own synthetic fixture"; then
+  ok "case 11b: names the blind door and says its zero was never coverage"
+else
+  no "case 11b: did not name test-sigildir as BLIND: $out"
+fi
+if has "$out" "idiom test-rootpipe: 0 live read(s), detector PROVEN"; then
+  ok "case 11b: the OTHER zero-census doors still prove — the red is the sigil door, not a collapse"
+else
+  no "case 11b: every door went dark at once, so this red says nothing about the sigil door: $out"
+fi
+
+# --- 7c: a zero-census door with NO fixture must REFUSE --------------------
+# The predicate polices its own registry: adding a door and forgetting its
+# fixture cannot ship as silent coverage.
+cp "$SCRIPT" "$MUT_PROVE"
+perl -ni -e 'print unless m{^test-rootexec\tapi/test}' "$MUT_PROVE"
+if grep -qE '^test-rootexec\tapi/test' "$MUT_PROVE"; then
+  no "case 11c: the fixture-removal mutation did NOT apply — this case would prove nothing"
+else
+  ok "case 11c: the fixture row for test-rootexec is gone (the mutation applied)"
+fi
+out="$(bash "$MUT_PROVE" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "case 11c: exit $rc (non-zero) for a zero-census idiom with no fixture"
+else
+  no "case 11c: an unprovable door passed as coverage: $out"
+fi
+if has "$out" "idiom 'test-rootexec' resolved 0 reads and has NO entry in ELIXIR_ESCAPE_IDIOM_FIXTURE"; then
+  ok "case 11c: refuses by name rather than counting an unproven door"
+else
+  no "case 11c: no NO-FIXTURE refusal: $out"
+fi
+rm -rf "$FX_PROVE/scripts"
+echo
+
+# ── case 12: a read the scanner CANNOT resolve is said out loud ─────────────
+# task-c605ea24bbe5066c's original shape: `Path.expand("../../../" <> rel,
+# __DIR__)` where `rel` is not bound to anything the doors can reach. The
+# census cannot see it, and before this arm the output was identical to a tree
+# with no such read: silence, then OK.
+echo "case 12: an unresolvable path expression is REPORTED, and refuses when nothing binds it"
+FX_UNSEEN="$TMPROOT/unseen"
+make_fixture "$FX_UNSEEN"
+cat >"$FX_UNSEEN/api/test/barkpark/unseen_test.exs" <<'EX'
+  def r, do: File.read!(Path.expand("../../../" <> mirror_rel(), __DIR__))
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_UNSEEN" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "case 12a: exit $rc (non-zero) on a read the scanner cannot resolve"
+else
+  no "case 12a: an unresolvable read passed as OK — the original defect: $out"
+fi
+if has "$out" "CANNOT SEE this read: api/test/barkpark/unseen_test.exs"; then
+  ok "case 12a: names the file, the line and the operand it cannot resolve"
+else
+  no "case 12a: no CANNOT SEE line — the arm is silent on its own subject: $out"
+fi
+
+# --- 8b: the SAME expression, bound to a literal list, must NOT refuse -----
+# The FALSE-RED control. The shape-8 door resolves this one, so a red here
+# would be the gate refusing code it can in fact see — case 3j's lesson.
+cat >"$FX_UNSEEN/api/test/barkpark/unseen_test.exs" <<'EX'
+  @mirrors ["design/tokens.json"]
+  def r, do: Enum.map(@mirrors, fn mirror_rel -> File.read!(Path.expand("../../../" <> mirror_rel, __DIR__)) end)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_UNSEEN" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "case 12b: the same expression bound to a literal list is green"
+else
+  no "case 12b: a read the doors DO resolve was refused — a false red: $out"
+fi
+if has "$out" "cannot see directly: api/test/barkpark/unseen_test.exs"; then
+  ok "case 12b: still REPORTED as unresolvable-at-the-read-site, not silently counted"
+else
+  no "case 12b: green and silent — the honesty half is missing: $out"
+fi
+rm -f "$FX_UNSEEN/api/test/barkpark/unseen_test.exs"
 echo
 
 echo "----"

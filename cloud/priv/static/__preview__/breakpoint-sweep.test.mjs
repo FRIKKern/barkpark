@@ -28,7 +28,7 @@ import {
   SHELL_CHROME_SELECTORS, SHELL_CHROME_CEILING, CHROME_PIN_ROW, foldVerdict,
   HIDING_UTILITIES, THEMES, HEIGHTS, HEIGHT_REASONS, RENDER_HEIGHT,
   RENDER_HEIGHTS_DEFAULT, heightDriveReport, cueAxisOfMask, cueStuckVerdict,
-  selectNames,
+  selectNames, ascendingViolation, nonAscendingRefusal,
   SCENARIO_RESIDUE, RESIDUE_FAMILY_REASONS,
 } from "./breakpoint-sweep.mjs";
 import { SCENARIOS, SCENARIO_NAMES } from "./scenarios.mjs";
@@ -755,8 +755,8 @@ test("the DEFAULT loop is ONE height, and the decision carries its own render co
   // instead of quietly stale.
   const one = CELLS.length * THEMES.length * 1 * WIDTHS.length;
   const all = CELLS.length * THEMES.length * HEIGHTS.length * WIDTHS.length;
-  assert.equal(one, 1050);
-  assert.equal(all, 3150);
+  assert.equal(one, 1092);
+  assert.equal(all, 3276);
   const reason = HEIGHT_REASONS[RENDER_HEIGHT];
   assert.ok(reason.includes(String(one)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state the default-loop render count ${one}`);
   assert.ok(reason.includes(String(all)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state what walking all ${HEIGHTS.length} heights costs (${all})`);
@@ -1230,18 +1230,61 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // score — WHICH of the two values the role chip is painted from — is driven
   // by smoke.mjs's `members-self-role-drift` expectation instead. The three
   // numerals below were RE-DERIVED, not incremented, by RUNNING the bare sweep
-  // on this branch and reading what it PRINTED: `135 scenarios · 24 distinct
-  // covered by 25 cells · 111 residue over 14 families (committed literal)`.
+  // on this branch and reading what it PRINTED: `137 scenarios · 24 distinct
+  // covered by 25 cells · 113 residue over 14 families (committed literal)`.
   // The sweep refused at exit 2 (`UNLISTED scenario "members-self-role-drift"
   // (family hash:#settings)`) until the entry was written — the literal doing
-  // its job, not friction.
-  assert.equal(r.total, 135);
-  assert.equal(r.cells, 25);
-  assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 111, "111 is the RESIDUE, not the census");
+  // its job, not friction. cch-w45-s5-fu moved it by two: the /v1/me-unreadable
+  // fixtures on a suspended and on a behind box are the 136th and 137th
+  // scenarios and the 112th and 113th residue entries (family hash:#instance),
+  // and the sweep refused the same way until both entries were written.
+  // cch-w20-bl moved it by one: `overview-attention-long-name` — the first
+  // fixture in this corpus to give `.attention-name` a string its column cannot
+  // seat, and so the first able to make that ellipsis ENGAGE — is the 138th
+  // scenario and the 114th residue entry (family hash:#overview), and the sweep
+  // refused the same way until the entry was written.
+  // cch-w47-rv-bl moved it by one: `fleet-archives-member` — the first fixture
+  // to render the archives panel as a plain MEMBER — is the 139th scenario and
+  // the 115th residue entry (family hash:#fleet), and the sweep refused the
+  // same way until the entry was written.
+  // task-5ffdec2b609404bc moved it by two, and for a reason no earlier mover
+  // had: the modal seam stopped being a NAME CONVENTION in shoot.sh and became
+  // a scenarios.mjs `modal` field, so a scenario can finally ask for a dialog
+  // other than the account modal. `tokens-revoke-confirm` (the confirm-sheet
+  // shape, family hash:#settings) and `cmdk-palette` (the .modal-root:has(.cmdk)
+  // arm, family hash:#fleet) are the 140th and 141st scenarios and the 116th and
+  // 117th residue entries. Each is its HOST scenario's fixture deep-copied plus
+  // one field, so what they add to THIS sweep's axis is nothing — the tables
+  // beneath them are the ones the `tokens`/`fleet` cells already walk at all 18
+  // widths — and the sweep refused at exit 2 (`UNLISTED scenario
+  // "tokens-revoke-confirm"`) until both entries were written.
+  // task-499cab525e65018b moved it by two more, for the reason the seam above
+  // exists: `instance-pin-version` and `instance-update-conflict` (both family
+  // hash:#instance) are the first scenarios to reach `openPinModal` and
+  // `openUpdateConflictModal` — the two openModal call sites PR #19581's
+  // enumeration filed as having NO scenario at all. They are the 142nd and
+  // 143rd scenarios and the 118th and 119th residue entries; the sweep refused
+  // at exit 2 (`UNLISTED scenario "instance-pin-version" (family
+  // hash:#instance)`) until both entries were written.
+  // pdf-bl-fleet-group-route moves it by ONE, and unlike the last several it
+  // moves the CELL axis: `fleet-group-view` is the 144th scenario and the FIRST
+  // to reach the PDF-D11 group tab (`#instance/<main>/group`), which the parent
+  // slice shipped with no route at all. It gets a CELL, not a residue entry,
+  // because `.group-table` is a five-column grid collapsing to two at 640 —
+  // geometry none of the 23 hash:#instance residue entries shares, and its
+  // sentinel exists only after the browser-direct roster read lands, so the
+  // cell also walks the route's async paint. Total 143 -> 144, cells 25 -> 26,
+  // distinctCovered 24 -> 25. Residue (119) and families (14) are DELIBERATELY
+  // UNMOVED: a cell is not residue, and a cell creates no family. Every integer
+  // was RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` and reading the
+  // `>> scenarios` line it PRINTED, never by adding one.
+  assert.equal(r.total, 144);
+  assert.equal(r.cells, 26);
+  assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
+  assert.equal(r.residue, 119, "119 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 111, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 119, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
@@ -1541,7 +1584,7 @@ test("the ownership map's own family numerals are recounted from the literal", (
   // delete the arm.
   //
   // IT LIVES INSIDE THIS TEST RATHER THAN BESIDE IT ON PURPOSE: this file's test
-  // count is pinned EXACTLY (two-sided) at 82 in .github/workflows/
+  // count is pinned EXACTLY (two-sided) at 89 in .github/workflows/
   // console-harness.yml, and the assertions belong to the bullet this test
   // already owns. A separate `test()` would have been a clearer failure NAME at
   // the cost of a workflow bump in a file this change has no business touching.
@@ -1754,4 +1797,186 @@ test("a cell pointed at a scenario that no longer exists refuses", () => {
   });
   assert.equal(r.ok, false);
   assert.deepEqual(r.phantomCells, ["not-a-scenario"]);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE ORDER PIN (cch-w15-bl-target-reuse-ascending-order-pin)
+// ─────────────────────────────────────────────────────────────────────────────
+//  Target reuse across the WIDTH axis makes the width ORDER part of the
+//  measurement: a reused document carries the previous width's settled
+//  geometry into the next probe. These pin the predicate and the sentence; the
+//  browser half is proven by running the leg both ways and diffing the raw
+//  Q1/Q2/Q3 records byte-for-byte.
+
+test("the shipped width axis is strictly ascending, and boundaryWalk asserts it rather than leaving it to be inferred", () => {
+  assert.equal(ascendingViolation(WIDTHS), null);
+  assert.equal(ascendingViolation(boundaryWalk(BREAKPOINTS)), null);
+});
+
+test("a DESCENDING width list is a violation, named by position and pair", () => {
+  // The exact mutation the row names: `--widths 900,619` under reuse.
+  assert.deepEqual(ascendingViolation([900, 619]), { index: 1, prev: 900, next: 619 });
+  // And the positive control it is a mutation OF — the same two widths, sorted.
+  assert.equal(ascendingViolation([619, 900]), null);
+});
+
+test("EQUAL neighbours violate too — the same width twice measures the second against the first's settled state", () => {
+  assert.deepEqual(ascendingViolation([619, 720, 720, 830]), { index: 2, prev: 720, next: 720 });
+  assert.equal(ascendingViolation([619, 720, 721, 830]), null);
+});
+
+test("a single width, and an empty list, are vacuously ascending — reuse has nothing to inherit from", () => {
+  assert.equal(ascendingViolation([901]), null);
+  assert.equal(ascendingViolation([]), null);
+  // The two lists console-harness.yml actually drives, pinned as ACCEPTED:
+  // a pin that refused a committed CI invocation would red the harness.
+  assert.equal(ascendingViolation([320, 390, 620]), null);
+});
+
+test("the dip in the MIDDLE is caught, not just a reversed pair at the end", () => {
+  assert.deepEqual(ascendingViolation([619, 720, 700, 830, 900]), { index: 2, prev: 720, next: 700 });
+});
+
+test("the refusal PRINTS the list it read and names the escape hatch", () => {
+  const widths = [900, 619];
+  const msg = nonAscendingRefusal(widths, ascendingViolation(widths));
+  assert.match(msg, /--widths 900,619/);            // the offending list, verbatim
+  assert.match(msg, /position 1 goes 900 -> 619/);  // where it broke
+  assert.match(msg, /--fresh-targets/);             // how to drive any order anyway
+  // MUTATION: the sentence is built from the list, not typed. A different list
+  // must produce a different sentence, or the assertions above are satisfied by
+  // a constant string.
+  const other = [830, 720];
+  assert.match(nonAscendingRefusal(other, ascendingViolation(other)), /--widths 830,720/);
+  assert.doesNotMatch(nonAscendingRefusal(other, ascendingViolation(other)), /900/);
+});
+
+// ── cch-w23-bl-real-hetzner-remediation-scenario ─────────────────────────
+// THE CONNECT-REMEDIATION MIRROR LOCK.
+//
+// `connect_remediation/1` lives in cloud/lib/barkpark_cloud/failure_copy.ex and
+// its sentences also appear as LITERALS in scenarios.mjs, because a module the
+// browser loads cannot read the Elixir source at run time. Before this arm the
+// two sides were an UNLOCKED MIRROR: two hand-typed copies of one truth with no
+// shared fixture, each well covered by its own suite. Reword the server and
+// every suite on both sides stays green while the preview corpus certifies a
+// string the server stopped sending — which is exactly how a 168-character
+// "hetzner" sentence that NO clause has ever produced lived in the corpus for a
+// whole wave, and got driven by overflow-guard.mjs's W23 leg as the short cell.
+//
+// NOTHING BELOW IS A HAND-TYPED EXPECTATION. The clauses are extracted from
+// failure_copy.ex; the corpus side is read out of the imported SCENARIOS
+// literal; the assertion is set membership between the two. Re-word the Elixir
+// and this arm probes the NEW wording.
+//
+// IT REFUSES RATHER THAN PASSING. An unreadable or clause-less failure_copy.ex
+// throws by name instead of yielding an empty set that every corpus string
+// would then trivially fail — and, more dangerously, an empty CORPUS side is
+// caught by its own floor, because a rename of `providerConnect` would
+// otherwise leave this lock quiet, and quiet reads exactly like agreement.
+const FAILURE_COPY_EX = path.resolve(ROOT, "..", "..", "lib", "barkpark_cloud", "failure_copy.ex");
+
+// A `def connect_remediation("<kind>") do` (or `(_kind)`) head whose whole body
+// is one string literal on the next line. A clause whose body is anything else
+// is simply not extracted — this reader claims only what it can read.
+const CONNECT_CLAUSE_RE =
+  /def\s+connect_remediation\(\s*(?:"([a-z0-9_]+)"|_kind)\s*\)\s+do\s*\n\s*"((?:[^"\\]|\\.)*)"\s*\n\s*end/g;
+
+function connectRemediationClauses() {
+  const src = fs.readFileSync(FAILURE_COPY_EX, "utf8");
+  if (!src.trim()) {
+    throw new Error("REFUSED: cloud/lib/barkpark_cloud/failure_copy.ex read empty — " +
+      "the connect-remediation mirror cannot be derived, so this lock will not green");
+  }
+  const out = {};
+  CONNECT_CLAUSE_RE.lastIndex = 0;
+  let m;
+  while ((m = CONNECT_CLAUSE_RE.exec(src))) {
+    out[m[1] || "_kind"] = m[2].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  if (Object.keys(out).length === 0) {
+    throw new Error("REFUSED: no connect_remediation/1 clause matched in failure_copy.ex — " +
+      "the clause shape changed and this reader went blind");
+  }
+  return out;
+}
+
+// Every `remediation` string any scenario can answer POST /v1/providers with,
+// across BOTH fixture shapes: the flat { status, body } response and the
+// per-kind map cch-w23-bl-real-hetzner-remediation-scenario added.
+function corpusConnectRemediations(scenarios) {
+  const rows = [];
+  for (const [name, scen] of Object.entries(scenarios)) {
+    const pc = scen && scen.data && scen.data.providerConnect;
+    if (!pc || typeof pc !== "object") continue;
+    const arms = "status" in pc ? { "": pc } : pc;
+    for (const [key, res] of Object.entries(arms)) {
+      const text = res && res.body && res.body.remediation;
+      if (typeof text === "string") rows.push({ name, key, text });
+    }
+  }
+  return rows;
+}
+
+test("cch-w23: every connect remediation in the corpus is a VERBATIM connect_remediation/1 clause, and the real hetzner one is among them", () => {
+  const server = connectRemediationClauses();
+
+  // POSITIVE CONTROL ON THE SERVER READ, and it fails DIFFERENTLY from the
+  // comparison below: this is the extraction going blind, not the two sides
+  // disagreeing. The two kinds the console can actually connect
+  // (app.js's `available: true` providers) plus the fallback must all resolve.
+  for (const kind of ["hetzner", "azure", "_kind"]) {
+    assert.equal(typeof server[kind], "string",
+      `failure_copy.ex has no literal connect_remediation(${JSON.stringify(kind)}) clause — ` +
+      "the server side of this mirror is not speaking, and a lock that cannot read must RED");
+    assert.ok(server[kind].length > 40,
+      `the extracted ${kind} clause is ${server[kind].length} characters — the regex is matching something that is not the sentence`);
+  }
+  // The clauses must DISCRIMINATE, or set membership below is vacuous: a
+  // failure_copy.ex that had collapsed to one sentence would make every corpus
+  // string "match" whatever it was copied from.
+  assert.equal(new Set(Object.values(server)).size, Object.keys(server).length,
+    "two connect_remediation/1 clauses are byte-identical — per-kind copy has collapsed server-side");
+
+  const rows = corpusConnectRemediations(SCENARIOS);
+
+  // FLOOR ON THE CORPUS READ. A rename of `providerConnect`, or a fixture
+  // restructure, would empty this list and leave the loop below iterating
+  // nothing — green, and blind. Two is the honest floor: `providers-empty`'s
+  // flat response and at least one arm of `providers-unverified`'s kind map.
+  assert.ok(rows.length >= 2,
+    `only ${rows.length} providerConnect remediation(s) found in the corpus — this lock has gone blind, ` +
+    "re-point corpusConnectRemediations() at the fixture shape on disk rather than accepting the green");
+
+  const known = new Set(Object.values(server));
+  for (const row of rows) {
+    assert.ok(known.has(row.text),
+      `scenario "${row.name}" (providerConnect${row.key ? "." + row.key : ""}) answers a remediation string ` +
+      "that NO connect_remediation/1 clause produces — the corpus is certifying copy the server has never " +
+      `sent:\n  corpus: ${JSON.stringify(row.text)}`);
+  }
+
+  // A named kind must answer ITS OWN clause, not merely SOME clause: a map that
+  // gave hetzner the azure sentence would pass set membership alone.
+  for (const row of rows) {
+    if (row.key && row.key !== "_default" && server[row.key] !== undefined) {
+      assert.equal(row.text, server[row.key],
+        `scenario "${row.name}" answers the WRONG clause for kind "${row.key}"`);
+    }
+  }
+
+  // THE CRITERION ITSELF: the real hetzner clause is IN the corpus. Before this
+  // row it was not — the corpus carried azure verbatim and a paraphrase for
+  // hetzner — so this assertion is the one that fails on origin/main's fixture.
+  assert.ok(rows.some((r) => r.text === server.hetzner),
+    "no scenario answers connect_remediation(\"hetzner\") verbatim — the server's real Hetzner remediation " +
+    "is not in the preview corpus, which is the whole subject of cch-w23-bl-real-hetzner-remediation-scenario");
+
+  // NON-VACUITY: the membership rule must actually REJECT. One character off the
+  // real clause — the shape a paraphrase has — must not be accepted.
+  assert.equal(known.has(server.hetzner.slice(0, -1)), false,
+    "the membership set accepts a truncated clause — this lock cannot lose");
+  assert.equal(known.has("We couldn't verify this token. In the Hetzner Cloud console open Security → API tokens, " +
+    "revoke the old token, then generate a fresh Read & Write token for this project."), false,
+    "the membership set accepts the retracted 168-character paraphrase — this lock cannot lose");
 });

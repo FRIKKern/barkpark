@@ -111,15 +111,22 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
 
   # ── the canonical component inputs ───────────────────────────────────────────
   #
-  # task-board: a snapshot whose statuses land in the five board columns every
-  # emitter now draws (open · ready · progress · blocked · done); two `ready` rows
-  # pin the per-column ordering and a leading `open` row COVERS the open-inclusive
-  # parity that bug-taskboard-drops-open-tasks fixed — the Elixir View + Go
-  # pdrender both grew an `open` column so a populated `open` bucket is no longer
-  # dropped, matching the web reader's white-ladder set. `cancelled` is still
-  # avoided (the board folds it to a tally, never a column). Empty-column policy
-  # (web keep-empty vs View/TUI omit-empty) is a SUPERSET difference this
+  # task-board: a snapshot whose statuses land in the SIX board columns every
+  # emitter now draws (open · ready · progress · blocked · done · cancel); two
+  # `ready` rows pin the per-column ordering and a leading `open` row COVERS the
+  # open-inclusive parity that bug-taskboard-drops-open-tasks fixed — the Elixir
+  # View + Go pdrender both grew an `open` column so a populated `open` bucket is
+  # no longer dropped, matching the web reader's white-ladder set. `cancelled` is
+  # CARRIED, not avoided: since task-881952f8d8417f4b it renders in its OWN
+  # terminal lane (last, de-emphasised, with the manifest's ✕), so the row below
+  # generates a golden WITH a cancel column on all three mirrors. Empty-column
+  # policy (web keep-empty vs View/TUI omit-empty) is a SUPERSET difference this
   # ⊆-projection deliberately does not police.
+  #
+  # The tally-fold sentence that used to sit here was FALSE of this board and had
+  # been outlived by the very @task_board_input twenty lines below
+  # (task-c29e16374107fb10). It remains TRUE — of a DIFFERENT board — in
+  # api/lib/barkpark/tasks/board.ex, which really does keep a `cancelled_count`.
   @task_board_input %{
     "type" => "task-board",
     "snapshot" => [
@@ -396,6 +403,29 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
       "terminal",
       "section"
     ]
+
+  # The minimum population a PROJECTED collection must carry for a surface's
+  # fixture-driven realization loop to measure anything. Declared HERE — beside
+  # the `*_projection/1` functions that produce the population, and upstream of
+  # all three mirrors — so the floor has exactly ONE home. An emptied projection
+  # makes every per-row assertion downstream vacuous while the freshness leg
+  # (committed mirror == `build/1`) still agrees with the emptied generator, so
+  # the floor is the only control that reds. Values match the strictness the Go
+  # leg (internal/pdrender/component_golden_test.go) already enforces.
+  @population_floors %{
+    {"notes", "rows"} => 2,
+    {"cards", "cards"} => 2,
+    {"roadmap", "lanes"} => 2,
+    {"roadmap", "scale"} => 1
+  }
+
+  @doc """
+  The declared population floor for one `{type, projection key}` pair.
+
+  Raises for a pair that carries no declared floor — a test asking for a key the
+  projection does not carry is itself the defect, and a silent default would hide it.
+  """
+  def population_floor(type, key), do: Map.fetch!(@population_floors, {type, key})
 
   @impl Mix.Task
   def run(_args) do

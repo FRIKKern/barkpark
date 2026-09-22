@@ -232,11 +232,11 @@ if [ "$INTERVAL" -lt 1080 ] && [ "${PULSE_LOOP_ALLOW_FAST:-}" != 1 ]; then
 fi
 if [ ! -r "$HELD" ]; then
   echo "pulse-loop.sh: held file '$HELD' is missing or unreadable — NOTHING was pulsed. This is NOT 'no rows held'." >&2
-  [ -n "$LOG" ] && printf '%s pulse-loop: held file %s unreadable — nothing pulsed\n' "$(date -u +%H:%M:%SZ)" "$HELD" >> "$LOG" 2>/dev/null
+  [ -n "$LOG" ] && printf '%s pulse-loop: held file %s unreadable — nothing pulsed\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$HELD" >> "$LOG" 2>/dev/null
   exit 2
 fi
 
-say()  { printf '%s %s\n' "$(date -u +%H:%M:%SZ)" "$*"; printf '%s %s\n' "$(date -u +%H:%M:%SZ)" "$*" >> "$LOG" 2>/dev/null; return 0; }
+say()  { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG" 2>/dev/null; return 0; }
 # A refusal is LOUD: stdout+log via say(), and stderr as well. A background loop whose only
 # output is a log file is silent by construction.
 loud() { say "$*"; printf '%s\n' "$*" >&2; return 0; }

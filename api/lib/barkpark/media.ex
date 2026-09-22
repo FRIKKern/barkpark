@@ -478,7 +478,7 @@ defmodule Barkpark.Media do
              @asset_type,
              attrs,
              dataset,
-             [source: :api] ++ Assets.file_scope_opts(file)
+             [source: :api] ++ MediaFile.scope_opts(file)
            ) do
         {:ok, updated} -> {:ok, updated}
         error -> error
@@ -824,35 +824,46 @@ defmodule Barkpark.Media do
   # in-transaction plugin hook. `delete_file/2`'s docs above explain, at length,
   # why NO transaction-mode option is passed here — a source pin in
   # media_delete_atomicity_test.exs keeps one from creeping back.
+  #
+  # It also OWNS the content broadcast/webhook queue for the duration
+  # (`with_deferred_queue/1` — a no-op when `Tenancy.delete_workspace/1` already
+  # claimed it upstream). `delete_asset_doc/1` reaches
+  # `Broadcast.tap_broadcast/7` with this transaction open, so without the claim
+  # the `mediaAsset` document's `delete` webhook was queued into a process-dict
+  # slot nothing would ever flush: the row deleted, `mutation_events` committed,
+  # and the dispatch never happened — not even a `webhook_fanout phase=selected`
+  # line to count it by.
   defp delete_row_with_asset_doc(%MediaFile{} = file) do
-    Repo.transaction(fn ->
-      case Repo.delete(file, stale_error_field: :id) do
-        {:ok, deleted} ->
-          case delete_asset_doc(file) do
-            :ok ->
-              # `run_after_media_delete` is a DB write and MUST stay inside the
-              # transaction so it rolls back with the row. HOOK CONTRACT: an
-              # `after_media_delete` plugin callback may only touch the DATABASE
-              # — NO file or HTTP I/O — because it runs before commit and would
-              # otherwise re-open exactly the phantom hole the effect deferral
-              # closes. The media plugin's own callback is now a second,
-              # idempotent pass over an already-deleted document; other plugins
-              # still get theirs.
-              _ =
-                Barkpark.Plugins.Registry.run_after_media_delete(%{
-                  media_file_id: file.id,
-                  dataset: file.dataset
-                })
+    Barkpark.Content.Broadcast.with_deferred_queue(fn ->
+      Repo.transaction(fn ->
+        case Repo.delete(file, stale_error_field: :id) do
+          {:ok, deleted} ->
+            case delete_asset_doc(file) do
+              :ok ->
+                # `run_after_media_delete` is a DB write and MUST stay inside the
+                # transaction so it rolls back with the row. HOOK CONTRACT: an
+                # `after_media_delete` plugin callback may only touch the DATABASE
+                # — NO file or HTTP I/O — because it runs before commit and would
+                # otherwise re-open exactly the phantom hole the effect deferral
+                # closes. The media plugin's own callback is now a second,
+                # idempotent pass over an already-deleted document; other plugins
+                # still get theirs.
+                _ =
+                  Barkpark.Plugins.Registry.run_after_media_delete(%{
+                    media_file_id: file.id,
+                    dataset: file.dataset
+                  })
 
-              deleted
+                deleted
 
-            {:error, reason} ->
-              Repo.rollback({:asset_doc, reason})
-          end
+              {:error, reason} ->
+                Repo.rollback({:asset_doc, reason})
+            end
 
-        {:error, cs} ->
-          Repo.rollback({:row, cs})
-      end
+          {:error, cs} ->
+            Repo.rollback({:row, cs})
+        end
+      end)
     end)
   end
 

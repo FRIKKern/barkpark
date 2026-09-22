@@ -18,6 +18,7 @@ defmodule Barkpark.Tasks.QueueGate do
   @derived_states ["foreign_claimed" | @persisted_states]
   @allowed_fields ~w(version state reason evidence)
   @default_lease_ttl_seconds 2700
+  @ts_iso_shape ~S"^[0-9]{4}-((0[13578]|1[02])-(0[1-9]|[12][0-9]|3[01])|(0[469]|11)-(0[1-9]|[12][0-9]|30)|02-(0[1-9]|1[0-9]|2[0-9]))T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?(Z|[+]00:00)$"
   @reason_max_bytes 500
   @evidence_max_bytes 1_000
 
@@ -114,6 +115,69 @@ defmodule Barkpark.Tasks.QueueGate do
   def claim_lease_live?(_content), do: true
 
   @doc """
+  The anchored shape a `claim.ts_iso` must have before the SQL lease arm will
+  COMPARE it — the shape guard in `executable_query/0`, and nothing else.
+
+  IT IS AN ECTO PARAMETER, NOT A LITERAL IN THE FRAGMENT STRING, AND THAT IS
+  THE WHOLE POINT. `Ecto.Query.fragment/1` counts EVERY `?` in its format
+  string as a bound placeholder and cannot tell one that is a regex quantifier
+  from one that is an argument slot. Inlining this pattern therefore put the
+  regex into a restricted dialect — no `?`, no `{n,m}` — enforced by nothing at
+  the edit site, and the failure it produced was a COMPILE error naming Ecto and
+  an argument count, three tokens away from the character that caused it:
+
+      (Ecto.Query.CompileError) fragment(...) expects extra arguments in the
+      same amount of question marks in string. It received 3 extra argument(s)
+      but expected 4
+
+  Bound as a parameter, no metacharacter here can ever collide with that count,
+  and the pattern is written in ordinary regex — `([.][0-9]+)?` included.
+
+  PRECISION: the inlined workaround was `[.0-9]*Z$`, which also admitted
+  `2026-07-26T18:00:00123Z` and multi-dot forms. Those now fail the shape guard,
+  which means they fall to `false` — NOT expired, i.e. still claim-held. That is
+  the same FAIL-CLOSED direction the rest of this predicate takes, and it is the
+  direction `lease_live?/1` already took for them: `DateTime.from_iso8601/1`
+  rejects both, so the Elixir arm called them LIVE while the loose SQL pattern
+  was willing to call them expired. The two arms now agree on these shapes.
+
+  CALENDAR SEMANTICS ARE IN HERE, AND A REGEX CAN CARRY ALL BUT ONE DAY OF THEM
+  (task-16b12b4fbef83e65). The previous `[0-9]{2}-[0-9]{2}` date body admitted
+  `2026-02-30T12:00:00Z` — February 30th — which then COMPARED as a plain string
+  and read EXPIRED, while `DateTime.from_iso8601/1` rejects it and the Elixir arm
+  therefore called it LIVE. That is the one direction that must never happen: the
+  ready queue handing out a row the targeted-claim path still considers held.
+
+  So the month/day body is now an alternation of the three real month lengths
+  (31 / 30 / Feb) and the time-of-day is bounded (`2[0-3]`, `[0-5][0-9]` twice,
+  which also drops the `:60` leap second `DateTime.from_iso8601/1` refuses).
+  THE ONE THING THIS CANNOT EXPRESS IS LEAP YEARS — `02-29` is admitted here and
+  ruled on ARITHMETICALLY in `executable_query/0`'s inner CASE, because a regex
+  cannot divide a year by four. A pattern alone is a PARTIAL improvement, not a
+  fix, and the split is deliberate rather than an oversight.
+
+  `+00:00` IS ACCEPTED ALONGSIDE `Z`. It is the same instant, and
+  `DateTime.from_iso8601/1` reads it as such, so rejecting it made the SQL arm
+  call a two-month-dead lease HELD while Elixir called it expired. The
+  comparison takes `substring(ts, 1, 19)` — the calendar part only — so every
+  accepted form is compared as UTC.
+
+  `-00:00` IS NOT, and the asymmetry is not a typo. ISO 8601 forbids a negative
+  zero offset and `DateTime.from_iso8601/1` returns `:invalid_format` for it, so
+  the Elixir arm calls it LIVE; admitting it here alongside `+00:00` reopened the
+  exact fail-open this row exists to close, and the twin-agreement test caught it
+  on the first run.
+
+  A NON-ZERO OFFSET (`-05:00`) IS STILL REJECTED, AND THAT DIVERGENCE IS
+  DELIBERATE: its literal digits are LOCAL time, and shifting them to UTC is
+  arithmetic this arm deliberately does not do. Elixir converts it correctly, so
+  the two arms can disagree there — always with SQL saying HELD, i.e. FAIL
+  CLOSED, which is the direction that cannot hand a live row away.
+  """
+  @spec ts_iso_shape_pattern() :: String.t()
+  def ts_iso_shape_pattern, do: @ts_iso_shape
+
+  @doc """
   The claim lease TTL in seconds — `:task_lease_ttl_seconds`, default 2700.
 
   ONE reader for a number that had grown three private copies (this module,
@@ -162,30 +226,71 @@ defmodule Barkpark.Tasks.QueueGate do
       # anything with a well-formed first 19 characters straight into the cast.
       #
       # ANCHORING ALONE WOULD NOT HAVE FIXED IT — a regex cannot validate
-      # CALENDAR semantics. '2026-13-45T99:99:99Z' and '2026-02-30T12:00:00Z'
-      # both match a fully anchored pattern and both still raise. So the shape
-      # guard and the comparison each do the job the other cannot: the anchored
-      # pattern (T and Z REQUIRED, which is what every writer emits —
-      # `Claim.do_claim_resolved`, `Claim.do_renew` and `Pulse.pulse/3` are all
-      # `DateTime.utc_now() |> DateTime.to_iso8601()`) makes LEXICOGRAPHIC
-      # ordering well-defined, and the text comparison cannot raise whatever
-      # the tail says.
+      # CALENDAR semantics on its own. '2026-13-45T99:99:99Z' and
+      # '2026-02-30T12:00:00Z' both match a merely-anchored `[0-9]{2}-[0-9]{2}`
+      # pattern and both still raise under a cast. So the shape guard and the
+      # comparison each do the job the other cannot: the anchored pattern (T
+      # REQUIRED, and a UTC designator REQUIRED, which is what every writer
+      # emits — `Claim.do_claim_resolved`, `Claim.do_renew` and `Pulse.pulse/3`
+      # are all `DateTime.utc_now() |> DateTime.to_iso8601()`) makes
+      # LEXICOGRAPHIC ordering well-defined, and the text comparison cannot
+      # raise whatever the tail says.
       #
-      # Requiring `T` and `Z` is load-bearing, not tidiness: a space separator
-      # sorts BELOW 'T', and a '-05:00' offset compares by its literal local
-      # digits — either would let a live claim read as expired, which is the one
-      # direction that must never fail. Anything not matching falls to `false`,
-      # i.e. NOT expired, i.e. still claim-held: the same FAIL-CLOSED direction
-      # the Elixir arm takes.
+      # THE CALENDAR IS SPLIT ACROSS TWO PLACES ON PURPOSE
+      # (task-16b12b4fbef83e65). `ts_iso_shape_pattern/0` now spells the real
+      # month lengths out as an alternation, so 2026-02-30, 2026-06-31 and
+      # 2026-13-45 fall to `false` — HELD — exactly as `lease_live?/1` already
+      # treated them (`DateTime.from_iso8601/1` returns `:invalid_date`). The
+      # ONE rule a regex cannot express is the leap year, so `02-29` is admitted
+      # by the pattern and ruled on by the INNER CASE below, arithmetically:
+      # the `::int` casts there are reachable only after the pattern has already
+      # proven those four characters are digits, so they cannot raise, and the
+      # nested CASE — not an `AND` — is what pins that order against Postgres's
+      # freedom to reorder AND arms.
       #
-      # The cutoff carries no trailing `Z` so a fractional stamp at the exact
-      # boundary second sorts GREATER than it — erring toward LIVE by under a
-      # second against a 2700-second lease.
+      # WITHOUT THIS THE SQL ARM FAILED OPEN ON ONE INPUT AND ONLY ONE DIRECTION
+      # MATTERS: '2026-02-30T12:00:00Z' compared as a bare string read EXPIRED
+      # here while `lease_live?/1` called it LIVE, so `bp task ready` /
+      # `bp task next` would hand out a row the targeted-claim path refuses.
+      #
+      # Requiring `T` is load-bearing, not tidiness: a space separator sorts
+      # BELOW 'T'. A NON-ZERO offset ('-05:00') compares by its literal LOCAL
+      # digits, which would let a live claim read as expired — the one direction
+      # that must never fail — so it is rejected and falls to `false`, i.e. NOT
+      # expired, i.e. still claim-held. `lease_live?/1` DOES convert it, so the
+      # two arms can disagree on that shape; the disagreement is recorded at
+      # both sites and is always SQL-says-HELD, the fail-closed side.
+      #
+      # `+00:00` IS accepted, because it is the same instant as `Z` and
+      # `DateTime.from_iso8601/1` reads it that way — rejecting it was the second
+      # measured disagreement, with SQL calling a two-month-dead lease HELD. The
+      # comparison takes `substring(ts, 1, 19)`, the calendar part only, so every
+      # accepted designator compares as UTC and a fractional tail is simply
+      # dropped rather than sorted against a cutoff that has none.
+      #
+      # `-00:00` IS NOT accepted, deliberately: ISO 8601 forbids a negative zero
+      # offset and `DateTime.from_iso8601/1` returns `:invalid_format`, so the
+      # Elixir arm calls it LIVE. Admitting it here for symmetry reopened this
+      # row's own fail-open, and the twin-agreement test named it immediately.
+      #
+      # THE SHAPE GUARD IS A BOUND PARAMETER, NOT A LITERAL — see
+      # `ts_iso_shape_pattern/0`. Ecto counts EVERY `?` in a fragment format
+      # string as a placeholder and cannot tell a regex quantifier from an
+      # argument slot, so an inlined pattern may contain no `?` and no `{n,m}`.
+      # If you are about to tighten a pattern in ANY fragment here, bind it the
+      # same way; `queue_gate_fragment_placeholders_test.exs` counts the `?`
+      # against the argument list so you meet this in a test, not in a compiler
+      # error that names Ecto and an argument count.
       (fragment("COALESCE(btrim(?->'claim'->>'worker'), '') = ''", d.content) or
          fragment("COALESCE(btrim(?->'claim'->>'closed_at'), '') <> ''", d.content) or
          fragment("COALESCE(btrim(?->'claim'->>'closed_by'), '') <> ''", d.content) or
          fragment(
-           "CASE WHEN ?->'claim'->>'ts_iso' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.0-9]*Z$' THEN ?->'claim'->>'ts_iso' < to_char((now() at time zone 'UTC') - (? * interval '1 second'), 'YYYY-MM-DD\"T\"HH24:MI:SS') ELSE false END",
+           "CASE WHEN ?->'claim'->>'ts_iso' ~ ? THEN CASE WHEN substring(?->'claim'->>'ts_iso' from 6 for 5) = '02-29' AND NOT ((substring(?->'claim'->>'ts_iso' from 1 for 4)::int % 4 = 0 AND substring(?->'claim'->>'ts_iso' from 1 for 4)::int % 100 <> 0) OR substring(?->'claim'->>'ts_iso' from 1 for 4)::int % 400 = 0) THEN false ELSE substring(?->'claim'->>'ts_iso' from 1 for 19) < to_char((now() at time zone 'UTC') - (? * interval '1 second'), 'YYYY-MM-DD\"T\"HH24:MI:SS') END ELSE false END",
+           d.content,
+           ^ts_iso_shape_pattern(),
+           d.content,
+           d.content,
+           d.content,
            d.content,
            d.content,
            ^lease_ttl_seconds()
@@ -399,6 +504,21 @@ defmodule Barkpark.Tasks.QueueGate do
   defp closed_claim?(claim),
     do: non_blank?(fetch(claim, "closed_at")) or non_blank?(fetch(claim, "closed_by"))
 
+  # THE ELIXIR HALF OF THE TWIN, and the site where the two documented
+  # divergences from `executable_query/0`'s SQL arm are recorded
+  # (task-16b12b4fbef83e65). `DateTime.from_iso8601/1` validates the CALENDAR —
+  # 2026-02-30, 2026-06-31, 2026-13-45, `:60` — which is why anything it rejects
+  # must also fail the SQL shape guard rather than be compared as a bare string;
+  # that was the fail-open the tightened pattern closed.
+  #
+  # RESIDUAL, DELIBERATE, ONE-DIRECTIONAL: this arm accepts ANY offset and shifts
+  # it to UTC (`2026-07-26T18:00:00-05:00` becomes 23:00Z). The SQL arm accepts
+  # only `Z`, `+00:00` and `-00:00` and rejects the rest, because shifting local
+  # digits is arithmetic it does not do. So for a non-zero offset the arms can
+  # disagree — ALWAYS with SQL saying HELD, never with SQL handing out a row this
+  # arm calls live. `queue_gate_lease_twin_agreement_test.exs` pins the agreeing
+  # set and uses exactly this shape as its positive control, so the harness is
+  # proven able to SEE a disagreement rather than merely never meeting one.
   defp lease_live?(claim) when is_map(claim) do
     case fetch(claim, "ts_iso") do
       ts when is_binary(ts) ->

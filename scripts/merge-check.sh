@@ -89,6 +89,90 @@ mc_pooled_names_OLD(){
               | select(.conclusion!="success" and .conclusion!="neutral" and .conclusion!="skipped")
               | .name ] | .[]' "$1" 2>/dev/null
 }
+# --- mc_hold_verdict <raw> ---------------------------------------------------
+# THE HOLD CLASSIFIER. Lives HERE, above --selftest, so the selftest's arms run
+# THIS function and not a retyped lookalike of it (the A6 lesson in this file).
+#
+# WHY IT EXISTS (measured on #18497, 2026-09-17). The old arm was four lines:
+#
+#   LBL=$(gh pr view "$PR" --json labels --jq '[.labels[].name]|join(",")') \
+#     || { cannot "hold-label" "could not read labels"; LBL="__UNREAD__"; }
+#   case "$LBL" in
+#     __UNREAD__) : ;;
+#     *hold*) arm ok "hold label" "HELD — ..." ;;
+#     *)      arm ok "hold label" "not held — ..." ;;
+#   esac
+#
+# THREE separate defects, each on its own:
+#  1. BOTH readable branches were `arm ok`. A PR carrying `hold` produced a PASS
+#     row and contributed NOTHING to FAIL, so the run could still conclude ALL N
+#     CONDITIONS MET. The arm was informational wearing a verdict's costume.
+#     #18497 was owner-held (a migration on a 31k-row prod table) and merged.
+#  2. The `__UNREAD__) : ;;` branch printed NOTHING. `cannot` had already
+#     counted the arm, so an unreadable label left a SILENT row in the tally —
+#     a permanently blind arm that still counts toward the vacuity floor.
+#  3. `*hold*` is a SUBSTRING glob over a joined string: `holdover`, `withhold`,
+#     `on-hold-review` and `stakeholder` all match `*hold*`. The membership test
+#     below is EXACT (case-insensitive) against each label name, never a glob
+#     over the join.
+#
+# And the defect under all three: `join(",")` renders BOTH "this PR has no
+# labels" and "the projection returned nothing" as the SAME empty string, and
+# the empty string took the `*)` branch and published `not held` — a POSITIVE
+# ABSENCE CLAIM manufactured out of an empty read. So this function is handed
+# the RAW JSON ARRAY (`@json`), never a join: `[]` is a readable, genuinely
+# unlabelled PR and passes; anything that is not a JSON array of strings is
+# UNREAD and refuses. A read that did not happen and a PR with no labels are
+# different objects and get different verdicts.
+#
+# Prints "<VERDICT>\t<detail>"; rc 0 CLEAR, 1 HELD, 2 UNREAD.
+MC_HOLD_LABEL="${MERGE_CHECK_HOLD_LABEL:-hold}"
+mc_hold_verdict(){
+  local raw="${1-}" names
+  if [ -z "$raw" ]; then
+    printf 'UNREAD\tthe label read produced NO OUTPUT — an empty read is not an empty label set\n'; return 2
+  fi
+  printf '%s' "$raw" | jq -e 'type=="array" and (map(type=="string")|all)' >/dev/null 2>&1 || {
+    printf 'UNREAD\tthe label read did not parse as a JSON array of names (got: %s)\n' "$raw"; return 2; }
+  if printf '%s' "$raw" | jq -e --arg h "$MC_HOLD_LABEL" \
+       'any(.[]; (ascii_downcase) == ($h|ascii_downcase))' >/dev/null 2>&1; then
+    names=$(printf '%s' "$raw" | jq -r 'join(", ")')
+    printf 'HELD\tlabels: [%s]\n' "$names"; return 1
+  fi
+  names=$(printf '%s' "$raw" | jq -r 'if length==0 then "(none)" else join(", ") end')
+  printf 'CLEAR\tlabels: [%s]\n' "$names"; return 0
+}
+
+# THE PDS-CITATION CLASSIFIER. Lives HERE, above --selftest, for the same reason
+# mc_hold_verdict does: the selftest's arms must drive THIS function and the REAL
+# `arm`/`cannot` helpers, not a copy of the case statement. A selftest that
+# re-types the mapping it is checking pins nothing (the A6 lesson in this file).
+#
+# WHY IT IS A SIBLING OF ARM 6 AND NOT AN EXTENSION OF IT. `squash sentinels`
+# greps the PR BODY for D-tokens and warns that the squash message can re-create
+# a guarded literal on main. This reads the PR DIFF and asks a different question
+# of a different corpus: does each PDS-D number the diff INTRODUCES resolve to a
+# decision the charter ALREADY defines on origin/main. A body citing a
+# perfectly-resolving number still needs the sentinel warning; a diff citing a
+# phantom still needs this one. Folding them makes both verdicts unreadable.
+#
+# THE HAZARD (PDS-D643, mechanised by scripts/pds-citation-precedes-merge.sh):
+# on 2026-08-03 three slice PRs merged forty minutes BEFORE the charter PR that
+# defined the numbers they cite, and origin/main carried thirteen hits in
+# shipped code pointing at decisions it did not define.
+#
+# THREE OUTCOMES, NOT TWO. rc 2 (and anything else) is UNCHECKED — the predicate
+# refuses to print a verdict when its own controls do not fire — and UNCHECKED is
+# `cannot`, never a pass. A predicate that could not look must not read as clean.
+mc_pds_citation_verdict(){ # <rc> <output-of-the-predicate>
+  local rc="${1-}" out="${2-}"
+  case "$rc" in
+    0) arm ok "pds citation" "resolves on origin/main —$(printf '%s' "$out" | sed -n 's/^  citations  ://p')" ;;
+    1) arm no "pds citation" "cites what origin/main does not define: $(printf '%s' "$out" | sed -n 's/^  MISSING: //p')" ;;
+    *) cannot "pds citation" "$(printf '%s' "$out" | tail -1)" ;;
+  esac
+}
+
 # Display join. NEVER re-parsed: check names contain commas (A14).
 mc_join(){ awk 'NR>1{printf ", "}{printf "%s",$0} END{if(NR)printf "\n"}'; }
 
@@ -456,10 +540,29 @@ if [ "${1:-}" = "--selftest" ]; then
     case "$out" in *"Elixir gate"*"absence is not a pass"*) _ok "presence refusal renders" "under set -u, no crash";;
       *) _no "presence refusal renders" "unexpected output: $out";; esac
   else _no "presence refusal renders" "CRASHED under set -u: $out"; fi
-  # A1b — CONTROL: the OLD form must still crash, or A1 proves nothing.
+  # A1b — CONTROL: an unbraced expansion that ABSORBS the following character
+  # must still crash, or A1 proves nothing.
+  #
+  # IT IS TWO ARMS, AND THE SPLIT IS THE FINDING. This suite had NO CALLER OF ANY
+  # KIND until 2026-09-17 — no workflow, no Makefile target — so it had only ever
+  # run on macOS. Its first CI run failed on THIS LINE: whether the em-dash's
+  # bytes count as name characters is a bash-version/locale question, and the
+  # answer differs. bash 3.2.57 (macOS) absorbs them and dies `MISS<u+2014>:
+  # unbound variable` — the production crash, verbatim. bash 5.x on ubuntu stops
+  # the name at the non-ASCII byte, expands cleanly, and the control could not
+  # fire. A control that only fires on the author's machine is the "control that
+  # flips was never a control" fault: it dated the platform, not the subject.
+  #
+  # So the ASCII arm carries the CLASS and is asserted EVERYWHERE — `$MISSx` is
+  # an unbound name on every bash there is. The em-dash arm replays the PRODUCTION
+  # STRING and is asserted only where a probe says this interpreter can see it,
+  # and it SAYS which case it took rather than passing silently.
+  if bash -c 'set -uo pipefail; MISS="x"; printf "%s\n" "$MISSx "' >/dev/null 2>&1
+  then _no "CONTROL absorbed suffix crashes" "an unbraced expansion absorbing its suffix did NOT crash — A1 cannot discriminate on ANY platform"
+  else _ok "CONTROL absorbed suffix crashes" "\$MISSx is unbound, as \$MISS<em-dash> was in production"; fi
   if bash -c 'set -uo pipefail; MISS="x"; printf "%s\n" "$MISS— "' >/dev/null 2>&1
-  then _no "CONTROL old form crashes" "the pre-fix shape did NOT crash — A1 cannot discriminate"
-  else _ok "CONTROL old form crashes" "unbound variable, as it did in production"; fi
+  then _ok "CONTROL em-dash form (platform-scoped)" "this bash (${BASH_VERSION}) does NOT treat the em-dash as a name character, so the PRODUCTION string cannot crash here; the ASCII arm above carries the class"
+  else _ok "CONTROL em-dash form (platform-scoped)" "this bash (${BASH_VERSION}) absorbs the em-dash and dies unbound — the production crash, verbatim"; fi
 
   # A2 — PAGINATION SHORTFALL must be CANNOT READ, never a pass.
   _tc=119; _got=100
@@ -758,11 +861,251 @@ if [ "${1:-}" = "--selftest" ]; then
   if [ -z "$_bad" ]; then _ok "CONTROL wrong-shape URL yields nothing" "no run id invented"
   else _no "CONTROL wrong-shape URL yields nothing" "parsed [$_bad] out of a non-actions URL"; fi
 
+  # ---- A17: THE HOLD LABEL. #18497 carried `hold` continuously from
+  # 2026-09-16T08:51:19Z and merged at 06:41Z on 09-17 under `ALL 9 CONDITIONS
+  # MET`, because the arm was `arm ok` in BOTH readable branches. These arms
+  # call the REAL mc_hold_verdict, and A17/A17b drive it through the ACTUAL jq
+  # program the live arm runs, over the ACTUAL object `gh pr view --json labels`
+  # emits (captured from #18705 and #18882 on 2026-09-17) — a selftest whose
+  # fixtures encode a shape the system never emits measures nothing.
+  _ghheld='{"labels":[{"id":"LA_kwDOSAgT9M8AAAAC1x0Gkg","name":"hold","description":"Lane-settable merge hold: the orchestrator merge sweep skips this PR","color":"B60205"}]}'
+  _ghclear='{"labels":[]}'
+  # The live arm's jq, verbatim. If this line and the live one drift, A17j reds.
+  _hraw=$(printf '%s' "$_ghheld" | jq -r '[.labels[].name]|@json')
+  _out=$(mc_hold_verdict "$_hraw"); _rc=$?
+  case "$_rc:$_out" in
+    1:HELD*) _ok "real gh shape -> HELD" "$_out" ;;
+    *) _no "real gh shape -> HELD" "rc=$_rc out=$_out — the shape gh ACTUALLY emits did not read as held" ;;
+  esac
+  # A17b — CONTROL: a real, readable, genuinely UNLABELLED PR must be CLEAR.
+  _hraw=$(printf '%s' "$_ghclear" | jq -r '[.labels[].name]|@json')
+  _out=$(mc_hold_verdict "$_hraw"); _rc=$?
+  case "$_rc:$_out" in
+    0:CLEAR*none*) _ok "CONTROL zero labels is CLEAR" "$_out" ;;
+    *) _no "CONTROL zero labels is CLEAR" "rc=$_rc out=$_out — an unlabelled PR must PASS, or every PR is held" ;;
+  esac
+  # A17c — A HELD PR MUST LAND IN THE FAIL BUCKET. rc alone is not the defect:
+  # the old code got the rc-equivalent RIGHT (it matched *hold*) and still
+  # called `arm ok`. This drives the REAL arm helper and reads the REAL counter.
+  _F0=$FAIL; _A0=$ARMS
+  arm no "selftest-hold" "synthetic held PR" >/dev/null
+  if [ "$FAIL" -eq $((_F0+1)) ] && [ "$ARMS" -eq $((_A0+1)) ]; then
+    _ok "a HELD arm refuses" "FAIL $_F0->$FAIL — a hold reaches the verdict"
+  else _no "a HELD arm refuses" "FAIL $_F0->$FAIL ARMS $_A0->$ARMS — a hold does not change the verdict"; fi
+  FAIL=$_F0; ARMS=$_A0
+  # A17d — AN UNREADABLE LABEL IS CANNOT, NEVER CLEAR. The old `__UNREAD__` arm
+  # printed nothing at all while still counting as an arm.
+  _out=$(mc_hold_verdict ""); _rc=$?
+  case "$_rc:$_out" in
+    2:UNREAD*) _ok "empty read is UNREAD" "$_out" ;;
+    *) _no "empty read is UNREAD" "rc=$_rc out=$_out — an empty read reported a verdict about labels" ;;
+  esac
+  _out=$(mc_hold_verdict 'not json at all'); _rc=$?
+  case "$_rc:$_out" in
+    2:UNREAD*) _ok "unparseable read is UNREAD" "$_out" ;;
+    *) _no "unparseable read is UNREAD" "rc=$_rc out=$_out" ;;
+  esac
+  # A17e — EXACT MEMBERSHIP, NOT A SUBSTRING GLOB. `holdover`/`withhold`/
+  # `stakeholder` are not holds.
+  _out=$(mc_hold_verdict '["holdover","withhold","stakeholder"]'); _rc=$?
+  case "$_rc:$_out" in
+    0:CLEAR*) _ok "hold-lookalikes are not holds" "$_out" ;;
+    *) _no "hold-lookalikes are not holds" "rc=$_rc out=$_out — a substring match is falsely holding PRs" ;;
+  esac
+  # A17f — CONTROL: the PRE-FIX glob really DOES misfire on those, or A17e pins
+  # nothing. This is the retired reader, kept only to be the control.
+  case "holdover,withhold,stakeholder" in
+    *hold*) _ok "CONTROL the old glob misfires" "the pre-fix *hold* glob matched three non-hold labels" ;;
+    *) _no "CONTROL the old glob misfires" "the pre-fix glob did not match — A17e cannot discriminate" ;;
+  esac
+  # A17g — case-insensitive exact match still holds.
+  _out=$(mc_hold_verdict '["Hold"]'); _rc=$?
+  case "$_rc:$_out" in
+    1:HELD*) _ok "case-insensitive exact match" "$_out" ;;
+    *) _no "case-insensitive exact match" "rc=$_rc out=$_out — a capitalised label escaped the hold" ;;
+  esac
+  # A17h — a hold ALONGSIDE other labels is still a hold (the join-order trap).
+  _out=$(mc_hold_verdict '["needs-review","hold","area/gates"]'); _rc=$?
+  case "$_rc:$_out" in
+    1:HELD*) _ok "hold among other labels" "$_out" ;;
+    *) _no "hold among other labels" "rc=$_rc out=$_out" ;;
+  esac
+  # A17j — PIN THE LIVE LINES, not just the classifier. Reverting the live arm to
+  # `arm ok` would leave every arm above green. Assert POSITIVELY that the real
+  # HELD branch calls `arm no`, that the UNREAD branch calls `cannot`, and that
+  # the live read uses @json (a join(",") read cannot tell [] from unreadable).
+  _real=$(grep -n '1) arm no "hold label"' "$0" | grep -v '_real=' | head -1)
+  case "$_real" in
+    "") _no "live HELD branch pinned" "could not FIND the HELD branch — the pin measures nothing" ;;
+    *) _ok "live HELD branch pinned" "the real arm refuses on HELD (arm no)" ;;
+  esac
+  _realu=$(grep -c '^  \*) cannot "hold-label"' "$0")
+  if [ "${_realu:-0}" -ge 1 ]; then _ok "live UNREAD branch pinned" "the real arm calls cannot on an unread label"
+  else _no "live UNREAD branch pinned" "the real arm no longer refuses an unreadable label"; fi
+  _realj=$(grep -c "json labels --jq '\[\.labels\[\]\.name\]|@json'" "$0")
+  if [ "${_realj:-0}" -ge 1 ]; then _ok "live read uses @json" "the raw array survives to the classifier"
+  else _no "live read uses @json" "the live read no longer passes a raw array — [] and unreadable have re-merged"; fi
+  # A17k — NO LIVE BRANCH MAY PASS A HELD PR. Scoped to NON-COMMENT lines: the
+  # comment block above QUOTES the retired code verbatim, and the first version
+  # of this arm matched its own documentation and red. That miss is the point —
+  # a pin that reads comments is measuring prose, not behaviour.
+  # NOT `grep -v … | grep -q`: this file runs under `set -o pipefail` and `grep
+  # -q` exits on its FIRST match, SIGPIPEing the upstream grep, so the pipeline
+  # returns 141 — non-zero — and the arm reads "not found" whether or not the
+  # needle is there. That is this repo's pipefail/SIGPIPE lesson, and it made
+  # the first draft of A17m red against a line 60 lines below it. Count into a
+  # variable instead; the whole stream is consumed, so nothing gets SIGPIPEd.
+  # THE NEEDLES ARE SPLIT ACROSS A CONCATENATION ON PURPOSE. Written whole, each
+  # needle IS a live non-comment line of this file, so the arm matches its own
+  # source and reports the defect it exists to detect. The first draft did
+  # exactly that (1 "live" PASS-on-HELD line: this one). Split, the literal never
+  # appears in the file, so a hit can only come from the real arm.
+  _live=$(grep -v '^[[:space:]]*#' "$0")
+  _nh='arm ok "hold label" "H'; _nh="${_nh}ELD"
+  _nc='arm ok "hold label" "not h'; _nc="${_nc}eld"
+  _passheld=$(printf '%s\n' "$_live" | grep -c "$_nh" || true)
+  _passclear=$(printf '%s\n' "$_live" | grep -c "$_nc" || true)
+  if [ "${_passheld:-0}" -gt 0 ]; then
+    _no "CONTROL no PASS-on-HELD remains" "$_passheld LIVE line(s) still pass a held PR — the original defect"
+  else _ok "CONTROL no PASS-on-HELD remains" "no live branch passes a held PR"; fi
+  # A17m — CONTROL FOR THE CONTROL: that comment-stripped grep must still FIND
+  # the arm it is scoped to, or A17k is green because the needle is broken.
+  if [ "${_passclear:-0}" -eq 1 ]; then
+    _ok "CONTROL the stripped grep sees code" "the same stripped stream finds the live CLEAR branch, exactly once"
+  else _no "CONTROL the stripped grep sees code" "expected exactly 1 live CLEAR branch, found ${_passclear:-0} — A17k is vacuous or the arm was duplicated"; fi
+
+  # ── A18 — THE PDS-CITATION ARM, PROVEN IN BOTH DIRECTIONS ─────────────────
+  #
+  # NOT FIXTURE THEATRE. These arms run the REAL predicate
+  # (scripts/pds-citation-precedes-merge.sh) over a THROWAWAY GIT REPO this
+  # block writes, then hand its ACTUAL rc and ACTUAL stdout to the REAL
+  # classifier mc_pds_citation_verdict, which calls the REAL `arm`/`cannot`
+  # helpers and moves the REAL counters. Nothing below re-types the case
+  # statement it is checking, and nothing below matches its own fixture: the
+  # two `sed` extractions in the classifier are read off output the predicate
+  # produced, so a classifier whose extraction stopped matching reds here.
+  #
+  # THE REPO IS ITS OWN CORPUS. The real charter is never read, so the verdict
+  # cannot move when an unrelated PR lands, and no network or origin/main
+  # history is needed — the merge-check leg may be checked out shallow.
+  #
+  # THE PHANTOM NUMBER IS BUILT ARITHMETICALLY, never written as a prefixed
+  # literal: the live arm above runs this very predicate over this very file's
+  # diff, and a planted phantom written out would red the arm by construction.
+  # Anchored on THIS FILE's location, never on $PWD: merge-check.sh --selftest is
+  # run from wherever the operator stands, and a relative subject path would make
+  # the arms below vanish (or worse, read a different tree) off the cwd alone.
+  PWD_REAL="$(cd "$(dirname "$0")/.." && pwd)"
+  _pc_subj="scripts/pds-citation-precedes-merge.sh"
+  _pc_lens="$PWD_REAL/scripts/pds-record-parity.sh"
+  if [ ! -f "$PWD_REAL/$_pc_subj" ] || [ ! -f "$_pc_lens" ]; then
+    # ABSENCE IS NOT A SKIP. A missing subject makes every arm below vacuous, so
+    # it refuses loudly — six times, once per arm it displaced, so the tally
+    # reads FAILED (a diagnosis) and not CANNOT READ (a floor breach).
+    _no "a defined citation PASSES" "missing $PWD_REAL/$_pc_subj or $_pc_lens — this arm measured nothing"
+    _no "the PASS detail is extracted, not empty" "not run: the subject or its lens is absent"
+    _no "a phantom citation REFUSES" "not run: the subject or its lens is absent"
+    _no "the refusal NAMES the number" "not run: the subject or its lens is absent"
+    _no "UNCHECKED refuses, it does not pass" "not run: the subject or its lens is absent"
+    _no "UNCHECKED counts against the verdict" "not run: the subject or its lens is absent"
+  else
+    _pcD1=$((100 + 0)); _pcD2=$((100 + 1)); _pcPH=$((9000 + 91))
+    _pcT="$(mktemp -d "${TMPDIR:-/tmp}/mc-pdscite.XXXXXX")"
+    mkdir -p "$_pcT/.claude/workflows" "$_pcT/api"
+    git -C "$_pcT" init -q -b main
+    git -C "$_pcT" config user.email t@example.com
+    git -C "$_pcT" config user.name t
+    git -C "$_pcT" config commit.gpgsign false
+    {
+      echo "# Fixture charter"; echo
+      echo "### PDS-D${_pcD1} — THE FIRST DECISION."; echo "body"; echo
+      echo "- **PDS-D${_pcD2} — THE SECOND DECISION.** body"
+    } > "$_pcT/.claude/workflows/bp-pds-charter.md"
+    echo "seed" > "$_pcT/api/seed.ex"
+    git -C "$_pcT" add -A && git -C "$_pcT" commit -q -m base
+    git -C "$_pcT" checkout -q -b slice
+
+    # A FILE REDIRECT, NOT A COMMAND SUBSTITUTION. `v=$(mc_pds_citation_verdict …)`
+    # runs the classifier in a SUBSHELL, so ARMS and FAIL come back unchanged and
+    # every counter assertion below would read 0->0 and fail while the classifier
+    # worked perfectly. Measured here on the first run of these arms. The verdict
+    # must be captured WITHOUT losing the side effect that IS the thing under test.
+    _pcVF="$(mktemp "${TMPDIR:-/tmp}/mc-pdsv.XXXXXX")"
+    _pc_verdict(){ mc_pds_citation_verdict "$_pcRC" "$_pcOUT" > "$_pcVF" 2>&1; _pcV="$(cat "$_pcVF")"; }
+
+    _pc_run(){ # -> $_pcOUT, $_pcRC
+      _pcOUT="$(cd "$_pcT" && bash "$PWD_REAL/$_pc_subj" --root "$_pcT" --base main --head HEAD --lens "$_pc_lens" 2>&1)"
+      _pcRC=$?
+    }
+
+    # DIRECTION 1 — a diff citing a number the base charter DEFINES must PASS.
+    echo "# see PDS-D${_pcD1} for why" >> "$_pcT/api/seed.ex"
+    git -C "$_pcT" commit -q -am "cite a defined decision"
+    _pc_run
+    _A0=$ARMS; _F0=$FAIL
+    _pc_verdict
+    if [ "$_pcRC" -eq 0 ] && [ "$FAIL" -eq "$_F0" ] && [ "$ARMS" -eq "$((_A0 + 1))" ]; then
+      _ok "a defined citation PASSES" "predicate rc=0; the arm reported and did NOT refuse: ${_pcV}"
+    else
+      _no "a defined citation PASSES" "rc=$_pcRC FAIL $_F0->$FAIL ARMS $_A0->$ARMS — ${_pcV}"
+    fi
+    # and the PASS detail must carry the predicate's own citations line, or the
+    # classifier's sed matched nothing and the verdict is content-free.
+    case "$_pcV" in
+      *"introduced occurrence"*) _ok "the PASS detail is extracted, not empty" "the citations line reached the verdict: ${_pcV}" ;;
+      *) _no "the PASS detail is extracted, not empty" "the classifier's sed pulled nothing off real output: ${_pcV}" ;;
+    esac
+
+    # DIRECTION 2 — a diff citing a number NOTHING defines must RED, BY NAME.
+    echo "# and also PDS-D${_pcPH}, which is nothing" >> "$_pcT/api/seed.ex"
+    git -C "$_pcT" commit -q -am "cite a phantom"
+    _pc_run
+    _A0=$ARMS; _F0=$FAIL
+    _pc_verdict
+    if [ "$_pcRC" -eq 1 ] && [ "$FAIL" -eq "$((_F0 + 1))" ]; then
+      _ok "a phantom citation REFUSES" "predicate rc=1 and the arm refused: ${_pcV}"
+    else
+      _no "a phantom citation REFUSES" "rc=$_pcRC FAIL $_F0->$FAIL — a phantom did not reach the verdict: ${_pcV}"
+    fi
+    case "$_pcV" in
+      *"PDS-D${_pcPH}"*) _ok "the refusal NAMES the number" "the MISSING list reached the verdict: PDS-D${_pcPH}" ;;
+      *) _no "the refusal NAMES the number" "the refusal does not name PDS-D${_pcPH}: ${_pcV}" ;;
+    esac
+
+    # DIRECTION 3 — UNCHECKED is `cannot`, never a pass. An unresolvable base
+    # makes the predicate exit 2 with no verdict printed; a classifier that
+    # folded that into the 0-branch would publish a clean bill off a read that
+    # never happened.
+    _pcOUT="$(cd "$_pcT" && bash "$PWD_REAL/$_pc_subj" --root "$_pcT" --base no-such-ref-here --head HEAD --lens "$_pc_lens" 2>&1)"; _pcRC=$?
+    _A0=$ARMS; _F0=$FAIL
+    _pc_verdict
+    case "${_pcRC}|${_pcV}" in
+      2\|CANNOT*) _ok "UNCHECKED refuses, it does not pass" "predicate rc=2 -> ${_pcV}" ;;
+      *) _no "UNCHECKED refuses, it does not pass" "rc=$_pcRC -> ${_pcV} — an unreadable corpus must not print a pass" ;;
+    esac
+    if [ "$FAIL" -eq "$((_F0 + 1))" ]; then
+      _ok "UNCHECKED counts against the verdict" "FAIL $_F0->$FAIL"
+    else _no "UNCHECKED counts against the verdict" "FAIL $_F0->$FAIL — a CANNOT READ that costs nothing is decoration"; fi
+
+    rm -rf -- "$_pcT" "$_pcVF"
+  fi
+
+  # A18f — PIN THE LIVE CALL. Every arm above drives the classifier directly, so
+  # deleting the live invocation would leave all of them green while the shipped
+  # check measured nothing. Assert the live path calls it, exactly once, off a
+  # comment-stripped stream (a hit inside a comment is documentation, not code).
+  _pclive=$(grep -v '^[[:space:]]*#' "$0" | grep -c 'mc_pds_citation_verdict "\$PCS_RC"' || true)
+  if [ "${_pclive:-0}" -eq 1 ]; then
+    _ok "the live pds-citation arm is wired" "1 live call to the classifier on the merge path"
+  else _no "the live pds-citation arm is wired" "found ${_pclive:-0} live call(s) — the arm above is unreachable in production"; fi
+
   # DERIVED tally with its own floor. A hardcoded count is a lie waiting.
   _total=$((_p+_f))
   # THE FLOOR RISES WITH THE SUITE. 26 before the pending/failure split and the
-  # workflow-history read added 10 arms (A15..A15d, A16..A16e).
-  if [ "$_total" -lt 36 ]; then
+  # workflow-history read added 10 arms (A15..A15d, A16..A16e); the hold-label
+  # repair added 12 more (A17..A17m); A1b split into a
+  # platform-independent arm plus a platform-scoped one.
+  if [ "$_total" -lt 56 ]; then
     echo "MERGE-CHECK SELFTEST: CANNOT READ — only $_total arm(s) reported; this tally measures nothing"; exit 3
   fi
   if [ "$_f" -eq 0 ]; then echo "MERGE-CHECK SELFTEST: $_p/$_total arms pass"; exit 0
@@ -804,13 +1147,19 @@ case "${PRSTATE%%	*}" in
   *)      printf 'CANNOT READ %-14s %s\n' "pr-state" "state unreadable (got [${PRSTATE%%	*}]) — an unread state is NOT an open PR"; exit 3 ;;
 esac
 
-# 1. HOLD LABEL — read from the server, never from an exit code.
-LBL=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '[.labels[].name]|join(",")' 2>/dev/null) \
-  || { cannot "hold-label" "could not read labels"; LBL="__UNREAD__"; }
-case "$LBL" in
-  __UNREAD__) : ;;
-  *hold*) arm ok "hold label" "HELD — the sweep will skip it; remove the label deliberately to merge" ;;
-  *)      arm ok "hold label" "not held — the sweep MAY merge this at any moment" ;;
+# 1. HOLD LABEL — read from the server, never from an exit code, and a HOLD is a
+# REFUSAL. See mc_hold_verdict above for the three defects this replaces; the
+# short version is that the old arm was `arm ok` in BOTH readable branches, so a
+# held PR still reached ALL N CONDITIONS MET (#18497, merged under a live hold).
+# The classifier is handed the RAW ARRAY so `[]` (no labels) and a failed read
+# are DIFFERENT objects.
+HOLD_RAW=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '[.labels[].name]|@json' 2>/dev/null) || HOLD_RAW=""
+HOLD_OUT=$(mc_hold_verdict "$HOLD_RAW"); HOLD_RC=$?
+HOLD_WHY=${HOLD_OUT#*	}
+case "$HOLD_RC" in
+  1) arm no "hold label" "HELD by the \`$MC_HOLD_LABEL\` label — ${HOLD_WHY}. A hold is a REFUSAL, not a note: remove the label deliberately, then re-run this." ;;
+  0) arm ok "hold label" "not held — ${HOLD_WHY}" ;;
+  *) cannot "hold-label" "${HOLD_WHY} — an unread label is NOT an absent hold" ;;
 esac
 
 # 2. HEADS AGREE. The API and the branch must name the same commit.
@@ -936,8 +1285,23 @@ else
   else arm no "squash sentinels" "$N in body — control the squash message explicitly or it re-creates the guarded literal on main"; fi
 fi
 
+# 7. PDS CITATION PRECEDES MERGE — a SIBLING of arm 6, over the DIFF, asking
+#    whether each cited number RESOLVES on origin/main. See mc_pds_citation_verdict
+#    above for why this is not folded into the sentinel arm.
+#
+#    ABSENT PREDICATE IS `cannot`, NOT SILENCE. If the script is not in the tree
+#    the arm still reports — dropping it would shrink ARMS and let the vacuity
+#    floor pass a verdict that measured one condition fewer without saying so.
+PCS=scripts/pds-citation-precedes-merge.sh
+if [ -f "$PCS" ]; then
+  PCS_OUT=$(bash "$PCS" --head "$BR" 2>&1); PCS_RC=$?
+  mc_pds_citation_verdict "$PCS_RC" "$PCS_OUT"
+else
+  cannot "pds citation" "$PCS is not in this tree — the citation corpus was never read"
+fi
+
 # DERIVED tally with a vacuity floor. A hardcoded count is a lie waiting.
-if [ "$ARMS" -lt 6 ]; then
+if [ "$ARMS" -lt 7 ]; then
   echo "MERGE-CHECK: CANNOT READ — only $ARMS arm(s) reported; this verdict measures nothing"; exit 3
 fi
 # THREE OUTCOMES, NOT TWO. A WAIT is not a refusal and must not print like one:
@@ -948,5 +1312,5 @@ if [ "$FAIL" -gt 0 ]; then
 elif [ "$WAITS" -gt 0 ]; then
   echo "MERGE-CHECK: NOT YET — $WAITS of $ARMS condition(s) STILL MOVING and ZERO concluded failures. This is a WAIT, not a refusal: re-read when CI settles; do NOT debug the pending names."; exit 4
 else
-  echo "MERGE-CHECK: ALL $ARMS CONDITIONS MET — remove the hold label deliberately, then merge"; exit 0
+  echo "MERGE-CHECK: ALL $ARMS CONDITIONS MET — the hold-label arm is one of them, so this head is not held; merge"; exit 0
 fi

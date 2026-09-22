@@ -59,16 +59,25 @@ defmodule Barkpark.Search.HitEnvelope do
   `(sort_key, id)` tuple to seek past; offset is the only continuation this
   surface can honestly mint.
 
-  ONE CALLER-SIDE GAP REMAINS, named rather than hidden: `SearchChannel`
-  clamps a `"offset"` param on its `"query"` message but never threads it into
-  `build/5`, so a WS page two computes both `hasMore` and `nextOffset` against
-  an assumed offset of `0`. That is a one-line fix in `search_channel.ex`,
-  which this builder does not own. The two fields stay CONSISTENT under it —
-  they are derived from the same `offset` — so the channel under-reports its
-  position rather than contradicting itself.
+  THE CALLER-SIDE GAP IS CLOSED (task-2fcfad0f92b49f6d). `SearchChannel` used
+  to clamp an `"offset"` param on its `"query"` message and never thread it
+  into `build/5`, so a WS page two computed `offset`, `nextOffset` AND
+  `hasMore` against an assumed offset of `0`. Because all three derive from the
+  same base they stayed mutually CONSISTENT under it — the channel
+  under-reported its position without ever contradicting itself, which is why
+  no self-consistency check ever caught it. `build_reply/9` now threads
+  `opts_base[:offset]` — the same clamped value handed to
+  `Content.search_documents/3` — at both the reply and the P5 live-push call
+  sites, and `search_channel_test.exs` asserts the envelope against the
+  REQUESTED offset rather than against itself.
+
+  `FederatedSearchController` remains the one caller that passes no `:offset`,
+  deliberately: `rekey_federated/1` below drops `hasMore`/`offset`/`nextOffset`
+  together, so that payload is silent about paging rather than mis-stating it.
   """
 
   alias Barkpark.Content.{CallerContext, Envelope}
+  alias Barkpark.Search.BodyBound
   alias Barkpark.Search.Highlighter
 
   @brief "brief"
@@ -87,7 +96,11 @@ defmodule Barkpark.Search.HitEnvelope do
       second consumer (the snippet pass) does not re-query.
     * `:fields` — the `?fields=` projection allowlist (full view only; brief
       cards are already a fixed projection).
-    * `:view` — `"brief"` for brief hit cards; anything else is full.
+    * `:body_chars` — `?bodyChars=<n>`: bound each FULL-view hit's projected
+      prose to ~n characters (`Search.BodyBound`). `nil` (the default) is
+      unbounded — every caller that never passes it is byte-identical to
+      before. Brief cards ignore it: their snippet is already windowed, so a
+      cap there would bound something already bounded.
     * `:offset` — the page's starting offset into the corpus, as threaded by
       the caller's own `offset` param. Defaults to `0` when absent/nil so a
       caller written before `hasMore` existed (or a future caller that never
@@ -100,6 +113,7 @@ defmodule Barkpark.Search.HitEnvelope do
     schema_resolver = Keyword.fetch!(opts, :schema_resolver)
     fields = Keyword.get(opts, :fields)
     view = Keyword.get(opts, :view)
+    body_chars = Keyword.get(opts, :body_chars)
     offset = Keyword.get(opts, :offset) || 0
 
     # `highlightFields` is schema-configurable, so the top-level `highlights`
@@ -114,7 +128,12 @@ defmodule Barkpark.Search.HitEnvelope do
     has_more = count > next_offset
 
     %{
-      documents: documents(docs, meta, view, caller_context, schema_resolver, fields, highlights),
+      documents:
+        bound_documents(
+          documents(docs, meta, view, caller_context, schema_resolver, fields, highlights),
+          view,
+          body_chars
+        ),
       count: count,
       query: query,
       parsedQuery: meta[:parsed],
@@ -182,6 +201,17 @@ defmodule Barkpark.Search.HitEnvelope do
       recovery: envelope.recovery
     }
   end
+
+  # The `?bodyChars=` bound, applied to the RENDERED hits — after
+  # `Envelope.project/2` and after the per-type field-visibility redaction, so
+  # it can only ever REMOVE payload a caller was already allowed to see. Brief
+  # cards are skipped on purpose: a brief card carries a windowed `snippet`,
+  # never a block tree, so there is nothing for this bound to cut and applying
+  # it would only invite the reading that brief hits are "capped prose".
+  defp bound_documents(documents, @brief, _body_chars), do: documents
+
+  defp bound_documents(documents, _view, body_chars),
+    do: BodyBound.apply_bound(documents, body_chars)
 
   defp documents(docs, meta, @brief, caller_context, schema_resolver, _fields, highlights) do
     # Fail closed: a nil caller is the anonymous principal, never a bypass —

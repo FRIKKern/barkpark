@@ -19,6 +19,31 @@
 # minting a new one every night. Close the issue when the condition is fixed;
 # the next failure opens a fresh one.
 #
+# BOUNDED. The append above is not free: measured 2026-09-17, the 18 open
+# ci-failure issues carry 2782 bot comments between them and #11714
+# (crown-reconcile) alone carries 1283 in 31 days — ~41/day, zero human
+# replies, and not one of the 18 has ever been adopted into the ledger. A
+# notification that repeats 1283 times is a notification nobody reads. So
+# after ESCALATE_AFTER consecutive appends on the SAME key the script STOPS
+# appending and escalates ONCE: it retitles the issue with the repeat count,
+# the first-seen age and the latest run URL, labels it ci-failure-escalated,
+# posts ONE @-mention comment, and OPENS one escalation issue under a distinct
+# key — the record the ledger could adopt. Every firing after that is SILENT
+# on the issue (a ::notice:: in the run log, nothing on GitHub).
+#
+# THE COUNTER IS THE ISSUE. Nothing here persists across runs, so the repeat
+# count is not stored: it is READ from the existing issue's own `comments`
+# field, and "already escalated" is read from its LABELS. That is a predicate
+# over whatever GitHub currently holds, not a list of keys that goes stale —
+# a new workflow gets the behaviour without being enrolled anywhere.
+#
+# THE LEDGER DOES NOT ADOPT IT, AND THE COMMENT SAYS SO. Barkpark's GitHub
+# intake drops every payload whose `sender.type == "Bot"` as its FIRST gate
+# (Barkpark.Plugins.Github.Intake.bot_sender?/1 — the D4 structural loop cut),
+# and this script writes as github-actions[bot]. So the escalation issue is
+# dropped before birth and NO gh-<n> row is created. The escalation comment
+# states that in words rather than implying a mirror that does not happen.
+#
 # FILED IS NOT ROUTED. An issue nobody is assigned to and nobody is mentioned
 # in reaches nobody: `gh repo view FRIKKern/barkpark --json viewerSubscription`
 # reads UNSUBSCRIBED, which means GitHub notifies the owner only when they are
@@ -70,6 +95,14 @@ repo="${GITHUB_REPOSITORY:-}"
 workflow="${GITHUB_WORKFLOW:-unknown-workflow}"
 key="${CI_FAILURE_KEY:-$workflow}"
 label="${CI_FAILURE_LABEL:-ci-failure}"
+# COMMITTED LITERAL. After this many consecutive "Still failing." appends on
+# the same key the script escalates once and goes quiet. 3 is deliberate: it is
+# large enough that a flap self-heals before anyone is paged twice, and small
+# enough that the 1283-comment shape measured on #11714 cannot recur. Not an
+# env knob — a caller that could raise it would re-open the spiral.
+escalate_after=3
+escalated_label="ci-failure-escalated"
+escalation_label="ci-escalation"
 detail="${CI_FAILURE_DETAIL:-}"
 # REDACTION (task-6f18e71a351f8081, E). The issue this script files is PUBLIC and
 # the detail is pasted from CI logs by the caller. Anything shaped like a
@@ -156,13 +189,130 @@ esac
 # The list response ALREADY carries `assignees`, so the comment path can tell a
 # routed issue from an unrouted one without a second round trip: number and
 # assignee count come out of this one extraction, tab-separated.
-existing_row="$(jq -r --arg title "$title" \
+# The list response already carries everything the escalation predicate needs —
+# `comments` (the repeat count), `created_at` (first seen) and `labels` (has it
+# already escalated?) — so no extra round trip is made to decide. Five
+# tab-separated fields out of one extraction. `title` is matched WITHOUT the
+# escalated suffix, so an issue this script already retitled is still found: the
+# match is on the prefix, which is the key.
+existing_row="$(jq -r --arg title "$title" --arg esc "$escalated_label" \
   'if type == "array"
-   then [ .[] | select(has("pull_request") | not) | select(.title == $title)
-          | "\(.number)\t\((.assignees // []) | length)" ] | first // empty
+   then [ .[] | select(has("pull_request") | not)
+          | select((.title // "") == $title
+                   or ((.title // "") | startswith($title + " [ESCALATED")))
+          | "\(.number)\t\((.assignees // []) | length)\t\(.comments // 0)\t\(.created_at // "")\t\(if ((.labels // []) | map(.name // .) | index($esc)) == null then "no" else "yes" end)\t\(((.labels // []) | map(.name // .) | join(",")))" ] | first // empty
    else empty end' "$body_file" 2>/dev/null)"
-existing="${existing_row%%$'\t'*}"
-existing_assignees="${existing_row#*$'\t'}"
+IFS=$'\t' read -r existing existing_assignees existing_comments existing_created \
+  existing_escalated existing_labels <<<"$existing_row"
+existing_comments="${existing_comments:-0}"
+existing_escalated="${existing_escalated:-no}"
+
+if [ -n "$existing" ] && [ "$existing_escalated" = yes ]; then
+  # ALREADY ESCALATED — the terminal state. The issue is open, retitled with the
+  # repeat count, assigned and @-mentioned; another identical comment adds no
+  # information and is exactly the 1283-comment defect. Say it in the RUN LOG,
+  # where it costs nobody a notification, and write nothing to GitHub.
+  printf 'escalated issue #%s already carries this condition (%s) — no comment appended\n' \
+    "$existing" "$title"
+  printf '::notice title=CI failure already escalated::%s — issue #%s is escalated (%s comments); this firing appended nothing. Close #%s when the condition is fixed.\n' \
+    "$title" "$existing" "$existing_comments" "$existing"
+  exit 0
+fi
+
+if [ -n "$existing" ] && [ "$existing_comments" -ge "$escalate_after" ] 2>/dev/null; then
+  # ESCALATE, ONCE. $escalate_after consecutive appends have reported the same
+  # condition to the same human with no reply. Four writes, in this order:
+  #   1. PATCH the issue: retitle with the count + age, rewrite the body, and
+  #      add $escalated_label. The LABEL IS THE LATCH — it is written FIRST, so
+  #      a failure in any later step cannot produce a second escalation. That
+  #      ordering is what makes "at most once per key" true rather than likely.
+  #   2. POST one @-mention comment naming the count, the age, the latest run,
+  #      and — in words — that the ledger does not adopt this.
+  #   3. POST one NEW issue under $esc_key: the structured record.
+  first_seen_days="$(jq -n --arg c "$existing_created" -r '
+    if $c == "" then "unknown"
+    else (((now - ($c | fromdateiso8601)) / 86400) | floor | tostring) end' 2>/dev/null)"
+  [ -n "$first_seen_days" ] || first_seen_days="unknown"
+  esc_key="$key"
+  esc_title="CI escalation: $esc_key"
+  new_title="$title [ESCALATED after $existing_comments repeats]"
+
+  esc_summary="$(jq -n \
+    --arg key "$key" \
+    --arg n "$existing_comments" \
+    --arg age "$first_seen_days" \
+    --arg run_url "$run_url" \
+    --arg after "$escalate_after" \
+    --arg num "$existing" \
+    -r '
+      "- failure key: `\($key)`\n" +
+      "- repeats: \($n) identical automated reports on #\($num)\n" +
+      "- first seen: \($age) days ago\n" +
+      "- latest run: \($run_url)\n" +
+      "- escalated after: \($after) consecutive appends\n"
+    ')"
+
+  # The honest line. Verified against api/lib/barkpark/plugins/github/intake.ex:
+  # bot_sender?/1 returns true for sender.type == "Bot" and the FIRST gate in
+  # handle/2 drops it — this script writes as github-actions[bot], so the
+  # escalation issue below is dropped before birth and mints no gh-<n> row.
+  ledger_note="$(printf '%s' 'LEDGER: NOT ADOPTED. This escalation is opened by `github-actions[bot]`. Barkpark'"'"'s GitHub intake drops every payload whose `sender.type == "Bot"` as its first gate (`Barkpark.Plugins.Github.Intake.bot_sender?/1`, the D4 loop cut), so NO `gh-<n>` task row is born from it and nothing in the ledger will ever show this condition. Adopt it by hand (`bp task create`) if it needs to be tracked. This line exists so the escalation does not read as a mirror that happened.')"
+
+  esc_body="$(jq -n \
+    --arg s "$esc_summary" \
+    --arg c "$context" \
+    --arg note "$ledger_note" \
+    --arg num "$existing" \
+    -r '
+      "A CI failure has repeated past the point where another automated comment " +
+      "tells anyone anything. `scripts/file-ci-failure-issue.sh` has STOPPED " +
+      "appending to #\($num) and filed this once instead.\n\n" +
+      $s + "\n" + $c + "\n" + $note + "\n"
+    ')"
+
+  patch_body="$(jq -n \
+    --arg t "$new_title" \
+    --arg s "$esc_summary" \
+    --arg c "$context" \
+    --arg note "$ledger_note" \
+    --arg esc "$escalated_label" \
+    --argjson labels "$(printf '%s' "$existing_labels" | jq -R 'split(",") | map(select(length > 0))')" \
+    '{
+       title: $t,
+       labels: (($labels + [$esc]) | unique),
+       body: ("**ESCALATED.** This condition has repeated without a human reply. " +
+              "No further automated comments will be appended to this issue " +
+              "while it carries the `" + $esc + "` label — reopening the spiral " +
+              "requires closing this issue, which is also how you tell the gate " +
+              "the condition is fixed.\n\n" + $s + "\n" + $c + "\n" + $note + "\n")
+     }')"
+
+  esc_status="$(api PATCH "/repos/$repo/issues/$existing" "$patch_body")"
+  [ "$esc_status" = 200 ] || die "GitHub API returned HTTP $esc_status escalating issue #$existing (the latch was NOT written, so this will be retried): $(head -c 400 "$body_file")"
+
+  mention_line=''
+  [ -n "$assignee" ] && mention_line="$(printf '@%s — you are the routed human for this.\n\n' "$assignee")"
+  esc_comment="$(jq -n --arg m "$mention_line" --arg s "$esc_summary" --arg note "$ledger_note" \
+    '{body: ($m + "**Escalated — no further automated comments will be posted here.**\n\n" + $s + "\n" + $note + "\n")}')"
+  esc_status="$(api POST "/repos/$repo/issues/$existing/comments" "$esc_comment")"
+  [ "$esc_status" = 201 ] || die "GitHub API returned HTTP $esc_status posting the escalation comment on #$existing: $(head -c 400 "$body_file")"
+
+  esc_issue="$(jq -n --arg t "$esc_title" --arg l "$escalation_label" --arg b "$esc_body" \
+    --argjson assignees "$( [ -n "$assignee" ] && jq -n --arg a "$assignee" '[$a]' || printf '[]' )" \
+    '{title: $t, labels: [$l], assignees: $assignees, body: $b}')"
+  esc_status="$(api POST "/repos/$repo/issues" "$esc_issue")"
+  case "$esc_status" in
+    201) esc_number="$(jq -r '.number // "?"' "$body_file")" ;;
+    *)   die "GitHub API returned HTTP $esc_status opening the escalation issue '$esc_title'. Issue #$existing IS escalated (it carries $escalated_label) and will not be retried, so this record is LOST unless filed by hand: $(head -c 400 "$body_file")" ;;
+  esac
+
+  printf 'escalated issue #%s after %s repeats; opened escalation issue #%s (%s)\n' \
+    "$existing" "$existing_comments" "$esc_number" "$esc_title"
+  printf '::notice title=CI failure ESCALATED::%s — #%s repeated %s times over %s days; escalation issue #%s opened. The ledger does NOT adopt it (bot sender drop).\n' \
+    "$title" "$existing" "$existing_comments" "$first_seen_days" "$esc_number"
+  warn "escalation issue #$esc_number was opened by github-actions[bot] and Barkpark's GitHub intake drops Bot senders, so NO ledger row was created for it. Track it by hand if it matters."
+  exit 0
+fi
 
 if [ -n "$existing" ]; then
   # Ongoing condition: comment, do not mint a duplicate.

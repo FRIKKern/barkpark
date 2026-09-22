@@ -1,0 +1,22 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "dependsOn": ["^build", "build"],
+      "inputs": [
+        "src/**",
+        "tests/**",
+        "test/**",
+        "templates/**",
+        "vitest*.config.*",
+        "wrangler.toml",
+        "README.md",
+        "CHANGELOG.md",
+        "dist/**",
+        "$TURBO_ROOT$/.changeset/**",
+        "$TURBO_ROOT$/test-utils/**"
+      ]
+    }
+  }
+}

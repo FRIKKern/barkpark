@@ -12,10 +12,15 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
       COALESCE(btrim(?->'claim'->>'worker'), '') = ''
       OR COALESCE(btrim(?->'claim'->>'closed_at'), '') <> ''
       OR COALESCE(btrim(?->'claim'->>'closed_by'), '') <> ''
-      OR CASE WHEN ?->'claim'->>'ts_iso' ~ '^[0-9]{4}-…Z$'
+      OR CASE WHEN ?->'claim'->>'ts_iso' ~ ?
               THEN ?->'claim'->>'ts_iso' < to_char((now() at time zone 'UTC')
                                                    - (? * interval '1 second'), …)
               ELSE false END
+
+  Four `?`, four arguments: `d.content`, `^QueueGate.ts_iso_shape_pattern()`,
+  `d.content`, `^QueueGate.lease_ttl_seconds()`. The shape guard is a BOUND
+  PARAMETER (task-de481ee75f777d55) — inlined, its `([.][0-9]+)?` quantifier
+  counted as a fifth placeholder and the module did not compile.
 
   So the answer to "can a row whose claim names a worker be ready?" is YES, on
   exactly THREE arms, and the gate is on the LEASE, never on the worker:
@@ -258,6 +263,49 @@ defmodule BarkparkWeb.TasksControllerReadyClaimWorkerTest do
       # below 'T' and would read as expired, so the shape guard refuses it.
       refute id in ids
       refute malformed in ids
+    end
+
+    test "REFUSES (fail-closed): a LAPSED stamp whose fractional tail is malformed",
+         %{scope: scope, phase_id: phase} do
+      # task-de481ee75f777d55. The shape guard used to be `[.0-9]*Z$` — a
+      # dialect with no `?` in it, because an inlined `?` collides with Ecto's
+      # placeholder count. That loose form admitted a MISSING dot
+      # ('…:00123Z') and multi-dot forms straight into the comparison, where
+      # their ancient date read as EXPIRED and handed the row away. Bound as a
+      # parameter, the pattern is the precise `([.][0-9]+)?` one, and these
+      # shapes now take the `ELSE false` arm: still held.
+      #
+      # `lease_live?/1`, the Elixir twin, always said LIVE for both —
+      # `DateTime.from_iso8601/1` rejects them. The two arms now agree.
+      no_dot =
+        mk_task!(uniq("lapsed-nodot"), scope, phase, %{
+          "claim" => Map.put(held_claim(), "ts_iso", "2024-01-01T00:00:00123456Z")
+        })
+
+      two_dots =
+        mk_task!(uniq("lapsed-twodots"), scope, phase, %{
+          "claim" => Map.put(held_claim(), "ts_iso", "2024-01-01T00:00:00.1.2Z")
+        })
+
+      # CONTROL: the SAME ancient instant, written correctly, DOES reach the
+      # queue. Without it a refusal above could mean the fixtures never landed.
+      well_formed =
+        mk_task!(uniq("lapsed-wellformed"), scope, phase, %{
+          "claim" => Map.put(held_claim(), "ts_iso", @lapsed_ts)
+        })
+
+      ids = ready_ids(scope, phase)
+
+      assert well_formed in ids,
+             "the well-formed lapsed control did not reach the queue — this test is vacuous"
+
+      refute no_dot in ids
+      refute two_dots in ids
+
+      # And both agree with the Elixir arm, which is the point of the change.
+      assert Barkpark.Tasks.QueueGate.claim_lease_live?(%{
+               "claim" => Map.put(held_claim(), "ts_iso", "2024-01-01T00:00:00123456Z")
+             })
     end
 
     test "the LIFECYCLE is a separate axis: in_progress is refused with the SAME closed claim",

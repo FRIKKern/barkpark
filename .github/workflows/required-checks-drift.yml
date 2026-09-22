@@ -147,6 +147,8 @@ on:
       - "scripts/required-checks-verify.sh"
       - "scripts/required-checks.test.sh"
       - "scripts/workflow-job-shape-check.sh"
+      - "scripts/workflow-run-block-length-check.sh"
+      - "scripts/workflow-errexit-capture-check.sh"
       - "scripts/stale-tree-regression-check.sh"
       - "scripts/stale-tree-ci-wiring.test.sh"
       - "scripts/main-red-breaker.sh"
@@ -310,9 +312,27 @@ jobs:
 
   # ── the hermetic half (see the header: not a required context today) ────────
   # Unmatrixed (one job, one rendered name — no `(27.0, 1.18.1)` tuple to pin),
-  # path-unfiltered, and it depends on NO dispatcher job: a `needs:` on a
-  # dispatch job would reintroduce exactly the conditional-absence shape the
-  # paths filter had. It renders on every PR, always, and its name is stable.
+  # and its name is stable. It IS dispatcher-gated: `needs: changes` plus
+  # `if: needs.changes.outputs.touched == 'true'` below, added deliberately by
+  # #15663 after measuring 4.58 min/exec across 1,227 PR pushes in a 4-day
+  # window for a question that does not vary with the PR ("has the required-set
+  # roster moved?"). So it does NOT run on every PR: on a PR that touches none
+  # of the dispatcher's paths it concludes `skipped`.
+  #
+  # THE PROPERTY THE OLD WORDING WAS REACHING FOR SURVIVES, RESTATED HONESTLY.
+  # What a required-adjacent name must never do is go ABSENT — an absent context
+  # routes to "expected" forever, the D18 deadlock this file's header warns
+  # about. There is still no workflow-level `on:.paths` key here (that is the
+  # mechanism that makes a name absent, and it must not come back). A JOB-LEVEL
+  # `if:` is a different mechanism: the job still RENDERS, with conclusion
+  # `skipped`, so the name is always present. That is why the dispatcher is
+  # legal here and a paths filter is not.
+  #
+  # BUT A SKIPPED CONCLUSION IS NOT A PASS, so this name CANNOT be required as
+  # it stands: `.github/required-checks.json` holds it out under `S7 EXCLUDED BY
+  # DECISION` (replacement trigger: cch-w37-bl-register-spec-gate-human-gate).
+  # Registering it would mean first removing the `needs:`/`if:` pair — a lead
+  # call with a measured cost, not a comment's assertion.
   spec-gate:
     name: Required-check spec gate
     needs: changes
@@ -376,10 +396,12 @@ jobs:
       # (advisory)` carries `continue-on-error: true`, so a floor breach there
       # prints and the job still concludes SUCCESS — a guard whose red is
       # swallowed is the defect class this workflow exists to delete. `spec-gate`
-      # is hermetic (the floor makes no API call and needs no credential),
-      # deliberately path-unfiltered so it renders on EVERY pull request rather
-      # than only on ones that look like CI changes, and its failure is a real
-      # red X. It is not a REQUIRED context today — registering it is a
+      # is hermetic (the floor makes no API call and needs no credential). It is
+      # NOT workflow-level paths-filtered, so its NAME renders on every pull
+      # request — but it is dispatcher-gated (`needs: changes` + `if: touched`,
+      # see the job comment above), so it RUNS only on a PR that touches the
+      # dispatcher's paths and concludes `skipped` otherwise. When it runs, its
+      # failure is a real red X. It is not a REQUIRED context today — registering it is a
       # branch-protection change and a lead call — so this is an unswallowed red
       # a human must read, which is strictly more than the advisory job can offer,
       # and it becomes blocking for free the day that name is registered.
@@ -500,6 +522,108 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/workflow-job-shape-check.sh --dir .github/workflows
 
+      # ── THE SECOND STRUCTURAL LINT ON THIS JOB ─────────────────────────────
+      # A DIFFERENT SUBJECT, THE SAME HOST, AND ON PURPOSE. The job above judges
+      # whether Actions will PARSE a workflow; this one judges whether a step's
+      # shell will REACH the line that adjudicates an exit status. Both are
+      # single PyYAML passes over the same tree, both want to render on every PR
+      # including the ones that edit an unrelated workflow, and this job is the
+      # only one in the repo that is already dispatcher-independent and
+      # path-unfiltered for exactly that reason.
+      #
+      # A STEP, NOT A NEW JOB. A new job renders a new check-run name, and a new
+      # name pulls the required-checks census in behind it (generator stage S4,
+      # S6's leaf-granularity trap) for a lint that is asking for neither. The
+      # sibling above records the same trade-off for itself; this applies it
+      # rather than re-deriving it.
+      #
+      # WHAT IT CAUGHT ON ITS FIRST RUN (task-3b5edb3d1f5990e3): four sites, all
+      # four capturing an exit status the runner's `bash -e` had already killed
+      # the step over. One of them was main-red-owner.yml's own `--record` step,
+      # which had been STABLY RED on main's tip for it — the workflow whose job
+      # is to give a red on main an owner, counted as a red on main, by its own
+      # reporting bug.
+      - name: Prove the errexit-capture checker on planted fixtures (--selftest)
+        run: bash scripts/workflow-errexit-capture-check.sh --selftest
+
+      - name: No workflow captures an exit status the runner's `bash -e` already killed
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/workflow-errexit-capture-check.sh --dir .github/workflows
+
+      # ── THE THIRD LINT ON THIS JOB: the ledger's OTHER blind spot ──────────
+      # A THIRD SUBJECT, THE SAME HOST, FOR THE SAME REASON THE SECOND IS HERE.
+      # Another single pass over the same tree, wanting to render on every PR
+      # including the ones that edit an unrelated workflow, on the one job in
+      # the repo that is already dispatcher-independent and path-unfiltered. A
+      # new job would render a new check-run name and pull the census in behind
+      # it — the trade-off the block above records; this applies it.
+      #
+      # WHAT IT SEES THAT NOTHING ELSE CAN. required-checks-verify.sh has two
+      # clauses about accounting and a documented gap BETWEEN them: census_check
+      # judges only names GitHub actually RENDERED on the head it sampled, and
+      # partial_accounting_check judges only workflows that ALREADY have at
+      # least one accounted name ("a workflow whose names are all unaccounted is
+      # invisible to it", its own header). A brand-new workflow with no rows at
+      # all therefore has no judge until a sampled head happens to render one of
+      # its names.
+      #
+      # MEASURED, 2026-09-18 (pe-bl-main-advisory-gate-hygiene): main-red-owner.yml
+      # landed with `a red on main's tip gets an owner` and zero rows. Its
+      # pull_request arm is `paths:`-fenced to its own four scripts, so PR heads
+      # did not render it; the census read GREEN run after run and then went RED
+      # the moment one finally did (run 35299266243, job 105460030845) — a red
+      # that had existed the whole time and that nothing could see.
+      #
+      # IT IS A RATCHET, NOT A GATE, and the script's header says why: demanding
+      # zero would red over 22 inherited, unadjudicated workflows, which is the
+      # advisory-red problem this row was filed about. It refuses GROWTH only.
+      - name: Prove the unledgered-workflow ratchet on planted fixtures (--selftest)
+        run: bash scripts/unaccounted-workflow-ratchet.sh --selftest
+
+      - name: No NEW workflow joins the tree with no row in the required-checks ledger
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/unaccounted-workflow-ratchet.sh
+
+      # ── THE FOURTH LINT ON THIS JOB: the cap ABOVE the YAML parser ─────────
+      # A FOURTH SUBJECT, THE SAME HOST, FOR THE SAME REASON THE OTHERS ARE
+      # HERE: one more single PyYAML pass over the same tree, wanting to render
+      # on every PR including the ones that edit an unrelated workflow, on the
+      # one job in this repo that is already dispatcher-independent and
+      # path-unfiltered. A new job renders a new check-run name and pulls the
+      # census in behind it — the trade-off the blocks above record; this
+      # applies it rather than re-deriving it.
+      #
+      # AND THE HOST MATTERS MORE HERE THAN FOR ANY SIBLING. The failure this
+      # measures is a STARTUP FAILURE: GitHub refuses the whole workflow file at
+      # parse time, zero jobs, everything in that file dark at once. A checker
+      # wired inside shell-harnesses.yml — the file that actually carries the
+      # at-risk block — would be dead in exactly the run that needed it. A
+      # broken file cannot lint itself.
+      #
+      # WHAT IT SEES THAT NOTHING ELSE CAN (task-91e5ae77bb475fe1, 2026-09-18).
+      # GitHub compiles an interpolated `run:` scalar into ONE expression and
+      # caps it at 21000 characters. Eleven roster rows added to
+      # shell-harnesses.yml's `changes` block crossed it:
+      #
+      #   Invalid workflow file: .github/workflows/shell-harnesses.yml#L1
+      #   (Line: 1529, Col: 14): Exceeded max expression length 21000
+      #
+      # The file is VALID YAML, so actionlint, PyYAML, every local gate in this
+      # repo and shell-harnesses-dispatch.test.sh (22 arms) all passed it. The
+      # cap is one layer above the parser and nothing in the tree measured it.
+      #
+      # WHERE IT STANDS TODAY, so a reader gets the headroom without re-deriving
+      # it: that block is 19968 bytes of the 21000 cap at merge base c0e04a7ea —
+      # inside the WARN band, 32 bytes under the 20000 fail floor. The next
+      # roster row reds here, at PR time, instead of in a zero-job run nobody
+      # is watching.
+      - name: Prove the run-block length check on planted fixtures (--selftest)
+        run: bash scripts/workflow-run-block-length-check.sh --selftest
+
+      - name: No `run:` block approaches GitHub's 21000-char max expression length
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/workflow-run-block-length-check.sh --dir .github/workflows
+
   # ── required contexts must be unable to conclude `cancelled` ────────────────
   #
   # WHY IT LIVES HERE. Its two inputs are this workflow's own subjects: the
@@ -513,8 +637,9 @@ jobs:
   # `workflow-job-shape` block above records for itself, applied again rather
   # than re-derived.
   #
-  # WHY IT IS DISPATCHER-INDEPENDENT. Like `workflow-job-shape` it carries no
-  # `needs: changes`, so it renders on EVERY pull request. The hazard it forbids
+  # WHY IT IS DISPATCHER-INDEPENDENT. Unlike `spec-gate` above — and like
+  # `workflow-job-shape` — this job carries NO `needs: changes` and no job-level
+  # `if:`, so it really does render on EVERY pull request. The hazard it forbids
   # is introduced by editing a workflow's `concurrency:` or by promoting a new
   # required context, and a guard that is ABSENT on the PR which does the thing
   # is worse than a guard that is noisy: the name would simply not appear, and
@@ -572,11 +697,19 @@ jobs:
   #
   # NOT a required context, and deliberately not proposed as one: arm (a) cannot
   # tell an intentional delete from a stale-tree delete (the script's own header
-  # says so), so its red is a question, not a verdict. It is not in
-  # .github/required-checks.json's required set and needs no exclusion row —
-  # exclusions exist to explain why a name that COULD be required is not, and
-  # `Every workflow job has runs-on+steps or uses`, the sibling job in this file,
-  # carries no row either.
+  # says so), so its red is a question, not a verdict.
+  #
+  # IT IS NOT IN THE REQUIRED SET, AND IT DOES CARRY AN EXCLUSION ROW. Checked
+  # against .github/required-checks.json, not assumed:
+  #     "context": "Head does not silently revert main (stale tree)",
+  #     "reason":  "S7 EXCLUDED BY DECISION: required-checks-drift.yml job
+  #                 `stale-tree` — … unregistered by decision, not by oversight"
+  # That row is hand-reasoned and must SURVIVE a regeneration — required-checks
+  # .json's `gofmt drift ceiling (blocking)` row records four names that
+  # "have SILENTLY LEFT this list on regeneration". The sibling
+  # `Every workflow job has runs-on+steps or uses` carries an S7 row too (same
+  # file, the entry immediately above this one); the earlier claim here that
+  # neither name had a row was wrong on both counts.
   stale-tree:
     name: Head does not silently revert main (stale tree)
     if: github.event_name == 'pull_request'

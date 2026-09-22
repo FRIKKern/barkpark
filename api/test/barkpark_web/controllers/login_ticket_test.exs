@@ -37,9 +37,23 @@ defmodule BarkparkWeb.LoginTicketTest do
     ensure_default_scope!()
 
     {:ok, _} =
-      Auth.create_token(@admin_token, "dwb7 admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_token,
+        "dwb7 admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
-    {:ok, _} = Auth.create_token(@reader_token, "dwb7 reader", "production", ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @reader_token,
+        "dwb7 reader",
+        "production",
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     :ok
   end
 

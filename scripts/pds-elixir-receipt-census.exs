@@ -562,7 +562,7 @@ defmodule PDS.Census do
     phantom: 9,
     consumer: 4,
     emitted: 100,
-    # RE-DERIVED BY RUN AT PDS-D480/D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
+    # RE-DERIVED BY RUN AT PDS-D480/PDS-D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
     # their own), the capture edge and the variable-module-head edge. Engine and lens are
@@ -975,7 +975,7 @@ defmodule PDS.Census do
     {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
-    # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/D566).
+    # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/PDS-D566).
     # IT IS THE ONE MEMBER A BFS AT DEPTHS 2..12 RECOVERS OUT OF EVERY EXCLUDED ROW, and
     # it stays in `status_only_receipt` with this comment rather than being moved, because
     # the class's CURRENT prose is TRUE of it and the reason it is excluded is a limit of
@@ -1333,9 +1333,13 @@ defmodule PDS.Census do
   # (`hzKeyConfirmation: "declared"` beside `hzKeyConfirmBasis`), because a confirmation
   # level that exists in one surface must not be re-invented with a new name in another.
   #
-  # WHAT THE REGISTER IS FOR. Exactly one row suppresses anything today
-  # (github_webhook_controller.ex:87, the one site the CATCH-ALL-TO-SUCCESS arm fires on
-  # whose body NAMES its outcome). The other four are DOCUMENTATION: they record that a
+  # WHAT THE REGISTER IS FOR. THREE rows withhold a finding today: the whole
+  # CATCH-ALL-TO-SUCCESS class — github_webhook_controller.ex:87 (the site whose body
+  # NAMES its outcome) plus the two synonym-delete sites registered off #18899 below.
+  # Up to wave 47 there was exactly one, and this sentence said so; the two that joined
+  # it were findings for two waves before their in-code ruling was written, which is the
+  # ORDER this register is supposed to enforce — reasoning in the code first, row second.
+  # The other five are DOCUMENTATION: they record that a
   # human read the code and found the receipt honest, so the next lens that starts firing
   # on them meets a written basis instead of an argument.
   #
@@ -1451,6 +1455,69 @@ defmodule PDS.Census do
           "because submit/2 routes to a write on its SUCCESS path — crediting a write to the one " <>
           "arm that provably makes none. The bracket is disputed here because it cannot be " <>
           "retracted from the shape vocabulary: route_tag/1 and evidence/3 read write?/depth only."
+    },
+    # -- REGISTERED BY task-477972989335da51, off the declarations #18899 shipped in api/.
+    # A CODE COMMENT DOES NOT REACH THIS REGISTER. #18899 wrote an explicit ruling above
+    # each of the three sites below, and the census AT THAT HEAD still printed
+    # `CATCH-ALL-TO-SUCCESS FINDINGS  2 undeclared of 3 fired` — the comment is where the
+    # reasoning lives, this row is what the instrument reads. Both halves, or neither.
+    # THE INVERSION THESE ROWS MUST NOT BE: a register row that silences a finding while
+    # the api-side basis is absent. Each row below is anchored on a basis_token that
+    # occurs ONLY inside the block #18899 added, so deleting that block reds
+    # DECLARED-BASIS-INTACT at rc 1 — proved by deletion on the filing branch, per site.
+    %{
+      key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.delete_search_synonym/2", "57054890", "120063507"},
+      basis_spans: [{417, 442}],
+      basis_token: "no failure reaches this receipt",
+      class: "CATCH-ALL-TO-SUCCESS",
+      confirmation: "declared",
+      basis:
+        "the in-code ruling at :417-442, added by #18899 — three stated grounds, of which " <>
+          "the token anchors the third: `NO FAILURE REACHES THIS RECEIPT` on :434.",
+      why:
+        "the arm fires and this row withholds the finding. The `_ws_id` head is NOT a " <>
+          "failure sink: it is the non-nil half of the two-way split on token_workspace_id/1 " <>
+          "whose `nil ->` half refuses the write one clause up, and " <>
+          "Barkpark.Search.Synonyms.delete/4 answers `:ok | {:error, :not_found}` with the " <>
+          "404 rendered by the clause beside the receipt. The receipt is reached only from " <>
+          "the `:ok` clause of a CLOSED case, so a future return tag raises rather than " <>
+          "passing as success."
+    },
+    %{
+      key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
+            "BarkparkWeb.V1.MediaController.delete_search_synonym/2", "57054890", "20252134"},
+      basis_spans: [{219, 244}],
+      basis_token: "no failure reaches this receipt",
+      class: "CATCH-ALL-TO-SUCCESS",
+      confirmation: "declared",
+      basis:
+        "the in-code ruling at :219-244, added by #18899 — the `media` surface twin of the " <>
+          "search_controller row above, token `NO FAILURE REACHES THIS RECEIPT` on :236.",
+      why:
+        "the arm fires and this row withholds the finding, for the reason its twin states: " <>
+          "same split, same @spec'd delete, same 404 beside the receipt. TWO ROWS, NOT ONE " <>
+          "SHARED ONE — the sites are separate keys with separate spans, and a basis that " <>
+          "covered both would survive the deletion of either block."
+    },
+    %{
+      key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
+      basis_spans: [{556, 578}],
+      basis_token: "why it must merge",
+      class: "PURE-ECHO",
+      confirmation: "declared",
+      basis:
+        "the in-code ruling at :556-578, added by #18899 — the `{:error, changeset}` " <>
+          "mint-failure arm, token `WHY IT MUST MERGE` on :565.",
+      why:
+        "A SECOND ROW ON A KEY THAT ALREADY HAS ONE, DELIBERATELY. The site carries TWO " <>
+          "independent declarations now: the @doc's anti-enumeration contract (the NO-OP-ACK " <>
+          "row above, span :537-542) and #18899's ruling on the mint-failure arm below it. " <>
+          "One row cannot tripwire both — DECLARED-BASIS-INTACT is satisfied by ANY span " <>
+          "carrying the token, so folding the new span into the old row would let either " <>
+          "block be deleted in silence. Each declaration gets its own row and its own " <>
+          "token. This row suppresses nothing: no arm fires on this site."
     }
   ]
 
@@ -1476,15 +1543,34 @@ defmodule PDS.Census do
   # head_hash} and are separated by expr_fp ALONE.
   #
   # WHAT head_hash CANNOT DISCRIMINATE (scope stated, or a reader believes it is near
-  # unique on its own — it is not, and it does not need to be): across all 17,620 defs it
-  # collides in exactly 3 buckets WITHIN a {path, module.name/arity} group, and 0 times
-  # within the 75 site-owning groups. Only ONE of the three is a benign bodiless
-  # declaration head; the other TWO are DISTINCT functions inside two `defimpl Inspect,
-  # for: ...` blocks (plugins/github/errors.ex :94/:138, plugins/indx/errors.ex :118/:137)
-  # that this walker cannot tell apart. Corpus-wide — ignoring path and mfa — it is 912
-  # groups over 2,543 defs under this normaliser (the wave brief recorded 913/2,544 under
-  # another spelling; that figure does not survive a spelling change and is not quotable
-  # across one).
+  # unique on its own — it is not, and it does not need to be). RE-DERIVED at ac35fbe06
+  # over 23,771 defs, under this normaliser and under the walker's CURRENT attribution:
+  # it collides in 3 buckets (6 defs) WITHIN a {path, module.name/arity} group, and 0
+  # times inside the 82 site-owning groups (99 defs, 100 emitted keys, all distinct).
+  #
+  # THE THREE ARE A RULE, NOT A LIST: every survivor is a pair of clause heads that CANNOT
+  # both be a distinct runtime function, so a key that cannot separate them is losing
+  # nothing. Two are a bodiless `@spec` companion header colliding with its own last
+  # clause (plugins/capabilities.ex visible?/2, media/storage/object_key.ex derive/3); one
+  # is the two arms of a compile-time `if @test_env do ... else ... end`, of which exactly
+  # one ever compiles (content/dedup_wall.ex default_timeout/0).
+  #
+  # THE OLD SENTENCE HERE SAID "3 buckets ... only ONE of the three is a benign bodiless
+  # declaration head" AND NAMED THE OTHER TWO AS DEFIMPL CLAUSES. Both halves are retired:
+  # the defimpl pairs (plugins/github/errors.ex inspect/2, plugins/indx/errors.ex
+  # inspect/2) were REAL and are now separated by the walker recording the defimpl target
+  # — they were 2 of the 5 groups the pre-change key produced, and the count is 5 -> 3 on
+  # the same population. The description "all benign bodiless declaration heads" was never
+  # true of them and is not the predicate above. See defimpl_key_checks!/0, which derives
+  # both partitions off ONE walk on every `--selftest` run and raises if the witness set
+  # goes empty.
+  #
+  # Corpus-wide — ignoring path and mfa — it is 1,103 groups over 3,040 defs under this
+  # normaliser at this sha (widest: init/1 at 62, call/2 at 40, render/1 at 31). THE PATH
+  # AND THE MFA CARRY THAT LOAD. Earlier figures (912/2,543 here, 913/2,544 in the wave
+  # brief) were derived on a smaller corpus and under an older attribution; a corpus-wide
+  # number survives neither a spelling change nor a tree that grew, and is not quotable
+  # across one.
   #
   # CHURN, MEASURED across the three merges that landed into this sha: 5 orphaned / 5
   # arrived / 86 common, and it was a PURE RE-KEY — the {path, mfa} multiset was
@@ -1514,7 +1600,7 @@ defmodule PDS.Census do
   #             confident guesses, which is what dissolves the shadowed-bucket problem
   #             instead of trading one shadowed bucket for another.
   #
-  # -- THE OPENING BALANCE, STATED SO IT CANNOT BE ROUNDED UP (PDS-D526/D527).
+  # -- THE OPENING BALANCE, STATED SO IT CANNOT BE ROUNDED UP (PDS-D526/PDS-D527).
   #   8 rows  PROVEN / end-to-end            mutation-attested; the row carries the line
   #   7 rows  PROVEN / end-to-end-unmutated  ALREADY CONJUNCTIVE in the committed suite,
   #                                          BUT ITS FALSIFIER WAS NEVER EXERCISED — the
@@ -1544,7 +1630,7 @@ defmodule PDS.Census do
   # REQUIRED, counted, printed, and never reds. @basis_vocab below is the authority.
   # THIS WAVE ADDS FOUR VALUES to PDS-D499's eleven, each mechanically falsifiable:
   #   end_to_end_unmutated   — the distinct token for a conjunction read but not exercised
-  #   declared_basis         — the five @declared rows; DECLARED-BASIS-INTACT is its check
+  #   declared_basis         — the eight @declared rows; DECLARED-BASIS-INTACT is its check
   #   partial_tag_coverage   — one emitted site, several rendered receipts (below)
   #   unexamined             — no differential has been READ for this row. It is not a
   #                            euphemism for "probably fine": it is the honest floor, and
@@ -3019,6 +3105,20 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- parsing
 
+  # THE ONE PARSE LENS, NAMED. Every arm that re-parses a file (the CAS-spelling removal
+  # mutation below) has to read it through the SAME encoder as the census, or its refusal
+  # is a different lens wearing this one's name — literal_encoder is what wraps a 2-tuple,
+  # and a mutant parsed without it reads zero through every tuple predicate in this file.
+  defp census_parse_opts do
+    [
+      literal_encoder: &{:ok, {:__block__, &2, [&1]}},
+      token_metadata: true,
+      columns: true,
+      emit_warnings: false,
+      unescape: false
+    ]
+  end
+
   defp parse_file(path) do
     src = File.read!(path)
     lines = String.split(src, "\n")
@@ -3031,16 +3131,8 @@ defmodule PDS.Census do
           List.duplicate({n, :string}, count(line, "\"ok\" => true"))
       end)
 
-    opts = [
-      literal_encoder: &{:ok, {:__block__, &2, [&1]}},
-      token_metadata: true,
-      columns: true,
-      emit_warnings: false,
-      unescape: false
-    ]
-
     ast =
-      case Code.string_to_quoted(src, opts) do
+      case Code.string_to_quoted(src, census_parse_opts()) do
         {:ok, ast} -> ast
         {:error, _} -> :parse_error
       end
@@ -3441,19 +3533,97 @@ defmodule PDS.Census do
 
   # -- def collection ---------------------------------------------------------
 
-  defp collect_defs(ast, path), do: defs(ast, [], path, [])
+  # THE WALKER CARRIES TWO MODULE PATHS, NOT ONE (PDS wave 36 backlog,
+  # pds-bl-w36-defimpl-key-blind). `lex_module` is the enclosing `defmodule` chain and
+  # NOTHING else — it is what this walker recorded before the defimpl arm existed, and it
+  # is the field the additivity arm in defimpl_key_checks!/0 asserts is UNMOVED for every
+  # def that is not inside a `defimpl`. `module` is `lex_module ++ impl_segs(impl)`, so
+  # for a non-defimpl def the two are equal by construction and no existing register key
+  # can move; only a def lexically inside a `defimpl` gets extra segments.
+  #
+  # WHY THE ARM EXISTS AT ALL. Without it, two `def inspect/2` clauses in two different
+  # `defimpl Inspect, for: _` blocks of the SAME file collapse into ONE {path, mfa} group,
+  # and `defimpl` reuses the head verbatim — so byte-identical heads make head_hash
+  # useless and the register key cannot discriminate them. Two such pairs are live in this
+  # corpus (plugins/github/errors.ex and plugins/indx/errors.ex, both `inspect/2`).
+  #
+  # `module` IS AN ATTRIBUTION LABEL, NOT THE COMPILED MODULE NAME. The BEAM names a
+  # defimpl module `<Protocol>.<expanded target>`, and expanding the target needs alias
+  # resolution this lens does not do. What is recorded here is exactly what is WRITTEN:
+  # the enclosing lexical module, then the protocol as written, then the `for:` target as
+  # written. That is unambiguous within a file (two `defimpl` blocks cannot name the same
+  # protocol AND the same target) and needs no alias table, which is the property the key
+  # actually requires.
+  defp collect_defs(ast, path), do: defs(ast, [], nil, path, [])
 
-  defp defs(node, mod, path, acc) do
+  # nil impl = not inside a defimpl. {proto_segs, for_segs} otherwise.
+  defp impl_segs(nil), do: []
+  defp impl_segs({proto, target}), do: proto ++ target
+
+  # THE OPTION LIST IS NOT A KEYWORD LIST HERE, AND `Keyword.get/2` SILENTLY RETURNS NIL
+  # ON IT. Under census_parse_opts/0's `literal_encoder` every literal — including a
+  # keyword KEY — comes back as `{:__block__, meta, [:for]}`, so `Keyword.get(opts, :for)`
+  # finds nothing and a clause built on it reads as "not a defimpl". Worse, the arity is
+  # not fixed either: `defimpl P, for: T do ... end` parses as [proto, [for: T], [do: _]]
+  # under these options and as [proto, [for: T, do: _]] under bare ones. Both shapes are
+  # handled by merging every list-shaped argument after the protocol and reading the
+  # options out of THAT — the same `lit/1`-tolerant read `kw/2` already does for
+  # `defdelegate`. Measured cost of getting this wrong: 21 defs silently vanished from the
+  # index (23771 -> 23750) because the do-block was never descended into.
+  defp opt_key?(k, key) do
+    case lit(k) do
+      {:lit, ^key, _} -> true
+      _ -> k == key
+    end
+  end
+
+  # kw/2 runs its value through alias_or_atom/1, which is right for `for:` and destroys a
+  # `do:` block. This is the raw read, returning {:ok, value} so an absent key and a nil
+  # value stay distinguishable.
+  defp kw_raw(opts, key) when is_list(opts) do
+    Enum.find_value(opts, fn
+      {k, v} -> if opt_key?(k, key), do: {:ok, v}
+      _ -> nil
+    end)
+  end
+
+  defp kw_raw(_, _), do: nil
+
+  # A `defimpl` this clause cannot read a single alias target out of (a `for:` LIST, a var,
+  # an absent `for:`) falls through to the generic descent and keeps the OLD blind
+  # attribution — a known-narrow arm rather than a guessed one. Every `defimpl` in this
+  # corpus is the single-alias shape, and defimpl_key_checks!/0 raises if that population
+  # goes empty.
+  defp impl_target({:__aliases__, _, proto}, opts) do
+    case kw_raw(opts, :for) do
+      {:ok, {:__aliases__, _, target}} when is_list(target) -> {proto, target}
+      _ -> nil
+    end
+  end
+
+  defp impl_target(_, _), do: nil
+
+  defp defs(node, mod, impl, path, acc) do
     case node do
       {:defmodule, _, [{:__aliases__, _, segs}, body]} ->
-        defs(body, mod ++ segs, path, acc)
+        defs(body, mod ++ segs, impl, path, acc)
+
+      {:defimpl, _, [proto | rest] = args} when rest != [] ->
+        opts = Enum.flat_map(rest, fn o -> if is_list(o), do: o, else: [] end)
+
+        case {impl_target(proto, opts), kw_raw(opts, :do)} do
+          {t, {:ok, body}} when not is_nil(t) -> defs(body, mod, t, path, acc)
+          _ -> Enum.reduce(args, acc, &defs(&1, mod, impl, path, &2))
+        end
 
       {op, meta, [head | rest]} when op in [:def, :defp, :defmacro, :defmacrop] ->
         {name, req, arity, hmeta} = head_sig(head)
         body = List.first(rest)
 
         rec = %{
-          module: mod,
+          module: mod ++ impl_segs(impl),
+          lex_module: mod,
+          impl: impl,
           name: name,
           arity: arity,
           req: req,
@@ -3473,7 +3643,9 @@ defmodule PDS.Census do
         as = kw(opts, :as)
 
         rec = %{
-          module: mod,
+          module: mod ++ impl_segs(impl),
+          lex_module: mod,
+          impl: impl,
           name: name,
           arity: arity,
           req: req,
@@ -3488,13 +3660,13 @@ defmodule PDS.Census do
         [rec | acc]
 
       list when is_list(list) ->
-        Enum.reduce(list, acc, &defs(&1, mod, path, &2))
+        Enum.reduce(list, acc, &defs(&1, mod, impl, path, &2))
 
       {a, b} ->
-        acc |> then(&defs(a, mod, path, &1)) |> then(&defs(b, mod, path, &1))
+        acc |> then(&defs(a, mod, impl, path, &1)) |> then(&defs(b, mod, impl, path, &1))
 
       {_f, _, args} when is_list(args) ->
-        Enum.reduce(args, acc, &defs(&1, mod, path, &2))
+        Enum.reduce(args, acc, &defs(&1, mod, impl, path, &2))
 
       _ ->
         acc
@@ -4848,11 +5020,46 @@ defmodule PDS.Census do
   defp cas_confirmed?(%{body: nil}), do: false
 
   defp cas_confirmed?(%{body: body} = d) do
-    updates? = Enum.any?(verb_hits(d), fn {k, v, _} -> k == :write and v == :"Repo.update_all" end)
-    updates? and int_tuple_match?(body)
+    update_all_writer?(d) and int_tuple_match?(body)
   end
 
+  defp update_all_writer?(d) do
+    Enum.any?(verb_hits(d), fn {k, v, _} -> k == :write and v == :"Repo.update_all" end)
+  end
+
+  # THE TWO SPELLINGS OF A ROW-COUNT CONFIRMATION, AND WHY A LIST OF ONE WAS A BUG
+  # (pds-bl-cas-int-tuple-spelling-blind). This predicate used to be `literal_int_tuple?/1`
+  # ALONE: it required the integer to sit IN the tuple, `{1, [saved]} = ... update_all`.
+  # api/lib/barkpark/content/sessions.ex writes the identical CAS twice with the count
+  # BOUND and compared one line later —
+  #
+  #     {rows, _} = from(...) |> Repo.update_all(set: [...])
+  #     if rows == 1, do: %{...}, else: Repo.rollback(:stale)
+  #
+  # — and a bound variable compared to 1 is invisible to a pattern test. Re-derived over
+  # api/lib at the widening: 60 defs write with `Repo.update_all`; 16 carry the LITERAL
+  # spelling, 11 the BOUND-COUNT spelling, 33 carry NEITHER and are still refused. A
+  # predicate that starts matching everything is not a repair, so the refused half is the
+  # number that has to be quoted beside the new one.
+  #
+  # THE COMPARISON SET IS EQUALITY-FAMILY ONLY, and that is a VERDICT, not an oversight.
+  # The arm's own sentence is "matches its update_all result against a literal row count".
+  # `n > 0` (webhooks.ex:655/:744, scim.ex:246) guards on the count without matching it —
+  # admitting ordering operators moves BOUND-COUNT 11 -> 14 and quietly re-labels three
+  # threshold guards as confirmed echoes. A `case count do 1 -> ...` head IS a match and is
+  # admitted, because it is the literal spelling wearing a case instead of a `=`.
+  #
+  # THE BINDING MUST COME OFF THE WRITE. Only a 2-tuple whose RHS itself calls
+  # `.update_all` binds a count here — without that, any `{n, _} = Enum.split(...)` later
+  # compared to an integer would certify a CAS the function never performed. Scope is the
+  # whole body (no shadowing analysis), the same known over-reach POST-READ's prewalk
+  # carries (pds-bl-has-select-in-update-unsound); it can only over-fire, and the
+  # update_all-on-the-RHS requirement is what keeps that from being free.
   defp int_tuple_match?(body) do
+    literal_int_tuple?(body) or bound_count_match?(body)
+  end
+
+  defp literal_int_tuple?(body) do
     {_, found} =
       Macro.prewalk(body, false, fn
         {:{}, _, [a, _]} = n, acc -> {n, acc or int_lit?(a)}
@@ -4862,6 +5069,80 @@ defmodule PDS.Census do
 
     found
   end
+
+  defp bound_count_match?(body) do
+    body
+    |> update_all_count_vars()
+    |> Enum.any?(&count_var_matched_to_int?(body, &1))
+  end
+
+  # EVERY `{count, _} = <expr calling .update_all>` IN THE BODY, by bound name. A
+  # `_`-prefixed head is a DISCARD and is not a count: naming it `_rows` says the row
+  # count was thrown away, which is the opposite of a confirmation.
+  defp update_all_count_vars(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {:=, _, [lhs, rhs]} = n, acc ->
+          case tuple2_head_var(lhs) do
+            nil -> {n, acc}
+            v -> if calls_update_all?(rhs), do: {n, [v | acc]}, else: {n, acc}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    Enum.uniq(acc)
+  end
+
+  # parse_file/1's literal_encoder WRAPS A 2-TUPLE (see `ok_pattern_var/1`, same unwrap),
+  # so the pattern arrives as {:__block__, _, [{var, _}]} and a naive match reads nothing.
+  defp tuple2_head_var({:__block__, _, [inner]}), do: tuple2_head_var(inner)
+  defp tuple2_head_var({{v, _, ctx}, _}) when is_atom(v) and is_atom(ctx), do: named_var(v)
+  defp tuple2_head_var({:{}, _, [{v, _, ctx}, _]}) when is_atom(v) and is_atom(ctx), do: named_var(v)
+  defp tuple2_head_var(_), do: nil
+
+  defp named_var(v) do
+    if String.starts_with?(Atom.to_string(v), "_"), do: nil, else: v
+  end
+
+  defp calls_update_all?(node) do
+    {_, found} =
+      Macro.prewalk(node, false, fn
+        {{:., _, [_, :update_all]}, _, _} = n, _acc -> {n, true}
+        n, acc -> {n, acc}
+      end)
+
+    found
+  end
+
+  @count_match_ops [:==, :===, :!=, :!==]
+
+  defp count_var_matched_to_int?(body, v) do
+    {_, found} =
+      Macro.prewalk(body, false, fn
+        {op, _, [l, r]} = n, acc when op in @count_match_ops ->
+          {n, acc or (var?(l, v) and int_lit?(r)) or (var?(r, v) and int_lit?(l))}
+
+        {:case, _, [subj, [{_do, clauses} | _]]} = n, acc ->
+          {n, acc or (var?(subj, v) and int_headed_clause?(clauses))}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    found
+  end
+
+  defp int_headed_clause?(clauses) do
+    Enum.any?(List.wrap(clauses), fn
+      {:->, _, [[head], _]} -> int_lit?(head)
+      _ -> false
+    end)
+  end
+
+  defp var?({v, _, ctx}, v) when is_atom(ctx), do: true
+  defp var?(_, _), do: false
 
   defp int_lit?(node) do
     case lit(node) do
@@ -4989,22 +5270,37 @@ defmodule PDS.Census do
   # every register row keyed under the old spelling orphans at once. Bump @key_normaliser
   # in the same commit so the register can see which spelling produced its integers.
   #
-  # WHAT head_hash CANNOT DISCRIMINATE — DERIVED UNDER THIS NORMALISER, not transcribed.
-  # Across all 17,620 defs it collides in exactly 3 buckets (6 defs) WITHIN a
-  # {path, module.name/arity} group, and 0 times within the 75 site-owning groups. Only
-  # ONE of the three is the benign bodiless header (plugins/capabilities.ex visible?/2
-  # :144/:155, where :144 is the header and :155 the last clause); the other TWO are two
-  # DISTINCT functions inside two `defimpl Inspect, for: ...` blocks
-  # (plugins/github/errors.ex :94/:138, plugins/indx/errors.ex :118/:137) that this walker
-  # cannot tell apart, because it reads the head and defimpl reuses it verbatim.
+  # WHAT head_hash CANNOT DISCRIMINATE — DERIVED UNDER THIS NORMALISER, not transcribed,
+  # and RE-DERIVED at ac35fbe06 after the walker learned the defimpl target. Across all
+  # 23,771 defs it collides in 3 buckets (6 defs) WITHIN a {path, module.name/arity}
+  # group, and 0 times within the 82 site-owning groups.
   #
-  # CORPUS-WIDE — ignoring path and mfa — it is 912 groups over 2,543 defs (`def all()` is
-  # byte-identical in 7 modules; the widest groups are init/1 at 53 defs and call/2 at 39).
-  # THE PATH AND THE MFA ARE CARRYING THAT LOAD, which is why the key is a 4-tuple and not
-  # a hash. NOTE: the wave brief recorded 913 over 2,544 for this figure — re-derived here
-  # it is 912 over 2,543. The corpus-wide partition is NOT covered by the two normalisers'
-  # within-group partition identity, so that number does not survive a spelling change and
-  # is not quotable across one. capabilities.ex visible?/2 hashes 52289869 here.
+  # THE THREE ARE A PREDICATE, NOT AN ENUMERATION — every survivor is a pair of heads that
+  # cannot both be a distinct runtime function, so the key loses nothing by not separating
+  # them. Two are a bodiless `@spec` companion header against its own last clause
+  # (plugins/capabilities.ex visible?/2, media/storage/object_key.ex derive/3, each cited
+  # by SYMBOL because the line anchors this comment used to carry — :144/:155 — had
+  # already rotted to :166/:177 by the time anyone re-read them). The third is the two
+  # arms of a compile-time `if @test_env do ... else ... end`, of which exactly one ever
+  # compiles (content/dedup_wall.ex default_timeout/0).
+  #
+  # WHAT USED TO BE HERE, AND WHY IT IS GONE: this comment claimed the three were "the
+  # benign bodiless header" plus TWO DISTINCT functions inside two `defimpl Inspect,
+  # for: ...` blocks that the walker could not tell apart. That was TRUE and it was a real
+  # hole in the key — a receipt inside a defimpl was silently un-keyable. It is closed: the
+  # walker records the defimpl protocol and target (see collect_defs/2), so the two pairs
+  # now live in different {path, mfa} groups and the count went 5 -> 3 on one population.
+  # defimpl_key_checks!/0 derives both partitions off ONE walk on every `--selftest` run,
+  # and raises rather than passing if the witness set or the defimpl population goes empty.
+  #
+  # CORPUS-WIDE — ignoring path and mfa — it is 1,103 groups over 3,040 defs at this sha
+  # (widest: init/1 at 62 defs, call/2 at 40, render/1 at 31). THE PATH AND THE MFA ARE
+  # CARRYING THAT LOAD, which is why the key is a 4-tuple and not a hash. NOTE: earlier
+  # readings of this figure (912/2,543 here, 913/2,544 in the wave brief) were taken on a
+  # smaller corpus; the corpus-wide partition is covered by NEITHER the two normalisers'
+  # within-group partition identity NOR a stable tree, so no corpus-wide number survives a
+  # spelling change or a growing corpus and none is quotable across one.
+  # capabilities.ex visible?/2 hashes 52289869 here.
   @key_normaliser "total-meta-drop/phash2-term/v1"
 
   defp drop_meta(ast) do
@@ -6791,7 +7087,7 @@ defmodule PDS.Census do
   defp report_response_carries_read(%{scope: :scoped_out}), do: :ok
 
   defp report_response_carries_read(h) do
-    p("RESPONSE-CARRIES-THE-READ — A HYPOTHESIS COLUMN, NEVER A VERDICT (PDS-D490/D469)")
+    p("RESPONSE-CARRIES-THE-READ — A HYPOTHESIS COLUMN, NEVER A VERDICT (PDS-D490/PDS-D469)")
     p(String.duplicate("-", 78))
 
     wrap(
@@ -6935,10 +7231,13 @@ defmodule PDS.Census do
 
   # -- the router AST ---------------------------------------------------------
   #
-  # SCOPE STATE IS {path prefix, alias segments} AND BOTH NEST. `scope "/v1", BarkparkWeb
-  # do get("/x", FooController, :y) end` is GET /v1/x -> BarkparkWeb.FooController.y, and
+  # SCOPE STATE IS {path prefix, alias segments} AND BOTH NEST. The worked example is a
+  # LIVE ROUTE, not a placeholder, so the claim is re-derivable rather than illustrative:
+  # `scope "/v1", BarkparkWeb do get("/meta", MetaController, :index) end` in
+  # api/lib/barkpark_web/router.ex is GET /v1/meta -> BarkparkWeb.MetaController.index, and
   # reading the literal alone (as an earlier route-linkage probe did) manufactures false
-  # findings on every scoped controller in the file.
+  # findings on every scoped controller in the file. A made-up `FooController` was what
+  # stood here, and PROSE-NAMES-RESOLVE cannot tell a placeholder from a rename.
   defp router_literal_routes(ast), do: Enum.reverse(router_walk(ast, {"", []}, []))
 
   @route_verbs ~w(get post put patch delete options head live)a
@@ -13022,6 +13321,75 @@ defmodule PDS.Census do
       ],
       proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-#{length(@roster)} — an arm that certifies an empty set is the vacuous green this epic refuses"
     },
+    # THE PROSE SWEEP (pds-w42-bl-census-prose-outlives-its-code). Three cases, all
+    # `corpus: :repo`, because PROSE-NAMES-RESOLVE is scoped through `register_scope/1`
+    # exactly as the register and roster arms are — a mutant over the synthetic tree would
+    # be proven where the arm is switched OFF (PDS-D541). Each mutation edits a SENTENCE in
+    # this file and nothing under api/lib: the committed side of the comparison is the only
+    # side a selftest may touch, and the prose IS that side here.
+    #
+    # THE THREE ARE ONE PER FAILURE DIRECTION, not three spellings of one. A function that
+    # left its module, an arity that moved under a live name, and the sweep examining
+    # NOTHING — the last is the shape every count-free arm dies of, and no mutation of the
+    # first two kinds can reach it.
+    %{
+      name: "PROSE-NAME-FUNCTION-GONE",
+      corpus: :repo,
+      argv: [],
+      # The shape wave 42 found: a committed sentence naming a function by name, kept
+      # while the code moved. `Writer.do_create_document/5` (qualified in full at the
+      # citation, spelled short HERE so this comment is not itself a second anchor) is cited in a
+      # comment; renaming the CITATION is the same divergence as renaming the def, seen
+      # from the side this file owns.
+      # THE ANCHOR AND ITS REPLACEMENT ARE BOTH SPLIT AT A MODULE BOUNDARY, and that is
+      # this arm measuring itself: a contiguous qualified name written here would be
+      # swept like any other, so the mutant's own payload would red the clean tree. Split
+      # after `Barkpark.Content.`, neither fragment carries a lowercase final segment and
+      # the pattern matches nothing — while the CONCATENATED value is the exact anchor.
+      mut:
+        {"`Barkpark.Content." <> "Writer.do_create_document/5`",
+         "`Barkpark.Content." <> "Writer.do_create_documents/5`"},
+      exit: 1,
+      expect: [
+        "FAIL  PROSE-NAMES-RESOLVE",
+        "do_create_documents/5",
+        "defines no such function"
+      ],
+      refute: ["PASS  PROSE-NAMES-RESOLVE"],
+      proves: "a committed sentence that names a function the corpus does not define reds BY NAME and BY LINE — the species that shipped inside the disclosure artifact for a full wave with every arm printing PASS"
+    },
+    %{
+      name: "PROSE-NAME-ARITY-MOVED",
+      corpus: :repo,
+      argv: [],
+      # The half a name-only check is blind to, and the reason the cited arity is read
+      # through `accepts?/2` rather than ignored: `Accounts.confirm_user/1` (spelled short
+      # here for the same reason as the case above) is
+      # real at arity 1 and at no other, so /4 names a function that does not exist while
+      # every name segment still resolves.
+      # NO BACKTICKS IN THE ANCHOR: the citation at :4205 is written bare in a comment, and
+      # an anchor carrying punctuation the file does not have is a MUTATION ANCHOR GONE
+      # that reads, from the summary line, exactly like an arm that failed to fire.
+      mut: {"Barkpark." <> "Accounts.confirm_user/1", "Barkpark." <> "Accounts.confirm_user/4"},
+      exit: 1,
+      expect: ["FAIL  PROSE-NAMES-RESOLVE", "confirm_user/4", "defined at arity 1"],
+      refute: ["PASS  PROSE-NAMES-RESOLVE"],
+      proves: "an arity that moved under a live module and a live function name reds too — the drift a module/function existence test cannot see by construction"
+    },
+    %{
+      name: "PROSE-NAMES-NOT-VACUOUS",
+      corpus: :repo,
+      argv: [],
+      # THE 0-OF-NOTHING SHAPE, pointed at this arm. A pattern that matches nothing makes
+      # every comparison unreachable, and an arm without this precondition then prints
+      # `0 drifted` over an EMPTY population at exit 0 — the vacuous green ROSTER-FRESH
+      # -NOT-VACUOUS exists to refuse, one table over.
+      mut: {"@prose_name_re ~r/\\b(?:Barkpark", "@prose_name_re ~r/\\bZZ-NO-SUCH-ROOT-ZZ(?:Barkpark"},
+      exit: 1,
+      expect: ["FAIL  PROSE-NAMES-RESOLVE", "VACUOUS", "NOT ONE name resolved"],
+      refute: ["PASS  PROSE-NAMES-RESOLVE"],
+      proves: "a sweep that resolves NOTHING refuses instead of certifying — the denominator is the arm, not decoration beside it"
+    },
     # THE EXCLUSION ANCHOR (PDS-D585), AND WHY ALL THREE CASES CENSUS THE REPO. The arm
     # is scoped to the real corpus by the same predicate the register and roster arms
     # use, so a mutant over the synthetic tree would be proven exactly where the arm is
@@ -14013,6 +14381,8 @@ defmodule PDS.Census do
     p("")
 
     unwrap_checks!()
+    cas_spelling_checks!()
+    defimpl_key_checks!()
 
     src = File.read!(@self_source)
     # THE OS PID IS LOAD-BEARING (PDS-D542). System.unique_integer/1 is VM-LOCAL: eight
@@ -14077,6 +14447,285 @@ defmodule PDS.Census do
   # measuring the fixture; these two read the same two functions the live report reads.
   # Both refusals are raises, not skips: a selftest that reported OK while its own
   # substring check was inert is the exact failure this repairs.
+  # THE CAS-SPELLING ARMS, RUN BEFORE ANY CASE AND OVER THE LIVE api/lib TREE, using this
+  # census's OWN producers (tree_population/0, parse_file/1, cas_confirmed?/1) rather than
+  # a hand-typed body — a fixture here would encode a shape the corpus never writes and
+  # the arms would be measuring the fixture. Every refusal is a raise, never a skip: an
+  # arm that reports OK while its specimen set was empty is the failure this repairs.
+  #
+  # THE THREE PRECONDITIONS COME FIRST BECAUSE A CONTROL SAYS NOTHING ABOUT THEM. `bound`
+  # empty means the widening has no witness and arm 4 would pass with the widening
+  # deleted; `literal` empty means the older spelling went dark and a green here would
+  # certify a lens nobody is using; `refused` empty means the predicate matches every
+  # update_all writer in the tree, which is not a repair but a detector that has stopped
+  # discriminating. Each is stated as a POPULATION read off this run, never as a number
+  # typed into this file, so a corpus that grows a new spelling moves them by itself.
+  defp cas_spelling_checks! do
+    defs =
+      tree_population()
+      |> Enum.filter(&String.contains?(File.read!(&1), "update_all"))
+      |> Enum.flat_map(fn path -> parse_file(path).defs end)
+      |> Enum.filter(&update_all_writer?/1)
+
+    literal = Enum.filter(defs, &literal_int_tuple?(&1.body))
+    bound = Enum.filter(defs, fn d -> not literal_int_tuple?(d.body) and cas_confirmed?(d) end)
+    refused = Enum.reject(defs, &cas_confirmed?/1)
+
+    if bound == [] do
+      raise "CAS-SPELLING arms are VACUOUS: no api/lib def binds an update_all row count " <>
+              "and matches it against an integer literal, so the BOUND-COUNT arm below would " <>
+              "pass with the widening reverted. #{length(defs)} update_all writer(s) were " <>
+              "scanned under CWD #{File.cwd!()} — a zero here is a corpus that moved or a " <>
+              "selftest run from the wrong directory, not a green."
+    end
+
+    if literal == [] do
+      raise "CAS-SPELLING arms are HALF-BLIND: no api/lib def carries the LITERAL-TUPLE " <>
+              "spelling any more, so nothing on this run exercises the original predicate " <>
+              "and a green certifies only the half that was added."
+    end
+
+    if refused == [] do
+      raise "CAS-SPELLING arms have STOPPED DISCRIMINATING: all #{length(defs)} update_all " <>
+              "writer(s) in api/lib now read as CAS-CONFIRMED-ECHO. A predicate that matches " <>
+              "its whole population is not a widened detector, it is an absent one."
+    end
+
+    p("  CAS SPELLING LENS — re-derived over api/lib on this run, never typed")
+    p("    api/lib defs writing with Repo.update_all ......... #{length(defs)}")
+    p("    LITERAL-TUPLE spelling ({1, _} = update_all) ...... #{length(literal)}")
+    p("    BOUND-COUNT spelling ({n, _} = ...; n == <int>) ... #{length(bound)}")
+    p("    REFUSED — no integer row-count match at all ....... #{length(refused)}")
+
+    Enum.each(bound, fn d -> p("      BOUND-COUNT  #{d.path}:#{d.line}  #{label(d)}") end)
+
+    p("    LENS NOTE: this is the CORPUS lens (update_all writers), NOT the emitted-site")
+    p("    lens the shape table prints. The two are different denominators and the")
+    p("    emitted-site CAS figure does not follow from this one.")
+    p("")
+
+    # THE ARM THAT REDS IF THE WIDENING IS REVERTED. Every BOUND-COUNT member is, BY
+    # CONSTRUCTION of the partition above, refused by literal_int_tuple?/1 — so
+    # int_tuple_match?/1 narrowed back to its literal half makes cas_confirmed? false on
+    # all of them and this raises, naming them.
+    Enum.each(bound, fn d ->
+      unless cas_confirmed?(d) do
+        raise "CAS-SPELLING BOUND-COUNT arm FAILED: #{d.path}:#{d.line} binds an update_all " <>
+                "row count and matches it against an integer literal, and cas_confirmed?/1 " <>
+                "does not see it."
+      end
+    end)
+
+    # THE ARM THAT MUST STAY QUIET, AND IT IS A MUTATION ON THE REAL SOURCE, not a second
+    # fixture: the integer literal each member matches its count against is replaced, IN
+    # THAT MEMBER'S OWN LINE RANGE ONLY, by a variable of the same name. Nothing else about
+    # the def moves — it still writes with update_all, still binds the count, still
+    # compares it — and cas_confirmed? must go FALSE. If it does not, the predicate is
+    # reading the destructure alone and every `{n, _} = update_all(...)` in the tree is
+    # about to certify a confirmation nobody wrote.
+    Enum.each(bound, fn d -> cas_int_removal_check!(d) end)
+  end
+
+  # THE DEFIMPL-ATTRIBUTION ARMS, RUN BEFORE ANY CASE AND OVER THE LIVE api/lib TREE, using
+  # this census's OWN walker (tree_population/0, parse_file/1) and its OWN head fingerprint
+  # (fp/1 — the same function head_hash/1 calls), never a hand-typed fixture. Both the
+  # BEFORE and the AFTER collision partitions are derived in ONE pass off ONE population:
+  # `lex_module` is the attribution this walker recorded before the defimpl arm existed and
+  # `module` is what it records now, so the two numbers below are the same defs counted
+  # under two keys — no revert, no transcription, no second run to disagree with.
+  #
+  # THE THREE PRECONDITIONS COME FIRST BECAUSE A CONTROL SAYS NOTHING ABOUT THEM. No
+  # defimpl-owned def means the walker's `:defimpl` clause is dead and arm 1 would pass
+  # with it deleted; no non-defimpl def means the additivity arm has nothing to hold
+  # still; and an empty WITNESS set means no defimpl-blind collision is live in this
+  # corpus, so arm 1 would pass with the whole fix reverted — a green with no subject.
+  defp defimpl_key_checks! do
+    defs = tree_population() |> Enum.flat_map(fn path -> parse_file(path).defs end)
+
+    impl_defs = Enum.filter(defs, &(&1.impl != nil))
+    plain = Enum.filter(defs, &(&1.impl == nil))
+
+    before = head_collisions(defs, &{&1.path, &1.lex_module, &1.name, &1.arity})
+    aftr = head_collisions(defs, &{&1.path, &1.module, &1.name, &1.arity})
+
+    # A WITNESS is a BEFORE collision whose colliding defs do NOT all share one defimpl
+    # target — i.e. exactly the shape the old key could not discriminate. A bodiless
+    # `@spec` companion header colliding with its own clause is NOT a witness: both sit
+    # under the same (nil) target and stay collided after the change, by design.
+    witness = Enum.filter(before, fn {_k, _h, g} -> Enum.uniq_by(g, & &1.impl) |> length() > 1 end)
+
+    if impl_defs == [] do
+      raise "DEFIMPL-ATTRIBUTION arms are VACUOUS: no def in api/lib was collected inside a " <>
+              "`defimpl` block, so the walker's :defimpl clause is dead and arm 1 below would " <>
+              "pass with it deleted. #{length(defs)} def(s) were walked under CWD " <>
+              "#{File.cwd!()} — a zero here is a corpus that moved or a run from the wrong " <>
+              "directory, not a green."
+    end
+
+    if plain == [] do
+      raise "DEFIMPL-ATTRIBUTION additivity arm is VACUOUS: every def in api/lib reads as " <>
+              "defimpl-owned, so the arm that holds non-defimpl attribution still has an " <>
+              "empty population and cannot go red."
+    end
+
+    if witness == [] do
+      raise "DEFIMPL-ATTRIBUTION arm 1 is VACUOUS: no {path, lexical module, name, arity} " <>
+              "group in api/lib holds head-identical defs from two DIFFERENT `defimpl` " <>
+              "targets, so the blindness this arm exists to catch has no witness in the " <>
+              "corpus and a green here certifies nothing. #{length(before)} within-group " <>
+              "head_hash collision(s) were found in total."
+    end
+
+    p("  DEFIMPL ATTRIBUTION — re-derived over api/lib on this run, never typed")
+    p("    defs walked ...................................... #{length(defs)}")
+    p("    of them lexically inside a `defimpl` ............. #{length(impl_defs)}")
+    p("    within-{path,mfa} head_hash collisions BEFORE .... #{length(before)} group(s), #{Enum.sum(Enum.map(before, fn {_, _, g} -> length(g) end))} def(s)")
+    p("    of those, defimpl-blind (the WITNESS set) ........ #{length(witness)} group(s)")
+    p("    within-{path,mfa} head_hash collisions AFTER ..... #{length(aftr)} group(s), #{Enum.sum(Enum.map(aftr, fn {_, _, g} -> length(g) end))} def(s)")
+
+    Enum.each(witness, fn {_k, _h, g} ->
+      p("      WITNESS  #{hd(g).path}  #{hd(g).name}/#{hd(g).arity}  #{Enum.map_join(g, " vs ", &":#{&1.line} (#{Enum.join(impl_segs(&1.impl), ".")})")}")
+    end)
+
+    p("    KEY NOTE: BEFORE is this same population keyed on `lex_module` (the enclosing")
+    p("    defmodule chain alone, which is what this walker recorded before the defimpl")
+    p("    arm) and AFTER is it keyed on `module`. Both come off ONE walk of ONE tree.")
+    p("")
+
+    # ARM 1 — REDS IF THE WALKER'S :defimpl CLAUSE IS REVERTED. Every witness group must be
+    # gone from the AFTER partition: its members now sit in different {path, mfa} groups, so
+    # no head_hash comparison between them is ever made.
+    after_keys = MapSet.new(aftr, fn {k, h, _g} -> {k, h} end)
+
+    Enum.each(witness, fn {_k, h, g} ->
+      d = hd(g)
+      k = {d.path, d.module, d.name, d.arity}
+
+      if MapSet.member?(after_keys, {k, h}) do
+        raise "DEFIMPL-ATTRIBUTION arm 1 FAILED: #{d.path} #{d.name}/#{d.arity} still collides " <>
+                "on head_hash #{h} inside ONE {path, mfa} group after the change — the defimpl " <>
+                "target is not reaching the key. Clauses: " <>
+                Enum.map_join(g, ", ", &"#{&1.path}:#{&1.line}")
+      end
+    end)
+
+    # ARM 2 — THE ONE THAT MUST STAY QUIET, AND IT IS WHAT MAKES THE CHANGE ADDITIVE. A key
+    # that becomes unique by hashing more of everything is not a fix; it re-keys and orphans
+    # every register row. Nothing outside a `defimpl` may have moved a single segment.
+    moved = Enum.reject(plain, &(&1.module == &1.lex_module))
+
+    unless moved == [] do
+      raise "DEFIMPL-ATTRIBUTION additivity arm FAILED: #{length(moved)} def(s) NOT inside a " <>
+              "`defimpl` carry an attribution the enclosing defmodule chain does not explain, " <>
+              "so existing register keys have moved. First: " <>
+              "#{hd(moved).path}:#{hd(moved).line} #{label(hd(moved))}"
+    end
+
+    # ARM 3 — THE PARTITION MOVED BY EXACTLY THE WITNESS SET AND NOT ONE GROUP MORE. Arm 1
+    # says the witnesses left; this says nothing else did, in EITHER direction: no collision
+    # survived that should not have, and no NEW collision was manufactured by the extra
+    # segments (two defimpl blocks landing on one label would do exactly that).
+    expected = length(before) - length(witness)
+
+    unless length(aftr) == expected do
+      raise "DEFIMPL-ATTRIBUTION arm 3 FAILED: the within-{path,mfa} head_hash collision count " <>
+              "went #{length(before)} -> #{length(aftr)}, but removing the #{length(witness)} " <>
+              "defimpl-blind witness group(s) and NOTHING else predicts #{expected}. The " <>
+              "re-attribution changed more than the defimpl-owned partition."
+    end
+  end
+
+  # ONE HELPER, TWO KEYS. Groups defs by `keyfun`, then inside each group by the SAME head
+  # fingerprint head_hash/1 uses, and returns every bucket holding more than one def as
+  # {group_key, head_hash, defs}. Passing `lex_module` gives the pre-change partition and
+  # `module` the post-change one, which is the only way the two are guaranteed to be the
+  # same population counted twice rather than two runs that could disagree.
+  defp head_collisions(defs, keyfun) do
+    defs
+    |> Enum.group_by(keyfun)
+    |> Enum.flat_map(fn {k, ds} ->
+      ds
+      |> Enum.group_by(&fp(&1.head))
+      |> Enum.filter(fn {_h, g} -> length(g) > 1 end)
+      |> Enum.map(fn {h, g} -> {k, h, Enum.sort_by(g, & &1.line)} end)
+    end)
+  end
+
+  # BOTH SPELLINGS OF "AN INTEGER LITERAL THE COUNT IS MATCHED AGAINST" — the comparison
+  # (`rows == 1`) and the case head (`case claimed do 1 -> ...`, webhooks.ex:919). Each
+  # integer becomes a VARIABLE of the same digits, which always parses and leaves the
+  # destructure, the write and the comparison in place; only the literal is gone.
+  #
+  # EVERY OCCURRENCE IN THE RANGE, NOT THE FIRST. Mutating one and leaving a second would
+  # assert "still reads CAS" against a body that still HOLDS a confirmation — a red with
+  # the wrong cause, which is worse than the miss it is hunting.
+  @count_int_cmp_rx ~r/(===|!==|==|!=)(\s*)(\d+)/
+  @count_int_head_rx ~r/^(\s*)(\d+)(\s*->)/
+
+  defp count_matches(line, rx), do: length(Regex.scan(rx, line))
+
+  defp cas_int_removal_check!(d) do
+    lines = d.path |> File.read!() |> String.split("\n")
+    lo = d.line - 1
+    hi = min(d.last, length(lines)) - 1
+
+    {mutated, hits} =
+      lines
+      |> Enum.with_index()
+      |> Enum.map_reduce(0, fn {line, i}, hits ->
+        if i >= lo and i <= hi do
+          n = count_matches(line, @count_int_cmp_rx) + count_matches(line, @count_int_head_rx)
+
+          rewritten =
+            line
+            |> then(&Regex.replace(@count_int_cmp_rx, &1, "\\1\\2n_\\3"))
+            |> then(&Regex.replace(@count_int_head_rx, &1, "\\1n_\\2\\3"))
+
+          {rewritten, hits + n}
+        else
+          {line, hits}
+        end
+      end)
+
+    if hits == 0 do
+      raise "CAS-SPELLING removal arm is VACUOUS at #{d.path}:#{d.line}: no integer-literal " <>
+              "comparison was found in lines #{d.line}-#{d.last} to remove, so the quiet arm " <>
+              "below would assert over an unmutated body."
+    end
+
+    src = Enum.join(mutated, "\n")
+
+    case Code.string_to_quoted(src, census_parse_opts()) do
+      {:ok, ast} ->
+        mutant = ast |> collect_defs(d.path) |> Enum.find(&(&1.line == d.line))
+
+        cond do
+          is_nil(mutant) ->
+            raise "CAS-SPELLING removal arm at #{d.path}:#{d.line}: the mutated copy holds no " <>
+                    "def on that line — the substitution moved the tree and the arm is measuring " <>
+                    "a different function."
+
+          not update_all_writer?(mutant) ->
+            raise "CAS-SPELLING removal arm at #{d.path}:#{d.line}: the mutant stopped writing " <>
+                    "with Repo.update_all, so a refusal below would be the LOST WRITE talking, " <>
+                    "not the lost integer."
+
+          cas_confirmed?(mutant) ->
+            raise "CAS-SPELLING removal arm FAILED at #{d.path}:#{d.line}: with the integer " <>
+                    "literal replaced by a variable, cas_confirmed?/1 STILL reads CAS. The " <>
+                    "predicate is matching the destructure alone."
+
+          true ->
+            :ok
+        end
+
+      {:error, _} ->
+        raise "CAS-SPELLING removal arm at #{d.path}:#{d.line}: the mutated copy of " <>
+                "#{d.path} does not parse, so its refusal would be a parse error wearing a " <>
+                "predicate's name."
+    end
+  end
+
   defp unwrap_checks! do
     indent = "             "
     targets = for i <- 1..8, do: {"FixtureController.helper_number_#{i}/3", nil, nil}
@@ -15695,6 +16344,206 @@ defmodule PDS.Census do
     [{"BASIS-FALSIFIERS", red == [], why}]
   end
 
+  # -- PROSE-NAMES-RESOLVE ----------------------------------------------------
+  #
+  # THE ARTIFACT'S OWN PROSE IS A MEASURED SURFACE, OR IT IS NOT MEASURED AT ALL.
+  # Wave 42 found this file's comments and printed lines naming `AuthController.register`
+  # on the CALL-substitution mechanism it was never on. That sentence shipped inside the
+  # artifact whose stated purpose is disclosure and survived a full wave with every arm
+  # printing PASS, because nothing here read the file's own sentences. The named instance
+  # carries its correction above; ONE FIX IS NOT THE DELIVERABLE. An enumeration of the
+  # sentences known to be wrong today is a snapshot; this arm is the predicate, and it
+  # runs on every census.
+  #
+  # THE POPULATION IS A RULE, NOT A LIST: every fully-qualified name rooted at `Barkpark`
+  # or `BarkparkWeb` that this file writes ANYWHERE — comment, printed line, register
+  # note, blind-shape sentence — with a lowercase final segment, so `Foo.Bar.baz` and
+  # `Foo.Bar.baz/2` are in and a bare module alias is not. Each is resolved against the
+  # SAME index the register and roster arms resolve against: the whole `api/lib` corpus,
+  # by {module segments, function name}, with the cited arity checked through `accepts?/2`
+  # when one is written. A name that resolves is CONFIRMED BY RUN, which is the half of
+  # this that no reader can do by eye over 300 citations.
+  #
+  # FOUR CLASSES, AND ONLY TWO OF THEM ARE THE FINDING.
+  #   corpus           — module and function are there, and the cited arity is accepted.
+  #   self_declared    — the name belongs to this file's OWN synthetic `--selftest` corpus
+  #                      (`Barkpark.Filler.*`, `Barkpark.Repo`, …). Those modules exist
+  #                      only in the heredocs below, so the api/lib index CANNOT resolve
+  #                      them and a red on them would be a false accusation on every run.
+  #                      Membership is DERIVED from this file's own `defmodule` lines, not
+  #                      listed: a fixture module added tomorrow is covered the day it is
+  #                      written, and a fixture module DELETED stops covering its citations.
+  #   mutation_payload — a name written inside an ESCAPED quote, i.e. a string inside a
+  #                      string. That is the shape of a `mut:` replacement and of nothing
+  #                      else in this file (measured: 4 occurrences on 536b65ced, all four
+  #                      inside `mut:` tuples). A mutation payload is REQUIRED to name
+  #                      something absent — that is what it mutates INTO — so redding on
+  #                      one would red every clean checkout.
+  #   drift            — everything else, split by which half moved: the function is gone
+  #                      from a module that is still there, the module itself is gone, or
+  #                      the arity moved under a live name. This is the finding.
+  #
+  # WHAT IT CANNOT SEE, SAID PLAINLY AND PRINTED BESIDE THE PASS.
+  #   (a) EXISTENCE AND ARITY, NEVER TRUTH. `Barkpark.Tasks.close/3 renders the stored
+  #       row` is checked only as far as `close/3` being there. The wave-42 sentence would
+  #       NOT have reddened here — `AuthController.register` existed; the MECHANISM claim
+  #       about it was the false part. This arm catches the species that is mechanically
+  #       decidable and says so rather than implying it caught the genus.
+  #   (b) UNQUALIFIED NAMES ARE INVISIBLE. `handle_intake/2` or `the register's create
+  #       clause` carry no module root, so no index lookup is possible and they are not in
+  #       the denominator. The denominator below is occurrences SWEPT, never sentences
+  #       written.
+  #   (c) A MACRO-GENERATED FUNCTION IS NOT IN THE INDEX. `collect_defs/2` reads `def`,
+  #       `defp`, `defmacro`, `defdelegate` — a function a `use` injects (Ecto.Repo's
+  #       `update/1` is the live example) has no def to find, so a prose citation to one
+  #       would land in `function_absent`. The only such citation in this file names the
+  #       FIXTURE `Barkpark.Repo`, which the self_declared clause takes first.
+  #   (d) A MODULE GENERATED UNDER AN INTERPOLATED `defmodule` PREFIX is accepted WHOLE:
+  #       `defmodule Barkpark.Filler.#{m}` declares the prefix `Barkpark.Filler.`, so every
+  #       `Barkpark.Filler.Anything.f` citation is self_declared without the suffix being
+  #       checked. Narrowing that needs the generator's own value list, which is data this
+  #       lens does not evaluate.
+  @prose_name_re ~r/\b(?:Barkpark|BarkparkWeb)(?:\.[A-Z][A-Za-z0-9_]*)+\.[a-z_][A-Za-z0-9_?!]*(?:\/[0-9]+)?/
+
+  # THE FIXTURE NAMESPACE, DERIVED FROM THIS FILE ON EVERY RUN. `#{` immediately after the
+  # captured name means the `defmodule` is interpolated, and what it declares is a PREFIX
+  # rather than a name — see blind spot (d).
+  defp prose_fixture_decls(src) do
+    ~r/defmodule\s+((?:Barkpark|BarkparkWeb)[A-Za-z0-9_.]*)(\#\{)?/
+    |> Regex.scan(src)
+    |> Enum.map(fn
+      [_, name, _interp] -> {:prefix, name}
+      [_, name] -> {:exact, name}
+    end)
+    |> Enum.uniq()
+  end
+
+  defp prose_self_declared?(mod, decls) do
+    Enum.any?(decls, fn
+      {:exact, d} -> mod == d
+      {:prefix, d} -> String.starts_with?(mod, d)
+    end)
+  end
+
+  # A NAME INSIDE AN ESCAPED QUOTE IS A MUTATION PAYLOAD. Read off the two bytes before
+  # the match, never off a line-shaped guess about which table the line belongs to.
+  defp prose_mutation_payload?(_line, at) when at < 2, do: false
+  defp prose_mutation_payload?(line, at), do: binary_part(line, at - 2, 2) == "\\\""
+
+  defp prose_split_name(name) do
+    {name, arity} =
+      case String.split(name, "/") do
+        [n] -> {n, nil}
+        [n, a] -> {n, String.to_integer(a)}
+      end
+
+    {mod_segs, [fun]} = name |> String.split(".") |> Enum.split(-1)
+    {Enum.join(mod_segs, "."), Enum.map(mod_segs, &String.to_atom/1), fun, arity}
+  end
+
+  defp prose_name_class(%{mutant?: true}, _index, _decls), do: :mutation_payload
+
+  defp prose_name_class(%{name: name}, index, decls) do
+    {mod_str, segs, fun, arity} = prose_split_name(name)
+    clauses = Map.get(index.by_key, {segs, String.to_atom(fun)}, [])
+
+    cond do
+      clauses != [] and Enum.any?(clauses, &accepts?(&1, arity)) ->
+        :corpus
+
+      clauses != [] ->
+        {:arity_moved, clauses |> Enum.map(& &1.arity) |> Enum.uniq() |> Enum.sort()}
+
+      prose_self_declared?(mod_str, decls) ->
+        :self_declared
+
+      Map.has_key?(index.by_module, segs) ->
+        :function_absent
+
+      true ->
+        :module_absent
+    end
+  end
+
+  defp prose_names_sweep(index) do
+    src = File.read!(@self_source)
+    decls = prose_fixture_decls(src)
+
+    src
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.flat_map(fn {line, i} ->
+      @prose_name_re
+      |> Regex.scan(line, return: :index)
+      |> Enum.map(fn [{at, len}] ->
+        %{
+          name: binary_part(line, at, len),
+          line: i,
+          mutant?: prose_mutation_payload?(line, at)
+        }
+      end)
+    end)
+    |> Enum.map(fn o -> Map.put(o, :class, prose_name_class(o, index, decls)) end)
+  end
+
+  defp prose_class_tag({:arity_moved, _}), do: :arity_moved
+  defp prose_class_tag(c), do: c
+
+  defp prose_drift_sentence(%{class: {:arity_moved, live}, name: n, line: l}),
+    do: "#{n} at :#{l} — that function is defined at arity #{Enum.join(live, "/")} and at no other, never at the arity written"
+
+  defp prose_drift_sentence(%{class: :function_absent, name: n, line: l}),
+    do: "#{n} at :#{l} — the module is in the corpus and defines no such function"
+
+  defp prose_drift_sentence(%{class: :module_absent, name: n, line: l}),
+    do: "#{n} at :#{l} — no module of that name is in the corpus at all"
+
+  # THE DENOMINATOR IS PRINTED ON BOTH BRANCHES, because "0 wrong" over an unstated
+  # population is the vacuous green this epic refuses: the number that makes a PASS
+  # readable is how many claims were CHECKED, not how many were bad.
+  defp prose_names_check(parsed) do
+    index = roster_index(parsed)
+    rows = prose_names_sweep(index)
+    by = Enum.group_by(rows, &prose_class_tag(&1.class))
+    n = fn k -> length(Map.get(by, k, [])) end
+    distinct = rows |> Enum.map(& &1.name) |> Enum.uniq() |> length()
+
+    drift =
+      Map.get(by, :function_absent, []) ++
+        Map.get(by, :module_absent, []) ++ Map.get(by, :arity_moved, [])
+
+    denom =
+      "#{length(rows)} qualified name occurrence(s) swept from this file (#{distinct} distinct) · " <>
+        "#{n.(:corpus)} RESOLVED by run against the #{length(index.modules)}-module api/lib corpus · " <>
+        "#{n.(:self_declared)} name this file's OWN --selftest fixture modules · " <>
+        "#{n.(:mutation_payload)} are mutation payloads (a name inside an escaped quote, required to be absent)"
+
+    blind =
+      "BLIND TO: the sentence AROUND the name (existence and arity only — the wave-42 " <>
+        "sentence named a function that EXISTED), unqualified names (no module root, no lookup, " <>
+        "not in the denominator), and macro-injected functions (no def to index)"
+
+    cond do
+      # VACUITY PRECONDITION. A sweep that resolves NOTHING has examined nothing — a broken
+      # pattern, an empty index or a self-read that failed all print `0 drifted` otherwise,
+      # which is a green bought with an empty set.
+      n.(:corpus) == 0 ->
+        {"PROSE-NAMES-RESOLVE", false,
+         "VACUOUS — #{denom}. NOT ONE name resolved against the corpus, so the 0-drift verdict " <>
+           "below would be a verdict over an empty population: the pattern, the index or the " <>
+           "self-read is what failed, not the prose"}
+
+      drift == [] ->
+        {"PROSE-NAMES-RESOLVE", true, "#{denom} · 0 drifted. #{blind}"}
+
+      true ->
+        {"PROSE-NAMES-RESOLVE", false,
+         "#{length(drift)} committed name(s) NAME CODE THAT IS NOT THERE — the prose outlived " <>
+           "its subject: " <> Enum.map_join(Enum.take(drift, 4), " · ", &prose_drift_sentence/1) <>
+           " [#{denom}]"}
+    end
+  end
+
   defp register_checks(classified, parsed) do
     case register_scope(classified) do
       :scoped_out -> []
@@ -15706,6 +16555,7 @@ defmodule PDS.Census do
           declared_rows_resolve(classified),
           declared_basis_intact(parsed),
           roster_check(parsed),
+          prose_names_check(parsed),
           register_callee_split_check(classified)
         ]
     end

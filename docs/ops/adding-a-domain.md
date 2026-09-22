@@ -38,7 +38,7 @@ Elsewhere, add the site block:
 your-domain.example, www.your-domain.example {
     encode zstd gzip
     reverse_proxy localhost:4000
-    handle_errors { ... }  # verbatim: deploy/caddy/barkpark-maintenance.caddy
+    handle_errors 502 503 504 { ... }  # verbatim: deploy/caddy/barkpark-maintenance.caddy
     header Strict-Transport-Security "max-age=31536000; includeSubDomains"
     header X-Content-Type-Options "nosniff"
     header Referrer-Policy "strict-origin-when-cross-origin"
@@ -47,7 +47,11 @@ your-domain.example, www.your-domain.example {
 
 `handle_errors` is **not optional** — it is the branded 503 + `Retry-After`
 maintenance page (`MaintenanceHandler`, `internal/caddyfile/caddyfile.go`);
-omit it and every restart shows a raw 502. Then `caddy validate --config
+omit it and every restart shows a raw 502. The status list `502 503 504` is
+equally not optional: a bare `handle_errors` with no status list also swallows
+the 404 a `file_server` raises, so every miss on a spawned static site answers
+the maintenance 503 (`deploy/caddy-handle-errors-scope-check.sh` is the
+repo-wide predicate). Then `caddy validate --config
 /etc/caddy/Caddyfile && systemctl reload caddy`.
 
 ## Step 3 — Phoenix env

@@ -47,9 +47,9 @@ defmodule Barkpark.Tasks.Internal do
   # those, hiding genuinely available work from reconciliation sweeps.
   #
   # THE RETAINED EPOCH IS LOAD-BEARING, NOT RESIDUE. `Tasks.Claim` computes the
-  # next lease as `current_epoch(doc) + 1` (claim.ex:481), reading it straight
+  # next lease as `current_epoch(doc) + 1` (claim.ex, `current_epoch/1` call sites), reading it straight
   # off the released row, so the epoch is what keeps the fence MONOTONIC across
-  # release-then-reclaim; and `Tasks.Close.check_fencing/2` (close.ex:741-742)
+  # release-then-reclaim; and `Tasks.Close.check_fencing/2` (close.ex, its `{:error, :fenced_off}` arm)
   # refuses `:fenced_off` whenever a claim map carries an epoch that does not
   # match the caller's. Clearing it would let a stale holder's old-epoch close
   # land on the next worker's lease. DO NOT "CLEAN IT UP".
@@ -925,8 +925,70 @@ defmodule Barkpark.Tasks.Internal do
   # `content.claim.worker`. Backward-compatible: an anonymous / tokenless /
   # internal caller (no bearer resolved to `conn.assigns[:api_token]`) threads
   # `nil` and emits NO key, so pre-existing events stay byte-identical.
-  def caller_stamp(token_id) when is_binary(token_id), do: %{"caller_token_id" => token_id}
-  def caller_stamp(_), do: %{}
+  # `session` (optional 2nd arg) is the SessionId-derived session discriminator
+  # for this request — see `caller_identity_stamp/2` for why it rides here.
+  def caller_stamp(token_id, session \\ nil) do
+    base = if is_binary(token_id), do: %{"caller_token_id" => token_id}, else: %{}
+    Map.merge(base, caller_identity_stamp(token_id, session))
+  end
+
+  # ─── THE SERVER-DERIVED CALLER IDENTITY (task-56adb45f973e242f) ───────────
+  #
+  # WHO the SERVER measured making this mutation — as distinct from every
+  # other identity on a task event, all of which are the audited party's own
+  # self-report:
+  #
+  #   * `content.claim.worker` / `closed_by` / `actor.worker` — a free-form
+  #     string the CLIENT chooses and the server stores verbatim. It is the
+  #     handle the CAS fences on, which makes it the right thing to fence with
+  #     and the WRONG thing to attribute with: an agent that writes
+  #     `worker: "lead-api"` is believed.
+  #   * `caller_token_id` — server-authenticated, but an `audit_keys/0` member,
+  #     so `Tasks.Events`' `:payload` projection SUBTRACTS it. It reached no
+  #     read surface at all: the live measurement on this row's filing found
+  #     the default feed projection at exactly `{at, doc_id, event, id, rev}`
+  #     and concluded there was no attribution anywhere. It was half right —
+  #     `actor` (the self-report) does project under `--payload`; the
+  #     server-measured half did not project under ANY projection.
+  #
+  # So this is the ONE key on a task event that the client cannot choose:
+  #
+  #     "caller" => %{"kind" => "api_token",
+  #                   "id"   => <the token the server AUTHENTICATED>,
+  #                   "session" => <SessionId.derive/2 — HMAC(secret_key_base,
+  #                                 token_id <> 0 <> client key), never the
+  #                                 client's key and not replayable from the
+  #                                 stored row>}
+  #
+  # DELIBERATELY NOT AN AUDIT KEY. `audit_keys/0` is the list the payload
+  # projection removes; putting `caller` there would reproduce exactly the
+  # defect this closes. `caller_token_id` STAYS an audit key and stays written,
+  # byte for byte, so nothing that reads the raw `mutation_events.document`
+  # changes.
+  #
+  # NIL-SAFE, AND THAT IS CRITERION 2. A tokenless/internal/test caller
+  # (`nil`, `nil`) emits NO `caller` key — not `%{}`, not `""`. Historical rows
+  # are never touched and never backfilled, so a reader that finds no `caller`
+  # on an event is reading UNMEASURED, not "measured, nobody". An empty-string
+  # placeholder would destroy precisely that distinction across the whole back
+  # catalogue.
+  @spec caller_identity_stamp(term(), term()) :: map()
+  def caller_identity_stamp(token_id, session \\ nil) do
+    # `token_id != ""` is not defensive noise: an empty-string token id is the
+    # exact placeholder criterion 2 forbids. Without it this emits
+    # `%{"caller" => %{"kind" => "api_token", "id" => ""}}` — a row that reads
+    # MEASURED, NOBODY where the truth is UNMEASURED. (This arm was red on the
+    # first run of `caller_identity_stamp/2 never emits an empty placeholder`.)
+    named? = is_binary(token_id) and token_id != ""
+
+    identity =
+      %{}
+      |> maybe_put("kind", if(named?, do: "api_token"))
+      |> maybe_put("id", if(named?, do: token_id))
+      |> maybe_put("session", if(is_binary(session) and session != "", do: session))
+
+    if map_size(identity) == 0, do: %{}, else: %{"caller" => identity}
+  end
 
   # ─── THE ACTOR STAMP (tlv-bl-events-actor-attribution) ────────────────────
   #

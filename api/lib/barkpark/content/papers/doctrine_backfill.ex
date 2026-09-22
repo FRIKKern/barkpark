@@ -50,6 +50,13 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
        render-identical), adding a title heading changes the render, so every
        derived surface must be refreshed.
 
+  A plan whose POST-migration block list would be HOLLOW (skeleton-only — only
+  the locked title/featured blocks survive, no real content block) is REFUSED
+  and reported under its own would-be-hollow count/list. The first-heading title
+  heuristic consumes the paper's only heading, so a single-heading legacy paper
+  would otherwise be silently migrated into the title-only document the
+  authoring gate (`Barkpark.Content.Papers.Hollow`) refuses at every write seam.
+
   After `--apply` every TOUCHED paper passes `Template.validate/1`; a paper that
   would still violate the template after the plan — or whose planned block ids
   are not unique (a pre-existing duplicate, or a block already squatting on the
@@ -98,6 +105,7 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
   alias Barkpark.Repo
   alias Barkpark.Content.Document
   alias Barkpark.Content.Labels
+  alias Barkpark.Content.Papers.Hollow
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.Projection
   alias Barkpark.PortableDoc.Render
@@ -106,6 +114,12 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
 
   @title_role "title"
   @featured_role "featured"
+
+  # The ONE unfixable reason for a plan whose post-migration block list is
+  # skeleton-only. `run/1` matches on this exact string (via `hollow_reason/0`)
+  # to split the would-be-hollow rows out of the general unfixable list — the
+  # report must name this class distinctly, not bury it among html-only rows.
+  @hollow_reason "backfill would leave a HOLLOW paper (title/featured skeleton only, no content block survives) \u2014 manual review"
 
   @type title_source :: :doc_title | :first_heading
   @type featured_disposition :: :inserted | :skipped
@@ -138,10 +152,20 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
           titles_synthesized: non_neg_integer(),
           featured_inserted: non_neg_integer(),
           featured_skipped: non_neg_integer(),
+          would_be_hollow_count: non_neg_integer(),
           dry_run: boolean(),
           changes: [change_entry()],
-          unfixable: [unfixable_entry()]
+          unfixable: [unfixable_entry()],
+          would_be_hollow: [unfixable_entry()]
         }
+
+  @doc """
+  The single unfixable reason emitted for a plan whose post-migration block list
+  would be HOLLOW (skeleton-only). Public so `run/1`, the report, and tests all
+  key off ONE string instead of re-spelling it.
+  """
+  @spec hollow_reason() :: String.t()
+  def hollow_reason, do: @hollow_reason
 
   @doc """
   Scan the WHOLE paper corpus and (unless dry-run) backfill the doctrine template.
@@ -166,7 +190,8 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
       titles: 0,
       featured_inserted: 0,
       featured_skipped: 0,
-      unfixable: []
+      unfixable: [],
+      hollow: []
     }
 
     acc =
@@ -211,8 +236,18 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
             end
 
           {:unfixable, reason} ->
+            # A would-be-hollow row is unfixable AND tracked distinctly: it is
+            # the class the human reviewing an --apply most needs to see, and
+            # (like every unfixable) `persist/2` is never reached for it.
             entry = %{slug: doc.doc_id, dataset: doc.dataset, reason: reason}
-            %{acc | unfixable: [entry | acc.unfixable]}
+
+            acc = %{acc | unfixable: [entry | acc.unfixable]}
+
+            if reason == @hollow_reason do
+              %{acc | hollow: [entry | acc.hollow]}
+            else
+              acc
+            end
         end
       end)
 
@@ -223,9 +258,11 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
       titles_synthesized: acc.titles,
       featured_inserted: acc.featured_inserted,
       featured_skipped: acc.featured_skipped,
+      would_be_hollow_count: length(acc.hollow),
       dry_run: dry_run?,
       changes: Enum.reverse(acc.changes),
-      unfixable: Enum.reverse(acc.unfixable)
+      unfixable: Enum.reverse(acc.unfixable),
+      would_be_hollow: Enum.reverse(acc.hollow)
     }
 
     {:ok, stats}
@@ -247,7 +284,8 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
       the doctrine-shaped block list (title@0, featured@1 when an asset exists);
       `meta` carries `:title_source`, `:title_text`, `:featured`.
     * `{:unfixable, reason}` — cannot be backfilled automatically (HTML-only, no
-      derivable title, an already-present but misplaced title block, a plan that
+      derivable title, an already-present but misplaced title block, a plan whose
+      post-migration blocks would be HOLLOW (`hollow_reason/0`), a plan that
       would still fail `Template.validate/1`, or non-unique block ids after the
       plan — a pre-existing duplicate or a block squatting on the template id).
 
@@ -299,6 +337,15 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
         {new_blocks, featured} = maybe_place_featured(with_title)
 
         cond do
+          Hollow.hollow?(new_blocks) ->
+            # The first_heading branch CONSUMES the paper's only heading into
+            # the locked title: a legacy paper whose sole block was that
+            # heading would be migrated to a title-only document — exactly the
+            # shape the authoring gate (`Hollow`) forbids at every write seam.
+            # Checked FIRST so every post-plan skeleton-only shape reports the
+            # hollow reason, not an incidental template complaint.
+            {:unfixable, @hollow_reason}
+
           (errors = Template.validate(new_blocks)) != [] ->
             {:unfixable, "template still violated after backfill: " <> Enum.join(errors, "; ")}
 
@@ -555,11 +602,25 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
     emit.("  featured inserted:     #{stats.featured_inserted}")
     emit.("  featured skipped:      #{stats.featured_skipped} (no image asset)")
 
+    emit.(
+      "  would-be-hollow:       #{Map.get(stats, :would_be_hollow_count, 0)} (REFUSED \u2014 skeleton-only after backfill, never written)"
+    )
+
     Enum.each(stats.changes, fn c ->
       title = "title←#{c.title_source} #{inspect(c.title_text)}"
       featured = "featured #{c.featured}"
       emit.("    • #{c.slug} (#{c.dataset}) — #{title}, #{featured}")
     end)
+
+    hollow = Map.get(stats, :would_be_hollow, [])
+
+    if hollow != [] do
+      emit.("  !! WOULD BE HOLLOW (refused, never written): #{length(hollow)}")
+
+      Enum.each(hollow, fn h ->
+        emit.("    \u2205 #{h.slug} (#{h.dataset}) \u2014 #{h.reason}")
+      end)
+    end
 
     if stats.unfixable != [] do
       emit.("  !! UNFIXABLE (reported, never written): #{length(stats.unfixable)}")

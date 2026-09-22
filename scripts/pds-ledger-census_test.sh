@@ -1235,7 +1235,7 @@ expect_status_matching "a duplicate reason on a TERMINAL row still reds (1-3 sta
 echo
 
 # =============================================================================
-# CLAUSE 6 — THE CLAIMABLE-AND-CLOSED CONTRADICTION (PDS-D372/D373).
+# CLAUSE 6 — THE CLAIMABLE-AND-CLOSED CONTRADICTION (PDS-D372/PDS-D373).
 #
 # Every fixture in this section EXITS 0 against the census as it stood on
 # origin/main before the clause existed — verified by running each one against
@@ -1747,7 +1747,7 @@ expect_output_lacks "the quiet control claims no undercount" \
 echo
 
 # =============================================================================
-# CLAUSE 4(a) — THE ROUND ANCHOR (PDS-D364/D365). 4(a) unanchored is
+# CLAUSE 4(a) — THE ROUND ANCHOR (PDS-D364/PDS-D365). 4(a) unanchored is
 # structurally unreachable by any round that discovers work: a row is BORN bare,
 # so a round that files one row can never certify. The anchor says WHICH ROUND
 # the clause is asking about — and the danger it introduces is the opposite one,
@@ -2556,7 +2556,7 @@ every pre-existing fixture here, and the reason none of them changed. --no-ancho
 opts back into the UNANCHORED clause, which defers nothing and so cannot seal a
 round, and a declared Paper the source cannot serve still fails closed.
 
-CLAUSE 6 is the CLAIMABLE-AND-CLOSED contradiction (PDS-D372/D373), and it is
+CLAUSE 6 is the CLAIMABLE-AND-CLOSED contradiction (PDS-D372/PDS-D373), and it is
 CLOSED-ONLY and CASE-EXACT. It reds on a live+closed row on `open` and on
 `blocked`, naming the row; it stays SILENT on a terminal+closed row (the correct
 shape of a finished row), on a LIVE park carrying a structured reopen_trigger

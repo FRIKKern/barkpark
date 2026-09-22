@@ -196,7 +196,28 @@ defmodule Barkpark.Content.Scope do
   """
   @spec scope_to_workspace_or_global(Ecto.Queryable.t(), binary() | nil, binary() | nil) ::
           Ecto.Queryable.t()
+  # PROJECT-PINNED, WORKSPACE-UNPINNED (task-ab5da5c4faf1a04c). A caller that
+  # resolved a PROJECT but no workspace is not a global caller — it named a
+  # tenant, just by the narrower key. Before this clause the nil-workspace arm
+  # below swallowed it and returned the query UNTOUCHED, DISCARDING the
+  # project_id, so the read spanned every tenant with no clause at all.
+  #
+  # `BarkparkWeb.Plugs.DatasetCors.cors_scope/1` builds exactly this shape —
+  # `[project_id: id]`, no `:workspace_id` — off a routed
+  # `/w/:ws/p/:project` request, so the shape is live traffic, not theory.
+  #
+  # APPLY rather than REFUSE, decided by reading the callers: ~42 call sites
+  # thread `opts[:workspace_id]`/`opts[:project_id]` straight through, and the
+  # project-only ones (DatasetCors above; any opts built from a resolved
+  # project) are LEGITIMATE reads. Refusing them would turn a silent widening
+  # into a 500 on a correct request. A project belongs to exactly one
+  # workspace, so `project_id` alone is a COMPLETE tenancy key — narrowing on
+  # it loses nothing the workspace clause would have added, and it matches the
+  # strictness the two-key arm below already has.
   # @canonical capability:tenancy-scope aka:scope_workspace,workspace_scope,scope_to_workspace doc:docs/contracts/tenancy.md
+  def scope_to_workspace_or_global(query, nil, project_id) when is_binary(project_id),
+    do: where(query, [x], x.project_id == ^project_id)
+
   def scope_to_workspace_or_global(query, nil, _project_id),
     do: scope_to_workspace_global(query)
 

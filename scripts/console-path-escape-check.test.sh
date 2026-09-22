@@ -10,6 +10,9 @@
 # The cases that matter are the ones that prove the instruments can FAIL:
 #   * an uncovered repo-root read must red                  (case 3)
 #   * an uncovered read in an UNTRACKED file must red       (case 4)
+#   * an ARGV token that collides with a repo-root filename
+#     must NOT be a read, while the SAME word inside a
+#     join(...) call still is                                (case 4c)
 #   * a neutered scanner must red rather than report clean  (case 5)
 #   * the aggregator must red on every not-a-pass result    (case 9)
 #   * the dispatcher must red rather than emit all-false    (case 10)
@@ -498,6 +501,83 @@ else
   no ".git entered the census — this gate would red locally and pass in CI: $out"
 fi
 rm -f "$FXB/.git"
+echo
+
+# ── case 4c: AN ARGV ARRAY IS NOT A PATH READ ──────────────────────────────
+# The literal-join grep used to be a bare TOKEN PAIR — `(REPO_ROOT|REPO)` then a
+# comma then a quoted string — and that is also the shape of an ARGV ARRAY:
+# `execFileSync('git', ['-C', REPO, 'rev-parse', …])`. Measured on origin/main,
+# __preview__/seal-predicate.mjs and its test fed `rev-parse`, `show`,
+# `merge-base`, `--guard-cmd`, `--successor`, `--epic`, `--ladder-only`, `.git`
+# and `.github` into the literal-join idiom. All harmless — but harmless BY
+# COINCIDENCE: each was dropped by the `[ -f ]` existence filter or by the
+# explicit `.git` exclusion, never by the extractor refusing to see it.
+#
+# THE COINCIDENCE HAS A DEADLINE, and it is the bare-word rule. literal-join is
+# one of the three idioms allowed to admit a literal with no `/`, which is what
+# makes a read of `Makefile` / `README.md` / `mix.lock` representable at all. A
+# git subcommand is spelled exactly like a repo-root filename, so the first argv
+# token that collides with one reds this ratchet on a path NOTHING READS — and
+# the obvious remedy (an exemption) would enshrine a read that does not exist.
+#
+# So: the match must sit inside a `join(...)` CALL. Both arms below run on the
+# SAME fixture and differ in ONE thing — the shape the bare word is written in —
+# so neither arm can pass for a reason foreign to what this case measures.
+echo "case 4c: an argv array is not a path read, a join() of the same word is"
+FXV="$TMPROOT/argv"
+make_fixture "$FXV"
+: >"$FXV/Makefile"   # a REAL repo-root file, so the existence filter admits it
+# ARM 1 — the argv shape. `Makefile` here is the third element of a list, not a
+# path segment under REPO. It must not enter the census at all.
+cat >"$FXV/cloud/priv/static/__preview__/argv-probe.mjs" <<'JS'
+const out = execFileSync('git', ['-C', REPO, 'Makefile'], { encoding: 'utf8' });
+JS
+census_argv="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+if has_line "$census_argv" 'Makefile'; then
+  no "an ARGV token entered the census as a repo-root read — literal-join is matching token pairs, not join() calls"
+else
+  ok "an argv token colliding with a repo-root filename is not a read"
+fi
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "exit 0 — the ratchet does not red on a path nothing reads"
+else
+  no "RED on an argv token (exit $rc) — this is the false red the join() shape exists to prevent: $out"
+fi
+# ARM 2 — THE CONTROL, and it is the half that keeps arm 1 from being vacuous.
+# Same fixture, same bare word, same file: written as a join() it IS a read, so
+# it must enter the census and red as UNCOVERED. If this arm ever goes quiet,
+# arm 1 is passing because bare words died, not because argv stopped matching.
+cat >"$FXV/cloud/priv/static/__preview__/argv-probe.mjs" <<'JS'
+const p = path.join(REPO_ROOT, "Makefile");
+JS
+census_join="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+if has_line "$census_join" 'Makefile'; then
+  ok "CONTROL: the SAME bare word inside join(REPO_ROOT, …) is still a read"
+else
+  no "CONTROL FAILED: join(REPO_ROOT, \"Makefile\") is invisible — the bare-word rule died, and arm 1 proves nothing"
+fi
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "CONTROL: exit $rc (non-zero) — an undeclared bare-word read still reds"
+else
+  no "CONTROL FAILED: PASSED with an uncovered join(REPO_ROOT, \"Makefile\") read"
+fi
+if has "$out" "UNCOVERED repo-root read: Makefile"; then
+  ok "CONTROL: names the uncovered bare-word path"
+else
+  no "CONTROL FAILED: did not name the uncovered bare-word read: $out"
+fi
+# …and the idiom that admitted it is literal-join, not one of the others. The
+# bare-word rule is keyed on the TAG, so a row arriving under a different tag
+# would mean the control passed through a door this case is not measuring.
+tagged_join="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | awk -F'\t' '$1 == "Makefile" { print $3 }' | sort -u)"
+if has_line "$tagged_join" 'literal-join'; then
+  ok "CONTROL: the bare-word read is tagged literal-join"
+else
+  no "CONTROL FAILED: Makefile arrived tagged '$tagged_join', not literal-join"
+fi
+rm -f "$FXV/cloud/priv/static/__preview__/argv-probe.mjs"
 echo
 
 # ── case 5: a neutered scanner reds on the floor, never reports clean ───────
@@ -1438,7 +1518,13 @@ gate_denies() {
 # the first `%0A` belongs to a later clause (the measured-defect list).
 gate_names() {
   local ann named nl='%0A'
-  ann="$(grep '^::error' "$GATE_OUT" | tr '\n' ' ')"
+  # `|| true` IS LOAD-BEARING under `set -euo pipefail`: a green step output has
+  # no `::error` line, grep exits 1, pipefail propagates it and `set -e` kills
+  # the whole harness MID-RUN — no summary line, so the very branch below that
+  # exists to say "the annotation names no job at all" could never be reached.
+  # That branch was dead until the (s2) adjacency cases first drove a mutation
+  # that greened the gate; keep it reachable or the crash replaces the verdict.
+  ann="$( { grep '^::error' "$GATE_OUT" || true; } | tr '\n' ' ')"
   named="${ann#*NOT IN THE ALLOW-SET: }"
   if [ -z "$ann" ] || [ "$named" = "$ann" ]; then
     no "  …but the annotation names no job at all: ${ann:-<no ::error:: line>}"
@@ -1457,25 +1543,25 @@ gate_names() {
 
 # (a) the happy path: a console PR, everything ran and passed
 gate "full run, all green" 0 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (b) a legitimate docs-only skip greens the required context
 gate "docs-only PR, console jobs legitimately skipped" 0 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped R_ESCAPE=success \
   O_CONSOLE=false
 gate_says "legitimately not dispatched" "…and says so, rather than claiming the harness passed"
 
 # (c) an upstream FAILURE reds it — 720 red harness tests may never merge green
 gate "console-unit failed" 1 \
-  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 gate_names "console-unit" "cssom-parity"
 
 # (d) THE BYPASS THIS SLICE EXISTS TO CLOSE: cssom-parity `skipped` only because
 #     its dependency died, while the dispatcher said it WAS needed.
 gate "cssom-parity skipped behind a live gate (upstream died)" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "its gate is 'true', not 'false'" "…and names the reason (a skip is not a pass)"
 # …and the SKIP arm accumulates too, not just the failure arm: this red never
@@ -1485,32 +1571,32 @@ gate_names "cssom-parity" "console-unit"
 
 # (e) the dispatcher itself failing reds it, with empty outputs
 gate "dispatcher failed, output empty" 1 \
-  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped R_ESCAPE=success \
   O_CONSOLE=
 
 # (f) the unfiltered ratchet may never skip
 gate "path-escape skipped" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=skipped \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=skipped \
   O_CONSOLE=true
 
 # (g) cancelled is not success
 gate "a cancelled upstream" 1 \
-  R_CHANGES=success R_UNIT=cancelled R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=cancelled R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (h) anything unrecognised is red — "cannot tell" is a failure, not a pass
 gate "an unrecognised result value" 1 \
-  R_CHANGES=success R_UNIT=neutral R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=neutral R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (i) an EMPTY result (a job silently dropped from `needs`) is red
 gate "an empty result string" 1 \
-  R_CHANGES=success R_UNIT= R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT= R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (j) a garbage gate value must not license a skip
 gate "skip against a garbage gate value" 1 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped R_ESCAPE=success \
   O_CONSOLE=maybe
 
 # (k1) THE SILENT OMISSION, MADE LOUD (D209). Adding a job to `needs:` and to
@@ -1520,7 +1606,7 @@ gate "skip against a garbage gate value" 1 \
 #      demands the gate go red AND name it — delete the `decide "overflow-guard"`
 #      line and this test is the thing that notices.
 gate "overflow-guard failed" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "overflow-guard: failure" "…and names overflow-guard (its decide line is really invoked)"
 #      (The arithmetic half of that invariant — one `decide` per `needs:` entry
@@ -1543,7 +1629,7 @@ gate_says "overflow-guard: failure" "…and names overflow-guard (its decide lin
 
 # (l) A REFUSAL IS NAMED AS A REFUSAL — and names a cause SET, never one cause.
 gate "cssom-parity REFUSED (a verdict is published)" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_CSSOM=REFUSED
 gate_says "REFUSED TO MEASURE" "…and says the instrument refused, not that CSS is broken"
 gate_says "ONE code over MANY causes" "…and says exit 2 is one code over many causes"
@@ -1565,7 +1651,7 @@ gate_denies "ENVIRONMENT REFUSAL" "…and no longer labels every refusal an envi
 #     workflow's `env:`, or the 4th argument from its `decide` line, and this
 #     case is what notices.
 gate "console-unit REFUSED (the refusal the gate could not see)" 1 \
-  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_UNIT=REFUSED
 gate_says "console-unit: failure" "…and names console-unit"
 gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal rather than a bare failure"
@@ -1581,7 +1667,7 @@ gate_says "(exit 2): console-unit" "…and carries it into the refusals tally by
 #      MEASURED an uncovered read. The structural half of this is the
 #      exit2_without_verdict_output fact in case 8; this is the behavioural half.
 gate "path-escape REFUSED (the last unwired refusal)" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=failure \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=failure \
   O_CONSOLE=true V_ESCAPE=REFUSED
 gate_says "path-escape ratchet: failure" "…and names the ratchet"
 gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal, not a measured coverage defect"
@@ -1600,7 +1686,7 @@ gate_says "(exit 2): path-escape ratchet" "…and carries it into the refusals t
 #      NOTE THE GATE VALUE: the dispatcher is a NEVER-gated job, so this run also
 #      exercises the refusal arm on a job that can never legitimately skip.
 gate "changes (dispatcher) REFUSED (the exemption this slice deleted)" 1 \
-  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped R_ESCAPE=success \
   O_CONSOLE= V_CHANGES=REFUSED
 gate_says "changes (dispatcher): failure" "…and names the dispatcher"
 gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal, not a bare dispatcher death"
@@ -1609,7 +1695,7 @@ gate_names "changes (dispatcher)" "path-escape ratchet"
 
 # (n) …and BOTH refusals in one run are both named, in decide order.
 gate "console-unit and cssom-parity both REFUSED" 1 \
-  R_CHANGES=success R_UNIT=failure R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_UNIT=REFUSED V_CSSOM=REFUSED
 gate_says "(exit 2): console-unit cssom-parity" "…and the tally names two refusals, not one"
 
@@ -1619,7 +1705,7 @@ gate_says "(exit 2): console-unit cssom-parity" "…and the tally names two refu
 #     the un-wrapped steps in console-unit (node --check, the two --test runs,
 #     smoke, the css gate) are precisely that case.
 gate "cssom-parity failed, no verdict published" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "cssom-parity: failure" "…and still names the failing job"
 gate_denies "REFUSED TO MEASURE" "…and does NOT manufacture a refusal out of an absent verdict"
@@ -1628,21 +1714,21 @@ gate_says "not in the allow-set" "…and reaches the plain red conclusion"
 # (p) a MEASURED defect is the opposite claim, and must not borrow the
 #     refusal's words.
 gate "tier-floor-render MEASURED_DEFECT" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_TIER=MEASURED_DEFECT
 gate_says "This one IS about the console's own bytes" "…and says the defect is real and console-side"
 gate_denies "REFUSED TO MEASURE" "…and does not call a measured defect a refusal"
 
 # (q) a verdict outside the published vocabulary is "cannot tell", not a pass.
 gate "overflow-guard publishes an unknown verdict" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_OVERFLOW=BANANA
 gate_says "outside the published vocabulary" "…and refuses to interpret it"
 
 # (r) verdict=OK on a FAILED job — the instrument said clean and the job died
 #     anyway. Still red, and still says why it cannot tell.
 gate "cssom-parity publishes OK but the job failed" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_CSSOM=OK
 gate_says "the instrument said clean and the job" "…and names the contradiction"
 
@@ -1654,17 +1740,41 @@ gate_says "the instrument said clean and the job" "…and names the contradictio
 #     exit 2 are indistinguishable at the aggregator by design, so each arm is
 #     told apart ONLY by the verdict the job publishes; drive both.
 gate "modal-oracle MEASURED_DEFECT" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_MODAL=MEASURED_DEFECT
 gate_says "This one IS about the console's own bytes" "…and says the modal defect is real and console-side"
 gate_denies "REFUSED TO MEASURE" "…and does not call a measured modal defect a refusal"
 gate_names "modal-oracle" "cssom-parity"
 
 gate "modal-oracle REFUSED" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_MODAL=REFUSED
 gate_says "REFUSED TO MEASURE" "…and says the oracle refused, not that the modal is broken"
 gate_names "modal-oracle" "cssom-parity"
+
+# (s2) THE ADJACENCY GUARD'S TWO ARMS, BOTH DRIVEN, AND THE MUTATION THEY EXIST
+#      FOR. Modelled on (s) above, and added for the same reason one commit
+#      later: `adjacency-guard` was wired into `needs:`, `env:` and the decide
+#      ladder, but until these two cases `R_ADJACENCY` was EQUAL to `R_MODAL`
+#      on every fixture line in this file. Under that equality the decide line
+#      could read "${R_MODAL}" by mistype and EVERY case here would still pass
+#      — the Console gate would then green over a failed adjacency-guard, which
+#      is the whole failure this job was added to prevent. These two are the
+#      only lines where the two variables DISAGREE, so they are what turns that
+#      mistype red. Same verdict-channel discipline as (s): exit 1 and exit 2
+#      are indistinguishable at the aggregator, so drive both arms by verdict.
+gate "adjacency-guard MEASURED_DEFECT" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=failure R_ESCAPE=success \
+  O_CONSOLE=true V_ADJACENCY=MEASURED_DEFECT
+gate_says "This one IS about the console's own bytes" "…and says the adjacency defect is real and console-side"
+gate_denies "REFUSED TO MEASURE" "…and does not call a measured adjacency defect a refusal"
+gate_names "adjacency-guard" "cssom-parity"
+
+gate "adjacency-guard REFUSED" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=failure R_ESCAPE=success \
+  O_CONSOLE=true V_ADJACENCY=REFUSED
+gate_says "REFUSED TO MEASURE" "…and says the guard refused, not that the adjacency is broken"
+gate_names "adjacency-guard" "cssom-parity"
 
 # (k) the aggregator's own step body must be able to fail. If the extracted
 #     script were empty or unparseable every case above would "pass" at exit 0

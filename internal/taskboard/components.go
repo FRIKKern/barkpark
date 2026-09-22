@@ -442,6 +442,24 @@ func priorityLabel(p string) string {
 	return p
 }
 
+// draftLabel is THE DRAFT LABEL CONTRACT's word, spelled once for the whole
+// package. Studio's reader paints data-role="draft", text "DRAFT", amber
+// (var(--warn)) — deliberately the SAME hue as `blocked`, because a draft is
+// "not the real row yet", not an error. draftChip is the styled form every
+// reader in this package uses, so the board card and the detail view can never
+// disagree about the word or the hue.
+const draftLabel = "DRAFT"
+
+// draftChip is the amber DRAFT marker, or "" for a row that is not a draft.
+// Returning "" (rather than a blank-width placeholder) keeps a published row's
+// paint byte-identical to the pre-marker board — the aliveness budget.
+func draftChip(t Task) string {
+	if !t.Draft {
+		return ""
+	}
+	return warnStyle.Render(draftLabel)
+}
+
 // blockerCause is the amber `! cause` badge text for a blocked row (spec §3): a
 // derivable short blocker ref/title when the wire carries one, else the plain
 // word. The board Task envelope carries only dependency COUNTS (not the blocker

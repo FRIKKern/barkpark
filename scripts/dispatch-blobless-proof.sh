@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
 # dispatch-blobless-proof.sh [--selftest] [PR ...] — the re-runnable proof behind
-# `filter: blob:none` on the four `changes:` dispatcher jobs (task-4a969b6e57d82390).
+# `filter: blob:none` on the diff-only `changes:`/dispatcher jobs (task-4a969b6e57d82390).
 #
-# THE CLAIM. Replacing `fetch-depth: 0` with `filter: blob:none` on the dispatcher
-# checkout in .github/workflows/{cloud,compose-smoke,console-harness,required-checks-drift}.yml
-# leaves every computed changed-path set IDENTICAL while cutting the checkout cost.
+# THE CLAIM. ADDING `filter: blob:none` BESIDE `fetch-depth: 0` (never replacing
+# it — see THE TRAP below) on the dispatcher checkout leaves every computed
+# changed-path set IDENTICAL while cutting the checkout cost.
+#
+# WHERE IT IS WIRED, and this list is the file's own claim about the tree, so
+# re-derive it rather than trust it:
+#     grep -l 'filter: blob:none' .github/workflows/*.yml
+# Wave 1 (2026-09-03, this script's original subject): cloud, compose-smoke,
+# console-harness, required-checks-drift — later also ci and elixir.
+# Wave 2 (2026-09-17, task-dee226be3107a98b): the four always-firing diff-only
+# dispatchers that never took the fix — shell-harnesses, astro-finder-render-smoke,
+# posix-vacuous-green-census, pipefail-sigpipe-scan. Their checkout steps were
+# measured at 36s/36s/28s/28s on merged head b71d22875b against 13-15s for the
+# wave-1 dispatchers on the same head.
 #
 # WHY NOT SHALLOW — this is the correctness argument, and it is why the row that
 # asked for `fetch-depth: 2` was rewritten rather than built as written. Those

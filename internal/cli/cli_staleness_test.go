@@ -231,7 +231,7 @@ func TestWhoamiCLIFreshnessSurfacesStaleDevBuild(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(wd) })
 
-	c := whoamiCLIFreshness()
+	c := whoamiCLIFreshness(nil)
 	if c.Status != onbCLIBehind {
 		t.Fatalf("whoami cli status = %q, want %q — whoami is where the fleet reads freshness", c.Status, onbCLIBehind)
 	}
@@ -291,7 +291,7 @@ func stalenessChannelFixture(t *testing.T, changedPath, ver, latest string) {
 func TestWhoamiCLIFreshnessRefusesGreenWhenTheChannelItselfIsStale(t *testing.T) {
 	stalenessChannelFixture(t, "internal/cli/run.go", "1.21.0", "1.21.0")
 
-	c := whoamiCLIFreshness()
+	c := whoamiCLIFreshness(nil)
 	if c.Status != onbCLIBehind {
 		t.Fatalf("status = %q, want %q — matching the newest cli-v tag is not carrying the code", c.Status, onbCLIBehind)
 	}
@@ -319,7 +319,7 @@ func TestWhoamiCLIFreshnessRefusesGreenWhenTheChannelItselfIsStale(t *testing.T)
 func TestWhoamiCLIFreshnessKeepsGreenWhenTheChannelCarriesTheCLICode(t *testing.T) {
 	stalenessChannelFixture(t, "docs/unrelated.md", "1.21.0", "1.21.0")
 
-	c := whoamiCLIFreshness()
+	c := whoamiCLIFreshness(nil)
 	if c.Status != onbCLIUpToDate {
 		t.Fatalf("status = %q, want %q — no internal/cli change landed after this release", c.Status, onbCLIUpToDate)
 	}
@@ -341,7 +341,7 @@ func TestWhoamiCLIFreshnessMakesNoChannelClaimWithoutACommitStamp(t *testing.T) 
 	stalenessChannelFixture(t, "internal/cli/run.go", "1.21.0", "1.21.0")
 	withStamp(t, "", "") // unstamped: a release tarball run outside any checkout
 
-	c := whoamiCLIFreshness()
+	c := whoamiCLIFreshness(nil)
 	if c.Status != onbCLIUpToDate {
 		t.Fatalf("status = %q, want %q — with no provenance there is no contrary reading to act on", c.Status, onbCLIUpToDate)
 	}
@@ -359,7 +359,7 @@ func TestOnboardingCLIFreshnessRefusesGreenWhenTheChannelItselfIsStale(t *testin
 	onboardingLatestRelease = func() (string, error) { return "1.21.0", nil }
 	t.Cleanup(func() { onboardingLatestRelease = orig })
 
-	c := onboardingCLIFreshness()
+	c := onboardingCLIFreshness(nil)
 	if c.Status != onbCLIBehind || c.UpToDate == nil || *c.UpToDate {
 		t.Fatalf("doctor leg = %+v, want behind/false — the resolved release is itself behind internal/cli", c)
 	}

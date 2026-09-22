@@ -1,6 +1,6 @@
 defmodule Barkpark.Content.TagRegistryProvenanceTest do
   @moduledoc """
-  THE SECOND UNGUARDED BOOT-TIME WRITER (PDS-D125/D126).
+  THE SECOND UNGUARDED BOOT-TIME WRITER (PDS-D125/PDS-D126).
 
   `bootstrap_guard_test.exs` proves the pull-provenance guard over
   `Plugins.Bootstrap` — the plugin-registry walk. It has ZERO `tag` coverage,

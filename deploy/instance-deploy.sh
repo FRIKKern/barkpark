@@ -930,6 +930,36 @@ arm_caddy_maintenance() {
         mv "$ubak" "$CADDYFILE"
         log "caddy validate rejected the maintenance-handler scoping — reverted, Caddy untouched"
       fi
+    fi
+    # ALREADY ARMED, SECOND DEFECT — the block emits an HTML document but sets
+    # no Content-Type, and Caddy's `respond` then defaults the response to
+    # `text/plain; charset=utf-8`. MEASURED against real Caddy 2.11.4: during a
+    # backend gap the branded "Back in a moment" page is delivered as PLAIN
+    # TEXT, so a browser paints the raw `<!doctype html>…` source — markup,
+    # inline <style> and all — instead of the page. The STATUS was always
+    # honest (503 + Retry-After, on every path incl. /assets/*.css); it is the
+    # RENDERING that was broken. Upgrade in place on the same
+    # backup/validate/auto-revert contract as the scoping upgrade above, so
+    # boxes armed before this change are fixed on their next deploy rather than
+    # waiting for a re-arm that the marker guard will never allow.
+    if ! grep -qE '^[[:space:]]*header[[:space:]]+Content-Type[[:space:]]+"text/html' "$CADDYFILE"; then
+      local cbak; cbak="${CADDYFILE}.bak.maint-ctype.$(date -u +%Y%m%d%H%M%S)"
+      cp -a "$CADDYFILE" "$cbak"
+      local ctmp; ctmp="$(mktemp)"
+      # Anchored on the maintenance handler's OWN Retry-After line. `header
+      # Retry-After "15"` appears nowhere else in any config this script arms.
+      sed -E 's|^([[:space:]]*)header[[:space:]]+Retry-After[[:space:]]+"15"[[:space:]]*$|\1header Retry-After "15"\n\1header Content-Type "text/html; charset=utf-8"|' "$CADDYFILE" > "$ctmp" \
+        && mv "$ctmp" "$CADDYFILE" || { rm -f "$ctmp"; mv "$cbak" "$CADDYFILE"; log "could not rewrite $CADDYFILE to set the maintenance Content-Type — Caddy untouched"; return 0; }
+      chmod --reference="$cbak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+      chown --reference="$cbak" "$CADDYFILE" 2>/dev/null || true
+      if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+        rm -f "$cbak"
+        systemctl reload caddy 2>/dev/null || true
+        log "set Content-Type: text/html on the already-armed maintenance handler (the 503 page rendered as plain text)"
+      else
+        mv "$cbak" "$CADDYFILE"
+        log "caddy validate rejected the maintenance Content-Type upgrade — reverted, Caddy untouched"
+      fi
       return 0
     fi
     log "caddy maintenance page already armed"; return 0
@@ -944,6 +974,7 @@ arm_caddy_maintenance() {
   local block; block="$(cat <<'MAINT'
 	handle_errors 502 503 504 {
 		header Retry-After "15"
+		header Content-Type "text/html; charset=utf-8"
 		respond 503 {
 			body <<BARKPARK_MAINTENANCE
 <!doctype html>

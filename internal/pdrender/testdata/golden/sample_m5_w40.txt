@@ -30,31 +30,29 @@ Write to the terminal
 Flush the composed lines to stdout.     
 source: tui                             
                                         
-╭────────────────────────────────────╮  
-│ Info card                          │  
-│ An informational card carries the  │  
-│ neutral-info tone border.          │  
-╰────────────────────────────────────╯  
+╭──────────────────────────────────────╮
+│ Info card                            │
+│ An informational card carries the    │
+│ neutral-info tone border.            │
+╰──────────────────────────────────────╯
                                         
-╭────────────────────────────────────╮  
-│ OK card                            │  
-│ A success card is tinted with the  │  
-│ ok/success tone.                   │  
-╰────────────────────────────────────╯  
+╭──────────────────────────────────────╮
+│ OK card                              │
+│ A success card is tinted with the    │
+│ ok/success tone.                     │
+╰──────────────────────────────────────╯
                                         
-╭────────────────────────────────────╮  
-│ Warn card                          │  
-│ A warning card draws attention     │  
-│ with                               │  
-│ the warn tone border.              │  
-╰────────────────────────────────────╯  
+╭──────────────────────────────────────╮
+│ Warn card                            │
+│ A warning card draws attention with  │
+│ the warn tone border.                │
+╰──────────────────────────────────────╯
                                         
-╭────────────────────────────────────╮  
-│ Danger card                        │  
-│ A danger card signals a            │  
-│ destructive                        │  
-│ or failing state.                  │  
-╰────────────────────────────────────╯  
+╭──────────────────────────────────────╮
+│ Danger card                          │
+│ A danger card signals a destructive  │
+│ or failing state.                    │
+╰──────────────────────────────────────╯
                                         
 ○  open  — backlog — not ready yet      
 ○  ready  — unchecked — claim it now    

@@ -1,8 +1,10 @@
 package template
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -110,6 +112,78 @@ func TestValidateRejects(t *testing.T) {
 	}
 }
 
+// TestFrameworkEnumAcceptsWidenedValues pins the W2 widening ITSELF, not just
+// its rejection half: TestValidateRejects only proves "svelte" fails, which
+// stays true if astro and phoenix are deleted from the switch. This test reds
+// the moment either accepted value is removed from Validate.
+func TestFrameworkEnumAcceptsWidenedValues(t *testing.T) {
+	for _, fw := range []string{FrameworkNextJS, FrameworkAstro, FrameworkPhoenix} {
+		t.Run(fw, func(t *testing.T) {
+			tpl, err := Load([]byte(`{
+  "manifestVersion":"1","name":"x","title":"X","description":"d",
+  "framework":"` + fw + `","schemas":["s.json"]
+}`))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if err := tpl.Validate(); err != nil {
+				t.Fatalf("framework %q must validate (W2 widened the enum): %v", fw, err)
+			}
+		})
+	}
+}
+
+// TestThemeValidation covers the optional `theme` field end to end: omitted is
+// legal, each shipped palette is accepted, and an unknown palette is rejected
+// by name. Before this test the whole knownThemes map was unexercised — every
+// branch of the theme check could be deleted with the suite still green.
+func TestThemeValidation(t *testing.T) {
+	load := func(t *testing.T, themeJSON string) *Template {
+		t.Helper()
+		tpl, err := Load([]byte(`{
+  "manifestVersion":"1","name":"x","title":"X","description":"d",
+  "framework":"nextjs","schemas":["s.json"]` + themeJSON + `
+}`))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		return tpl
+	}
+
+	t.Run("omitted", func(t *testing.T) {
+		tpl := load(t, "")
+		if tpl.Theme != "" {
+			t.Fatalf("Theme = %q, want empty", tpl.Theme)
+		}
+		if err := tpl.Validate(); err != nil {
+			t.Fatalf("theme is optional: %v", err)
+		}
+	})
+
+	for _, theme := range []string{"evergreen", "ember", "fjord", "charple"} {
+		t.Run("accepts/"+theme, func(t *testing.T) {
+			tpl := load(t, `,"theme":"`+theme+`"`)
+			if tpl.Theme != theme {
+				t.Fatalf("Theme = %q, want %q", tpl.Theme, theme)
+			}
+			if err := tpl.Validate(); err != nil {
+				t.Fatalf("shipped palette %q must validate: %v", theme, err)
+			}
+		})
+	}
+
+	t.Run("rejects unknown", func(t *testing.T) {
+		tpl := load(t, `,"theme":"neon"`)
+		err := tpl.Validate()
+		if err == nil {
+			t.Fatal("expected an unknown theme to be rejected, got nil")
+		}
+		if !strings.Contains(err.Error(), `unknown theme "neon"`) {
+			t.Fatalf("error %q does not name the bad theme", err.Error())
+		}
+	})
+}
+
 // TestScriptSeedNoPublishType: a "script" seed publishes itself, so publishType
 // is NOT required even with publish=true.
 func TestScriptSeedNoPublishType(t *testing.T) {
@@ -125,18 +199,35 @@ func TestScriptSeedNoPublishType(t *testing.T) {
 	}
 }
 
-// realManifests is the drift gate: every checked-in barkpark.template.json must
-// load, validate, AND its referenced schema/seed paths must exist on disk.
-// A broken or drifted manifest fails CI here.
+// TestRealManifests is the drift gate: EVERY checked-in barkpark.template.json
+// in the repo must load, validate, AND have its referenced schema/seed paths
+// present on disk.
+//
+// Enrolment is BY PREDICATE, not by a written-down list. The list this replaced
+// named three files while the repo carried fourteen: search-starter and
+// astro-search-starter — the templates the W2 catalog family exists for — were
+// validated by no Go test at all, and every embedded and mirrored copy was
+// likewise unchecked. A list cannot enrol a template nobody remembered to add
+// to it; a predicate enrols it the moment the file lands.
 func TestRealManifests(t *testing.T) {
 	root := repoRoot(t)
-	manifests := []string{
-		filepath.Join(root, "templates", "place-directory", "barkpark.template.json"),
-		filepath.Join(root, "js", "packages", "create-barkpark-app", "templates", "website-starter", "barkpark.template.json"),
-		filepath.Join(root, "js", "packages", "create-barkpark-app", "templates", "blog-starter", "barkpark.template.json"),
+	manifests := findManifests(t, root)
+
+	// A floor, so a walk that silently finds nothing cannot pass vacuously:
+	// zero subtests is also zero failures. The number is deliberately below the
+	// current count — it is a "the walk worked" assertion, not a census to
+	// maintain.
+	const floor = 10
+	if len(manifests) < floor {
+		t.Fatalf("found only %d barkpark.template.json files under %s, want >= %d — the walk is broken, not the repo", len(manifests), root, floor)
 	}
+
 	for _, mf := range manifests {
-		t.Run(filepath.Base(filepath.Dir(mf)), func(t *testing.T) {
+		rel, err := filepath.Rel(root, mf)
+		if err != nil {
+			rel = mf
+		}
+		t.Run(filepath.ToSlash(rel), func(t *testing.T) {
 			data, err := os.ReadFile(mf)
 			if err != nil {
 				t.Fatalf("read %s: %v", mf, err)
@@ -149,9 +240,9 @@ func TestRealManifests(t *testing.T) {
 				t.Fatalf("Validate %s: %v", mf, err)
 			}
 			dir := filepath.Dir(mf)
-			for _, rel := range tpl.Schemas {
-				if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
-					t.Errorf("%s: schema path %q does not exist: %v", mf, rel, err)
+			for _, s := range tpl.Schemas {
+				if _, err := os.Stat(filepath.Join(dir, s)); err != nil {
+					t.Errorf("%s: schema path %q does not exist: %v", mf, s, err)
 				}
 			}
 			if tpl.Seed != nil {
@@ -161,6 +252,44 @@ func TestRealManifests(t *testing.T) {
 			}
 		})
 	}
+}
+
+// findManifests walks the repo for every barkpark.template.json, skipping the
+// directories that hold generated or vendored copies of other people's files
+// (node_modules, build output, VCS metadata). Result is sorted so subtest names
+// and failure order are deterministic.
+func findManifests(t *testing.T, root string) []string {
+	t.Helper()
+	skip := map[string]bool{
+		"node_modules": true,
+		".git":         true,
+		"_build":       true,
+		"deps":         true,
+		"dist":         true,
+		".next":        true,
+		"vendor":       true,
+	}
+	var out []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if p != root && skip[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() == "barkpark.template.json" {
+			out = append(out, p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s for manifests: %v", root, err)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // repoRoot walks up from the package dir to the module root (the dir with go.mod).

@@ -4,6 +4,9 @@
 # cross-built provisioner binary, then executes it).
 #
 #   bash cp-deploy.sh [path-to-prebuilt-linux-amd64-provisioner]
+#   bash cp-deploy.sh --rollback-preflight   # read-only: can we roll back?
+#   bash cp-deploy.sh --rollback             # recreate the dormant slot with
+#                                            # CURRENT cloud/.env, then flip
 #
 # ZERO-DOWNTIME blue/green: the control plane is two compose slots behind
 # profiles (blue=:4100, green=:4101); exactly one serves at a time and host
@@ -83,6 +86,21 @@ else
   bp_curl_code() { local __c; __c="$(curl -w '%{http_code}' "$@")" || return $?; printf '%s' "$__c"; }
 fi
 
+# ---- MODE (gr-blk-cp-deploy-rollback-stale-env) -----------------------------
+# The default mode is the deploy. `--rollback` / `--rollback-preflight` select
+# the EMERGENCY path, which used to exist only as prose in a comment near the
+# flip. Prose is the wrong medium for this: it is followed by a human under
+# pressure, on a box, with production already broken, and every step of it is a
+# step that can be typed wrong. Worse, the recipe it replaced taught
+# `docker start` — see do_rollback below for why that silently serves stale env.
+MODE=deploy
+case "${1:-}" in
+  --rollback)           MODE=rollback; shift ;;
+  --rollback-preflight) MODE=rollback-preflight; shift ;;
+  --*)
+    echo "[cp-deploy] unknown flag: $1 (want --rollback or --rollback-preflight)" >&2
+    exit 2 ;;
+esac
 PROV_BIN="${1:-}"
 log() { echo "[cp-deploy $(date -u +%H:%M:%S)] $*"; }
 compose() { docker compose -f "$COMPOSE_FILE" --profile blue --profile green "$@"; }
@@ -190,6 +208,156 @@ if ! flock -n 9; then
 fi
 
 cd "$APP" || { log "no $APP"; exit 10; }
+
+# ============================================================================
+# ROLLBACK — RECREATE, NEVER `docker start` (gr-blk-cp-deploy-rollback-stale-env)
+# ============================================================================
+# WHY THIS IS CODE AND NOT A COMMENT. The flip below keeps the old slot's
+# container STOPPED so a human can go back in seconds, and this script used to
+# document that return trip as "flip the Caddyfile port back, reload caddy,
+# `docker start` it". Two things are wrong with that sentence and both of them
+# fail SILENTLY, which is the worst possible property for the one path you take
+# when production is already broken:
+#
+#   1. `docker start` RESUMES AN EXISTING CONTAINER OBJECT. It replays the
+#      environment baked in at the instant that container was CREATED and
+#      recomputes nothing. A slot that predates a cloud/.env change therefore
+#      comes back serving the OLD env: a variable added since (say
+#      PLATFORM_ADMIN_EMAILS) is simply absent — no error, no warning, a 200 on
+#      every probe, and operator access quietly gone. The AUTOMATED path never
+#      has this problem because the deploy exports cloud/.env before build and
+#      up, so the compose service config-hash moves when a variable does and
+#      `up` RECREATES rather than reuses. The manual path must take that door.
+#
+#   2. IT FLIPPED CADDY FIRST. The prose recipe seds the Caddyfile back before
+#      the old slot is running at all, so between the reload and the start the
+#      public front points at a dead port. This function inverts that order:
+#      recreate, health-gate, and only THEN flip — the same order the deploy
+#      uses, for the same reason.
+#
+# AND IT FAILS CLOSED. Every precondition below REFUSES with a named reason and
+# a distinct exit code rather than doing its best. A rollback that half-works
+# looks like it worked, and the operator stops looking.
+rollback_refuse() { log "REFUSING ROLLBACK: $1"; return "$2"; }
+
+do_rollback() {
+  preflight_only="${1:-0}"
+
+  # (a) compose file. Without it there is no service to recreate at all.
+  if [ ! -r "$COMPOSE_FILE" ]; then
+    rollback_refuse "no readable $COMPOSE_FILE — this box has no compose slots to recreate" 20
+    return $?
+  fi
+
+  # (b) cloud/.env. THE POINT OF THE WHOLE FUNCTION. A recreate without it
+  # boots the slot with an EMPTY environment; `docker start` would have
+  # "worked" here, which is exactly the trap. Refuse and say so.
+  if [ ! -r "$APP/cloud/.env" ]; then
+    rollback_refuse "$APP/cloud/.env is missing or unreadable, so a recreate cannot pick up current configuration. Do NOT fall back to 'docker start': that resumes the dormant container with the environment baked in when it was CREATED, serving stale secrets and allowlists with no signal. Restore cloud/.env first." 21
+    return $?
+  fi
+  set -a
+  # shellcheck disable=SC1091
+  . "$APP/cloud/.env"
+  set +a
+
+  # (c) the rollback image. Both slots are `image: cloud-control_plane:latest`
+  # in cloud/docker-compose.yml, so a recreate WITHOUT the retag brings back the
+  # code you are rolling back FROM — a rollback that rolls nothing back and
+  # reports success.
+  if ! docker image inspect cloud-control_plane:rollback >/dev/null 2>&1; then
+    rollback_refuse "image cloud-control_plane:rollback does not exist (never deployed here, or pruned). Both slots run cloud-control_plane:latest, so recreating now would reinstall the CURRENT code under the guise of a rollback." 22
+    return $?
+  fi
+
+  # (d) which slot serves, and which one we are going back to. Derived from the
+  # SAME Caddyfile marker the deploy flip uses, never guessed.
+  BLUE_PORT="${PORT_BLUE:-4100}"
+  GREEN_PORT="${PORT_GREEN:-4101}"
+  RB_LIVE_PORT="$(grep -oE "localhost:(${BLUE_PORT}|${GREEN_PORT})" "$CADDYFILE" | head -1 | cut -d: -f2)"
+  if [ -z "$RB_LIVE_PORT" ]; then
+    rollback_refuse "$CADDYFILE names neither :$BLUE_PORT nor :$GREEN_PORT as 'localhost:<port>' — the live slot cannot be derived, and guessing it would flip the public front onto a dead port." 23
+    return $?
+  fi
+  if [ "$RB_LIVE_PORT" = "$BLUE_PORT" ]; then
+    RB_SLOT=green; RB_PORT="$GREEN_PORT"
+  else
+    RB_SLOT=blue; RB_PORT="$BLUE_PORT"
+  fi
+  if [ "$RB_PORT" = "$RB_LIVE_PORT" ]; then
+    rollback_refuse "rollback slot '$RB_SLOT' resolves to :$RB_PORT, the port Caddy already serves (PORT_BLUE and PORT_GREEN agree in cloud/.env) — recreating there would tear down the LIVE container." 24
+    return $?
+  fi
+  log "rollback: live :$RB_LIVE_PORT -> recreating slot '$RB_SLOT' on :$RB_PORT from cloud/.env + cloud-control_plane:rollback"
+
+  if [ "$preflight_only" = 1 ]; then
+    # Read-only. It has touched no image tag, no container and no Caddyfile.
+    echo "ROLLBACK_SLOT=$RB_SLOT"
+    echo "ROLLBACK_PORT=$RB_PORT"
+    echo "LIVE_PORT=$RB_LIVE_PORT"
+    log "rollback preflight OK — nothing was changed"
+    return 0
+  fi
+
+  # (e) retag, then RECREATE. --force-recreate is what makes the current
+  # cloud/.env reach the container (it is the whole fix); --no-build keeps this
+  # a seconds-long operation on the image just retagged.
+  if ! docker tag cloud-control_plane:rollback cloud-control_plane:latest; then
+    rollback_refuse "could not retag cloud-control_plane:rollback -> :latest; a recreate now would boot the CURRENT code" 22
+    return $?
+  fi
+  if ! compose up -d --force-recreate --no-build "control_plane_$RB_SLOT"; then
+    rollback_refuse "compose could not recreate control_plane_$RB_SLOT — Caddy was NOT touched, the slot on :$RB_LIVE_PORT is still serving" 25
+    return $?
+  fi
+
+  # (f) health-gate BEFORE the flip. The prose recipe had no gate at all.
+  rb_ok=0
+  for _ in $(seq 1 36); do
+    code="$(bp_curl_code -s -o /dev/null --max-time 6 "http://localhost:${RB_PORT}/" || echo 000)"
+    # `case`, not `echo | grep -q`: under this file's `pipefail` the reader
+    # exits at the first match, `echo` takes SIGPIPE and pipefail hands back 141,
+    # so a HEALTHY code reads as unhealthy. `$code` is short enough that it has
+    # never fired here, but the shape is the hazard and a pattern match needs no
+    # pipe at all (fix 1 in scripts/pipefail-sigpipe-scan.sh's preference order).
+    case "$code" in 200|301|302) rb_ok=1; log "rollback slot $RB_SLOT healthy ($code)"; break ;; esac
+    sleep 5
+  done
+  if [ "$rb_ok" != 1 ]; then
+    rollback_refuse "recreated slot $RB_SLOT never became healthy on :$RB_PORT — Caddy was NOT flipped, so whatever is serving on :$RB_LIVE_PORT keeps serving. Roll forward or fix the image." 26
+    return $?
+  fi
+
+  # (g) flip, with the same did-it-land assertion the deploy uses: a sed that
+  # matched nothing leaves the file byte-identical and every check after it
+  # still passes.
+  cp -a "$CADDYFILE" "$CADDYFILE.pre-rollback"
+  sed -i "s/localhost:${RB_LIVE_PORT}/localhost:${RB_PORT}/g" "$CADDYFILE"
+  if grep -q "localhost:${RB_LIVE_PORT}" "$CADDYFILE" || ! grep -q "localhost:${RB_PORT}" "$CADDYFILE"; then
+    cp -a "$CADDYFILE.pre-rollback" "$CADDYFILE"
+    rollback_refuse "the Caddyfile rewrite did not land (upstream is not spelled 'localhost:<slot port>') — file restored, nothing flipped" 27
+    return $?
+  fi
+  if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
+    cp -a "$CADDYFILE.pre-rollback" "$CADDYFILE"
+    rollback_refuse "Caddyfile invalid after the rollback flip — file restored, nothing flipped" 27
+    return $?
+  fi
+  if ! systemctl reload caddy; then
+    cp -a "$CADDYFILE.pre-rollback" "$CADDYFILE"; systemctl reload caddy || true
+    rollback_refuse "caddy reload failed — Caddyfile restored" 27
+    return $?
+  fi
+  log "ROLLED BACK: Caddy now -> :$RB_PORT (slot $RB_SLOT, recreated with current cloud/.env)"
+  log "the slot on :$RB_LIVE_PORT is left RUNNING on purpose — inspect it, then stop it by hand once you are satisfied"
+  return 0
+}
+
+case "$MODE" in
+  rollback)           do_rollback 0; exit $? ;;
+  rollback-preflight) do_rollback 1; exit $? ;;
+esac
+# ---- end ROLLBACK ----------------------------------------------------------
 OLD="$(git rev-parse HEAD)"
 log "current=$OLD"
 
@@ -352,7 +520,9 @@ BARKPARK_PROVISIONER_SHA=""
 if [ -n "$PROV_BIN" ] && [ -f "$PROV_BIN" ]; then
   [ -x "$PROV_BIN" ] || chmod 0755 "$PROV_BIN" 2>/dev/null || true
   _prov_sha="$("$PROV_BIN" --version 2>/dev/null | head -1 | tr -d '[:space:]')"
-  if printf '%s' "$_prov_sha" | grep -qE '^[0-9a-f]{40}$'; then
+  # Here-string, not `printf | grep -q` — a producer process that can be killed
+  # by the reader's early exit is what returns 141 under pipefail.
+  if grep -qE '^[0-9a-f]{40}$' <<<"$_prov_sha"; then
     BARKPARK_PROVISIONER_SHA="$_prov_sha"
   else
     log "provisioner binary carries NO usable build sha (--version gave '${_prov_sha}') — reporting absent"
@@ -471,8 +641,19 @@ SERVING_CONTAINER="${COMPOSE_PROJECT_NAME:-cloud}-control_plane_${ACTIVE_SLOT}-1
 # nothing. Never fatal: this runs on a path that is already failing.
 clear_wedged_endpoints() {
   cleared=0
+  seen=0
+  # MATERIALISED, not consumed straight out of the heredoc's command
+  # substitution: the count identity below needs an enumeration side that a
+  # short read cannot move.
+  endpoints="$(docker network inspect "$CP_NETWORK" --format '{{range $id, $c := .Containers}}{{$id}} {{$c.Name}}
+{{end}}' 2>/dev/null)"
+  enumerated="$(printf '%s' "$endpoints" | grep -c . || true)"
   while IFS=' ' read -r cid cname; do
     [ -n "$cid" ] && [ -n "$cname" ] || continue
+    # MUT-SPLICE: endpoint-count-identity
+    # THE WORK SIDE — tallied above every `continue`, so it counts endpoints
+    # REACHED. `$cleared` is the OUTCOME, not the coverage.
+    seen=$((seen + 1))
     # GUARD — NEVER unplug the slot that is serving traffic right now. A running
     # container's endpoint is not the fault anyway (the wedge is an endpoint
     # whose container is GONE), but this is the one mistake that would convert a
@@ -496,9 +677,29 @@ clear_wedged_endpoints() {
       log "WARNING: could not disconnect '$cname' from $CP_NETWORK"
     fi
   done <<EOF
-$(docker network inspect "$CP_NETWORK" --format '{{range $id, $c := .Containers}}{{$id}} {{$c.Name}}
-{{end}}' 2>/dev/null)
+$endpoints
 EOF
+  # ── THE COUNT IDENTITY (task-fb55d468c7dea75b) ─────────────────────────────
+  # This loop reads the endpoint list on fd 0. Its body already starts THREE
+  # subprocesses (`docker inspect`, `docker network disconnect`, `log`), and the
+  # next one added that reads stdin — an `ssh`, a `read`, a `docker` subcommand
+  # that prompts — swallows the remaining endpoints and the loop ENDS EARLY with
+  # no error and no non-zero status. `$cleared` is read off this same loop, so a
+  # sweep that reached endpoint 1 of 6 leaves the other five WEDGED and reports a
+  # smaller number in the same words as a complete sweep — and the caller then
+  # retries a `compose up -d` against a network that is still blocked, which is
+  # the 2026-07-21 48h47m blackout's exact shape.
+  #
+  # NOT FATAL, deliberately: this runs on a path that is already failing, and a
+  # `die` here would convert a repairable deploy into an aborted one. The
+  # refusal is that the function reports FAILURE (return 1) and says both
+  # numbers, so it can never claim a clearance it did not complete.
+  # MUT-ANCHOR: endpoint-count-identity
+  if [ "$seen" -ne "$enumerated" ]; then
+    log "SHORT ENDPOINT SWEEP on $CP_NETWORK: examined $seen of $enumerated endpoint(s) the daemon listed. The sweep loop ended before the list did (a loop-body child that reads stdin consumes the rest silently), so $((enumerated - seen)) endpoint(s) were never even examined and a stale one may still be wedging the network. Reporting FAILURE rather than '$cleared cleared' — a partial sweep must not read as a completed one."
+    return 1
+  fi
+  # MUT-END: endpoint-count-identity
   [ "$cleared" -gt 0 ]
 }
 
@@ -620,7 +821,9 @@ for _ in $(seq 1 36); do
   # SPA missing) is exactly the broken-deploy shape this gate exists to
   # catch, and 404 waved it through as "healthy". Only redirect/success on
   # '/' counts now.
-  if echo "$code" | grep -qE '^(200|301|302)$'; then ok=1; log "slot $TARGET healthy ($code)"; break; fi
+  # `case`, not `echo | grep -q` — see the rollback probe above: under pipefail
+  # a SIGPIPE'd producer turns a healthy code into an unhealthy verdict.
+  case "$code" in 200|301|302) ok=1; log "slot $TARGET healthy ($code)"; break ;; esac
   sleep 5
 done
 if [ "$ok" != "1" ]; then
@@ -695,31 +898,21 @@ cutover_stamp flip target_port="$TARGET_PORT"
 # image is held by that stopped container, so no prune below can reclaim it) so
 # a human can roll back in seconds.
 #
-# ROLLBACK RECIPE — RECREATE, DO NOT `docker start` (gr-blk-cp-deploy-rollback-
-# stale-env). This comment used to read "flip the Caddyfile port back, reload
-# caddy, `docker start` it". `docker start` RESUMES an existing container
-# object: it replays the environment BAKED IN at the moment that container was
-# created and recomputes nothing. A slot that predates a cloud/.env change is
-# therefore brought back serving the OLD env — a variable added since (say
-# PLATFORM_ADMIN_EMAILS) is simply absent, silently, with no signal anywhere.
-# The AUTOMATED path never has this problem: :104 exports cloud/.env before
-# build and up, so the compose service config-hash changes when a variable does
-# and `up` RECREATES rather than reuses. The manual path must take the same
-# door. On the box, as root:
+# ROLLBACK — RUN THE SCRIPT, DO NOT HAND-TYPE A RECIPE, AND NEVER `docker start`
+# (gr-blk-cp-deploy-rollback-stale-env). On the box, as root:
 #
 #   cd /opt/barkpark
-#   sed -i "s/localhost:<new port>/localhost:<old port>/g" /etc/caddy/Caddyfile
-#   caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
-#   # The rollback image, saved at :59 before the pull. Both slots are
-#   # `image: cloud-control_plane:latest` in cloud/docker-compose.yml, so
-#   # without this retag the recreate would bring back the NEW code.
-#   docker tag cloud-control_plane:rollback cloud-control_plane:latest
-#   set -a; . cloud/.env; set +a          # the same export the deploy uses
-#   docker compose -f cloud/docker-compose.yml --profile blue --profile green \
-#     up -d --force-recreate --no-build control_plane_<old slot>
+#   bash deploy/cp-deploy.sh --rollback-preflight   # read-only; names the slot
+#   bash deploy/cp-deploy.sh --rollback             # retag, recreate, gate, flip
 #
-# `--force-recreate` is what makes the current cloud/.env reach the container;
-# `--no-build` keeps it a seconds-long operation on the image you just retagged.
+# do_rollback() near the top of this file IS that recipe, executable: it takes
+# the same deploy lock, retags cloud-control_plane:rollback -> :latest, sources
+# cloud/.env, `up -d --force-recreate --no-build`s the dormant slot, HEALTH-GATES
+# it, and only then flips Caddy — refusing, loudly and with a distinct exit code,
+# at every precondition it cannot satisfy. Read its header for why `docker start`
+# (which this comment used to teach) silently serves the environment baked into
+# the dormant container at creation time, and why flipping Caddy first pointed
+# the public front at a dead port.
 sleep 5
 for c in $(docker ps -q --filter "publish=$ACTIVE_PORT"); do
   log "stopping old slot container on :$ACTIVE_PORT ($c)"; docker stop -t 30 "$c"

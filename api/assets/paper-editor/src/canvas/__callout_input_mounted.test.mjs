@@ -94,11 +94,23 @@ try {
       assert.equal(host._editor.commands.toggleBlockquote, undefined,
         "unsupported native quote commands cannot create an empty saved block");
       typeText(host._editor, "> Keep this quote intact");
-      assert.equal(host._editor.state.doc.firstChild.type.name, "paragraph");
-      host.flushPendingChanges();
-      assert.deepEqual(ops, [{ op: "patch-block", id: "literal", patch: {
-        content: [{ type: "text", value: "> Keep this quote intact" }],
-      } }]);
+      if (tag === "bp-paper-canvas") {
+        // The canvas turns `> ` into the plain quote block (blockquote), keeping the block's id, and
+        // saves it as a same-id replace-block since patch-block cannot change a type.
+        assert.equal(host._editor.state.doc.firstChild.type.name, "blockquote");
+        host.flushPendingChanges();
+        assert.equal(ops.length, 1);
+        assert.equal(ops[0].op, "replace-block");
+        assert.equal(ops[0].id, "literal");
+        assert.equal(ops[0].block.type, "blockquote");
+        assert.deepEqual(ops[0].block.content, [{ type: "text", value: "Keep this quote intact" }]);
+      } else {
+        assert.equal(host._editor.state.doc.firstChild.type.name, "paragraph");
+        host.flushPendingChanges();
+        assert.deepEqual(ops, [{ op: "patch-block", id: "literal", patch: {
+          content: [{ type: "text", value: "> Keep this quote intact" }],
+        } }]);
+      }
     } finally { host.remove(); }
   }
 

@@ -30,12 +30,39 @@ name: Grip suite
 # preference. Do not "fix" a red here by setting GRIP_LIVE=1 — that is exactly
 # the trap D113 exists to name.
 #
-# WHY PATH-FILTERED, PR AND PUSH ALIKE: no other epic's PR should ever wait on
-# grip's own suite, and a PR-only filter would let a direct push to main go
-# unre-checked forever (the mirrored-list discipline every tenant in
-# shell-harnesses.yml already follows, and doc-gates-paths-parity-check.sh
-# polices generally for that file — this one is a single two-entry pair, kept
-# by hand and by inspection since drift here has only one place to hide).
+# WHY PATH-FILTERED, AND WHY PUSH-ONLY TODAY. This block used to read "PR AND
+# PUSH ALIKE" and describe "a single two-entry pair" of mirrored lists. THAT WAS
+# FALSE from 2026-09-05, when task-33742276cf0a35b1 removed the pull_request arm
+# on CI cost (2.7 min per execution, ~40 PR runs a fortnight) and left the prose
+# describing a pair that no longer existed. A reader — and at least one agent
+# tasked to "restore the PR arm like pipefail-sigpipe-scan got" — takes the
+# comment for the trigger set. Corrected 2026-09-17.
+#
+# WHY THE PR ARM WAS NOT SIMPLY RESTORED, measured 2026-09-17 rather than
+# reasoned from the shape it shares with pipefail-sigpipe-scan.yml (whose arm
+# WAS restored, task-4f360efc26a428f5):
+#   - Since the move, main has been GREEN on this workflow for 38 consecutive
+#     runs (2026-09-06 08:46Z through 2026-09-17 08:45Z). The two reds after the
+#     move were 33957443869 (the move commit itself, already-landed breakage)
+#     and 34020570014 the next morning — neither a PR landing a fresh break.
+#   - The pipefail restoration's evidence was the opposite: 15 consecutive main
+#     reds in a two-hour window naming sites three PRs had introduced.
+#   - And when this workflow DID have a PR arm it did not prevent that class:
+#     runs 33784250382, 33777534298, 33716456559, 33678640189 and 33667441858
+#     all concluded `failure` on pull_request across 2026-09-02/03 and every one
+#     of those PRs merged anyway, because this check is advisory and cannot
+#     block. A PR arm on an advisory check produces attribution, not prevention.
+#   - Narrowing a restored PR arm to "only what the suite reads" is not
+#     available either: the suite reads tooling/grip/*.mjs (entry-guard-
+#     uniformity, class-coverage, rerun-import-boundary), tooling/grip/test/**
+#     (suite-shape), tooling/grip/fixtures/evidence-corpus.json (backfill,
+#     binding) AND the real tooling/grip/ledger/ (census loadLedgerRecipes,
+#     ledger foldLedger over DEFAULT_LEDGER_DIR, leads, mint). That is already
+#     the whole `tooling/grip/**` filter below.
+# If the PR arm is ever restored, it must MIRROR the push list below — and that
+# mirroring is no longer kept "by hand and by inspection": arm C of
+# scripts/workflow-trigger-coverage.sh fails when two trigger arms both declare
+# `paths:` and the sets disagree (29 such pairs in this corpus on 2026-09-17).
 #
 # WHY fetch-depth: 0. A shallow, ref-scoped checkout (the shape a PR-only
 # fetch of a single commit produces, with no `origin/main` remote-tracking ref

@@ -80,6 +80,7 @@ defmodule BarkparkCloud.DeployLedgerPartitionTest do
 
   alias BarkparkCloud.{Accounts, DeployLedger, Registry, Repo}
   alias BarkparkCloud.BoxCapacityRefusalFixture
+  alias BarkparkCloud.UnknownDeploymentStatus
   alias BarkparkCloud.Registry.Deployment
 
   @password "correct-horse-battery"
@@ -258,14 +259,22 @@ defmodule BarkparkCloud.DeployLedgerPartitionTest do
 
     # A status no arm of this census has ever been taught: the residue, which
     # must RISE rather than be absorbed by a neighbour.
-    for i <- 1..2 do
-      deployment!(site, %{
-        status: "quarantined",
-        stage: "SWITCH",
-        failure_reason: nil,
-        inserted_at: at(500 + i)
-      })
-    end
+    #
+    # Migration 20260916080000 closed the status vocabulary in the database, so
+    # this row is no longer insertable through the front door — and `residual`
+    # still matters, because the pre-constraint corpus is what the ledger reads
+    # and a CHECK can be widened or dropped. The helper drops the constraint
+    # inside this test's own sandbox transaction; the rollback restores it.
+    UnknownDeploymentStatus.without_status_constraint(fn ->
+      for i <- 1..2 do
+        deployment!(site, %{
+          status: "quarantined",
+          stage: "SWITCH",
+          failure_reason: nil,
+          inserted_at: at(500 + i)
+        })
+      end
+    end)
 
     deployment!(site, %{
       status: "failed",

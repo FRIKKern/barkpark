@@ -107,12 +107,70 @@ for r in json.loads(sys.argv[1]).get('workflow_runs', []):
 PY
 }
 
+# THE TRUNCATION CONTROL. `gh api ... ?per_page=100` WITHOUT `--paginate` returns
+# AT MOST 100 items and says nothing about it: the JSON simply ends. Every count
+# below is then a PREFIX of the real one, in the direction that argues FOR this
+# script's own verdict — a short total makes the movable ceiling look smaller and
+# the floor look closer to the whole story. That is the worst possible direction
+# for a measurement instrument to be wrong in.
+#
+# Measured 2026-09-17 on head 1743cdd15b: run feed total_count=23, largest jobs
+# feed (Shell harnesses) total_count=54. NEITHER TRUNCATES TODAY, so this guard
+# is a RATCHET, not a bug fix — it exists so that the day a head crosses 100 the
+# script REFUSES instead of quietly reporting a prefix. A fleet lead read a
+# FALSE "required context absent" off exactly this trap today on a head that
+# rendered 133 check-run names.
+#
+# Takes a feed and the key holding its item array; prints a `<label>\t<got>/<total>`
+# row when the page is short, and NOTHING when it is complete.
+feed_truncated() {
+  LABEL="$1" KEY="$2" python3 - "$3" <<'PY'
+import json, os, sys
+d = json.loads(sys.argv[1])
+items = d.get(os.environ['KEY'], [])
+total = d.get('total_count')
+if total is not None and len(items) < total:
+    print("%s\t%d/%d" % (os.environ['LABEL'], len(items), total))
+PY
+}
+
+# ── the full-oid gate (task-0a44c3bc96baa8cc) ────────────────────────────────
+# `repos/<r>/actions/runs?head_sha=` matches the FULL 40-character oid ONLY.
+# Handed an abbreviation it returns HTTP 200 with an EMPTY workflow_runs list —
+# well-formed, so no transport or shape guard fires — and the caller then reads
+# "no runs on this head" off a query the endpoint simply refused to match. That
+# is the failed-read-equals-zero class; it was MEASURED on main-gate-watch.sh,
+# where `--sha 769c39bd6` said MISSING/exit 1 in the same minute the full oid
+# said WAITING/exit 2. Widen here, before the feed is queried, or refuse.
+# Prints the 40-character oid, or the single token UNRESOLVED.
+cpf_full_oid() {
+  local sha="$1" full
+  case "$sha" in
+    ""|*[!0-9a-fA-F]*) echo "UNRESOLVED"; return 0 ;;
+  esac
+  if [ "${#sha}" -eq 40 ]; then printf '%s\n' "$sha" | tr 'A-F' 'a-f'; return 0; fi
+  [ "${#sha}" -ge 4 ] || { echo "UNRESOLVED"; return 0; }
+  full="$(git -C "$(cd "$(dirname "$0")/.." && pwd)" rev-parse --verify --quiet "${sha}^{commit}" 2>/dev/null)"
+  [ "${#full}" -eq 40 ] || full="$(gh api "repos/$REPO/commits/$sha" 2>/dev/null | jq -r '.sha // ""' 2>/dev/null)"
+  if [ "${#full}" -eq 40 ]; then printf '%s\n' "$full"; else echo "UNRESOLVED"; fi
+}
+
 measure() {
   local ref="$1" sha
   if printf '%s' "$ref" | grep -qE '^[0-9]+$'; then
     sha=$(gh pr view "$ref" --repo "$REPO" --json headRefOid -q .headRefOid) \
       || { echo "REFUSE: cannot read PR $ref" >&2; return 4; }
-  else sha="$ref"; fi
+  else
+    # A bare ref is OPERATOR-SUPPLIED and can arrive abbreviated; headRefOid
+    # above is always 40 chars. Widen or refuse BEFORE the run feed is queried
+    # — see cpf_full_oid.
+    sha="$(cpf_full_oid "$ref")"
+    if [ "$sha" = "UNRESOLVED" ]; then
+      echo "REFUSE: '$ref' is not a full 40-character commit oid and could not be widened to one; actions/runs?head_sha= matches the FULL oid only and would answer an EMPTY feed for it" >&2
+      return 4
+    fi
+    [ "$sha" = "$ref" ] || echo "resolved '$ref' to the full oid $sha (the run feed matches the full oid only)" >&2
+  fi
   [ -n "$sha" ] || { echo "REFUSE: empty sha" >&2; return 4; }
 
   local reqmap; reqmap=$(required_workflows) || return 4
@@ -124,6 +182,14 @@ measure() {
     || { echo "REFUSE: cannot read run feed for $sha" >&2; return 4; }
   local nruns; nruns=$(printf '%s' "$runs" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["workflow_runs"]))')
   [ "${nruns:-0}" -gt 1 ] || { echo "REFUSE: control failed — $nruns run(s) on this head; a feed that sees one thing cannot discriminate" >&2; return 4; }
+
+  local short; short=$(feed_truncated "run feed" workflow_runs "$runs")
+  if [ -n "$short" ]; then
+    echo "REFUSE: truncation control failed — the run feed is a PREFIX, so every count below would be short:" >&2
+    printf '%s\n' "$short" | sed 's/^/  /' >&2
+    echo "  (this endpoint needs --paginate; a short total understates the movable ceiling)" >&2
+    return 4
+  fi
 
   local unfinished; unfinished=$(incomplete_required_runs "$reqmap" "$runs")
   if [ -n "$unfinished" ]; then
@@ -145,6 +211,12 @@ for r in runs:
         ['gh', 'api', f"repos/{repo}/actions/runs/{r['id']}/jobs?per_page=100"],
         capture_output=True, text=True).stdout or '{"jobs":[]}')
     jobs = j.get('jobs', [])
+    jtot = j.get('total_count')
+    if jtot is not None and len(jobs) < jtot:
+        sys.stderr.write(
+            f"REFUSE: truncation control failed — jobs feed for {os.path.basename(r['path'])} "
+            f"returned {len(jobs)} of {jtot}; the per-workflow counts below would be a PREFIX.\n")
+        sys.exit(4)
     base = os.path.basename(r['path'])
     sk = sum(1 for x in jobs if x.get('conclusion') == 'skipped')
     tot += len(jobs); skipped += sk
@@ -244,6 +316,42 @@ EOF
     {"path":".github/workflows/doc-gates.yml","status":"in_progress"}]}')
   if [ -z "$out" ]; then _ok "CONTROL: advisory in-flight ignored" "no rows"
   else _no "CONTROL: advisory in-flight ignored" "got: [$out]"; fi
+
+  # ── THE TRUNCATION CONTROL, DRIVEN BOTH WAYS OFF FIXTURES ────────────────
+  # These are the arms that red if the `len(items) < total` test is removed. They
+  # run offline: the trap is a property of the PAGE, not of the network.
+
+  # RED ARM: a page holding 100 of 133 must be NAMED. Delete the comparison in
+  # feed_truncated and this arm goes silent — which is the state in which the
+  # script reports a prefix as if it were the whole count.
+  out=$(feed_truncated "run feed" workflow_runs \
+    "{\"total_count\":133,\"workflow_runs\":[$(python3 -c 'print(",".join(["{}"]*100))')]}")
+  if printf '%s' "$out" | grep -q '^run feed.100/133$'; then
+    _ok "RED: short page named" "$out"
+  else _no "RED: short page named" "got: [$out]"; fi
+
+  # QUIET ARM: a COMPLETE page must print nothing. A truncation guard that fires
+  # on every healthy head is a guard the fleet disables. This is the live shape:
+  # head 1743cdd15b's run feed really did read 23 of 23 on 2026-09-17.
+  out=$(feed_truncated "run feed" workflow_runs \
+    "{\"total_count\":23,\"workflow_runs\":[$(python3 -c 'print(",".join(["{}"]*23))')]}")
+  if [ -z "$out" ]; then _ok "QUIET: complete page silent" "23/23"
+  else _no "QUIET: complete page silent" "got: [$out]"; fi
+
+  # DISCRIMINATION CONTROL: a feed with NO total_count key must not be called
+  # short. Without this arm the predicate could be `len(items) < 100` — which
+  # passes both arms above and then refuses on every small healthy head.
+  out=$(feed_truncated "jobs feed" jobs '{"jobs":[{},{}]}')
+  if [ -z "$out" ]; then _ok "CONTROL: absent total_count ignored" "no rows"
+  else _no "CONTROL: absent total_count ignored" "got: [$out]"; fi
+
+  # SECOND DISCRIMINATION CONTROL: the predicate must read the KEY it is given,
+  # not a hardcoded one. A jobs feed of 54 of 54 is the real Shell-harnesses
+  # shape measured 2026-09-17 — the largest single jobs feed in the repo.
+  out=$(feed_truncated "jobs feed" jobs \
+    "{\"total_count\":54,\"jobs\":[$(python3 -c 'print(",".join(["{}"]*54))')]}")
+  if [ -z "$out" ]; then _ok "CONTROL: jobs key honoured (54/54)" "no rows"
+  else _no "CONTROL: jobs key honoured (54/54)" "got: [$out]"; fi
 
   rm -rf "$tmp"
   echo "── $pass passed, $fail failed ──"

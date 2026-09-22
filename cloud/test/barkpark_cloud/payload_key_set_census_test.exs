@@ -1103,16 +1103,26 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — the in-flight rollout marker; without it a CLI status can print a stale cached verdict over a landing rollout."},
     {"barkpark_json/6", :unread, "custom_host",
      "dr-w11-payload-divergence-close — the attached platform-zone host."},
-    # THIS ROW IS A HOLE MOVING, NOT A HOLE TRADED FOR ANOTHER. `suspended_at`
-    # was a Side C row (UNSERIALIZED: written by every suspension, emitted by no
-    # serializer). cch-w54-bl emitted it, so that row is DELETED above and
-    # `@schema_unserialized_floor` fell 25 -> 24. What is left is strictly
-    # smaller and one arm to the right: the key is now ON the wire and the Go
-    # client does not decode it yet. The console — the reader this fix exists
-    # for — reads it from the same payload immediately, so the browser half is
-    # closed; only `bp` is still blind.
-    {"barkpark_json/6", :unread, "suspended_at",
-     "cch-w54-bl-suspended-at-is-written-but-never-serialized closed the SERIALIZER half; task-85c531c2adbf0dff is the live tracker for THIS half. The billing-suspension stamp is EMITTED since cch-w54-bl and decoded by nobody: internal/cloudclient's Barkpark struct declares the `Suspended` and `SuspendedReason` fields (json:\"suspended\" / json:\"suspended_reason\") and stops there, so `bp` can still say a box is suspended and why but never SINCE WHEN. Cited by FIELD rather than by line because this struct is appended to constantly and a line number here would rot within the week. Adding the third field is a one-line change in internal/, outside the cloud/-only fence of the PR that emitted the key; it is filed rather than smuggled."},
+    # THE `suspended_at` ROW IS GONE (task-85c531c2adbf0dff, the tracker the
+    # deleted row itself named). It read:
+    #
+    #   {"barkpark_json/6", :unread, "suspended_at", "…the billing-suspension
+    #    stamp is EMITTED since cch-w54-bl and decoded by nobody…"}
+    #
+    # cch-w54-bl put the key on the wire and was fenced to cloud/, so it filed
+    # that KNOWN OPEN row rather than smuggling a Go edit past its scope. The
+    # Go edit is now IN THIS COMMIT: `internal/cloudclient/client.go`'s
+    # `Barkpark` struct declares `SuspendedAt *string json:"suspended_at"`
+    # beside `Suspended` and `SuspendedReason`, and `bp cloud status` renders
+    # the day (DETAIL cell `since <day>`, `-o json` key `suspended_at`) with a
+    # nil rendered as an explicit em dash and NO json key.
+    #
+    # THE TWO EDITS ARE ONE COMMIT BY CONSTRUCTION, not by discipline: this arm
+    # refuses BOTH halves alone. Leaving the row after the decoder lands reds as
+    # "no longer unread (allowlisted but now decoded — DELETE the allowlist
+    # row)", which is how this deletion was measured rather than assumed. The
+    # Go-tag floor above moves 379 -> 380 in the same commit for the same one
+    # tag.
     # THE THREE FLEET ROWS SAID SOMETHING FALSE (corrected by hand, dr-w27-s2).
     # They read as "decoded by NOBODY", and all three are decoded today by
     # `internal/cli/cloud_support_cmd.go:1460-1462`, which declares
@@ -1936,7 +1946,79 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `@emitted_pinned` does NOT move either — this slice writes no Elixir
   # serializer. It declares a READER for a key `deployment_json/1` already
   # emits, which is the whole point of the pair.
-  @go_tag_pinned 373
+  # 373 -> 379 (ssw11-bl-no-pat-mint-verb-in-bp). RE-MEASURED ON THE REBASED
+  # TREE, not carried forward: the first reading of this slice was taken against
+  # a base where this pin still read 372, and #18566 moved it to 373 underneath
+  # it — so the delta was re-derived, never re-applied. The new
+  # internal/cloudclient/tokens.go declares 13 tag sites carrying 11 names, of
+  # which exactly SIX are names the package did not have: `abilities`,
+  # `expires_in_days`, `last_used_at`, `pat`, `revoked_at` and `tokens`. The
+  # other seven sites are names already in the union and move the SITE register
+  # below instead. CONTROL: the same scan with tokens.go excluded returns 373,
+  # byte-equal to the value this line replaces.
+  # 379 -> 380 (task-85c531c2adbf0dff). `internal/cloudclient/client.go`'s
+  # `Barkpark` struct gains ONE tag, `json:"suspended_at"` — the billing
+  # suspension stamp `barkpark_json/6` has emitted since cch-w54-bl and no Go
+  # struct decoded. `suspended_at` is a name the package did NOT have, so it
+  # joins the NAME union and this floor moves by exactly one. It is the same
+  # edit that deletes the `{"barkpark_json/6", :unread, "suspended_at", …}` row
+  # from `@known_open` above, which is why both pins move in ONE commit: the
+  # UNREAD arm refuses either half alone.
+  #
+  # MEASURED ON THIS TREE by the PIN CO-EDIT arm, which printed
+  # "@go_tag_pinned 379 -> 380", never derived by arithmetic from the diff.
+  #
+  # CONTROL: the same scan with `internal/cloudclient/client.go` restored to its
+  # origin/main content (`git show origin/main:internal/cloudclient/client.go`)
+  # returns 379 — byte-equal to the value this line replaces, and green against
+  # the old pin — so the scan is measuring the population these pins are taken
+  # against and the +1 is this PR's tag and nothing else.
+  #
+  # `@go_tag_sites` below does NOT move, and that is MEASURED rather than
+  # assumed: the SITE arm read 727 sites on this tree against 726 accounted for
+  # by the OLD floor, and 380 names − 138 registered names + 485 registered
+  # sites = 727 reconstructs it exactly. `suspended_at` is declared at exactly
+  # ONE site, so it belongs to this pin's once-declared class and the register
+  # refuses a row of 1 by name.
+  #
+  # `@emitted_pinned` does NOT move either — this slice writes no Elixir
+  # serializer. It declares a READER for a key `barkpark_json/6` already emits,
+  # which is the whole point of the pair.
+  #
+  # 380 -> 381 (cch-w69-bl-site-create-detail-is-cli-voiced-…). POST /v1/sites
+  # stopped writing a CLI-voiced refusal `detail` and moved the terminal re-run
+  # to its own key, `cli_hint`. THE GO TAG RIDES THAT SAME COMMIT AND IS NOT
+  # OPTIONAL: `CloudRefusal.Detail` no longer carries the incantation, so without
+  # `json:"cli_hint"` on `CloudRefusal.CLIHint` the key is LAUNDERED — the name
+  # union would stay green while `json.Unmarshal` dropped it and `bp cloud site
+  # create` printed a refusal with no fix in it (the #18607 shape). ONE new tag
+  # SITE carrying ONE name the package did not have, so this pin moves by one and
+  # the SITE register below does not move at all — the partition arm's expected
+  # total follows this line alone (728 sites = 381 names + the register's 347
+  # duplicated sites). MEASURED by the PIN CO-EDIT arm on this tree
+  # ("@go_tag_pinned 380 -> 381"), never by arithmetic; `@emitted_pinned` HOLDS
+  # at 176 and the co-edit arm printed only this one moved pin, which is the
+  # measurement that the router's 422 bodies are outside the emit scanner's
+  # corpus.
+  # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18 on this
+  # branch rebased onto origin/main: 381 -> 383. box_error.go is a new source in
+  # the corpus, and `boxErrorEnvelope` carries `hint` and `request_id` — of the
+  # envelope's four keys, `code` and `message` were already in the package union
+  # and ride free, so exactly TWO new NAMES land. MEASURED by the PIN CO-EDIT arm
+  # ("@go_tag_pinned 381 -> 383"), never by arithmetic from the diff.
+  #
+  # cli-r21j-boxerror (task-bb5b44bcc5e233af), MEASURED 2026-09-20 by the
+  # 999-technique on this branch rebased onto origin/main — the pin set to 999
+  # and the per-pin refusal printed "385 json tag(s) found in
+  # internal/cloudclient, the PIN is EXACTLY 999", never 383 + 2. 383 -> 385:
+  # `BoxErrorEnvelope.fields/1` has emitted `box_error_message` and
+  # `box_error_request_id` as SIBLING top-level keys since #19341 while no Go
+  # decoder declared either, so json.Unmarshal dropped both in silence. Both are
+  # names the package did not have — TWO new NAMES — and each lands at TWO sites
+  # (SiteBuildLogRecord in site_build_log.go and SiteBuildLogBytes in
+  # site_build_log_bytes.go), so they move this NAME floor AND enter the SITE
+  # register below at 2 apiece.
+  @go_tag_pinned 385
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2004,6 +2086,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # already in the package union, so `@go_tag_pinned` does NOT move (the PIN
     # CO-EDIT arm printed "0 of 4 scalar pin(s) no longer match this tree, and the
     # SITE register moved too"); only this register can notice either site dying.
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). `PAT.Abilities` and
+    # `MintPATRequest.Abilities` — a name the package did not have, declared at
+    # TWO sites, so it enters this register at 2.
+    "abilities" => 2,
     "artifact_sha256" => 2,
     "artifact_url" => 2,
     "as_of" => 5,
@@ -2015,7 +2103,32 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "basis" => 7,
     "became_live_at" => 2,
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytesRefusal.BoxLogState` joins the single existing declaration — the box-side state the refusal reports verbatim.
+    # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18:
+    # NEWLY DUPLICATED, 1 -> 2. `box_error` was declared once
+    # (SiteBuildLogRecord, where it was typed `string` and hard-failed the whole
+    # record on the envelope shape the box actually sends); SiteBuildLogBytes now
+    # declares it too. The bytes route had NEVER declared the key, though
+    # BuildLogBytes has merged it all along from the byte-for-byte identical
+    # box_error/1 clause — json.Unmarshal dropped it in silence, which is the
+    # quieter half of the same fault. This register is the only guard that can
+    # notice either site dying.
+    "box_error" => 2,
+    # cli-r21j-boxerror (task-bb5b44bcc5e233af), MEASURED 2026-09-20 by the
+    # 999-technique on this branch rebased onto origin/main — the SITE arm's
+    # four-way diff printed "newly duplicated: box_error_message x2,
+    # box_error_request_id x2", never derived by adding 4 to the old site total.
+    # Both are NEW NAMES (so `@go_tag_pinned` moves 383 -> 385 for them), born
+    # here at 2 because each is declared on BOTH log decoders: SiteBuildLogRecord
+    # (site_build_log.go) and SiteBuildLogBytes (site_build_log_bytes.go). The
+    # producer has emitted them beside `box_error` since #19341; the name floor
+    # can see them appear but only this register can notice EITHER site dying.
+    "box_error_message" => 2,
+    "box_error_request_id" => 2,
     "box_log_state" => 2,
+    # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18:
+    # NEWLY DUPLICATED, 1 -> 2, and born alongside `box_error` for the same
+    # reason — SiteBuildLogBytes declared neither of the 502 arm's own two keys.
+    "box_status" => 2,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.BuildID` joins
     # the single existing declaration — the recorder's key, echoed on EVERY
     # answer including the refusals. It rides free on the NAME union.
@@ -2050,7 +2163,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "clock" => 3,
     # 2026-09-10 #17479: 3 -> 4, retry.go added. The throttle envelope's
     # `details.code` — an existing name at a new site.
-    "code" => 4,
+    # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18:
+    # 4 -> 5. `boxErrorEnvelope.Code` in box_error.go — the box's OWN error code,
+    # a fifth declaration of a name the package already had, so it rides free on
+    # the NAME union and only this row moves.
+    "code" => 5,
     "content_rev" => 2,
     # MetricsSpaceSites.Count joined the five existing `count` declarations
     # — the deployed-sites walk (host-space report, W6 S4). ssw8 (PR #14610)
@@ -2119,6 +2236,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.EvictedAt` joins the single existing declaration — when the recorder dropped the log.
     "evicted_at" => 2,
     "evidence" => 2,
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). `PAT.ExpiresAt` joins the one
+    # existing declaration elsewhere in the package — NEWLY DUPLICATED, 1 -> 2.
+    "expires_at" => 2,
     "failed" => 2,
     # deploy/sites-embed-failure-cause: `SiteDeploymentEmbed` (internal/cloudclient) is a THIRD declaration — the fleet list embed learned to name the cause.
     "failure_class" => 3,
@@ -2135,10 +2257,21 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "git_ref" => 2,
     "headroom" => 2,
     "host" => 6,
-    "id" => 14,
+    # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18:
+    # NEWLY DUPLICATED, 1 -> 2. `boxErrorEnvelope.Hint` joins the single existing
+    # declaration — the box's own "retry shortly" advice, relayed rather than
+    # reworded.
+    "hint" => 2,
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). `PAT.ID`, 14 -> 15.
+    "id" => 15,
     "image_tag" => 2,
     "in_flight" => 2,
-    "inserted_at" => 8,
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). `PAT.InsertedAt`, 8 -> 9.
+    "inserted_at" => 9,
     "instance" => 4,
     "instances" => 2,
     # cli/site-doctor-verb (ssw8-site-doctor): NEWLY DUPLICATED, 1 -> 2.
@@ -2172,7 +2305,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "mode" => 2,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one name site (11 -> 12). `SiteBuildLogStage.Name` — one stage of the
     # recorded build ladder.
-    "name" => 13,
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). `PAT.Name` and
+    # `MintPATRequest.Name` — two new sites, 13 -> 15.
+    "name" => 15,
     "never_covered" => 3,
     "next_cursor" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.OK` — the 202 relay envelope's own flag.
@@ -2288,7 +2425,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "terminal_failure_rate" => 2,
     "theme" => 2,
     "to" => 2,
-    "token" => 2,
+    # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
+    # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
+    # /v1/tokens PAT surface). the mint envelope's own `token`
+    # field (the plaintext, handed over once), 2 -> 3.
+    "token" => 3,
     # dr-bl-w7: `top` crossed INTO this register. It was declared ONCE
     # (MetricsSpaceSites.Top, the biggest site slugs) and is now declared on
     # MetricsSpaceConsumerRoot too, naming a root's biggest children — the thing
@@ -2352,7 +2493,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 6 that bump an existing register row, and 8 that were declared exactly once
   # and are now duplicated. The 14 ride free on the NAME union — the class
   # `@go_tag_pinned` structurally cannot see, which is why the register moves.
-  @cloudclient_sources ~w(client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go)
+  @cloudclient_sources ~w(box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go tokens.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was

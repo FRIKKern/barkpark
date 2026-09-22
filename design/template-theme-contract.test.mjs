@@ -259,3 +259,155 @@ for (const relDoc of PALETTE_PROSE) {
     }
   });
 }
+
+// ── THE PREVIEWABILITY INVENTORY ────────────────────────────────────────────
+// stw4-backlog-picker-thumbnails c0. A create-site picker wants to show a
+// thumbnail per choice, and the first honest question is WHICH CHOICES DESERVE
+// ONE. `templates/` holds seven directories but only five are deploy-UI
+// templates; the other two are bare framework scaffolds with no manifest and no
+// seeded content. Photographing those would advertise a designed option that
+// does not exist — the criterion's "framework or infrastructure choices that
+// should remain text-only".
+//
+// design/preview-inventory.json is that inventory, and these arms keep it from
+// becoming an opinion. Every boolean in it is DERIVED from the tree, so the file
+// carries the REASON (which a test cannot write) while the test owns the CLAIM.
+//
+// COVERAGE IS A PREDICATE, NOT A LIST: the inventory's key sets are compared as
+// SETS against the directories under templates/ and the palette files under
+// design/themes/. An eighth template or a sixth palette reds this the day it
+// lands, rather than being silently absent from the picker's contract.
+//
+// The inventory deliberately holds NO image paths. A binary preview asset must
+// not ride inside a published starter payload, so where the bytes live is the
+// picker surface's problem, not the descriptor's.
+const INVENTORY_PATH = path.join(ROOT, "design", "preview-inventory.json");
+const inventory = JSON.parse(fs.readFileSync(INVENTORY_PATH, "utf8"));
+
+/** Every directory under templates/ that a picker could conceivably list. */
+const TEMPLATE_DIRS = fs
+  .readdirSync(TEMPLATES, { withFileTypes: true })
+  .filter((e) => e.isDirectory() && !e.name.startsWith("_"))
+  .map((e) => e.name)
+  .sort();
+
+/** The `theme` enum the versioned descriptor actually accepts. */
+const SCHEMA_THEME_ENUM = (() => {
+  const schema = JSON.parse(
+    fs.readFileSync(path.join(TEMPLATES, "barkpark.template.schema.json"), "utf8"),
+  );
+  return [...(schema.properties?.theme?.enum ?? [])].sort();
+})();
+
+function manifestOf(slug) {
+  const raw = readIfFile(path.join(TEMPLATES, slug, "barkpark.template.json"));
+  return raw ? JSON.parse(raw) : null;
+}
+
+// ── CONTROL ─────────────────────────────────────────────────────────────────
+// Every assertion below iterates the inventory. An empty or half-empty file
+// would make them vacuously green, so print all four populations and refuse a
+// run that measured nothing.
+test("preview inventory: the populations are non-empty, and named", () => {
+  const invTemplates = Object.keys(inventory.templates ?? {}).sort();
+  const invThemes = Object.keys(inventory.themes ?? {}).sort();
+  console.log(`# templates/ dirs:        ${TEMPLATE_DIRS.join(", ")}`);
+  console.log(`# inventory templates:    ${invTemplates.join(", ") || "(none)"}`);
+  console.log(`# design/themes/:         ${SHIPPED_THEMES.join(", ")}`);
+  console.log(`# inventory themes:       ${invThemes.join(", ") || "(none)"}`);
+  console.log(`# schema theme enum:      ${SCHEMA_THEME_ENUM.join(", ") || "(none)"}`);
+  assert.equal(inventory.inventoryVersion, "1", "inventoryVersion must be \"1\"");
+  assert.ok(invTemplates.length >= 2, `inventory names ${invTemplates.length} templates`);
+  assert.ok(invThemes.length >= 2, `inventory names ${invThemes.length} themes`);
+  assert.ok(TEMPLATE_DIRS.length >= 2, "templates/ holds fewer than two directories");
+});
+
+test("preview inventory: covers exactly the directories under templates/", () => {
+  assert.deepEqual(
+    Object.keys(inventory.templates).sort(),
+    TEMPLATE_DIRS,
+    "design/preview-inventory.json .templates must name every directory under " +
+      "templates/ and nothing else — a template with no entry is a picker choice " +
+      "with no ruling on whether it may show a thumbnail",
+  );
+});
+
+test("preview inventory: covers exactly the palettes under design/themes/", () => {
+  assert.deepEqual(
+    Object.keys(inventory.themes).sort(),
+    SHIPPED_THEMES,
+    "design/preview-inventory.json .themes must name every design/themes/*.json " +
+      "palette and nothing else",
+  );
+});
+
+for (const slug of Object.keys(inventory.templates).sort()) {
+  const entry = inventory.templates[slug];
+
+  test(`preview inventory: ${slug}'s previewable flag is derived, not asserted`, () => {
+    const manifest = manifestOf(slug);
+    // The rule, stated on two grounds: a directory the deploy UI never
+    // enumerates cannot be previewed, and a bare scaffold has no representative
+    // output to photograph even when it IS enumerated.
+    const expected = manifest !== null && manifest.demoContent === true;
+    assert.equal(
+      entry.previewable,
+      expected,
+      `${slug}: inventory says previewable=${entry.previewable} but the tree says ` +
+        `${expected} (barkpark.template.json ${manifest ? "present" : "absent"}, ` +
+        `demoContent=${manifest ? JSON.stringify(manifest.demoContent) : "n/a"})`,
+    );
+    assert.equal(
+      entry.kind,
+      expected ? "site" : "framework-scaffold",
+      `${slug}: kind must follow previewable — "site" when there is output to ` +
+        `show, "framework-scaffold" when the honest control is a text label`,
+    );
+  });
+
+  test(`preview inventory: ${slug} carries a written reason`, () => {
+    // The booleans are mechanical; the REASON is the half a test cannot write,
+    // and the half that keeps a text-only ruling honest rather than arbitrary.
+    assert.equal(typeof entry.reason, "string", `${slug}: reason must be a string`);
+    assert.ok(
+      entry.reason.trim().length >= 40,
+      `${slug}: reason is ${entry.reason.trim().length} chars — too short to say ` +
+        `WHY this choice does or does not deserve a preview`,
+    );
+  });
+}
+
+test("preview inventory: pinnable themes are exactly the descriptor's enum", () => {
+  // A palette file that ships without joining the manifest enum cannot be
+  // selected by any deploy, so a picker must not offer it as a preview axis.
+  // Today design/themes/iris.json is in exactly that state, and the inventory
+  // records it rather than papering over it. This reds the day the enum and the
+  // directory move relative to each other.
+  const pinnable = Object.keys(inventory.themes)
+    .filter((n) => inventory.themes[n].pinnable === true)
+    .sort();
+  assert.deepEqual(
+    pinnable,
+    SCHEMA_THEME_ENUM,
+    "the inventory's pinnable themes must equal the `theme` enum in " +
+      "templates/barkpark.template.schema.json",
+  );
+  for (const name of Object.keys(inventory.themes)) {
+    assert.ok(
+      typeof inventory.themes[name].reason === "string" &&
+        inventory.themes[name].reason.trim().length >= 40,
+      `theme ${name}: reason is missing or too short`,
+    );
+  }
+});
+
+test("templates/MANIFEST.md documents the inventory by path", () => {
+  // "A documented inventory" is only documented while the spec doc points at it.
+  const src = readIfFile(path.join(TEMPLATES, "MANIFEST.md")) ?? "";
+  assert.match(
+    src,
+    /design\/preview-inventory\.json/,
+    "templates/MANIFEST.md must name design/preview-inventory.json — an inventory " +
+      "no spec doc points at is not a documented one",
+  );
+});

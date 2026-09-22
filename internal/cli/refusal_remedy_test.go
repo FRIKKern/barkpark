@@ -3,9 +3,14 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
 	"net/http"
 	"os"
-	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -124,11 +129,27 @@ func TestReaderLawRefusalsAllCarryTheirRemedy(t *testing.T) {
 }
 
 // TestNoRefusalDropsItsHint is the structural guard, and the reason this file
-// exists rather than three more assertions: it scans the package source for the
-// SHAPE of the bug — a renderErrorEnvelope call passing a non-empty hint whose
-// else-branch prints the message alone. Every such site silently withholds the
-// remedy from table and minimal output, and the wave-27/28/29 refusals did
-// exactly that while their `-o json` envelope carried a carefully written one.
+// exists rather than three more assertions: it parses the package source and
+// looks for the SHAPE of the bug — a renderErrorEnvelope call passing a
+// non-empty hint whose else-branch prints the message alone. Every such site
+// silently withholds the remedy from table and minimal output, and the
+// wave-27/28/29 refusals did exactly that while their `-o json` envelope
+// carried a carefully written one.
+//
+// It matches the whole wrapper FAMILY — renderErrorEnvelope,
+// renderErrorEnvelopeDetailed, renderErrorEnvelopeRemedy — because the three
+// delegate to one another (errors.go) and therefore share the one hint path:
+// only a matcher keyed on the spelling could tell them apart, and the spelling
+// is not the defect. It likewise does not care how many arguments the
+// else-branch userErr takes: `out.userErr("it broke")` withholds the remedy
+// exactly as much as `out.userErr("it broke: %s", why)` does.
+//
+// This is an AST walk rather than a regexp because the wrappers carry trailing
+// arguments (details, bp_remedy). A regexp anchored on `, "", <hint>)` cannot
+// tell the hint slot from a later one: in `Detailed(out, code, msg, "", "",
+// nil)` the empty hint is skipped and `nil` reads as the hint, which would
+// report a site that withholds nothing. The parser counts arguments instead, so
+// the hint is always argument five.
 //
 // A new refusal must either route through refuseWithRemedy or print the hint
 // itself. The sites where withholding it IS correct are recorded below with the
@@ -140,17 +161,15 @@ func TestReaderLawRefusalsAllCarryTheirRemedy(t *testing.T) {
 //     its own hint inline, which is strictly more than the summary hint.
 //   - seed_cmd.go, tinker_cmd.go, servers_cmd.go — print the hint by hand.
 //
-// None of those match the pattern below, so the guard needs no allowlist: the
-// pattern IS "computed a remedy, then printed only the message".
+// None of those match the shape below, so the guard needs no allowlist: the
+// shape IS "computed a remedy, then printed only the message".
 func TestNoRefusalDropsItsHint(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("reading the package dir: %v", err)
 	}
-	// A call passing a hint literal or named constant (i.e. NOT `, "", "")`),
-	// immediately followed by a lone userErr and a closing brace.
-	bad := regexp.MustCompile(`if !renderErrorEnvelope\(out, [^\n]*?, "", (?:[A-Za-z_][A-Za-z0-9_]*|"[^"]+")\) \{\n\s*out\.userErr\("[^"]*", [^\n]*\)\n\s*\}`)
 
+	fset := token.NewFileSet()
 	scanned := 0
 	var offenders []string
 	for _, e := range entries {
@@ -158,13 +177,25 @@ func TestNoRefusalDropsItsHint(t *testing.T) {
 		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		src, err := os.ReadFile(name)
+		file, err := parser.ParseFile(fset, name, nil, 0)
 		if err != nil {
-			t.Fatalf("reading %s: %v", name, err)
+			t.Fatalf("parsing %s: %v", name, err)
 		}
 		scanned++
-		for _, m := range bad.FindAll(src, -1) {
-			offenders = append(offenders, name+": "+strings.Join(strings.Fields(string(m)), " "))
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				stmt, ok := n.(*ast.IfStmt)
+				if !ok || !refusalWithholdsItsHint(stmt) {
+					return true
+				}
+				offenders = append(offenders, fmt.Sprintf("%s (in %s): %s",
+					fset.Position(stmt.Pos()), fn.Name.Name, oneLineSource(fset, stmt)))
+				return true
+			})
 		}
 	}
 	if scanned == 0 {
@@ -174,4 +205,91 @@ func TestNoRefusalDropsItsHint(t *testing.T) {
 		t.Errorf("these refusals compute a remedy and then withhold it from table/minimal output — route them through refuseWithRemedy, or print the hint yourself (see this test's doc comment for the sites where that is already correct):\n  %s",
 			strings.Join(offenders, "\n  "))
 	}
+}
+
+// renderErrorEnvelopeFamily is every spelling that reaches the one hint path.
+// Adding a wrapper without adding it here reopens the escape this guard closes.
+var renderErrorEnvelopeFamily = map[string]bool{
+	"renderErrorEnvelope":         true,
+	"renderErrorEnvelopeDetailed": true,
+	"renderErrorEnvelopeRemedy":   true,
+}
+
+// refusalWithholdsItsHint reports whether stmt is
+//
+//	if !renderErrorEnvelope<family>(out, code, msg, requestID, <non-empty hint>, …) {
+//		out.userErr(<format literal>, …)
+//	}
+//
+// i.e. a refusal that computed a remedy for the machine shapes and then printed
+// the message alone to the human ones.
+func refusalWithholdsItsHint(stmt *ast.IfStmt) bool {
+	if stmt.Else != nil {
+		return false
+	}
+	not, ok := stmt.Cond.(*ast.UnaryExpr)
+	if !ok || not.Op != token.NOT {
+		return false
+	}
+	call, ok := not.X.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	name, ok := call.Fun.(*ast.Ident)
+	if !ok || !renderErrorEnvelopeFamily[name.Name] {
+		return false
+	}
+	// out, code, msg, requestID, hint — the hint is always argument five, and
+	// the wrappers only ever append after it.
+	if len(call.Args) < 5 || isEmptyStringLit(call.Args[4]) {
+		return false
+	}
+	return printsMessageAlone(stmt.Body)
+}
+
+// printsMessageAlone reports whether body is a lone `out.userErr("…"…)` — the
+// house human-channel refusal, with or without format arguments.
+func printsMessageAlone(body *ast.BlockStmt) bool {
+	if body == nil || len(body.List) != 1 {
+		return false
+	}
+	expr, ok := body.List[0].(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := expr.X.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "userErr" {
+		return false
+	}
+	if _, ok := sel.X.(*ast.Ident); !ok {
+		return false
+	}
+	if len(call.Args) == 0 {
+		return false
+	}
+	lit, ok := call.Args[0].(*ast.BasicLit)
+	return ok && lit.Kind == token.STRING
+}
+
+func isEmptyStringLit(e ast.Expr) bool {
+	lit, ok := e.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return false
+	}
+	v, err := strconv.Unquote(lit.Value)
+	return err == nil && v == ""
+}
+
+// oneLineSource re-prints a node as a single whitespace-collapsed line, so a
+// failure quotes the offending source rather than just pointing at it.
+func oneLineSource(fset *token.FileSet, n ast.Node) string {
+	var buf bytes.Buffer
+	if err := printer.Fprint(&buf, fset, n); err != nil {
+		return "<unprintable>"
+	}
+	return strings.Join(strings.Fields(buf.String()), " ")
 }

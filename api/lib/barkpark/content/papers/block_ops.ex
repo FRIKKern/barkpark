@@ -59,6 +59,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # an independent literal, so there is exactly one place to widen the list.
   @blocks_types ["paper", "session"]
 
+  # Process-dictionary key for the deferred blocks-doc tail — see
+  # `with_deferred_blocks_doc_tail/1`. Holds a list of queued tail arg tuples
+  # while a caller-owned transaction is open; absent (nil) otherwise.
+  @blocks_doc_tail_owner_key :barkpark_blocks_doc_tail
+
   @doc "The closed whitelist of document types that ride the blocks-doc write path."
   def blocks_types, do: @blocks_types
 
@@ -142,22 +147,119 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def upsert_blocks_doc(type, attrs, opts) when is_map(attrs) and is_list(opts) do
     case attrs["slug"] || attrs[:slug] do
       slug when is_binary(slug) and slug != "" ->
-        Repo.transaction(fn ->
-          _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["#{type}:#{slug}"])
-          do_upsert_blocks_doc(type, attrs, opts)
+        # OWNERSHIP OF THE TAIL, not merely of the lock (task-c352740ae6b0f72a).
+        # This clause opens a BARE `Repo.transaction`, so the
+        # `Broadcast.write_atomically/1` inside `persist_blocks_doc_serialized/9`
+        # NESTS and runs its function as is — which means `persist_blocks_doc_tail/7`
+        # used to run with this transaction STILL OPEN, exactly the pre-commit
+        # posture the comment block above `persist_blocks_doc_serialized/9`
+        # enumerates as deliberately avoided (a raw pre-commit
+        # `broadcast_paper_update/1`, an `Oban.insert/1` riding the lock).
+        # `with_deferred_blocks_doc_tail/1` registers this clause as the tail's
+        # owner: the tail is QUEUED while the lock is held and RUN once this
+        # transaction has returned, so the tail's own contract — "reached only on
+        # a committed row" — is true on this leg too.
+        with_deferred_blocks_doc_tail(fn ->
+          Repo.transaction(fn ->
+            _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["#{type}:#{slug}"])
+            do_upsert_blocks_doc(type, attrs, opts)
+          end)
+          |> case do
+            # The inner result IS the return value — errors are NOT rolled back
+            # because every failure leg returns before (or IS) the single Repo
+            # write, so there is nothing partial to undo, and rolling back would
+            # rewrite `{:error, reason}` into `{:error, reason}` via a different
+            # code path for no gain.
+            {:ok, inner} -> inner
+            {:error, reason} -> {:error, reason}
+          end
         end)
-        |> case do
-          # The inner result IS the return value — errors are NOT rolled back
-          # because every failure leg returns before (or IS) the single Repo
-          # write, so there is nothing partial to undo, and rolling back would
-          # rewrite `{:error, reason}` into `{:error, reason}` via a different
-          # code path for no gain.
-          {:ok, inner} -> inner
-          {:error, reason} -> {:error, reason}
-        end
 
       _ ->
         do_upsert_blocks_doc(type, attrs, opts)
+    end
+  end
+
+  # ── THE DEFERRED TAIL (task-c352740ae6b0f72a) ──────────────────────────────
+  #
+  # A process-dictionary owner flag, shaped exactly like
+  # `Broadcast.with_deferred_queue/1`'s: the clause that opens a transaction of
+  # its own around the blocks-doc write CLAIMS the tail, `persist_blocks_doc_tail/7`
+  # is queued instead of run while an owner is registered, and the owner runs the
+  # queue AFTER its transaction has returned.
+  #
+  # NESTING is a no-op by design, for the same reason `with_deferred_queue/1`'s
+  # is: an inner owner that re-claimed would run — or discard — an outer owner's
+  # queued tails while the OUTER transaction is still open, which is the bug this
+  # closes, one level up.
+  #
+  # The queue is only drained when the write actually produced a document. Any
+  # other term (`{:error, changeset}`, `{:error, {:halted, _}}`) means no row was
+  # written, so there is no tail to run; an exception or throw clears it on the
+  # way out.
+  defp with_deferred_blocks_doc_tail(fun) when is_function(fun, 0) do
+    if Process.get(@blocks_doc_tail_owner_key) do
+      fun.()
+    else
+      Process.put(@blocks_doc_tail_owner_key, [])
+
+      try do
+        fun.()
+      rescue
+        e ->
+          clear_deferred_blocks_doc_tails()
+          reraise e, __STACKTRACE__
+      catch
+        kind, reason ->
+          clear_deferred_blocks_doc_tails()
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      else
+        {:ok, %Document{}} = ok ->
+          run_deferred_blocks_doc_tails()
+          ok
+
+        other ->
+          clear_deferred_blocks_doc_tails()
+          other
+      end
+    end
+  end
+
+  defp run_deferred_blocks_doc_tails do
+    (Process.delete(@blocks_doc_tail_owner_key) || [])
+    |> Enum.reverse()
+    |> Enum.each(fn {doc, attrs, type, dataset, slug, existing, opts} ->
+      persist_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
+    end)
+
+    :ok
+  end
+
+  defp clear_deferred_blocks_doc_tails do
+    Process.delete(@blocks_doc_tail_owner_key)
+    :ok
+  end
+
+  # Run the tail now, or hand it to the registered owner. Deferral requires BOTH
+  # an owner AND an open transaction: an owner with no transaction open (nothing
+  # on main reaches that shape today) would otherwise postpone a tail that is
+  # already safe to run.
+  defp run_or_defer_blocks_doc_tail(%Document{} = doc, attrs, type, dataset, slug, existing, opts) do
+    case Process.get(@blocks_doc_tail_owner_key) do
+      queued when is_list(queued) ->
+        if Repo.in_transaction?() do
+          Process.put(
+            @blocks_doc_tail_owner_key,
+            [{doc, attrs, type, dataset, slug, existing, opts} | queued]
+          )
+
+          {:ok, doc}
+        else
+          persist_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
+        end
+
+      nil ->
+        persist_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
     end
   end
 
@@ -503,8 +605,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # exists yet for the other to see) and both then commit the duplicate pair
   # the wall exists to refuse.
   #
-  # The per-slug `pg_advisory_xact_lock` on `upsert_blocks_doc/3`'s non-paper
-  # leg does NOT cover this: two different slugs hash to two different keys, so
+  # The per-slug `pg_advisory_xact_lock` on `upsert_blocks_doc/3`'s slug-keyed
+  # leg (reached by every non-paper blocks type — papers have their own earlier,
+  # unlocked clause) does NOT cover this: two different slugs hash to two different keys, so
   # the two writers never meet. The key here is the SCOPE, not the row —
   # `DedupWall.publish_scope_lock_key/3`, shared byte-for-byte with the
   # lifecycle publish path so a paper born through ingest and one born through
@@ -585,7 +688,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
     case written do
       {:ok, %Document{} = doc} ->
-        persist_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
+        # NOT `persist_blocks_doc_tail/7` directly: when an enclosing clause owns
+        # a transaction of its own (the slug-keyed advisory lock on
+        # `upsert_blocks_doc/3`), `write_atomically/1` above NESTED and this row
+        # is not durable yet. `run_or_defer_blocks_doc_tail/7` hands the tail to
+        # that owner, which runs it after its transaction returns.
+        run_or_defer_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
 
       other ->
         other
@@ -646,7 +754,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # `write_atomically/1` has returned, so `Repo.in_transaction?()` is false here
   # and every one of these runs against durable state, exactly as it did before
   # the publish-scope lock existed.
+  #
+  # THAT SENTENCE IS LOAD-BEARING AND IT USED TO BE FALSE on the slug-keyed
+  # advisory-lock leg of `upsert_blocks_doc/3`, where `write_atomically/1` nested
+  # inside a bare `Repo.transaction` and returned with it still open
+  # (task-c352740ae6b0f72a). `run_or_defer_blocks_doc_tail/7` now keeps it true
+  # on every leg, and the telemetry below makes it MEASURABLE rather than merely
+  # asserted: `[:barkpark, :content, :blocks_doc, :tail]` carries the answer
+  # `Repo.in_transaction?/0` gives at this exact point, so a future caller that
+  # re-opens a transaction around this path reds a test instead of silently
+  # firing a pre-commit broadcast. Wrapped: telemetry can never fail a write.
   defp persist_blocks_doc_tail(%Document{} = doc, attrs, type, dataset, slug, existing, opts) do
+    emit_tail_boundary_telemetry(type, dataset, slug)
     save_upsert_revision(doc, type, dataset, existing, opts)
     broadcast_paper_update(doc)
     enqueue_edge_projection(doc)
@@ -660,6 +779,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # applied to the doc above) so a goal's events share the goal's scope.
     maybe_append_paper_event(attrs, slug, doc)
     {:ok, doc}
+  end
+
+  defp emit_tail_boundary_telemetry(type, dataset, slug) do
+    :telemetry.execute(
+      [:barkpark, :content, :blocks_doc, :tail],
+      %{count: 1},
+      %{type: type, dataset: dataset, slug: slug, in_transaction: Repo.in_transaction?()}
+    )
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   # [paper-upsert-unlogged-clobber] Record the version-history row for a paper
@@ -2358,7 +2489,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
       key_hash = document_op_key_hash(doc, target_doc_id, type, request_id, principal_key)
       exact_scope = "document_op:v1:" <> document_op_payload_fingerprint(op, opts)
 
-      Broadcast.clear_deferred_broadcasts()
+      # CLAIM, not merely clear: this path opens its own transaction and flushes
+      # by hand in `finish_document_op_transaction/4`, so it must register as the
+      # queue's owner or every webhook it defers reads as orphaned.
+      Broadcast.claim_deferred_queue()
       Writer.clear_deferred_after_save()
 
       try do
@@ -2489,7 +2623,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
         "document_block_form:v1:" <>
           block_form_payload_fingerprint(source_tag, source_params, opts)
 
-      Broadcast.clear_deferred_broadcasts()
+      # CLAIM, not merely clear: this path opens its own transaction and flushes
+      # by hand in `finish_document_op_transaction/4`, so it must register as the
+      # queue's owner or every webhook it defers reads as orphaned.
+      Broadcast.claim_deferred_queue()
       Writer.clear_deferred_after_save()
 
       try do
@@ -4606,16 +4743,38 @@ defmodule Barkpark.Content.Papers.BlockOps do
   #   2. the first heading block's text (legacy heading-driven papers);
   #   3. the slug (the desk list always needs a title).
   defp paper_title(content, slug) when is_map(content) do
-    blocks = Map.get(content, "blocks")
+    blank_to_nil(Map.get(content, "title")) || heading_title(Map.get(content, "blocks")) || slug
+  end
 
-    heading_text =
-      if is_list(blocks) do
-        Enum.find_value(blocks, fn b ->
-          if Map.get(b, "type") == "heading", do: blank_to_nil(Map.get(b, "text"))
-        end)
+  @doc """
+  The first heading block's PLAIN text, or `nil` when there is no heading with
+  printable text.
+
+  Public so the ingest controller's create-precheck twin (`create_title/3` in
+  `BulldocsIngestController`) derives the title the SAME way the authoritative
+  upsert wall does — the two derivations must move in lockstep or a dry-run
+  passes under one title and the write stores another.
+
+  Reads BOTH authored heading forms (bp-paper-ingest-title-trap): the flat
+  `"text"` key (legacy heading-driven papers) and the normal PortableDoc inline
+  `"content"` array. Matching only `"text"` made an array-authored heading miss
+  the fallback entirely, so the row title fell silently to the slug.
+  """
+  def heading_title(blocks) when is_list(blocks) do
+    Enum.find_value(blocks, fn b ->
+      if is_map(b) and Map.get(b, "type") == "heading" do
+        blank_to_nil(Map.get(b, "text")) || heading_content_text(b)
       end
+    end)
+  end
 
-    blank_to_nil(Map.get(content, "title")) || heading_text || slug
+  def heading_title(_), do: nil
+
+  defp heading_content_text(b) do
+    case Map.get(b, "content") do
+      nodes when is_list(nodes) -> nodes |> inline_plain_text() |> String.trim() |> blank_to_nil()
+      _ -> nil
+    end
   end
 
   defp blank_to_nil(""), do: nil

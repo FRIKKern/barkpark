@@ -688,6 +688,28 @@ type Revision struct {
 	Title     string    `json:"title"`
 	Status    string    `json:"status"`
 	Timestamp time.Time `json:"timestamp"`
+
+	// ATTRIBUTION, DECODED THREE-STATE (flight recorder P3,
+	// task-b3045c0a79510f28). HistoryController.render_revision/1 has emitted
+	// actor_kind / actor_id / actor_label / actor_user_id (and `rev`) since the
+	// edit-on-the-link slice, and this struct DROPPED all five on the floor.
+	//
+	// The consequence was not "less detail": it was a manufactured measurement.
+	// Any caller reading a Revision could only ever conclude "no actor", which
+	// is indistinguishable from "the store recorded no actor" — an UNMEASURED
+	// dressed up as a measured absence.
+	//
+	// They are POINTERS on purpose. The store distinguishes a column it never
+	// wrote (JSON null -> nil here) from one it wrote empty ("" -> a non-nil
+	// pointer to ""), and that distinction IS the finding: null means nobody
+	// ever stamped this mutation, empty means something answered with nothing.
+	// Decoding into plain string would collapse the two and reintroduce the
+	// exact defect this field set exists to remove.
+	Rev         *string `json:"rev"`
+	ActorKind   *string `json:"actor_kind"`
+	ActorID     *string `json:"actor_id"`
+	ActorLabel  *string `json:"actor_label"`
+	ActorUserID *string `json:"actor_user_id"`
 }
 
 // History lists a document's revisions, newest first. docID is the BARE
@@ -1181,6 +1203,15 @@ type taskEnvelope struct {
 	// the holder on skip so a builder learns who owns the seam BEFORE merge (it
 	// was silently dropped before df-next-frontier). Empty on every other reason.
 	Conflicts []TaskConflict `json:"conflicts"`
+	// RailRev is the top-level `rail_rev` a claim / claim_by_id / close 2xx
+	// envelope carries when the subject task HAS a parent (omitted otherwise).
+	// It is the POST-write ETag of the parent rail — the server's own words:
+	// "the fresh baseline the worker carries into its next action". This is the
+	// CLIENT-SIDE SOURCE for observed_rail_rev: the client never has to invent a
+	// rail digest, it echoes back the one the previous claim/close handed it.
+	// Decoded nowhere before wb-bl-go-railrev-claim-plumbing, which is why the
+	// rail_changed advisory was dead for automated fleet claims.
+	RailRev string `json:"rail_rev"`
 }
 
 // TaskConflict is one holder in a resource_conflict envelope: the task + worker
@@ -1312,10 +1343,44 @@ func (c *Client) TaskClaim(docID, workerID string) (int, error) {
 // strip, the desk TUI, the cmux hook) use this; TaskClaim stays the epoch-only
 // convenience for callers that don't.
 func (c *Client) TaskClaimN(docID, workerID string) (int, []TaskNotice, []string, error) {
+	epoch, notices, help, _, err := c.TaskClaimObservedN(docID, workerID, "")
+	return epoch, notices, help, err
+}
+
+// claimPayload is the ONE builder for a claim request body, so the omission rule
+// lives in one place: observed_rail_rev and resources are sent ONLY when
+// non-empty. An empty value keeps the marshalled body BYTE-IDENTICAL to the bare
+// {"worker_id":…} claim every caller sent before — the advisory is opt-in, and a
+// client with no rail baseline yet must not start sending "" (the server's
+// add_rail_changed_notice guard requires `observed != ""`, but a client that
+// ships an empty key has changed the wire for every unrelated consumer).
+func claimPayload(workerID string, resources []string, observedRailRev string) map[string]interface{} {
+	payload := map[string]interface{}{"worker_id": workerID}
+	if len(resources) > 0 {
+		payload["resources"] = resources
+	}
+	if observedRailRev != "" {
+		payload["observed_rail_rev"] = observedRailRev
+	}
+	return payload
+}
+
+// TaskClaimObservedN is TaskClaimN plus the rail-awareness ROUND TRIP: it sends
+// observedRailRev (the rail_rev this client last saw for the task's parent rail,
+// "" when it has none) and returns the envelope's fresh `rail_rev` as the fifth
+// value, so the caller can carry it into its NEXT claim in the same rail.
+//
+// That round trip is the whole fix: the server fires the rail_changed advisory
+// only when a claim SUPPLIES observed_rail_rev
+// (tasks_controller.ex add_rail_changed_notice/5), and no Go caller ever did.
+// Measured against guerrilla 2026-09-18 — with the key the envelope carries
+// notices:[{"type":"rail_changed","parent_id":…,"rail_rev":…}]; without it,
+// notices is null.
+func (c *Client) TaskClaimObservedN(docID, workerID, observedRailRev string) (int, []TaskNotice, []string, string, error) {
 	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/claim",
-		map[string]interface{}{"worker_id": workerID})
+		claimPayload(workerID, nil, observedRailRev))
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, nil, nil, "", err
 	}
 	var doc struct {
 		Claim struct {
@@ -1323,9 +1388,9 @@ func (c *Client) TaskClaimN(docID, workerID string) (int, []TaskNotice, []string
 		} `json:"claim"`
 	}
 	if err := json.Unmarshal(env.Doc, &doc); err != nil || doc.Claim.Epoch <= 0 {
-		return 0, nil, nil, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
+		return 0, nil, nil, "", fmt.Errorf("claim %s: server returned no fencing epoch", docID)
 	}
-	return doc.Claim.Epoch, env.Notices, env.Help, nil
+	return doc.Claim.Epoch, env.Notices, env.Help, env.RailRev, nil
 }
 
 // TaskClaimOutcome is the full result of a resources-declaring claim: on a
@@ -1341,6 +1406,10 @@ type TaskClaimOutcome struct {
 	Notices   []TaskNotice
 	Help      []string
 	Conflicts []TaskConflict
+	// RailRev is the envelope's fresh parent-rail ETag (empty when the task is
+	// parentless or the claim was rejected). Feed it back as the next claim's
+	// observedRailRev to arm the rail_changed advisory for the rail.
+	RailRev string
 }
 
 // TaskClaimResources claims docID for workerID and DECLARES the file resources
@@ -1356,10 +1425,15 @@ type TaskClaimOutcome struct {
 // empty resources slice sends no resources key (byte-identical to a bare claim),
 // so the server fence is a no-op — the caller opts into the fence by declaring.
 func (c *Client) TaskClaimResources(docID, workerID string, resources []string) (TaskClaimOutcome, error) {
-	payload := map[string]interface{}{"worker_id": workerID}
-	if len(resources) > 0 {
-		payload["resources"] = resources
-	}
+	return c.TaskClaimResourcesObserved(docID, workerID, resources, "")
+}
+
+// TaskClaimResourcesObserved is TaskClaimResources plus the rail-awareness round
+// trip (see TaskClaimObservedN): it sends observedRailRev when non-empty and
+// reports the envelope's fresh rail_rev on the outcome. An empty observedRailRev
+// leaves the request byte-identical to TaskClaimResources.
+func (c *Client) TaskClaimResourcesObserved(docID, workerID string, resources []string, observedRailRev string) (TaskClaimOutcome, error) {
+	payload := claimPayload(workerID, resources, observedRailRev)
 	env, _, err := c.taskPostRaw("/v1/tasks/"+url.PathEscape(docID)+"/claim", payload)
 	if err != nil {
 		return TaskClaimOutcome{}, err
@@ -1379,7 +1453,7 @@ func (c *Client) TaskClaimResources(docID, workerID string, resources []string) 
 	if err := json.Unmarshal(env.Doc, &doc); err != nil || doc.Claim.Epoch <= 0 {
 		return TaskClaimOutcome{}, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
 	}
-	return TaskClaimOutcome{OK: true, Epoch: doc.Claim.Epoch, Notices: env.Notices, Help: env.Help}, nil
+	return TaskClaimOutcome{OK: true, Epoch: doc.Claim.Epoch, Notices: env.Notices, Help: env.Help, RailRev: env.RailRev}, nil
 }
 
 // TaskClose closes a claimed task via POST /v1/tasks/:doc_id/close. The server
@@ -1538,7 +1612,7 @@ func (r TaskReadback) IsDraft() bool {
 // token-scoped task route — tenancy rides the bearer token, exactly like the
 // claim/close/stamp POSTs above).
 //
-// It exists for the PDS success-claim law (charter PDS-D359/D361): a ledger
+// It exists for the PDS success-claim law (charter PDS-D359/PDS-D361): a ledger
 // writer may not report a write it never read back. `bp task stamp` POSTs and
 // then calls this to ask the STORE what it now holds, so a write dropped by a
 // transport ceiling, a second door, or a bad minute on the box cannot be
@@ -1548,18 +1622,25 @@ func (r TaskReadback) IsDraft() bool {
 // error; a non-200 carries the status. Both are honest read failures — the
 // caller must NOT read them as "the write landed".
 func (c *Client) TaskGetContent(docID string) (TaskReadback, error) {
-	resp, err := c.authGet(c.flatURL("/v1/tasks/" + url.PathEscape(docID)))
+	raw, status, err := c.taskGetRaw(docID, "")
 	if err != nil {
 		return TaskReadback{}, err
 	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	if err != nil {
-		return TaskReadback{}, fmt.Errorf("task read-back %s: %w", docID, err)
+	// A doc_id that exists in more than one dataset makes the BARE route
+	// refuse 409 ambiguous_dataset. The write that this read is checking was
+	// already addressed by dataset (`bp task stamp/close/pulse -d <ds>` sends
+	// ?dataset=), so the read-back must name the same one or it reports a
+	// landed write as NOT STORED — and tells the operator to write again.
+	// Retry ONLY on the 409, and only with the dataset the caller resolved, so
+	// every non-ambiguous row keeps today's bare-route behaviour byte for byte
+	// (including the server-side `drafts.` fallback that route performs).
+	if status == http.StatusConflict && c.Dataset != "" {
+		if raw2, status2, err2 := c.taskGetRaw(docID, c.Dataset); err2 == nil && status2 == http.StatusOK {
+			raw, status = raw2, status2
+		}
 	}
-	if resp.StatusCode != http.StatusOK {
-		return TaskReadback{}, fmt.Errorf("task read-back %s: status %d", docID, resp.StatusCode)
+	if status != http.StatusOK {
+		return TaskReadback{}, fmt.Errorf("task read-back %s: status %d", docID, status)
 	}
 	var env struct {
 		OK     bool   `json:"ok"`
@@ -1592,6 +1673,26 @@ func (c *Client) TaskGetContent(docID string) (TaskReadback, error) {
 		LifecycleStatus: env.Doc.LifecycleStatus,
 		Claim:           env.Doc.Claim,
 	}, nil
+}
+
+// taskGetRaw performs one GET /v1/tasks/:doc_id, optionally naming a dataset,
+// and hands back the body with its status. An empty dataset sends the BARE
+// route, byte-identical to the request this read-back has always made.
+func (c *Client) taskGetRaw(docID, dataset string) ([]byte, int, error) {
+	endpoint := c.flatURL("/v1/tasks/" + url.PathEscape(docID))
+	if dataset != "" {
+		endpoint += "?dataset=" + url.QueryEscape(dataset)
+	}
+	resp, err := c.authGet(endpoint)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("task read-back %s: %w", docID, err)
+	}
+	return raw, resp.StatusCode, nil
 }
 
 // GraphNode is one node of a GET /v1/graph/:id response — the id ↔ doc_id join

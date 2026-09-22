@@ -107,7 +107,7 @@ const DECLARES_NO_SUMMARY = "gates no part-summary";
 // shrink: a gate that stops gating drops it, including a gate inside a Part whose
 // OTHER gate still answers for the Part. Growth is fine and prints a NOTE — a new
 // hooked Part earns its line without editing anything here.
-const OK_LINE_FLOOR = 17;
+const OK_LINE_FLOOR = 22;
 
 /** One run of the real gate. `faults` is the array of part ids to force. */
 function runGate(faults) {
@@ -147,11 +147,15 @@ export async function selftest() {
   const PARTS = [...healthy.keys()];
 
   // The injectable set comes from check.mjs itself — one hook per ok-gate. The
-  // `[A-Z][A-Z0-9]*` shape deliberately does not match the `FAULT.has("<id>")`
-  // written in that file's own comment.
+  // `[A-Z0-9]+` shape deliberately does not match the `FAULT.has("<id>")` written
+  // in that file's own comment. It was `[A-Z][A-Z0-9]*` until r21d, which is to
+  // say it could not see a hook on a Part whose id STARTS with a digit — and the
+  // gate has exactly one, Part 0. The set of ids here must mirror PART_HEADER's
+  // `[A-Za-z0-9]+`, not a narrower guess at what a Part will be called, or a hook
+  // that IS present reads here as a Part that carries none.
   const source = readFileSync(CHECK, "utf8");
   const INJECTABLE = [...new Set(
-    [...source.matchAll(/FAULT\.has\("([A-Z][A-Z0-9]*)"\)/g)].map((m) => m[1]),
+    [...source.matchAll(/FAULT\.has\("([A-Z0-9][A-Z0-9]*)"\)/g)].map((m) => m[1]),
   )];
   const covered = PARTS.filter((p) => INJECTABLE.includes(p));
   const uncovered = PARTS.filter((p) => !INJECTABLE.includes(p));

@@ -111,6 +111,11 @@ func runPaper(out *writer, g globals, args []string) int {
 		return runPaperNew(out, g, args[1:])
 	case "pull":
 		return runPaperPull(out, g, resolveContext(g), args[1:])
+	// `export` (paper_export_cmd.go) is the retrieval half the BP-ONB-21 audit
+	// found missing: the paper OUT in the shape `bp bulldocs publish` takes IN.
+	// It rides the same source route as `pull`, so it resolves context alike.
+	case "export":
+		return runPaperExport(out, g, resolveContext(g), args[1:])
 	case "status":
 		return runPaperStatus(out, g, resolveContext(g), args[1:])
 	case "diff":
@@ -655,15 +660,33 @@ func paperFetchAll(client *apiclient.Client, perspective string) ([]paperRawDoc,
 		headers["Authorization"] = "Bearer " + t
 	}
 
-	// Page until a short page. The query endpoint defaults to limit=100 and
-	// silently drops the rest, so an unbounded fetch capped the corpus at 100
-	// docs — papers beyond that window (e.g. soc2-controls-mapping, dpa-template)
-	// vanished and `bp paper view` reported "no paper matches" for papers that
-	// exist. paperPageSize (1000) is the server's max clamp, so this loop drains
-	// the whole corpus in as few round-trips as possible while staying correct
-	// past 1000 papers. Mirrors migrateFetchAll's proven pagination.
+	// Page until the SERVER says the corpus is drained. The query endpoint
+	// defaults to limit=100 and silently drops the rest, so an unbounded fetch
+	// capped the corpus at 100 docs — papers beyond that window (e.g.
+	// soc2-controls-mapping, dpa-template) vanished and `bp paper view`
+	// reported "no paper matches" for papers that exist.
+	//
+	// A SHORT PAGE WAS TREATED AS A DRAINED CORPUS, AND ZERO IS A SHORT PAGE.
+	// `len(rawDocs) < paperPageSize { break }` ended the walk on the first page
+	// that did not fill, so a first request answered `{"documents":[]}` at HTTP
+	// 200 — for ANY reason — returned (nil, nil): an empty corpus with a NIL
+	// ERROR. A genuinely empty corpus and a request the server would not serve
+	// produced the same bytes at the same exit code, and the caller printed "no
+	// paper matches" for both. Measured on guerrilla 2026-09-17, the query route
+	// answers 200 with zero documents for a dataset that does not exist and for
+	// a type that does not exist, exactly as it does for a filter that matches
+	// nothing — three different facts, one response shape.
+	//
+	// So the loop consults `hasMore` LAST and UNCONDITIONALLY (pageHasMoreStated,
+	// shared with the single-page guard so the two envelope spellings are known
+	// in one place), advances by the rows ACTUALLY returned rather than by the
+	// requested page size, and falls back to the short-page heuristic only when
+	// the envelope states nothing. A zero-row FIRST page is routed through
+	// paperEmptyFirstPage, which refuses rather than guess.
 	var out []paperRawDoc
 	offset := 0
+	requested := paperPageSize
+	retriedAtServedLimit := false
 	for {
 		params := url.Values{}
 		if perspective != "" {
@@ -674,7 +697,7 @@ func paperFetchAll(client *apiclient.Client, perspective string) ([]paperRawDoc,
 		// task widgets render live plans instead of "[task-list — unresolved]".
 		// Read-only: paperFetchAll feeds the render path, never a write-back.
 		params.Set("resolve", "tasks")
-		params.Set("limit", strconv.Itoa(paperPageSize))
+		params.Set("limit", strconv.Itoa(requested))
 		params.Set("offset", strconv.Itoa(offset))
 		u := base + "?" + params.Encode()
 
@@ -701,6 +724,37 @@ func paperFetchAll(client *apiclient.Client, perspective string) ([]paperRawDoc,
 			rawDocs = env.Documents
 		}
 
+		inner := unwrapResult(body)
+		promisesMore, statedMore := pageHasMoreStated(inner)
+		served, servedOK := pageEffectiveLimit(inner)
+
+		if len(rawDocs) == 0 && offset == 0 {
+			// The three outcomes this function could not tell apart. Only the
+			// envelope can separate them, so decide from it or refuse.
+			switch {
+			case promisesMore:
+				return nil, fmt.Errorf("paper query returned 0 of a corpus the server says is non-empty (hasMore is true) at limit=%d on %s — the page was withheld, not drained", requested, base)
+			case statedMore:
+				// The server stated hasMore:false over zero rows: a genuinely
+				// empty corpus, answered honestly. Not an error.
+				return nil, nil
+			case servedOK && served == requested:
+				// No hasMore, but the server echoed back the limit it applied
+				// and it is the one asked for: it ran the query we asked for
+				// and found nothing. Also a genuinely empty corpus.
+				return nil, nil
+			case servedOK && served > 0 && served != requested && !retriedAtServedLimit:
+				// The server clamped the limit and returned nothing at it.
+				// Retry ONCE at the limit it says it honours before concluding
+				// anything — the row's "fetch at an honoured limit" branch.
+				retriedAtServedLimit = true
+				requested = served
+				continue
+			default:
+				return nil, fmt.Errorf("paper query returned 0 documents at limit=%d on %s and the response carried neither hasMore nor an echoed limit — an empty corpus and a refused request are indistinguishable here, so this is reported rather than rendered as \"no paper matches\"", requested, base)
+			}
+		}
+
 		for _, r := range rawDocs {
 			var ident struct {
 				ID    string `json:"_id"`
@@ -710,18 +764,45 @@ func paperFetchAll(client *apiclient.Client, perspective string) ([]paperRawDoc,
 			_ = json.Unmarshal(r, &ident)
 			out = append(out, paperRawDoc{id: ident.ID, slug: ident.Slug, title: ident.Title, raw: r})
 		}
-		if len(rawDocs) < paperPageSize {
+
+		// THE SERVER'S FACT BEATS THE ROW ARITHMETIC. hasMore is an exact
+		// answer; "did the page fill" is a client-side inference that a
+		// byte-bounded or clamped page invalidates.
+		if statedMore {
+			if !promisesMore {
+				break
+			}
+		} else if len(rawDocs) < requested {
+			// No envelope evidence at all — the pre-existing heuristic, kept so
+			// a server that states nothing still terminates.
 			break
 		}
-		offset += paperPageSize
+		// Advance by the rows ACTUALLY returned, never by the requested page
+		// size: a clamped or byte-bounded page is shorter than what was asked,
+		// and `offset += requested` would skip every row in the gap.
+		offset += len(rawDocs)
 	}
 	return out, nil
 }
 
-// paperPageSize is the per-request page size for paperFetchAll. 1000 is the
-// query endpoint's max limit clamp (see query_controller.ex), so it drains the
-// corpus in the fewest round-trips while the loop still handles a >1000 corpus.
-const paperPageSize = 1000
+// paperPageSize is the per-request page size for paperFetchAll.
+//
+// IT IS THE CLIENT'S BYTE CAP THAT BINDS HERE, NOT THE SERVER'S ROW CLAMP. The
+// old value was 1000 with the comment "1000 is the query endpoint's max limit
+// clamp … so it drains the corpus in the fewest round-trips". The clamp half is
+// true — query_controller.ex does `parse_int(params["limit"], 100) |> min(1000)
+// |> max(1)`, and measured against guerrilla 2026-09-17 the route honours
+// 50/100/200/500/1000 exactly and serves 1000 for a requested 1001 or 2000. The
+// CONCLUSION is what was false: paperFetchAll sends `resolve=tasks` and no
+// `fields` projection, so it asks for 1000 WHOLE paper bodies. Measured on the
+// live corpus, that response is 169,080,988 bytes — 2.5x doRequest's own
+// maxResponseBytes (64MB), which readCapped refuses outright ("response exceeds
+// 67108864 bytes — refusing to parse a truncated body"). The fewest round-trips
+// was zero successful ones. The same ladder: limit=500 is 63,595,931 bytes, 99.8%
+// of the cap, and limit=100 is 19,569,591 bytes — a 3.4x margin. So 100, proven
+// under the cap rather than asserted against the wrong ceiling; the loop above
+// pages past it on the server's own hasMore.
+const paperPageSize = 100
 
 // paperScopedURL builds the workspace/project-scoped /v1/ URL for a paper read,
 // mirroring apiclient.Client.scopedURL (which is unexported) so the built-in
@@ -1578,6 +1659,13 @@ func usagePaper(out *writer, toStdout bool) {
 	p("  view <slug>      render a paper to the terminal (the CLI counterpart")
 	p("                   to opening it in the browser)")
 	p("  capture <url>    capture immutable CLI, task-board, and TUI readers")
+	p("  export <slug>    print the paper as a publish-ready JSON payload on")
+	p("                   stdout (--out <path> to a file) — the retrieval half")
+	p("                   of the round trip:")
+	p("                     bp paper export <slug> > p.json")
+	p("                     bp bulldocs publish <slug> --file p.json")
+	p("                   (get/list are the generic doc verbs: bp doc get paper")
+	p("                    <slug> for the stored row, bp doc ls paper to list)")
 	p("")
 	p("working copy (BPML — papers as files under .barkpark/papers/):")
 	p("  new <slug>       scaffold a wall-passing BPML starter + rev-0 anchor")

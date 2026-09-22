@@ -35,13 +35,68 @@ for {env_name, config_key} <- [
   end
 end
 
+require Logger
+
+# BARKPARK_RELEASE_CAPTURE_HMAC_SECRET authenticates server-owned reader
+# evidence — the CycleFleet release-gate captures and the public-smoke
+# attestation. It is DELIBERATELY OPTIONAL, on exactly the contract
+# CONNECTORS_CONNECT_SECRET states further down this file: absent ⇒ the one
+# feature that needs it refuses, and an instance that never runs a release gate
+# is a normal instance.
+#
+# WHY THIS NEVER RAISES. It did raise, from 12c903782 (2026-07-19) until this
+# block, and the 2026-09-19 fleet migration-lag census
+# (tooling/grip/ledger/fleet-migration-lag-census-2026-09-19.md) measured the
+# cost. runtime.exs is evaluated for EVERY prod Mix invocation — `mix
+# ecto.migrate` included (scripts/deploy-rebuild.sh, deploy/instance-deploy.sh)
+# — so a box without the secret could not migrate, could not even be TOLD its
+# schema was behind, while `git pull` kept fast-forwarding HEAD past it. Three
+# warm boxes were crashlooping (NRestarts 585206 / 208412 / 363216) on
+# `/opt/barkpark/api/config/runtime.exs:44: (file)`, schema pinned at
+# 20260705260000 and 28-52 days behind HEAD; a 2x5 control held in both
+# directions — every box carrying the key was current, every box without it was
+# stuck. The invariant this block now keeps: a missing FEATURE secret must
+# refuse to SERVE the feature, and must never refuse to MIGRATE or to boot the
+# release for a maintenance task.
+#
+# The refusal is NOT dropped, it MOVED to the feature boundary:
+# `Barkpark.CycleFleet`'s `put_release_capture_hmac_secret/0` returns
+# `{:error, :release_capture_signing_unavailable}` for a missing or short
+# secret, and both signing transactions (activate + public smoke) roll back on
+# it, so nothing is ever signed with an absent or weak key.
+#
+# `Logger.warning`, NOT `Logger.info`: runtime.exs is evaluated BEFORE the
+# Logger application starts, so the `:logger` primary level is still the Erlang
+# default `:notice` and a `Logger.info` line here produces NO OUTPUT AT ALL —
+# see the BARKPARK_KEK_PREVIOUS block below for the same reasoning and its
+# control run. The line prints the LENGTH, never the value.
 case System.get_env("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET") do
   secret when is_binary(secret) and byte_size(secret) >= 32 ->
     config :barkpark, :cycle_release_capture_hmac_secret, secret
 
-  _ ->
+  other ->
     if config_env() == :prod do
-      raise "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET must contain at least 32 bytes"
+      got =
+        case other do
+          nil -> "it is not set"
+          "" -> "it is set but empty"
+          short -> "got #{byte_size(short)} bytes"
+        end
+
+      Logger.warning("""
+      BARKPARK_RELEASE_CAPTURE_HMAC_SECRET must be at least 32 bytes (#{got}) \
+      — the CycleFleet release-capture surface is DISABLED on this box.
+
+      Every other endpoint serves normally and `mix ecto.migrate` runs, by \
+      design: this file must never refuse to migrate for a feature the box may \
+      not use (fleet migration-lag census, 2026-09-19). Activating a release \
+      gate or passing a public smoke will refuse with \
+      :release_capture_signing_unavailable until the secret is set.
+
+      Generate one: openssl rand -base64 32 — and set \
+      BARKPARK_RELEASE_CAPTURE_HMAC_SECRET in .env (compose) or \
+      /opt/barkpark/.env, then restart. This line never echoes the value.
+      """)
     end
 end
 

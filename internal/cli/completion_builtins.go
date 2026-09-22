@@ -43,9 +43,15 @@ var builtinCompletionPaths = map[string][]string{
 	"cloud": {
 		"autoupdate", "azure", "deliveries", "deploy", "deployments", "domain", "domains",
 		"hetzner", "instance", "instances", "member", "members", "open", "providers",
-		"rollback", "rollout", "site", "sites", "status", "support", "supports", "update",
+		"rollback", "rollout", "site", "sites", "status", "support", "supports",
+		"token", "tokens", "update",
 		"usage", "verify", "webhook", "webhooks", "workspace", "workspaces",
 	},
+
+	// `bp cloud token <TAB>` — the PAT verbs. The aliases (create/list/rm) are
+	// deliberately NOT offered: one spelling per action keeps the completion a
+	// teaching surface rather than a menu of synonyms.
+	"cloud token": {"mint", "ls", "revoke"},
 
 	// `bp cloud site <TAB>` / `bp cloud sites <TAB>` — every verb in the SITE
 	// COMMAND MATRIX (site_verb_matrix.go), which both `bp cloud site` and the

@@ -39,6 +39,35 @@
 # wider version destroyed copy a person needed (a redacted git SHA reads exactly
 # like a redacted token).
 #
+# DOES THIS TABLE KEEP GROWING? — the decision, recorded 2026-09-17 for
+# `cch-w13-rv-scrub-eats-bracketed-prose` c3, which asked whether
+# `task-4f363dc65ac43203`'s fail-closed oracle supersedes this table.
+#
+# IT DOES NOT, and the two are not alternatives. They answer different
+# questions and both are load-bearing:
+#
+#   * The oracle (`cloud/test/barkpark_cloud/raw_failure_channel_oracle_test.exs`,
+#     shipped; that task is `done`) writes a sentinel secret into each raw
+#     failure-bearing column and asserts it cannot appear in the JSON of any
+#     route that serves it. It answers "IS the scrub applied on every channel" —
+#     a COVERAGE question about call sites. It is completely blind to what the
+#     scrub matches: swap this table for `[]` and the oracle's sentinel, chosen
+#     to be a shape the table catches, would simply stop being caught — it would
+#     red, but it can never tell you that `Bearer <none>` was mauled, because
+#     nothing there reads ordinary prose.
+#
+#   * This table answers "does the scrub redact THE RIGHT BYTES" — a PRECISION
+#     question. Its failure mode is silent copy loss, which no channel oracle
+#     can see, because a redaction that ate prose passes every leak assertion.
+#
+# So the table stays. What it may NOT do is grow by ENUMERATION: the rule for
+# every future edit is that a false positive is fixed by widening the GUARD'S
+# SHAPE (as `value_wrapper` below does for every delimiter x every stop word at
+# once), not by appending the specific string that was mauled. If a proposed
+# edit adds a row that only spares one literal, it is the wrong edit — find the
+# rule it is a sample of. Every entry, new or widened, ships with a POSITIVE and
+# a NEGATIVE row in `failure_copy_test.exs`.
+#
 # `vectors` at the bottom is the CROSS-APP BEHAVIOUR LOCK: the same input must
 # fold to the same bytes on both sides. One pattern set is not enough on its
 # own, because each app carries its own small engine; the vectors are what makes
@@ -54,7 +83,29 @@ redaction = "[redacted]"
 # a person a secret leaked when none did. Every entry is an ordinary English
 # word that no generated credential can be, so this guard costs the scrub no
 # coverage; it is anchored with `\b` so it can only skip the WHOLE value.
-prose_value = "(?:token|tokens|credential|credentials|value|header|auth|expired|missing|invalid|unset|unknown|empty|none|null|nil|set|required|absent|not)\\b"
+#
+# THE WRAPPER PREFIX IS THE RULE, NOT A SECOND STOP-LIST (cch-w13-rv). The word
+# list above is a snapshot; the thing that kept eating prose was not a missing
+# word but a missing RULE — the guard was anchored on the value's FIRST BYTE, so
+# it only ever saw a value that opens with the word itself. A placeholder does
+# not: `Bearer <none>`, `token: [none]`, `Bearer (none)` and `Bearer "none"` all
+# open with a DELIMITER, the stop-word sits one byte in, the guard never fired
+# and the scrub redacted copy that held no secret. The answer is to let the
+# guard see THROUGH the wrapper rather than to append `<none>`, `[none]`,
+# `(none)` … to the list — an enumeration of wrapped spellings is
+# (delimiters x words) long and grows forever.
+#
+# `*` (not `+`) keeps the unwrapped case byte-identical, so this is a strict
+# widening of the SPARE side. It can only cost coverage for a value that opens
+# with one of these delimiters AND whose first whole word is a stop word — i.e.
+# `token: <token>`, which is a placeholder by construction. A generated
+# credential is not an English word, wrapped or not; that is the same premise
+# the bare list already rests on.
+value_wrapper = "[\\[({<\"'`]*"
+
+prose_value =
+  value_wrapper <>
+    "(?:token|tokens|credential|credentials|value|header|auth|expired|missing|invalid|unset|unknown|empty|none|null|nil|set|required|absent|not)\\b"
 
 # The secret shapes a remote capture can carry, most specific first. Each entry
 # is `{pattern, replacement}` and every one carries POSITIVE and NEGATIVE rows
@@ -228,6 +279,13 @@ ansi_run = "\x1B(?:\\][^\x07\x1B]*(?:\x07|\x1B\\\\)|\\[[0-?]*[ -/]*[@-~]|[ -~])"
      "fetch refused: the pat bppat_7Kd-Qm2xTf9Zb_LpV4nA1sJhR0yWuEcG3iOtXvB is not valid for this workspace",
      "fetch refused: the pat [redacted] is not valid for this workspace"},
     {"a minted box admin credential, bare", "bp_admin_9xKq2LmN4pR7sT1vW3yZ5aC8eF0hJ6b was rotated",
-     "[redacted] was rotated"}
+     "[redacted] was rotated"},
+    # THE WRAPPED PLACEHOLDER, both directions — cross-app, because the api half
+    # compiles the same `prose_value` and a wrapper-blind copy of it would fold
+    # these differently while the pattern-identity arm stayed green.
+    {"a wrapped status placeholder is not a credential", "refused: Bearer <none>",
+     "refused: Bearer <none>"},
+    {"a REAL credential wrapped the same way still redacts",
+     "refused: Bearer <bppat_7Kd-Qm2xTf9Zb_LpV4nA1sJhR0yWuEcG3iOtXvB>", "refused: Bearer [redacted]"}
   ]
 }

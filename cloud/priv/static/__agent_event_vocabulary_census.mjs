@@ -22,8 +22,10 @@
 //   A  RENDERED  = the keys of TLV_EVENT_TITLES in cloud/priv/static/app.js
 //   B  PRODUCED  = the literal 2nd argument of every `Registry.record_event(`
 //                  under cloud/lib/**/*.ex
-//   C  FIXTURED  = the types the preview corpus manufactures, via `ev(…, "…")`
-//                  in cloud/priv/static/__preview__/scenarios.mjs
+//   C  FIXTURED  = the types the console's fixture corpus manufactures, via
+//                  `ev(…, "…")` or `EV(…, "…")`, in EVERY `*.mjs` under
+//                  cloud/priv/static (recursively). ARM C'S SUBJECT IS A
+//                  PREDICATE, NOT A FILE LIST — see "ARM C SCANS A ROOT".
 //
 // and the three failures it can name:
 //
@@ -61,9 +63,45 @@
 // ordering test supplied `backup` and `tls` as false producers until cch-w51-bl
 // rewrote it onto real types; accounts_test.exs still supplies `content`;
 // registry_test.exs's deliberate negative-test type `meltdown` is invented
-// alongside them; and `__app.test.mjs` still manufactures `backup`/`tls` EV()
-// rows for the timeline grammar. The wide variant certifies the exact lie.
-// Tests are not producers.
+// alongside them; and `__app.test.mjs` manufactured `backup`/`tls` EV() rows
+// for the timeline grammar until arm C was widened to read it (below) and they
+// were retyped. The wide variant certifies the exact lie. Tests are not
+// producers.
+//
+// ── ARM C SCANS A ROOT, AND THAT IS THE WHOLE OF THIS FIX ───────────────────
+//
+// Arm C used to read ONE file — __preview__/scenarios.mjs — while EIGHT rows
+// typed `backup`/`tls` sat in __app.test.mjs, in the same directory, built by
+// the same kind of builder. This file DECLARED `fixture-manufactures-
+// unproducible` as a failure mode, IMPLEMENTED a check for it, and aimed that
+// check at one file while an instance of the failure lived in another. The
+// header above even ADMITTED the rows existed. A census that names a failure
+// class and cannot see an instance of it is worse than no census, because its
+// green gets read as coverage over ground it never walked.
+//
+// The repair is NOT "add __app.test.mjs to a list". A hand-kept list is a
+// SNAPSHOT: it is correct on the day it is written and silently short the day
+// after, and the next fixture file arrives exactly the way this one did. Arm C
+// takes a ROOT and a RULE instead:
+//
+//     every `*.mjs` under cloud/priv/static, recursively, is scanned; the ones
+//     that call the `ev(`/`EV(` builder with a literal type ARE the fixture
+//     corpus, and the ones that do not, are not.
+//
+// Nothing is exempted — not even this file. Its own prose writes `ev(…, "…")`
+// with an ellipsis where the type would be, which the extractor's
+// `"([a-z][a-z0-9_]*)"` cannot match, so it contributes zero rows by the RULE
+// rather than by a waiver. MEASURED 2026-09-17 on origin/main d9f02af18: 68
+// `*.mjs` files under the root, exactly TWO contribute rows (__app.test.mjs 52,
+// __preview__/scenarios.mjs 7) and 66 contribute none. That zero is a measured
+// zero — the same scan returned 59 rows from the other two files in the same
+// pass, so the extractor demonstrably CAN return a non-empty answer.
+//
+// The vacuity guard moves with the reach: FLOORS.fixtureFiles is the number of
+// files that must contribute at least one row. A builder renamed in one file
+// would leave the type totals intact (the other file still supplies them) and
+// this arm would go on certifying a file it had stopped reading — which is the
+// blindness being fixed here, re-arriving one level up.
 //
 // Heredocs and `#` comments are stripped before the scan for the same reason:
 // telemetry.ex's @moduledoc QUOTES a call site (`Registry.record_event(barkpark,
@@ -90,8 +128,18 @@
 //   literal at the call site, or teach this file the new shape, in the same
 //   commit that introduces it.
 //
-//   LIMIT 2 — ARM C READS `ev(` CALLS. A scenario that inlines an event object
-//   literal instead of calling the `ev()` builder is invisible to arm C.
+//   LIMIT 2 — ARM C READS `ev(`/`EV(` CALLS WITH A LITERAL TYPE. A fixture that
+//   inlines an event object literal instead of calling the builder is invisible
+//   to arm C. This limit is REAL and was exercised: one of the eight retired
+//   backup/tls rows was written `{ id: 2, type: "backup", inserted_at:
+//   "garbage" }`, which no call-shaped extractor can see; it was retyped by
+//   hand. Widening the extractor to a bare `type: "…"` scan was MEASURED and
+//   REFUSED: run over __app.test.mjs on d9f02af18 it returns 61 matches and 19
+//   distinct words, of which only `health`, `verify` and `backup` are event
+//   types at all — the rest are notification channels (`slack`, `discord`),
+//   webhook and paper and task nouns, and deliberate junk fixtures (`nonsense`,
+//   `wat`). That arm would red every run for the wrong reason. A noisy arm gets
+//   muted, and a muted arm is the blindness this file exists to end.
 //
 //   LIMIT 3 — IT PROVES A TITLE EXISTS, NOT THAT THE TITLE IS GOOD. Whether
 //   "Disk space" is the right words is a judgement, pinned in __app.test.mjs.
@@ -116,10 +164,13 @@
 // name begins `__` (pinned by cloud/test/web/static_allowlist_test.exs).
 //
 // Run: node cloud/priv/static/__agent_event_vocabulary_census.mjs
-//      node cloud/priv/static/__agent_event_vocabulary_census.mjs <app.js> <lib-dir> <scenarios.mjs>
+//      node cloud/priv/static/__agent_event_vocabulary_census.mjs <app.js> <lib-dir> <fixture-root-or-file>
 //   (the argv overrides exist so a mutation driver can point the census at
 //    patched COPIES without writing inside this slice's fence — the fail-before
-//    half of this guard's discrimination proof is run exactly that way)
+//    half of this guard's discrimination proof is run exactly that way. argv[4]
+//    accepts a DIRECTORY, scanned by the same rule, or a single FILE, which is
+//    the shape older drivers passed when they handed it scenarios.mjs; a single
+//    file also relaxes FLOORS.fixtureFiles to 1, because one file cannot be two)
 
 import fs from "node:fs";
 import path from "node:path";
@@ -128,18 +179,32 @@ import vm from "node:vm";
 const here = path.dirname(new URL(import.meta.url).pathname);
 const APP = process.argv[2] || path.join(here, "app.js");
 const LIB = process.argv[3] || path.join(here, "../../lib");
-const SCENARIOS = process.argv[4] || path.join(here, "__preview__/scenarios.mjs");
+// ARM C'S SUBJECT IS A ROOT, NOT A FILE (see "ARM C SCANS A ROOT" above). The
+// default is this directory: every `*.mjs` beneath it is offered to the
+// extractor, and the ones that call the builder ARE the fixture corpus.
+const FIXTURE_ROOT = process.argv[4] || here;
 
 // Report against stable repo-relative labels so the output reads the same from
 // any cwd; a mutant copy passed on argv keeps its own path.
 const APP_LABEL = process.argv[2] || "cloud/priv/static/app.js";
 const LIB_LABEL = process.argv[3] ? process.argv[3] + "/**/*.ex" : "cloud/lib/**/*.ex";
-const SCENARIOS_LABEL = process.argv[4] || "cloud/priv/static/__preview__/scenarios.mjs";
+const FIXTURE_ROOT_LABEL = process.argv[4] || "cloud/priv/static";
 
 // The per-arm vacuity floors. main today: 4 producers (health/space/verify/
-// status), 4 titles, 3 fixtured types. An arm under its floor is a broken
+// status), 4 titles, 4 fixtured types. An arm under its floor is a broken
 // extractor reporting a clean tree — the exact vacuous green this epic kills.
-const FLOORS = { produced: 4, rendered: 4, fixtured: 3 };
+//
+// FIXTURED ROSE 3 -> 4 with the widening: __app.test.mjs manufactures `space`
+// rows the preview corpus does not, so the root scan genuinely sources one more
+// type than scenarios.mjs alone. Leaving the floor at 3 would have let the whole
+// second file drop back out of the read without tripping anything.
+//
+// fixtureFiles IS THE REACH FLOOR and it is the one that guards THIS fix: the
+// count of files under the root that contribute at least one row. Type totals
+// alone cannot notice a file going silent, because the surviving file still
+// supplies the same types — that is precisely how arm C certified a corpus it
+// was not reading. Two files contribute today.
+const FLOORS = { produced: 4, rendered: 4, fixtured: 4, fixtureFiles: 2 };
 
 
 // ── THE ONE REFUSAL VOCABULARY (cch-w63-bl) ─────────────────────────────────
@@ -329,25 +394,162 @@ if (produced.size < FLOORS.produced) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// (C) THE FIXTURE SIDE — what the preview corpus manufactures.
+// (C) THE FIXTURE SIDE — what the console's fixture corpus manufactures, read
+//     BY A RULE over a ROOT rather than from a hand-kept file list.
 // ═══════════════════════════════════════════════════════════════════════════
 
-if (!fs.existsSync(SCENARIOS)) die2([`FAIL(2): ${SCENARIOS_LABEL} not readable at ${SCENARIOS}.`]);
-const scenariosSrc = fs.readFileSync(SCENARIOS, "utf8");
-const EV_RE = /\bev\(\s*[^,()]+,\s*"([a-z][a-z0-9_]*)"/g;
-const fixtureSites = [];
-let fm;
-while ((fm = EV_RE.exec(scenariosSrc)) !== null) {
-  fixtureSites.push({ type: fm[1], line: scenariosSrc.slice(0, fm.index).split("\n").length });
+if (!fs.existsSync(FIXTURE_ROOT)) {
+  die2([`FAIL(2): the fixture root ${FIXTURE_ROOT_LABEL} not readable at ${FIXTURE_ROOT}.`]);
 }
-const fixtured = new Set(fixtureSites.map((f) => f.type));
-if (fixtured.size < FLOORS.fixtured) {
+const rootIsFile = fs.statSync(FIXTURE_ROOT).isFile();
+
+function mjsFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...mjsFiles(full));
+    else if (entry.name.endsWith(".mjs")) out.push(full);
+  }
+  return out;
+}
+
+// A single-file argv[4] keeps the older mutation drivers working; anything else
+// is a directory walked by the rule. Sorted so the report reads the same twice.
+const fixtureCandidates = (rootIsFile ? [FIXTURE_ROOT] : mjsFiles(FIXTURE_ROOT)).sort();
+if (!fixtureCandidates.length) {
   die2([
-    `FAIL(2): the FIXTURED arm came back with ${fixtured.size} type(s), under its floor of ${FLOORS.fixtured}.`,
-    `    read: ${[...fixtured].sort().join(", ") || "(none)"}  from ${fixtureSites.length} ev() row(s)`,
-    "  The corpus builds health, status and verify rows today. Under the floor means the ev()",
-    "  builder was renamed or inlined, and this arm would stop seeing manufactured traffic —",
-    "  which is precisely the blindness that let a `backup` fixture exercise a dead branch.",
+    `FAIL(2): ${FIXTURE_ROOT_LABEL}/**/*.mjs matched ZERO files. The fixture side is unreadable.`,
+    "  An empty candidate set is not an empty corpus — it is a walker that stopped walking, and",
+    "  it would make `fixture-manufactures-unproducible` trivially satisfiable.",
+  ]);
+}
+
+// The builder is spelled `ev(` in the preview corpus and `EV(` in __app.test.mjs,
+// so the extractor matches BOTH. A case-sensitive `\bev\(` was the second half of
+// this arm's blindness: even pointed at the test file it would have read zero
+// rows from it, and zero rows reads exactly like a clean file.
+const EV_RE = /\b(?:ev|EV)\(\s*[^,()]+,\s*"([a-z][a-z0-9_]*)"/g;
+
+// The extractor, as a PURE function of source text, so the discrimination
+// proof below can run it over synthetic sources instead of over the tree.
+function scanFixtureSource(text) {
+  const out = [];
+  EV_RE.lastIndex = 0;
+  let m;
+  while ((m = EV_RE.exec(text)) !== null) {
+    out.push({ type: m[1], line: text.slice(0, m.index).split("\n").length });
+  }
+  return out;
+}
+
+// ── THE DISCRIMINATION PROOF, RUN ON EVERY RUN (not written down and trusted) ──
+//
+// Arm C's blindness was never visible in its output: it reported a confident
+// set, and a set is a set whether or not the extractor could see the file it was
+// supposedly reading. So the extractor states what it must SEE and what it must
+// NOT see, and refuses to measure if either control comes back wrong. A guard
+// whose own controls are only in a commit message does not fire.
+//
+// MUST SEE — the `EV(` spelling. This is the arm that reds if the extractor is
+// reverted to the case-sensitive `\bev\(` it had before this widening: pointed at
+// __app.test.mjs, that version reads ZERO rows, which is indistinguishable in the
+// totals from a clean file.
+//
+// MUST NOT SEE — prose and bare `type:` keys. This is the arm that stays quiet
+// when it should: it is what keeps the widened scan from mistaking this file's
+// own header, or a fixture's `type: "backup"` object key, for a call site, and it
+// is why nothing under the root needs a waiver.
+// THE CONTROLS ARE BUILT, NEVER WRITTEN LITERALLY. This file is itself a `*.mjs`
+// under the root arm C walks, so a control written out as a literal builder call
+// with a literal type would be read as a real fixture row and red the census on
+// its own source. (That is not hypothetical: the first draft of THIS COMMENT
+// spelled one out and the census immediately reported itself minting `backup` —
+// the rule working, with no waiver to soften it.) `mkRow` assembles the shape at
+// runtime; the pieces in this source never form a call site. That the assembly is
+// right is not assumed — it is what the positive controls below measure.
+const mkRow = (fn, type) => `${fn}(1, ${JSON.stringify(type)}, 10)`;
+const PROOF_SEES = [
+  [mkRow("EV", "backup"), "backup"],
+  [mkRow("ev", "health"), "health"],
+  [`  const bare = hooks.mergeTimeline([${mkRow("EV", "space")}], [])[0];`, "space"],
+];
+const PROOF_BLIND = [
+  // prose with an elided type — this file's own header writes exactly this
+  '// C  FIXTURED = the types the corpus manufactures, via `ev(…, "…")`',
+  // a bare object key: the one shape LIMIT 2 concedes arm C cannot see
+  '{ id: 2, type: "backup", inserted_at: "garbage" }',
+  // the word boundary: `prev(` ends in `ev(` and must not count as the builder
+  'prev(x, "backup", 10)',
+];
+for (const [src, want] of PROOF_SEES) {
+  const got = scanFixtureSource(src).map((r) => r.type);
+  if (!got.includes(want)) {
+    die2([
+      `FAIL(2): arm C's extractor did not see "${want}" in its own positive control.`,
+      `    control: ${src}`,
+      `    read:    ${got.join(", ") || "(nothing)"}`,
+      "  The extractor cannot report an honest fixture set while it is blind to a shape the",
+      "  corpus actually uses — a zero read is indistinguishable from a clean file, which is",
+      "  exactly how six backup/tls rows sat unseen inside this census's declared coverage.",
+    ]);
+  }
+}
+for (const src of PROOF_BLIND) {
+  const got = scanFixtureSource(src).map((r) => r.type);
+  if (got.length) {
+    die2([
+      `FAIL(2): arm C's extractor matched its own NEGATIVE control and read ${got.join(", ")}.`,
+      `    control: ${src}`,
+      "  Prose and bare `type:` keys are not call sites. An extractor that matches them hands",
+      "  this arm words that are not event types and reds every run for the wrong reason — and",
+      "  a noisy arm gets muted, which is the blindness this file exists to end.",
+    ]);
+  }
+}
+
+const fixtureSites = []; // { type, label, line }
+const contributing = [];
+for (const file of fixtureCandidates) {
+  const label = rootIsFile
+    ? FIXTURE_ROOT_LABEL
+    : FIXTURE_ROOT_LABEL + file.slice(FIXTURE_ROOT.length);
+  const text = fs.readFileSync(file, "utf8");
+  const rows = scanFixtureSource(text);
+  for (const r of rows) fixtureSites.push({ type: r.type, label, line: r.line });
+  // A file with zero rows is simply not a fixture file — that is the rule doing
+  // its job, not a waiver. 66 of the 68 files under the root are in this case.
+  if (rows.length) contributing.push({ label, rows: rows.length });
+}
+
+if (contributing.length < (rootIsFile ? 1 : FLOORS.fixtureFiles)) {
+  die2([
+    `FAIL(2): only ${contributing.length} file(s) under ${FIXTURE_ROOT_LABEL} contributed ev()/EV() rows,`,
+    `  under the reach floor of ${rootIsFile ? 1 : FLOORS.fixtureFiles}, out of ${fixtureCandidates.length} *.mjs scanned.`,
+    `    contributing: ${contributing.map((c) => `${c.label} (${c.rows})`).join(", ") || "(none)"}`,
+    "  The TYPE totals cannot notice this: a surviving fixture file supplies the same types, so",
+    "  the arm would go on reporting a set it had stopped sourcing. That is the exact shape this",
+    "  arm was widened to end — a census green over ground it never walked. Either the builder",
+    "  was renamed or inlined in a file that used to manufacture rows, or the corpus genuinely",
+    "  shrank and this floor should move in the SAME commit that shrinks it.",
+  ]);
+}
+
+// A caller who NARROWS the subject to one file narrows the floors with it — the
+// root-mode floors describe the union of the whole corpus and one file cannot be
+// expected to carry it (scenarios.mjs alone sources 3 of the 4). CI never passes
+// argv[4], so the full floors are what the merge gate is held to; this branch
+// exists only for the mutation drivers that hand the census a patched COPY.
+const fixturedFloor = rootIsFile ? 1 : FLOORS.fixtured;
+const fixtured = new Set(fixtureSites.map((f) => f.type));
+if (fixtured.size < fixturedFloor) {
+  die2([
+    `FAIL(2): the FIXTURED arm came back with ${fixtured.size} type(s), under its floor of ${fixturedFloor}.`,
+    `    read: ${[...fixtured].sort().join(", ") || "(none)"}  from ${fixtureSites.length} ev()/EV() row(s)`,
+    `    across: ${contributing.map((c) => c.label).join(", ")}`,
+    "  The corpus builds health, space, status and verify rows today. Under the floor means the",
+    "  ev()/EV() builder was renamed or inlined, and this arm would stop seeing manufactured",
+    "  traffic — which is precisely the blindness that let `backup` fixtures exercise a dead",
+    "  render branch through eight rows arm C was not even opening.",
   ]);
 }
 
@@ -387,10 +589,13 @@ if (orphanTitles.length || untitled.length || impossibleFixtures.length) {
   if (impossibleFixtures.length) {
     console.error(`  fixture-manufactures-unproducible: ${impossibleFixtures.join(", ")}`);
     for (const t of impossibleFixtures) {
-      const at = fixtureSites.filter((f) => f.type === t).map((f) => `:${f.line}`).join(", ");
-      console.error(`    "${t}" is minted at ${SCENARIOS_LABEL}${at}`);
+      // The label is part of `at` now — arm C reads MORE THAN ONE file, so the
+      // site list must say WHICH; a single hardcoded label would name the wrong
+      // file for every row that came from the other one.
+      const at = fixtureSites.filter((f) => f.type === t).map((f) => `${f.label}:${f.line}`).join(", ");
+      console.error(`    "${t}" is minted at ${at}`);
     }
-    console.error("    The preview corpus is inventing traffic the plane cannot produce. That is how a");
+    console.error("    The fixture corpus is inventing traffic the plane cannot produce. That is how a");
     console.error("    dead render branch comes to look exercised by 110 green scenarios — the corpus");
     console.error("    is an ORACLE, and an oracle that mints the impossible certifies the impossible.");
     console.error("");
@@ -408,8 +613,9 @@ if (orphanTitles.length || untitled.length || impossibleFixtures.length) {
 
 console.log("");
 console.log("OK: every titled event type has a producer, every produced type has a title, and the");
-console.log("    preview corpus manufactures nothing the control plane cannot write.");
+console.log("    fixture corpus manufactures nothing the control plane cannot write.");
 console.log(`    produced (${produced.size}): ${sorted(produced).join(", ")}  — ${producerSites.length} Registry.record_event( site(s) in ${LIB_LABEL}`);
 console.log(`    rendered (${rendered.size}): ${sorted(rendered).join(", ")}  — read by RUNNING ${APP_LABEL} in a node:vm sandbox`);
-console.log(`    fixtured (${fixtured.size}): ${sorted(fixtured).join(", ")}  — ${fixtureSites.length} ev() row(s) in ${SCENARIOS_LABEL}`);
+console.log(`    fixtured (${fixtured.size}): ${sorted(fixtured).join(", ")}  — ${fixtureSites.length} ev()/EV() row(s) in ${contributing.map((c) => `${c.label} (${c.rows})`).join(", ")}`);
+console.log(`               scanned ${fixtureCandidates.length} *.mjs under ${FIXTURE_ROOT_LABEL}; ${contributing.length} manufacture event rows`);
 process.exit(0);

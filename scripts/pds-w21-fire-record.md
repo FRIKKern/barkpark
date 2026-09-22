@@ -82,7 +82,7 @@ confirmed the cut-at-d633786 ruling and a TOTAL merge freeze before the arm.
 | child script | `/tmp/pds-crown-launch/5abf6afd/child.sh` |
 | scratch home | `/tmp/pds-w14.5abf6afd` (`BARKPARK_HOME` the launcher derives from run_tag; macOS canonicalizes to `/private/tmp/pds-w14.5abf6afd`) |
 | budget | `PDS_FULL_EXPORT_BUDGET=7` = attempts spent (`cat /tmp/pds-full-export/attempts` = 5) + 2, exported INLINE in the arm shell (D224/D285), never a literal |
-| floor | `mem_floor_mib=897` AND `full_export_min_mem_mb=897` (PDS-D276/D277 DERIVED floor; the fossil 2200 no longer applies). `PDS_FULL_EXPORT_MIN_MEM_MB` / `PDS_LAUNCH_MEM_FLOOR_MIB` UNSET in the arm shell — the launcher's own 897 stands |
+| floor | `mem_floor_mib=897` AND `full_export_min_mem_mb=897` (PDS-D276/PDS-D277 DERIVED floor; the fossil 2200 no longer applies). `PDS_FULL_EXPORT_MIN_MEM_MB` / `PDS_LAUNCH_MEM_FLOOR_MIB` UNSET in the arm shell — the launcher's own 897 stands |
 | poll | every 10 s, up to 2160 draws (≤ 6 h), inside the detached child |
 | collect | `/Volumes/SATECHI/github/barkpark-w21-fire/scripts/pds-crown-launch.sh collect 5abf6afd` — LEAD only |
 

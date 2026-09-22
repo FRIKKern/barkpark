@@ -9,6 +9,7 @@ defmodule Barkpark.Content.DedupWallTest do
       including the fail-open guarantee.
   """
   use Barkpark.DataCase, async: true
+  import ExUnit.CaptureLog
 
   alias Barkpark.Content.{AuthoringWall, DedupWall, Document}
   alias Barkpark.LabelFixtures
@@ -397,6 +398,91 @@ defmodule Barkpark.Content.DedupWallTest do
 
     assert message =~ "the duplicate scan"
     assert message =~ "REFUSED rather than passed unchecked"
+  end
+
+  # ── the PROD arm of the tripwire: a defect must not wear the outage's clothes ─
+  #
+  # `config/test.exs` turns the tripwire ON, so the two tests above see a raise.
+  # Prod runs with it OFF: the rescue answers, the publish is refused, and the
+  # operator reads a message. These pin what that message SAYS and how loud the
+  # log is — the one call-level opt turns the tripwire off for one call only.
+
+  defp code_class_refusal do
+    DedupWall.check(degraded_doc("drafts.defect"), "paper", @dataset,
+      workspace_id: 12_345,
+      dedup_raise_on_code_errors: false
+    )
+  end
+
+  defp infra_class_refusal do
+    without_a_database(fn ->
+      DedupWall.check(degraded_doc("drafts.outage"), "paper", @dataset)
+    end)
+  end
+
+  test "same door, two messages: a code-class failure reads as a DEFECT, an infra one as an outage" do
+    assert {:error, {:dedup_unavailable, defect}} = code_class_refusal()
+    assert {:error, {:dedup_unavailable, outage}} = infra_class_refusal()
+
+    # RED before the split: both were "publish dedup wall could not complete:
+    # the duplicate scan failed (FunctionClauseError). … resend with
+    # content.dedup_bypass: true …" — the module name was the only difference.
+    assert defect =~ "hit a DEFECT, not an outage"
+    assert defect =~ "bug in Barkpark (FunctionClauseError)"
+    refute outage =~ "DEFECT"
+    assert outage =~ "could not complete: the duplicate scan"
+    refute defect == outage
+
+    # Both are still fail-CLOSED refusals.
+    assert defect =~ "REFUSED rather than passed unchecked"
+    assert outage =~ "REFUSED rather than passed unchecked"
+  end
+
+  test "the DEFECT message never offers content.dedup_bypass; the outage message still does" do
+    assert {:error, {:dedup_unavailable, defect}} = code_class_refusal()
+    assert {:error, {:dedup_unavailable, outage}} = infra_class_refusal()
+
+    # The bypass turns a bug into a permanently-disabled wall; only the outage
+    # arm may name it. `refute =~ "dedup_bypass"` is the whole point of the row.
+    refute defect =~ "dedup_bypass"
+    assert outage =~ "content.dedup_bypass: true"
+  end
+
+  test "a code-class failure logs at :error with a DEFECT prefix; an infra one stays at :warning" do
+    # `level: :error` captures ONLY error-and-above, so a warning-level defect
+    # would leave this capture empty — the level is asserted, not eyeballed.
+    error_only = capture_log([level: :error], fn -> code_class_refusal() end)
+    assert error_only =~ "Content.DedupWall DEFECT (not an outage): candidate fetch failed"
+    assert error_only =~ "FunctionClauseError"
+
+    assert capture_log([level: :warning], fn -> infra_class_refusal() end) =~
+             "Content.DedupWall degraded: candidate fetch failed"
+  end
+
+  test "a code-class failure emits [:barkpark, :dedup_wall, :defect] tagged with the exception" do
+    handler = "dedup-defect-#{System.unique_integer([:positive])}"
+    parent = self()
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:barkpark, :dedup_wall, :defect],
+        fn event, measurements, meta, _ ->
+          send(parent, {:defect_event, event, measurements, meta})
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    assert {:error, {:dedup_unavailable, _}} = code_class_refusal()
+
+    assert_receive {:defect_event, [:barkpark, :dedup_wall, :defect], %{count: 1},
+                    %{exception: FunctionClauseError, where: "candidate fetch failed"}}
+
+    # The infra arm is an outage, not a defect: no event.
+    assert {:error, {:dedup_unavailable, _}} = infra_class_refusal()
+    refute_receive {:defect_event, _, _, _}, 100
   end
 
   test "fail-LOUD: a blown query budget refuses the publish and names the scan" do

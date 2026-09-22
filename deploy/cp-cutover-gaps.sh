@@ -487,6 +487,46 @@ fi
 FLOOR=38
 check "at least $FLOOR checks executed (a vacuous green is a red)" "[ $checks_ran -ge $FLOOR ]"
 
+# --- deploy/README.md count guard (ssw8-selftest-count-guard) ---------------
+# deploy/README.md publishes THIS engine's check count in prose, and until this
+# block nothing read it back: the page said 46 while the only thing guarding it
+# was `FLOOR=38` above — in a DIFFERENT file (deploy/cp-deploy_test.sh asserts
+# `>= 38`), so the published number could drift by 8 downward and without bound
+# upward with every harness still green. The agreement was a coincidence of
+# timing, not a measurement.
+#
+# Direction matters, and is the same as the other four engines': the README
+# number is the ASSERTED value, $checks_ran — which this run just measured — is
+# the MEASUREMENT, and the guard only ever READS the README. A guard that learns
+# its expected value from the thing it guards is inert and would have agreed
+# with any drifted number.
+#
+# Skips cleanly when the README is absent, so a box that ships the engines
+# without the docs tree is unaffected.
+readme_md="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)/README.md"
+if [ ! -f "$readme_md" ]; then
+  echo "README count guard: SKIPPED - no $readme_md (engine shipped without the docs tree)"
+else
+  # The anchor is this engine's own invocation followed by its count, which
+  # occurs exactly once on the page. Zero matches, or more than one, is a
+  # FAILURE and not a pass: a reworded sentence must red here rather than
+  # quietly disarm the guard by matching nothing.
+  readme_anchor='deploy/cp-cutover-gaps\.sh[^0-9]{1,24}[0-9]+ checks'
+  readme_hits="$(grep -oE "$readme_anchor" "$readme_md" | wc -l | tr -d ' ')"
+  if [ "$readme_hits" != 1 ]; then
+    echo "FAIL: README count guard, deploy/cp-cutover-gaps.sh: expected exactly ONE 'deploy/cp-cutover-gaps.sh ... <N> checks' anchor in $readme_md, found $readme_hits. The guard reads that sentence to learn the published count; if you reworded it, restore the anchor (the script path, then the number, then the word 'checks', all on one line) in the SAME commit."
+    fails=$((fails + 1))
+  else
+    readme_count="$(grep -oE "$readme_anchor" "$readme_md" | sed -E 's/.*[^0-9]([0-9]+) checks$/\1/')"
+    if [ "$readme_count" != "$checks_ran" ]; then
+      echo "FAIL: README count drift in deploy/cp-cutover-gaps.sh: deploy/README.md publishes $readme_count checks, this run measured $checks_ran. The RUN is the truth - update the number in deploy/README.md to $checks_ran in the SAME commit that changed the case count, or the two drift apart again."
+      fails=$((fails + 1))
+    else
+      echo "README count guard: deploy/README.md publishes $readme_count checks for deploy/cp-cutover-gaps.sh, this run measured $checks_ran - agreed"
+    fi
+  fi
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then
   echo "ALL PASS ($checks_ran checks)"

@@ -58,8 +58,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   windowed `done_today` a single event cannot re-derive.
 
   A per-socket **seen-set** of `{doc_id, updated_at}` drops the mount-snapshot
-  echo and exact-repeat events. Non-`task` events and anything else are ignored
-  by a catch-all `handle_info` clause — a stray message never crashes the socket.
+  echo and exact-repeat events. It is a BOUNDED FIFO (`@seen_cap` newest keys):
+  the topic it is fed from is dataset-global, so an unbounded set grew one tuple
+  per task write ANYWHERE in the dataset for the life of the socket, and the
+  `:refresh` reconcile never pruned it. Non-`task` events and anything else are
+  ignored by a catch-all `handle_info` clause — a stray message never crashes
+  the socket.
 
   ## Drag restage (charter §criterion, wave 3)
 
@@ -189,6 +193,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # the windowed done_today) — so seconds, not milliseconds, is right.
   @refresh_ms 15_000
 
+  # A CEILING on the per-socket echo set. The set's only job is to drop the
+  # mount-snapshot echo and an exact repeat of an event this socket just
+  # applied, so it needs memory of the RECENT past only — yet it was an
+  # unbounded `MapSet` fed by the DATASET-GLOBAL topic `documents:#{@dataset}`,
+  # so every task write anywhere in the dataset added a permanent
+  # `{doc_id, updated_at}` tuple for the life of the socket. `:refresh`
+  # rebuilds board/readable?/last_change/peek and walks straight past it, so
+  # the 15s reconcile was not a pruning point. A board tab left open under
+  # campaign write load therefore grew per-socket heap no GC can reclaim.
+  # Bounded FIFO: the newest @seen_cap keys are remembered, older ones evicted.
+  # Persisted so the protective test can read the real ceiling out of the
+  # compiled module instead of restating the number and drifting from it.
+  Module.register_attribute(__MODULE__, :seen_cap, persist: true)
+  @seen_cap 256
+
   @dataset "production"
 
   @facet_keys [:goal, :priority, :label, :worker]
@@ -237,7 +256,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
      |> assign(:readable?, readable?)
      |> assign(:last_change, nil)
      |> assign(:notice, nil)
-     |> assign(:seen, MapSet.new())
+     |> assign(:seen, seen_new())
      |> assign(:group_by, :none)
      |> assign(:filters, empty_filters())
      |> assign_view()}
@@ -283,7 +302,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       when is_map(doc) do
     key = {doc.doc_id, doc.updated_at}
 
-    if MapSet.member?(socket.assigns.seen, key) do
+    if seen_member?(socket.assigns.seen, key) do
       {:noreply, socket}
     else
       board = socket.assigns.board
@@ -295,7 +314,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
        socket
        |> assign(:board, board)
        |> assign(:last_change, change)
-       |> update(:seen, &MapSet.put(&1, key))
+       |> update(:seen, &seen_put(&1, key))
        |> refresh_peek()
        |> assign_view()}
     end
@@ -323,6 +342,40 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # A non-task document event, or any other stray message — ignore it. NEVER
   # crash the socket over an event we don't render.
   def handle_info(_other, socket), do: {:noreply, socket}
+
+  # ── bounded echo set ───────────────────────────────────────────────────────
+  #
+  # `MapSet` alone answers membership but cannot say which key is OLDEST, so a
+  # cap needs insertion order alongside it: an Erlang `:queue` (O(1) amortised
+  # at both ends) carries the FIFO, the `MapSet` carries the O(1) lookup, and
+  # `size` is tracked rather than recomputed. Exactly one key enters per
+  # accepted event, so at most one eviction is ever owed per put.
+
+  defp seen_new, do: %{set: MapSet.new(), order: :queue.new(), size: 0}
+
+  defp seen_member?(%{set: set}, key), do: MapSet.member?(set, key)
+
+  # Re-putting a key already held is a no-op: it must NOT re-enqueue, or the
+  # queue would outgrow the set and the eviction arm would delete a key that is
+  # still current.
+  defp seen_put(%{set: set, order: order, size: size} = seen, key) do
+    if MapSet.member?(set, key) do
+      seen
+    else
+      seen_evict(%{
+        set: MapSet.put(set, key),
+        order: :queue.in(key, order),
+        size: size + 1
+      })
+    end
+  end
+
+  defp seen_evict(%{size: size} = seen) when size <= @seen_cap, do: seen
+
+  defp seen_evict(%{set: set, order: order, size: size}) do
+    {{:value, oldest}, order} = :queue.out(order)
+    %{set: MapSet.delete(set, oldest), order: order, size: size - 1}
+  end
 
   # ── wave 3: drag restage (charter D4/D11/D12) ──────────────────────────────
   #
@@ -1839,6 +1892,19 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         flex: 1 1 auto; min-width: 0;
         font-weight: 500; font-size: 13px; line-height: 1.4; color: var(--text);
       }
+      /* PDS-D749 — the DRAFT marker. `drafts.<id>` is the only signal a row is
+         not published, and `Content.published_id/1` strips it off the card's
+         doc_id before anything paints; `Board`'s card carries the boolean
+         forward (see its DRAFT LABEL CONTRACT) and this is where it lands.
+         Amber like `blocked`: not an error, but "this is not the real row yet". */
+      .bp-draft {
+        flex: 0 0 auto; align-self: flex-start;
+        font-size: 9px; font-weight: 700; letter-spacing: 0.09em;
+        line-height: 1.6; text-transform: uppercase;
+        color: var(--warn); border: 1px solid var(--warn);
+        border-radius: 3px; padding: 0 4px; opacity: 0.85;
+      }
+      .bp-phone-title .bp-draft { vertical-align: middle; margin-right: 6px; }
       /* Freshness stamp — every card dates itself (relative, tabular) so
          relevance is readable at a glance without opening anything. */
       .bp-age {
@@ -2789,6 +2855,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
               <%= glyph_text(card) %>
             </span>
             <span class="bp-title" data-role="card-title"><%= card.title %></span>
+            <span
+              :if={card[:draft]}
+              class="bp-draft"
+              data-role="draft"
+              title="Unpublished draft row — its stored id still carries the drafts. prefix"
+            >
+              DRAFT
+            </span>
             <span :if={card.updated_at} class="bp-age" data-role="age">
               <%= age_label(card.updated_at) %>
             </span>
@@ -3296,7 +3370,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           </button>
         </header>
 
-        <h3 class="bp-phone-title" data-role="card-title"><%= card.title %></h3>
+        <h3 class="bp-phone-title" data-role="card-title">
+          <span
+            :if={card[:draft]}
+            class="bp-draft"
+            data-role="draft"
+            title="Unpublished draft row — its stored id still carries the drafts. prefix"
+          >
+            DRAFT
+          </span>
+          <%= card.title %>
+        </h3>
 
         <p :if={card[:description_excerpt]} class="bp-phone-desc" data-role="card-desc">
           <%= card.description_excerpt %>

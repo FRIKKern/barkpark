@@ -121,6 +121,19 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
           project_id: proj_b.id
         )
 
+      # pbw-backlog-cache-draft-ref-leak: the body_html cache now resolves
+      # field references under the PUBLISHED principal, so a draft-only
+      # referent degrades to its raw id. This test measures TENANT binding, not
+      # visibility — publish both twins so the title is legitimately resolvable
+      # and the A/B assertion still discriminates on workspace.
+      for {ws, proj} <- [{ws_a, proj_a}, {ws_b, proj_b}] do
+        {:ok, _} =
+          Content.publish_document("shared-author", "author", @dataset,
+            workspace_id: ws.id,
+            project_id: proj.id
+          )
+      end
+
       blocks = [
         %{
           "id" => "title",
@@ -431,6 +444,15 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
             "author",
             %{"doc_id" => "shared-rh-author", "title" => title},
             @dataset,
+            workspace_id: ws.id,
+            project_id: proj.id
+          )
+
+        # pbw-backlog-cache-draft-ref-leak: published, so the rehydrated cache
+        # can resolve the title at all under the new published-only principal.
+        # The subject here is TENANT binding, not field visibility.
+        {:ok, _} =
+          Content.publish_document("shared-rh-author", "author", @dataset,
             workspace_id: ws.id,
             project_id: proj.id
           )

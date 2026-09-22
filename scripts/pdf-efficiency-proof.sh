@@ -31,8 +31,14 @@
 # the efficiency loop is LIVE — structured capacity heartbeats round-trip
 # through /v1/fleet/beat -> roster -> dispatch.sh -> transform.py -> route.py,
 # routing follows CONTENT (capacity), not identity (names), and the
-# FLEET_SPEND_CAP brake reads $FLEET_HOME/orchestrator/spend.jsonl (dialect
-# cost_usd, PDF-D54 pin 1) live on EVERY batch, failing loud on garbage.
+# FLEET_SPEND_CAP brake reads the $FLEET_HOME spend ledger SET (dialect cost_usd,
+# PDF-D54 pin 1) live on EVERY batch, failing loud on garbage. Since the aggregator
+# wiring (task-8a1f525034614c34) dispatch.sh derives SPENT from
+# tooling/fleet/spend-aggregate.py, which sums every <worker>/spend.jsonl record_spend
+# actually writes PLUS orchestrator/spend.jsonl — the orchestrator path alone had no
+# producer, so the old single-file read was a $0.00 forever. The CANNOT-READ leg of
+# that gate (no readable ledger + a cap set must refuse, exit 13, never "dispatch
+# allowed") is proved server-free in tooling/fleet/dispatch-cap-gate.test.sh.
 #
 # THE THREE OUTCOMES (the pds-pull-proof.sh ladder, verbatim — no fourth, no
 # silent skip):
@@ -658,8 +664,9 @@ if [ "$MODE" = "plan" ]; then
   say "           $GHOST $CAP_GHOST (beaten ONCE, ttl_s=$GHOST_TTL -> status:offline)"
   say "orders:    <run>-export (heavy) + <run>-lint (light) — one mixed batch"
   say "cap:       FLEET_SPEND_CAP=\$$CAP_USD; trip ledger sums to EXACTLY the cap"
-  say "           (compare is spent >= cap, D54 pin 4); ledger dialect cost_usd at"
-  say "           \$FLEET_HOME/orchestrator/spend.jsonl (D54 pin 1)"
+  say "           (compare is spent >= cap, D54 pin 4); ledger dialect cost_usd,"
+  say "           read through tooling/fleet/spend-aggregate.py over the"
+  say "           \$FLEET_HOME ledger set incl. orchestrator/spend.jsonl (D54 pin 1)"
   say "outcomes:  PASS / ABORT / FAIL — no silent skip. Exit 0/2/1 (+3 usage)."
   say ""
   say "RUNGS:"
@@ -668,7 +675,8 @@ if [ "$MODE" = "plan" ]; then
   say "     structured map-capacity beat must round-trip INTACT to the roster"
   say "     (asserted via GET roster — the beat receipt NEVER echoes capacity,"
   say "     D54 pin 2); and the merged dispatch.sh cap gate must provably read"
-  say "     \$FLEET_HOME/orchestrator/spend.jsonl in the cost_usd dialect"
+  say "     \$FLEET_HOME/orchestrator/spend.jsonl (via spend-aggregate.py, which"
+  say "     globs the whole ledger set) in the cost_usd dialect"
   say "     (functional probe: a seeded ledger of 1.25 + one canonical"
   say "     cost_usd:null skip-row must print 'spent \$1.2500' under a high cap)."
   say "  1  SETUP (ABORT) — two stub curl-loop listeners under set -m beat"
@@ -821,13 +829,21 @@ if [ "$GHOST_CAP_BACK" != "$(canon_json "$CAP_GHOST")" ]; then
 fi
 info "roster carries the structured capacity INTACT: $GHOST_CAP_BACK"
 
-# The cap-gate contract (D54 pin 1): dispatch.sh must read
-# $FLEET_HOME/orchestrator/spend.jsonl in the cost_usd dialect. Static pin +
-# functional probe (seeded ledger 1.25 + one canonical cost_usd:null skip-row
-# under a high cap -> the printed spent MUST be 1.2500).
-grep -qF 'orchestrator/spend.jsonl' "$DISPATCH_SH" && grep -qF 'cost_usd' "$DISPATCH_SH" \
-  || { abort 0 "env:dispatch-ledger-contract-drift" "dispatch.sh no longer names orchestrator/spend.jsonl + cost_usd — the D54 pin-1 contract moved; re-pin before trusting any cap rung"; exit 2; }
-info "static pin: dispatch.sh names orchestrator/spend.jsonl and cost_usd"
+# The cap-gate contract (D54 pin 1): the gate must read
+# $FLEET_HOME/orchestrator/spend.jsonl in the cost_usd dialect. RE-PINNED for the
+# aggregator wiring (task-8a1f525034614c34): dispatch.sh no longer parses the ledger
+# inline, it shells out to tooling/fleet/spend-aggregate.py, so the literals moved into
+# the aggregator. Pinning dispatch.sh for 'orchestrator/spend.jsonl' now would match only
+# its COMMENTS — a pin that can never red. So: pin dispatch.sh on the delegation, and pin
+# the dialect + orchestrator path on the file that actually implements them.
+AGGREGATOR="$REPO_ROOT/tooling/fleet/spend-aggregate.py"
+grep -qF 'spend-aggregate.py' "$DISPATCH_SH" \
+  || { abort 0 "env:dispatch-ledger-contract-drift" "dispatch.sh no longer delegates to spend-aggregate.py — the D54 pin-1 read path moved; re-pin before trusting any cap rung"; exit 2; }
+[ -f "$AGGREGATOR" ] \
+  || { abort 0 "env:dispatch-ledger-contract-drift" "$AGGREGATOR missing — the cap gate's reader is not in this tree"; exit 2; }
+grep -qF 'orchestrator' "$AGGREGATOR" && grep -qF 'spend.jsonl' "$AGGREGATOR" && grep -qF 'cost_usd' "$AGGREGATOR" \
+  || { abort 0 "env:dispatch-ledger-contract-drift" "spend-aggregate.py no longer names orchestrator/spend.jsonl + cost_usd — the D54 pin-1 contract moved; re-pin before trusting any cap rung"; exit 2; }
+info "static pin: dispatch.sh delegates to spend-aggregate.py, which names the orchestrator spend.jsonl path and the cost_usd dialect"
 
 mkdir -p "$FLEET_HOME/orchestrator"
 printf '%s\n%s\n' \
@@ -1154,9 +1170,14 @@ run_dispatch "$ORDERS_FILE" "$ROSTER_R6" "$CAP_USD"
 expect_line 'SPEND CAP REACHED ($5.0000 >= $5.00) — dispatch halted, 0/2 orders placed'
 info "tripped state re-confirmed (freeze fired)"
 
-INODE_BEFORE="$(stat -f %i "$LEDGER" 2>/dev/null || stat -c %i "$LEDGER")"
+# GNU FIRST, BSD second — never the reverse. On GNU coreutils `-f` means
+# FILESYSTEM status, so `stat -f %s` SUCCEEDS on Linux with a block-count
+# report instead of failing, and a BSD-first `||` chain never reaches the
+# GNU form. BSD stat rejects `-c` outright, so GNU-first fails loudly on the
+# wrong platform instead of quietly.
+INODE_BEFORE="$(stat -c %i "$LEDGER" 2>/dev/null || stat -f %i "$LEDGER")"
 : > "$LEDGER"
-INODE_AFTER="$(stat -f %i "$LEDGER" 2>/dev/null || stat -c %i "$LEDGER")"
+INODE_AFTER="$(stat -c %i "$LEDGER" 2>/dev/null || stat -f %i "$LEDGER")"
 [ "$INODE_BEFORE" = "$INODE_AFTER" ] || efail "the truncate replaced the file (inode $INODE_BEFORE -> $INODE_AFTER) — not an in-place zero"
 info "ledger truncated IN PLACE (inode $INODE_BEFORE unchanged); scratch server + shell untouched — no process restarted"
 show_ledger
@@ -1185,9 +1206,12 @@ ROSTER_R7="$WORKDIR/roster-r7.json"
 pull_roster "$ROSTER_R7"
 run_dispatch "$ORDERS_FILE" "$ROSTER_R7" ""
 [ "$DISP_RC" -eq 12 ] || efail "dispatch exit rc=$DISP_RC, want the named 12 (MALFORMED_SPEND_LEDGER)"
-expect_line "MALFORMED_SPEND_LEDGER_ROW line 1"
+# The aggregator names the OFFENDING FILE inside the row abort
+# ("...MALFORMED_SPEND_LEDGER_ROW <path> line 1: ..."), so the pin is the path and the
+# line number, not the old file-less spelling.
+expect_line "MALFORMED_SPEND_LEDGER_ROW $LEDGER line 1"
 expect_line "non-numeric 'cost_usd'"
-expect_line "ABORT: MALFORMED_SPEND_LEDGER at $LEDGER"
+expect_line "ABORT: MALFORMED_SPEND_LEDGER under $FLEET_HOME"
 reject_line " → "
 reject_line "spend_cap"
 [ -s "$FILER_LOG" ] && efail "the filer ran during a malformed-ledger abort"

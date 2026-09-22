@@ -84,7 +84,22 @@ type SiteBuildLogRecord struct {
 	// `unknown` reaches a client, and it reaches it as itself.
 	BoxLogState string `json:"box_log_state"`
 	BoxStatus   int    `json:"box_status"`
-	BoxError    string `json:"box_error"`
+
+	// BoxError is the box's OWN refusal, and it is deliberately not a string.
+	// The producer's box_error/1 emits either a slug or the standard error
+	// envelope (a map of code/hint/message/request_id) through this one key; a
+	// scalar here failed the WHOLE record decode on the envelope shape and
+	// killed every branch below it. See box_error.go for the measurement.
+	BoxError BoxError `json:"box_error"`
+
+	// THE SIBLING KEYS, DERIVED FROM THE REDUCER. `BoxErrorEnvelope.fields/1`
+	// ALWAYS returns three keys, not one: it REDUCES the box's error envelope
+	// so `box_error` stays the string it is typed as, and routes the two facts
+	// that actually route an incident — the box's own message and request_id —
+	// to keys of their own. A struct that declares only `box_error` reads both
+	// as "" forever, and json.Unmarshal says nothing about it.
+	BoxErrorMessage   string `json:"box_error_message"`
+	BoxErrorRequestID string `json:"box_error_request_id"`
 
 	LogPath        string              `json:"log_path"`
 	LogBytes       *int64              `json:"log_bytes"`

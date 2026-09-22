@@ -154,6 +154,16 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"GET", "/v1/capabilities"} => "the manifest itself — `bp` fetches it to learn its verbs",
     {"GET", "/v1/openapi.json"} => "the spec generated FROM the manifest",
     {"GET", "/v1/meta"} => "server identity probe `bp` reads directly during connect",
+    # `bp` already HAS the deployed build: the manifest carries it as the
+    # root `build` key (`Capabilities.maybe_put_build/3` →
+    # `BuildInfo.info/0`), fetched on the same connect handshake that builds
+    # the verb table. A `version.*` command would be a second spelling of a
+    # value the client is holding before any verb could run — circular in
+    # exactly the way `/v1/capabilities` and `/v1/openapi.json` are. The route
+    # exists for the tier the manifest WITHHOLDS `build` from: an anonymous
+    # deploy verifier with curl and no token (task-bl-v1-version-route-gap).
+    {"GET", "/v1/version"} =>
+      "public build readout for anonymous deploy verifiers — `bp` gets the same value from the manifest's `build` key during connect",
 
     # ── The chat-host daemon's own protocol ────────────────────────────────
     # An enrolled host process speaks these with its enrollment secret to poll

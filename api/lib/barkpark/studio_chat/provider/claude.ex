@@ -1519,6 +1519,9 @@ defmodule Barkpark.StudioChat.Provider.Claude do
              # exactly like `mcp_token`; the raw values live only in the spawn
              # env and the 0600 config file.
              minter: Map.get(session_opts, :minter),
+             # The session's own workspace, carried so the renewal mint binds
+             # the SAME tenant the spawn mint bound.
+             mcp_workspace_id: Map.get(session_opts, :workspace_id),
              mcp_session_id: pinned_session_id(opts) || "anonymous",
              token_expires_at: mcp.expires_at,
              token_renewed_at: nil,
@@ -1842,7 +1845,9 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     # path, mirroring cleanup_stderr. Total and best-effort: a dead Repo at
     # teardown must never turn a normal stop into a crash — the token's short
     # TTL is the crash backstop.
-    # sobelow_skip ["Traversal.FileModule"]
+    # NO `sobelow_skip` HERE, DELIBERATELY: this clause makes no `File.` call of
+    # its own — the `File.rm` lives in `cleanup_mcp_file/1` below, which carries
+    # the real waiver. A waiver here suppressed nothing.
     defp cleanup_mcp(%{mcp_token: token} = state) when not is_nil(token) do
       safe_revoke(token)
       cleanup_mcp_file(state)
@@ -1970,11 +1975,24 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     end
 
     defp mint_replacement(state) do
-      case Barkpark.Auth.create_claude_session_token(
-             state.minter,
-             state.mcp_session_id,
-             ClaudeChat.task_token_ttl_opts()
-           ) do
+      # The RENEWAL mint binds the same workspace the spawn mint bound — the
+      # session's own, never a default (see `mint_workspace_id/2`). A renewal
+      # that could not name a workspace is refused here rather than handed to
+      # the mint: the old credential lives on and the next tick retries.
+      workspace_id = mint_workspace_id(Map.get(state, :mcp_workspace_id), state.minter)
+
+      mint =
+        if is_nil(workspace_id) do
+          {:error, :no_session_workspace}
+        else
+          Barkpark.Auth.create_claude_session_token(
+            state.minter,
+            state.mcp_session_id,
+            Keyword.put(ClaudeChat.task_token_ttl_opts(), :workspace_id, workspace_id)
+          )
+        end
+
+      case mint do
         {:ok, {raw, token}} ->
           install_replacement(state, raw, token)
 
@@ -2068,14 +2086,29 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     # write keeps the token alive (env-only hands — the Bash-lane bp still
     # works); a refused/crashed mint returns `:mint_refused` so init poisons
     # the env with the sentinel (D2) — the chat spawns either way, never dead.
-    defp setup_mcp(opts, %{minter: minter}) when not is_nil(minter) do
+    defp setup_mcp(opts, %{minter: minter} = session_opts) when not is_nil(minter) do
       session_id = pinned_session_id(opts) || "anonymous"
 
-      case Barkpark.Auth.create_claude_session_token(
-             minter,
-             session_id,
-             ClaudeChat.task_token_ttl_opts()
-           ) do
+      # WHICH workspace the credential is minted into is this session's own —
+      # resolved here, passed EXPLICITLY, never left to the mint to guess.
+      # A session that cannot name a workspace gets no hands at all (D2's
+      # `:mint_refused` sentinel below); it is never attributed to the seeded
+      # Default workspace, which would hand a `:global` chat task rights in a
+      # tenant it has no relationship with.
+      workspace_id = mint_workspace_id(Map.get(session_opts, :workspace_id), minter)
+
+      mint =
+        if is_nil(workspace_id) do
+          {:error, :no_session_workspace}
+        else
+          Barkpark.Auth.create_claude_session_token(
+            minter,
+            session_id,
+            Keyword.put(ClaudeChat.task_token_ttl_opts(), :workspace_id, workspace_id)
+          )
+        end
+
+      case mint do
         {:ok, {raw, token}} ->
           # The OTHER direction (connectors D69): fetch this workspace's TOOL
           # connectors from the bridge and fold them into the config as extra
@@ -2115,6 +2148,30 @@ defmodule Barkpark.StudioChat.Provider.Claude do
 
     defp setup_mcp(_opts, _session_opts),
       do: %{mint: :not_attempted, raw: nil, token: nil, expires_at: nil, config_path: nil}
+
+    # The workspace BOTH mints bind, in one place so the spawn mint and the
+    # renewal mint can never disagree about a session's tenant:
+    #
+    #   1. the chat session's own workspace, threaded from the socket into
+    #      `session_opts[:workspace_id]` (the same value the execution profile
+    #      and the tool-connector ticket already read); else
+    #   2. the minter token's OWN home workspace — the human's rights, not a
+    #      guess; else
+    #   3. `nil`, which both mints read as a REFUSAL.
+    #
+    # There is deliberately no fourth arm. `Auth.create_claude_session_token/3`
+    # used to end this chain with the seeded Default workspace, which silently
+    # gave a workspace-less minter task hands in a tenant nobody chose; that
+    # fallback is being removed, and the provider must not re-grow it.
+    defp mint_workspace_id(session_workspace_id, _minter)
+         when is_binary(session_workspace_id) and session_workspace_id != "",
+         do: session_workspace_id
+
+    defp mint_workspace_id(_session_workspace_id, %Barkpark.Auth.ApiToken{workspace_id: ws_id})
+         when is_binary(ws_id) and ws_id != "",
+         do: ws_id
+
+    defp mint_workspace_id(_session_workspace_id, _minter), do: nil
 
     # The tool-connector fetch (connectors D69/D73) — the outbound direction. Sign
     # a session-length tool ticket for `workspace_id` and ask the bridge which MCP

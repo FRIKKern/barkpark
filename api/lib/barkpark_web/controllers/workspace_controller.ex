@@ -655,7 +655,7 @@ defmodule BarkparkWeb.WorkspaceController do
       below (the 25P02 blindfold that made it a bare `internal_error` 500 is
       gone, task-63a199c0a0ce2a06), and that refusal is pinned by an
       HTTP-level test.
-    * `mode=merge` (PDS-D8/D10) — convergent upsert over a possibly-populated
+    * `mode=merge` (PDS-D8/PDS-D10) — convergent upsert over a possibly-populated
       workspace. FAIL-CLOSED OPT-IN: refused with 403 `bundle_import_disabled`
       unless `Application.get_env(:barkpark, :allow_bundle_import, false)` is
       true (the env plumb ships separately; the default here is always false).
@@ -665,7 +665,7 @@ defmodule BarkparkWeb.WorkspaceController do
   Returns the import stats — `{tables, total_rows}` — as JSON (plus
   `mode: "merge"` on the merge path), and a `provenance` receipt: pulled data
   says WHERE it came from, both in the response and, durably, in the target
-  workspace's `settings["pull_provenance"]` (PDS-D15/D16).
+  workspace's `settings["pull_provenance"]` (PDS-D15/PDS-D16).
 
   An empty or truncated body answers 422 `invalid_bundle` — an honest refusal
   rather than the MatchError-driven 500 it used to raise (PDS-D50).
@@ -916,7 +916,7 @@ defmodule BarkparkWeb.WorkspaceController do
     reraise(e, stacktrace)
   end
 
-  # PDS-D15/D16 — stamp WHERE the imported data came from into the target
+  # PDS-D15/PDS-D16 — stamp WHERE the imported data came from into the target
   # workspace's `settings["pull_provenance"]`, keyed by dataset slug, and echo
   # the same receipt in the response.
   #
@@ -1183,7 +1183,18 @@ defmodule BarkparkWeb.WorkspaceController do
   # `Archive.open_scratch_dir!/0` just created — `spill_dir/0` (operator config)
   # plus System.unique_integer/1. No request input reaches the path; `spill_body`
   # below writes only to `Path.join(scratch, "body.tar")` under it.
-  # sobelow_skip ["Traversal.FileModule"]
+  #
+  # NO `sobelow_skip` HERE, DELIBERATELY: this body makes no `File.` call of its
+  # own, not even a capture. The removal it describes is
+  # `Archive.discard_scratch_dir/1` — see the `after` clause below, which spells
+  # out why it is that and not a bare `File.rm_rf/1` — and the write is
+  # `spill_body/2`'s. Each of those carries its own waiver where the call
+  # actually is. A waiver here suppressed nothing and told the next reader a
+  # risk had been weighed on this def; the reachability argument above outlived
+  # the call it was written for. If you add a direct `File.` call below, the
+  # waiver belongs with it — not back up here. (PR #12837 moved an annotation
+  # onto this function once already; `.sobelow-annotation-bindings` is what
+  # catches that, and it no longer has a row here to be stolen.)
   defp with_spilled_body(conn, fun) do
     scratch = Archive.open_scratch_dir!()
 

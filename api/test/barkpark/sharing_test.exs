@@ -194,7 +194,15 @@ defmodule Barkpark.SharingTest do
       prior = Application.get_env(:barkpark, :shares)
       Application.delete_env(:barkpark, :shares)
 
-      ExUnit.Callbacks.on_exit(ctx, fn ->
+      # MODULE-SCOPED REF, and not negotiable. `on_exit/2`'s first argument is a
+      # KEY: a later registration under the same ref REPLACES this one, with no
+      # error and no red. This setup used to key on the bare `ctx`, and so does
+      # `with_shares/2` — which every test in this describe calls — so the
+      # restore below was silently unregistered and the baseline `:shares` value
+      # this setup snapshotted was DELETED instead of put back. See
+      # `Barkpark.OnExitRefScan` and the "restores the pre-describe baseline"
+      # test at the bottom of this module.
+      ExUnit.Callbacks.on_exit({__MODULE__, :active_baseline, ctx}, fn ->
         if is_nil(prior),
           do: Application.delete_env(:barkpark, :shares),
           else: Application.put_env(:barkpark, :shares, prior)
@@ -279,13 +287,68 @@ defmodule Barkpark.SharingTest do
     end
   end
 
+  # ── on_exit/2 ref discipline (regression, PR 14414 class) ──────────────
+
+  describe "on_exit/2 ref discipline" do
+    # WHAT THIS PINS. `describe "active?/0"`'s setup snapshots the incoming
+    # `:barkpark, :shares` value and registers a restore; every test in it then
+    # calls `with_shares/2`, which registers its OWN restore. `on_exit/2` keys
+    # on its first argument, so when both keyed on the bare `ctx` the setup's
+    # restore was silently REPLACED and the incoming value was deleted rather
+    # than put back. Nothing failed — that is the whole problem.
+    #
+    # This describe reproduces that exact stack with a SENTINEL baseline so the
+    # loss is observable. Flip either ref below back to a bare `ctx` and this
+    # test reds; that is the red-before.
+
+    # Setup 1 — installs the sentinel and, because on_exit drains LIFO, its
+    # callback is registered FIRST so it runs LAST: after every restore below.
+    setup ctx do
+      prior = Application.get_env(:barkpark, :shares)
+      Application.put_env(:barkpark, :shares, :sentinel_baseline)
+
+      ExUnit.Callbacks.on_exit({__MODULE__, :sentinel_guard, ctx}, fn ->
+        assert Application.get_env(:barkpark, :shares) == :sentinel_baseline,
+               "the baseline restore was unregistered by a later on_exit/2 under the same ref"
+
+        if is_nil(prior),
+          do: Application.delete_env(:barkpark, :shares),
+          else: Application.put_env(:barkpark, :shares, prior)
+      end)
+
+      :ok
+    end
+
+    # Setup 2 — a verbatim mirror of `describe "active?/0"`'s setup.
+    setup ctx do
+      prior = Application.get_env(:barkpark, :shares)
+      Application.delete_env(:barkpark, :shares)
+
+      ExUnit.Callbacks.on_exit({__MODULE__, :active_baseline_mirror, ctx}, fn ->
+        if is_nil(prior),
+          do: Application.delete_env(:barkpark, :shares),
+          else: Application.put_env(:barkpark, :shares, prior)
+      end)
+
+      :ok
+    end
+
+    test "with_shares/2 does not unregister the setup's baseline restore", ctx do
+      refute Sharing.active?()
+      with_shares("gyldendal:papers:read", ctx)
+      assert Sharing.active?()
+    end
+  end
+
   # ── helpers ────────────────────────────────────────────────────────────
 
   defp with_shares(env_string, ctx) do
     prior = Application.get_env(:barkpark, :shares)
     Application.put_env(:barkpark, :shares, Sharing.parse(env_string))
 
-    ExUnit.Callbacks.on_exit(ctx, fn ->
+    # Module-scoped AND distinct from the `active?/0` setup's ref — those two
+    # both keyed on the bare `ctx` and the setup's restore lost the coin toss.
+    ExUnit.Callbacks.on_exit({__MODULE__, :with_shares, ctx}, fn ->
       if is_nil(prior),
         do: Application.delete_env(:barkpark, :shares),
         else: Application.put_env(:barkpark, :shares, prior)

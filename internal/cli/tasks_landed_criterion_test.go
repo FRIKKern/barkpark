@@ -190,8 +190,12 @@ func TestTaskLanded_NoMergeShapedCriterionLandsAndSaysSo(t *testing.T) {
 // MORE THAN ONE — send NONE and name them. Picking the first would be the client
 // adjudicating on the lead's behalf.
 func TestTaskLanded_AmbiguousCriteriaSendNoneAndNameThem(t *testing.T) {
+	// BOTH candidates carry the FLAG. Before task-b40af0580ec7deb6 index 0 was
+	// a candidate on its wording alone; it no longer is, so a fixture that left
+	// it unflagged would now present ONE candidate and this test would silently
+	// stop exercising the ambiguity arm — a green with no subject.
 	cap := landedCriterionServer(t, []landedCrit{
-		{text: "MERGE-GATED: the lead closes this on merge"},
+		{text: "MERGE-GATED: the lead closes this on merge", mergeGate: boolPtr(true)},
 		{text: "A decision is recorded before code"},
 		{text: "PR merged to main", mergeGate: boolPtr(true)},
 	})
@@ -348,15 +352,22 @@ func TestTaskLanded_WithoutANoteNothingIsResolved(t *testing.T) {
 // explicit `false` that VETOES. This client mirrors the server, so an explicit
 // `merge_gate: true` IS resolved into a flip.
 //
-// Measured against guerrilla 2026-09-13 with the shipped predicate: of the nine
-// rows the filing names, exactly TWO still carry a resolvable candidate, and one
-// of them — task-dd37cc248363e633 index 2, the shape reproduced below — is
-// resolvable ONLY because of this polarity. Enforcing c2 as written would leave
-// the cure reaching ONE row of the nine (task-f56d553a70a4bba8 index 4, whose own
-// text reads "MERGE-GATED (the LEAD closes this)"), i.e. it would nullify the
-// measured effect. That is a decision for the lead, not for this test — so the
-// test only makes the disagreement fail loudly if the polarity is ever flipped
-// without c2 being settled.
+// SETTLED 2026-09-17 (task-573618865e3c2b3f): main ruled KEEP — an explicit
+// `merge_gate: true` stays flippable, c2 is not implemented as written, and the
+// per-row `merge_discharges: false` from #16619 is the fence instead. So this is
+// no longer a pin on an OPEN question; it is a pin on a decided one, and the
+// ruling with its by-id row list lives in tasks_landed_polarity_fence_test.go.
+//
+// The 2026-09-13 figure this comment used to carry (two of nine rows, one of
+// them task-dd37cc248363e633 index 2) is SUPERSEDED — that row is no longer a
+// candidate at all. Re-measured 2026-09-17 over 1451 rows: 11 resolvable, 7 of
+// them field-arm-only. Do not re-quote either number; run
+// TestMeasureLandedCandidatesOverCorpus against a fresh corpus cut.
+//
+// This test exercises the FIELD arm through a criterion that is ALSO marker-
+// worded, so it cannot distinguish the two arms on its own — that separation is
+// what the two independently mutation-proved tests in
+// tasks_landed_polarity_fence_test.go exist for.
 func TestTaskLanded_ExplicitMergeGateTrueIsTheCandidate(t *testing.T) {
 	cap := landedCriterionServer(t, []landedCrit{
 		{text: "OpsController maps {:error, :replay_unavailable} to 503 with the retry-after hint"},

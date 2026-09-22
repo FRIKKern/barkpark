@@ -32,6 +32,12 @@ import (
 // fleet list call.
 const testSiteID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
+// testSiteSlug is the SAME site addressed the way an operator types it. The
+// control plane resolves a team-scoped slug itself (Registry.get_team_site/2),
+// so `/v1/sites/blog/...` and `/v1/sites/<uuid>/...` are the same row there —
+// the fake below routes them together while recording the path bp ACTUALLY sent.
+const testSiteSlug = "blog"
+
 // --instance is MANDATORY on create; the package-level testInstanceID (declared in
 // cloud_webhook_cmd_test.go) is a valid UUID, so resolveOpenBarkparkID passes it
 // through without a fleet-list call.
@@ -137,6 +143,11 @@ func (cp *siteCP) serve() *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		path := r.URL.Path
 		cp.wireLog = append(cp.wireLog, r.Method+" "+path)
+		// Route the slug form onto the uuid form, exactly as the control plane's
+		// own `Registry.get_team_site/2` does. The wireLog above is appended
+		// BEFORE this rewrite, so a test still asserts the literal path bp put on
+		// the wire — the rewrite decides which case answers, never what was seen.
+		path = strings.Replace(path, "/v1/sites/"+testSiteSlug, "/v1/sites/"+testSiteID, 1)
 		switch {
 		// GET /v1/sites is the list-ALL read that `resolveOpenSiteID` issues when
 		// the ref is not already a uuid. It is a real round trip on every
@@ -1706,11 +1717,14 @@ func TestRunCloudSiteRollback(t *testing.T) {
 // overhead" is wrong about the word unavoidable: most of it is one discretionary
 // list-ALL read, not a floor.
 //
-// It is discretionary only in principle today: `Registry.get_team_site/2` runs
-// the ref through `uuid_or_nil/1`, so POST /v1/sites/:id/rollback accepts a uuid
-// and NOTHING else. Until the control plane resolves a slug itself, the CLI has
-// to make this read — so the test pins the count at its true present value of
-// two rather than pretending it can be one.
+// IT IS NO LONGER DISCRETIONARY IN PRINCIPLE ONLY, AND THAT IS WHY THIS TEST
+// FLIPPED. The note above was written when `Registry.get_team_site/2` ran the
+// ref through `uuid_or_nil/1`, so POST /v1/sites/:id/rollback accepted a uuid
+// and NOTHING else, and the test pinned the count at its true value of two.
+// PR #18797 gave that function a `(team_id, slug)` arm, so the control plane
+// resolves the slug itself; `resolveOpenSiteID` hands a slug-shaped ref straight
+// through and the list read is gone. The count is now ONE, and this assertion is
+// the arm that reds if the passthrough is reverted.
 //
 // Why a count and not a clock: a `< 1s` assertion passes on every developer
 // machine regardless of the code and reds under CI load regardless of the code.
@@ -1728,11 +1742,10 @@ func TestRunCloudSiteRollbackBySlugCostsExactlyOneExtraRoundTrip(t *testing.T) {
 		t.Fatalf("exit=%d want 0\n%s", code, stderr)
 	}
 	want := []string{
-		"GET /v1/sites",
-		"POST /v1/sites/" + testSiteID + "/rollback",
+		"POST /v1/sites/" + testSiteSlug + "/rollback",
 	}
 	if len(cp.wireLog) != len(want) {
-		t.Fatalf("slug rollback must cost exactly %d round trips, got %d:\n%v",
+		t.Fatalf("slug rollback must cost exactly %d round trip(s), got %d:\n%v",
 			len(want), len(cp.wireLog), cp.wireLog)
 	}
 	for i, w := range want {
@@ -1740,9 +1753,11 @@ func TestRunCloudSiteRollbackBySlugCostsExactlyOneExtraRoundTrip(t *testing.T) {
 			t.Fatalf("round trip %d = %q, want %q (full log %v)", i+1, cp.wireLog[i], w, cp.wireLog)
 		}
 	}
-	// Named separately so a regression says WHICH leg grew.
-	if cp.sitesListHits != 1 {
-		t.Fatalf("slug resolve must read GET /v1/sites exactly once, got %d", cp.sitesListHits)
+	// Named separately so a regression says WHICH leg grew. Zero, not one: the
+	// slug went to the control plane unresolved.
+	if cp.sitesListHits != 0 {
+		t.Fatalf("a slug-addressed rollback must not read GET /v1/sites at all, got %d hits (log %v)",
+			cp.sitesListHits, cp.wireLog)
 	}
 	if cp.rollHits != 1 {
 		t.Fatalf("rollback must POST exactly once, got %d", cp.rollHits)
@@ -1778,6 +1793,71 @@ func TestRunCloudSiteRollbackByIDIsASingleRoundTrip(t *testing.T) {
 	want := []string{"POST /v1/sites/" + testSiteID + "/rollback"}
 	if len(cp.wireLog) != 1 || cp.wireLog[0] != want[0] {
 		t.Fatalf("id rollback must be exactly one round trip %v, got %v", want, cp.wireLog)
+	}
+}
+
+// TestRunCloudSiteRollbackByDisplayNameStillPaysTheListRead is the FAILURE
+// DIRECTION arm of the slug passthrough, and it is the assertion that would have
+// caught the regression an unconditional passthrough would have shipped.
+//
+// The control plane resolves a uuid or a team-scoped SLUG. It cannot resolve a
+// display NAME — `Registry.get_team_site/2` has exactly two arms — and the list
+// read that `resolveOpenSiteID` used to make unconditionally matched names too.
+// So the saving is gated on SHAPE: a ref with a capital or a space is not a slug
+// the CP could look up, it keeps the list read, and it must still work. A ref
+// this test addresses (`Blog Site`) resolves through GET /v1/sites to the uuid,
+// costing the two round trips the slug path no longer pays.
+func TestRunCloudSiteRollbackByDisplayNameStillPaysTheListRead(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	// A site whose NAME is not its slug — the only shape the list read still owns.
+	cp.sitesListResp = fakeResp{200,
+		`{"sites":[{"id":"` + testSiteID + `","name":"Blog Site","slug":"blog","kind":"static"}]}`}
+	cp.serve()
+
+	_, stderr, code := runSite(t, "table", "rollback", "Blog Site")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if cp.sitesListHits != 1 {
+		t.Fatalf("a display-name ref must still resolve through GET /v1/sites exactly once, got %d (log %v)",
+			cp.sitesListHits, cp.wireLog)
+	}
+	want := []string{"GET /v1/sites", "POST /v1/sites/" + testSiteID + "/rollback"}
+	if len(cp.wireLog) != len(want) {
+		t.Fatalf("name rollback must cost exactly %d round trips, got %d:\n%v",
+			len(want), len(cp.wireLog), cp.wireLog)
+	}
+	for i, w := range want {
+		if cp.wireLog[i] != w {
+			t.Fatalf("round trip %d = %q, want %q (full log %v)", i+1, cp.wireLog[i], w, cp.wireLog)
+		}
+	}
+}
+
+// TestLooksLikeSiteSlug pins the predicate against the control plane's own rule
+// (registry/site.ex @slug_format + the 63-char length validation) rather than
+// against a vibe: everything the CP would accept as a slug must pass, and every
+// shape it would refuse must fall back to the list read.
+func TestLooksLikeSiteSlug(t *testing.T) {
+	for _, ok := range []string{"blog", "b", "my-site-2", "0", "a-b-c", strings.Repeat("a", 63)} {
+		if !looksLikeSiteSlug(ok) {
+			t.Errorf("looksLikeSiteSlug(%q) = false, want true (the CP resolves this by slug)", ok)
+		}
+	}
+	for _, bad := range []string{
+		"",                      // no ref at all
+		"Blog",                  // a capital: a NAME, never a slug
+		"Blog Site",             // spaces
+		"my_site",               // underscore
+		"my.site",               // dot
+		"-leading",              // the CP requires [a-z0-9] first
+		"has/slash",             // would forge a path segment
+		strings.Repeat("a", 64), // one past validate_length max: 63
+	} {
+		if looksLikeSiteSlug(bad) {
+			t.Errorf("looksLikeSiteSlug(%q) = true, want false (the CP cannot resolve this)", bad)
+		}
 	}
 }
 
@@ -2096,10 +2176,15 @@ func TestRunCloudSiteCreateInvalidBindingExitsGeneric(t *testing.T) {
 // The fixture ships THREE rows — two with counts, one WITHOUT (bare type) — so the
 // grammar `type (count)` / bare `type` is exercised on one payload, plus a JUNK
 // row (empty type) the render must drop.
+// cch-w69-bl: the plane's `detail` is SURFACE-NEUTRAL and the incantation rides
+// its own `cli_hint` key, so this fixture carries the two halves separately —
+// and the CLI must reassemble them by reading the KEY, never by finding a
+// sentence inside `detail`.
 const emptyBindingBody = `{"error":"content_binding_empty",` +
 	`"detail":"this site would build from nothing — its token sees nothing at acme/blog/production. ` +
 	`This site CAN read: task (12), paper (40), note. ` +
-	"Re-run naming a type this site can read: `bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>`\"," +
+	`Name a content type this site can read.",` +
+	`"cli_hint":"bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>",` +
 	`"readable_types":[{"type":"task","count":12},{"type":"paper","count":40},{"type":"note"},{"type":""}]}`
 
 // The HUMAN receipt renders the menu FROM THE ARRAY in the console grammar and
@@ -2123,9 +2208,29 @@ func TestRunCloudSiteCreateEmptyBindingRendersReadableTypesMenu(t *testing.T) {
 	if strings.Contains(stderr, "This site CAN read:") {
 		t.Fatalf("the CLI must compose from the array, not echo the server prose menu:\n%s", stderr)
 	}
-	// The bp re-run line is the CLI's home — kept, unlike the console which strips it.
+	// The bp re-run line is the CLI's home — kept, unlike the console, which now
+	// never sees it at all because it rides its own key.
 	if !strings.Contains(stderr, "--doc-type <type>") {
 		t.Fatalf("the CLI must KEEP the bp re-run line:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "bp cloud site create <name>") {
+		t.Fatalf("the re-run must come from cli_hint, whole:\n%s", stderr)
+	}
+	// cch-w69-bl MUTATION CONTROL: reword `detail` exactly as a writer would —
+	// no sentence the old strings.Index(detail, "Re-run naming a type") search
+	// could find, and no re-run text in `detail` at all. The receipt must be
+	// unchanged in substance, because the hint is read from a FIELD. On the
+	// pre-fix build this body loses the re-run line entirely and this reds.
+	reworded := `{"error":"content_binding_empty",` +
+		`"detail":"nothing here to build from — acme/blog/production holds no post this site may read. Pick a type it can see.",` +
+		`"cli_hint":"bp cloud site create <name> --kind static --framework astro --dataset acme/blog/production --doc-type <type>",` +
+		`"readable_types":[{"type":"task","count":12},{"type":"paper","count":40},{"type":"note"}]}`
+	_, stderr2, _ := createRefused(t, fakeResp{422, reworded})
+	if !strings.Contains(stderr2, "It can read: task (12), paper (40), note") {
+		t.Fatalf("a reworded detail must not disturb the array-derived menu:\n%s", stderr2)
+	}
+	if !strings.Contains(stderr2, "--doc-type <type>") {
+		t.Fatalf("a reworded detail must NOT cost the re-run line — that is the whole point of cli_hint:\n%s", stderr2)
 	}
 	if !strings.Contains(stderr, "No site was created") {
 		t.Fatalf("a refused create must say no site was created:\n%s", stderr)
@@ -3076,8 +3181,11 @@ func TestCloudSitePrebuiltRefusesABadDirBeforeAnyCall(t *testing.T) {
 	if code != exitUsage {
 		t.Fatalf("project dir exit=%d want %d\n%s%s", code, exitUsage, stdout, stderr)
 	}
-	if !strings.Contains(stdout+stderr, "no index.html") {
-		t.Fatalf("the refusal must name the missing root index.html:\n%s%s", stdout, stderr)
+	// The PRE-MINT arm has read no site row yet, so it asks the union question
+	// (see prebuiltRuntime): a project directory is refused because it is
+	// NEITHER release-root shape, and the refusal names both.
+	if !strings.Contains(stdout+stderr, "neither an index.html nor a server.js") {
+		t.Fatalf("the refusal must name both release-root shapes it looked for:\n%s%s", stdout, stderr)
 	}
 
 	if cp.deployHits != 0 || cp.artifactHits != 0 {
@@ -5188,5 +5296,136 @@ func TestCloudSitePrebuiltMintReadsTheSourceBack(t *testing.T) {
 	sout2, serr2, _ := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
 	if !strings.Contains(sout2+serr2, "no build started on the box") {
 		t.Fatalf("a genuinely prebuilt mint must still say it:\n%s%s", sout2, serr2)
+	}
+}
+
+// --- the rollback receipt's latency clause -----------------------------------
+
+// stubSiteClockSteps makes `siteClock` return t0, then t0+steps[0], then
+// t0+steps[1], … so a test can hand `runCloudSiteRollback` an exact flip
+// duration without sleeping. Past the end the last step repeats, so a caller
+// that reads the clock more times than a test predicted gets a stable answer
+// instead of a panic — the test would then be measuring the wrong span, which
+// the assertions below catch, rather than crashing on an off-by-one.
+func stubSiteClockSteps(t *testing.T, steps ...time.Duration) {
+	t.Helper()
+	orig := siteClock
+	t0 := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	n := -1
+	siteClock = func() time.Time {
+		n++
+		if n == 0 {
+			return t0
+		}
+		i := n - 1
+		if i >= len(steps) {
+			i = len(steps) - 1
+		}
+		return t0.Add(steps[i])
+	}
+	t.Cleanup(func() { siteClock = orig })
+}
+
+// THE RED ARM. A rollback that misses the 1 s budget must SAY SO on the receipt,
+// with the number and with where the time went. 3820 ms is not a made-up value:
+// it is the slowest of the three live guerrilla runs this row was filed on
+// (1840 / 3021 / 3820 ms, 2026-09-02), every one of which printed the same
+// unqualified checkmark a 90 ms flip prints.
+//
+// Proven by mutation: deleting the `siteRollbackOverBudgetLine` call from
+// `runCloudSiteRollback` reds this test and leaves the quiet arm below green.
+func TestRunCloudSiteRollbackOverBudgetSaysSoAndSaysWhere(t *testing.T) {
+	stubSiteClockSteps(t, 3820*time.Millisecond)
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	// The checkmark is unchanged — this clause is additive, not a replacement.
+	if !strings.Contains(stdout, "✓ site rolled back") {
+		t.Fatalf("the success receipt must survive the latency clause:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "3.82s") {
+		t.Fatalf("an over-budget rollback must print the measured flip duration:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "over the 1.00s budget") {
+		t.Fatalf("the clause must name the budget it missed:\n%s", stdout)
+	}
+	// The whole point of the sentence: a breach of a span that brackets the POST
+	// alone is server-side by construction, and the operator must be told that
+	// rather than left to suspect their own machine or link.
+	if !strings.Contains(stdout, "server-side") {
+		t.Fatalf("the clause must say the wait is server-side:\n%s", stdout)
+	}
+}
+
+// THE QUIET ARM, and the control for the test above. A rollback INSIDE the
+// budget must print exactly the receipt it always printed — no duration, no
+// budget word. It is what makes the red arm's failure attributable to the breach
+// and not merely to the clause existing, and it pins the failure direction of
+// the obvious "just always print the time" alternative: a number on every run is
+// output that changes on every run.
+func TestRunCloudSiteRollbackUnderBudgetPrintsNoLatencyClause(t *testing.T) {
+	stubSiteClockSteps(t, 90*time.Millisecond)
+	cp := newSiteCP(t)
+	cp.rollResp = fakeResp{200, rollbackEnvelope}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "rollback", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "✓ site rolled back") {
+		t.Fatalf("the success receipt must be unchanged:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "budget") || strings.Contains(stdout, "0.09s") {
+		t.Fatalf("an in-budget rollback must print no latency clause:\n%s", stdout)
+	}
+}
+
+// The BOUNDARY, stated because "under 1000 ms" is the criterion's own wording and
+// an off-by-one here would make the CLI and
+// `deploy/site-spawner-live-proof.sh` disagree about the same run. Exactly at the
+// budget is NOT a breach; one millisecond past it is.
+func TestSiteRollbackOverBudgetLineBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		d    time.Duration
+		want bool
+	}{
+		{999 * time.Millisecond, false},
+		{1000 * time.Millisecond, false},
+		{1001 * time.Millisecond, true},
+		{3820 * time.Millisecond, true},
+	} {
+		got := siteRollbackOverBudgetLine(tc.d) != ""
+		if got != tc.want {
+			t.Errorf("siteRollbackOverBudgetLine(%s) breach=%v, want %v", tc.d, got, tc.want)
+		}
+	}
+}
+
+// `-o json` and `-o yaml` return the control plane's envelope VERBATIM, and the
+// latency clause must not leak into either: a machine reader parses that body,
+// and a line of English in it is a parse error, not a warning. This is the arm
+// that would catch someone "helpfully" moving the clause above the format switch.
+func TestRunCloudSiteRollbackJSONCarriesNoLatencyClause(t *testing.T) {
+	for _, format := range []string{"json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			stubSiteClockSteps(t, 3820*time.Millisecond)
+			cp := newSiteCP(t)
+			cp.rollResp = fakeResp{200, rollbackEnvelope}
+			cp.serve()
+
+			stdout, stderr, code := runSite(t, format, "rollback", testSiteID)
+			if code != exitOK {
+				t.Fatalf("exit=%d want 0\n%s", code, stderr)
+			}
+			if strings.Contains(stdout, "budget") || strings.Contains(stdout, "3.82s") {
+				t.Fatalf("-o %s must carry the envelope alone:\n%s", format, stdout)
+			}
+		})
 	}
 }

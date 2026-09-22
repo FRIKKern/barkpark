@@ -12,6 +12,7 @@ import type {
   MutateResult,
   PatchBuilder,
   Perspective,
+  ResolveSpec,
   ListenFilter,
   ExportOptions,
   TransactionBuilder,
@@ -357,6 +358,7 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
         fields?: string | string[]
         signal?: AbortSignal
         perspective?: Perspective
+        resolve?: ResolveSpec
       },
     ): Promise<T | null> {
       const { data } = await getDoc<T>(frozen, type, id, opts)

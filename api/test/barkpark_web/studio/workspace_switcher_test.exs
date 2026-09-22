@@ -1,7 +1,11 @@
 defmodule BarkparkWeb.Studio.WorkspaceSwitcherTest do
   @moduledoc """
   Pins the rendering logic of WorkspaceSwitcher:
-    - name_of/1: displays the workspace/project name or a fallback dash
+    - name_of/1: renders the PROJECT trail (`span.scope-title-trail`) — the
+      project's name, or an em-dash when no project resolves. It is NOT what
+      renders the workspace: the title bar shows the workspace through
+      `initial_of/1` in `span.scope-avatar` plus the button's `title=` hint.
+    - initial_of/1: the workspace avatar letter (`span.scope-avatar`)
     - same?/2: drives is-current / is-previewed CSS classes on menu items
     - current_dataset?/3: drives the dataset dot (only when previewed ws+proj
       match the current ws+proj AND the slug matches)
@@ -22,6 +26,35 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcherTest do
   defp proj(id, name), do: %{id: id, name: name, slug: "proj-#{id}"}
   defp ds(slug, name \\ nil), do: %{slug: slug, name: name || slug}
 
+  # Bind an assertion to the ELEMENT that carries it. Every claim below used to
+  # be a substring search over the whole render, which is satisfied by any
+  # render that emits the character or class ANYWHERE — including renders that
+  # put it on every row, or on exactly the wrong one.
+  defp frag(html), do: LazyHTML.from_fragment(html)
+
+  defp text_of(html, selector) do
+    html |> frag() |> LazyHTML.query(selector) |> LazyHTML.text() |> String.trim()
+  end
+
+  defp ws_button(html, %{id: id}) do
+    html
+    |> frag()
+    |> LazyHTML.query(~s(button[phx-click="scope-menu-ws"][phx-value-id="#{id}"]))
+  end
+
+  defp ws_classes(html, w) do
+    html
+    |> ws_button(w)
+    |> LazyHTML.attribute("class")
+    |> List.first()
+    |> Kernel.||("")
+    |> String.split()
+  end
+
+  defp ws_has_dot?(html, w) do
+    html |> ws_button(w) |> LazyHTML.query("span.scope-menu-dot") |> Enum.count() > 0
+  end
+
   defp render_switcher(overrides \\ []) do
     defaults = [
       current_workspace: nil,
@@ -39,22 +72,53 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcherTest do
   # name_of/1 — via title-bar spans
   # ---------------------------------------------------------------------------
 
-  describe "name_of — workspace/project name display" do
-    test "shows the workspace name when set" do
-      html = render_switcher(current_workspace: ws(1, "Acme"))
-      assert html =~ "Acme"
+  describe "name_of — the project trail (span.scope-title-trail)" do
+    # `name_of/1` has exactly one visible subject in this component: the
+    # PROJECT trail at `span.scope-title-trail`. Asserting `html =~ "—"` could
+    # never see it — the literal em-dash is also emitted by `scope_hint/3`
+    # ("Switch scope — …") and by `span.scope-dataset-badge` (`@current_dataset
+    # || "—"`), both on EVERY render, so the assertion held no matter what
+    # `name_of/1` returned.
+
+    test "shows the project name when a project is set" do
+      html = render_switcher(current_project: proj(7, "Widgets"))
+      assert text_of(html, "span.scope-title-trail") == "Widgets"
     end
 
-    test "falls back to em-dash when workspace is nil" do
-      html = render_switcher(current_workspace: nil)
-      # The title bar renders two spans; the first gets name_of(workspace).
-      # We can't distinguish spans directly, but the dash must appear.
-      assert html =~ "—"
+    test "falls back to an em-dash when no project resolves" do
+      html = render_switcher(current_project: nil)
+      assert text_of(html, "span.scope-title-trail") == "—"
     end
 
-    test "falls back to em-dash when workspace map has no name key" do
-      html = render_switcher(current_workspace: %{id: 99})
-      assert html =~ "—"
+    test "falls back to an em-dash when the project map has no name key" do
+      html = render_switcher(current_project: %{id: 99})
+      assert text_of(html, "span.scope-title-trail") == "—"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # initial_of/1 — the workspace avatar, which is what actually shows the
+  # workspace in the title bar (name_of/1 never touches it)
+  # ---------------------------------------------------------------------------
+
+  describe "initial_of — the workspace avatar (span.scope-avatar)" do
+    test "shows the workspace's upcased initial when set" do
+      html = render_switcher(current_workspace: ws(1, "acme"))
+      assert text_of(html, "span.scope-avatar") == "A"
+      # …and the full name rides the button's tooltip, which is the only place
+      # it appears at all.
+      assert [hint] =
+               html
+               |> frag()
+               |> LazyHTML.query("button.scope-title")
+               |> LazyHTML.attribute("title")
+
+      assert hint =~ "acme"
+    end
+
+    test "falls back to the brand letter when no workspace resolves" do
+      assert text_of(render_switcher(current_workspace: nil), "span.scope-avatar") == "B"
+      assert text_of(render_switcher(current_workspace: %{id: 99}), "span.scope-avatar") == "B"
     end
   end
 
@@ -95,31 +159,56 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcherTest do
       %{ws_a: ws_a, ws_b: ws_b, menu: menu}
     end
 
-    test "is-current applied to the active workspace item", %{ws_a: ws_a, menu: menu} do
+    test "is-current applied to the active workspace item", %{ws_a: ws_a, ws_b: ws_b, menu: menu} do
       html = render_switcher(current_workspace: ws_a, menu: menu)
-      assert html =~ "is-current"
+      assert "is-current" in ws_classes(html, ws_a)
+      refute "is-current" in ws_classes(html, ws_b)
     end
 
+    # CLASS only. Disjoint from the dot test below, so that marking every row
+    # current and showing the dot on every row are two separately-measured
+    # defects rather than one.
     test "non-current workspace does not get is-current class", %{
       ws_a: ws_a,
       ws_b: ws_b,
       menu: menu
     } do
-      # current = ws_b; previewed = ws_a — ws_b should have is-current in its button
-      html = render_switcher(current_workspace: ws_b, menu: %{menu | ws: ws_b}, menu: menu)
-      # ws_a is in the list but is neither current nor previewed on this render
-      # At minimum the page must render without error and show both names
-      assert html =~ ws_a.name
-      assert html =~ ws_b.name
+      # current = ws_b; previewed (menu.ws) = ws_a — so ws_a is previewed but
+      # NOT current, and must not be dressed as the place the operator is.
+      html = render_switcher(current_workspace: ws_b, menu: menu)
+
+      assert ws_classes(html, ws_a) != [], "ws_a's menu button did not render at all"
+
+      refute "is-current" in ws_classes(html, ws_a),
+             "a non-current workspace was marked is-current: #{inspect(ws_classes(html, ws_a))}"
+
+      assert "is-current" in ws_classes(html, ws_b)
+    end
+
+    # DOT only — the other half of "this row is where you are", and the half a
+    # class assertion cannot see.
+    test "only the current workspace carries the Current dot", %{
+      ws_a: ws_a,
+      ws_b: ws_b,
+      menu: menu
+    } do
+      html = render_switcher(current_workspace: ws_b, menu: menu)
+
+      assert ws_has_dot?(html, ws_b), "the current workspace lost its Current dot"
+
+      refute ws_has_dot?(html, ws_a),
+             "a non-current workspace shows the Current dot"
     end
 
     test "is-previewed applied to the previewed (but not current) workspace", %{
+      ws_a: ws_a,
       ws_b: ws_b,
       menu: menu
     } do
       # current = ws_b, previewed = ws_a
       html = render_switcher(current_workspace: ws_b, menu: menu)
-      assert html =~ "is-previewed"
+      assert "is-previewed" in ws_classes(html, ws_a)
+      refute "is-previewed" in ws_classes(html, ws_b)
     end
 
     test "aria-expanded is true when menu is open", %{menu: menu} do

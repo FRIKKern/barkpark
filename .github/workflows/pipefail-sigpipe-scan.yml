@@ -40,6 +40,16 @@ name: pipefail SIGPIPE scan
 #                                  file carries the number, the command that
 #                                  produced it, its date, its composition, and
 #                                  the reason it is a baseline and not a zero.
+#   2b. the VARIABLE-PRODUCER SHAPE ratchet — fails this job when the count of
+#                                  `printf/echo of a VARIABLE into an early-exit
+#                                  reader` RISES above
+#                                  scripts/pipefail-sigpipe-variable-producer-baseline.txt.
+#                                  Added 2026-09-20 because the site that took
+#                                  main red that day (:1154, #19478) was flagged
+#                                  at [medium] and (2) above reads high only.
+#                                  It is a SHAPE, not the medium TIER — medium
+#                                  also holds 67 unclassified sites and their
+#                                  false positives, which stay unenforced.
 #   3. the full inventory        — never fails. medium/low are printed so the
 #                                  debt is visible, and enforced at neither.
 #
@@ -48,14 +58,29 @@ name: pipefail SIGPIPE scan
 on:
   push:
     branches: [main]
-  # ── NO `pull_request:` ARM (2026-09-15, task-dee226be3107a98b) ───────────────
-  # Removed, on this file's own reasoning. The header above states it outright:
-  # "This gate asks a question about the REPO STATE, not about a diff, so its
-  # primary venue is push-to-main plus a schedule". It is advisory and blocks
-  # nothing, and the HIGH-confidence ratchet against
-  # scripts/pipefail-sigpipe-baseline.txt reds identically on the `push: main`
-  # arm — a rise is a rise whichever side of the merge measures it. Measured
-  # 2026-09-15: fired on 10/10 of the last 10 merged heads, 2 check runs each.
+  # ── `pull_request:` ARM RESTORED (2026-09-17, task-4f360efc26a428f5) ────────
+  # It was removed on 2026-09-15 (task-dee226be3107a98b, the check-run-volume
+  # row) on the argument that "a rise is a rise whichever side of the merge
+  # measures it". That sentence is true and it is not the question. WHICH SIDE
+  # MEASURES IT DECIDES WHOSE RED IT IS. With only the `push: main` arm, a PR
+  # that adds a new high-confidence site merges green and the ratchet reds on
+  # MAIN, on the next unrelated author's push, naming a site they never wrote.
+  #
+  # MEASURED 2026-09-17, which is the retraction's evidence and not an opinion:
+  # this workflow failed on EVERY push to main across a two-hour window (15
+  # consecutive runs; run 35218846761 is one of them) with
+  #   "RATCHET BROKEN — 104 finding(s) at confidence >= high, baseline is 101."
+  # Three new sites landed through pull requests that never ran this scan. The
+  # removal's own measurement ("fired on 10/10 of the last 10 merged heads")
+  # counted that the gate FIRED; it did not ask who was left holding the red.
+  #
+  # The cost stays bounded because the PR filter is unchanged: the `changes`
+  # job below computes `hit` from the diff and the `scan` job's `if:` skips when
+  # a PR touches none of the scanner's target roots. A PR that cannot introduce
+  # a finding pays one short `changes` job and gets a SKIPPED scan — never an
+  # ABSENT context, which is why the filter stays on the job and never becomes a
+  # workflow-level `paths:`.
+  pull_request:
   schedule:
     # Weekly. A latent class does not need a fast loop; it needs a loop that
     # never stops. Offset off the hour because GitHub queues cron under load —
@@ -82,6 +107,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # `filter: blob:none` — a BLOBLESS partial clone, and it is NOT
+          # shallowness. It fetches every commit and every tree and omits only
+          # blob CONTENTS; `git cat-file -e <base>^{commit}`, `git merge-base`
+          # and `git diff --name-only` read commits and trees, so this job's
+          # verdict is bit-identical. `fetch-depth: 0` above STAYS: drop it and
+          # actions/checkout falls back to depth 1, which has no merge base
+          # whether blobless or not. Equivalence is provable, not asserted:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # MEASURED on merged head b71d22875b (2026-09-17): this checkout step
+          # took 28s here, while the already-blobless dispatchers on the
+          # same head (elixir/cloud/ci/console/compose) took 13-15s.
+          filter: blob:none
       - id: f
         name: compare the PR against the scanner's own targets
         run: |
@@ -96,13 +133,23 @@ jobs:
           # A here-string, never `printf … | grep -q`: this file is scanned by the
           # very gate it wires, and a gate that hosts the defect it hunts is the
           # loudest way to lose an argument.
-          if grep -Eq '^(scripts/|\.github/workflows/|deploy/)' <<<"$changed"; then
+          # The three prefixes are the scanner's OWN default targets, read off
+          # scripts/pipefail-sigpipe-scan.sh:159 —
+          #   targets=("$ROOT/scripts" "$ROOT/.github" "$ROOT/deploy")
+          # — walked at :555 by
+          #   find "$t" -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.yml' -o -name '*.yaml' \)
+          # so every .sh/.bash/.yml/.yaml under those three roots is in scope.
+          # `.github/` and not `.github/workflows/`: the narrower prefix this
+          # filter used to carry missed .github/dependabot.yml, the one file the
+          # scanner reads under .github that is not a workflow (verified with
+          # the same find(1) over .github, filtered to non-workflow paths).
+          if grep -Eq '^(scripts/|\.github/|deploy/)' <<<"$changed"; then
             echo "hit=true" >>"$GITHUB_OUTPUT"
             echo "the PR touches the scanner's targets — running the scan:"
-            grep -E '^(scripts/|\.github/workflows/|deploy/)' <<<"$changed"
+            grep -E '^(scripts/|\.github/|deploy/)' <<<"$changed"
           else
             echo "hit=false" >>"$GITHUB_OUTPUT"
-            echo "the PR touches none of scripts/ .github/workflows/ deploy/ — skipping."
+            echo "the PR touches none of scripts/ .github/ deploy/ — skipping."
             echo "This SKIPS the scan job; it does not make its context absent."
           fi
 
@@ -124,6 +171,42 @@ jobs:
       # The enforced tier. Reasons, date and derivation live in the baseline file.
       - name: high-confidence ratchet (fails this job)
         run: bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --baseline scripts/pipefail-sigpipe-baseline.txt
+
+      # The number must carry what produced it. A bare integer is how an
+      # INHERITED number — 8, 15 or 16, all from the PRE-2026-09-12 detector —
+      # reached an acceptance criterion as "high <= 6" and stood for four days
+      # while the tree really read 101. The baseline file has said "put its
+      # printed count here, and update the date" in prose since 2026-09-09; a
+      # written finding does not fire by itself, so this step fires it.
+      # (task-bf9d623529d86a86)
+      - name: the banked number carries its command, date and sha (fails this job)
+        run: bash scripts/pipefail-sigpipe-scan.sh --check-provenance scripts/pipefail-sigpipe-baseline.txt
+
+      # ── THE SHAPE RATCHET (2026-09-20, task-7fccc7b8cf1c6f6c) ───────────────
+      # The site that took main red on 2026-09-20 —
+      # scripts/pds-live-hetzner-placement-group.sh:1154, fixed by #19478 — was
+      # flagged by this very scanner BEFORE it reddened anything, at [medium],
+      # and the only tier enforced above is high. So the finding that cost a
+      # session sat in a tier nothing read.
+      #
+      # This does NOT enforce "medium". medium is two populations (101 of this
+      # shape, 67 `producer not classified`, measured on 5cd9243e1) and the
+      # second one holds the false positives. The enforced unit is the SHAPE:
+      # a printf/echo of a VARIABLE into an early-exit reader whose status is a
+      # boolean. Composition, reasoning and the refutation of the 2026-09-09
+      # "the variables are usually short" argument live in the baseline file.
+      #
+      # The high ratchet above is UNCHANGED and reads its own file: high was 89
+      # on this tree before this step existed and 89 after.
+      - name: variable-producer shape ratchet (fails this job)
+        run: bash scripts/pipefail-sigpipe-scan.sh --only-shape variable-producer --baseline scripts/pipefail-sigpipe-variable-producer-baseline.txt
+
+      # Same rule as the high baseline: a bare integer is not a measurement.
+      # --check-provenance derives the command it demands from the option state,
+      # so this one requires the --only-shape command and NOT the high one — a
+      # shape file quoting the high command is refused (selftest arm 9g).
+      - name: the shape number carries its command, date and sha (fails this job)
+        run: bash scripts/pipefail-sigpipe-scan.sh --only-shape variable-producer --check-provenance scripts/pipefail-sigpipe-variable-producer-baseline.txt
 
       # Advisory: the whole inventory, so medium/low debt is visible in the log
       # rather than only in someone's memory. Never fails.

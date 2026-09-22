@@ -30,15 +30,18 @@ import (
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 )
 
-// Version is the agent's own build version, reported verbatim in every Report.
-// Stamped here (overridable at build time via -ldflags) rather than read from
-// the server so the report tells the truth about THIS binary.
-const Version = "0.1.0"
-
 // agentVersion is the build stamp of the agent binary ITSELF — what produced
-// THIS beat, as opposed to the hand-maintained Version const above, which only
-// says what the source tree called itself when a human last edited it and so
-// cannot distinguish two boxes running binaries months apart.
+// THIS beat.
+//
+// It REPLACES a hand-maintained `const Version = "0.1.0"` that used to sit here
+// and fill the wire's `version` key. That const was the misleading twin of this
+// stamp: two keys in one payload answering "which binary is this?", and only
+// one of them could. The const read 0.1.0 across every rebuild the fleet ever
+// took, so `version` looked like a determination and was a literal. It is gone;
+// `version` is now an ALIAS filled from this same resolution (see gatherReport),
+// so the two keys cannot drift — there is no second source left to go stale.
+// TestVersionKeyIsTheMeasuredTwin and TestNoHandMaintainedVersionConst red if
+// either half of that is undone.
 //
 // It is a var, not a const, so a blessed release can inject it:
 //
@@ -178,7 +181,15 @@ type Report struct {
 	// AgentStatus is always "online" in a report — the agent only reports when
 	// it is running. The registry flips a Barkpark to "offline" on staleness.
 	AgentStatus string `json:"agent_status"`
-	// Version is the agent binary version (Version const above).
+	// Version is the `version` key the control plane has read since cloud-9
+	// (router.ex lands it on barkparks.version; sites/deploy.ex uses it as the
+	// `code_rev` fallback when a box reports no git_commit). It is an ALIAS of
+	// AgentVersion below — the SAME resolved build stamp, filled from the same
+	// call in gatherReport — not a second, independently-maintained answer.
+	//
+	// It is kept, rather than dropped, because those CP readers are live: the
+	// key must keep arriving. It is no longer a constant, because a constant in
+	// a `code_rev` fallback freezes that half of every build_id.
 	Version string `json:"version"`
 	// AgentVersion dates the PRODUCER of this beat — which agent binary emitted
 	// it — from the binary's own build stamp (see AgentVersion above), not from
@@ -212,6 +223,40 @@ type Report struct {
 	// could never report the good state — a light that is always on says
 	// nothing. Do not re-add untracked counting.
 	DirtyTree bool `json:"dirty_tree"`
+
+	// SiteDeploy is "can this box deploy sites", read off the instance's own
+	// GET /v1/instance/site-deploy (dr-w15-s1) once per beat.
+	//
+	// IT IS A POINTER, AND THAT IS THE WHOLE HONESTY OF THE FIELD. nil means
+	// UNMEASURED — the probe is unwired, the box predates the route and 404ed,
+	// the token was refused, the body would not decode, or the request timed out
+	// — and `omitempty` keeps the key OFF THE WIRE entirely in that case, so the
+	// control plane's merge_capability/2 sees an ABSENT key and maps it to
+	// nil/unmetered. It must never arrive as `false`: `configured: false` means
+	// THIS BOX REFUSES DEPLOYS, a verdict about the box, and reporting an
+	// un-upgraded box as refusing is exactly the fabricated-false this whole
+	// slice exists to prevent (the same measured_or_nil law the -1 sentinels
+	// above keep for the numeric vitals, expressed as absence because the
+	// quantity is a boolean and has no spare value to spend as a sentinel).
+	SiteDeploy *SiteDeployCapability `json:"site_deploy,omitempty"`
+
+	// SitePlane is "does this box carry the SITE-HOSTING PLANE" — docker +
+	// buildx, nixpacks, the isolated Go toolchain, git, and the
+	// barkpark-builder / barkpark-runtime units — measured LOCALLY on the box
+	// by the agent and carried to the control plane on the beat
+	// (jpf-bl-siteplane-verify-probe).
+	//
+	// It is the FACT SOURCE the verify executors could not have: both of them
+	// are HTTP-only against the instance origin, so neither can see a docker or
+	// a systemd unit. This field is how a plane fact becomes HTTPS-visible at
+	// all.
+	//
+	// IT IS A POINTER FOR SiteDeploy's REASON, and `omitempty` keeps the key off
+	// the wire when the probe is unwired or failed: a box whose agent predates
+	// this field must arrive as ABSENT, never as a plane-less verdict. The
+	// record's own seven facts are each three-state again inside it — see
+	// SitePlaneCapability.
+	SitePlane *SitePlaneCapability `json:"site_plane,omitempty"`
 
 	// HealthStatus rolls the health-gate up to the registry's enum
 	// (up/down/unknown): "up" iff the gate's OK is true, "down" when the gate
@@ -938,6 +983,18 @@ type ReportConfig struct {
 	// error to one, so "measured and quiet" can never arrive as "we did not look".
 	// Wire the production implementation with NewRunawayProbe().
 	RunawayProbe func() ([]RunawayProc, error)
+	// SiteDeployProbe returns the instance's deploy-capability record. nil, or a
+	// non-nil error, leaves Report.SiteDeploy nil — UNMEASURED — and `omitempty`
+	// keeps the key off the wire. It NEVER degrades to a zero-valued record: a
+	// probe that could not ask must not answer "this box refuses deploys". Wire
+	// the production implementation with NewSiteDeployProbe(base, token, rootCAs).
+	SiteDeployProbe func() (*SiteDeployCapability, error)
+	// SitePlaneProbe returns the box's site-hosting-plane record. nil, or a
+	// non-nil error, leaves Report.SitePlane nil — UNMEASURED — and `omitempty`
+	// keeps the key off the wire. Wire the production implementation with
+	// NewSitePlaneProbe(); unlike the HTTP probes it needs no base URL and no
+	// token, because the plane is LOCAL to the box the agent runs on.
+	SitePlaneProbe func() (*SitePlaneCapability, error)
 	// SlotUnitsProbe returns the blue/green (and failed site) unit states plus
 	// how many the cap hid. nil → SlotUnits stays nil (UNMEASURED) and
 	// SlotUnitsTruncated stays -1; the two land as ONE unit like SwapProbe's
@@ -989,12 +1046,17 @@ type ReportConfig struct {
 // or failing probe yields an honest unknown value, never a panic, so a partial
 // box still phones home with whatever it can prove.
 func gatherReport(cfg ReportConfig) Report {
+	// ONE resolution, TWO wire keys. `version` (the key the CP has read since
+	// cloud-9) and `agent_version` (the explicit producer stamp) are filled from
+	// the SAME call, so a beat can never carry two different answers to "which
+	// binary produced this?".
+	buildStamp := AgentVersion()
 	r := Report{
 		AgentStatus: "online",
-		Version:     Version,
 		// Always emitted, never "" — AgentVersion falls back to the explicit
 		// AgentVersionUnknown marker rather than to silence.
-		AgentVersion:    AgentVersion(),
+		Version:         buildStamp,
+		AgentVersion:    buildStamp,
 		HealthStatus:    "unknown",
 		DiskUsedPercent: -1,
 		PGSizeBytes:     -1,
@@ -1060,6 +1122,30 @@ func gatherReport(cfg ReportConfig) Report {
 			r.P95Ms = p95
 			r.Err5xxPerS = err5xx
 			r.WindowS = windowS
+		}
+	}
+
+	// Deploy capability. The ONLY assignment to r.SiteDeploy in this function, and
+	// it is guarded twice: the probe must exist AND must have returned no error.
+	// Every other path leaves the field nil, which `omitempty` turns into an
+	// absent key — the UNMEASURED reading. There is deliberately no else-branch
+	// writing a zero record: absence is the sentinel here, and a written-out
+	// `configured: false` would be a verdict nobody measured.
+	if cfg.SiteDeployProbe != nil {
+		if cap, err := cfg.SiteDeployProbe(); err == nil {
+			r.SiteDeploy = cap
+		}
+	}
+
+	// Site-hosting plane. Guarded twice exactly like SiteDeploy above, and for
+	// the same reason: every other path leaves the field nil, which `omitempty`
+	// turns into an absent key. There is deliberately no else-branch writing a
+	// zero record — a `&SitePlaneCapability{}` would put a `site_plane` key on
+	// the wire whose seven nil facts invite a reader to treat the record as
+	// present, which is the fabricated-absence twin of a fabricated false.
+	if cfg.SitePlaneProbe != nil {
+		if plane, err := cfg.SitePlaneProbe(); err == nil {
+			r.SitePlane = plane
 		}
 	}
 
@@ -1259,6 +1345,97 @@ func NewReqStatsProbe(base, token string, rootCAs *x509.CertPool) func() (float6
 			windowS = *body.WindowS
 		}
 		return body.ReqPerS, p95, err5xx, windowS, nil
+	}
+}
+
+// siteDeployPath is the instance route the SiteDeployProbe reads, served by
+// dr-w15-s1 (api/lib/barkpark_web/router.ex, GET /v1/instance/site-deploy). It
+// answers 200 {"configured": bool, "runner_alive": bool, "door": {…},
+// "serving": {…}} for an admin-tier bearer token; an instance built before that
+// slice returns 404, which the probe degrades to the UNMEASURED sentinel (a nil
+// record), never to a fabricated `configured: false`. This string is the
+// cross-slice contract — keep it in lockstep with the route the instance mounts.
+const siteDeployPath = "/v1/instance/site-deploy"
+
+// siteDeployTimeout bounds the per-beat site-deploy GET, for the same reason
+// reqStatsTimeout is short: a capability read must never stall the whole report
+// cycle, and a hung box degrades to UNMEASURED rather than blocking every other
+// vital.
+const siteDeployTimeout = 3 * time.Second
+
+// SiteDeployCapability is the beat's record of the instance's deploy capability.
+//
+// BOTH FIELDS ARE POINTERS, for the reason Report.SiteDeploy itself is one: an
+// instance that omits a key (a route that grew a field later, a body that
+// carried only half the record) must arrive as UNMEASURED, never as a confident
+// false. `false` here is a VERDICT — "this box refuses deploys" — and only a
+// box that actually said so may produce it.
+type SiteDeployCapability struct {
+	// Configured is DeployRunner.enabled?/0 on the box: literally the expression
+	// the deploy trigger branches on to emit feature_not_configured, so it cannot
+	// contradict the refusal a real deploy attempt would get.
+	Configured *bool `json:"configured"`
+	// RunnerAlive is Process.whereis(DeployRunner) != nil. The Runner is in the
+	// supervision tree UNCONDITIONALLY, so false here means CRASHED, never
+	// "feature off" — which is why it is a separate field from Configured.
+	//
+	// HONEST LIMIT, carried forward verbatim from the route's own moduledoc:
+	// nothing here sees a WEDGE. A process parked forever in `receive` is as
+	// alive as a healthy one. This is capability and process presence, not a
+	// guarantee about the next deploy.
+	RunnerAlive *bool `json:"runner_alive"`
+}
+
+// NewSiteDeployProbe builds the production SiteDeployProbe: a short-timeout HTTP
+// GET against the instance site-deploy route (base+siteDeployPath) carrying the
+// health gate's bearer token — the SAME base+token seam NewReqStatsProbe uses.
+//
+// It is fail-soft to UNMEASURED: any transport error, non-200 status (the 404
+// from an instance that predates dr-w15-s1 included), or undecodable body
+// returns a non-nil error so gatherReport leaves Report.SiteDeploy nil and the
+// key never reaches the wire. base=="" returns a nil probe (unwired), mirroring
+// NewReqStatsProbe.
+//
+// A 200 whose body omits a key lands that FIELD as nil for the same reason — the
+// record is carried, the unstated half is stated as unstated.
+func NewSiteDeployProbe(base, token string, rootCAs *x509.CertPool) func() (*SiteDeployCapability, error) {
+	base = strings.TrimRight(base, "/")
+	if base == "" {
+		return nil
+	}
+	url := base + siteDeployPath
+	return func() (*SiteDeployCapability, error) {
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		client := &http.Client{Timeout: siteDeployTimeout}
+		if rootCAs != nil {
+			tr := http.DefaultTransport.(*http.Transport).Clone()
+			tr.TLSClientConfig = &tls.Config{RootCAs: rootCAs}
+			client.Transport = tr
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			// THE 404 ARM. An instance that predates dr-w15-s1 lands here, and it
+			// must leave with NOTHING — not &SiteDeployCapability{} (whose nil
+			// fields would still put a `site_deploy` key on the wire and invite a
+			// reader to treat the record as present), and above all not a
+			// fabricated Configured=false.
+			return nil, fmt.Errorf("site-deploy: status %d", resp.StatusCode)
+		}
+		var body SiteDeployCapability
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		return &body, nil
 	}
 }
 

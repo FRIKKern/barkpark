@@ -11,6 +11,12 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
+    // THE PREREQUISITE. `vitest.globalSetup.ts` runs
+    // `scripts/prepare-pinned.mjs` before this project's suite, on EVERY
+    // invocation path -- package script, root multi-project run, IDE runner --
+    // because it hangs off the project's own config rather than off a
+    // package.json script chain that only `pnpm --filter ... test` ever walked.
+    globalSetup: ['./vitest.globalSetup.ts'],
     // The negative controls import and render the whole golden set three times
     // through three separate artifact copies.
     testTimeout: 30_000,

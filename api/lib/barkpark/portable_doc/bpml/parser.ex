@@ -35,7 +35,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "h3" => ~w(id),
     "notes" => ~w(id),
     "note" => ~w(id label lead),
-    "stat" => ~w(label value denom),
+    "stat" => ~w(label value denom verdict),
     # The grid/widget tier (task-3b08cbd8a16ad48e criterion 1) — the corpus's
     # biggest unspellable types and their child elements. `stat` above is
     # SHARED by <stats> and <stat-grid>: the renderer composes both through one
@@ -67,7 +67,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "step" => ~w(id title),
     "tag" => ~w(tag strength),
     "item" => [],
-    "li" => [],
+    "li" => ~w(checked),
     "tr" => [],
     "th" => [],
     "td" => [],
@@ -314,11 +314,23 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   defp build_block("ul", attrs, sc, cur) do
     with {:ok, items, cur} <-
-           child_seq("ul", "li", sc, cur, fn _attrs, sc, cur -> tag_inline("li", sc, cur) end) do
+           child_seq("ul", "li", sc, cur, fn li_attrs, sc, cur ->
+             case tag_inline("li", sc, cur) do
+               {:ok, nodes, cur} ->
+                 case List.keyfind(li_attrs, "checked", 0) do
+                   {"checked", v} -> {:ok, %{"content" => nodes, "checked" => v == "true"}, cur}
+                   nil -> {:ok, nodes, cur}
+                 end
+
+               other ->
+                 other
+             end
+           end) do
       {:ok,
        %{"type" => "list", "items" => items}
        |> put_attr("id", attrs)
-       |> put_bool_attr("ordered", attrs), cur}
+       |> put_bool_attr("ordered", attrs)
+       |> put_bool_attr("task", attrs), cur}
     end
   end
 
@@ -844,6 +856,12 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   # one element spells both. The grid's `caption`/`note` are NOT in this row:
   # widening it changes the published /v1/capabilities grammar digest, so the
   # printer refuses an item carrying them rather than dropping them silently.
+  #
+  # `verdict` IS in the row (task-8bdef19b5acef8a8): the render leg
+  # (render/data_viz.ex `stat_html/1` → `.bp-stat__v--loss` / `--peace`) and the
+  # JS mirror both read it, so a stat that lost it on a BPML round-trip came back
+  # with its digits repainted `--paper-ink` and no error. Adding it MOVES the
+  # /v1/capabilities grammar digest on purpose — that is this row's decision.
   defp stat_item_builder(stat_attrs, sc, cur) do
     with {:ok, body, cur} <- tag_text("stat", sc, cur) do
       item =
@@ -851,6 +869,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         |> put_attr("value", stat_attrs)
         |> put_attr("label", stat_attrs)
         |> put_attr("denom", stat_attrs)
+        |> put_attr("verdict", stat_attrs)
         |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
 
       {:ok, item, cur}

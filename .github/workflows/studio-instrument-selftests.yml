@@ -16,6 +16,15 @@
 # ADVISORY, not required: this workflow is paths-filtered, and a paths-filtered
 # workflow emits no check run on a non-matching PR, so it can never be made
 # required without deadlocking every unrelated PR (docs/ops/merge-gates.md).
+#
+# SECOND TENANT (task-481cb0ec3900a583, 2026-09-18): the two node:vm harnesses
+# under api/assets/chat-palette and api/assets/chat-turn-clock had the same
+# defect this file was created to fix — `grep -rn 'chat-palette' .github scripts`
+# returned NOTHING, so 21 passing tests read as coverage while no job executed
+# them, and the only CI-reachable check on __palette.test.mjs was an Elixir
+# `assert File.exists?("assets/chat-palette/__palette.test.mjs")`. They are the
+# same species as the suites above — dep-free, node-builtin only, no npm
+# install, no browser — so they ride this job rather than a new workflow.
 name: Studio instrument selftests
 
 on:
@@ -24,6 +33,14 @@ on:
       - "scripts/studio-desk-*.mjs"
       - "scripts/measurements/**"
       - "scripts/node-test-floor.mjs"
+      # The chat harnesses AND the shipped artifacts they read. A harness whose
+      # subject cannot dispatch the job is green for free: __palette.test.mjs
+      # runs api/priv/static/assets/bp-chat-palette.js verbatim in a node:vm
+      # sandbox, so a regression lives in the artifact, not in the test file.
+      - "api/assets/chat-palette/**"
+      - "api/assets/chat-turn-clock/**"
+      - "api/priv/static/assets/bp-chat-palette.js"
+      - "api/priv/static/assets/bp-chat-turn-clock.js"
       - ".github/workflows/studio-instrument-selftests.yml"
   push:
     branches: [main]
@@ -31,6 +48,14 @@ on:
       - "scripts/studio-desk-*.mjs"
       - "scripts/measurements/**"
       - "scripts/node-test-floor.mjs"
+      # The chat harnesses AND the shipped artifacts they read. A harness whose
+      # subject cannot dispatch the job is green for free: __palette.test.mjs
+      # runs api/priv/static/assets/bp-chat-palette.js verbatim in a node:vm
+      # sandbox, so a regression lives in the artifact, not in the test file.
+      - "api/assets/chat-palette/**"
+      - "api/assets/chat-turn-clock/**"
+      - "api/priv/static/assets/bp-chat-palette.js"
+      - "api/priv/static/assets/bp-chat-turn-clock.js"
       - ".github/workflows/studio-instrument-selftests.yml"
 
 concurrency:
@@ -71,3 +96,18 @@ jobs:
           node scripts/node-test-floor.mjs --floor 13 \
             'scripts/studio-desk-*.test.mjs' \
             'scripts/measurements/*.test.mjs'
+
+      # The api/assets chat harnesses, same runner and same reasoning. Floor 2
+      # is the file count ACTUALLY ACHIEVED, not a placeholder: measured
+      # 2026-09-18 on node v22.22.0 at e69281345 —
+      #   node scripts/node-test-floor.mjs --floor 2 \
+      #     'api/assets/chat-palette/__*.test.mjs' \
+      #     'api/assets/chat-turn-clock/__*.test.mjs'
+      #   -> ran 21 tests from 2 files (pass 21, fail 0) [floor 2 files]
+      # Raise it in the PR that adds a third harness.
+      - name: Run the api/assets chat harnesses through the floor
+        run: |
+          set -euo pipefail
+          node scripts/node-test-floor.mjs --floor 2 \
+            'api/assets/chat-palette/__*.test.mjs' \
+            'api/assets/chat-turn-clock/__*.test.mjs'

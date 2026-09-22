@@ -71,6 +71,45 @@ type tokenProvenance struct {
 	// AltServer is the server Alt's token belongs to — printed so the operator
 	// can see the two facts line up.
 	AltServer string
+
+	// WithheldFrom / WithheldTail record a SAVED credential that resolveContextProv
+	// declined to send because the resolved server is not the server it was saved
+	// for — the server-to-credential binding (see resolveContextProv's THE
+	// BINDING block for the decision and what it costs). WithheldFrom is the
+	// server the credential belongs to; WithheldTail is its ≤4-char tail, so the
+	// operator can tell WHICH credential stayed home without it being disclosed.
+	// Both empty when nothing was withheld, which is every same-server flow.
+	WithheldFrom string
+	WithheldTail string
+}
+
+// credentialWithheld reports that a saved credential was bound to another server
+// and therefore NOT attached to this invocation's requests.
+func (p tokenProvenance) credentialWithheld() bool { return p.WithheldFrom != "" }
+
+// withheldNotice is the stderr line Execute prints BEFORE the first request goes
+// out. It exists because the binding is a SILENT downgrade otherwise: the
+// operator asked for a host, got the baked dev floor instead of their saved
+// credential, and would read the resulting 401/404 as the server's fault. Empty
+// when nothing was withheld, so the caller prints nothing rather than a hedge.
+func (p tokenProvenance) withheldNotice(server string) string {
+	if !p.credentialWithheld() {
+		return ""
+	}
+	return fmt.Sprintf(
+		"your saved credential (%s) belongs to %s and was NOT sent to %s — "+
+			"bp is using the dev default instead",
+		p.WithheldTail, p.WithheldFrom, server)
+}
+
+// withheldFix is the remedy line under withheldNotice: the two ways to make the
+// pairing deliberate rather than accidental.
+func (p tokenProvenance) withheldFix() string {
+	if !p.credentialWithheld() {
+		return ""
+	}
+	return "fix: pass the credential for that host explicitly (`--token <tok>` or " +
+		"`BARKPARK_API_TOKEN=…`), or name a saved server with `bp -s <name>`"
 }
 
 // fromEnv reports whether the resolved token came out of the environment.

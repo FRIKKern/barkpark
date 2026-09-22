@@ -20,6 +20,7 @@ defmodule BarkparkCloud.Push.DeviceTokenRateLimitTest do
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
   alias BarkparkCloud.Push.DevicePushToken
+  alias BarkparkCloud.RateLimitWindow
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -51,6 +52,10 @@ defmodule BarkparkCloud.Push.DeviceTokenRateLimitTest do
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
   test "the 11th registration/min for one user → 429; another user still registers" do
+    # The limiter window is the CALENDAR minute, so the whole loop must land
+    # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+    RateLimitWindow.align!()
+
     {user, session} = user_with_session()
 
     for i <- 1..10 do
@@ -73,6 +78,10 @@ defmodule BarkparkCloud.Push.DeviceTokenRateLimitTest do
   end
 
   test "a rate-braked request writes NO row (the brake fires before the upsert)" do
+    # The limiter window is the CALENDAR minute, so the whole loop must land
+    # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+    RateLimitWindow.align!()
+
     {user, session} = user_with_session()
 
     # Exhaust the bucket without endpoint work.

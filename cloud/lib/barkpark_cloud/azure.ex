@@ -15,8 +15,12 @@ defmodule BarkparkCloud.Azure do
 
   @doc """
   The configured `Azure.Client`. Resolved at call time (config-at-call-time, so
-  a runtime.exs override wins). Defaults to `Azure.RealClient` (prod); dev/test
-  swaps in `Azure.FakeClient` via `config :barkpark_cloud, :azure_http_client`.
+  a runtime.exs override wins). Defaults to `Azure.RealClient`, which is what
+  prod gets; dev (`dev.exs`) and test (`test.exs`) BOTH swap in
+  `Azure.FakeClient` via `config :barkpark_cloud, :azure_http_client`. Dev was
+  wired in task-2772b2cdd5001bfc — until then this sentence was true of test
+  only and a dev box resolved `RealClient`, whose transport no environment
+  configured, so every azure read died `:http_client_not_configured`.
   """
   @spec client() :: module()
   def client do

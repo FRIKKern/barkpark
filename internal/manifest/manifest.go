@@ -113,12 +113,29 @@ type ChatProviderCaps struct {
 // self-reported version and git_commit.
 //
 // MINCLI IS ADVISORY. Server-side it is a hardcoded literal ("1.0.0" on prod),
-// not derived from the running build, and every published bp release is tagged
-// v0.2.x — strictly below it. A blocking gate keyed on today's value would
-// therefore refuse 100% of released clients. It is decoded (it MUST be: Parse
-// uses DisallowUnknownFields, so dropping the field would fail every manifest
-// that carries it) and reported by internal/cli minCLICheck, never enforced as
-// a refusal.
+// not derived from the running build.
+//
+// THIS COMMENT USED TO ADD: "every published bp release is tagged v0.2.x —
+// strictly below it. A blocking gate keyed on today's value would therefore
+// refuse 100% of released clients." That is FALSE (re-measured 2026-09-17) and
+// it conflated two tag series in one repo. v0.2.x is the SERVER release series
+// — the same number /status.json reports as "0.2.26.929". The CLI ships from
+// cli-v* tags, and cli-release.yml does `VERSION=${TAG#cli-v}`, so a released
+// bp carries "1.21.0". `git tag -l 'cli-v*' | sed 's/cli-v//' | sort -V` lists
+// 27 releases, 1.1.0 through 1.21.0, NONE below 1.0.0.
+//
+// So the floor is not unreachable — it is SATISFIED by every client ever
+// shipped, which is why the check has never fired in production. It stays
+// advisory for the reasons that do survive: a dev build carries no release
+// identity, and a floor never once exercised must not debut as a refusal.
+//
+// It is decoded (it MUST be: Parse uses DisallowUnknownFields, so dropping the
+// field would fail every manifest that carries it) and reported by internal/cli
+// minCLICheck — at `bp capabilities`, and at the whoami/doctor freshness leg via
+// serverFloorStaleness. That second consumer is why the VALUE matters: because
+// DisallowUnknownFields recurses, the server envelope cannot gain a NEW key
+// without breaking every released binary, so min_cli is the only channel by
+// which a server can tell an already-installed client it is not current.
 type Server struct {
 	Name       string  `json:"name"`
 	Version    string  `json:"version"`

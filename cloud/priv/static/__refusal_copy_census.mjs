@@ -861,6 +861,7 @@ const PIN = [
   { key: "FN|loadOverview|d1b27ebe", verdict: "UNREVIEWED", copy: "You don't have access to this fleet." },
   { key: "FN|loadOverview|6ad5126d", verdict: "UNREVIEWED", copy: "Your fleet couldn't be loaded, and the answer didn't say why." },
   { key: "ARG|dismissRunway|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  { key: "ARG|ackRunwayStep|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|runDecommission|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|retryInstance|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|removeInstance|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
@@ -938,6 +939,13 @@ const PIN = [
   { key: "FN|operatorReadFault|a5b0ceb4", verdict: "UNREVIEWED", copy: "The request never reached the control plane, so there is no..." },
   { key: "ARG|operatorConfirmBrake|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|operatorConfirmBrake|ctl.fail|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  // gr-backlog-operator-digest-send — the send-now button's failure leg, the
+  // brake's twin two rows up and DELEGATED for the identical reason: the
+  // sentence a human reads comes from operatorReadFault(r) / friendly(r.data),
+  // i.e. the SERVER's own refusal, and "Please try again." is only the fallback
+  // when the response carried no cause at all. Nothing here authors a cause.
+  { key: "ARG|operatorConfirmDigestSend|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  { key: "ARG|operatorConfirmDigestSend|ctl.fail|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "FN|loadInstanceSites|00ee8a15", verdict: "UNREVIEWED", copy: "You don't have access to the sites on this instance." },
   { key: "FN|loadInstanceSites|1cf6149e", verdict: "UNREVIEWED", copy: "We couldn't read this instance's sites — try again in a mom..." },
   { key: "FN|siteCreateFailureCopy|3b49b7b9", verdict: "UNREVIEWED", copy: "It can read:" },
@@ -1039,7 +1047,27 @@ const PIN = [
   { key: "ARG|openSiteGithub|friendly|f69d8f71", verdict: "DELEGATED", copy: "Couldn't load your repositories." },
   { key: "ARG|submitSiteGithub|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|disconnectSiteGithub|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
-  { key: "ARG|resumeStudioLogin|friendly|ca861173", verdict: "DELEGATED", copy: "Try again from the instance page." },
+  // ── studioSigninOutcome — the "Log in with Barkpark Cloud" refusal sheet.
+  // Every sentence here is backed by an emitter in the studio-signin route
+  // (`post "/v1/auth/studio-signin"`, cloud/lib/barkpark_cloud/web/router.ex):
+  // `not_found` (the deliberate non-oracle: no such host AND not your team),
+  // `no_admin_token`, `suspended`, `not_live`, `instance_unreachable`, plus the
+  // 401 from Auth.require_user. The two 404 slugs are why the branch reads the
+  // SLUG and not the status — see studioSigninOutcome's own note. It replaces
+  // ARG|resumeStudioLogin|friendly|ca861173, whose call site is gone.
+  { key: "FN|studioSigninOutcome|1addabec", verdict: "AUTHORED", copy: "Instance not linked" },
+  { key: "FN|studioSigninOutcome|3de1ca26", verdict: "AUTHORED", copy: "isn't managed by this account." },
+  { key: "FN|studioSigninOutcome|ea757cd2", verdict: "AUTHORED", copy: "Can't open Studio yet" },
+  { key: "ARG|studioSigninOutcome|friendly|7c6265e0", verdict: "DELEGATED", copy: "No stored credentials for this instance." },
+  { key: "FN|studioSigninOutcome|348f9c97", verdict: "AUTHORED", copy: "Studio access to" },
+  { key: "FN|studioSigninOutcome|a86e71d3", verdict: "AUTHORED", copy: "is closed until the suspension is cleared." },
+  { key: "FN|studioSigninOutcome|966a3d35", verdict: "AUTHORED", copy: "Instance isn't live yet" },
+  { key: "FN|studioSigninOutcome|310ef575", verdict: "AUTHORED", copy: "has finished provisioning." },
+  { key: "ARG|studioSigninOutcome|friendly|6f310ee9", verdict: "DELEGATED", copy: "Try again once" },
+  { key: "FN|studioSigninOutcome|aad0405d", verdict: "AUTHORED", copy: "Couldn't reach the instance" },
+  { key: "ARG|studioSigninOutcome|friendly|5f827a70", verdict: "DELEGATED", copy: "Try again from" },
+  { key: "FN|studioSigninOutcome|f61ae203", verdict: "AUTHORED", copy: "Couldn't open Studio" },
+  { key: "ARG|studioSigninOutcome|faultCopy|5f827a70", verdict: "DELEGATED", copy: "Try again from" },
   { key: "ARG|submitLaunchFlow|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|renderLaunchPlan|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|renderBilling|faultCopy|a8e3bd83", verdict: "DELEGATED", copy: "Check your connection and retry." },
@@ -1103,6 +1131,17 @@ const PIN = [
   { key: "ARG|inviteFailureCopy|faultCopy|a448c5d3", verdict: "DELEGATED", copy: "Check the address and try again." },
   { key: "FN|roleChangeFailureCopy|3871abbb", verdict: "UNREVIEWED", copy: "You're the last owner — promote another member to owner first." },
   { key: "ARG|roleChangeFailureCopy|friendly|37eaf9f4", verdict: "DELEGATED", copy: "That role change didn't go through — please try again." },
+  { key: "FN|accountEraseFailureCopy|294d3435", verdict: "CONSULTED", copy: "That password didn't match. If you sign in with GitHub or Go..." },
+  { key: "FN|accountEraseFailureCopy|bd9e0fef", verdict: "CONSULTED", copy: "set one first — account deletion needs it." },
+  { key: "FN|accountEraseFailureCopy|30bf11ab", verdict: "CONSULTED", copy: "You're the only owner of" },
+  { key: "FN|accountEraseFailureCopy|5b2c6096", verdict: "AUTHORED", copy: "a team that still exists" },
+  { key: "FN|accountEraseFailureCopy|2ca7f6fc", verdict: "CONSULTED", copy: ". Promote another owner, or delete the team first." },
+  { key: "ARG|accountEraseFailureCopy|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  { key: "FN|teamEraseFailureCopy|55d60362", verdict: "CONSULTED", copy: "This team still owns" },
+  { key: "FN|teamEraseFailureCopy|b467498e", verdict: "CONSULTED", copy: ". Decommission them first — deleting the team now would lea..." },
+  { key: "FN|teamEraseFailureCopy|3920aff9", verdict: "CONSULTED", copy: "Only an owner can delete a team." },
+  { key: "FN|teamEraseFailureCopy|eac7fb8b", verdict: "CONSULTED", copy: "That team is no longer there." },
+  { key: "ARG|teamEraseFailureCopy|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "FN|removeMemberFailureCopy|cdc21050", verdict: "UNREVIEWED", copy: "You're the last owner — promote another member to owner bef..." },
   { key: "FN|removeMemberFailureCopy|c860f807", verdict: "UNREVIEWED", copy: "That member is no longer on the team." },
   { key: "ARG|removeMemberFailureCopy|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
@@ -1111,6 +1150,27 @@ const PIN = [
   { key: "FN|offloadFileErrorCopy|009882c1", verdict: "UNREVIEWED", copy: "Couldn't reach the Barkpark — it may be offline, or its add..." },
   { key: "FN|offloadFileErrorCopy|f712989d", verdict: "UNREVIEWED", copy: "The app token was rejected — reload and try again." },
   { key: "ARG|offloadFileErrorCopy|friendly|3fddca35", verdict: "DELEGATED", copy: "Couldn't file the order — please try again." },
+
+  // cch-w47-rv-bl — SIX SITES THAT ARRIVED WITHOUT ONE SENTENCE BEING WRITTEN.
+  // archivesPanelHtml gained ONE call to `forbiddenEvidenceCopy` (the refuse arm's
+  // server-owned role line). That call is what QUALIFIES a function here, so the
+  // whole of archivesPanelHtml's string population entered the census in the same
+  // commit — six literals that were already shipping, unchanged, byte for byte.
+  // The sentence the change actually adds is NOT among them: it is read out of
+  // FORBIDDEN_ROLE_COPY through the fence and is already pinned as a MAP key.
+  // Read each of the six: none is a refusal CAUSE. They are the panel's own
+  // explanatory prose and its empty state — what an archive IS, where archives
+  // come from, and the `bp cloud instance archive <name>` chip. They are console
+  // AUTHORED in the literal sense (no server emits them) and the census's own
+  // question — "can the server produce this cause?" — does not apply to any of
+  // them, because none of them claims a cause. Pinned so the key set is exact;
+  // a copy edit to any of the six reds this gate again, which is correct.
+  { key: "FN|archivesPanelHtml|4497a103", verdict: "AUTHORED", copy: "An archive is a portable bundle of a whole deployment" },
+  { key: "FN|archivesPanelHtml|742ff044", verdict: "AUTHORED", copy: "DNS record and registry row as one unit — that you can resu..." },
+  { key: "FN|archivesPanelHtml|c2e4f6de", verdict: "AUTHORED", copy: "Wire object storage for this deployment and they show up here." },
+  { key: "FN|archivesPanelHtml|9d773160", verdict: "AUTHORED", copy: "No archives yet. Archive an instance with" },
+  { key: "FN|archivesPanelHtml|2a86a13b", verdict: "AUTHORED", copy: "bp cloud instance archive <name>" },
+  { key: "FN|archivesPanelHtml|7c79cc42", verdict: "AUTHORED", copy: "to keep a portable, cross-provider bundle you can resurrect..." },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -85,10 +85,10 @@ defmodule BarkparkWeb.MediaCollectionsShareViewScopeTest do
   # written into `content` directly rather than through `Share.create/3` so the
   # fixture never depends on the write pipeline; `Share.resolve/2` reads exactly
   # these three keys.
-  defp shared_virtual_collection!(workspace, project) do
+  defp shared_virtual_collection!(workspace, project, ttl_seconds \\ 3600) do
     suffix = System.unique_integer([:positive])
     token = "sharetok-#{suffix}-#{:erlang.unique_integer([:positive])}"
-    expires_at = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.to_iso8601()
+    expires_at = DateTime.utc_now() |> DateTime.add(ttl_seconds, :second) |> DateTime.to_iso8601()
 
     {:ok, doc} =
       %Document{}
@@ -122,6 +122,10 @@ defmodule BarkparkWeb.MediaCollectionsShareViewScopeTest do
     |> json_response(200)
   end
 
+  defp share_conn(token) do
+    scoped_conn() |> get("/v1/media/#{@dataset}/share/#{token}")
+  end
+
   defp hit_ids(%{"result" => %{"hits" => hits}}), do: Enum.map(hits, & &1["id"])
 
   setup do
@@ -150,6 +154,7 @@ defmodule BarkparkWeb.MediaCollectionsShareViewScopeTest do
 
     %{
       ws_a: ws_a,
+      proj_a: proj_a,
       ws_b: ws_b,
       file_a_public: file_a_public,
       file_a_private: file_a_private,
@@ -287,6 +292,68 @@ defmodule BarkparkWeb.MediaCollectionsShareViewScopeTest do
   # token IS the principal, and clamping to `:public` would empty every shared
   # collection of exactly the non-public assets someone chose to share. This
   # test fails the moment the clamp is added.
+
+  # ── The expired door ──────────────────────────────────────────────────────
+  #
+  # The HTTP door held to the same standard as `Share.resolve/2`. The unit arm
+  # in `test/barkpark/media/share_scope_test.exs` proves the FUNCTION refuses
+  # an expired link; this proves the SURFACE A REAL CALLER REACHES refuses it
+  # too — a resolver that returned {:error, :expired} while `share_view/2`
+  # still rendered the collection would satisfy the unit test alone.
+  #
+  # The fixture writes the past `expiresAt` DIRECTLY through the changeset
+  # (a NEGATIVE ttl into `shared_virtual_collection!/3`). It cannot go through
+  # `Share.create/3`, which only ever mints `utc_now + ttl` with a positive ttl
+  # — that impossibility is why this arm never existed and why deleting the
+  # expiry comparison in `Share.share_active?/1` left the whole media fence
+  # green.
+
+  test "an EXPIRED share token renders no collection through the HTTP door",
+       %{ws_a: ws_a, proj_a: proj_a, file_a_public: file_a_public} do
+    # THE FLOOR, on this door, in this run: the same helper with a FUTURE
+    # expiry must answer 200 and carry A's asset. Without it a 410 below could
+    # come from an unroutable token or an unreadable fixture rather than from
+    # the expiry.
+    {_live_collection, live_token} = shared_virtual_collection!(ws_a, proj_a, 3600)
+
+    live_body = share_get(live_token)
+
+    assert file_a_public.id in hit_ids(live_body),
+           "the live-token control did not render A's own asset, so a refusal on " <>
+             "the expired token below would prove nothing about expiry"
+
+    # THE SUBJECT. Identical fixture, identical enabled flag, identical
+    # parseable ISO8601 — only the instant differs.
+    {expired_collection, expired_token} = shared_virtual_collection!(ws_a, proj_a, -3600)
+
+    %Document{content: %{"shareLink" => %{"expiresAt" => persisted}}} =
+      Barkpark.Repo.get!(Document, expired_collection.id)
+
+    assert {:ok, persisted_at, _} = DateTime.from_iso8601(persisted)
+
+    assert DateTime.compare(persisted_at, DateTime.utc_now()) == :lt,
+           "the fixture's expiresAt (#{persisted}) is not in the past, so this test " <>
+             "would pass against a door with no expiry check at all"
+
+    conn = share_conn(expired_token)
+
+    assert conn.status == 410,
+           "EXPIRED SHARE RENDERED: the share-view door answered #{conn.status} for a " <>
+             "token whose expiresAt is #{persisted} (behind now) — an expired link " <>
+             "still serves the collection over HTTP"
+
+    body = json_response(conn, 410)
+
+    assert get_in(body, ["error", "code"]) == "share_expired" or
+             body["code"] == "share_expired",
+           "the expired share door answered 410 but not with the share_expired " <>
+             "contract: #{inspect(body)}"
+
+    # And nothing of the collection came back with it.
+    refute Map.has_key?(body, "result"),
+           "EXPIRED SHARE RENDERED: the refusal body still carried a result payload: " <>
+             "#{inspect(body)}"
+  end
 
   test "the clamp is still not applied: an anonymous share returns NON-PUBLIC assets",
        %{file_a_private: file_a_private, token: token} do

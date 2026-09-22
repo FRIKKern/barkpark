@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Notifications do
     DigestRun,
     EmailSettings,
     EventEmail,
+    ReceiptLoss,
     SafeUrl,
     SitePublishWaitingAlert,
     Transactional,
@@ -567,10 +568,31 @@ defmodule BarkparkCloud.Notifications do
   deploys and how often it fails — an instance-count-shaped disclosure through
   the back door, in the same email whose per-instance list is partitioned
   precisely to prevent one. Half a rule is not a rule.
+
+  ## WHO ASKED FOR THIS RUN (gr-backlog-operator-digest-send)
+
+  `opts` carries the CAUSE onto the accounting row and nothing else: `:trigger`
+  (`"scheduled"`, the default and the 06:00Z cron tick, or `"operator"`) and
+  `:actor_user_id` (the operator's id, NULL on a scheduled run because there is
+  nobody — not because nobody was recorded). It changes no audience, no payload
+  and no branch; `DailyDigestWorker` keeps calling the /1 form and keeps writing
+  the word it always meant.
+
+  It is NOT a second send path and NOT a new producer (D14). The operator route
+  calls THIS function, so the recipient resolution, the per-team payload
+  tenancy, the transport seam and the `Delivery` receipt (with its
+  `content_sha256` / `content_subject` / `content_counts`, dr-w34/dr-w29) are the
+  same bytes on both causes. A manual send that recorded less than the cron send
+  would be a send nobody could prove.
   """
-  @spec deliver_fleet_digest([term()]) ::
+  @spec deliver_fleet_digest([term()], keyword()) ::
           {:ok, :no_admins} | {:ok, %{sent: non_neg_integer(), recipients: [String.t()]}}
-  def deliver_fleet_digest(barkparks) when is_list(barkparks) do
+  def deliver_fleet_digest(barkparks, opts \\ []) when is_list(barkparks) do
+    cause = %{
+      trigger: Keyword.get(opts, :trigger, "scheduled"),
+      actor_user_id: Keyword.get(opts, :actor_user_id)
+    }
+
     fleet = DigestEmail.summary(barkparks)
 
     # WHO gets what, resolved before anything is sent. Two reasons this is a
@@ -653,7 +675,8 @@ defmodule BarkparkCloud.Notifications do
             covered: 0,
             reason: "no_team_recipients",
             withheld: withheld
-          }
+          },
+          cause
         )
 
         {:ok, :no_admins}
@@ -690,7 +713,8 @@ defmodule BarkparkCloud.Notifications do
 
         account_fleet_digest(
           %{recipients: length(recipients), sent: sent},
-          %{instances: fleet.total, covered: covered, reason: reason}
+          %{instances: fleet.total, covered: covered, reason: reason},
+          cause
         )
 
         {:ok, %{sent: sent, recipients: recipients}}
@@ -1444,7 +1468,7 @@ defmodule BarkparkCloud.Notifications do
   # `safely/1` around each: accounting is a side path on a best-effort operator
   # email. It must never be able to break the send it is counting — and that
   # holds for the row too, so a DB failure loses the record, never the digest.
-  defp account_fleet_digest(measurements, metadata) do
+  defp account_fleet_digest(measurements, metadata, cause) do
     metadata = Map.put(metadata, :phase, :settled)
 
     safely(fn ->
@@ -1455,7 +1479,7 @@ defmodule BarkparkCloud.Notifications do
       )
     end)
 
-    safely(fn -> record_digest_run(measurements, metadata) end)
+    safely(fn -> record_digest_run(measurements, metadata, cause) end)
 
     safely(fn -> log_fleet_digest(measurements, metadata) end)
 
@@ -1470,7 +1494,7 @@ defmodule BarkparkCloud.Notifications do
   # funnel through `Withhold.record/4` carry the key, and the column is NULLABLE
   # precisely so its absence is not silently written as a zero — the same rule
   # the log line follows by omitting the key entirely.
-  defp record_digest_run(m, meta) do
+  defp record_digest_run(m, meta, cause) do
     %DigestRun{}
     |> DigestRun.changeset(%{
       event: "fleet_digest",
@@ -1480,7 +1504,13 @@ defmodule BarkparkCloud.Notifications do
       instances: meta.instances,
       covered: Map.get(meta, :covered, 0),
       reason: meta.reason,
-      withheld: Map.get(meta, :withheld)
+      withheld: Map.get(meta, :withheld),
+      # gr-backlog-operator-digest-send — the cause, on the ONE sink a container
+      # recreate cannot take with it. A `digest_runs` row that says `operator`
+      # without saying WHICH operator would leave "who mailed the fleet at
+      # 14:07?" unanswerable on the only durable record there is.
+      trigger: cause.trigger,
+      actor_user_id: cause.actor_user_id
     })
     |> Repo.insert()
     |> case do
@@ -1579,6 +1609,39 @@ defmodule BarkparkCloud.Notifications do
   """
   @spec dispatch_event(Team.t() | binary(), atom(), map()) :: :ok
   def dispatch_event(team, event, payload \\ %{}) when is_atom(event) do
+    # task-6aadf4ff08101b20 asked whether the settings read here is a DUPLICATE
+    # that can be collapsed, the way task-a342dccd023211d5 asked it of the
+    # membership pair below. It is NOT, and the answer was measured rather than
+    # argued — `settings_query_cost_test.exs` is the mechanical form of every
+    # sentence here.
+    #
+    # The row was filed on a count of `[:barkpark_cloud, :repo, :query]` showing
+    # `email_notification_settings` at a CONSTANT 2 per dispatch (5 / 7 / 14
+    # total queries at team sizes 1 / 3 / 10). That count reproduces exactly.
+    # Bucketed by SQL VERB, which the original count did not do, the two are:
+    #
+    #     1x email_notification_settings SELECT
+    #     1x email_notification_settings INSERT
+    #
+    # — the two halves of `get_or_create_settings/1`'s own lazy create, on a
+    # team whose row does not exist yet. There is ONE call to it in this
+    # function; `enqueue_chat/3`, `should_send?/2` and `deliver_alert/2` are all
+    # handed the struct. Every other call site in this module is a separate
+    # entry point and none nests inside this one.
+    #
+    # So the second event is neither a read-after-write (the `{:ok, settings}`
+    # arm returns `insert`'s own struct and never re-reads — a re-read is
+    # mutation-proven to add a THIRD event), nor a cache miss, nor a duplicate.
+    # It is the CREATE, it happens once in a team's lifetime, and a second
+    # dispatch costs 1 settings query: `4 + N` becomes `3 + N`.
+    #
+    # Collapsing would mean deleting the create half, which is the lazy backstop
+    # for teams predating the signup auto-create — for them a dispatch would
+    # then run against a bare `%EmailSettings{}` and write no row. That is a
+    # behaviour change dressed as a query saving. It would also buy nothing
+    # worth having: this path sends N emails SYNCHRONOUSLY and writes one
+    # `notification_deliveries` row per recipient, so the mail I/O dominates at
+    # every team size above one.
     settings = get_or_create_settings(team)
 
     if should_send?(settings, event) do
@@ -1794,6 +1857,25 @@ defmodule BarkparkCloud.Notifications do
   is matched literally and therefore returns nothing. Silently DROPPING an
   unrecognised filter would widen the result set behind the caller's back, which
   is the one failure mode a delivery log must not have.
+
+  ## THE EMPTY/RARE RESULT WAS THE EXPENSIVE ONE (cch-w32-bl), and it is indexed
+
+  A filter that matches PLENTY is cheap: `(team_id, inserted_at)` carries the
+  ORDER BY and the scan stops at the LIMIT. A filter that matches NOTHING — or
+  almost nothing — never fills the LIMIT, so the planner abandons that index and
+  bitmap-scans the team's ENTIRE partition to return zero rows. Re-measured on
+  this tree with EXPLAIN (ANALYZE, BUFFERS) over a seeded 250k-row corpus with a
+  50k-row hot team: `?status=bogus`, `?event=bogus`, `?channel=bogus` and the
+  in-vocabulary-but-empty `?status=suppressed` each cost ~1153 shared buffers and
+  report `Rows Removed by Filter: 50000`, against 7 buffers unfiltered.
+
+  `20260918110000_index_notification_delivery_filter_axes` adds one
+  `(team_id, <axis>, inserted_at)` index per filter axis and takes those to 3-12
+  buffers, with the common-value and unfiltered plans unchanged. THE VOCABULARY
+  WAS NOT THE FIX: rejecting an unknown value at the door would have rescued only
+  the `bogus` line and neither the RARE-but-real one (`?status=pending`, 50 real
+  rows, 1153 → 54 buffers) nor the OPEN-vocabulary `event` axis. The literal-match
+  contract above therefore stands unchanged.
   """
   @spec list_deliveries(Team.t() | binary(), keyword() | pos_integer()) :: [Delivery.t()]
   def list_deliveries(team, opts \\ [])
@@ -2022,8 +2104,7 @@ defmodule BarkparkCloud.Notifications do
           {"failed", DeliveryReason.summarize(why)}
       end
 
-    %Delivery{}
-    |> Delivery.changeset(%{
+    attrs = %{
       team_id: team_id,
       recipient: recipient,
       event: event,
@@ -2047,7 +2128,10 @@ defmodule BarkparkCloud.Notifications do
       # nothing else.
       content_subject: Delivery.content_subject(email),
       content_counts: Delivery.content_counts(email)
-    })
+    }
+
+    %Delivery{}
+    |> Delivery.changeset(attrs)
     |> Repo.insert()
     |> case do
       {:ok, delivery} ->
@@ -2057,13 +2141,17 @@ defmodule BarkparkCloud.Notifications do
       # not mistaken for a withhold: the send above already happened, and a
       # `suppressed` row would assert the opposite of what occurred. What is
       # lost is the RECEIPT, not the notification. It is NOT routed through
-      # `Withhold` and it is NOT absorbed by this row; it keeps its own filed
-      # backlog task `cch-w32-bl-receipt-loss-branches-have-no-trace`, which
-      # needs a trace of its own class (the same species as
-      # `cch-w31-bl-auto-deploy-refusal-row-failure-leaves-no-trace`).
+      # `Withhold`.
+      # ADJUDICATED, cch-w32-bl: the Logger line that used to be the whole
+      # handling is now the FIRST step of `ReceiptLoss.rescue_receipt/3`, which
+      # re-writes the narrowest TRUE receipt still available so the send stays
+      # visible in the delivery log. A `:lost` here is a named, counted residue,
+      # not a silence — see that module's moduledoc for the ladder.
       {:error, changeset} ->
-        Logger.error("Notifications: failed to record delivery: #{inspect(changeset.errors)}")
-        nil
+        case ReceiptLoss.rescue_receipt(:record_delivery, attrs, changeset) do
+          {:reduced, delivery} -> delivery
+          :lost -> nil
+        end
     end
   end
 
@@ -2484,8 +2572,7 @@ defmodule BarkparkCloud.Notifications do
 
     last_error = DeliveryReason.summarize(reason)
 
-    %Delivery{}
-    |> Delivery.changeset(%{
+    attrs = %{
       team_id: team_id,
       recipient: type,
       channel: type,
@@ -2495,22 +2582,25 @@ defmodule BarkparkCloud.Notifications do
       http_status: http_status,
       attempts: 1,
       last_error: last_error
-    })
+    }
+
+    %Delivery{}
+    |> Delivery.changeset(attrs)
     |> Repo.insert()
     |> case do
       {:ok, delivery} ->
         delivery
 
-      # cch-w32-r2, RECEIPT LOSS — the chat twin of `record_delivery/5`'s arm
+      # cch-w32-r2, RECEIPT LOSS — the chat twin of `record_delivery/7`'s arm
       # above, and adjudicated identically: the POST already returned, so this
       # is a lost receipt, not a withheld notification. Not routed through
-      # `Withhold`; still owned by `cch-w32-bl-receipt-loss-branches-have-no-trace`.
+      # `Withhold`.
+      # ADJUDICATED, cch-w32-bl — the chat twin, same funnel and same ladder.
       {:error, changeset} ->
-        Logger.error(
-          "Notifications: failed to record chat delivery: #{inspect(changeset.errors)}"
-        )
-
-        nil
+        case ReceiptLoss.rescue_receipt(:log_chat_delivery, attrs, changeset) do
+          {:reduced, delivery} -> delivery
+          :lost -> nil
+        end
     end
   end
 
@@ -2574,6 +2664,25 @@ defmodule BarkparkCloud.Notifications do
   # `Accounts.list_team_members/1` already selects the role — no new query shape,
   # no migration. An address missing from this map (impossible today; both reads
   # are the same join) renders as NOT an owner, which is the honest direction.
+  #
+  # task-a342dccd023211d5 asked whether to COLLAPSE the two reads into this one,
+  # which already returns both the address and the role. Answer: NO, and the cost
+  # was measured rather than argued. Counting `[:barkpark_cloud, :repo, :query]`
+  # across one `dispatch_event/3`, the membership reads are a CONSTANT 2 (one
+  # `team_memberships`, one `users`) at every team size, while the fan-out writes
+  # one `notification_deliveries` row per member and sends each mail
+  # SYNCHRONOUSLY: 5 queries at 1 member, 7 at 3, 14 at 10. Collapsing saves
+  # exactly one query out of 3+N, and its share shrinks as the audience grows —
+  # it is noise beside the per-recipient mail I/O.
+  #
+  # The saving is small; the thing it would spend is not. Collapsing moves the
+  # AUDIENCE onto a query that DOES select role — precisely the shape in which a
+  # later role predicate would narrow who is told about an alert while looking
+  # like a copy change. `owner_only_remedy_test.exs` now fences that mechanically
+  # ("the audience is exactly list_team_member_emails/1, with no role predicate"):
+  # a three-role team where both non-owners are still mailed, with the recipient
+  # set pinned to `Accounts.list_team_member_emails/1`'s own output. Anyone who
+  # does collapse these reads must keep that block green.
   defp team_member_roles(team_id) do
     team_id
     |> Accounts.list_team_members()

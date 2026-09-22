@@ -114,8 +114,12 @@ defmodule Barkpark.Content.Mutations do
 
   defp do_apply_mutations(mutations, dataset, opts) do
     # Initialise the deferred-broadcast queue for this process so
-    # tap_broadcast/5 knows to queue instead of broadcast immediately.
-    Process.put(:barkpark_deferred_broadcasts, [])
+    # tap_broadcast/5 knows to queue instead of broadcast immediately, and CLAIM
+    # it: the claim is what tells `maybe_dispatch_webhook/7` that this queue has
+    # a flusher. It also resets `:barkpark_deferred_webhooks`, which this line
+    # used to leave alone — a stale webhook entry stranded on this process by an
+    # unowned transaction would otherwise be dispatched by the next mutate.
+    Broadcast.claim_deferred_queue()
 
     try do
       result =
@@ -570,7 +574,7 @@ defmodule Barkpark.Content.Mutations do
          :ok <- Writer.refuse_bare_id(Map.get(patch, "setIfMissing"), :patch),
          {:ok, existing} <- get_patch_base(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
-      protected = ~w(title status _id _type _rev)
+      protected = patch_protected_keys(patch, type, dataset, opts)
       set_fields = Map.get(patch, "set", %{})
       unset_keys = list_or_empty(Map.get(patch, "unset"))
 
@@ -624,7 +628,7 @@ defmodule Barkpark.Content.Mutations do
 
       merged =
         prior
-        |> Map.merge(Map.drop(fields, ~w(title status _id _type _rev)))
+        |> Map.merge(Map.drop(fields, patch_protected_keys(patch, type, dataset, opts)))
         # Bound-block write-through — see the ops clause above and
         # `Barkpark.Content.BoundFieldSync`.
         |> BoundFieldSync.sync(prior, fields["title"])
@@ -1744,6 +1748,68 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp warn_on_nested_content(_fields), do: :ok
+
+  # [declaring-type-status] task-949bee3f1fb1d304 — the PATCH counterpart of
+  # #17346's CREATE/UPSERT fix (`Writer.declared_status_field?/4`).
+  #
+  # THE DEFECT. `status` sits in the patch path's hard `protected` list, so
+  # every patch verb DROPS it: `set` merges a map it was removed from, `unset`
+  # cannot name it, `inc`/`dec`/`append`/`prepend`/`setIfMissing` skip it. On a
+  # type that does NOT declare a `status` field that is correct — `status` is
+  # the document's LIFECYCLE word there and a caller must move it with
+  # `publish`/`archive`, never by writing a content key. But on a type whose
+  # SchemaDefinition declares its own `status` field (Tickets ships one), the
+  # key is the caller's ordinary field, and dropping it returned HTTP 2xx while
+  # writing nothing at all: no field write, no lifecycle write, no error. A
+  # silent no-op is the one failure a write API cannot let the caller detect.
+  #
+  # THE SHAPE, AND THE ONE WE REFUSED. Removing `status` from `protected`
+  # outright would let any caller rewrite any document's lifecycle through
+  # `content`, on every type. #17346 already settled how this repo tells the
+  # two cases apart: ASK THE TYPE. `Writer.schema_declares_status?/3` is that
+  # question, and it is now called from both doors instead of one.
+  #
+  # COST. One `Content.resolve_schema/3` read, and only when the patch actually
+  # MENTIONS `status` in some verb — `patch_mentions_status?/1` gates it, the
+  # same way #17346 gated its read behind a present top-level `status` key. A
+  # patch that never says `status` costs exactly what it cost before.
+  #
+  # BACKWARD COMPATIBILITY. A type that does not declare `status` keeps the
+  # byte-identical old list, so its patches are unchanged down to the stored
+  # map. The only behaviour that moves belongs to declaring types, where the
+  # previous behaviour stored nothing — there is no working caller to migrate,
+  # because nobody was reading back a value that was never written. A missing
+  # schema or any resolver error reads as NOT DECLARED, so the predicate can
+  # only ever move a patch from the silent reading to the stored one.
+  #
+  # `title` is deliberately NOT part of this. It is protected here but it is
+  # not silently discarded: the clauses below lift `set["title"]` into the
+  # document's `title` COLUMN, which is what a read renders. Its story is a
+  # different one (a declaring type's `content["title"]` shadowing the column)
+  # with a different remedy, and it is not this row.
+  defp patch_protected_keys(patch, type, dataset, opts) do
+    base = ~w(title status _id _type _rev)
+
+    if patch_mentions_status?(patch) and is_binary(type) and
+         Writer.schema_declares_status?(type, dataset, opts) do
+      base -- ["status"]
+    else
+      base
+    end
+  end
+
+  @status_bearing_ops ~w(set setIfMissing inc dec append prepend)
+
+  defp patch_mentions_status?(patch) when is_map(patch) do
+    Enum.any?(@status_bearing_ops, fn op ->
+      case Map.get(patch, op) do
+        m when is_map(m) -> Map.has_key?(m, "status")
+        _ -> false
+      end
+    end) or "status" in list_or_empty(Map.get(patch, "unset"))
+  end
+
+  defp patch_mentions_status?(_), do: false
 
   defp list_or_empty(l) when is_list(l), do: l
   defp list_or_empty(_), do: []

@@ -643,6 +643,14 @@
 .bp-paper-editor-body li { margin: var(--bp-li-gap) 0 0; }
 .bp-paper-editor-body ul > li { list-style: disc; }
 .bp-paper-editor-body ol > li { list-style: decimal; }
+/* Checklist (TipTap taskList/taskItem markup; the reader twin is .bp-checklist in
+ * paper-surface.css): no marker, native checkbox ahead of the text, done items struck. */
+.bp-paper-editor-body ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.bp-paper-editor-body ul[data-type="taskList"] > li { display: flex; align-items: flex-start; gap: 0.55em; list-style: none; }
+.bp-paper-editor-body ul[data-type="taskList"] > li > label { flex: 0 0 auto; margin: 0.35em 0 0; user-select: none; }
+.bp-paper-editor-body ul[data-type="taskList"] > li > label input { width: 1em; height: 1em; margin: 0; accent-color: var(--paper-accent); cursor: pointer; }
+.bp-paper-editor-body ul[data-type="taskList"] > li > div { flex: 1 1 auto; min-width: 0; }
+.bp-paper-editor-body ul[data-type="taskList"] > li[data-checked="true"] > div > p { color: var(--paper-ink-soft); text-decoration: line-through; text-decoration-color: var(--paper-rule); }
 /* Article-chrome ROLE prose (eyebrow/byline/ingress/pullquote) — mirror of the
  * single-source .bp-paper-surface .bp-role-* rules (paper-surface.css). The canvas
  * node emits `<p class="bp-role-*">` matching the reader; pullquote's italic rides
@@ -1000,6 +1008,16 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }
 .bp-paper-editor-body .bp-callout--danger  { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg);  border-left-color: var(--bp-tone-danger-fg); }
 .bp-paper-editor-body .bp-callout--neutral { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); border-left-color: var(--bp-tone-neutral-fg); }
+/* The two SEMANTIC VERDICT tones ride the SAME mirror but a DIFFERENT token
+ * family: `--bp-verdict-{loss,peace}` + its `-soft` wash, not `--bp-tone-*`
+ * (design/tokens.json color.verdict — pe-bl-verdict-accent-tokens). Byte-copied
+ * from paper-surface.css `.bp-paper-surface .bp-callout--loss` / `--peace`; the
+ * tokens are already in the generated token region above, so a standalone host
+ * resolves them without a `.bp-paper-surface` ancestor. Without these two rules
+ * an authored verdict callout fell through to the bare `.bp-callout` default and
+ * the embedder painted no rail at all where /papers paints terracotta/green. */
+.bp-paper-editor-body .bp-callout--loss  { background: var(--bp-verdict-loss-soft);  color: var(--bp-verdict-loss);  border-left-color: var(--bp-verdict-loss); }
+.bp-paper-editor-body .bp-callout--peace { background: var(--bp-verdict-peace-soft); color: var(--bp-verdict-peace); border-left-color: var(--bp-verdict-peace); }
 .bp-paper-editor-body .bp-callout__summary { cursor: pointer; font-weight: bold; }
 .bp-paper-editor-body .bp-callout__body { margin-top: 8px; }
 
@@ -1152,6 +1170,33 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   font-size: 13px;
   font-weight: 500;
   line-height: 1.2;
+}
+
+/* pd-ee-sheet-embed-retarget: a read-only atom's ONE control — the existing
+ * <bp-reference-picker>, scoped by ref-type to the documents that atom's reference
+ * names (sheet → sheets, embed → papers; embed-node.js mountAtomRetarget). It sits
+ * BESIDE the summary chip, not inside it: the chip still says what this block
+ * resolves to, the picker says which document that is.
+ * Three overrides the read-only atom's own rules make necessary:
+ *   * user-select — the atom sets `none` (nothing inside is text to select); a
+ *     typeahead input IS text to select, so the island opts back in.
+ *   * overflow — the atom clips horizontally (pdd-t17, cards under the sidebar);
+ *     the picker's dropdown hangs BELOW the input, so an atom carrying one must
+ *     not clip, or the affordance is dead the moment you type in it.
+ *   * cursor/caret — the atom is a selectable read-only unit; the input is not. */
+.bp-canvas-readonly:has(.bp-canvas-readonly-retarget) {
+  overflow: visible;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.bp-canvas-readonly-retarget {
+  display: inline-block;
+  flex: 1 1 220px;
+  min-width: 0;
+  user-select: text;
+  cursor: auto;
 }
 
 /* editable-figure: the bpFigure atom wears "bp-canvas-readonly bp-canvas-figure",
@@ -1498,3 +1543,21 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   color: var(--paper-ink); background: var(--paper-bg-deep); font-size: 12px; line-height: 1.5;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
+
+
+/* ── Block gutter (block-handle.js): + and ⋮⋮ beside the hovered top-level block. ── */
+bp-paper-canvas { position: relative; display: block; }
+.bp-block-handle { position: absolute; display: flex; gap: 2px; align-items: center; height: 22px; z-index: 5; opacity: 0.85; }
+.bp-block-handle__btn { width: 22px; height: 22px; border: 0; border-radius: 4px; background: transparent; color: var(--paper-ink-soft); font: 600 13px/1 var(--paper-font-sans, system-ui, sans-serif); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.bp-block-handle__btn:hover { background: var(--paper-edit-hover); color: var(--paper-ink); }
+.bp-block-handle__grip { cursor: grab; font-size: 14px; }
+.bp-block-handle--dragging .bp-block-handle__grip { cursor: grabbing; }
+.bp-block-drop { position: absolute; height: 2px; background: var(--paper-accent); border-radius: 1px; pointer-events: none; z-index: 6; }
+.bp-block-menu { position: absolute; z-index: 30; min-width: 200px; padding: 6px; border-radius: 10px; background: var(--paper-chrome-bg); color: var(--paper-ink); border: 1px solid var(--paper-chrome-border); box-shadow: 0 12px 40px var(--paper-chrome-border), 0 2px 8px var(--paper-rule); font: 13px/1.4 var(--paper-font-sans, system-ui, sans-serif); }
+.bp-block-menu__group { font-size: 10px; text-transform: uppercase; color: var(--paper-ink-soft); padding: 6px 8px 2px; }
+.bp-block-menu__item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.bp-block-menu__item:hover, .bp-block-menu__item:focus-visible { background: var(--paper-edit-hover); outline: 0; }
+.bp-block-menu__item--danger { color: var(--bp-tone-danger-fg); }
+.bp-block-menu__glyph { width: 22px; text-align: center; font-size: 11px; color: var(--paper-ink-soft); }
+.bp-paper-format__btn--strike { text-decoration: line-through; }
+.bp-paper-format__btn--underline { text-decoration: underline; text-underline-offset: 2px; }

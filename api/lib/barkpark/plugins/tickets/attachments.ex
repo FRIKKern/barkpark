@@ -241,6 +241,14 @@ defmodule Barkpark.Plugins.Tickets.Attachments do
   `{:error, :storage_unavailable}`.
   """
   @spec store(binary(), keyword()) :: {:ok, map()} | {:error, :storage_unavailable}
+  # `File.write/2` (the spill) and `File.rm/1` (the `after` cleanup) both act on
+  # `tmp`, a path THIS function builds from `System.tmp_dir!/0` plus 8 bytes of
+  # `:crypto.strong_rand_bytes/1`. No caller input reaches either call.
+  # Inline rather than two line-pinned `.sobelow-skips` rows: a fingerprint is
+  # `type,file:line,HASH`, so any edit ABOVE these calls shifts them and reds the
+  # security gate over a finding nobody introduced. The annotation travels with
+  # the function and is falsifiable — detach it and the finding comes back.
+  # sobelow_skip ["Traversal.FileModule"]
   def store(binary, opts) when is_binary(binary) and is_list(opts) do
     mime = Keyword.fetch!(opts, :mime)
     ticket_id = Keyword.fetch!(opts, :ticket_id)
@@ -349,7 +357,7 @@ defmodule Barkpark.Plugins.Tickets.Attachments do
         @asset_type,
         attrs,
         dataset,
-        [source: :api] ++ Assets.file_scope_opts(file)
+        [source: :api] ++ Barkpark.Media.Storage.MediaFile.scope_opts(file)
       )
     end
   end

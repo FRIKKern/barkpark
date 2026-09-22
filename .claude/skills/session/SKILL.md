@@ -36,6 +36,46 @@ environment; check `bp whoami -o json` and the shell environment before assuming
 feature is broken. `link-task` is the one verb NOT on the ingest tier: it writes a task,
 so it uses the regular bearer token (`BARKPARK_TOKEN`) like every other `bp task` call.
 
+### NEVER `echo "$json" | jq` — it corrupts the payload and fakes an ABSENCE
+
+Every recipe below hands `bp … -o json` to `jq`. Do it one of these ways, and never
+with `echo`:
+
+```bash
+bp … -o json > "$f" && jq -r '…' "$f"   # redirect, then read the file  ← prefer this
+bp … -o json | jq -r '…'                # pipe the command directly
+printf '%s' "$j" | jq -r '…'            # when a variable must be re-emitted
+```
+
+`echo "$j" | jq` and `<(echo "$j")` are UNSAFE for JSON. A JSON string carrying `\n`,
+`\t` or `\\` is TWO characters on the wire; an `echo` that interprets backslash escapes
+collapses each pair into one real control character *inside* the string, which RFC 8259
+forbids unescaped, so jq refuses the whole document:
+
+```
+jq: parse error: Invalid string: control characters from U+0000 through U+001F
+    must be escaped
+```
+
+It is a property of the SHELL, not of `bp` and not of the row — measured on one captured
+row, three writers: **bash SAFE · `/bin/sh` (dash) CORRUPTS · zsh CORRUPTS**
+(printf bytes=11692, echo bytes=11625, 68 characters collapsed). bash's safety is not a
+defence: these fenced recipes carry no shebang, so they land in whatever shell you are
+sitting in — zsh, here — where the same line corrupts.
+
+**The failure mode is FALSE ABSENCE, not a syntax error you will notice.** The corruption
+is UNIFORM: it hits every row with an escape in it, identically, so a loop that swallows
+jq's stderr prints an *empty* field for every row and reads as a fact about the DATA —
+"these rows have no evidence" — rather than as a fault in the pipe. This was found while
+auditing eight task closes: seven of eight reported a blank lifecycle, `0/0` criteria and
+"no sha in evidence". Re-read through `printf`, all eight were `done`, fully met, every
+cited commit on main. A uniform verdict is the signature of a broken instrument, and this
+one manufactures an absence — the class inspection never catches, because there is
+nothing to look at.
+
+Guarded by `scripts/echo-json-parse-guard.test.sh`, which drives real `jq` over a real
+captured row in each shell and reds if an `echo`-into-`jq` recipe returns to this file.
+
 ## 1. Open (once, at session start)
 
 Pick a slug and HOLD ON TO IT for the rest of the conversation — every later command in
@@ -190,9 +230,11 @@ if [ -n "${TRANSCRIPT:-}" ] && [ -f "$TRANSCRIPT" ]; then
   if [ "$SIZE" -gt 104857600 ]; then
     echo "checkpoint: scrubbed transcript is ${SIZE} bytes (>100MB cap) — bp media upload will reject it. Split it first, e.g. tail the last N lines or gzip it, then upload the smaller file." >&2
   else
-    UPLOAD_JSON=$(bp media upload "$WORK/scrubbed.jsonl" -o json)
-    TRANSCRIPT_ID=$(echo "$UPLOAD_JSON" | jq -r '.document._id // .document.id // .id // empty')
-    [ -n "$TRANSCRIPT_ID" ] || echo "checkpoint: uploaded the transcript but couldn't parse its doc id out of: $UPLOAD_JSON — inspect the response shape and set 'transcript' by hand." >&2
+    # Redirect, then read the FILE — never `echo "$UPLOAD_JSON" | jq` (see the
+    # doctrine above: zsh and sh collapse the escapes and jq refuses the whole doc).
+    bp media upload "$WORK/scrubbed.jsonl" -o json > "$WORK/upload.json"
+    TRANSCRIPT_ID=$(jq -r '.document._id // .document.id // .id // empty' "$WORK/upload.json")
+    [ -n "$TRANSCRIPT_ID" ] || echo "checkpoint: uploaded the transcript but couldn't parse its doc id out of $WORK/upload.json — inspect the response shape and set 'transcript' by hand." >&2
   fi
 else
   echo "checkpoint: NO transcript found for this session — publishing synthesis-only. This is a real gap, not silently ignored: the resume skill will have no transcript to offer." >&2
@@ -202,8 +244,9 @@ fi
 # mid-session (close, step 4, overrides it to "closed"); transcript is only added when the
 # upload above produced an id.
 EXTRA_FIELDS="{\"status\": \"open\"}"
-[ -n "$TRANSCRIPT_ID" ] && EXTRA_FIELDS=$(echo "$EXTRA_FIELDS" | jq --arg t "$TRANSCRIPT_ID" '. + {transcript: $t}')
-jq -s '.[0] * .[1]' "$WORK/checkpoint.json" <(echo "$EXTRA_FIELDS") > "$WORK/checkpoint-final.json"
+[ -n "$TRANSCRIPT_ID" ] && EXTRA_FIELDS=$(printf '%s' "$EXTRA_FIELDS" | jq --arg t "$TRANSCRIPT_ID" '. + {transcript: $t}')
+printf '%s' "$EXTRA_FIELDS" > "$WORK/extra.json"
+jq -s '.[0] * .[1]' "$WORK/checkpoint.json" "$WORK/extra.json" > "$WORK/checkpoint-final.json"
 bp session publish "$SLUG" --file "$WORK/checkpoint-final.json"
 ```
 
@@ -220,8 +263,9 @@ Repeat step 3 in full (fresh blocks, fresh transcript checkpoint), but override
 
 ```bash
 EXTRA_FIELDS=$(jq -n --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{status: "closed", ended_at: $t}')
-[ -n "$TRANSCRIPT_ID" ] && EXTRA_FIELDS=$(echo "$EXTRA_FIELDS" | jq --arg t "$TRANSCRIPT_ID" '. + {transcript: $t}')
-jq -s '.[0] * .[1]' "$WORK/checkpoint.json" <(echo "$EXTRA_FIELDS") > "$WORK/checkpoint-final.json"
+[ -n "$TRANSCRIPT_ID" ] && EXTRA_FIELDS=$(printf '%s' "$EXTRA_FIELDS" | jq --arg t "$TRANSCRIPT_ID" '. + {transcript: $t}')
+printf '%s' "$EXTRA_FIELDS" > "$WORK/extra.json"
+jq -s '.[0] * .[1]' "$WORK/checkpoint.json" "$WORK/extra.json" > "$WORK/checkpoint-final.json"
 bp session publish "$SLUG" --file "$WORK/checkpoint-final.json"
 ```
 

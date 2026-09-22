@@ -116,6 +116,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "content_binding_empty",
              "content_binding_not_applicable",
              "content_binding_required",
+             "credential_unreadable",
              "decrypt_failed",
              "deliveries_required",
              "deploy_ability_required",
@@ -144,6 +145,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "instance_rate_limited",
              "instance_refused",
              "instance_unreachable",
+             "instances_present",
              "invalid",
              "invalid_bundle_ref",
              "invalid_code",
@@ -155,6 +157,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "invalid_or_expired",
              "invalid_otp",
              "invalid_parent",
+             "invalid_password",
              "invalid_payload",
              "invalid_provider",
              "invalid_role",
@@ -240,10 +243,16 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "revoke_unsupported",
              "role_too_high",
              "rollback_failed",
+             # gr-backlog-operator-digest-send — POST /v1/operator/digest/send's
+             # 422 when no audience is named. It is the route's DEFAULT arm, not
+             # an edge: there is no fleet-by-omission, so a bodyless or
+             # disagreeing body lands here rather than mailing everybody.
+             "scope_required",
              "secret_unreadable",
              "send_failed",
              "server_error",
              "slow_down",
+             "sole_owner",
              "stale_claim",
              "stale_epoch",
              "steps_incomplete",

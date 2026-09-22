@@ -191,7 +191,16 @@ defmodule Barkpark.Content.PapersCacheProvenanceTest do
         }
       ]
 
-      opts = Labels.paper_render_opts(@dataset, nil, scope)
+      # pbw-backlog-cache-draft-ref-leak: `Labels.render_opts/2` now defaults to
+      # the PUBLISHED principal, and this fixture's referent is draft-only
+      # (created, never published) — under the default it degrades to the raw
+      # id and no rename can move the bytes. This test measures DRIFT
+      # CLASSIFICATION, not field visibility, so it declares the privileged
+      # draft-resolving principal explicitly. That declaration is the whole
+      # point of the new default: a caller that wants draft titles writes it
+      # down. The draft-leak property itself is pinned in
+      # test/barkpark/content/papers_cache_draft_ref_test.exs.
+      opts = Labels.paper_render_opts(@dataset, nil, scope ++ [published_only: false])
       body_html = render(blocks, opts)
       assert body_html =~ "Original Title", "fixture must bake the live-resolved title in"
 

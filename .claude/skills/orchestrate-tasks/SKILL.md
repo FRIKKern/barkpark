@@ -71,7 +71,10 @@ FIRST read $ORCH/LEAD-BRIEF.md in full — it is your operating manual and is bi
 Your lane: <one sentence>.
 Your fence (paths you may edit): <list>.
 Seed rows (verify before trusting): <ids + one-line titles>.
-Repo root (read-only reference, on origin/main): <path>. Your worktrees go under $ORCH/wt/.
+Repo root: <path> — a SHARED checkout that may be hundreds of commits behind `origin/main`, and
+is NOT a reference for what the code says. Never `cat`/`grep` it to orient: those reads succeed
+and return a consistent older snapshot with no error. Orient with `git fetch origin main` then
+`git show origin/main:<path>`, or from a worktree. Your worktrees go under $ORCH/wt/.
 $ORCH = <absolute path>. Your SESSION id: <lane>-s<N> — it is yours alone, never
 another session's of this lane. Open your files FIRST and use only what it prints:
   bash .claude/skills/orchestrate-tasks/helpers/session-files.sh open $ORCH/lead-<lane> s<N>

@@ -68,6 +68,8 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
       %{"kind" => "task", "lifecycle_status" => "open"}
       |> Barkpark.LabelFixtures.with_labels()
       |> Map.merge(content_extra)
+      # The Tasks plugin's :before_publish brief wall (inert until #19303).
+      |> Barkpark.TaskBriefFixtures.with_brief()
 
     {:ok, _} =
       Content.create_document(
@@ -83,6 +85,18 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
 
   defp project_edges(doc) do
     Registry.collect_edge_extractors(baseline: [], ctx: %{doc: doc, dataset: @dataset})
+  end
+
+  # The FULL union the projector actually writes: core reference-field edges
+  # PLUS every plugin's projected edges, deduped on {from_id, to_id, kind}.
+  # `project_edges/1` above seeds `baseline: []`, so it sees ONLY the plugin
+  # half — which is exactly the wrong lens for `parent_id`, whose edge is
+  # projected by the CORE extractor off the schema's `reference` declaration.
+  defp project_union(doc) do
+    {:ok, %{edges: edges}} =
+      Barkpark.EdgeProjector.Projector.project(@dataset, [doc], dataset: @dataset)
+
+    edges
   end
 
   describe "task_edges is the authoritative source (gap #1)" do
@@ -157,21 +171,59 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
     end
   end
 
-  describe "parent_id still projects (regression)" do
-    test "content.parent_id surfaces as a parent edge alongside task_edges",
+  # ── ONE parent relationship → ONE edge ────────────────────────────────────
+  #
+  # THE DEFECT THIS PINS. `content.parent_id` was projected TWICE on every save:
+  # the task schema declares it `"type" => "reference"`, so the CORE extractor
+  # emits kind `parent_id` (kind IS the source field name), AND the Tasks
+  # plugin's `parent_edge/2` read the same key and emitted kind `parent`. The
+  # dedup in `Projector.dedup/1` keys on {from_id, to_id, KIND}, so the two
+  # spellings never collided and both rows survived. MEASURED on the live corpus
+  # 2026-09-18: 7062 published tasks carry `parent_id`, so the graph held ~14124
+  # parent rows for 7062 relationships — every backlink reader that does not
+  # de-duplicate by (from,to) rendered each parent twice, and `node_budget/0`
+  # (1000) burned at half the useful fan-in.
+  #
+  # WHICH KIND SURVIVED, AND WHY: `parent_id`, the CORE one. Repo-wide there is
+  # no consumer that hard-codes either spelling as an edge kind (every reader —
+  # `Content.Graph.filter_edges/2`, `Tasks.Expectations.driven_tasks/2`,
+  # `bp-graph.js`, the Go client — is kind-agnostic), so the tiebreaker is
+  # REACH, not breakage: the schema `reference` declaration also drives
+  # `?expand=parent_id`, the Studio typeahead pill and the dangling resolution,
+  # while the plugin clause was pure duplication. Retiring the plugin clause
+  # costs nothing; retiring the schema declaration would have cost all three.
+  describe "parent_id projects EXACTLY ONE edge" do
+    test "one parent relationship yields one edge, kind parent_id",
          %{scope: scope} do
       src = publish_task!("t-l", scope, %{"parent_id" => "t-parent"})
       b = publish_task!("t-m", scope)
       {:ok, _} = Tasks.add_dep(src.id, b.id, :blocks)
 
       hydrated = TasksPlugin.hydrate_edges(src)
-      edges = project_edges(hydrated)
+      edges = project_union(hydrated)
 
-      parent = Enum.find(edges, &(&1[:kind] == "parent"))
+      to_parent = Enum.filter(edges, &(&1[:to_id] == "t-parent"))
+
+      assert length(to_parent) == 1,
+             "one parent_id must project ONE edge, got: #{inspect(Enum.map(to_parent, & &1[:kind]))}"
+
+      [parent] = to_parent
+      assert parent[:kind] == "parent_id"
       assert parent[:from_id] == "t-l"
-      assert parent[:to_id] == "t-parent"
+
+      # The retired spelling must not come back under any target.
+      refute Enum.any?(edges, &(&1[:kind] == "parent"))
 
       assert Enum.any?(edges, &(&1[:kind] == "blocks"))
+    end
+
+    test "the Tasks plugin contributes NO parent edge of its own", %{scope: scope} do
+      src = publish_task!("t-pp", scope, %{"parent_id" => "t-pp-parent"})
+
+      plugin_edges = TasksPlugin.extract_edges(TasksPlugin.hydrate_edges(src), %{})
+
+      assert Enum.filter(plugin_edges, &(&1[:to_id] == "t-pp-parent")) == [],
+             "parent_edge/2 is retired — the core reference extractor owns this edge"
     end
   end
 
@@ -281,11 +333,12 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
       kinds =
         src
         |> TasksPlugin.hydrate_edges()
-        |> project_edges()
+        |> project_union()
         |> Enum.map(& &1[:kind])
         |> Enum.sort()
 
-      assert "parent" in kinds
+      assert "parent_id" in kinds
+      refute "parent" in kinds
       assert "blocks" in kinds
       assert "wave_paper" in kinds
     end

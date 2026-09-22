@@ -14,7 +14,9 @@ name: astro-search-finder-test
 # auth_tier first and hard-fail on a privileged token. The path filter was scoped
 # to `src/**` only, which meant it never saw EITHER config — a guard deletion
 # shipped completely unwatched. Both config files are now in the filter and the
-# guard test runs on any change to them.
+# guard test runs on any change to them. That was true and was not the whole
+# subject: the same test file also walks the ENTIRE search-starter template
+# (see the filter entry below), so the filter now names the whole template.
 #
 # Gates a PR only once registered as a required check in branch protection
 # (a human GitHub step); until then it still reds the PR page on failure.
@@ -29,6 +31,22 @@ on:
       - "templates/astro-search-starter/astro.config.mjs"
       - "templates/search-starter/next.config.mjs"
       - "templates/search-starter/token-guard.test.mjs"
+      # THE REST OF THE TEMPLATE THE token-guard JOB ACTUALLY READS. The two
+      # config entries above are only two of `token-guard.test.mjs`'s subjects.
+      # Its `no control in this template spends the public-read token on a
+      # privileged mutation` suite WALKS THE WHOLE TEMPLATE — it asserts
+      # `app/api/admin/reindex/route.ts` stays deleted, that no `.ts/.tsx/.mjs/
+      # .js/.json` file anywhere under the template references `admin/reindex`,
+      # that no `route.ts` builds an upstream `/reindex` URL, and that README.md
+      # still carries the two honesty paragraphs; a separate floor asserts the
+      # walk found >=50 source / >=20 code files so an emptied scan cannot pass
+      # vacuously. NONE of those paths matched this list. MEASURED 2026-09-18 on
+      # origin/main b73585c3f: restoring the deleted route (from 3ad3696c5^)
+      # reds the suite 2 of 21 tests, exit 1 — and a diff consisting of exactly
+      # that one file matched NO pattern here, so CI ran the guard on zero of
+      # its own regressions. The header above says "Both config files are now in
+      # the filter", which was true and was not the whole subject.
+      - "templates/search-starter/**"
       - ".github/workflows/astro-search-finder-test.yml"
   pull_request:
     paths:
@@ -36,6 +54,22 @@ on:
       - "templates/astro-search-starter/astro.config.mjs"
       - "templates/search-starter/next.config.mjs"
       - "templates/search-starter/token-guard.test.mjs"
+      # THE REST OF THE TEMPLATE THE token-guard JOB ACTUALLY READS. The two
+      # config entries above are only two of `token-guard.test.mjs`'s subjects.
+      # Its `no control in this template spends the public-read token on a
+      # privileged mutation` suite WALKS THE WHOLE TEMPLATE — it asserts
+      # `app/api/admin/reindex/route.ts` stays deleted, that no `.ts/.tsx/.mjs/
+      # .js/.json` file anywhere under the template references `admin/reindex`,
+      # that no `route.ts` builds an upstream `/reindex` URL, and that README.md
+      # still carries the two honesty paragraphs; a separate floor asserts the
+      # walk found >=50 source / >=20 code files so an emptied scan cannot pass
+      # vacuously. NONE of those paths matched this list. MEASURED 2026-09-18 on
+      # origin/main b73585c3f: restoring the deleted route (from 3ad3696c5^)
+      # reds the suite 2 of 21 tests, exit 1 — and a diff consisting of exactly
+      # that one file matched NO pattern here, so CI ran the guard on zero of
+      # its own regressions. The header above says "Both config files are now in
+      # the filter", which was true and was not the whole subject.
+      - "templates/search-starter/**"
       - ".github/workflows/astro-search-finder-test.yml"
 
 concurrency:
@@ -56,15 +90,17 @@ jobs:
       # green having proven nothing at all. The floor reds on a zero-match
       # pattern, on a file that registers no tests, and prints the test count.
       #
-      # `--floor 5` IS THE POINT OF THE LITERAL. Every other assertion the
+      # `--floor 6` IS THE POINT OF THE LITERAL. Every other assertion the
       # runner makes is derived from this same glob, so deleting 4 of the 5
       # spec files shrinks the expectation along with the tree and the job
-      # stays green. Five is a committed number: it cannot shrink unless a
+      # stays green. Six is a committed number: it cannot shrink unless a
       # human edits this line, which is what makes a partial deletion visible.
-      # Adding a spec reds this with `raise the floor to 6` -- bump it here.
+      # Adding a spec reds this with `raise the floor to N+1` -- bump it here.
+      # Raised 5 -> 6 for src/lib/browse-request.test.ts (the build-time browse
+      # seed's route-and-bearer decision).
       - name: Run the finder contract tests
         working-directory: templates/astro-search-starter
-        run: node ../../scripts/node-test-floor.mjs --floor 5 'src/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs --floor 6 'src/**/*.test.ts'
 
   token-guard:
     name: Browser-token build guard (both editions)

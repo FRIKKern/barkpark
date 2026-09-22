@@ -38,6 +38,9 @@ import { portableTextBoundary } from "../portable-text-boundary.js";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
+import Underline from "@tiptap/extension-underline";
+import TiptapTaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
 // ProseMirror selection constructors — used by the slash direct-insert to place the
 // caret naturally after the swap (TextSelection INTO a prose/callout body;
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
@@ -145,7 +148,7 @@ import { TaskList } from "./task-list-node.js";
 // element with a bp-role-* class). Each renders `["p", {class:"bp-role-*"}, 0]` so
 // PM derives the contentDOM from the content hole; getJSON round-trips the styled
 // element + bpId/bpType, and run-convert.js maps the block ⇄ node. See ./role-nodes.js.
-import { Eyebrow, Byline, Ingress, Pullquote } from "./role-nodes.js";
+import { Eyebrow, Byline, Ingress, Pullquote, Blockquote } from "./role-nodes.js";
 // editable table: the `table` block as FOUR hand-rolled NESTED nodes (bpTable >
 // bpTableRow > bpTableHeaderCell|bpTableCell), NOT @tiptap/extension-table. Cell bodies
 // are PM `inline*` holes reusing the shared inline serializer (marks round-trip); the
@@ -184,6 +187,7 @@ import { Opaque } from "./opaque-node.js";
 import { Terminal, TerminalAtom } from "./terminal-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
+import { BlockHandle, moveTopLevel, duplicateTopLevel, topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
 // for BOTH triggers via a row adapter) + the PURE, DOM-free trigger detectors and
 // replace-range mappers. All shipped + browser-verified in the per-block editor;
@@ -470,7 +474,8 @@ function hasOnlyBpKeys(attrs) {
 // kind only for the row's dataset/filter haystack — it is NOT a portable-doc type,
 // and _chooseSlash's CANVAS_SLASH_TYPES guard would no-op it defensively anyway.
 const CANVAS_SLASH_ITEMS = [
-  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)),
+  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) =>
+    it.type === "list" ? [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }] : [it]),
   ...CANVAS_COMPOUND_INSERTS.map((c) => ({
     group: "Starters",
     type: c.kind,
@@ -720,7 +725,7 @@ class BpPaperCanvas extends HTMLElement {
         }),
         // Link mark — same config as ../index.js so existing `link` inline nodes
         // render/edit and the format bubble's link button works.
-        Link.configure({ openOnClick: false, autolink: false }),
+        Link.configure({ openOnClick: false, autolink: true }),
         // Empty-block ghost text — same contract as ../index.js. includeChildren
         // :false so one placeholder shows on the focused top-level textblock only.
         Placeholder.configure({
@@ -736,6 +741,14 @@ class BpPaperCanvas extends HTMLElement {
         // Smart typography — parity with ../index.js. A prose run holds no code
         // block, so nothing to exclude.
         Typography,
+        // Underline (Mod-u) — the PortableDoc inline wire already carries an `underline`
+        // wrapper (convert.js), so this only adds the mark the schema was missing.
+        Underline,
+        // Checklist: the list block with task:true (convert.js listToTiptap). `[ ] ` typed at the
+        // start of a paragraph wraps it; the checkbox is a native control whose toggle is an
+        // ordinary transaction, so runToOps patches the item's `checked`.
+        TiptapTaskList,
+        TaskItem.configure({ nested: true }),
         // Internal-link marks — schema registration only (see import note). This
         // keeps existing inline wikilink/blockref/tag marks round-tripping; the
         // [[ / # autocomplete UI is OUT of S1.
@@ -895,6 +908,7 @@ class BpPaperCanvas extends HTMLElement {
         Byline,
         Ingress,
         Pullquote,
+        Blockquote,
         // editable table: the four nested nodes (bpTable > bpTableRow >
         // bpTableHeaderCell|bpTableCell). Registers the container + row/cell types so
         // runToTiptap's { type:"bpTable", content:[rows…] } tree mounts with editable
@@ -978,7 +992,7 @@ class BpPaperCanvas extends HTMLElement {
         // others shut so a stale popup never lingers (triggers disjoint by leading
         // token "[[" vs "#" vs "/", but the gate makes the single-popup invariant
         // code-enforced rather than incidental).
-        const consumed = this._maybeCalloutShorthand();
+        const consumed = this._maybeBlockShorthand() || this._maybeCalloutShorthand();
         if (!consumed) {
           if (this._maybeWikilink()) {
             this._closeTag();
@@ -1019,6 +1033,8 @@ class BpPaperCanvas extends HTMLElement {
     // mode; every consumer is `if (this._bubble)` guarded.
     if (this._editable) {
       this._bubble = new FormatBubble({ editor: this._editor });
+      // Notion-style block gutter: + to add below, ⋮⋮ to drag / open the block menu.
+      this._handle = new BlockHandle({ host: this, editor: this._editor, openSlash: () => this._openSlash("") });
     }
 
     // Lifecycle: one-shot bubbling/composed signal a host hook can await —
@@ -1218,6 +1234,10 @@ class BpPaperCanvas extends HTMLElement {
     if (this._bubble) {
       this._bubble.destroy();
       this._bubble = null;
+    }
+    if (this._handle) {
+      this._handle.destroy();
+      this._handle = null;
     }
     // P5 source-mode: tear down the markdown textarea + its keydown listener if the
     // element disconnects while in source mode (so neither the node nor the listener
@@ -1443,6 +1463,11 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._acknowledgedSaves) return false;
     const current = this._inflightOps;
     if (!current || current.seq !== seq) return false;
+    // A `saved:false` acknowledgement keeps the batch in flight: the Studio host's
+    // contract is that a failed head stays pending and its Retry resends the same
+    // batch verbatim, with later edits waiting behind it (__save_ack_mounted). A host
+    // that wants the other behaviour — drop the refused batch and fold it into the
+    // next edit — calls discardInflightOps(seq) instead.
     if (saved !== true) return false;
 
     // Diff against the local snapshot the author still sees. A canonical reply
@@ -1483,6 +1508,40 @@ class BpPaperCanvas extends HTMLElement {
     return true;
   }
 
+  // The host's OTHER answer to a refused batch (a lifecycle veto such as "a published
+  // paper cannot be hollowed out", or a request that will not succeed by retrying):
+  // drop the in-flight batch WITHOUT advancing the baseline. `_blocks` still holds the
+  // last SAVED snapshot, so the next local edit diffs against it and carries the
+  // refused change along — the author keeps what they see, and it lands as soon as
+  // the server will take it (a batch that would hollow the paper saves once they
+  // write again). Edits made while the batch was travelling are emitted now: that
+  // diff already differs from the refused one. An unchanged vetoed batch is never
+  // resent on its own; resendPendingOps() is the host's explicit "try again".
+  // Without this seam a refused batch pinned the pipeline: every later edit queued
+  // behind it, never sent (found by Barkdown's editor-multiblock row: cut all, type).
+  discardInflightOps(seq) {
+    if (!this._acknowledgedSaves) return false;
+    const current = this._inflightOps;
+    if (!current || current.seq !== seq) return false;
+    this._inflightOps = null;
+    const dirty = this._dirtyWhileInflight;
+    this._dirtyWhileInflight = false;
+    if (dirty) this._emitOps();
+    return true;
+  }
+
+  // Re-diff the live document against the saved baseline and emit the batch, if any
+  // and if nothing is in flight. The host's Retry after discardInflightOps: it must
+  // NOT resend the discarded ops (an insert would land twice); it asks for a fresh diff.
+  resendPendingOps() {
+    if (this._inflightOps || !this._editor) return false;
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+    return this._emitOps() === true;
+  }
+
   // ── P4 autocomplete: keyboard routing + caret rect ─────────────────────────
   //
   // Keyboard handler installed via editorProps.handleKeyDown. Only ACTS when a
@@ -1491,6 +1550,62 @@ class BpPaperCanvas extends HTMLElement {
   // (wikilink / tag / slash) are mutually exclusive — at most one branch ever owns
   // the keystroke. Ported from ../index.js:_onKeyDown (all three branches).
   _onKeyDown(event) {
+    if (this._editable && this._editor && (event.metaKey || event.ctrlKey) && !event.altKey) {
+      const key = event.key;
+      if (event.shiftKey && (key === "ArrowUp" || key === "ArrowDown")) {
+        const index = topLevelIndexAtSelection(this._editor);
+        event.preventDefault();
+        moveTopLevel(this._editor, index, key === "ArrowUp" ? index - 1 : index + 1);
+        return true;
+      }
+      if (!event.shiftKey && (key === "d" || key === "D")) {
+        event.preventDefault();
+        duplicateTopLevel(this._editor, topLevelIndexAtSelection(this._editor));
+        return true;
+      }
+      // (Backspace handling sits below, outside the modifier branch.)
+      // Notion's turn-into chords: Mod-Shift-0 text, 1..3 headings, 5 bulleted, 6 numbered,
+      // 8 code block. event.code keeps them working on layouts where Shift+digit yields a symbol.
+      const digit = /^Digit([0-9])$/.exec(event.code || "")?.[1] ?? (/^[0-9]$/.test(key) ? key : null);
+      if (event.shiftKey && digit != null && !this._slash?.isOpen?.()) {
+        const kind = { 0: "paragraph", 1: "h1", 2: "h2", 3: "h3", 4: "task", 5: "bullet", 6: "ordered" }[digit];
+        if (kind) {
+          event.preventDefault();
+          turnTopLevelInto(this._editor, topLevelIndexAtSelection(this._editor), kind);
+          return true;
+        }
+        if (digit === "8") {
+          event.preventDefault();
+          insertSlashTypeAtSelection(this._editor, "code");
+          return true;
+        }
+      }
+      if (!event.shiftKey && (key === "k" || key === "K") && this._bubble && !this._editor.state.selection.empty) {
+        event.preventDefault();
+        this._bubble.update();
+        this._bubble.openLink();
+        return true;
+      }
+    }
+    // Backspace at the very start of a block: a list item lifts out one level (a top-level item
+    // becomes a paragraph) and a quote turns back into a paragraph, instead of merging into the
+    // block above. Notion and Tiptap 3's list keymap behave this way.
+    if (event.key === "Backspace" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && this._editable && this._editor) {
+      const { $from, empty } = this._editor.state.selection;
+      if (empty && $from.parentOffset === 0) {
+        // Only the FIRST item of a list lifts; a later item keeps ProseMirror's join into the
+        // item above, which is how an Enter-split is undone without losing nested children.
+        const itemType = $from.depth >= 3 ? $from.node(-1).type.name : null;
+        if ((itemType === "listItem" || itemType === "taskItem") && $from.index(-1) === 0 && $from.index(-2) === 0) {
+          if (this._editor.commands.liftListItem(itemType)) { event.preventDefault(); return true; }
+        }
+        if ($from.depth === 1 && $from.parent.type.name === "pullquote") {
+          event.preventDefault();
+          this._editor.commands.setNode("paragraph");
+          return true;
+        }
+      }
+    }
     // P5 MARKDOWN SOURCE-MODE — Mod-Shift-m (Cmd-Shift-M on mac / Ctrl-Shift-M
     // elsewhere) ENTERS source mode from the rich editor. Detected FIRST, before the
     // palette/popup branches: it is a deliberately FREE combo (Mod-p = palette, Mod-b
@@ -1659,6 +1774,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _onPaste(view, _event, slice) {
+    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteMarkdown(view, _event)) return true;
     if (!this._editable || !isFigureSingletonCanvas(this)) return false;
     const plan = figurePastePlan(slice);
     if (plan.native) return false;
@@ -1669,6 +1785,35 @@ class BpPaperCanvas extends HTMLElement {
       return true;
     }
     view.dispatch(view.state.tr.replaceSelection(plan.inline).scrollIntoView());
+    return true;
+  }
+
+  // Plain-text paste that carries markdown block syntax (headings, lists, quotes, fences, rules)
+  // lands as the corresponding blocks instead of literal `## ` and `- ` paragraphs. HTML on the
+  // clipboard keeps the native path (the browser already structured it); a single plain line too.
+  _pasteMarkdown(view, event) {
+    const data = event && event.clipboardData;
+    if (!data) return false;
+    const html = data.getData("text/html");
+    const text = data.getData("text/plain");
+    if (html || !text) return false;
+    const lines = text.split(/\r?\n/);
+    const blockish = /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|```|---\s*$)/;
+    // A GFM pipe table announces itself by a delimiter row (dashes with a pipe) under a header line.
+    const tableDelimiter = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+    const pipeTable = lines.some((line, k) => k + 1 < lines.length && line.includes("|") && lines[k + 1].includes("|") && tableDelimiter.test(lines[k + 1]));
+    if (!lines.some((line) => blockish.test(line)) && !pipeTable) return false;
+    let nodes;
+    try {
+      const blocks = markdownToBlocks(text);
+      if (!blocks.length) return false;
+      nodes = runToTiptap(blocks).content.map((json) => view.state.schema.nodeFromJSON(json));
+    } catch (_e) {
+      return false;
+    }
+    if (!nodes.length) return false;
+    const tr = view.state.tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0)).scrollIntoView();
+    view.dispatch(tr);
     return true;
   }
 
@@ -1984,7 +2129,9 @@ class BpPaperCanvas extends HTMLElement {
     // body). Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
     // body (and any future inline-content node-view), and also keeps rejecting a
     // paragraph nested in a list item (depth 3). See slashTriggerAllowsParent.
-    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name)) {
+    // Notion parity: "/" also works inside an otherwise-empty list item; the item is lifted
+    // out of the list when a block is chosen (see _chooseSlash).
+    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name) && !this._slashInListItem($from)) {
       this._closeSlash();
       return;
     }
@@ -2017,6 +2164,71 @@ class BpPaperCanvas extends HTMLElement {
   // Predicate parity with _maybeSlash: caret collapsed, caret at end, single line —
   // all evaluated BLOCK-LOCALLY (the multi-block canvas frame), so it never fires
   // mid-prose or across blocks. The trailing space in the regex commits the gesture.
+  _maybeBlockShorthand() {
+    if (!this._editable || !this._editor) return false;
+    const { selection } = this._editor.state;
+    if (!selection.empty) return false;
+    const $from = selection.$from;
+    if ($from.parent.type.name !== "paragraph" || $from.depth !== 1) return false;
+    const blockText = $from.parent.textContent;
+    if ($from.parentOffset !== blockText.length) return false;
+    // Typography turns the first two dashes into an en/em dash before the third arrives; accept both spellings.
+    const divider = /^(---|—-|–-)$/.test(blockText);
+    const code = /^```$/.test(blockText);
+    const quote = /^>\s$/.test(blockText);
+    if (quote) {
+      // `> ` → the plain quote block (`blockquote`, what Notion and Tiptap authors mean by a
+      // quote; the pullquote stays article chrome, reached from the slash menu). The callout
+      // gesture `> [!note] ` still works: _maybeCalloutShorthand accepts `[!note] ` typed inside.
+      const { state, view } = this._editor;
+      const start = $from.before(1);
+      const end = $from.after(1);
+      // Keep the block's id so the save is a same-id replace-block, not remove + insert.
+      const quoteNode = state.schema.nodes.blockquote
+        ? state.schema.nodes.blockquote.create({ bpId: $from.parent.attrs.bpId || null, bpType: "blockquote" })
+        : null;
+      if (!quoteNode) return false;
+      let tr = state.tr.replaceWith(start, end, quoteNode);
+      try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1))); } catch (_e) {}
+      view.dispatch(tr);
+      this._editor.commands.focus();
+      return true;
+    }
+    if (!divider && !code) return false;
+    if (code) {
+      // Clear the fence text, then reuse the slash-insert seam so the code atom takes the
+      // caret exactly as it does from the menu (its own editing surface, not a PM text hole).
+      const { state, view } = this._editor;
+      view.dispatch(state.tr.delete($from.start(1), $from.end(1)));
+      insertSlashTypeAtSelection(this._editor, "code");
+      // The code atom edits in its own textarea island; hand it the caret at once so the very
+      // next keystroke lands inside the block (a deferred focus would swallow fast typing).
+      const focusArea = () => {
+        if (!this._editor || this._editor.isDestroyed) return false;
+        const dom = this._editor.view.nodeDOM(this._editor.state.selection.from);
+        const area = dom && dom.querySelector ? dom.querySelector(".bp-canvas-code-area") : null;
+        if (!area) return false;
+        area.focus();
+        return true;
+      };
+      if (!focusArea()) requestAnimationFrame(focusArea);
+      return true;
+    }
+    const block = canvasDefaultBlock("divider");
+    const node = runToTiptap([block]).content[0];
+    const { state, view } = this._editor;
+    const start = $from.before(1);
+    const end = $from.after(1);
+    const pmNode = state.schema.nodeFromJSON(node);
+    let tr = state.tr.replaceWith(start, end, pmNode);
+    const after = start + pmNode.nodeSize;
+    tr = tr.insert(after, state.schema.nodes.paragraph.create());
+    try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1))); } catch (_e) {}
+    view.dispatch(tr);
+    this._editor.commands.focus();
+    return true;
+  }
+
   _maybeCalloutShorthand() {
     if (!this._editable) return false; // read mode: no shorthand
     if (!this._editor) return false;
@@ -2038,15 +2250,18 @@ class BpPaperCanvas extends HTMLElement {
     // callout. Requiring parent.type.name ∈ {paragraph, heading} excludes the callout
     // body, and still rejects a paragraph nested in a list item. See
     // slashTriggerAllowsParent.
-    if (!slashTriggerAllowsParent($from.depth, $from.parent.type.name)) return false;
+    // `> ` has already become a quote block (the plain blockquote now; a pullquote when one
+    // was authored from the menu), so the `[!note] ` that follows arrives inside it.
+    const inQuote = $from.depth === 1 && ($from.parent.type.name === "blockquote" || $from.parent.type.name === "pullquote");
+    if (!inQuote && !slashTriggerAllowsParent($from.depth, $from.parent.type.name)) return false;
     const blockText = $from.parent.textContent;
     const atEnd = $from.parentOffset === blockText.length;
     if (!atEnd || blockText.includes("\n")) return false;
 
     // ^>\s*\[!(\w+)\]([+-]?)\s$ — identical to the per-block editor. The trailing \s
     // (the committing space) + the no-newline guard above mean \s only matches that
-    // space here.
-    const m = /^>\s*\[!(\w+)\]([+-]?)\s$/.exec(blockText);
+    // space here. Inside a quote block (`> ` already consumed) the leading `>` is absent.
+    const m = (inQuote ? /^\[!(\w+)\]([+-]?)\s$/ : /^>\s*\[!(\w+)\]([+-]?)\s$/).exec(blockText);
     if (!m) return false;
 
     const tone = normalizeTone(m[1]);
@@ -2125,8 +2340,22 @@ class BpPaperCanvas extends HTMLElement {
   // DEFENSIVE: an EXPECTED-group pick (or any item) whose type is NOT canvas-
   // insertable is a no-op — CANVAS_SLASH_TYPES is the same allowlist that built the
   // base menu, so a non-insertable EXPECTED field never produces a bad insert.
+  // True when the caret sits in a list item's only paragraph and that paragraph holds nothing but the slash query.
+  _slashInListItem($from) {
+    if ($from.parent.type.name !== "paragraph" || $from.depth < 2) return false;
+    const item = $from.node($from.depth - 1);
+    if (!item || (item.type.name !== "listItem" && item.type.name !== "taskItem") || item.childCount !== 1) return false;
+    return /^\/[^\s]*$/.test($from.parent.textContent) || $from.parent.textContent === "";
+  }
+
   _chooseSlash(item) {
     this._closeSlash();
+    // A slash pick inside a list item first lifts the item out of the list, so the chosen block
+    // lands at the top level where insertSlashTypeAtSelection replaces the paragraph.
+    let guard = 0;
+    while (this._editor.state.selection.$from.depth > 1 && guard++ < 6) {
+      if (!this._editor.commands.liftListItem("listItem")) break;
+    }
     // A COMPOUND starter row (the Starters group): insert the whole pre-composed
     // subtree through the shared landing seam — same guard, same caret rules as a
     // single-node pick, but the carried node is a container + seeded children.

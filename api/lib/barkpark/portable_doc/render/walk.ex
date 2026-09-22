@@ -1725,6 +1725,11 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # surface root (serif font, ink, `--bp-body-lh` line-height, inherited) own
   # all structure in both View and Edit by construction — see the moduledoc
   # theme-vs-data contract.
+  defp list(%{"task" => true} = n, width, %{style: :article} = pal) do
+    inner = render_children(Map.get(n, "children", []), width, pal)
+    ~s(<ul class="bp-checklist">) <> inner <> "</ul>"
+  end
+
   defp list(n, width, %{style: :article} = pal) do
     tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
     inner = render_children(Map.get(n, "children", []), width, pal)
@@ -1734,6 +1739,16 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # Email/default keeps the same semantic structure but owns its styling inline:
   # clients may strip stylesheets, so list indentation, typography, and item
   # spacing must travel on the `<ul>` / `<ol>` / `<li>` elements themselves.
+  defp list(%{"task" => true} = n, width, pal) do
+    inner = render_children(Map.get(n, "children", []), width, pal)
+
+    style =
+      "margin:0 0 24px;padding-left:0;list-style:none;" <>
+        "font-family:#{pal.font_body};color:#{pal.text};line-height:1.7"
+
+    ~s(<ul style="#{style}">) <> inner <> "</ul>"
+  end
+
   defp list(n, width, pal) do
     tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
     inner = render_children(Map.get(n, "children", []), width, pal)
@@ -1742,9 +1757,42 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       inner <> "</#{tag}>"
   end
 
+  # Checklist item: a disabled native checkbox (state is data, not a control the
+  # reader can toggle) ahead of the text; `data-checked` lets the surface style done
+  # items. The stylesheet owns layout in article mode; email mode inlines it.
+  defp list_item(%{"task" => true} = n, width, %{style: :article} = pal) do
+    inner = render_children(Map.get(n, "children", []), width, pal)
+    checked = Map.get(n, "checked") == true
+    checked_attr = if checked, do: " checked", else: ""
+    label = if checked, do: "Done", else: "To do"
+
+    box =
+      ~s(<input type="checkbox" class="bp-checklist__box" disabled#{checked_attr} ) <>
+        ~s(aria-label="#{label}">)
+
+    ~s(<li class="bp-checklist__item" data-checked="#{checked}">) <>
+      box <> ~s(<span class="bp-checklist__body">) <> inner <> "</span></li>"
+  end
+
   defp list_item(n, width, %{style: :article} = pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
     "<li>" <> inner <> "</li>"
+  end
+
+  defp list_item(%{"task" => true} = n, width, pal) do
+    inner = render_children(Map.get(n, "children", []), width, pal)
+    checked = Map.get(n, "checked") == true
+    box = if checked, do: "&#9745;", else: "&#9744;"
+
+    style =
+      if checked do
+        "margin:4pt 0 0;opacity:.65;text-decoration:line-through"
+      else
+        "margin:4pt 0 0"
+      end
+
+    glyph = ~s(<span style="display:inline-block;width:1.4em">#{box}</span>)
+    ~s(<li style="#{style}">) <> glyph <> inner <> "</li>"
   end
 
   defp list_item(n, width, pal) do

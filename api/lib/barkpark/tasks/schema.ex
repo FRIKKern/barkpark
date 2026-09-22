@@ -557,9 +557,18 @@ defmodule Barkpark.Tasks.Schema do
           "title" => "Parent task",
           "type" => "reference",
           "refType" => "task",
+          # `refType` here is an AUTHORING hint (expand + Studio typeahead), not
+          # an existence gate: a task is legitimately hung off a PAPER as an
+          # epic anchor, and the typed dangling probe
+          # (`get_document(to_id, "task", …)`) false-flagged every such edge.
+          # MEASURED 2026-09-18 on the live corpus: `GET /v1/graph/dangling`
+          # returned 54 rows with `via_field: "parent_id"` across 11 distinct
+          # existing-but-not-a-task targets. Tolerance makes the probe
+          # type-agnostic for THIS field only — see `Content.Edges`.
+          "refTypeTolerant" => true,
           "group" => "brief",
           "description" =>
-            "Doc-id of the parent task (a goal is a root task; this task is one rail of its parent). Plain string, may carry a drafts. prefix."
+            "Doc-id of the parent task (a goal is a root task; this task is one rail of its parent). Plain string, may carry a drafts. prefix. May also name a paper used as an epic anchor."
         },
 
         # ── WORK — the in_progress surface ──────────────────────────────

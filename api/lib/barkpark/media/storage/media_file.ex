@@ -48,6 +48,36 @@ defmodule Barkpark.Media.Storage.MediaFile do
     field :search_cursorable, :boolean, virtual: true, default: true
   end
 
+  @doc """
+  The tenancy scope THIS ROW belongs to, as read/write `opts`
+  (`[:project_id, :workspace_id]`, in that key order).
+
+  CORE accessor, pure over two struct fields — no DB, network or config. It
+  exists so host code never has to name a plugin module to answer "which
+  tenant owns this blob?"; it was `Barkpark.Plugins.Media.Assets`'
+  `file_scope_opts/1` until task-6bc5e1025154b6fb moved it here and retired
+  the host-to-plugin coupling sanctions it needed (aka: file_scope_opts).
+
+  The `%MediaFile{}` carries the scope resolved at upload (`put_scope_attrs`
+  on the blob), so stamping a companion asset DOCUMENT from it keeps the two
+  in the same tenant — closing the gap where the doc landed NULL-workspace
+  while the blob was scoped (barkpark-x56q).
+
+  NIL-DROP IS LOAD-BEARING: only non-nil scope keys are emitted, so a
+  pre-tenancy blob (nil `workspace_id`) writes NOTHING and
+  `Content.put_scope_attrs` falls back to its Default-scope behaviour —
+  never-worse for legacy uploads.
+  """
+  @spec scope_opts(%__MODULE__{}) :: keyword()
+  def scope_opts(%__MODULE__{workspace_id: ws_id, project_id: project_id}) do
+    []
+    |> maybe_put_scope(:workspace_id, ws_id)
+    |> maybe_put_scope(:project_id, project_id)
+  end
+
+  defp maybe_put_scope(opts, _key, nil), do: opts
+  defp maybe_put_scope(opts, key, value), do: Keyword.put(opts, key, value)
+
   def changeset(media_file, attrs) do
     media_file
     |> cast(attrs, [
@@ -70,8 +100,13 @@ defmodule Barkpark.Media.Storage.MediaFile do
       name: :media_files_path_dataset_id_index
     )
     # FK-abort containment: all three tenancy columns are real Postgres FKs
-    # (migrations 20260527110100 + 20260527131000, default-derived names
-    # media_files_<col>_fkey). Without these, a reference to a vanished row —
+    # (columns from migrations 20260527110100 + 20260527131000, default-derived
+    # names media_files_<col>_fkey). Follow those two migrations alone and you
+    # get the WRONG delete action: 20260527160000_cascade_content_on_scope_delete
+    # later set all three to `on_delete: :delete_all` (SQL `ON DELETE CASCADE`),
+    # which is still what ships — a scope delete reaps the media row rather than
+    # leaving it behind with NULL scope columns.
+    # Without these constraints, a reference to a vanished row —
     # a workspace/project deleted concurrently mid-upload, or a cross-instance
     # blob push carrying a foreign id — raises Ecto.ConstraintError (500) out
     # of Repo.insert instead of returning {:error, changeset}.

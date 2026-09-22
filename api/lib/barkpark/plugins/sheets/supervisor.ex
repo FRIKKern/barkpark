@@ -44,6 +44,20 @@ defmodule Barkpark.Plugins.Sheets.Supervisor do
       {Barkpark.Plugins.Sheets.Session.ReplayRing, heir: self()}
     ]
 
-    Supervisor.init(children, strategy: :one_for_one)
+    # WIDER than the OTP default 3/5s, which is the SAME budget
+    # `Barkpark.Supervisor` runs (application.ex sets it explicitly). With
+    # identical budgets the crash-loop this tier exists to contain exhausts both
+    # walls inside one window and escalates to the top, taking Repo, Oban and
+    # the Endpoint down with it — a whole-node outage out of a sheets session.
+    # The concrete path is the ReplayRing/session churn under a saturated Repo
+    # pool (config/runtime.exs records a measured pool-exhaustion incident), so
+    # four crashes inside five seconds is reachable.
+    # Matches `Barkpark.Plugins.Supervisor`, `Barkpark.Plugins.Indx.Supervisor`
+    # and `Barkpark.StudioChat.Supervisor`.
+    Supervisor.init(children,
+      strategy: :one_for_one,
+      max_restarts: 5,
+      max_seconds: 10
+    )
   end
 end

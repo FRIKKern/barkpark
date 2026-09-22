@@ -47,7 +47,14 @@ defmodule BarkparkWeb.Studio.SharedPublishAdvisoryTest do
           "doc_id" => "adv-task",
           "title" => "Advisory task",
           "content" =>
-            LabelFixtures.with_labels(%{"kind" => "task", "lifecycle_status" => "open"}, 1)
+            LabelFixtures.with_labels(
+              %{
+                "kind" => "task",
+                "brief" => Barkpark.TaskBriefFixtures.brief(),
+                "lifecycle_status" => "open"
+              },
+              1
+            )
         },
         @dataset,
         scope
@@ -62,11 +69,17 @@ defmodule BarkparkWeb.Studio.SharedPublishAdvisoryTest do
   # about the publish advisory, not the gate, so it mounts an admin principal.
   defp admin_conn(conn) do
     {:ok, _} =
-      Barkpark.Auth.create_token(@admin_token, "publish advisory admin", @dataset, [
-        "read",
-        "write",
-        "admin"
-      ])
+      Barkpark.Auth.create_token(
+        @admin_token,
+        "publish advisory admin",
+        @dataset,
+        [
+          "read",
+          "write",
+          "admin"
+        ],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     Plug.Test.init_test_session(conn, %{"api_token" => @admin_token})
   end

@@ -70,9 +70,89 @@ ExUnit.start(
     # ~40s per run, needs OAuth login). Opt-in via scripts/claude-chat-e2e.sh —
     # NEVER in the default lane or CI. See
     # test/barkpark_web/studio/claude_chat_real_binary_test.exs (charter D20).
-    :real_binary
+    :real_binary,
+    # The claim-forward LIVE probe (task-adaae4196cffa86f): it reaches a REAL
+    # instance's `/v1/tasks/prime` derived-ready head over HTTP, so it needs a
+    # network and a credential and can never run in the default lane. Point it
+    # at an instance and opt in:
+    #
+    #     BARKPARK_LIVE_URL=https://guerrilla.barkpark.cloud \
+    #     BARKPARK_LIVE_TOKEN=<a read token> \
+    #     mix test --include live_probe \
+    #       test/barkpark/tasks/board/claim_forward_live_probe_test.exs
+    #
+    # Mirrors the TUI half's `-tags liveprobe` build tag.
+    :live_probe
   ]
 )
+
+# NODE-GLOBAL LEAK PROBE — the PER-MODULE arm (task-086261728f14c078).
+#
+# The after_suite arm below says a key leaked. It cannot say WHICH module leaked
+# it, and finding that out cost a full diagnosis on 2026-09-20: run 35509163543
+# printed `value left behind: :one_shot` and the writer turned out to be
+# `Barkpark.OneShot.boot!/0`, called by `Mix.Tasks.Barkpark.Preview.Backfill`
+# and `Mix.Tasks.Barkpark.Workspace.ProvisionSchemas` — two frames below any
+# test source, so no static reader of api/test could see it.
+#
+# A formatter gets `:module_finished` for every module, so it can. APPENDED to
+# whatever is already configured (`mix test --formatter …` must keep working);
+# it never replaces the CLI formatter.
+ExUnit.configure(
+  formatters: ExUnit.configuration()[:formatters] ++ [Barkpark.BootModeLeakFormatter]
+)
+
+# NODE-GLOBAL LEAK PROBE — the RUNTIME arm (task-086261728f14c078).
+#
+# `scripts/test-env-leak-gate.sh` is a STATIC reader. Its rule is "an on_exit
+# restoring this key exists in the module", and its own moduledoc says so: a
+# green from it means "a restore is WRITTEN", never "a restore RAN". That is
+# not a tightening away — elixir-nightly 35323296944 (2026-09-18) reddened two
+# assertions in application_boot_mode_test.exs with `left: :one_shot` while the
+# writer module had a correct, present, matching `on_exit`. The gate was green
+# and RIGHT to be green; the leak was still live. A static reader cannot close
+# that, so something must run.
+#
+# This is the cheap half of that something: at the END of the suite, a
+# node-global key that no test claims to own must be in its pristine state. It
+# costs one function call per run and it cannot be vacuous — the pristine value
+# is asserted below, not read from the tree.
+#
+# WHAT IT DOES NOT CATCH, stated rather than left to be discovered: a write that
+# is restored before the suite ends but AFTER some other module read it. That is
+# the transient the 09-18 nightly actually drew, and it is caught at the SOURCE
+# instead — `Barkpark.BootModeSandbox` restores synchronously in a `try … after`
+# and then re-reads the key, so a restore that does not land reds the writer's
+# own test. The two arms are complementary: the sandbox catches it in the
+# module that caused it, this catches anything that escaped the whole run.
+ExUnit.after_suite(fn _results ->
+  case Barkpark.BootModeSandbox.current() do
+    :error ->
+      :ok
+
+    {:ok, mode} ->
+      IO.puts(:stderr, """
+
+      ================================================================
+      NODE-GLOBAL LEAK: :barkpark, :boot_mode outlived the whole suite
+      ================================================================
+
+        value left behind: #{inspect(mode)}
+
+      This key is ONE value for the WHOLE NODE. Whatever set it did not put it
+      back, and in a run where the ExUnit shuffle puts a reader after the writer
+      that reader fails an assertion about code it does not touch.
+
+      Every write must go through `Barkpark.BootModeSandbox` (api/test/support),
+      which restores in a `try … after` and asserts the restore landed.
+      ================================================================
+      """)
+
+      # Non-zero exit, not just a shout: a detector that only prints is read as
+      # decoration and scrolls past in 60k lines of CI log.
+      System.at_exit(fn _ -> exit({:shutdown, 1}) end)
+  end
+end)
 
 # ── chat_bridge fixture (Connectors D54) ───────────────────────────────────
 #
@@ -125,5 +205,69 @@ Barkpark.Repo.query!("""
 ALTER TABLE chat_bridge.connector_installs
   ADD COLUMN IF NOT EXISTS chat_token_ref text
 """)
+
+# ── shared-test-database banner (task-71dd1eb49e334fbb) ───────────────────
+#
+# MUST run BEFORE `Sandbox.mode(:manual)`: the probes need to see COMMITTED
+# rows, and after :manual every query is trapped in a per-test transaction that
+# sees only its own writes.
+#
+# This PRINTS and never raises. It is deliberately not a refusal — CI runs
+# unpartitioned by design (`.github/workflows/elixir.yml` gives the job its own
+# ephemeral postgres service and sets no MIX_TEST_PARTITION), so a refusal keyed
+# on "unpartitioned" would red the required Elixir gate on every PR. The full
+# reasoning, and what each probe is a rule about, is in the module.
+Barkpark.SharedTestDb.report!(Barkpark.Repo)
+
+# ── EXIT-CAUSE, printed LAST (task-71dd1eb49e334fbb) ──────────────────────
+#
+# MEASURED, 2026-09-21, run 35662807156 on PR #19715. The Elixir gate read:
+#
+#     30 doctests, 22051 tests, 0 failures, 33 excluded
+#     ##[error]Process completed with exit code 1.
+#
+# and a lead read those two lines as an unexplained exit and attributed it to
+# the PR. The explanation WAS in the log — `boot_mode_leak_formatter.ex`
+# printed the module and the value, and called
+# `System.at_exit(fn _ -> exit({:shutdown, 1}) end)` — but it printed it 2,567
+# lines EARLIER, and nobody reads upward from a summary that says zero
+# failures. The same misreading happened twice in one evening, to two readers,
+# on the same log.
+#
+# The last thing a run prints is the thing a reader believes. So when the
+# node-global key is dirty at exit, the LAST line of the capture says so, and
+# says explicitly that the failure count above does not explain the exit code.
+#
+# Print-only. It arms nothing and clears nothing; the exit code is still the
+# formatter's and the after_suite arm's to set. `System.at_exit/1` handlers run
+# in REGISTRATION order, and this file is loaded before any test, so this one
+# runs before the formatter's `exit({:shutdown, 1})` and its line lands.
+System.at_exit(fn status ->
+  leaked =
+    try do
+      Barkpark.BootModeSandbox.current()
+    rescue
+      _ -> :error
+    catch
+      _, _ -> :error
+    end
+
+  case leaked do
+    {:ok, mode} ->
+      IO.puts(:stderr, [
+        "\nEXIT-CAUSE: this run exits NON-ZERO and its \"N tests, M failures\" line does NOT explain it. ",
+        "`:barkpark, :boot_mode` was left set to ",
+        inspect(mode),
+        " (mix test's own status here was ",
+        inspect(status),
+        "). Search this capture UPWARD for `NODE-GLOBAL LEAK` — it names the module. ",
+        "A zero failure count is compatible with this exit: the ExUnit shuffle decides whether ",
+        "the modules that ASSERT the key run before or after the module that leaks it.\n"
+      ])
+
+    _ ->
+      :ok
+  end
+end)
 
 Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)

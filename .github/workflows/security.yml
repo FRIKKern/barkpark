@@ -10,19 +10,9 @@ name: security
 # Jobs:
 #   1. sobelow    — Phoenix-aware static analysis. Surfaces NEW insecure
 #                   patterns: the pre-existing findings on main are captured
-#                   in api/.sobelow-skips (the reviewed baseline — 35 rows at
-#                   628b88afe on 2026-09-11: 28 AST-anchored (Traversal.FileModule
-#                   18 + DOS.StringToAtom 6 + XSS.Raw 3 + XSS.SendResp 1) + 6
-#                   Config.CSRF + 1 Config.HTTPS. DERIVATION, so the next reader
-#                   re-measures instead of trusting this line:
-#                   `awk 'NF{n++} END{print n}' api/.sobelow-skips` — the file
-#                   carries ONE leading blank line and NO comment rows, so a bare
-#                   `wc -l` under-counts by one (35 rows, 36 lines, no trailing
-#                   newline) and must not be used. Per-class:
-#                   `grep -v '^[[:space:]]*$' api/.sobelow-skips | sed 's/:.*//' |
-#                   sort | uniq -c`. This integer read 41 until 2026-09-11 and 57
-#                   before that; each was true when written and rotted in place,
-#                   which is why the command now travels with the number.); `--exit Low`
+#                   in api/.sobelow-skips (the reviewed baseline; the census is
+#                   the `census:` table below, and it is COMPARED, not trusted).
+#                   `--exit Low`
 #                   reports any non-baselined finding at Low confidence or above.
 #                   ADVISORY (continue-on-error: true) — Sobelow fingerprints are
 #                   derived from compiled AST and are NOT stable across Elixir
@@ -33,6 +23,37 @@ name: security
 #                   the baseline is regenerated IN CI (matched toolchain) or the
 #                   30 real high/medium findings are remediated (task-c9d6d29cc0059d2a),
 #                   then flip to blocking.
+#
+#   ── BASELINE CENSUS — DERIVED AND MACHINE-COMPARED ───────────────────────
+#   The rows below are re-derived from api/.sobelow-skips and compared against
+#   this table by `scripts/security-gate-shape.test.sh` (case 7), which the
+#   unfiltered `gate-shape` job below runs on every head. Edit the baseline, and
+#   this table must move with it or that job reds and names the class that
+#   drifted. (`gate-shape` is not a required context — see the floor in
+#   .github/required-checks.json — so this is a ratchet a reviewer reads, not
+#   merge authority.)
+#
+#   WHY IT IS A CHECK AND NOT A COMMENT. This integer read 57, then 41, then 35
+#   — each true when written, each rotted in place. The wave-that-wrote-35
+#   remedy was to publish the derivation command beside the number so "the next
+#   reader re-measures instead of trusting this line". Nobody did: measured at
+#   6c4b904f9 the real file is 24 rows, and the per-class split had drifted in
+#   three of six classes (Traversal.FileModule 18->9, DOS.StringToAtom 6->4,
+#   AST-anchored 28->17). The old note's `wc -l` advice had inverted too — the
+#   file now ends WITH a newline, so `wc -l` OVER-counts by the one leading
+#   blank line rather than under-counting. A derivation command in a comment is
+#   not an instrument; nothing executes it. This table is executed.
+#
+#   DERIVATION (the same two commands the checker runs):
+#     total     — `awk 'NF{n++} END{print n}' api/.sobelow-skips`
+#     per-class — `grep -v '^[[:space:]]*$' api/.sobelow-skips |
+#                  sed 's/:.*//' | sort | uniq -c`
+#
+#     census: total=9
+#     census: Config.CSRF=6
+#     census: Config.HTTPS=1
+#     census: XSS.Raw=2
+#
 #   2. mix-audit  — dependency CVE scan over mix.lock. No continue-on-error, so
 #                   a red DOES fail `Security gate` — but `Security gate` is not
 #                   a required context, so no merge is stopped by it anywhere.
@@ -52,7 +73,7 @@ name: security
 #                   OTP 27+ — it is the single documented --ignore-advisory-ids
 #                   suppression in the audit step. A NEW CVE reds the fleet.
 #
-# Policy of record: docs/ops/merge-gates.md §Security gates.
+# Policy of record: docs/ops/security-gates.md (split out of merge-gates.md).
 #
 # ── THE SKIP SHIM (transplanted from elixir.yml / console-harness.yml) ───────
 #
@@ -172,6 +193,31 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       api: ${{ steps.sets.outputs.api }}
+      # THE SECOND SET (2026-09-20, task-76e529e61d9e34d0). `api` gates the
+      # three code-reading jobs; `locks` gates the ONE job that does not read
+      # code at all. `mix-audit` asks a question about the DEPENDENCY TREE —
+      # "does a lock we ship resolve to a package with a published advisory" —
+      # and the only things in this tree that can change that answer are the
+      # lockfiles, the manifests that produce them, the advisory baseline, and
+      # the oracle scripts themselves. An `api/lib/*.ex` edit cannot introduce a
+      # CVE, and for 25 of the last 49 pull_request runs of this workflow
+      # (MEASURED, window 2026-09-18T15:02:56Z..2026-09-20T09:28:29Z,
+      # `bash scripts/ci-measure.sh --per-job`) that is exactly the run this job
+      # spent 2.58 median minutes on — 61.2 job-minutes in 42 hours.
+      #
+      # THE COVERAGE THAT IS NOT LOST, and why this is a VENUE move rather than
+      # a deletion: the `push: branches:[main]` arm at the top of this file is
+      # paths-filtered on `api/**`, and the step below emits `api=true` AND
+      # `locks=true` unconditionally for any non-pull_request event — so EVERY
+      # merge that touches api/ still runs the full CVE audit on main, at the
+      # same granularity as before. What stops is re-asking the question on each
+      # PR push whose diff cannot have changed the answer.
+      #
+      # AND THE ANSWER CAN CHANGE WITH NO DIFF AT ALL — a new advisory is
+      # published upstream and no PR on earth moves. That is a CLOCK, not a
+      # diff, and the per-PR path never caught it either; the push:main arm
+      # fires on the next api/ merge and main-red-owner.yml owns the red.
+      locks: ${{ steps.sets.outputs.locks }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -199,8 +245,9 @@ jobs:
             # push-to-main (and anything else): NEVER skip. Main is the branch
             # every other run is compared against; a partial main is worse than
             # a slow one, and there is no reviewer left to notice.
-            echo "event '$event' is not a pull_request — the security path set is true."
+            echo "event '$event' is not a pull_request — the security path sets are true."
             echo "api=true" >> "$GITHUB_OUTPUT"
+            echo "locks=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -251,6 +298,7 @@ jobs:
             # truly unsafe answer.
             echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching api=true and running the WHOLE security suite rather than skipping it — a skip here would green a gate nothing measured. Cost: the full Sobelow + mix-audit run."
             echo "api=true" >> "$GITHUB_OUTPUT"
+            echo "locks=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -298,10 +346,26 @@ jobs:
           # if both were damage inflates the finding — the UNSCANNED 12 are the
           # whole of it, and they are severe alone.
           api=false
+          locks=false
           while IFS= read -r f; do
             [ -n "$f" ] || continue
             case "$f" in
               api/* | .github/workflows/security.yml) api=true ;;
+            esac
+            # THE LOCK SET — mix-audit's OWN inputs, and nothing else. Every
+            # entry is a file whose contents can change what the two CVE oracles
+            # say; the rest of api/ cannot. Keep it in sync with the steps of the
+            # `mix-audit` job, which is what scripts/security-gate-shape.test.sh
+            # case 3 pins.
+            case "$f" in
+              api/mix.lock | api/mix.exs \
+              | cloud/mix.lock | cloud/mix.exs \
+              | .github/hex-audit-baseline.txt \
+              | .github/workflows/security.yml \
+              | scripts/hex-audit-oracle.sh \
+              | scripts/main-red-breaker.sh \
+              | scripts/breaker-capture.sh \
+              | scripts/run-instrument.sh) locks=true ;;
             esac
           done <<EOF
           $changed
@@ -314,9 +378,22 @@ jobs:
               exit 1
               ;;
           esac
+          # SAME POLARITY AS `api`, and asserted rather than assumed: an
+          # uninterpretable value here would skip the CVE audit, and
+          # `security-gate`'s `decide` accepts a skip only against a gate value
+          # of literally 'false' — so a garbage value reds the aggregate rather
+          # than greening over a job nothing ran. Refusing here says WHY.
+          case "${locks}" in
+            true | false) ;;
+            *)
+              echo "::error::dispatcher: refusing to emit the uninterpretable verdict locks=${locks}."
+              exit 1
+              ;;
+          esac
 
-          echo "verdict: api=${api}"
+          echo "verdict: api=${api} locks=${locks}"
           echo "api=${api}" >> "$GITHUB_OUTPUT"
+          echo "locks=${locks}" >> "$GITHUB_OUTPUT"
 
   gate-shape:
     # DELIBERATELY UNFILTERED — no `if:`, no dependency on the dispatcher, the
@@ -341,6 +418,18 @@ jobs:
     # Advisory: fingerprint baselines drift across toolchains. Reconciliation
     # stays pinned to CI and produces a human-reviewed artifact, never a commit.
     continue-on-error: true
+    # ── THE CHANNEL THAT SURVIVES `continue-on-error` ────────────────────────
+    # `continue-on-error: true` destroys this job's RESULT for a consumer:
+    # `needs.sobelow.result` reads `success` even when the job concluded
+    # FAILURE (measured; see the aggregator header). It does NOT destroy this
+    # job's OUTPUTS. `outputs.verdict` is written by the `Publish` step at the
+    # bottom from `BP_STEP_VERDICT`, which scripts/run-instrument.sh combined
+    # worst-first across every channelled step — so the aggregator can judge
+    # Sobelow on a channel the laundering cannot reach. Before this block, a
+    # fresh Sobelow finding was visible on exactly ONE surface (this job's own
+    # red check run, which no aggregate reads and no protection requires).
+    outputs:
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -469,7 +558,24 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         # absolute path: jobs with defaults.run.working-directory (api/) ran the
         # relative form from api/ and exited 127 on main 0f6c9937 (2026-09-03).
-        run: bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+        # WRAPPED in run-instrument.sh, exactly as the two blocking Sobelow jobs
+        # below are: the breaker's 0/1/2 becomes MEASURED-CLEAN /
+        # MEASURED-DEFECT / REFUSED on $BP_STEP_VERDICT. An inherited-from-main
+        # red is breaker exit 0 and stays MEASURED-CLEAN, so this channel does
+        # NOT re-red the fleet on main's standing findings; a NEW finding is
+        # breaker exit 1 and travels.
+        run: bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-sobelow -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when the Decide step above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. EMPTY is not MEASURED-CLEAN: it means the job never
+      # reached a channelled step, and `security-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
   # spec-authority: advisory-ok — the `(blocking)` token is inside the JOB name,
   # which IS this job's rendered check-run context and IS a committed exclusion
@@ -792,7 +898,14 @@ jobs:
     # this job (OTP 27.0) and prod both run. It is the single documented
     # suppression below; revisit if esaml ships a patched release.
     needs: changes
-    if: needs.changes.outputs.api == 'true'
+    # GATED ON ITS OWN INPUTS, not on `api` (2026-09-20, task-76e529e61d9e34d0).
+    # A JOB-level `if:`, never a workflow-level `paths:` — the check run
+    # `Dependency CVE audit (mix_audit over mix.lock, non-blocking)` still
+    # RENDERS on every PR head, with conclusion `skipped`, so no context becomes
+    # ABSENT and nothing can deadlock. The rationale, the coverage that is
+    # preserved, and the measurement are on the dispatcher's `locks` output
+    # above. OWNER: lead-gates (honest-gates).
+    if: needs.changes.outputs.locks == 'true'
     outputs:
       # REFUSED when main-red-breaker.sh exited 2 — it could not DECIDE
       # ownership, which is not a claim that this PR is clean. Read by
@@ -949,23 +1062,46 @@ jobs:
     #   * It ASSERTS on every upstream result instead of echoing them.
     #     `if: always()` buys the right to decide; it does not decide.
     #
-    # ── WHY `sobelow` IS NOT IN `needs`, AND CANNOT BE ──────────────────────
+    # ── HOW `sobelow` IS JUDGED, AND WHY NOT ON ITS `result` ────────────────
     #
-    # `sobelow` is the one `continue-on-error: true` job in this file. MEASURED
-    # on a throwaway probe repo: a continue-on-error job that exits 1 CONCLUDES
-    # FAILURE and renders a RED check run, but `needs.<job>.result` reads
-    # `success` — byte-identical to a genuine pass. `failure` and `skipped` stay
-    # cleanly distinguishable; `success` is NOT decomposable, and no rewrite of
-    # `decide` below can recover the difference, because the information is
-    # destroyed before this job's shell starts.
+    # CORRECTED 2026-09-17 (dr-w25-bl-security-gate-cannot-see-sobelow). The
+    # block that stood here said `sobelow` "IS NOT IN `needs`, AND CANNOT BE",
+    # on this measurement, which still stands: a `continue-on-error: true` job
+    # that exits 1 CONCLUDES FAILURE and renders a RED check run, but
+    # `needs.<job>.result` reads `success` — byte-identical to a genuine pass.
+    # `failure` and `skipped` stay cleanly distinguishable; `success` is NOT
+    # decomposable.
     #
-    # So there is no honest "tolerate sobelow" branch to write: aggregating it
-    # would launder a failed Sobelow into a green required context ACCIDENTALLY
-    # and UNFALSIFIABLY. It is EXCLUDED from `needs` entirely — the red it
-    # already renders on its own check run is the only truthful signal it has.
-    # scripts/security-gate-shape.test.sh forces this shape, deriving the
-    # continue-on-error set FROM this file: when felix-w24-s7 flips Sobelow to
-    # blocking, that ratchet will require it to be ADDED here instead.
+    # The measurement is about `.result`. The CONCLUSION drawn from it — that no
+    # aggregation of this job is possible — was WIDER THAN THE MEASUREMENT, and
+    # it was false. `continue-on-error` launders a job's RESULT; it does not
+    # touch a job's OUTPUTS. `needs.sobelow.outputs.verdict` is written by the
+    # job's own last step from $BP_STEP_VERDICT and arrives here intact. That is
+    # the SAME channel the three blocking jobs already publish on; `sobelow` was
+    # simply the one member of the family never wired to it.
+    #
+    # WHAT THAT COST, for as long as the wider conclusion stood: a fresh Sobelow
+    # finding reddened exactly ONE surface — the `Sobelow static analysis …`
+    # check run, which is `continue-on-error`, is not in any aggregate, and is
+    # not a required context. No rollup anywhere could distinguish "Sobelow
+    # looked and found nothing" from "Sobelow was never in the picture".
+    #
+    # THE RULE NOW, enforced by scripts/security-gate-shape.test.sh: a
+    # continue-on-error job MAY be in `needs`, and ONLY on these terms —
+    #   (1) it declares `outputs.verdict`;
+    #   (2) the aggregator binds `needs.<job>.outputs.verdict` to a V_* env var;
+    #   (3) the aggregator NEVER passes that job's `.result` to `decide`.
+    # A continue-on-error job in `needs` that misses any of the three is the
+    # original laundering hazard and the ratchet reds on it by name. When
+    # felix-w24-s7 flips Sobelow to blocking, it simply moves into the normal
+    # `decide` roster and (3) stops applying to it.
+    #
+    # `decide_verdict` below is fail-closed on the one thing the result channel
+    # could never say: an EMPTY verdict on a DISPATCHED job means the job did
+    # not reach a channelled step, which is CANNOT READ, and a gate that cannot
+    # read must refuse rather than report clean (the rule
+    # scripts/bp-merge.sh:116-118 states for holds: "a merge path that fails
+    # OPEN on a hold is strictly worse than no hold at all").
     #
     # Allow-set, exhaustively: `success` always; `skipped` ONLY when the
     # dispatcher output that gated that job was literally 'false'. Everything
@@ -973,7 +1109,7 @@ jobs:
     # is a FAILURE, including a failure of the dispatcher itself.
     name: Security gate
     if: always()
-    needs: [changes, gate-shape, sobelow-inline-overlap, sobelow-baseline-fingerprint, mix-audit]
+    needs: [changes, gate-shape, sobelow, sobelow-inline-overlap, sobelow-baseline-fingerprint, mix-audit]
     runs-on: ubuntu-latest
     steps:
       - name: Decide (fail-closed over every upstream result)
@@ -984,6 +1120,12 @@ jobs:
           R_FINGERPRINT: ${{ needs.sobelow-baseline-fingerprint.result }}
           R_AUDIT: ${{ needs.mix-audit.result }}
           O_API: ${{ needs.changes.outputs.api }}
+          # mix-audit is gated on `locks`, so `locks` is the value `decide` must
+          # judge its skip against. Passing O_API here would reject a skip the
+          # dispatcher DID authorise: api=false skips everything, but
+          # api=true + locks=false is a LEGITIMATE mix-audit skip that O_API
+          # alone reads as 'skipped though its gate said true' and reds.
+          O_LOCKS: ${{ needs.changes.outputs.locks }}
           # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ───────────
           # `R_*` is a RESULT — success/failure/skipped — and a failure on that
           # channel is ONE word over two utterly different facts: "I measured
@@ -993,13 +1135,17 @@ jobs:
           # the job never reached one of those steps (skipped, or it died
           # earlier) — which is NOT a claim that nothing refused, so this step
           # never reads an empty V_* as MEASURED.
+          # NO `R_SOBELOW`. Binding `needs.sobelow.result` is the laundering
+          # hazard itself: it would read `success` over a failed Sobelow, and
+          # the shape ratchet reds if it ever appears here.
+          V_SOBELOW: ${{ needs.sobelow.outputs.verdict }}
           V_OVERLAP: ${{ needs.sobelow-inline-overlap.outputs.verdict }}
           V_FINGERPRINT: ${{ needs.sobelow-baseline-fingerprint.outputs.verdict }}
           V_AUDIT: ${{ needs.mix-audit.outputs.verdict }}
         run: |
           set -euo pipefail
 
-          echo "dispatcher outputs: api='${O_API}'"
+          echo "dispatcher outputs: api='${O_API}' locks='${O_LOCKS:-}'"
           echo
 
           bad=0
@@ -1078,15 +1224,74 @@ jobs:
             fi
           }
 
+          # ── decide_verdict <job> <verdict> <gate-value> ──────────────────
+          # The `decide` above judges a RESULT. This one judges a VERDICT, and
+          # it exists for exactly one shape: a `continue-on-error: true` job,
+          # whose result is laundered to `success` and therefore must never be
+          # read, but whose `outputs.verdict` survives intact.
+          #
+          # It is FAIL-CLOSED on the unreadable case, which is the whole point:
+          # an EMPTY verdict on a job whose gate said 'true' means the job never
+          # reached a channelled step — it died early, its wiring is broken, or
+          # somebody deleted the Publish step. That is CANNOT READ, and this
+          # gate refuses rather than reporting clean. An empty verdict is only
+          # accepted against a gate-value of exactly 'false', i.e. the job was
+          # legitimately never dispatched.
+          decide_verdict() {
+            local job="$1" v="$2" gate="$3"
+            case "$v" in
+              MEASURED-CLEAN)
+                echo "  ok      ${job}: MEASURED-CLEAN — it ran and found nothing new"
+                ;;
+              MEASURED-DEFECT)
+                echo "  FAIL    ${job}: MEASURED-DEFECT — it ran and found a defect this head"
+                echo "          introduced. Read that job's own log for the finding."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+              REFUSED | UNKNOWN)
+                echo "  FAIL    ${job}: REFUSED — the instrument COULD NOT MEASURE and made NO"
+                echo "          claim in either direction. A refusal is not a pass."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                refusals="${refusals:+${refusals}, }${job}"
+                ;;
+              '')
+                if [ "$gate" = "false" ]; then
+                  echo "  ok      ${job}: not dispatched — the dispatcher said this path set was not touched (gate='false')"
+                else
+                  echo "  FAIL    ${job}: EMPTY verdict with gate '${gate}'. The job was dispatched and"
+                  echo "          published no verdict, so it never reached a channelled step."
+                  echo "          CANNOT READ is not a pass: refusing to green over a hole."
+                  bad=1
+                  reds="${reds:+${reds}, }${job}"
+                  refusals="${refusals:+${refusals}, }${job}"
+                fi
+                ;;
+              *)
+                echo "  FAIL    ${job}: unrecognised verdict '${v}'. Cannot tell, therefore red."
+                bad=1
+                reds="${reds:+${reds}, }${job}"
+                ;;
+            esac
+            if [ "$gate" != "NEVER" ]; then
+              case "$v" in
+                MEASURED-CLEAN | MEASURED-DEFECT) dispatched=$((dispatched + 1)) ;;
+                '') [ "$gate" = "false" ] && not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
+          }
+
           # The dispatcher itself may never skip: without it there are no gate
           # values, so nothing downstream can be judged.
           # ── the refusal ledger ───────────────────────────────────────────
           # Built BEFORE the verdict, so the `::error::` below can say WHICH
           # instruments refused. Derived from ${job}, never a hardcoded name.
-          # `sobelow` is absent on purpose: it is not in `needs` at all (see the
-          # job header above), so it has no verdict to publish and this ledger
-          # makes no claim about it — which is the same vocabulary, applied to
-          # itself.
+          # `sobelow` is NOT noted here: it publishes a verdict like the rest,
+          # but it is judged by `decide_verdict` below, which appends to
+          # `refusals` itself. Noting it twice would double-name it in the
+          # ::error:: line; the single-entry rule is that a job reaches this
+          # list through the SAME call that reds the gate.
           refusals=""
           note_verdict() {
             local job="$1" v="$2"
@@ -1109,11 +1314,13 @@ jobs:
           note_verdict "mix-audit"                    "${V_AUDIT:-}"
 
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
+          # Judged on the verdict channel, never on `.result` — see the header.
+          decide_verdict "sobelow"         "${V_SOBELOW:-}" "${O_API}"
           # The shape ratchet is unfiltered, so it may never skip either.
           decide "gate-shape"              "${R_SHAPE}"   "NEVER"
           decide "sobelow-inline-overlap"  "${R_OVERLAP}" "${O_API}"
           decide "sobelow-baseline-fingerprint" "${R_FINGERPRINT}" "${O_API}"
-          decide "mix-audit"               "${R_AUDIT}"   "${O_API}"
+          decide "mix-audit"               "${R_AUDIT}"   "${O_LOCKS:-}"
 
           echo
           if [ "$bad" -ne 0 ]; then

@@ -313,7 +313,7 @@ type ProvisionFunc func(ctx context.Context, spec JobSpec) (ip string, adminToke
 // use httptest), Provision (so tests use the cloud fakes) — so RunOnce runs with
 // no live anything.
 type Worker struct {
-	// ControlURL is the control-plane origin (e.g. https://cloud.barkpark.dev).
+	// ControlURL is the control-plane origin (e.g. https://barkpark.cloud).
 	// Trailing slash is trimmed.
 	ControlURL string
 	// Token is the shared WORKER_TOKEN. Sent as `Authorization: Bearer <token>`

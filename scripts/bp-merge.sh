@@ -117,6 +117,21 @@
 #     not be read — so NOTHING was measured about holds. Never folded into 0.
 #     A merge path that fails OPEN on a hold is strictly worse than no hold at
 #     all, so an unreadable registry refuses. Exit 6 has no override door.
+#   7 PR-LABEL HOLD: this PR carries the `hold` label on GitHub. A DIFFERENT
+#     CLAIM FROM 5, and deliberately a different code. 5 is a statement about
+#     MAIN ("this tree is red on main"), derived from a committed registry and
+#     scoped per-file; 7 is a statement about THIS PR ("a human put it on
+#     hold"), derived from the PR's own labels and scoped to the whole PR. They
+#     stay on different arms for the same reason the verifier's 4 and the
+#     required-checks suite's 4 do: folding two claims onto one code means the
+#     operator cannot tell which one they answered. There is NO override door
+#     on 7 — the door is `gh pr edit <n> --remove-label hold`, which is one
+#     command, is visible on the PR, and is the deliberate act the label exists
+#     to require.
+#   8 PR-LABEL HOLD CANNOT READ: the PR's label set could not be read, or did
+#     not parse — so NOTHING was measured about a label hold. Same doctrine as
+#     6: an unread label is not an absent hold, and a merge path that fails
+#     OPEN on a hold is strictly worse than no hold at all.
 #
 # USAGE
 #   scripts/bp-merge.sh              # no arguments; the PR is derived from HEAD
@@ -620,6 +635,100 @@ hold_override_or_refuse() { # $1 = the check's own HELD output
   echo "bp-merge: hold '$oid' OVERRIDDEN by $owho — authorisation recorded on the PR; proceeding."
 }
 
+# ── THE PR-LABEL HOLD ────────────────────────────────────────────────────────
+# MEASURED, 2026-09-17. PR #18497 carried the `hold` label continuously from
+# 2026-09-16T08:51:19Z (labelled by the owner; the issue timeline shows NO
+# unlabelled event) and merged at 06:41Z the next morning through this very
+# script. It was owner-held: a migration on a 31k-row prod table that the owner
+# said must be ORDERED. Nothing mechanical refused, because NOTHING IN THIS FILE
+# EVER READ THE PR'S LABELS. The hold above is the MAIN-RED registry — a
+# different claim entirely, and it correctly said CLEAR, because the PR touched
+# no tree that is red on main.
+#
+# So the label was a convention enforced by whoever remembered it. The sweep
+# skipped held PRs; a human running the merge verb directly did not. A hold that
+# only some paths honour teaches everyone the hold is real while one path merges
+# straight through it — the exact failure the comments at lines 116-118 and
+# 488-489 already named for the registry.
+#
+# THIS ARM IS INDEPENDENT ON PURPOSE. Its own read, its own classifier, its own
+# exit codes (7 / 8), its own CANNOT-READ. It does not consult the registry and
+# the registry does not consult it; either can refuse alone. Folding it into
+# preflight_hold would have made one unreadable input silence both claims.
+BP_MERGE_LABEL_HOLD="${BP_MERGE_LABEL_HOLD:-hold}"
+
+# IMPURE (it calls gh), one line, for the same reason read_pr_files is: the
+# harness stubs `gh` around it and drives the REAL reader.
+read_pr_labels() {
+  gh pr view "$PR_NUMBER" --json labels --jq '[.labels[].name]|@json' 2>&1
+}
+
+# PURE. One raw string in, one state token out, so the harness drives THIS and
+# not a lookalike.
+#
+# IT IS HANDED THE RAW JSON ARRAY, NEVER A join(","). merge-check.sh's arm read
+# `[.labels[].name]|join(",")` and could not tell a PR with NO labels from a
+# read that returned nothing — both render the empty string — so it published
+# "not held" off an empty read. `[]` is a readable, genuinely unlabelled PR; a
+# string that is not a JSON array of names is a read that did not happen.
+#
+# And the membership test is EXACT, not the `*hold*` glob merge-check used:
+# `holdover`, `withhold` and `stakeholder` all match `*hold*`.
+# Prints "<STATE>\t<detail>"; rc 0 CLEAR, 1 HELD, 2 UNREAD.
+label_hold_classify() { # $1 = raw
+  local raw="${1-}" names
+  if [ -z "$raw" ]; then
+    printf 'UNREAD\tthe label read produced NO OUTPUT — an empty read is not an empty label set\n'; return 2
+  fi
+  printf '%s' "$raw" | jq -e 'type=="array" and (map(type=="string")|all)' >/dev/null 2>&1 || {
+    printf 'UNREAD\tthe label read did not parse as a JSON array of names. gh said: %s\n' "$raw"; return 2; }
+  if printf '%s' "$raw" | jq -e --arg h "$BP_MERGE_LABEL_HOLD" \
+       'any(.[]; ascii_downcase == ($h|ascii_downcase))' >/dev/null 2>&1; then
+    names=$(printf '%s' "$raw" | jq -r 'join(", ")')
+    printf 'HELD\tlabels: [%s]\n' "$names"; return 1
+  fi
+  names=$(printf '%s' "$raw" | jq -r 'if length==0 then "(none)" else join(", ") end')
+  printf 'CLEAR\tlabels: [%s]\n' "$names"; return 0
+}
+
+# The distinct CANNOT READ line. Never byte-identical to the CLEAR or HELD line,
+# so no caller can confuse "no hold label" with "I could not look".
+label_hold_cannot_read() { # $1 = what could not be read
+  echo "bp-merge: PR-LABEL HOLD CANNOT READ — $1" >&2
+  echo "          NOTHING is known about whether PR #$PR_NUMBER carries the '$BP_MERGE_LABEL_HOLD' label." >&2
+  echo "          This refusal carries no claim that your PR is held, and none that it is clear." >&2
+  echo "          An unread label is NOT an absent hold: a merge path that fails OPEN on a hold is" >&2
+  echo "          strictly worse than no hold at all. Fix the read and re-run." >&2
+  echo "          Read attempted: gh pr view $PR_NUMBER --json labels" >&2
+  exit 8
+}
+
+preflight_label_hold() {
+  echo "bp-merge: pre-flight — PR-label hold ('$BP_MERGE_LABEL_HOLD' on PR #$PR_NUMBER)"
+  local raw rc=0 out
+  raw="$(read_pr_labels)" || rc=$?
+  [ "$rc" = "0" ] \
+    || label_hold_cannot_read "gh could not read the labels on PR #$PR_NUMBER (exit $rc): $raw"
+
+  rc=0
+  out="$(label_hold_classify "$raw")" || rc=$?
+  case "$rc" in
+    0) echo "bp-merge: label pre-flight ok — CLEAR: ${out#*	}" ;;
+    1) {
+         echo "bp-merge: REFUSED — PR-LABEL HOLD: #$PR_NUMBER carries the '$BP_MERGE_LABEL_HOLD' label."
+         echo "          ${out#*	}"
+         echo "          A hold label is a HUMAN'S DELIBERATE STOP on this PR, and it is not a note:"
+         echo "          it is the only thing standing between an owner-held change and main. The PR"
+         echo "          may be 4/4 green; this refusal says nothing about its checks."
+         echo "          There is no override flag. The door is one visible, deliberate command:"
+         echo "            gh pr edit $PR_NUMBER --remove-label $BP_MERGE_LABEL_HOLD"
+         echo "          Ask whoever applied it FIRST — read the PR's timeline for who and why."
+       } >&2
+       exit 7 ;;
+    *) label_hold_cannot_read "${out#*	}" ;;
+  esac
+}
+
 preflight_hold() {
   echo "bp-merge: pre-flight — main-red hold registry ($HOLD_REGISTRY)"
   [ -f "$HOLD_SCRIPT" ] \
@@ -1001,6 +1110,7 @@ main() {
   esac
   [ -x "$VERIFY" ] || [ -f "$VERIFY" ] || die "missing $VERIFY — the pre-flight cannot run."
   resolve_pr
+  preflight_label_hold
   preflight_hold
   preflight
   preflight_mergeable

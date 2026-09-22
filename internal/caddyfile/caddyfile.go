@@ -58,12 +58,27 @@ p{opacity:.7;line-height:1.5;margin:.25rem 0}
 </body>
 </html>`
 
-// MaintenanceHandler returns a Caddy `handle_errors` block that turns an
-// upstream-unreachable error — what every request hits while the app restarts
-// during a deploy — into a branded 503 "Back in a moment" page with a
-// Retry-After header, instead of Caddy's raw 502. It fires ONLY on errors Caddy
-// itself raises (dial failures, gateway timeouts); a 4xx/5xx the app returns is
-// proxied through untouched, so this never masks a real application error.
+// MaintenanceHandler returns a Caddy `handle_errors 502 503 504` block that
+// turns an upstream-unreachable error — what every request hits while the app
+// restarts during a deploy — into a branded 503 "Back in a moment" page with a
+// Retry-After header, instead of Caddy's raw 502.
+//
+// THE STATUS LIST IS LOAD-BEARING. `handle_errors` with no status list catches
+// EVERY error the site raises, and a `file_server` 404 IS an error Caddy itself
+// raises: inside an armed `handle_path /sites/<slug>/*` block, every miss on
+// every spawned static site answered this branded 503 instead of 404. Scoping
+// the handler to the gateway statuses 502/503/504 is the fix for that incident
+// (deploy/caddy/barkpark-maintenance.caddy is the reference form, and
+// deploy/caddy-handle-errors-scope-check.sh is the repo-wide predicate that
+// keeps every renderer on it). Do not drop the list back to a bare block.
+//
+// THE Content-Type HEADER IS LOAD-BEARING TOO, for the reason the reference
+// form states: Caddy's `respond` with a body and no Content-Type answers
+// `text/plain; charset=utf-8` (MEASURED on caddy 2.11.4 by
+// deploy/caddy-handle-errors-behaviour-proof.sh's ARM NO-CT), so the browser
+// paints the raw `<!doctype html>...` source instead of rendering the page. It
+// is a RENDERING fix only — the status stays an honest 503 + Retry-After. The
+// same predicate above reds any renderer that emits this block without it.
 //
 // Each structural line is prefixed with indent so the block nests cleanly inside
 // a site block. The body is a Caddyfile heredoc whose closing delimiter is
@@ -71,8 +86,9 @@ p{opacity:.7;line-height:1.5;margin:.25rem 0}
 // Caddyfile syntax.
 func MaintenanceHandler(indent string) string {
 	var sb strings.Builder
-	sb.WriteString(indent + "handle_errors {\n")
+	sb.WriteString(indent + "handle_errors 502 503 504 {\n")
 	sb.WriteString(indent + "\theader Retry-After \"15\"\n")
+	sb.WriteString(indent + "\theader Content-Type \"text/html; charset=utf-8\"\n")
 	// The block form of `respond` lets us set 503 AND supply a heredoc body — a
 	// heredoc opener (`<<TOKEN`) must be the last token on its line, so the
 	// status cannot follow it directly.

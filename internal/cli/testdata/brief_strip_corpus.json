@@ -1,0 +1,9193 @@
+[
+  {
+    "input": "\r\n_**_\r\n",
+    "one_pass": "\r\n__\r\n",
+    "three_pass": "\r\n\r\n",
+    "family": "crlf",
+    "divergent": true
+  },
+  {
+    "input": "*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**\r\n**",
+    "one_pass": "\r\n",
+    "three_pass": "\r\n",
+    "family": "crlf",
+    "divergent": false
+  },
+  {
+    "input": "***",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*****",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "******",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*******",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "********",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "******_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "******__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "******`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "******a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*****_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*****__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*****`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*****a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****_*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****_**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****__*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****__**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****___",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****____",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****__`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****__a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****_`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****_a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****`*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****`**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****`_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****`__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****``",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****`a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "****aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***_*",
+    "one_pass": "*_*",
+    "three_pass": "*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***_**",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***__*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***__**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***___",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***____",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***__`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***__a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***_`",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***_a",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***`*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***`**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***`_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***`__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***``",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***`a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***a*",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***a**",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***a***",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "nested",
+    "divergent": false
+  },
+  {
+    "input": "***a_",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***a__",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***a`",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***aa",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "***open",
+    "one_pass": "*open",
+    "three_pass": "*open",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "**_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_***",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_****",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_**_",
+    "one_pass": "__",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "**_**__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_**`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_**a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_*_",
+    "one_pass": "_*_",
+    "three_pass": "_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_*__",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_*`",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_*a",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__***",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__****",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__**_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__**__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__**`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__**a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__*_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__*__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__*`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__*a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**___",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**___*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**___**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**____",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**____*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**____**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_____",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**______",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**____`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**____a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**___`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**___a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__`*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__`**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__`_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__`__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__``",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__`a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__a__**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "nested",
+    "divergent": false
+  },
+  {
+    "input": "**__a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**__aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_`*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_`**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_`_",
+    "one_pass": "__",
+    "three_pass": "__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_`__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_``",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_`a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_a*",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_a**",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_a_",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_a_**",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "nested",
+    "divergent": false
+  },
+  {
+    "input": "**_a__",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_a`",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**_aa",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`***",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`****",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`**_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`**__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`**`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`**`**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "nested",
+    "divergent": false
+  },
+  {
+    "input": "**`**a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`*_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`*__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`*`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`*a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`_*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`_**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`__*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`__**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`___",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`____",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`__`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`__a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`_`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`_a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**``",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**``*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**``**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**``_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**``__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**```",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**``a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**`aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a**\rb",
+    "one_pass": "a\rb",
+    "three_pass": "a\rb",
+    "family": "crlf",
+    "divergent": false
+  },
+  {
+    "input": "**a***",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a****",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a**_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a**__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a**`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a**a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a*_",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a*__",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a*`",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a*a",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a_*",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a_**",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a__*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a__**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a___",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a____",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a__`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a__a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a_`",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a_a",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a`*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a`**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a`_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a`__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a``",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**a`a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**aa*",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**aa**",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**aa_",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**aa__",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**aa`",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**aaa",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "**open",
+    "one_pass": "open",
+    "three_pass": "open",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "**x**",
+    "one_pass": "x",
+    "three_pass": "x",
+    "family": "named",
+    "divergent": false
+  },
+  {
+    "input": "*_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_*",
+    "one_pass": "*_*",
+    "three_pass": "*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_**",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_***",
+    "one_pass": "*_*",
+    "three_pass": "*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_****",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_**_",
+    "one_pass": "*__",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "*_**__",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_**`",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_**a",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_*_",
+    "one_pass": "*_*_",
+    "three_pass": "*_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_*_*_",
+    "one_pass": "*_*_*_",
+    "three_pass": "*_*_*_",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "*_*_*_*_",
+    "one_pass": "*_*_*_*_",
+    "three_pass": "*_*_*_*_",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "*_*_*_*_*_",
+    "one_pass": "*_*_*_*_*_",
+    "three_pass": "*_*_*_*_*_",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "*_*_*_*_*_*_",
+    "one_pass": "*_*_*_*_*_*_",
+    "three_pass": "*_*_*_*_*_*_",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "*_*_*_*_*_*_*_",
+    "one_pass": "*_*_*_*_*_*_*_",
+    "three_pass": "*_*_*_*_*_*_*_",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "*_*_*_*_*_*_*_*_",
+    "one_pass": "*_*_*_*_*_*_*_*_",
+    "three_pass": "*_*_*_*_*_*_*_*_",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "*_*__",
+    "one_pass": "*_*",
+    "three_pass": "*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_*`",
+    "one_pass": "*_*",
+    "three_pass": "*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_*a",
+    "one_pass": "*_*a",
+    "three_pass": "*_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__***",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__****",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__**_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__**__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__**`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__**a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__*_",
+    "one_pass": "**_",
+    "three_pass": "**_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__*__",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__*__*",
+    "one_pass": "***",
+    "three_pass": "***",
+    "family": "nested",
+    "divergent": false
+  },
+  {
+    "input": "*__*`",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__*a",
+    "one_pass": "**a",
+    "three_pass": "**a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*___",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*___*",
+    "one_pass": "*_*",
+    "three_pass": "*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*___**",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*____",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*____*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*____**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_____",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*______",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*____`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*____a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*___`",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*___a",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__`*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__`**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__`_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__`__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__``",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__`a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__a*",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__a**",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__a_",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__a__",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__a`",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*__aa",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_`",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_`*",
+    "one_pass": "*_*",
+    "three_pass": "*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_`**",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_`_",
+    "one_pass": "*__",
+    "three_pass": "*__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_`__",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_``",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_`a",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_a",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_a*",
+    "one_pass": "*_a*",
+    "three_pass": "*_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_a**",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_a_",
+    "one_pass": "*_a_",
+    "three_pass": "*_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_a__",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_a`",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*_aa",
+    "one_pass": "*_aa",
+    "three_pass": "*_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`***",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`****",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`**_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`**__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`**`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`**a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`*_",
+    "one_pass": "**_",
+    "three_pass": "**_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`*__",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`*`",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`*a",
+    "one_pass": "**a",
+    "three_pass": "**a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`_*",
+    "one_pass": "*_*",
+    "three_pass": "*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`_**",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`__*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`__**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`___",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`____",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`__`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`__a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`_`",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`_a",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*``",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*``*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*``**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*``_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*``__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*```",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*``a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`a*",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`a**",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`a_",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`a__",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`a`",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*`aa",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a*",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a**",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a***",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a****",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a**_",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a**__",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a**`",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a**a",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a*_",
+    "one_pass": "*a*_",
+    "three_pass": "*a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a*__",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a*`",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a*a",
+    "one_pass": "*a*a",
+    "three_pass": "*a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a_",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a_*",
+    "one_pass": "*a_*",
+    "three_pass": "*a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a_**",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a__",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a__*",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a__**",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a___",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a____",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a__`",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a__a",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a_`",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a_a",
+    "one_pass": "*a_a",
+    "three_pass": "*a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a`",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a`*",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a`**",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a`_",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a`__",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a``",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*a`a",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*aa",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*aa*",
+    "one_pass": "*aa*",
+    "three_pass": "*aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*aa**",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*aa_",
+    "one_pass": "*aa_",
+    "three_pass": "*aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*aa__",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*aa`",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*aaa",
+    "one_pass": "*aaa",
+    "three_pass": "*aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "*open",
+    "one_pass": "*open",
+    "three_pass": "*open",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "[**bold**](http://x)",
+    "one_pass": "[bold](http://x)",
+    "three_pass": "[bold](http://x)",
+    "family": "link",
+    "divergent": false
+  },
+  {
+    "input": "[_**_](http://a__b)",
+    "one_pass": "[__](http://ab)",
+    "three_pass": "[](http://ab)",
+    "family": "link",
+    "divergent": true
+  },
+  {
+    "input": "[`code`](http://x)",
+    "one_pass": "[code](http://x)",
+    "three_pass": "[code](http://x)",
+    "family": "link",
+    "divergent": false
+  },
+  {
+    "input": "[a](http://x/__y__)",
+    "one_pass": "[a](http://x/y)",
+    "three_pass": "[a](http://x/y)",
+    "family": "link",
+    "divergent": false
+  },
+  {
+    "input": "\\*",
+    "one_pass": "\\*",
+    "three_pass": "\\*",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "\\**",
+    "one_pass": "\\",
+    "three_pass": "\\",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "\\\\*",
+    "one_pass": "\\\\*",
+    "three_pass": "\\\\*",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "\\\\**",
+    "one_pass": "\\\\",
+    "three_pass": "\\\\",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "\\\\_",
+    "one_pass": "\\\\_",
+    "three_pass": "\\\\_",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "\\\\__",
+    "one_pass": "\\\\",
+    "three_pass": "\\\\",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "\\\\`",
+    "one_pass": "\\\\",
+    "three_pass": "\\\\",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "\\_",
+    "one_pass": "\\_",
+    "three_pass": "\\_",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "\\__",
+    "one_pass": "\\",
+    "three_pass": "\\",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "\\`",
+    "one_pass": "\\",
+    "three_pass": "\\",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_\r\n**_\r\n",
+    "one_pass": "_\r\n_\r\n",
+    "three_pass": "_\r\n_\r\n",
+    "family": "crlf",
+    "divergent": false
+  },
+  {
+    "input": "_*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_***",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_****",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*****",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_******",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_****_",
+    "one_pass": "__",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "_****__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_****`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_****a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_***_",
+    "one_pass": "_*_",
+    "three_pass": "_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_***__",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_***`",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_***a",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**_",
+    "one_pass": "__",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "_**_*",
+    "one_pass": "__*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "_**_**",
+    "one_pass": "__",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "_**__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**__*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**__**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**___",
+    "one_pass": "__",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "_**____",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**__`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**__a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**_`",
+    "one_pass": "__",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "_**_a",
+    "one_pass": "__a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "_**_é",
+    "one_pass": "__é",
+    "three_pass": "é",
+    "family": "unicode",
+    "divergent": true
+  },
+  {
+    "input": "_**`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**`*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**`**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**`_",
+    "one_pass": "__",
+    "three_pass": "__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**`__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**``",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**`a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**a*",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**a**",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**a**_",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "nested",
+    "divergent": false
+  },
+  {
+    "input": "_**a_",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**a__",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**a`",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**aa",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_**bold**_",
+    "one_pass": "_bold_",
+    "three_pass": "_bold_",
+    "family": "named",
+    "divergent": false
+  },
+  {
+    "input": "_*_",
+    "one_pass": "_*_",
+    "three_pass": "_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*_*",
+    "one_pass": "_*_*",
+    "three_pass": "_*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*_**",
+    "one_pass": "_*_",
+    "three_pass": "_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*_*_*",
+    "one_pass": "_*_*_*",
+    "three_pass": "_*_*_*",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "_*_*_*_*",
+    "one_pass": "_*_*_*_*",
+    "three_pass": "_*_*_*_*",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "_*_*_*_*_*",
+    "one_pass": "_*_*_*_*_*",
+    "three_pass": "_*_*_*_*_*",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "_*_*_*_*_*_*",
+    "one_pass": "_*_*_*_*_*_*",
+    "three_pass": "_*_*_*_*_*_*",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "_*_*_*_*_*_*_*",
+    "one_pass": "_*_*_*_*_*_*_*",
+    "three_pass": "_*_*_*_*_*_*_*",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "_*_*_*_*_*_*_*_*",
+    "one_pass": "_*_*_*_*_*_*_*_*",
+    "three_pass": "_*_*_*_*_*_*_*_*",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "_*__",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*__*",
+    "one_pass": "_**",
+    "three_pass": "_**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*__**",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*___",
+    "one_pass": "_*_",
+    "three_pass": "_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*____",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*__`",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*__a",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*_`",
+    "one_pass": "_*_",
+    "three_pass": "_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*_a",
+    "one_pass": "_*_a",
+    "three_pass": "_*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*`",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*`*",
+    "one_pass": "_**",
+    "three_pass": "_**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*`**",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*`_",
+    "one_pass": "_*_",
+    "three_pass": "_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*`__",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*``",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*`a",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*a",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*a*",
+    "one_pass": "_*a*",
+    "three_pass": "_*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*a**",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*a_",
+    "one_pass": "_*a_",
+    "three_pass": "_*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*a__",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*a`",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_*aa",
+    "one_pass": "_*aa",
+    "three_pass": "_*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__***",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__****",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*****",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__******",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__****_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__****__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__****`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__****a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__***_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__***__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__***`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__***a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**_*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**_**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**__*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**__**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**___",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**____",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**__`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**__a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**_`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**_a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**`*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**`**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**`_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**`__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**``",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**`a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__**aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*_*",
+    "one_pass": "*_*",
+    "three_pass": "*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*_**",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*__*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*__**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*___",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*____",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*__`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*__a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*_`",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*_a",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*`*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*`**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*`_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*`__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*``",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*`a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*a*",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*a**",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*a*__",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "nested",
+    "divergent": false
+  },
+  {
+    "input": "__*a_",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*a__",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*a`",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__*aa",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___***",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___****",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___**_",
+    "one_pass": "__",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "___**__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___**`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___**a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___*_",
+    "one_pass": "_*_",
+    "three_pass": "_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___*__",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___*`",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___*a",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____***",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____****",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____**_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____**__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____**`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____**a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____*_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____*__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____*`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____*a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_____",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_____*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_____**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "______",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "______*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "______**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_______",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "________",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "______`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "______a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_____`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_____a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____`*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____`**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____`_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____`__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____``",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____`a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "____aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___`*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___`**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___`_",
+    "one_pass": "__",
+    "three_pass": "__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___`__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___``",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___`a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___a*",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___a**",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___a_",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___a__",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___a`",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___aa",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "___open",
+    "one_pass": "_open",
+    "three_pass": "_open",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "__`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`***",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`****",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`**_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`**__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`**`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`**a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`*_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`*__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`*`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`*a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`_*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`_**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`__*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`__**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`___",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`____",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`__`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`__a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`_`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`_a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__``",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__``*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__``**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__``_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__``__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__```",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__``a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__`aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a***",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a****",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a**_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a**__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a**`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a**a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a*_",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a*__",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a*`",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a*a",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a_*",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a_**",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a__*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a__**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a___",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a____",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a__`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a__a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a_`",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a_a",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a`*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a`**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a`_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a`__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a``",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__a`a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__aa*",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__aa**",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__aa_",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__aa__",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__aa`",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__aaa",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "__open",
+    "one_pass": "open",
+    "three_pass": "open",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "_`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`***",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`****",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`**_",
+    "one_pass": "__",
+    "three_pass": "__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`**__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`**`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`**a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`*_",
+    "one_pass": "_*_",
+    "three_pass": "_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`*__",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`*`",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`*a",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`_",
+    "one_pass": "__",
+    "three_pass": "__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`_*",
+    "one_pass": "__*",
+    "three_pass": "__*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`_**",
+    "one_pass": "__",
+    "three_pass": "__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`__*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`__**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`___",
+    "one_pass": "__",
+    "three_pass": "__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`____",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`__`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`__a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`_`",
+    "one_pass": "__",
+    "three_pass": "__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`_a",
+    "one_pass": "__a",
+    "three_pass": "__a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_``",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_``*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_``**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_``_",
+    "one_pass": "__",
+    "three_pass": "__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_``__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_```",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_``a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`a*",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`a**",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`a_",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`a__",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`a`",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_`aa",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a*",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a**",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a***",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a****",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a**_",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a**__",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a**`",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a**a",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a*_",
+    "one_pass": "_a*_",
+    "three_pass": "_a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a*__",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a*`",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a*a",
+    "one_pass": "_a*a",
+    "three_pass": "_a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a_",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a_*",
+    "one_pass": "_a_*",
+    "three_pass": "_a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a_**",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a__",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a__*",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a__**",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a___",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a____",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a__`",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a__a",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a_`",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a_a",
+    "one_pass": "_a_a",
+    "three_pass": "_a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a`",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a`*",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a`**",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a`_",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a`__",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a``",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_a`a",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_aa",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_aa*",
+    "one_pass": "_aa*",
+    "three_pass": "_aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_aa**",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_aa_",
+    "one_pass": "_aa_",
+    "three_pass": "_aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_aa__",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_aa`",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_aaa",
+    "one_pass": "_aaa",
+    "three_pass": "_aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "_open",
+    "one_pass": "_open",
+    "three_pass": "_open",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`***",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`****",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*****",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`******",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`****_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`****__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`****`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`****a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`***_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`***__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`***`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`***a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**_*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**_**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**__*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**__**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**___",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**____",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**__`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**__a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**_`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**_a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**`*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**`**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**`**`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "nested",
+    "divergent": false
+  },
+  {
+    "input": "`**`_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**`__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**``",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**`a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`**bold**`",
+    "one_pass": "bold",
+    "three_pass": "bold",
+    "family": "code-span",
+    "divergent": false
+  },
+  {
+    "input": "`*_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*_*",
+    "one_pass": "*_*",
+    "three_pass": "*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*_**",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*__*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*__**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*___",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*____",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*__`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*__a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*_`",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*_a",
+    "one_pass": "*_a",
+    "three_pass": "*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*`*",
+    "one_pass": "**",
+    "three_pass": "**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*`**",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*`_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*`__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*``",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*`a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*a*",
+    "one_pass": "*a*",
+    "three_pass": "*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*a**",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*a_",
+    "one_pass": "*a_",
+    "three_pass": "*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*a__",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*a`",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`*aa",
+    "one_pass": "*aa",
+    "three_pass": "*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_***",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_****",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_**_",
+    "one_pass": "__",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "`_**__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_**_`",
+    "one_pass": "__",
+    "three_pass": "",
+    "family": "code-span",
+    "divergent": true
+  },
+  {
+    "input": "`_**`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_**a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_*_",
+    "one_pass": "_*_",
+    "three_pass": "_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_*__",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_*`",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_*a",
+    "one_pass": "_*a",
+    "three_pass": "_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__***",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__****",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__**_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__**__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__**`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__**a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__*_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__*__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__*`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__*a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`___",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`___*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`___**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`____",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`____*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`____**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_____",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`______",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`____`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`____a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`___`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`___a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__`*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__`**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__`_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__`__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__``",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__`a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__a__`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "code-span",
+    "divergent": false
+  },
+  {
+    "input": "`__a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`__aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_`*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_`**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_`_",
+    "one_pass": "__",
+    "three_pass": "__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_`__",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_``",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_`a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_a*",
+    "one_pass": "_a*",
+    "three_pass": "_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_a**",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_a_",
+    "one_pass": "_a_",
+    "three_pass": "_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_a__",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_a`",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`_aa",
+    "one_pass": "_aa",
+    "three_pass": "_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``***",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``****",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``**_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``**__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``**`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``**``",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "code-span",
+    "divergent": false
+  },
+  {
+    "input": "``**a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``*_",
+    "one_pass": "*_",
+    "three_pass": "*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``*__",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``*`",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``*a",
+    "one_pass": "*a",
+    "three_pass": "*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``_*",
+    "one_pass": "_*",
+    "three_pass": "_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``_**",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``__*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``__**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``___",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``____",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``__`",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``__a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``_`",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``_a",
+    "one_pass": "_a",
+    "three_pass": "_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "```",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "```*",
+    "one_pass": "*",
+    "three_pass": "*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "```**",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "```_",
+    "one_pass": "_",
+    "three_pass": "_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "```__",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "````",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`````",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "``````",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "```````",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "````````",
+    "one_pass": "",
+    "three_pass": "",
+    "family": "runs",
+    "divergent": false
+  },
+  {
+    "input": "```a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "```open",
+    "one_pass": "open",
+    "three_pass": "open",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "``a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``a`b``",
+    "one_pass": "ab",
+    "three_pass": "ab",
+    "family": "code-span",
+    "divergent": false
+  },
+  {
+    "input": "``aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "``open",
+    "one_pass": "open",
+    "three_pass": "open",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "`a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a***",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a****",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a**_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a**__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a**`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a**a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a*_",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a*__",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a*`",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a*a",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a_*",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a_**",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a__*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a__**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a___",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a____",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a__`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a__a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a_`",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a_a",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a` and `b`",
+    "one_pass": "a and b",
+    "three_pass": "a and b",
+    "family": "code-span",
+    "divergent": false
+  },
+  {
+    "input": "`a`*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a`**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a`_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a`__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a``",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`a`a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`aa*",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`aa**",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`aa_",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`aa__",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`aa`",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`aaa",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "`open",
+    "one_pass": "open",
+    "three_pass": "open",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "a",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a\n__\r\n__b",
+    "one_pass": "a\n\r\nb",
+    "three_pass": "a\n\r\nb",
+    "family": "crlf",
+    "divergent": false
+  },
+  {
+    "input": "a\r\n**b**\r\nc",
+    "one_pass": "a\r\nb\r\nc",
+    "three_pass": "a\r\nb\r\nc",
+    "family": "crlf",
+    "divergent": false
+  },
+  {
+    "input": "a*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a***",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a****",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*****",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a******",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a****_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a****__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a****`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a****a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a***_",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a***__",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a***`",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a***a",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**_*",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**_**",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**__*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**__**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**___",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**____",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**__`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**__a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**_`",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**_a",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**`*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**`**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**`_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**`__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**``",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**`a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**a*",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**a**",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**a_",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**a__",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**a`",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a**aa",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*_",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*_*",
+    "one_pass": "a*_*",
+    "three_pass": "a*_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*_**",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*__",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*__*",
+    "one_pass": "a**",
+    "three_pass": "a**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*__**",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*___",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*____",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*__`",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*__a",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*_`",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*_a",
+    "one_pass": "a*_a",
+    "three_pass": "a*_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*`",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*`*",
+    "one_pass": "a**",
+    "three_pass": "a**",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*`**",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*`_",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*`__",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*``",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*`a",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*a",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*a*",
+    "one_pass": "a*a*",
+    "three_pass": "a*a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*a**",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*a_",
+    "one_pass": "a*a_",
+    "three_pass": "a*a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*a__",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*a`",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a*aa",
+    "one_pass": "a*aa",
+    "three_pass": "a*aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a\\**b",
+    "one_pass": "a\\b",
+    "three_pass": "a\\b",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "a\\*b",
+    "one_pass": "a\\*b",
+    "three_pass": "a\\*b",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "a\\__b",
+    "one_pass": "a\\b",
+    "three_pass": "a\\b",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "a\\_b",
+    "one_pass": "a\\_b",
+    "three_pass": "a\\_b",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "a\\`b",
+    "one_pass": "a\\b",
+    "three_pass": "a\\b",
+    "family": "escaped",
+    "divergent": false
+  },
+  {
+    "input": "a_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_*",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_**",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_***",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_****",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_**_",
+    "one_pass": "a__",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": true
+  },
+  {
+    "input": "a_**__",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_**_b_**_c",
+    "one_pass": "a__b__c",
+    "three_pass": "abc",
+    "family": "named",
+    "divergent": true
+  },
+  {
+    "input": "a_**`",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_**a",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_*_",
+    "one_pass": "a_*_",
+    "three_pass": "a_*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_*__",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_*`",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_*a",
+    "one_pass": "a_*a",
+    "three_pass": "a_*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__***",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__****",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__**_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__**__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__**`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__**a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__*_",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__*__",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__*`",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__*a",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a___",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a___*",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a___**",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a____",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a____*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a____**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_____",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a______",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a____`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a____a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a___`",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a___a",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__`*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__`**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__`_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__`__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__``",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__`a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__a*",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__a**",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__a_",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__a__",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__a`",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a__aa",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_`",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_`*",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_`**",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_`_",
+    "one_pass": "a__",
+    "three_pass": "a__",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_`__",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_``",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_`a",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_a",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_a*",
+    "one_pass": "a_a*",
+    "three_pass": "a_a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_a**",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_a_",
+    "one_pass": "a_a_",
+    "three_pass": "a_a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_a__",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_a`",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a_aa",
+    "one_pass": "a_aa",
+    "three_pass": "a_aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`***",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`****",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`**_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`**__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`**`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`**a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`*_",
+    "one_pass": "a*_",
+    "three_pass": "a*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`*__",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`*`",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`*a",
+    "one_pass": "a*a",
+    "three_pass": "a*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`_*",
+    "one_pass": "a_*",
+    "three_pass": "a_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`_**",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`__*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`__**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`___",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`____",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`__`",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`__a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`_`",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`_a",
+    "one_pass": "a_a",
+    "three_pass": "a_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a``",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a``*",
+    "one_pass": "a*",
+    "three_pass": "a*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a``**",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a``_",
+    "one_pass": "a_",
+    "three_pass": "a_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a``__",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a```",
+    "one_pass": "a",
+    "three_pass": "a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a``a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`a",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`a*",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`a**",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`a_",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`a__",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`a`",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "a`aa",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa*",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa**",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa***",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa****",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa**_",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa**__",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa**`",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa**a",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa*_",
+    "one_pass": "aa*_",
+    "three_pass": "aa*_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa*__",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa*`",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa*a",
+    "one_pass": "aa*a",
+    "three_pass": "aa*a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa_",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa_*",
+    "one_pass": "aa_*",
+    "three_pass": "aa_*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa_**",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa__",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa__*",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa__**",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa___",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa____",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa__`",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa__a",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa_`",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa_a",
+    "one_pass": "aa_a",
+    "three_pass": "aa_a",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa`",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa`*",
+    "one_pass": "aa*",
+    "three_pass": "aa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa`**",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa`_",
+    "one_pass": "aa_",
+    "three_pass": "aa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa`__",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa``",
+    "one_pass": "aa",
+    "three_pass": "aa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aa`a",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aaa",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aaa*",
+    "one_pass": "aaa*",
+    "three_pass": "aaa*",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aaa**",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aaa_",
+    "one_pass": "aaa_",
+    "three_pass": "aaa_",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aaa__",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aaa`",
+    "one_pass": "aaa",
+    "three_pass": "aaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "aaaa",
+    "one_pass": "aaaa",
+    "three_pass": "aaaa",
+    "family": "combinatorial",
+    "divergent": false
+  },
+  {
+    "input": "á**b**",
+    "one_pass": "áb",
+    "three_pass": "áb",
+    "family": "unicode",
+    "divergent": false
+  },
+  {
+    "input": "close*",
+    "one_pass": "close*",
+    "three_pass": "close*",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "close**",
+    "one_pass": "close",
+    "three_pass": "close",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "close***",
+    "one_pass": "close*",
+    "three_pass": "close*",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "close_",
+    "one_pass": "close_",
+    "three_pass": "close_",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "close__",
+    "one_pass": "close",
+    "three_pass": "close",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "close___",
+    "one_pass": "close_",
+    "three_pass": "close_",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "close`",
+    "one_pass": "close",
+    "three_pass": "close",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "close``",
+    "one_pass": "close",
+    "three_pass": "close",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "close```",
+    "one_pass": "close",
+    "three_pass": "close",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "foo***bar",
+    "one_pass": "foo*bar",
+    "three_pass": "foo*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo**_bar",
+    "one_pass": "foo_bar",
+    "three_pass": "foo_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo**`bar",
+    "one_pass": "foobar",
+    "three_pass": "foobar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo**abar",
+    "one_pass": "fooabar",
+    "three_pass": "fooabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo**bar",
+    "one_pass": "foobar",
+    "three_pass": "foobar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*_*bar",
+    "one_pass": "foo*_*bar",
+    "three_pass": "foo*_*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*__bar",
+    "one_pass": "foo*bar",
+    "three_pass": "foo*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*_`bar",
+    "one_pass": "foo*_bar",
+    "three_pass": "foo*_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*_abar",
+    "one_pass": "foo*_abar",
+    "three_pass": "foo*_abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*_bar",
+    "one_pass": "foo*_bar",
+    "three_pass": "foo*_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*`*bar",
+    "one_pass": "foo**bar",
+    "three_pass": "foo**bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*`_bar",
+    "one_pass": "foo*_bar",
+    "three_pass": "foo*_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*``bar",
+    "one_pass": "foo*bar",
+    "three_pass": "foo*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*`abar",
+    "one_pass": "foo*abar",
+    "three_pass": "foo*abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*`bar",
+    "one_pass": "foo*bar",
+    "three_pass": "foo*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*a*bar",
+    "one_pass": "foo*a*bar",
+    "three_pass": "foo*a*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*a_bar",
+    "one_pass": "foo*a_bar",
+    "three_pass": "foo*a_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*a`bar",
+    "one_pass": "foo*abar",
+    "three_pass": "foo*abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*aabar",
+    "one_pass": "foo*aabar",
+    "three_pass": "foo*aabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*abar",
+    "one_pass": "foo*abar",
+    "three_pass": "foo*abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo*bar",
+    "one_pass": "foo*bar",
+    "three_pass": "foo*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_**_bar",
+    "one_pass": "foo__bar",
+    "three_pass": "foobar",
+    "family": "named",
+    "divergent": true
+  },
+  {
+    "input": "foo_**bar",
+    "one_pass": "foo_bar",
+    "three_pass": "foo_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_*_bar",
+    "one_pass": "foo_*_bar",
+    "three_pass": "foo_*_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_*`bar",
+    "one_pass": "foo_*bar",
+    "three_pass": "foo_*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_*abar",
+    "one_pass": "foo_*abar",
+    "three_pass": "foo_*abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_*bar",
+    "one_pass": "foo_*bar",
+    "three_pass": "foo_*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo__*bar",
+    "one_pass": "foo*bar",
+    "three_pass": "foo*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo___bar",
+    "one_pass": "foo_bar",
+    "three_pass": "foo_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo__`bar",
+    "one_pass": "foobar",
+    "three_pass": "foobar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo__abar",
+    "one_pass": "fooabar",
+    "three_pass": "fooabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo__bar",
+    "one_pass": "foobar",
+    "three_pass": "foobar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_`*bar",
+    "one_pass": "foo_*bar",
+    "three_pass": "foo_*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_`_bar",
+    "one_pass": "foo__bar",
+    "three_pass": "foo__bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_``bar",
+    "one_pass": "foo_bar",
+    "three_pass": "foo_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_`abar",
+    "one_pass": "foo_abar",
+    "three_pass": "foo_abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_`bar",
+    "one_pass": "foo_bar",
+    "three_pass": "foo_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_a*bar",
+    "one_pass": "foo_a*bar",
+    "three_pass": "foo_a*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_a_bar",
+    "one_pass": "foo_a_bar",
+    "three_pass": "foo_a_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_a`bar",
+    "one_pass": "foo_abar",
+    "three_pass": "foo_abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_aabar",
+    "one_pass": "foo_aabar",
+    "three_pass": "foo_aabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_abar",
+    "one_pass": "foo_abar",
+    "three_pass": "foo_abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo_bar",
+    "one_pass": "foo_bar",
+    "three_pass": "foo_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`**bar",
+    "one_pass": "foobar",
+    "three_pass": "foobar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`*_bar",
+    "one_pass": "foo*_bar",
+    "three_pass": "foo*_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`*`bar",
+    "one_pass": "foo*bar",
+    "three_pass": "foo*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`*abar",
+    "one_pass": "foo*abar",
+    "three_pass": "foo*abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`*bar",
+    "one_pass": "foo*bar",
+    "three_pass": "foo*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`_*bar",
+    "one_pass": "foo_*bar",
+    "three_pass": "foo_*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`__bar",
+    "one_pass": "foobar",
+    "three_pass": "foobar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`_`bar",
+    "one_pass": "foo_bar",
+    "three_pass": "foo_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`_abar",
+    "one_pass": "foo_abar",
+    "three_pass": "foo_abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`_bar",
+    "one_pass": "foo_bar",
+    "three_pass": "foo_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo``*bar",
+    "one_pass": "foo*bar",
+    "three_pass": "foo*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo``_bar",
+    "one_pass": "foo_bar",
+    "three_pass": "foo_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo```bar",
+    "one_pass": "foobar",
+    "three_pass": "foobar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo``abar",
+    "one_pass": "fooabar",
+    "three_pass": "fooabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo``bar",
+    "one_pass": "foobar",
+    "three_pass": "foobar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`a*bar",
+    "one_pass": "fooa*bar",
+    "three_pass": "fooa*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`a_bar",
+    "one_pass": "fooa_bar",
+    "three_pass": "fooa_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`a`bar",
+    "one_pass": "fooabar",
+    "three_pass": "fooabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`aabar",
+    "one_pass": "fooaabar",
+    "three_pass": "fooaabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`abar",
+    "one_pass": "fooabar",
+    "three_pass": "fooabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "foo`bar",
+    "one_pass": "foobar",
+    "three_pass": "foobar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa**bar",
+    "one_pass": "fooabar",
+    "three_pass": "fooabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa*_bar",
+    "one_pass": "fooa*_bar",
+    "three_pass": "fooa*_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa*`bar",
+    "one_pass": "fooa*bar",
+    "three_pass": "fooa*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa*abar",
+    "one_pass": "fooa*abar",
+    "three_pass": "fooa*abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa*bar",
+    "one_pass": "fooa*bar",
+    "three_pass": "fooa*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa_*bar",
+    "one_pass": "fooa_*bar",
+    "three_pass": "fooa_*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa__bar",
+    "one_pass": "fooabar",
+    "three_pass": "fooabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa_`bar",
+    "one_pass": "fooa_bar",
+    "three_pass": "fooa_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa_abar",
+    "one_pass": "fooa_abar",
+    "three_pass": "fooa_abar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa_bar",
+    "one_pass": "fooa_bar",
+    "three_pass": "fooa_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa`*bar",
+    "one_pass": "fooa*bar",
+    "three_pass": "fooa*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa`_bar",
+    "one_pass": "fooa_bar",
+    "three_pass": "fooa_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa``bar",
+    "one_pass": "fooabar",
+    "three_pass": "fooabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa`abar",
+    "one_pass": "fooaabar",
+    "three_pass": "fooaabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooa`bar",
+    "one_pass": "fooabar",
+    "three_pass": "fooabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooaa*bar",
+    "one_pass": "fooaa*bar",
+    "three_pass": "fooaa*bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooaa_bar",
+    "one_pass": "fooaa_bar",
+    "three_pass": "fooaa_bar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooaa`bar",
+    "one_pass": "fooaabar",
+    "three_pass": "fooaabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooaaabar",
+    "one_pass": "fooaaabar",
+    "three_pass": "fooaaabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooaabar",
+    "one_pass": "fooaabar",
+    "three_pass": "fooaabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "fooabar",
+    "one_pass": "fooabar",
+    "three_pass": "fooabar",
+    "family": "embedded",
+    "divergent": false
+  },
+  {
+    "input": "mid***dle",
+    "one_pass": "mid*dle",
+    "three_pass": "mid*dle",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "mid**dle",
+    "one_pass": "middle",
+    "three_pass": "middle",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "mid*dle",
+    "one_pass": "mid*dle",
+    "three_pass": "mid*dle",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "mid___dle",
+    "one_pass": "mid_dle",
+    "three_pass": "mid_dle",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "mid__dle",
+    "one_pass": "middle",
+    "three_pass": "middle",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "mid_dle",
+    "one_pass": "mid_dle",
+    "three_pass": "mid_dle",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "mid```dle",
+    "one_pass": "middle",
+    "three_pass": "middle",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "mid``dle",
+    "one_pass": "middle",
+    "three_pass": "middle",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "mid`dle",
+    "one_pass": "middle",
+    "three_pass": "middle",
+    "family": "unterminated",
+    "divergent": false
+  },
+  {
+    "input": "x__**__y",
+    "one_pass": "xy",
+    "three_pass": "xy",
+    "family": "named",
+    "divergent": false
+  },
+  {
+    "input": " **x** ",
+    "one_pass": " x ",
+    "three_pass": " x ",
+    "family": "unicode",
+    "divergent": false
+  },
+  {
+    "input": "é**é**é",
+    "one_pass": "ééé",
+    "three_pass": "ééé",
+    "family": "unicode",
+    "divergent": false
+  },
+  {
+    "input": "é_**_é",
+    "one_pass": "é__é",
+    "three_pass": "éé",
+    "family": "unicode",
+    "divergent": true
+  },
+  {
+    "input": "日本__語__",
+    "one_pass": "日本語",
+    "three_pass": "日本語",
+    "family": "unicode",
+    "divergent": false
+  },
+  {
+    "input": "＿＿full＿＿",
+    "one_pass": "＿＿full＿＿",
+    "three_pass": "＿＿full＿＿",
+    "family": "unicode",
+    "divergent": false
+  },
+  {
+    "input": "🙂`🙂`🙂",
+    "one_pass": "🙂🙂🙂",
+    "three_pass": "🙂🙂🙂",
+    "family": "unicode",
+    "divergent": false
+  }
+]

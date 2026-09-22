@@ -5,12 +5,12 @@
   // `projectService: true`: a file outside every tsconfig `include` is a
   // PARSING ERROR, not a lint pass, so `lint` can only reach them from here.
   //
-  // The `lint` script carries a trailing
-  // `--ignore-pattern test/pinned-collator.test.ts`. That is TEMPORARY: turning
-  // the gate on over `test/` for the first time found a dead
-  // `const fixturePath` at line 16 of that file, and fixing it is a source
-  // change. Delete the const, then delete the flag — task-b48b8587e0935449.
-  // The file still TYPECHECKS; only the lint pass skips it.
+  // `lint` once carried a trailing `--ignore-pattern` for
+  // `test/pinned-collator.test.ts` — turning the gate on over `test/` for the
+  // first time found a dead binding in it. Both the binding and the flag are
+  // gone (task-b48b8587e0935449); every file this `include` reaches is linted,
+  // with no exclusions. Do not reintroduce one: pinned-collator.test.ts asserts
+  // the `lint` script has no `--ignore-pattern`, so a new escape reds the suite.
   "include": ["src/**/*", "tests/**/*", "test/**/*", "tsup.config.ts", "vitest.config.ts"],
   "compilerOptions": {
     "rootDir": "."

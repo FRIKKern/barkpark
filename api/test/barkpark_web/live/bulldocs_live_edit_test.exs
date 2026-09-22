@@ -137,7 +137,16 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
 
   defp writer_conn(conn) do
     raw = "eol-writer-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "eol writer", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "eol writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     as_token(conn, raw)
   end
 
@@ -391,7 +400,14 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
     test "paper-action runs for a read-only token — a principal, not a writer",
          %{conn: conn, slug: slug} do
       raw = "eol-action-reader-#{System.unique_integer([:positive])}"
-      {:ok, _token} = Auth.create_token(raw, "eol action reader", @dataset, ["read"])
+
+      {:ok, _token} =
+        Auth.create_token(
+          raw,
+          "eol action reader",
+          @dataset,
+          ["read"]
+        )
 
       {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
 
@@ -406,7 +422,14 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
   describe "criterion 2 — a read-only token is identified but refused identically" do
     test "no toggle, and every MVP event is refused", %{conn: conn, slug: slug} do
       raw = "eol-reader-#{System.unique_integer([:positive])}"
-      {:ok, _token} = Auth.create_token(raw, "eol reader", @dataset, ["read"])
+
+      {:ok, _token} =
+        Auth.create_token(
+          raw,
+          "eol reader",
+          @dataset,
+          ["read"]
+        )
 
       {:ok, view, html} = live(as_token(conn, raw), "/papers/#{slug}")
 
@@ -431,7 +454,15 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       slug: slug
     } do
       raw = "eol-reader-field-#{System.unique_integer([:positive])}"
-      {:ok, _token} = Auth.create_token(raw, "eol field reader", @dataset, ["read"])
+
+      {:ok, _token} =
+        Auth.create_token(
+          raw,
+          "eol field reader",
+          @dataset,
+          ["read"]
+        )
+
       {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
       before = stored_blocks(slug)
 
@@ -969,7 +1000,16 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       slug: slug
     } do
       raw = "eol-replay-writer-#{System.unique_integer([:positive])}"
-      {:ok, token} = Auth.create_token(raw, "eol replay writer", @dataset, ["read", "write"])
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "eol replay writer",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
       render_click(view, "paper-toggle-edit", %{})
 
@@ -1033,7 +1073,16 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       slug: slug
     } do
       raw = "eol-structural-replay-#{System.unique_integer([:positive])}"
-      {:ok, token} = Auth.create_token(raw, "eol structural replay", @dataset, ["read", "write"])
+
+      {:ok, token} =
+        Auth.create_token(
+          raw,
+          "eol structural replay",
+          @dataset,
+          ["read", "write"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       {:ok, view, _html} = live(as_token(conn, raw), "/papers/#{slug}")
       render_click(view, "paper-toggle-edit", %{})
 

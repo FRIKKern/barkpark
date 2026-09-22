@@ -7316,7 +7316,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Patch a document: --set the fields to change (key:=json for typed values).",
+        "summary": "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "tags": [
           "doc"
         ],
@@ -11208,7 +11208,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Patch a document: --set the fields to change (key:=json for typed values).",
+        "summary": "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "tags": [
           "doc"
         ],
@@ -11492,6 +11492,15 @@
             "description": "Narrow the page to the DIRECT children of this parent task id (`parent_id` is an accepted alias server-side). This is the parent-scoped read that carries updated_at per row — the close-time field a \"which children closed between T1 and T2\" audit needs. `bp task get <parent>` renders the same rail but its child summaries are a lighter card; use this verb when you are querying by time rather than reading one task.",
             "in": "query",
             "name": "parent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Narrow the listing to ONE dataset — THE INDEX SCOPE SELECTOR. Absent: the page spans every dataset in the caller's workspace/project scope (`page.datasets` says which) and a doc_id living in more than one of them is WITHHELD and named once in `page.dataset_ambiguous`. Named: only that dataset's rows, `page.dataset_scope` reads \"named\", and a dataset holding no rows answers with an EMPTY page rather than the global one.",
+            "in": "query",
+            "name": "dataset",
             "required": false,
             "schema": {
               "type": "string"
@@ -14018,6 +14027,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Bound each hit's projected prose to ~N characters: blocks/body are cut to the smallest whole-block document prefix carrying that much text, and a cut hit carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse projecting blocks answers ~14 MB). A malformed value is a 400, never an unbounded 200.",
+            "in": "query",
+            "name": "bodyChars",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -14831,6 +14849,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Bound each hit's projected prose to ~N characters: blocks/body are cut to the smallest whole-block document prefix carrying that much text, and a cut hit carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse projecting blocks answers ~14 MB). A malformed value is a 400, never an unbounded 200.",
+            "in": "query",
+            "name": "bodyChars",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -15500,9 +15527,18 @@
             }
           },
           {
-            "description": "Max revisions to return.",
+            "description": "Max revisions to return (max 200).",
             "in": "query",
             "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Skip this many revisions — pages past the first. The response carries limit, offset and has_more.",
+            "in": "query",
+            "name": "offset",
             "required": false,
             "schema": {
               "type": "integer"
@@ -17665,9 +17701,18 @@
             }
           },
           {
-            "description": "Max revisions to return.",
+            "description": "Max revisions to return (max 200).",
             "in": "query",
             "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Skip this many revisions — pages past the first. The response carries limit, offset and has_more.",
+            "in": "query",
+            "name": "offset",
             "required": false,
             "schema": {
               "type": "integer"

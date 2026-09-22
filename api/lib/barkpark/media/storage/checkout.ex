@@ -82,7 +82,7 @@ defmodule Barkpark.Media.Storage.Checkout do
            @asset_type,
            attrs,
            dataset,
-           [source: :api] ++ Barkpark.Plugins.Media.Assets.file_scope_opts(file)
+           [source: :api] ++ MediaFile.scope_opts(file)
          ) do
       {:ok, updated} ->
         # Force-release side effect: clearing the holder (actor == nil, the

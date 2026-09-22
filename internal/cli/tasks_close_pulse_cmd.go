@@ -3,7 +3,7 @@ package cli
 // tasks_close_pulse_cmd.go — the read-back for `bp task close` and
 // `bp task pulse`, the two siblings of `bp task stamp` on the same ledger.
 //
-// Wave 26 gave `stamp` a second read (PDS-D359/D361) and cut the slice at the
+// Wave 26 gave `stamp` a second read (PDS-D359/PDS-D361) and cut the slice at the
 // stamp verb. Its two siblings carry the SAME exposure and were left reporting
 // success on an exit code alone:
 //
@@ -103,6 +103,19 @@ func runTaskClose(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	if code, refused := refuseAnchorlessCloseReason(out, cmd, tail); refused {
 		return code
 	}
+	// THE FLIGHT RECORDER'S CLOSING FRAME (task-a42dccec2fe4a406).
+	// `--context-compact <file>` is CLIENT-SIDE and undeclared, in the shape
+	// tasks_stamp_cmd.go's `--expect` established: consumed here and never
+	// forwarded, so no server has to declare it. Its contents ride as
+	// `--set context_compact=<text>`, the body escape hatch this verb already
+	// declares. A file that cannot be read, or one over the ledger bound,
+	// REFUSES before the POST rather than sealing the row and dropping the
+	// record the agent asked to attach.
+	forward, inject, code, refused := consumeContextCompact(out, tail)
+	if refused {
+		return code
+	}
+	tail = append(forward, inject...)
 
 	rc := runCommand(out, g, ctx, m, cmd, tail)
 

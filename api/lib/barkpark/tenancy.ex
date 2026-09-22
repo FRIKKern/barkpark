@@ -15,6 +15,7 @@ defmodule Barkpark.Tenancy do
   alias Barkpark.Audit.ExportSink
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Document
   alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile
@@ -986,7 +987,7 @@ defmodule Barkpark.Tenancy do
 
   defp do_set_workspace_chat_settings(_workspace_or_id, _chat), do: {:error, :not_found}
 
-  # ── Pull provenance (PDS-D15/D16 — where pulled data came from) ────────────
+  # ── Pull provenance (PDS-D15/PDS-D16 — where pulled data came from) ────────────
   #
   # A dataset pulled from another server (`bp dev pull`) records WHERE it came
   # from, in the same `settings` jsonb bag as `theme` / `plugins` / `chat`,
@@ -1042,7 +1043,7 @@ defmodule Barkpark.Tenancy do
 
   def pull_provenance(_workspace), do: %{}
 
-  # ─── The pull-provenance guard predicate (PDS-D21/D22, PDS-D125/D126) ──────
+  # ─── The pull-provenance guard predicate (PDS-D21/PDS-D22, PDS-D125/PDS-D126) ──────
   #
   # ONE home, TWO boot-time writers. `Plugins.Bootstrap.upsert_one/3` walks the
   # plugin registry; `Content.TagRegistry.register_attrs!/2` writes the core
@@ -1987,12 +1988,22 @@ defmodule Barkpark.Tenancy do
     # triad.
     Media.clear_deferred_media_effects()
 
+    # The SAME triad for the CONTENT broadcast/webhook queue, which this
+    # function used to inherit without owning. `delete_workspace_documents/1`
+    # calls `Content.delete_document/4` for every document in the workspace, and
+    # that reaches `Broadcast.tap_broadcast/7` with a transaction already open —
+    # so each delete's `mutation_events` row committed while its webhook sat in
+    # an unowned process-dict queue and died there, with no dispatch and no log
+    # line. `with_deferred_queue/1` claims the queue, flushes on `{:ok, _}` and
+    # clears on rollback; it is a no-op when an enclosing owner already exists.
     result =
-      Repo.transaction(fn ->
-        case do_delete_workspace(workspace) do
-          {:ok, ws} -> ws
-          {:error, reason} -> Repo.rollback(reason)
-        end
+      Broadcast.with_deferred_queue(fn ->
+        Repo.transaction(fn ->
+          case do_delete_workspace(workspace) do
+            {:ok, ws} -> ws
+            {:error, reason} -> Repo.rollback(reason)
+          end
+        end)
       end)
 
     case result do

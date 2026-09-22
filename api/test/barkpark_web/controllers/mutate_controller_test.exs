@@ -4,8 +4,21 @@ defmodule BarkparkWeb.MutateControllerTest do
   alias Barkpark.Content
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
-    Barkpark.Auth.create_token("barkpark-readonly-token", "ro", "test", ["read"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      "test",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
+    Barkpark.Auth.create_token(
+      "barkpark-readonly-token",
+      "ro",
+      "test",
+      ["read"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     Content.upsert_schema(
       %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
@@ -695,6 +708,7 @@ defmodule BarkparkWeb.MutateControllerTest do
         Map.merge(
           %{
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "priority" => 1,
             "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
@@ -755,6 +769,7 @@ defmodule BarkparkWeb.MutateControllerTest do
       content =
         %{
           "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
           "lifecycle_status" => "open",
           "priority" => 1,
           "acceptance_criteria" => [
@@ -1025,6 +1040,7 @@ defmodule BarkparkWeb.MutateControllerTest do
               "_type" => "task",
               "title" => "flat envelope",
               "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
               "lifecycle_status" => "done"
             }
           }
@@ -1350,7 +1366,15 @@ defmodule BarkparkWeb.MutateControllerTest do
         "_id" => id,
         "_type" => "task",
         "title" => "Guard fixture #{id}",
-        "content" => Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+        "content" =>
+          Map.merge(
+            %{
+              "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
+              "lifecycle_status" => "open"
+            },
+            content_extra
+          )
       }
     end
 
@@ -1698,6 +1722,7 @@ defmodule BarkparkWeb.MutateControllerTest do
           "title" => "Merge-gate advisory fixture #{id}",
           "content" => %{
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "priority" => 2,
             "acceptance_criteria" => criteria
@@ -1975,7 +2000,12 @@ defmodule BarkparkWeb.MutateControllerTest do
             "title" => "Filing-law fixture #{id}",
             "content" =>
               Map.merge(
-                %{"kind" => "task", "lifecycle_status" => "open", "priority" => 1},
+                %{
+                  "kind" => "task",
+                  "brief" => Barkpark.TaskBriefFixtures.brief(),
+                  "lifecycle_status" => "open",
+                  "priority" => 1
+                },
                 content_extra
               )
           }
@@ -2000,6 +2030,7 @@ defmodule BarkparkWeb.MutateControllerTest do
               Map.merge(
                 %{
                   "kind" => "task",
+                  "brief" => Barkpark.TaskBriefFixtures.brief(),
                   "lifecycle_status" => "open",
                   "priority" => 1,
                   "parent_id" => @epic
@@ -2030,6 +2061,7 @@ defmodule BarkparkWeb.MutateControllerTest do
             "id" => id,
             "title" => "Filing-law fixture #{id}",
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "priority" => 1,
             "parent_id" => @epic
@@ -2202,6 +2234,204 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert resp.status == 200
       {:ok, doc} = Content.get_document("drafts.bare-unset", "post", "test")
       refute Map.has_key?(doc.content || %{}, "id")
+    end
+  end
+
+  # ── the PATCH door and a type that declares its own `status` (task-949bee3f1fb1d304) ──
+  #
+  # #17346 taught the CREATE/UPSERT flat-envelope door to ASK THE TYPE whether
+  # `status` is the caller's own field. The PATCH door was never taught: both
+  # of its `apply_one/3` clauses held a HARD `~w(title status _id _type _rev)`
+  # and dropped `status` out of every verb, so on a declaring type a
+  # `patch{set:{status:…}}` returned HTTP 200 and wrote NOTHING — not the
+  # field, not the lifecycle. A silent no-op, undetectable by the caller.
+  #
+  # TWO DOORS, and the door set is DERIVED, not listed: `grep -n 'title status
+  # _id _type _rev' lib/barkpark/content/` finds exactly three sites.
+  #   * mutations.ex `protected` (the ops-bearing clause) — a patch carrying
+  #     setIfMissing/unset/inc/dec/append/prepend, WITH OR WITHOUT `set`.
+  #   * mutations.ex (the set-only clause) — a patch carrying ONLY `set`.
+  #     This is the door the row's own repro takes; a fix to the first clause
+  #     alone would not have moved it at all.
+  #   * papers/value_writeback.ex `@protected_fields` — NOT this defect: it
+  #     REFUSES with `{:error, :invalid_field}`, which the caller can see.
+  #
+  # Every cell asserts the STORED BYTES, never only the 200 — a 200 is exactly
+  # what the bug already returned.
+  describe "patch `status` on a type that declares it (task-949bee3f1fb1d304)" do
+    setup do
+      # `invoice` DECLARES its own `status` field. `post` (the top-level setup)
+      # declares none, and is the byte-unchanged control.
+      Content.upsert_schema(
+        %{
+          "name" => "invoice",
+          "title" => "Invoice",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "status", "type" => "string"},
+            %{"name" => "slug", "type" => "string"}
+          ]
+        },
+        "test"
+      )
+
+      :ok
+    end
+
+    defp patch_mutate(conn, mutations) do
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> put_req_header("content-type", "application/json")
+      |> post("/v1/data/mutate/test", Jason.encode!(%{"mutations" => mutations}))
+    end
+
+    defp seed!(id, type, content) do
+      {:ok, _} =
+        Content.create_document(
+          type,
+          %{"_id" => id, "title" => "seed", "content" => content},
+          "test"
+        )
+
+      :ok
+    end
+
+    # CELL 1 — declaring type + `set`, through the SET-ONLY clause.
+    test "declaring type + set: `status` lands in content and the lifecycle is untouched",
+         %{conn: conn} do
+      seed!("inv-set", "invoice", %{"status" => "archived", "slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{"patch" => %{"id" => "inv-set", "type" => "invoice", "set" => %{"status" => "paid"}}}
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.inv-set", "invoice", "test")
+      # THE BYTES. Before the fix this read back "archived" — the create's value.
+      assert doc.content["status"] == "paid"
+      assert doc.content["slug"] == "s"
+      # The document's lifecycle never moved.
+      assert doc.status == "draft"
+    end
+
+    # CELL 2 — declaring type + `set`, through the OPS-BEARING clause. Same
+    # `set`, but the presence of `unset` routes it to the OTHER apply_one head.
+    # Both heads must have been taught, and a one-clause fix reds here.
+    test "declaring type + set through the ops clause: the other head routes the same way",
+         %{conn: conn} do
+      seed!("inv-set-ops", "invoice", %{"status" => "archived", "slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{
+            "patch" => %{
+              "id" => "inv-set-ops",
+              "type" => "invoice",
+              "set" => %{"status" => "paid"},
+              "unset" => ["slug"]
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.inv-set-ops", "invoice", "test")
+      assert doc.content["status"] == "paid"
+      refute Map.has_key?(doc.content, "slug")
+      assert doc.status == "draft"
+    end
+
+    # CELL 3 — declaring type + `unset`. `unset_keys -- protected` scrubbed
+    # "status" out of the unset list, so the key was undeletable: 200, nothing
+    # removed.
+    test "declaring type + unset: `status` is actually removed from content", %{conn: conn} do
+      seed!("inv-unset", "invoice", %{"status" => "archived", "slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{"patch" => %{"id" => "inv-unset", "type" => "invoice", "unset" => ["status"]}}
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.inv-unset", "invoice", "test")
+      refute Map.has_key?(doc.content, "status")
+      assert doc.content["slug"] == "s"
+      assert doc.status == "draft"
+    end
+
+    # CELL 4 — NON-declaring type + `set`. THE EXISTING CONTRACT, stated: the
+    # patch door DROPS the key silently; it does NOT refuse. `status` is the
+    # lifecycle word on such a type and is moved with publish/archive, never by
+    # writing a content key. This arm must be byte-identical to main.
+    test "non-declaring type + set: `status` is still DROPPED (not refused), bytes unchanged",
+         %{conn: conn} do
+      seed!("post-set", "post", %{"slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{
+            "patch" => %{
+              "id" => "post-set",
+              "type" => "post",
+              "set" => %{"status" => "paid", "slug" => "t"}
+            }
+          }
+        ])
+
+      # Dropped, not refused — a 422 here would be a DIFFERENT contract.
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.post-set", "post", "test")
+      refute Map.has_key?(doc.content, "status")
+      # The sibling key in the same `set` still landed, so the drop is
+      # key-scoped and not a whole-patch refusal.
+      assert doc.content["slug"] == "t"
+      assert doc.status == "draft"
+    end
+
+    # CELL 5 — NON-declaring type + `unset`. Still undeletable: a stored
+    # `content["status"]` (which a nested-content create can leave behind)
+    # survives the unset, byte-for-byte.
+    test "non-declaring type + unset: `status` is still undeletable, bytes unchanged",
+         %{conn: conn} do
+      seed!("post-unset", "post", %{"status" => "stored", "slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{"patch" => %{"id" => "post-unset", "type" => "post", "unset" => ["status", "slug"]}}
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.post-unset", "post", "test")
+      assert doc.content["status"] == "stored"
+      # The sibling unset key DID go, so the survival is status-scoped.
+      refute Map.has_key?(doc.content, "slug")
+      assert doc.status == "draft"
+    end
+
+    # The COST gate, pinned: a patch that never mentions `status` must not be
+    # changed by any of this. `title` stays protected on BOTH types — it is
+    # lifted to the title COLUMN, not dropped into nothing, so it is a
+    # different story and deliberately out of scope.
+    test "a patch that never says `status` is unchanged, and `title` stays column-lifted",
+         %{conn: conn} do
+      seed!("inv-title", "invoice", %{"slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{
+            "patch" => %{
+              "id" => "inv-title",
+              "type" => "invoice",
+              "set" => %{"title" => "renamed", "slug" => "t"}
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.inv-title", "invoice", "test")
+      assert doc.title == "renamed"
+      refute Map.has_key?(doc.content, "title")
+      assert doc.content["slug"] == "t"
     end
   end
 end

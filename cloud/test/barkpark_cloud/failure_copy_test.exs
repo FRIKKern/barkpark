@@ -1055,7 +1055,43 @@ defmodule BarkparkCloud.FailureCopyTest do
       # `<`, so excluding that one byte costs the redaction nothing.
       {"the provider-key hand-off instruction keeps its placeholder",
        ~s(hand the box its key: printf 'ANTHROPIC_API_KEY=<your-key>\\n' >> /etc/barkpark/fleet-listener.env)},
-      {"a generic angle-bracket placeholder in a key position", "set api_key=<paste-it-here>"}
+      {"a generic angle-bracket placeholder in a key position", "set api_key=<paste-it-here>"},
+
+      # THE WRAPPED STOP-WORD (cch-w13-rv). `prose_value` was anchored on the
+      # value's FIRST BYTE, so it only ever saw a value that OPENS with the
+      # stop word. A placeholder opens with a delimiter and parks the word one
+      # byte in, so the guard never fired and the scrub redacted copy that held
+      # no secret. Measured on origin/main before the fix:
+      #
+      #     "Bearer <none>"  ->  "Bearer [redacted]"
+      #     "token: [none]"  ->  "token: [redacted]"
+      #
+      # `value_wrapper` in `priv/secret-scrub.exs` lets the guard see THROUGH
+      # the wrapper, which is why these rows are a RULE and not four literals:
+      # the same widening covers every delimiter x every stop word.
+      #
+      # `secret: <none>` is deliberately NOT here as the row's defect — the key
+      # clause's own `(?![=:<])` already spared it before this fix; it rides
+      # below only as the pin that it still does.
+      {"an angle-bracket placeholder after Bearer", "credentials refused: Bearer <none>"},
+      {"a square-bracket placeholder in a token value", "token: [none]"},
+      {"a parenthesised placeholder after Bearer", "Bearer (none)"},
+      {"a quoted placeholder after Bearer", ~s(Bearer "none")},
+      {"a brace placeholder in a secret value", "secret: {unset}"},
+      {"an angle-bracket placeholder in a secret value (already spared, pinned)",
+       "secret: <none>"}
+    ]
+
+    # THE MANDATORY CONTROL for the widening above: a REAL credential wrapped in
+    # exactly the same delimiters must STILL be redacted. Without these rows the
+    # negatives above could be satisfied by deleting the clauses outright.
+    # `@unprefixed_bearer` is the token no other clause can reach, so each row
+    # isolates the clause named in its label.
+    @wrapped_secret_controls [
+      {"angle-bracketed real credential after Bearer", "Authorization: Bearer <BEARER>"},
+      {"square-bracketed real credential in a token value", "token: [BEARER]"},
+      {"quoted real credential after Bearer", ~s(Bearer "BEARER")},
+      {"brace-wrapped real credential in a token value", "token: {BEARER}"}
     ]
 
     for {label, input, secret} <- @positives do
@@ -1073,6 +1109,32 @@ defmodule BarkparkCloud.FailureCopyTest do
       test "negative: #{label} survives verbatim" do
         assert FailureCopy.scrub(unquote(input)) == unquote(input)
       end
+    end
+
+    for {label, template} <- @wrapped_secret_controls do
+      test "control: #{label} is STILL redacted" do
+        line = String.replace(unquote(template), "BEARER", @unprefixed_bearer)
+        out = FailureCopy.scrub(line)
+
+        refute out =~ @unprefixed_bearer,
+               "the wrapper spared a real credential: #{out}"
+
+        assert out =~ "[redacted]"
+      end
+    end
+
+    # The driven before/after, pasted, for cch-w13-rv c1. Asserted as whole
+    # strings rather than a `refute … =~` so a future widening that spares the
+    # value but mangles the LINE reds here too.
+    test "a wrapped placeholder keeps its copy and a wrapped credential still goes" do
+      assert FailureCopy.scrub("Bearer <none>") == "Bearer <none>"
+      assert FailureCopy.scrub("token: [none]") == "token: [none]"
+      assert FailureCopy.scrub("secret: <none>") == "secret: <none>"
+
+      assert FailureCopy.scrub("Authorization: Bearer <#{@unprefixed_bearer}>") ==
+               "Authorization: Bearer [redacted]"
+
+      assert FailureCopy.scrub("token: [#{@unprefixed_bearer}]") == "token: [redacted]"
     end
 
     test "the naive \\b[A-Za-z0-9]{40,}\\b shape is REJECTED — it eats a git SHA" do

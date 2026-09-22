@@ -297,8 +297,17 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # nonce burn — so it owes no `side_effecting_get?/1` clause. It is agent-gated
   # like its `/v1/agent/*` siblings, so `total` and `agent_or_worker` each rise by
   # exactly one; session and public are untouched.
-  @baseline_total 74
-  @baseline_session 53
+  # 2026-09-18: 75 / 54 / 9 / 12. ONE ROUTE WAS ADDED — `GET
+  # /v1/providers/:kind/identity` (WHICH cloud account a connection points at,
+  # for the CONNECTABLE kinds rather than the catalog kinds). A bare HEAD of it
+  # MUTATES NOTHING: the body is `Auth.require_user/2`, `Registry.list_providers/1`
+  # and `Registry.reveal_provider_token/1` — a read and a decrypt, no write, no
+  # token mint, no nonce burn, and NO upstream call at all — so it owes no
+  # `side_effecting_get?/1` clause. It is session-gated like its
+  # `/v1/providers/*` siblings, so `total` and `session` each rise by exactly
+  # one; machine and public are untouched.
+  @baseline_total 75
+  @baseline_session 54
   @baseline_machine 9
   @baseline_public 12
 

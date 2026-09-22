@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 
@@ -76,12 +77,28 @@ assert.ok(
   "the watchdog must capture the exact clicked control's aria-pressed state",
 );
 const pressedWitness = new Function("el", pressedWitnessHelper[1]);
-const pressedChangedHelper = layout.match(/_paPressedChanged\(witness\) \{([\s\S]*?)\n      \},/);
+// `root` — spd-w19-press-answer-outside-panes. The witness is computed over the
+// press's OWN surface; the fixtures below pass it undefined, which falls back to
+// `this.el` and is exactly the scope this harness measured before.
+const pressedChangedHelper = layout.match(
+  /_paPressedChanged\(witness, root\) \{([\s\S]*?)\n      \},/,
+);
 assert.ok(
   pressedChangedHelper,
   "the watchdog must compare only the clicked control's aria-pressed state",
 );
-const pressedChanged = new Function("witness", pressedChangedHelper[1]);
+const pressedChanged = new Function("witness", "root", pressedChangedHelper[1]);
+
+// THE CHROME SCOPE. `_paOnPress` now asks which surface a press landed on, so
+// the handler cannot be exercised at all without it — extracted from the layout
+// rather than restated, so a change to the real resolver reaches this harness.
+const scopeForHelper = layout.match(/_paScopeFor\(el\) \{([\s\S]*?)\n      \},/);
+assert.ok(scopeForHelper, "the press answer must resolve the surface a press landed on");
+const scopeFor = new Function("el", scopeForHelper[1]);
+
+const chromeAnchorHelper = layout.match(/_paOnChromeAnchor\(ev, t\) \{([\s\S]*?)\n      \},/);
+assert.ok(chromeAnchorHelper, "the tab strip is plain anchors; it needs a navigation shape");
+const chromeAnchor = new Function("ev", "t", chromeAnchorHelper[1]);
 const settleHelper = layout.match(/_paSettleWord\(p\) \{([\s\S]*?)\n      \},/);
 assert.ok(settleHelper, "the watchdog settle classifier must remain present");
 const settleWord = new Function("p", settleHelper[1]);
@@ -90,6 +107,7 @@ const hook = {
   _paCurrentSig: () => "same-current",
   _paPressedWitness: pressedWitness,
   _paPressedChanged: pressedChanged,
+  _paScopeFor: scopeFor,
 };
 const betaMode = document.querySelector('[data-test-id="editor-mode-beta"]');
 const betaPressed = hook._paPressedWitness(betaMode);
@@ -200,7 +218,7 @@ assert.ok(
 // flips the stable Beta button only a little later. That transition must settle as
 // selected instead of emitting a premature lost-press warning.
 const transitionDom = new JSDOM(`
-  <main id="transition-panes">
+  <main id="studio-panes">
     <div class="editor-mode-toggle" role="group" aria-label="Editor mode" data-test-id="editor-mode-toggle">
       <button type="button" class="btn btn-sm btn-primary" phx-click="editor-set-mode" phx-value-mode="classic" aria-pressed="" data-test-id="editor-mode-classic">Classic</button>
       <button type="button" class="btn btn-sm btn-ghost" phx-click="editor-set-mode" phx-value-mode="beta" data-test-id="editor-mode-beta">Beta</button>
@@ -213,7 +231,7 @@ const transitionMessages = [];
 const onPressBody = onPress.slice(onPress.indexOf("{") + 1, onPress.lastIndexOf("\n      },"));
 const runOnPress = new Function("ev", onPressBody);
 const transitionHook = {
-  el: transitionDocument.getElementById("transition-panes"),
+  el: transitionDocument.getElementById("studio-panes"),
   _PA_PROBE: 16,
   _PA_POLL: 20,
   _PA_CEILING: 500,
@@ -229,6 +247,8 @@ const transitionHook = {
   _paPressedWitness: pressedWitness,
   _paPressedChanged: pressedChanged,
   _paNativeDisclosureOnly: nativeDisclosureOnly,
+  _paScopeFor: scopeFor,
+  _paOnChromeAnchor: chromeAnchor,
   _paSettleWord: settleWord,
   _paSay(text) {
     transitionMessages.push(text);
@@ -261,6 +281,13 @@ globalThis.document = transitionDocument;
 globalThis.location = transitionDom.window.location;
 try {
   const beta = transitionDocument.querySelector('[data-test-id="editor-mode-beta"]');
+  // PRECONDITION, not an afterthought: `_paOnPress` drops any press whose
+  // surface does not resolve, so without this the whole transition leg below
+  // would pass by never arming at all.
+  assert.ok(
+    transitionHook._paScopeFor(beta),
+    "the fixture control must sit on a surface the press answer covers, or every assertion below is vacuous",
+  );
   runOnPress.call(transitionHook, { target: beta });
   transitionDom.window.setTimeout(() => {
     transitionDocument.querySelector('[data-test-id="editor-mode-toggle"]').outerHTML = `
@@ -295,5 +322,273 @@ try {
   transitionDom.window.close();
 }
 
+// ── THE CHROME SURFACES (spd-w19-press-answer-outside-panes) ────────────────
+// The studio-tab strip carries NO phx-click: every `.studio-tab` is a plain
+// `<a href>`, so `_paOnPress` finds no binding and hands the press to the
+// navigation shape. Measured on the deployed desk, the shipped hook left the
+// region empty on exactly this press.
+const chromeDom = new JSDOM(`
+  <div class="studio-bar">
+    <div class="studio-bar-tabs">
+      <a id="tab-here" href="/w/default/studio" aria-current="page" aria-label="Structure"></a>
+      <a id="tab-away" href="/w/default/studio/media" aria-label="Media"></a>
+      <a id="tab-blank" href="/elsewhere" target="_blank" aria-label="Elsewhere"></a>
+    </div>
+    <button id="bar-action" phx-click="shares-open" aria-label="Network shares"></button>
+  </div>
+  <main id="studio-panes"><button id="row" phx-click="select" aria-label="Row"></button></main>
+  <div id="outside"><a id="stray" href="/somewhere" aria-label="Stray"></a></div>
+  <p id="bp-press-answer"></p>
+`, { pretendToBeVisual: true, url: "http://localhost/w/default/studio" });
+const chromeDocument = chromeDom.window.document;
+const said = [];
+const chromeHook = {
+  el: chromeDocument.getElementById("studio-panes"),
+  _PA_FADE: 500,
+  _paPending: null,
+  _paPoll: 0, _paProbe: 0, _paCeil: 0, _paFadeT: 0,
+  _paScopeFor: scopeFor,
+  _paOnChromeAnchor: chromeAnchor,
+  _paName(el) { return el.getAttribute("aria-label") || null; },
+  _paSay(text) { said.push(text); },
+  _paRelease(text) { this._paPending = null; this._paSay(text || ""); },
+};
+const priorChromeWindow = globalThis.window;
+const priorChromeDocument = globalThis.document;
+const priorChromeLocation = globalThis.location;
+globalThis.window = chromeDom.window;
+globalThis.document = chromeDocument;
+globalThis.location = chromeDom.window.location;
+try {
+  const press = (id) => {
+    said.length = 0;
+    const t = chromeDocument.getElementById(id);
+    chromeHook._paOnChromeAnchor.call(chromeHook, { defaultPrevented: false, target: t }, t);
+    return said.slice();
+  };
+
+  // THE SCOPE, both directions — the claim is symmetric, so both arms run.
+  assert.ok(chromeHook._paScopeFor(chromeDocument.getElementById("bar-action")),
+    "a top-bar control must resolve to the chrome surface");
+  assert.ok(chromeHook._paScopeFor(chromeDocument.getElementById("tab-away")),
+    "a studio-tab strip control must resolve to the chrome surface");
+  assert.ok(chromeHook._paScopeFor(chromeDocument.getElementById("row")),
+    "a pane row must still resolve, exactly as before");
+  assert.equal(chromeHook._paScopeFor(chromeDocument.getElementById("stray")), null,
+    "a surface this hook does not answer for must resolve to null and be left alone");
+
+  assert.deepEqual(press("tab-away"), ["Opening “Media”…"],
+    "a tab-strip press must say a named state, not the nothing the shipped build says");
+
+  // THE HONESTY RULE. The active tab's href IS this page: it answers and
+  // changes nothing, so it gets the neutral clear and never an "Opening".
+  assert.deepEqual(press("tab-here"), ["Done."],
+    "the active tab answers and changes nothing — naming it Opening would be a new lie");
+
+  // CONTROL — a check that cannot say no is not a check.
+  assert.notDeepEqual(press("tab-here"), press("tab-away"),
+    "the neutral clear and the named opening must be distinguishable, or neither assertion above measures anything");
+
+  assert.deepEqual(press("tab-blank"), [],
+    "a new-tab anchor changes nothing on THIS page and must not be announced");
+  assert.deepEqual(press("stray"), [],
+    "an anchor outside both surfaces must stay silent");
+
+  said.length = 0;
+  const away = chromeDocument.getElementById("tab-away");
+  chromeHook._paOnChromeAnchor.call(chromeHook, { defaultPrevented: true, target: away }, away);
+  assert.deepEqual(said, [],
+    "a press something else already claimed must not be announced as a navigation");
+} finally {
+  globalThis.window = priorChromeWindow;
+  globalThis.document = priorChromeDocument;
+  if (priorChromeLocation === undefined) delete globalThis.location;
+  else globalThis.location = priorChromeLocation;
+  chromeDom.window.close();
+}
+
 dom.window.close();
-console.log("press answer watchdog: native disclosure and fast mode-reply scenarios passed");
+console.log("press answer watchdog: native disclosure, fast mode-reply, and chrome-surface scenarios passed");
+
+// ── THE TEARDOWN (spd-w19 follow-up, task-3f18da89b058b886) ────────────────
+// THE ARMS ABOVE CANNOT SEE THIS DEFECT AND WERE NEVER GOING TO. They call
+// `_paOnChromeAnchor` directly on a synthetic hook that has no `destroyed()`,
+// a `_paSay` that pushes into an array instead of writing the DOM, and a
+// `_paRelease` stub that arms no fade timer. Every assertion in them is true
+// and none of them runs the path the press actually takes: on the deployed
+// desk the SAME synchronous click dispatch ran the anchor branch at dt=0.4ms
+// and `LiveSocket.destroyAllViews -> View.destroy -> destroyHook ->
+// destroyed() -> _paRelease("")` at dt=0.9ms, and the first rAF read EMPTY.
+//
+// So these arms run the REAL bodies — `_paSay`, `_paRelease`,
+// `_paDropPending`, the `pagehide` closure and the `destroyed()` body, all
+// extracted from the layout — against a REAL region element, in the real
+// order. They are not a restatement of the fix: run this file against the
+// layout as it shipped and arms 1 and 2 fail on the empty region.
+const teardownBody = layout.match(
+  /window\.addEventListener\("pagehide", this\._paOnPageHide\);\n      \},\n      destroyed\(\) \{([\s\S]*?)\n      \}/,
+);
+assert.ok(
+  teardownBody,
+  "the press-answer hook's own destroyed() must be locatable, or this harness is measuring some other hook",
+);
+// DELIBERATELY SHAPE-AGNOSTIC. This harness runs whatever the layout's own
+// teardown does — one line or twenty — so its verdict is about BEHAVIOUR and
+// not about whether a particular helper name is present. Point it at the
+// layout as it shipped and it still runs; arms 1 and 2 then fail on an empty
+// region, which is the defect, rather than on a missing symbol.
+const pageHideSource = layout.match(/this\._paOnPageHide = ([\s\S]*?);\n        window/);
+assert.ok(pageHideSource, "the pagehide handler must be locatable");
+const regionHelper = layout.match(/_paRegion\(\) \{(.*?)\},\n/);
+assert.ok(regionHelper, "the live region accessor must be locatable");
+const sayHelper = layout.match(/_paSay\(text\) \{([\s\S]*?)\n      \},/);
+assert.ok(sayHelper, "the live region writer must be locatable");
+// Optional by design (see above): absent from the shipped layout.
+const dropHelper = layout.match(/_paDropPending\(keepFade\) \{([\s\S]*?)\n      \},/);
+const releaseHelper = layout.match(/_paRelease\(text\) \{([\s\S]*?)\n      \},/);
+assert.ok(releaseHelper, "the single release path must be locatable");
+// Optional by design: absent from the shipped layout.
+const keepHelper = layout.match(/_paKeepWordThroughTeardown\(\) \{([\s\S]*?)\n      \},/);
+const nameHelper = layout.match(/_paName\(el\) \{([\s\S]*?)\n      \},/);
+assert.ok(nameHelper, "the accessible-name helper must be locatable");
+
+// A fresh document + a hook wired from the real bodies. `fade` is the only
+// thing shortened: the shipped 6000ms would make arm 4 a six-second test.
+function teardownFixture(fade) {
+  const tdom = new JSDOM(
+    `<div class="studio-bar"><div class="studio-bar-tabs">` +
+      `<a id="tab-away" href="/w/default/studio/media" aria-label="Media"></a>` +
+      `</div></div>` +
+      `<main id="studio-panes"><button id="row" phx-click="select" aria-label="Row"></button></main>` +
+      `<p id="bp-press-answer"></p>`,
+    { pretendToBeVisual: true, url: "http://localhost/w/default/studio" },
+  );
+  const hook = {
+    el: tdom.window.document.getElementById("studio-panes"),
+    _PA_FADE: fade,
+    _raf: 0,
+    _onResize() {},
+    _paPending: null,
+    _paPoll: 0,
+    _paProbe: 0,
+    _paCeil: 0,
+    _paFadeT: 0,
+    _paNavAway: false,
+    _paScopeFor: scopeFor,
+    _paOnChromeAnchor: chromeAnchor,
+    _paName: new Function("el", nameHelper[1]),
+    _paRegion: new Function(regionHelper[1]),
+    _paSay: new Function("text", sayHelper[1]),
+    _paRelease: new Function("text", releaseHelper[1]),
+  };
+  if (dropHelper) hook._paDropPending = new Function("keepFade", dropHelper[1]);
+  if (keepHelper) hook._paKeepWordThroughTeardown = new Function(keepHelper[1]);
+  hook._paOnClick = () => {};
+  hook._paOnPageHide = new Function("return (" + pageHideSource[1] + ")").call(hook);
+  const destroyed = new Function(teardownBody[1]);
+  const region = () => tdom.window.document.getElementById("bp-press-answer").textContent;
+  const enter = () => {
+    const prior = [globalThis.window, globalThis.document, globalThis.location];
+    globalThis.window = tdom.window;
+    globalThis.document = tdom.window.document;
+    globalThis.location = tdom.window.location;
+    return () => {
+      globalThis.window = prior[0];
+      globalThis.document = prior[1];
+      if (prior[2] === undefined) delete globalThis.location;
+      else globalThis.location = prior[2];
+    };
+  };
+  const pressTabAway = () => {
+    const a = tdom.window.document.getElementById("tab-away");
+    hook._paOnChromeAnchor.call(hook, { defaultPrevented: false, target: a }, a);
+  };
+  return { tdom, hook, destroyed, region, enter, pressTabAway };
+}
+
+test("a tab-strip press keeps its word through the teardown that same click causes", () => {
+  const f = teardownFixture(4000);
+  const leave = f.enter();
+  try {
+    f.pressTabAway();
+    assert.equal(
+      f.region(),
+      "Opening “Media”…",
+      "the anchor branch must put the word IN THE REGION, not merely call _paSay",
+    );
+    // THE STACK, in the order the deployed build ran it, inside one dispatch.
+    f.destroyed.call(f.hook);
+    assert.equal(
+      f.region(),
+      "Opening “Media”…",
+      "destroyed() wiped the navigation word before a frame could be painted — the shipped defect",
+    );
+    assert.equal(f.hook._paPending, null, "the teardown must still drop the pending press");
+    assert.ok(f.hook._paFadeT, "the fade timer must survive, or the word is stranded forever");
+  } finally {
+    leave();
+    f.tdom.window.close();
+  }
+});
+
+test("pagehide does not wipe the word either — it fires while the old document is still on screen", () => {
+  const f = teardownFixture(4000);
+  const leave = f.enter();
+  try {
+    f.pressTabAway();
+    f.hook._paOnPageHide();
+    assert.equal(
+      f.region(),
+      "Opening “Media”…",
+      "pagehide runs before the incoming document paints; clearing there loses the word just as destroyed() did",
+    );
+  } finally {
+    leave();
+    f.tdom.window.close();
+  }
+});
+
+// THE CONTROL. "Never clear on teardown" is not the fix and would strand a
+// word on a desk that is still here. A teardown with no navigation in flight —
+// a pane re-render dropping #studio-panes — must clear exactly as before. If
+// this arm cannot fail, the two above only prove the clear was deleted.
+test("a teardown with NO navigation in flight still clears the region", () => {
+  const f = teardownFixture(4000);
+  const leave = f.enter();
+  try {
+    f.hook._paRelease("Done.");
+    assert.equal(f.region(), "Done.", "the fixture must start from a word actually on screen");
+    assert.ok(!f.hook._paNavAway, "no anchor press happened, so nothing is navigating");
+    f.destroyed.call(f.hook);
+    assert.equal(
+      f.region(),
+      "",
+      "a hook that is going away with the page still here must take its own word with it",
+    );
+  } finally {
+    leave();
+    f.tdom.window.close();
+  }
+});
+
+// THE BOUND. The kept word is not permanent: the fade the anchor branch armed
+// is what finally clears it, and it outlives the hook on purpose.
+test("the surviving fade clears the kept word, so nothing is stranded", async () => {
+  const f = teardownFixture(60);
+  const leave = f.enter();
+  try {
+    f.pressTabAway();
+    f.destroyed.call(f.hook);
+    assert.equal(f.region(), "Opening “Media”…");
+    await new Promise((r) => f.tdom.window.setTimeout(r, 160));
+    assert.equal(
+      f.region(),
+      "",
+      "the fade timer must survive the teardown AND still fire, or a kept word is a stranded one",
+    );
+  } finally {
+    leave();
+    f.tdom.window.close();
+  }
+});
+

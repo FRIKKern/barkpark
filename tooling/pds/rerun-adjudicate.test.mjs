@@ -72,9 +72,58 @@ function sh(cmd) {
 // ── 1. THE FENCE ─────────────────────────────────────────────────────────────
 {
   const gripDiff = sh("git diff --stat origin/main -- tooling/grip/").stdout.trim();
+  // 1.1 IS LEFT EXACTLY AS IT WAS, AND NOT BECAUSE IT IS CLEAN. Its label and
+  // its predicate already name the same scope, so it is not the mislabel 1.2
+  // was, and closing that mislabel is all this change is chartered to do. But
+  // it has a DIFFERENT fault worth a row of its own: this suite's workflow
+  // (.github/workflows/research-coverage-suite.yml) deliberately carries
+  // `tooling/grip/**` in both `paths:` twins so that a grip-side change CAN
+  // red this gate — and 1.1 guarantees it always will, for the diff itself
+  // rather than for any drift. MEASURED at 863714ac8: one comment line
+  // appended to tooling/grip/screen.mjs prints
+  //   FAIL 1.1 zero bytes changed under tooling/grip/ — expected "", got
+  //        "tooling/grip/screen.mjs | 1 +\n 1 file changed, 1 insertion(+)"
+  // Whether an epic-era "touch no grip byte" fence should outlive its epic is
+  // a doctrine call, not a relabel, so it is reported and not decided here.
   eq("1.1 zero bytes changed under tooling/grip/", gripDiff, "");
-  const scriptsDiff = sh("git diff --stat origin/main -- scripts/").stdout.trim();
-  eq("1.2 scripts/pds-ledger-census.sh untouched by this slice", scriptsDiff, "");
+  // 1.2 — THE PATH IS THE FILE THE LABEL NAMES, AND THAT WAS A RULING, NOT A
+  // REFLEX. Until 2026-09-20 the path here was `scripts/`, the whole directory,
+  // while the label said `scripts/pds-ledger-census.sh`. So the check measured
+  // "did this branch touch ANY of the ~70 scripts/ files" and reported the
+  // answer as "pds-ledger-census.sh was touched", sending every reader to a
+  // file the branch had not opened. MEASURED at 863714ac8: appending one
+  // comment line to scripts/pds-secret-scan.sh — a file neither this suite nor
+  // that label names — printed
+  //   FAIL 1.2 scripts/pds-ledger-census.sh untouched by this slice —
+  //        expected "", got "scripts/pds-secret-scan.sh | 1 +\n 1 file changed…"
+  // The control file's own name in the failure text IS the proof the predicate
+  // was directory-wide.
+  //
+  // Three exits were open and the other two were refused for cause:
+  //   NOT "delete both fence checks". Deletion is the one repair that cannot
+  //   fail for the right reason afterwards — it leaves no check any mutation
+  //   can red, which is precisely the green-with-no-subject this file's header
+  //   calls its central obligation to refuse. The guard's SCOPE was wrong; its
+  //   existence was not the defect.
+  //   NOT "keep scripts/ and make the label honest". That ratifies a standing
+  //   suite forbidding a whole directory to every later PR forever, and the
+  //   pds lane's own charter fence is `scripts/pds-*` — i.e. the directory this
+  //   would forbid is the directory that lane is chartered to edit. A fence
+  //   that reds correctly-scoped work trains readers to ignore it.
+  // What is left is a check whose label and predicate name the same one file,
+  // which still reds when that file moves and no longer reds when a neighbour
+  // does.
+  //
+  // 1.2a IS THE ANTI-VACUITY HALF AND MUST NOT BE DROPPED. A one-file path is
+  // an enumeration, and an enumeration goes stale silently: rename or delete
+  // scripts/pds-ledger-census.sh on main and `git diff -- <that path>` is
+  // empty forever, so 1.2 would pass by measuring nothing. 1.2a asserts the
+  // fenced path still exists, so a rename reds the fence instead of voiding it.
+  const CENSUS = "scripts/pds-ledger-census.sh";
+  ok(`1.2a the fenced path ${CENSUS} still exists (a one-file fence over a renamed file measures nothing)`,
+    sh(`git ls-files --error-unmatch -- ${CENSUS}`).exit === 0);
+  const scriptsDiff = sh(`git diff --stat origin/main -- ${CENSUS}`).stdout.trim();
+  eq(`1.2 ${CENSUS} untouched by this slice`, scriptsDiff, "");
 
   // No module under tooling/pds may reach for grip's command-line entry point:
   // consuming its rc would be this epic's own violation one level up.

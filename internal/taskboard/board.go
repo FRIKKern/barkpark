@@ -352,6 +352,15 @@ func recomputeInProgress(s Snapshot) map[string]int {
 //     recent-terminal, updated desc inside each band) rather than a raw
 //     updated-desc mix, so the live rows sit above the just-closed tail.
 func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
+	// THE SNAPSHOT SEAM (PDS-D748 item 4). Published-wins twin collapse runs
+	// FIRST, before a single derived quantity is computed, so TaskCount, the
+	// criteria tally, the NOW band, the epic grouping and the NEXT strip all
+	// count a twinned task ONCE — exactly as the Studio board does. It runs here
+	// rather than in fetch.go because a snapshot restored from the on-disk cache
+	// (cache.go) never passes through the fetch path, and that cache is where
+	// the twins measurably are.
+	s.Tasks = collapseDraftTwins(s.Tasks)
+
 	board := Board{
 		Counts:           recomputeInProgress(s),
 		Events:           s.Events,
@@ -645,12 +654,95 @@ func resolveNext(s Snapshot, byID map[string]Task, now []Task, nowT time.Time) (
 	return out, len(ready) - readyPlaced
 }
 
+// collapseDraftTwins applies the published-wins twin collapse at the snapshot
+// seam (charter PDS-D748 item 4). A task can exist twice — `x` (the published
+// spelling) and `drafts.x` (its draft twin) — and every OTHER Barkpark display
+// surface renders such a pair as ONE card. The TUI was the last one that did
+// not: it joins ACROSS twins by bareID (buildByBare, bareID, paperChipResolver)
+// but never dropped a row, so a twinned pair painted two cards, routinely with
+// DIVERGENT lifecycle — measured on a real board cache: 55 twinned pairs in the
+// snapshot, 19 of them painting both spellings, one pair reading in_progress on
+// the published row and open on its draft.
+//
+// THE RULE IS NOT INVENTED HERE. It is the same rule the server already applies
+// on the resolve axis, mirrored for a reader that has no status column:
+// `Barkpark.Tasks.TwinResolver.winning_spelling_tier/1`
+// (api/lib/barkpark/tasks/twin_resolver.ex) — "bare-id rows when any exist, the
+// `drafts.` twins otherwise" — the spelling-only tier that module defines
+// precisely for the doors that "never split on `status`". The Go Task envelope
+// carries no status field (types.go), so the spelling tier is the ONLY form of
+// the rule this surface can express; it is deliberately the coarse variant, not
+// a third policy. The SQL door spells the same predicate in
+// `Barkpark.Tasks.Query.collapse_twins/1`.
+//
+// THE CARVE-OUT IS KEPT (PDS-D748 item 2): an UNPAIRED `drafts.<id>` row — no
+// bare-id twin in the snapshot — IS the row of record and survives untouched.
+// That population is every task born through `/v1/data/mutate`, and it is what
+// `bp task next --frontier`'s deliberate `Perspective: "drafts"` exists to keep
+// reachable (PDS-D748 item 5). This is NOT a blanket `drafts.`-prefix drop.
+//
+// Dropping a row also retargets the references to it: a child whose ParentID
+// names a suppressed draft twin is re-pointed at the surviving bare id, so the
+// collapse can never manufacture an orphan out of a row that had a parent. That
+// is the same prefix-agnostic parent join the server's `collapse_twins/1`
+// performs in SQL.
+//
+// Order is preserved and the input slice is never mutated.
+func collapseDraftTwins(tasks []Task) []Task {
+	if len(tasks) == 0 {
+		return tasks
+	}
+	// The winning spelling tier, per bare id: does a bare-id row exist at all?
+	hasBare := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		if !isDraftID(t.DocID) {
+			hasBare[t.DocID] = true
+		}
+	}
+	out := make([]Task, 0, len(tasks))
+	for _, t := range tasks {
+		if isDraftID(t.DocID) && hasBare[bareID(t.DocID)] {
+			continue // a draft twin whose published row is right there
+		}
+		if isDraftID(t.ParentID) && hasBare[bareID(t.ParentID)] {
+			t.ParentID = bareID(t.ParentID) // the parent we just suppressed
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
 // buildByBare indexes tasks by their bareID (drafts.-prefix stripped) so a
 // drafts.* id joins a bare parent/event id and vice versa.
+//
+// THE TWIN SLOT IS DECIDED BY THE RULE, NOT BY MAP ORDER. When both spellings
+// of one id are in `byID`, they collide on a single bare key, and the plain
+// `m[bareID(t.DocID)] = t` this function used to be resolved that collision by
+// Go's RANDOMIZED map iteration order: measured on a twinned pair, the draft
+// won 349 of 400 builds and the published row the other 51 — the same
+// insertion-order hazard `Barkpark.Tasks.Board.canonical_twin/1`'s `hd/1`
+// fallback carries on the Elixir side. That is live, not hypothetical: the
+// TUI's own on-disk snapshot cache held 58 twinned pairs (1307 tasks, 170
+// `drafts.` rows) when this was measured, and `Frontier`/`readySnapshotByBare`
+// index the RAW snapshot — `BuildBoard`'s `collapseDraftTwins` runs on its own
+// copy and never reaches them, so `bp task next --frontier`, `bp task
+// frontier` and `bp cmux dispatch` all join over an uncollapsed corpus.
+//
+// The tie-break is the SAME winning-spelling tier the rest of this file
+// already applies (`collapseDraftTwins`) and the server spells in
+// `Barkpark.Tasks.TwinResolver.winning_spelling_tier/1`: a bare-id row holds
+// the slot whenever one exists, the `drafts.` twin otherwise. It is NOT a
+// blanket `drafts.`-prefix drop — an UNPAIRED `drafts.<id>` is the row of
+// record and keeps its slot untouched (PDS-D748 item 2), which is 112 of the
+// 170 `drafts.` rows in that same measured cache.
 func buildByBare(byID map[string]Task) map[string]Task {
 	m := make(map[string]Task, len(byID))
 	for _, t := range byID {
-		m[bareID(t.DocID)] = t
+		bare := bareID(t.DocID)
+		if prev, ok := m[bare]; ok && !isDraftID(prev.DocID) {
+			continue // a bare-id row already holds the slot; a draft twin never displaces it
+		}
+		m[bare] = t
 	}
 	return m
 }

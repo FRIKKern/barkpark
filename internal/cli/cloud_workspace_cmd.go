@@ -232,12 +232,24 @@ func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
 	// What the server DECLARED, against what we actually received. resp.ContentLength
 	// is -1 whenever Go's transport transparently decompressed the body (it adds
 	// `Accept-Encoding: gzip` itself and then strips the length) or the response
-	// was chunked — on THIS route the controller ends in send_file/2 and the stack
-	// refuses to gzip application/x-tar, so a real length arrives today. But
-	// PDS-D204 already moved this route send_resp -> send_file once; a move back
-	// re-arms the -1 case, and a naive `n != resp.ContentLength` would then fail
-	// EVERY successful export. So -1 is unverified-but-fine, PERMANENTLY, and a
-	// real declared length that disagrees is a NAMED failure.
+	// was chunked — on THIS route a real length arrives today, and the REASON is
+	// not the one this comment used to give. It is NOT that "the stack refuses to
+	// gzip application/x-tar": Bandit 1.12.0's `Bandit.Compression` has no
+	// content-type filter at all and would gzip a tar happily. The only reason no
+	// gzip arrives is that `Bandit.Adapter.send_file/6` never calls
+	// `Bandit.Compression.new/5`, while `send_resp/4` and `send_chunked/3` both do
+	// (api/deps/bandit/lib/bandit/adapter.ex). So a move back to send_resp re-arms
+	// the -1 case for real, and a naive `n != resp.ContentLength` would then fail
+	// EVERY successful export. -1 is unverified-but-fine, PERMANENTLY, and a real
+	// declared length that disagrees is a NAMED failure.
+	//
+	// The wire-byte consequence of PDS-D204 is MEASURED and recorded, so nobody
+	// re-derives it as the spill engine being slow: one live profile=dev export is
+	// 310,917,632 B on the wire under send_file against 83,323,612 B gzipped under
+	// the send_resp ancestor — 3.731x, +217.05 MiB — while the bytes THIS function
+	// writes to disk are identical either way. Full record, including the
+	// deliberate absence of `vary: accept-encoding`:
+	// scripts/pds-w47-export-wire-bytes-2026-09-17.md.
 	declared := resp.ContentLength
 	verified := declared >= 0 && n == declared
 	if declared >= 0 && n != declared {

@@ -16,7 +16,7 @@ import { assertSegment } from './util/guards'
 import { BarkparkNotFoundError } from './errors'
 import { normalizeFieldList } from './filter-builder'
 import { request } from './transport'
-import type { BarkparkClientConfig, BarkparkDocument, Perspective } from './types'
+import type { BarkparkClientConfig, BarkparkDocument, Perspective, ResolveSpec } from './types'
 
 export interface DocResult<T> {
   data: T | null
@@ -47,6 +47,11 @@ export interface GetDocOptions {
   /** Return only these content fields (projection); system fields (`_id`, …) always
    *  included. A field name or list, e.g. `'title'` or `['title', 'slug']`. */
   fields?: string | string[]
+  /** Server-side block resolution (`?resolve=`). `'tasks'` fills every
+   *  query-shaped PortableDoc task block with a live snapshot; see
+   *  {@link ResolveSpec}. Omitted by default — the server leaves query blocks
+   *  unresolved unless asked. */
+  resolve?: ResolveSpec
 }
 
 // The document rev, out of the response BODY.
@@ -99,6 +104,7 @@ export async function getDoc<T = BarkparkDocument>(
   // throws where it previously shipped a silent no-op.
   if (opts?.expand !== undefined) qp.set('expand', normalizeFieldList(opts.expand, 'expand'))
   if (opts?.fields !== undefined) qp.set('fields', normalizeFieldList(opts.fields, 'fields'))
+  if (opts?.resolve !== undefined) qp.set('resolve', opts.resolve)
   const query = qp.toString() ? `?${qp.toString()}` : ''
   const path = `${scopePrefix(config)}/v1/data/doc/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`
 

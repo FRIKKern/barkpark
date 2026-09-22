@@ -109,6 +109,7 @@ defmodule BarkparkCloud.Sites.BuildLog do
   require Logger
 
   alias BarkparkCloud.Registry
+  alias BarkparkCloud.Sites.BoxErrorEnvelope
   alias BarkparkCloud.Sites.BoxRelay
 
   @typedoc "The box's verdict, as `BoxRelay` hands it back."
@@ -202,12 +203,16 @@ defmodule BarkparkCloud.Sites.BuildLog do
       # keep-waiting shape (charter D34) and means nothing about eviction.
       {:ok, status, body} when is_integer(status) ->
         {502,
-         Map.merge(base, %{
+         base
+         |> Map.merge(%{
            error: "box_unreachable",
            detail: "the box refused the record read",
-           box_status: status,
-           box_error: box_error(body)
-         })}
+           box_status: status
+         })
+         # ONE reducer, shared with the sibling route: the box's generic 500
+         # answers with the error ENVELOPE, and `box_error` is typed as a
+         # string on every consumer (task-3468f99ad5a4e9b8).
+         |> Map.merge(BoxErrorEnvelope.fields(body))}
 
       {:error, reason} ->
         # THE TERM IS LOGGED, NEVER ECHOED. `inspect/1` on a transport term is
@@ -335,7 +340,4 @@ defmodule BarkparkCloud.Sites.BuildLog do
 
   defp relay_reason(:decrypt_failed), do: "the stored admin credential could not be decrypted"
   defp relay_reason(_other), do: "the request could not be completed"
-
-  defp box_error(body) when is_map(body), do: Map.get(body, "error") || Map.get(body, "code")
-  defp box_error(_), do: nil
 end

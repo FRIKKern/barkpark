@@ -180,7 +180,11 @@ defmodule Barkpark.Tasks.QueueReadySetIdentityTest do
 
   defp mk!(doc_id, scope, content_extra, at: minutes) do
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => "open"
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
       |> Map.merge(content_extra)
 

@@ -9,6 +9,14 @@ defmodule Barkpark.Plugins.Registry.BootCollectors do
   the Registry process) or at router COMPILE time (routes). Discovery reuses
   `Barkpark.Plugins.Registry.Discovery`'s disk walk, so the unset-vs-empty
   `:plugins` distinction is identical. Module location only, NO logic change.
+
+  CAVEAT — that distinction exists in the function but the COMPILE-time
+  caller never sees it: `:barkpark, :plugins` is set only in
+  `config/runtime.exs`, which has not run at macro-expansion, so
+  `collect_routes/1` always takes the `:unset` disk-walk branch. See the
+  block above `plugin_modules_sync/0` for the per-caller branch table and
+  for how the kill switch is enforced for routes instead (PR #14725,
+  `BarkparkWeb.Plugs.PluginRouteGuard`).
   """
 
   require Logger
@@ -86,14 +94,26 @@ defmodule Barkpark.Plugins.Registry.BootCollectors do
   Walks registered plugin modules and returns the union of their
   `register_routes/1` callback results.
 
-  Pure function — does NOT require the Registry GenServer to be alive,
-  because it is called from the `plugin_routes/1` router macro at
-  COMPILE TIME (Goal barkpark-G2 task s3). Discovery reuses the same
-  synchronous `plugin_modules_sync/0` helper that powers
-  `collect_workers/1`, so the unset-vs-empty `:plugins` distinction
-  documented there applies here too: an explicit `[]` returns `[]`
-  (matching the fresh-install invariant the G1 boot test locks), while
-  `:unset` walks `default_paths/0` to fold bundled plugins in.
+  Pure function — does NOT require the Registry GenServer to be alive.
+  It has TWO callers on different clocks: the `plugin_routes/1` router
+  macro at COMPILE TIME (Goal barkpark-G2 task s3), and — since PR
+  #14725 — `BarkparkWeb.Plugs.PluginRouteGuard` at REQUEST time.
+
+  Discovery reuses the same synchronous `plugin_modules_sync/0` helper
+  that powers `collect_workers/1`, but the two callers do NOT reach the
+  same branch of it, and this block used to claim they did: "an explicit
+  `[]` returns `[]` (matching the fresh-install invariant the G1 boot
+  test locks), while `:unset` walks `default_paths/0`". Every clause of
+  that was true of this FUNCTION and the conclusion was still false for
+  the ROUTER. `:barkpark, :plugins` is written in exactly one place —
+  `config/runtime.exs`, which evaluates at BOOT, i.e. after compilation
+  — so at router macro-expansion `Application.fetch_env(:barkpark,
+  :plugins)` is `:error` (UNSET), never `{:ok, []}`, and the disk-walk
+  branch ALWAYS runs. The explicit-`[]` branch is UNREACHABLE from the
+  router path: no value of `BARKPARK_PLUGINS` can keep a plugin route
+  from being MOUNTED. Read `plugin_modules_sync/0`'s own block below for
+  the per-caller branch table, for where the kill switch does bite, and
+  for what the fresh-install boot test actually locks.
 
   Per-plugin error isolation: a plugin that fails to load, fails to
   export `register_routes/1`, returns a non-list, or whose callback
@@ -112,6 +132,65 @@ defmodule Barkpark.Plugins.Registry.BootCollectors do
 
   # ─── Synchronous plugin-module discovery ────────────────────────────────
 
+  # WHICH BRANCH EACH CALLER REACHES (corrected by PR #14725's follow-up)
+  #
+  # Two branches below, and the callers do not share them:
+  #
+  #   caller                          when it runs                 branch
+  #   ------------------------------  ---------------------------  ------------------
+  #   collect_workers/1               boot, AFTER runtime.exs      {:ok, list} if the
+  #   collect_oban_crontab/0          boot, AFTER runtime.exs      env var is set —
+  #                                                                an explicit [] is
+  #                                                                honoured verbatim
+  #   collect_routes/1, called by     router MACRO-EXPANSION,      ALWAYS :error —
+  #   BarkparkWeb.Router.Plugins.     i.e. `mix compile`,          the disk walk, every
+  #   plugin_routes/1                 BEFORE runtime.exs           build, no exceptions
+  #   collect_routes/1, called by     REQUEST time, after          {:ok, list} if set
+  #   BarkparkWeb.Plugs.              runtime.exs
+  #   PluginRouteGuard
+  #
+  # `:barkpark, :plugins` is written in exactly ONE place: config/runtime.exs
+  # (BARKPARK_PLUGINS unset -> leave unconfigured = discover-all-from-disk;
+  # "" -> `[]` = the kill switch; "a,b" -> explicit whitelist). config.exs,
+  # dev.exs, test.exs and prod.exs do not set it. Near miss to not be fooled
+  # by: config/config.exs does carry a `plugins:` key, but it belongs to
+  # `config :barkpark, Oban` — a different key, not this one.
+  #
+  # WHAT THE KILL SWITCH CAN AND CANNOT DO
+  #
+  # BARKPARK_PLUGINS="" stops plugin workers and plugin Oban crontab entries
+  # from registering (both collectors above run after runtime.exs), and since
+  # PR #14725 it makes plugin ROUTES answer 404. It does NOT unmount them — a
+  # compile-time-mounted route cannot be unmounted at runtime. Instead every
+  # route the macro emits is stamped with its spec key and wrapped in a scope
+  # piping through BarkparkWeb.Plugs.PluginRouteGuard, which re-reads
+  # collect_routes/1 at REQUEST time (where the switch is finally visible) and
+  # 404s any route whose plugin is not in the enabled set. The routes stay
+  # mounted; they stop answering. Before #14725 the switch could not touch
+  # routes at all: with it fully engaged, a build still carried 41
+  # /v1/plugins/* routes and POST /v1/plugins/pulse/:channel/events took an
+  # unauthenticated, persisted write. So never read "an explicit [] returns []"
+  # as "the router emits nothing" — that inference is how the P0 survived
+  # review.
+  #
+  # THE FRESH-INSTALL INVARIANT, AND WHAT ACTUALLY LOCKS IT
+  #
+  # test/barkpark/plugin_free_boot_test.exs (Goal barkpark-G1) is the
+  # invariant's regression bar, and it is narrower than its name suggests: it
+  # `put_env`s :plugins [] and RESTARTS the app — it never recompiles the
+  # router — so it locks the post-boot picture only. Its assertions are: no
+  # plugin children in the supervision tree; GET /studio/production renders
+  # with none of the plugin tokens; /api/schemas returns exactly the public
+  # seed set; core-mounted /v1/graph/* still answers under the switch. It
+  # asserts NOTHING about plugin routes being absent from Phoenix.Router, so
+  # a green run of it is not evidence that routes are gated.
+  #
+  # The empty-list branch of THIS function is locked instead by
+  # test/barkpark/plugins/registry/boot_collectors_test.exs ("returns [] when
+  # :plugins is explicitly empty", one per collector) and by
+  # test/barkpark_web/plugin_routes_test.exs ("collect_routes/1 returns []
+  # under plugins=[]"). Both call this function at RUNTIME with the env
+  # already `put_env`d; neither says anything about what compile time sees.
   defp plugin_modules_sync do
     case Application.fetch_env(:barkpark, :plugins) do
       {:ok, configured} when is_list(configured) ->
@@ -134,6 +213,11 @@ defmodule Barkpark.Plugins.Registry.BootCollectors do
 
   defp module_of_configured_entry({_name, module}) when is_atom(module), do: module
 
+  # `File.read/1` reads `plugin.json` under a directory enumerated by
+  # `Discovery.plugin_dirs_in/1` from `Discovery.default_paths/0`; `name` is only
+  # COMPARED against the decoded manifest, never joined into the path.
+  # Inline rather than a line-pinned `.sobelow-skips` row (fingerprints shift).
+  # sobelow_skip ["Traversal.FileModule"]
   defp module_of_configured_entry(name) when is_binary(name) do
     # Resolve a string plugin_name by reading the manifest off disk.
     Discovery.default_paths()
@@ -152,6 +236,10 @@ defmodule Barkpark.Plugins.Registry.BootCollectors do
 
   defp module_of_configured_entry(_), do: nil
 
+  # `File.read/1` reads `plugin.json` under `dir`, which the caller obtained from
+  # `Discovery.plugin_dirs_in/1` — a boot-time disk enumeration, not user input.
+  # Inline rather than a line-pinned `.sobelow-skips` row (fingerprints shift).
+  # sobelow_skip ["Traversal.FileModule"]
   defp module_from_plugin_dir(dir) do
     manifest_path = Path.join(dir, "plugin.json")
 

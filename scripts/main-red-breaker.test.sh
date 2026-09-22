@@ -307,6 +307,82 @@ else
   bad "16) scripts/breaker-capture.sh is missing"
 fi
 
+# -- 16b. WHICH COMMAND FAILED (task-2e11c7faa11c80d9) -----------------------
+# A step NAME is a label on a label. Measured on main 0542e9677, the
+# `Doc budgets + anchors` job declares 42 steps and runs 69 checker
+# invocations; 50 of them share a step with a sibling, and the commonest pair is
+# `bash scripts/X.sh --selftest` followed by `bash scripts/X.sh` -- two
+# different failures under one name. These arms assert the wrapper NAMES the
+# command; the controls assert it names the right one and stays silent when it
+# should.
+if [ -f "$CAPSH" ]; then
+  ARM='          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step'"'"'s error block'
+  mkdir -p "$TMP/g/scripts"
+  printf '%s\n' '#!/usr/bin/env bash' 'if [ "${1:-}" = "--selftest" ]; then echo "gate --selftest: FAILED"; exit 1; fi' 'echo "gate ok"' > "$TMP/g/scripts/gate.sh"
+  printf '%s\n' '#!/usr/bin/env bash' 'set -e' 'echo "inner: starting"' 'grep -q "absent-token" /dev/null' 'echo unreachable' > "$TMP/g/scripts/inner.sh"
+
+  # 16b-A THE ARM. Two commands, one step name, the FIRST one reds.
+  cap="$TMP/cap16b.txt"; : > "$cap"
+  { printf '%s\n' "$ARM"; printf '%s\n' 'bash scripts/gate.sh --selftest' 'bash scripts/gate.sh'; } > "$TMP/g/two-cmd.sh"
+  o="$( cd "$TMP/g" && (BREAKER_ERROR_LOG="$cap" bash "$CAPSH" "$TMP/g/two-cmd.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "RC=1" "16b-A) the step's exit code still passes through"
+  has "$o" "the command that failed, verbatim:" "16b-A) the red says a command failed, not merely that the step did"
+  has "$o" "bash scripts/gate.sh --selftest" "16b-A) and NAMES it: the --selftest arm, not its live sibling"
+  has "$o" "this step runs 2 command(s)" "16b-A) it counts the step's commands, derived from the step script"
+  has "$o" "1. bash scripts/gate.sh --selftest" "16b-A) the ordered list names command 1"
+  has "$o" "2. bash scripts/gate.sh" "16b-A) and command 2, which no step NAME could have distinguished"
+  has "$o" "::warning title=Failing command::bash scripts/gate.sh --selftest" "16b-A) legible from the checks page without opening the log"
+  # 16b-B THE FENCE LABEL. It used to be the BREAKER_CAPTURE_ARMED preamble --
+  #       byte-identical in EVERY armed step, so main-red-breaker.sh's per-step
+  #       OPAQUE report named nothing.
+  if head -n1 "$cap" | grep -qF '##[breaker-block]begin bash scripts/gate.sh --selftest'; then
+    ok "16b-B) the capture's fence label carries the failing command"
+  else
+    bad "16b-B) fence label is not the failing command: $(head -n1 "$cap")"
+  fi
+  if head -n1 "$cap" | grep -q 'BREAKER_CAPTURE_ARMED'; then
+    bad "16b-B) fence label is still the arming preamble every step shares"
+  else
+    ok "16b-B) and is no longer the preamble every armed step shares"
+  fi
+  # 16b-C CONTROL: the diagnostic never enters the capture. A line our side
+  #       carries and main's log does not is what `comm -23` reads as the PR's
+  #       OWN red, so enriching the signature set manufactures accusations.
+  if grep -q 'breaker-capture: the command that failed' "$cap"; then
+    bad "16b-C) the diagnostic leaked into the capture -- it would poison the signature set"
+  else
+    ok "16b-C) CONTROL: the diagnostic stays out of the capture file"
+  fi
+  # 16b-D CONTROL: a GREEN step is silent. A tripwire self-test that prints the
+  #       word FAIL and exits 0 must produce no annotation and no capture.
+  cap2="$TMP/cap16b-green.txt"; : > "$cap2"
+  { printf '%s\n' "$ARM"; printf '%s\n' 'echo "tripwire OK - FAIL was never planted"'; } > "$TMP/g/green.sh"
+  o="$( cd "$TMP/g" && (BREAKER_ERROR_LOG="$cap2" bash "$CAPSH" "$TMP/g/green.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "RC=0" "16b-D) a passing step still exits 0"
+  case "$o" in *"::warning title=Failing command"*) bad "16b-D) a GREEN step emitted a failing-command warning" ;; *) ok "16b-D) CONTROL: a green step emits no annotation" ;; esac
+  case "$o" in *"breaker-capture: "*) bad "16b-D) a GREEN step printed the failure diagnostic" ;; *) ok "16b-D) CONTROL: and prints no diagnostic" ;; esac
+  [ ! -s "$cap2" ] && ok "16b-D) CONTROL: and writes nothing to the capture" || bad "16b-D) a green step polluted the capture"
+  # 16b-E CONTROL: the name must be the INVOCATION the reader re-runs, not a
+  #       line inside the checker. The ERR trap is installed through BASH_ENV,
+  #       which every child shell would otherwise re-source; `unset BASH_ENV`
+  #       in the prelude is what keeps `grep -q absent-token` out of this line.
+  cap3="$TMP/cap16b-nested.txt"; : > "$cap3"
+  { printf '%s\n' "$ARM"; printf '%s\n' 'echo "selftest pass"' 'bash scripts/inner.sh'; } > "$TMP/g/nested.sh"
+  o="$( cd "$TMP/g" && (BREAKER_ERROR_LOG="$cap3" bash "$CAPSH" "$TMP/g/nested.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "::warning title=Failing command::bash scripts/inner.sh" "16b-E) names the invocation the reader re-runs"
+  case "$o" in *"Failing command::grep"*|*"Failing command::"*"absent-token"*) bad "16b-E) reported a line INSIDE the checker -- BASH_ENV leaked into the child" ;; *) ok "16b-E) CONTROL: does not report a line inside the checker" ;; esac
+  # 16b-F CONTROL: a step with its own EXIT cleanup trap. An ERR trap fires on
+  #       the command that tripped `bash -e`; a DEBUG trap would have reported
+  #       the `rm -rf` that runs afterwards, and several gate steps have one.
+  cap4="$TMP/cap16b-cleanup.txt"; : > "$cap4"
+  { printf '%s\n' "$ARM"; printf '%s\n' 'set -u' 'scratch="$(mktemp -d)"' "trap 'rm -rf \"\$scratch\"' EXIT" 'bash scripts/inner.sh'; } > "$TMP/g/cleanup.sh"
+  o="$( cd "$TMP/g" && (BREAKER_ERROR_LOG="$cap4" bash "$CAPSH" "$TMP/g/cleanup.sh" 2>&1; echo "RC=$?") )"
+  has "$o" "::warning title=Failing command::bash scripts/inner.sh" "16b-F) an EXIT cleanup trap does not displace the failing command"
+  case "$o" in *"Failing command::rm "*) bad "16b-F) reported the cleanup rm as the failure" ;; *) ok "16b-F) CONTROL: the cleanup rm is not mistaken for the failure" ;; esac
+else
+  bad "16b) scripts/breaker-capture.sh is missing"
+fi
+
 
 # ── 17. MAIN'S SIDE, AS THE API ACTUALLY RENDERS IT (task-2dbe8808f2a6f7b5) ──
 # Arms 2-5 and 11-14 feed main's jobs JSON with gate steps marked

@@ -41,6 +41,61 @@ func itemMaps(m map[string]any, key string) []map[string]any {
 	return out
 }
 
+// noteItemMaps is itemMaps for the two widgets whose items are NOTE ROWS
+// (notes today). It keeps every object item verbatim and, unlike itemMaps,
+// does NOT drop the two MALFORMED item shapes the corpus census found — it
+// normalizes each to the canonical `{text: …}` row so its prose still reaches
+// the reader:
+//
+//   - a BARE STRING item ("PR #11556: his original description restored …") —
+//     the heggemsnes-act `hga-remedies` shape. The BPML printer already
+//     TOLERATES this losslessly (printer.ex `note_item(s) when is_binary(s)`),
+//     so reading it here is grammar-consistent, not a widening.
+//   - an INLINE-NODE LIST item ([{type:"text",text:"…"}]) — the ProseMirror
+//     shape. The printer REFUSES this (one typed UnprintableError) because it
+//     cannot round-trip it; a READER carries no round-trip obligation, and
+//     silently deleting prose a human authored is the worse failure, so the
+//     terminal folds it to plain text via the shared inlineNodesText (the same
+//     fold `inlineText` in inline.tsx and `flatten_inline_text/1` do).
+//
+// Items that carry no readable prose at all (a number, a bool, nil, an empty
+// list) still drop. THREE STATES, and which pairs differ:
+//
+//	absent      items missing / [] .......... one blank line (block is silent)
+//	malformed   string / inline-node list ... the prose renders — DIFFERS from
+//	                                          absent and from empty (before
+//	                                          this, all three were identical)
+//	empty       {label:"",lead:"",text:""} .. dropped row; alone → one blank
+//	                                          line, i.e. SAME as absent
+//
+// absent and empty deliberately stay indistinguishable: an author who wrote a
+// row with nothing in it said nothing, and painting chrome around nothing is a
+// louder lie than silence. It is `malformed` that must never read as `empty`,
+// because that is where a false "the author wrote nothing here" is manufactured
+// out of a shape mismatch.
+func noteItemMaps(m map[string]any, key string) []map[string]any {
+	raw := attrSlice(m, key)
+	if raw == nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, el := range raw {
+		switch item := el.(type) {
+		case map[string]any:
+			out = append(out, item)
+		case string:
+			if item != "" {
+				out = append(out, map[string]any{"text": item})
+			}
+		case []any:
+			if text := inlineNodesText(item); text != "" {
+				out = append(out, map[string]any{"text": text})
+			}
+		}
+	}
+	return out
+}
+
 // ── notes ────────────────────────────────────────────────────────────────────
 // {items: [{label, lead, text}]}. A list of note "definition rows": each item is
 // fed to the singular noteRenderer as a synthesized `note` Block. By default the
@@ -53,7 +108,7 @@ func itemMaps(m map[string]any, key string) []map[string]any {
 type notesRenderer struct{}
 
 func (notesRenderer) Render(b Block, ctx RenderCtx) []string {
-	items := itemMaps(b.Attrs, "items")
+	items := noteItemMaps(b.Attrs, "items")
 	if len(items) == 0 {
 		return []string{""}
 	}
@@ -82,11 +137,13 @@ func (notesRenderer) Render(b Block, ctx RenderCtx) []string {
 	// narrow (Measure says stack) or a note's min-content overflows its cell (Fits).
 	if gridOptIn(b) {
 		n := len(groups)
-		if cellW, sideBySide := DefaultFlex.Measure(clampWidth(ctx.Width), n); sideBySide {
-			cellCtx := ctx.Deeper().WithWidth(cellW)
+		avail := clampWidth(ctx.Width)
+		if cellW, sideBySide := DefaultFlex.Measure(avail, n); sideBySide {
+			trackW := DefaultFlex.StretchTracks(avail, n, cellW)
 			nodes := make([]Node, n)
 			for i, item := range kept {
-				nodes[i] = Node{Lines: noteRenderer{}.Render(Block{Type: "note", Attrs: item}, cellCtx), Width: cellW, Span: 1}
+				cellCtx := ctx.Deeper().WithWidth(trackW[i])
+				nodes[i] = Node{Lines: noteRenderer{}.Render(Block{Type: "note", Attrs: item}, cellCtx), Width: trackW[i], Span: 1}
 			}
 			if DefaultFlex.Fits(nodes) {
 				return DefaultFlex.Arrange(nodes)
@@ -101,7 +158,7 @@ func (notesRenderer) Render(b Block, ctx RenderCtx) []string {
 		}
 		out = append(out, g...)
 	}
-	return out
+	return padGroupRight(out, clampWidth(ctx.Width))
 }
 
 // ── pipeline ───────────────────────────────────────────────────────────────────
@@ -144,15 +201,18 @@ func (pipelineRenderer) Render(b Block, ctx RenderCtx) []string {
 	if gridOptIn(b) {
 		nStage := len(groups)
 		tracks := 2*nStage - 1
-		if cellW, sideBySide := DefaultFlex.Measure(clampWidth(ctx.Width), tracks); sideBySide {
-			cellCtx := ctx.Deeper().WithWidth(cellW)
+		avail := clampWidth(ctx.Width)
+		if cellW, sideBySide := DefaultFlex.Measure(avail, tracks); sideBySide {
+			trackW := DefaultFlex.StretchTracks(avail, tracks, cellW)
 			arrow := ctx.Theme.Dim.Render("→")
 			seq := make([]Node, 0, tracks)
 			for i, node := range kept {
 				if i > 0 {
-					seq = append(seq, Node{Lines: []string{arrow}, Width: cellW, Span: 1})
+					seq = append(seq, Node{Lines: []string{arrow}, Width: trackW[len(seq)], Span: 1})
 				}
-				seq = append(seq, Node{Lines: stageRenderer{}.Render(Block{Type: "stage", Attrs: node}, cellCtx), Width: cellW, Span: 1})
+				w := trackW[len(seq)]
+				cellCtx := ctx.Deeper().WithWidth(w)
+				seq = append(seq, Node{Lines: stageRenderer{}.Render(Block{Type: "stage", Attrs: node}, cellCtx), Width: w, Span: 1})
 			}
 			if DefaultFlex.Fits(seq) {
 				return DefaultFlex.Arrange(seq)
@@ -179,7 +239,7 @@ func (pipelineRenderer) Render(b Block, ctx RenderCtx) []string {
 		}
 		out = append(out, g...)
 	}
-	return out
+	return padGroupRight(out, clampWidth(ctx.Width))
 }
 
 // ── cards ──────────────────────────────────────────────────────────────────────
@@ -203,6 +263,7 @@ func (cardsRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 
 	const chrome = 4 // rounded border (2) + padding (2)
+	const border = 2 // the rounded border's two columns, which lipgloss Width() excludes
 	inner := ctx.Width - chrome
 	flat := inner < MinWidth
 	childWidth := inner
@@ -210,13 +271,18 @@ func (cardsRenderer) Render(b Block, ctx RenderCtx) []string {
 		childWidth = ctx.Width
 	}
 	childWidth = clampWidth(childWidth)
+	// lipgloss Style.Width() sets the block width INCLUDING padding but EXCLUDING
+	// the border, so a box asked for `inner` (= W-4) draws W-2 columns wide and
+	// stopped two short of the content edge. The reader's card fills its container
+	// (measured right gap 0.00 px, 18/18), so the box is asked for W-border.
+	boxInner := clampWidth(ctx.Width - border)
 
 	// Full-width pass: build each item's box (the verbatim stack body AND the count
 	// the horizontal path re-sizes); drop all-empty items so N is honest.
 	kept := make([]map[string]any, 0, len(items))
 	groups := make([][]string, 0, len(items))
 	for _, item := range items {
-		box, ok := cardBox(ctx.Theme, item, childWidth, clampWidth(inner), flat)
+		box, ok := cardBox(ctx.Theme, item, childWidth, boxInner, flat)
 		if !ok {
 			continue
 		}
@@ -234,13 +300,17 @@ func (cardsRenderer) Render(b Block, ctx RenderCtx) []string {
 	// box (inner below MinWidth), or when a card's min-content overflows (Fits).
 	if gridOptIn(b) {
 		n := len(groups)
-		if cellW, sideBySide := DefaultFlex.Measure(clampWidth(ctx.Width), n); sideBySide {
+		avail := clampWidth(ctx.Width)
+		if cellW, sideBySide := DefaultFlex.Measure(avail, n); sideBySide {
 			if cellInner := cellW - chrome; cellInner >= MinWidth {
+				trackW := DefaultFlex.StretchTracks(avail, n, cellW)
 				nodes := make([]Node, n)
 				for i, item := range kept {
 					// Never the flat degrade in a cell: the cell holds the bordered box.
-					box, _ := cardBox(ctx.Theme, item, cellInner, cellInner, false)
-					nodes[i] = Node{Lines: box, Width: cellW, Span: 1}
+					// wrap at trackW-chrome, but ask the border box for trackW-border so
+					// the card FILLS its track (the reader's 1fr / justify-items:stretch).
+					box, _ := cardBox(ctx.Theme, item, clampWidth(trackW[i]-chrome), clampWidth(trackW[i]-border), false)
+					nodes[i] = Node{Lines: box, Width: trackW[i], Span: 1}
 				}
 				if DefaultFlex.Fits(nodes) {
 					return DefaultFlex.Arrange(nodes)
@@ -256,7 +326,7 @@ func (cardsRenderer) Render(b Block, ctx RenderCtx) []string {
 		}
 		out = append(out, g...)
 	}
-	return out
+	return padGroupRight(out, clampWidth(ctx.Width))
 }
 
 // cardBox builds ONE `cards` item box: a bold title + wrapped text body, the

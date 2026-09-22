@@ -92,11 +92,24 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
   # rule is failures-on / successes-off. It is a NARROWER event than
   # `deployment_failed`, never a wider one — a team that mutes it still gets
   # nothing it was not already getting.
+  # cch-w30-bl-member-joined-alert — TEN. `member_joined` is the team-membership
+  # half of the same rule, and it is the OTHER name: wave 30 deleted
+  # `member_invited`, which promised a mail at the moment an invitation was SENT
+  # (the invitee already gets a real one through
+  # `Transactional.deliver_invite/1`, so the toggle offered the team a duplicate
+  # of somebody else's letter). The fact nothing told the team was the invitation
+  # being ACCEPTED — `Accounts.accept_invitation/2` added a person to the team
+  # and no member learned of it. That is a membership change, so the producer
+  # lands with the column, both renderer arms and the console row in ONE change.
+  # It defaults FALSE: a join is not a failure, and the moduledoc's rule is
+  # failures-on / successes-off. `member_invited` stays deleted and stays dead —
+  # this is a different event with a different producer, never a rename.
   @events ~w(provision_succeeded provision_failed
              deployment_succeeded deployment_failed deployment_refused
              deployment_abandoned
              agent_reachable agent_unreachable
-             subscription_past_due)a
+             subscription_past_due
+             member_joined)a
 
   schema "email_notification_settings" do
     field :transport, :string, default: "instance"
@@ -119,6 +132,7 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
     field :agent_reachable, :boolean, default: false
     field :agent_unreachable, :boolean, default: true
     field :subscription_past_due, :boolean, default: true
+    field :member_joined, :boolean, default: false
 
     field :last_test_sent_at, :utc_datetime_usec
 

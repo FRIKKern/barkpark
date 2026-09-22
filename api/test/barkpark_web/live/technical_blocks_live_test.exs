@@ -31,7 +31,13 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
     raw = "technical-writer-#{System.unique_integer([:positive])}"
 
     {:ok, _token} =
-      Auth.create_token(raw, "technical control writer", @dataset, ["read", "write"])
+      Auth.create_token(
+        raw,
+        "technical control writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     %{slug: slug, writer: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
@@ -541,10 +547,12 @@ defmodule BarkparkWeb.TechnicalBlocksLiveTest do
   defp mount_editor(ctx, :studio) do
     {:ok, view, _html} = live(ctx.conn, scoped_studio("/d/#{@dataset}/studio/paper/#{ctx.slug}"))
 
-    # Studio has no View<->Edit toggle while the canvas is ON — components.ex
+    # Studio has no View<->Edit toggle while the canvas is ON —
+    # studio_live/components.ex
     # derives `show_editor` from the flag, so the editor renders on open. The
     # flag-OFF opt-out keeps the LEGACY shape: the read-only View pane plus a
-    # toggle whose `paper_edit_mode` still gates Edit (components.ex:140-147).
+    # toggle whose `paper_edit_mode` still gates Edit (the `show_editor`
+    # assignment in studio_live/components.ex).
     # The conditional click is therefore a no-op for every canvas-ON test in
     # this file and the entry step for the canvas-OFF ones. Same idiom as
     # shared_typed_leaf_authoring_test.exs.

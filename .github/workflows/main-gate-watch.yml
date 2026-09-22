@@ -100,10 +100,47 @@ on:
       - "scripts/main-gate-watch.sh"
       - "scripts/main-gate-watch.test.sh"
       - "scripts/main-gate-watch-route.sh"
+      # The owed-ness library the watch SOURCES (task-2253e13aba12fbe8). Without
+      # this line a PR changing only the glob matcher — the thing that decides
+      # whether a MISSING scream fires at all — dispatches no harness, and the
+      # both-ways proof in §16 never runs on the change that could break it.
+      - "scripts/lib/main-push-owedness.sh"
       - "scripts/main-verdict-presence.sh"
       - "scripts/main-verdict-presence.test.sh"
       - ".github/main-push-workflows.txt"
       - ".github/workflows/main-gate-watch.yml"
+      # ── THE RECURRENCE FIX (2026-09-17, task-45b262463f23b289) ─────────────
+      # The manifest above is the DERIVED transcript of every workflow whose
+      # push arm reaches main. What makes it stale is not an edit to any file
+      # listed above it — it is a PR that ADDS OR REMOVES A WORKFLOW, anywhere
+      # under .github/workflows/. Until this line existed, such a PR matched
+      # nothing in this list, so the harness that owns the staleness assertion
+      # (scripts/main-verdict-presence.test.sh §9, "the COMMITTED transcript
+      # matches this repo's own workflow tree") never ran on it and the drift
+      # landed silently.
+      #
+      # MEASURED, not argued. task-043f6831c6de5a76 regenerated the transcript
+      # on 2026-09-13 (fd07b4816). Within three days three workflows joined the
+      # main-push set — main-collapse-gates.yml (09-16), main-red-owner.yml
+      # (09-16), taskboard-drive.yml (09-17) — and the transcript learned none.
+      # The 22 workflow runs on 91ff506c0, the head of #18824 (which added
+      # taskboard-drive.yml), contain NO main-gate-watch run at all. The drift
+      # then surfaced only on the schedule arm, where "Main verdict presence"
+      # was red on 8 consecutive runs and nobody owned it — an advisory red on
+      # main with no owner is exactly the disease main-red-owner.yml was built
+      # for, reproduced one layer out.
+      #
+      # So the PR that changes the main-push population now reds ITSELF, named,
+      # where the fix is one `--write-manifest` and one person's. Regenerating
+      # the transcript is a snapshot; this line is the rule.
+      #
+      # THE ARM STAYS PATHS-FILTERED. Widening this entry does not promote any
+      # name in this file into the required set: S4 PATHS-FILTERED keys on the
+      # PRESENCE of a `paths:` list, never on how broad it is
+      # (scripts/required-checks-generate.sh:941), and every non-harness job
+      # here keeps its `if: github.event_name != 'pull_request'` fence. The
+      # harness job is pure shell with no network and no token.
+      - ".github/workflows/**"
       # The reporter-wiring arm (task-d1d19ca64ddd2f59) PARSES this workflow out
       # of scripts/file-ci-failure-issue.test.sh, so that harness and the script
       # it exercises are inputs of the job below exactly as the watch scripts are.

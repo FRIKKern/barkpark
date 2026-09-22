@@ -11,6 +11,12 @@ defmodule Barkpark.Plugins.Bulldocs.Event do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @decision_event_types ~w(simplify-accept simplify-reject)
+
+  @doc "The `paper_events` event types that DECIDE a pending request."
+  @spec decision_event_types() :: [String.t()]
+  def decision_event_types, do: @decision_event_types
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
@@ -22,6 +28,26 @@ defmodule Barkpark.Plugins.Bulldocs.Event do
     field :parent_event_id, :binary_id
     field :payload_html, :string
     field :source_doc, :string
+
+    # task-cefcbf5b3a9b1665 — the requester<->accepter identity tie.
+    #
+    # `actor_kind` / `actor_id` name the authenticated principal behind the
+    # row (`BarkparkWeb.PaperViewer` viewer `:kind` + `:id`). NULL = legacy or
+    # unattributed.
+    #
+    # `request_event_id` points a DECISION (`simplify-accept` /
+    # `simplify-reject`) at the `simplify-request` it decides — the originating
+    # intent id a consumer needs to know WHICH request was approved.
+    #
+    # `authorization` is the server's own verdict at write time:
+    # `"authorized"` (`Events.record_decision/1` checked paper, scope, actor,
+    # freshness and replay) or `"unverified"` (written through the raw
+    # `create_event/1` path, nobody checked). NULL — every legacy row — reads
+    # as non-authoritative too. See `Events.authoritative_decision?/1`.
+    field :actor_kind, :string
+    field :actor_id, :string
+    field :request_event_id, :binary_id
+    field :authorization, :string
 
     # W1.5-C tenancy scope. A paper_event FOLLOWS its goal — its scope = the
     # goal's (and its paper's) workspace/project. NULLABLE: NULL = unscoped /
@@ -60,9 +86,15 @@ defmodule Barkpark.Plugins.Bulldocs.Event do
       :payload_html,
       :source_doc,
       :workspace_id,
-      :project_id
+      :project_id,
+      :actor_kind,
+      :actor_id,
+      :request_event_id,
+      :authorization
     ])
     |> validate_required([:event_type])
+    |> validate_inclusion(:authorization, ["authorized", "unverified"])
+    |> demote_unchecked_decision()
     |> validate_goal_or_paper()
     |> maybe_default_branch()
     # W16 FK-abort containment: `workspace_id` / `project_id` are real CASCADE
@@ -73,6 +105,22 @@ defmodule Barkpark.Plugins.Bulldocs.Event do
     # These map the abort to {:error, changeset} so create_event/1 returns it.
     |> foreign_key_constraint(:workspace_id)
     |> foreign_key_constraint(:project_id)
+  end
+
+  # A decision row that arrives through the raw `create_event/1` path carries
+  # no server verdict. It is NOT rejected — the store is append-only and a
+  # bystander's opinion is still data — but it is stamped `"unverified"` so
+  # every consumer can see that nobody checked the requester<->accepter tie.
+  # Only `Events.record_decision/1`, which runs the checks, may put
+  # `"authorized"` here, and it does so explicitly before this runs.
+  defp demote_unchecked_decision(changeset) do
+    event_type = get_field(changeset, :event_type)
+
+    if event_type in @decision_event_types and is_nil(get_field(changeset, :authorization)) do
+      put_change(changeset, :authorization, "unverified")
+    else
+      changeset
+    end
   end
 
   defp validate_goal_or_paper(changeset) do

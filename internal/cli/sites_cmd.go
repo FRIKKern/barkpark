@@ -31,6 +31,7 @@ package cli
 // here.
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -1600,19 +1601,23 @@ func runSitesBuildLogRecord(out *writer, client *cloudclient.Client, site cloudc
 			}
 			return logBytes.TailText()
 		}(),
-		"pre_recorder":    rec.PreRecorder(),
-		"error":           nilIfEmpty(rec.Error),
-		"detail":          nilIfEmpty(rec.Detail),
-		"box_log_state":   nilIfEmpty(rec.BoxLogState),
-		"log_path":        nilIfEmpty(rec.LogPath),
-		"log_bytes":       rec.LogBytes,
-		"exit_code":       rec.ExitCode,
-		"failure_reason":  nilIfEmpty(rec.FailureReason),
-		"journal_command": nilIfEmpty(rec.JournalCommand),
-		"started_at":      nilIfEmpty(rec.StartedAt),
-		"finished_at":     nilIfEmpty(rec.FinishedAt),
-		"evicted_at":      nilIfEmpty(rec.EvictedAt),
-		"stages":          buildLogStagePayload(rec.Stages),
+		"pre_recorder":      rec.PreRecorder(),
+		"error":             nilIfEmpty(rec.Error),
+		"detail":            nilIfEmpty(rec.Detail),
+		"box_log_state":     nilIfEmpty(rec.BoxLogState),
+		"box_status":        nilIfZero(rec.BoxStatus),
+		"box_error":         nilIfEmptyBoxError(rec.BoxError),
+		"box_request_id":    nilIfEmpty(firstNonEmpty(rec.BoxErrorRequestID, rec.BoxError.RequestID)),
+		"box_error_message": nilIfEmpty(firstNonEmpty(rec.BoxErrorMessage, rec.BoxError.Message)),
+		"log_path":          nilIfEmpty(rec.LogPath),
+		"log_bytes":         rec.LogBytes,
+		"exit_code":         rec.ExitCode,
+		"failure_reason":    nilIfEmpty(rec.FailureReason),
+		"journal_command":   nilIfEmpty(rec.JournalCommand),
+		"started_at":        nilIfEmpty(rec.StartedAt),
+		"finished_at":       nilIfEmpty(rec.FinishedAt),
+		"evicted_at":        nilIfEmpty(rec.EvictedAt),
+		"stages":            buildLogStagePayload(rec.Stages),
 	}
 	if out.emitStructured(payload) {
 		if payload["ok"] == true {
@@ -1640,6 +1645,17 @@ func runSitesBuildLogRecord(out *writer, client *cloudclient.Client, site cloudc
 		}
 		if rec.Reason != "" {
 			msg += " — " + rec.Reason
+		}
+		// THE LAST HOP. box_error carries the box's own code/message and its
+		// request_id, and those are the two facts that route the incident to
+		// the box rather than to this client. Dropping them here is what let a
+		// 16-day outage read as a CLI bug (task-3468f99ad5a4e9b8), so the line
+		// is printed whenever the box said anything at all.
+		if line := cloudclient.BoxErrorLine(rec.BoxError, rec.BoxErrorMessage, rec.BoxErrorRequestID); line != "" {
+			msg += fmt.Sprintf(" — the box itself said: %s", line)
+		}
+		if rec.BoxStatus != 0 {
+			msg += fmt.Sprintf(" (box answered HTTP %d)", rec.BoxStatus)
 		}
 		return useError(out, "box_unreachable", msg, exitGeneric)
 	}
@@ -1745,6 +1761,15 @@ func renderSiteBuildLogBytes(out *writer, b cloudclient.SiteBuildLogBytes, err e
 		if d := firstNonEmpty(b.Detail, b.Reason); d != "" {
 			msg += " — " + d
 		}
+		// The bytes route relays box_error through the same producer clause the
+		// record route does. It reached no operator before this because the
+		// struct never declared the key, not because the box stayed quiet.
+		if line := cloudclient.BoxErrorLine(b.BoxError, b.BoxErrorMessage, b.BoxErrorRequestID); line != "" {
+			msg += fmt.Sprintf(" — the box itself said: %s", line)
+		}
+		if b.BoxStatus != 0 {
+			msg += fmt.Sprintf(" (box answered HTTP %d)", b.BoxStatus)
+		}
 		out.outf("%s", msg)
 		return
 	}
@@ -1829,6 +1854,29 @@ func nilIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nilIfZero maps a 0 status to null for the same reason nilIfEmpty exists: an
+// unsent box_status and a box that answered HTTP 0 are not the same fact.
+func nilIfZero(n int) any {
+	if n == 0 {
+		return nil
+	}
+	return n
+}
+
+// nilIfEmptyBoxError re-emits the box's refusal in the SHAPE IT ARRIVED IN (a
+// slug string stays a string, an envelope stays an object), so a structured
+// consumer sees the producer's own wire rather than a CLI flattening of it.
+func nilIfEmptyBoxError(b cloudclient.BoxError) any {
+	if b.Empty() {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(b.Raw, &v); err != nil {
+		return b.Line()
+	}
+	return v
 }
 
 // --- flag parsers (dependency-free, mirroring cloud12_cmd.go) ----------------

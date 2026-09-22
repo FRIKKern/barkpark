@@ -499,6 +499,262 @@ defmodule Barkpark.Tasks.FleetTest do
 
     assert manifest["nouns"] == ["task", "fleet"]
   end
+
+  # ── 9. twin collapse at all THREE fleet call sites (task-f7d389c21c68839f) ──
+
+  describe "twin collapse (Tasks.TwinCollapse — published wins, unpaired draft is the row of record)" do
+    # NAMED FAILURE MODE. Until this row, `Tasks.Fleet` held THREE verbatim
+    # copies of
+    #
+    #     Enum.find(twins, hd(twins), fn d -> d.status == "published" end)
+    #
+    # — in `load_listeners/2`, in `current_tasks_by_worker/2`, and in the
+    # by-ids `canonical_row/3`. The `hd(twins)` DEFAULT, taken whenever a
+    # bucket holds no published row, read Postgres STORAGE ORDER off an
+    # `ORDER BY`-less `Repo.all`. The Go mirror of this shape was measured
+    # live: over 400 builds the draft twin won the slot 349 times and the
+    # published row 51.
+    #
+    # Each arm below is written to red under ONE rule's mutation in isolation:
+    #
+    #   * "rule 1 …" arms are the only ones that red when the
+    #     `status == "published"` clause is deleted. They use the one bucket
+    #     shape where rules 1 and 2 DISAGREE — the PUBLISHED row carries the
+    #     `drafts.` spelling and the unpublished twin is the bare id. In every
+    #     bucket a normal corpus produces, rule 2 agrees with rule 1 and hides
+    #     it.
+    #   * "rule 2 …" arms seed two UNPUBLISHED twins in OPPOSITE insertion
+    #     orders, so only a total rule can answer both the same way; they red
+    #     on the `hd(twins)` default and on dropping the `DraftId.draft?/1`
+    #     term.
+    #   * "an UNPAIRED drafts. listener survives" is the QUIET arm: it passes
+    #     through both mutations above (a one-member bucket has no preference
+    #     to express) and reds only on a BLANKET `drafts.` drop, which would
+    #     make the whole mutate-created listener population unreadable.
+    #
+    # No arm names a line number.
+
+    defp twin_listener!(doc_id, content, status, scope) do
+      Repo.insert!(%Document{
+        doc_id: doc_id,
+        type: "listener",
+        dataset: @dataset,
+        status: status,
+        title: doc_id,
+        rev: "rev-#{doc_id}",
+        workspace_id: Keyword.fetch!(scope, :workspace_id),
+        project_id: Keyword.get(scope, :project_id),
+        content: content
+      })
+    end
+
+    defp listener_content(worker, agent, now) do
+      %{
+        "worker" => worker,
+        "agent" => agent,
+        "status" => "idle",
+        "ttl_s" => Fleet.default_ttl_s(),
+        "last_seen" => DateTime.to_iso8601(now)
+      }
+    end
+
+    defp twin_task!(doc_id, worker, status, scope) do
+      Repo.insert!(%Document{
+        doc_id: doc_id,
+        type: "task",
+        dataset: @dataset,
+        status: status,
+        title: doc_id,
+        rev: "rev-#{doc_id}",
+        workspace_id: Keyword.fetch!(scope, :workspace_id),
+        project_id: Keyword.get(scope, :project_id),
+        content: %{
+          "kind" => "task",
+          "lifecycle_status" => "in_progress",
+          "claim" => %{"worker" => worker}
+        }
+      })
+    end
+
+    # ── call site 1: load_listeners/2 ─────────────────────────────────────
+
+    test "rule 1: the drafts.-spelled PUBLISHED listener wins the roster slot", %{scope: scope} do
+      now = DateTime.utc_now()
+      worker = uniq("ls-r1")
+      logical = "listener-" <> worker
+
+      # Bare id FIRST on purpose: with the published preference deleted, rule 2
+      # takes it and the assertion below flips.
+      twin_listener!(logical, listener_content(worker, "bare-unpublished", now), "draft", scope)
+
+      twin_listener!(
+        "drafts." <> logical,
+        listener_content(worker, "draft-spelled-published", now),
+        "published",
+        scope
+      )
+
+      row = roster_row(@dataset, worker, now: now)
+
+      assert row["agent"] == "draft-spelled-published",
+             "status == published must outrank the bare-id tie-break"
+    end
+
+    test "rule 2: with NO published listener the winner is the RULE, not the storage order",
+         %{scope: scope} do
+      now = DateTime.utc_now()
+      a = uniq("ls-a")
+      b = uniq("ls-b")
+
+      # Two buckets, seeded in OPPOSITE orders. Rule 2 (bare beats `drafts.`)
+      # decides both, so the answer cannot depend on the row order Postgres
+      # hands back.
+      twin_listener!("drafts.listener-" <> a, listener_content(a, "draft-a", now), "draft", scope)
+      twin_listener!("listener-" <> a, listener_content(a, "bare-a", now), "draft", scope)
+
+      twin_listener!("listener-" <> b, listener_content(b, "bare-b", now), "draft", scope)
+      twin_listener!("drafts.listener-" <> b, listener_content(b, "draft-b", now), "draft", scope)
+
+      assert roster_row(@dataset, a, now: now)["agent"] == "bare-a"
+      assert roster_row(@dataset, b, now: now)["agent"] == "bare-b"
+
+      # The pair COLLAPSES: one roster row per worker, not two.
+      rows = Fleet.roster(@dataset, workspace_id: default_workspace_id(), now: now)
+      assert Enum.count(rows, &(&1["worker"] == a)) == 1
+      assert Enum.count(rows, &(&1["worker"] == b)) == 1
+    end
+
+    test "an UNPAIRED drafts. listener survives the collapse as ITSELF", %{scope: scope} do
+      now = DateTime.utc_now()
+      worker = uniq("ls-solo")
+
+      twin_listener!(
+        "drafts.listener-" <> worker,
+        listener_content(worker, "solo-draft", now),
+        "draft",
+        scope
+      )
+
+      row = roster_row(@dataset, worker, now: now)
+
+      assert row != nil, "an unpaired drafts. listener must survive the collapse"
+      assert row["agent"] == "solo-draft"
+    end
+
+    # ── call site 2: current_tasks_by_worker/2 ────────────────────────────
+
+    test "rule 1: the drafts.-spelled PUBLISHED task decides who holds the claim",
+         %{scope: scope} do
+      now = DateTime.utc_now()
+      holder = uniq("jt-pub")
+      other = uniq("jt-draft")
+      task_id = uniq("jt-task")
+
+      # The twins name DIFFERENT claim holders, so which row wins the bucket is
+      # observable in the roster's task join. Bare id inserted FIRST.
+      twin_task!(task_id, other, "draft", scope)
+      twin_task!("drafts." <> task_id, holder, "published", scope)
+
+      twin_listener!(
+        "listener-" <> holder,
+        listener_content(holder, "h", now),
+        "published",
+        scope
+      )
+
+      twin_listener!("listener-" <> other, listener_content(other, "o", now), "published", scope)
+
+      assert roster_row(@dataset, holder, now: now)["task"] == task_id,
+             "the published twin's claim.worker must own the join"
+
+      assert roster_row(@dataset, other, now: now)["task"] == nil,
+             "the draft twin's claim.worker must not also hold the task"
+    end
+
+    test "rule 2: with NO published task twin the bare id's claim holder wins", %{scope: scope} do
+      now = DateTime.utc_now()
+      bare_holder = uniq("jt2-bare")
+      draft_holder = uniq("jt2-draft")
+      task_id = uniq("jt2-task")
+
+      # drafts. row FIRST: under `hd(twins)` on storage order it takes the slot.
+      twin_task!("drafts." <> task_id, draft_holder, "draft", scope)
+      twin_task!(task_id, bare_holder, "draft", scope)
+
+      twin_listener!(
+        "listener-" <> bare_holder,
+        listener_content(bare_holder, "b", now),
+        "published",
+        scope
+      )
+
+      twin_listener!(
+        "listener-" <> draft_holder,
+        listener_content(draft_holder, "d", now),
+        "published",
+        scope
+      )
+
+      assert roster_row(@dataset, bare_holder, now: now)["task"] == task_id
+      assert roster_row(@dataset, draft_holder, now: now)["task"] == nil
+    end
+
+    # ── call site 3: canonical_row/3 (register-vs-touch) ──────────────────
+
+    test "rule 1: a beat touches the drafts.-spelled PUBLISHED listener row", %{scope: scope} do
+      now = DateTime.utc_now()
+      worker = uniq("cr-r1")
+      logical = "listener-" <> worker
+      stale = now |> DateTime.add(-3600, :second)
+
+      bare = twin_listener!(logical, listener_content(worker, "bare", stale), "draft", scope)
+
+      published =
+        twin_listener!(
+          "drafts." <> logical,
+          listener_content(worker, "pub", stale),
+          "published",
+          scope
+        )
+
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "status" => "working"}, @dataset, scope)
+
+      assert Repo.get!(Document, published.id).content["status"] == "working",
+             "the beat must land on the published twin"
+
+      assert Repo.get!(Document, bare.id).content["status"] == "idle",
+             "the unpublished bare twin must be left alone"
+
+      # And no THIRD row was registered: the beat resolved, it did not create.
+      assert length(listener_rows(worker)) == 2
+    end
+
+    test "rule 2: with NO published twin a beat touches the BARE row, not the drafts. one",
+         %{scope: scope} do
+      worker = uniq("cr-r2")
+      logical = "listener-" <> worker
+      stale = DateTime.utc_now() |> DateTime.add(-3600, :second)
+
+      # drafts. row FIRST — the one `hd(twins)` would take.
+      draft =
+        twin_listener!(
+          "drafts." <> logical,
+          listener_content(worker, "draft", stale),
+          "draft",
+          scope
+        )
+
+      bare = twin_listener!(logical, listener_content(worker, "bare", stale), "draft", scope)
+
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "status" => "working"}, @dataset, scope)
+
+      assert Repo.get!(Document, bare.id).content["status"] == "working",
+             "a bare id must beat a drafts.-prefixed twin"
+
+      assert Repo.get!(Document, draft.id).content["status"] == "idle"
+      assert length(listener_rows(worker)) == 2
+    end
+  end
 end
 
 defmodule BarkparkWeb.FleetControllerTest do

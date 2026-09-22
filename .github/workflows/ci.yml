@@ -7,6 +7,8 @@ name: ci
 #   0. changes      — the DISPATCHER. Always runs. Computes the changed-path set
 #                     and emits the one boolean the expensive jobs are gated on.
 #   1. path-escape  — the path ratchet + its harness. Unfiltered, blocking.
+#   1b. golden-rule-8-guard — selftest for the LOCAL post-checkout observer of
+#                     Golden Rule 8. Unfiltered; not in the required set.
 #   2. lighthouse   — Lighthouse CI. Gated on the web path set. continue-on-error,
 #                     and therefore deliberately OUTSIDE the aggregator (below).
 #   3. web-checks   — typecheck + unit tests + lint. Gated on the web path set.
@@ -319,6 +321,40 @@ jobs:
       - name: Every cross-tree read of the web gate is dispatched on
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/web-path-escape-check.sh
+
+  golden-rule-8-guard:
+    # DELIBERATELY UNFILTERED, like path-escape above. The subject is a LOCAL
+    # git hook: CI can never observe the violation it watches for (a branch
+    # switch in someone's working copy produces no ref on origin), so the only
+    # thing CI can honestly assert is that the observer still works. That is
+    # exactly the selftest — and a harness nobody runs is not a ratchet.
+    #
+    # NOT in the required set (.github/required-checks.json names only Cloud
+    # gate / Console gate / Elixir gate / PR references an active task), so this
+    # reds its own check run and cannot block a merge.
+    name: Golden Rule 8 observer (selftest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 12 arms in one temp repo: 5 that must FIRE on a branch switch in a
+      # primary checkout (switch / checkout / -b / detached / `git -C`), and 7
+      # that must stay QUIET (worktree add, switches inside a linked worktree,
+      # file checkouts, a re-checkout of main, an unrelated clone). The quiet
+      # arms are the load-bearing ones: a guard that shouts at legitimate work
+      # gets deleted by the next agent, and then it guards nothing.
+      - name: The observer must be able to fire, and must stay quiet otherwise
+        run: bash scripts/main-checkout-branch-guard.sh --selftest
+
+      # The shim must actually reach the guard. A hook that silently exits 0
+      # because it cannot find its script is the quietest possible failure.
+      - name: The .githooks/post-checkout shim resolves to the guard
+        run: |
+          set -euo pipefail
+          test -x .githooks/post-checkout
+          test -x scripts/main-checkout-branch-guard.sh
+          grep -q 'main-checkout-branch-guard.sh' .githooks/post-checkout
+          echo "shim -> guard: OK"
 
   lighthouse:
     # Lighthouse against the built web/ app. STILL fail-soft

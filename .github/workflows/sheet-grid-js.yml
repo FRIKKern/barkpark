@@ -17,6 +17,14 @@ on:
     paths:
       - "api/priv/static/assets/bp-sheet-grid.js"
       - "api/priv/static/assets/bp-sheet-formula.js"
+      # The third shipped file these harnesses load. __pointing.test.mjs reads
+      # api/priv/static/assets/bp-sheet-pointing.js verbatim (22 groups), and
+      # this list did not name it — so an edit to the pointing kernel alone
+      # dispatched this workflow on neither arm. (The Elixir gate still reaches
+      # it: anything under api/ selects ALL tests, and js_harness_test.exs shells
+      # all four sheet-grid harnesses. This closes the dedicated gate's own hole,
+      # which is the rule its comment below already states.)
+      - "api/priv/static/assets/bp-sheet-pointing.js"
       - "api/assets/sheet-grid/**"
       # THE FILES __palette.test.mjs READS. Without these three the contrast
       # harness never ran on a PR that changed a hue, a background token, or the
@@ -30,6 +38,14 @@ on:
     paths:
       - "api/priv/static/assets/bp-sheet-grid.js"
       - "api/priv/static/assets/bp-sheet-formula.js"
+      # The third shipped file these harnesses load. __pointing.test.mjs reads
+      # api/priv/static/assets/bp-sheet-pointing.js verbatim (22 groups), and
+      # this list did not name it — so an edit to the pointing kernel alone
+      # dispatched this workflow on neither arm. (The Elixir gate still reaches
+      # it: anything under api/ selects ALL tests, and js_harness_test.exs shells
+      # all four sheet-grid harnesses. This closes the dedicated gate's own hole,
+      # which is the rule its comment below already states.)
+      - "api/priv/static/assets/bp-sheet-pointing.js"
       - "api/assets/sheet-grid/**"
       - "api/lib/barkpark_web/layouts/root.html.heex"
       - "api/lib/barkpark_web/studio/presence_state.ex"

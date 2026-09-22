@@ -321,7 +321,7 @@ defmodule Barkpark.Plugins.Bootstrap do
     end
   end
 
-  # ─── The pull-provenance guard (PDS-D21/D22) ───────────────────────────
+  # ─── The pull-provenance guard (PDS-D21/PDS-D22) ───────────────────────────
   #
   # WHAT THE CLOBBER ACTUALLY IS. `Content.upsert_schema/2` reads first via
   # `get_schema/3`. `Content.Scope.scope_to_workspace_global/1` really is
@@ -350,7 +350,7 @@ defmodule Barkpark.Plugins.Bootstrap do
   # slot; both would be dead weight. A blanket never-update stays rejected: it
   # would freeze legitimate plugin schema evolution on every un-pulled install.
   #
-  # THE PREDICATE ITSELF LIVES IN `Barkpark.Tenancy` (PDS-D125/D126) — it is
+  # THE PREDICATE ITSELF LIVES IN `Barkpark.Tenancy` (PDS-D125/PDS-D126) — it is
   # shared with `Content.TagRegistry`, the OTHER boot-time schema writer, which
   # asks the same question and answers it differently (it guards the update but
   # still inserts when absent, because it must fail the boot closed on a missing

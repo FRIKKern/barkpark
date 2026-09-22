@@ -134,6 +134,12 @@ func runCloud(out *writer, g globals, args []string) int {
 		return runCloudUsage(out, g, args[1:])
 	case "members", "member":
 		return runCloudMembers(out, g, args[1:])
+	// `token` is the CONTROL-PLANE credential (a Personal Access Token) a CI job
+	// bears. Deliberately NOT the same noun as top-level `bp token`, which mints
+	// a WORKSPACE token on a content server: two services, two credentials, and
+	// conflating them is how an operator ends up pasting the wrong one into CI.
+	case "token", "tokens":
+		return runCloudToken(out, g, args[1:])
 	case "autoupdate":
 		return runCloudAutoupdate(out, g, args[1:])
 	case "rollout":

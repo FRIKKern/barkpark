@@ -1642,3 +1642,93 @@ func TestCloudWorkspaceListNarrowsToOneWorkspace(t *testing.T) {
 		t.Errorf("an unreachable slug must be named back:\n%s", stdout)
 	}
 }
+
+// TestCloudWorkspaceExportWireByteAgnostic is the RE-RUNNABLE instrument behind
+// scripts/pds-w47-export-wire-bytes-2026-09-17.md. PDS-D204 moved the export
+// route send_resp -> send_file, which deleted the transparent gzip the CLI used
+// to receive; the live paired measurement (2026-09-17) put one profile=dev
+// export at 310,917,632 wire bytes under send_file against 83,323,612 gzipped
+// under the ancestor — 3.731x — while the bytes landing on disk were identical.
+// This test pins BOTH halves against a local server so the claim is a check, not
+// a memory: it counts bytes off the socket in each arm and asserts the receipt
+// file is byte-identical across them.
+//
+// THE REVERSION IT REDS ON: setting DisableCompression on newTransferClient (or
+// pinning Accept-Encoding by hand on the export request). The CLI's agnosticism
+// is load-bearing precisely because the route has already moved once — if it
+// moves back and the CLI has stopped offering gzip, the transfer silently grows
+// by the measured 3.731x with nothing in the tree to say so.
+func TestCloudWorkspaceExportWireByteAgnostic(t *testing.T) {
+	workspaceEnvIsolate(t)
+	// A payload that actually compresses, so the two arms are distinguishable.
+	payload := bytes.Repeat([]byte("BUNDLE-TAR-BYTES-0123456789-"), 4096)
+
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write(payload); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+
+	run := func(t *testing.T, compress bool) (onDisk []byte, wire int, offered string) {
+		t.Helper()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			offered = r.Header.Get("Accept-Encoding")
+			w.Header().Set("Content-Type", "application/x-tar")
+			if compress {
+				// The send_resp ancestor: Bandit gzipped the body and Go strips
+				// Content-Length to -1 on the way back in.
+				w.Header().Set("Content-Encoding", "gzip")
+				wire = gz.Len()
+				_, _ = w.Write(gz.Bytes())
+				return
+			}
+			// Today's send_file: identity, declared length, no vary.
+			wire = len(payload)
+			_, _ = w.Write(payload)
+		}))
+		t.Cleanup(srv.Close)
+
+		outFile := filepath.Join(t.TempDir(), "acme.tar")
+		g := globals{server: srv.URL, token: "admin-tok"}
+		stdout, stderr, code := runWorkspace(t, g, "json", "export", "acme", "--file", outFile)
+		if code != exitOK {
+			t.Fatalf("export must succeed (compress=%v): exit=%d\nstdout:%s\nstderr:%s", compress, code, stdout, stderr)
+		}
+		got, err := os.ReadFile(outFile)
+		if err != nil {
+			t.Fatalf("read export file: %v", err)
+		}
+		return got, wire, offered
+	}
+
+	identityBytes, identityWire, identityOffered := run(t, false)
+	gzipBytes, gzipWire, _ := run(t, true)
+
+	// ARM 1 — REDS ON REVERSION. The transport must still offer gzip on its own.
+	// Go adds this header only while DisableCompression is unset and the caller
+	// has not pinned Accept-Encoding itself.
+	if !strings.Contains(identityOffered, "gzip") {
+		t.Fatalf("the export transport must still offer gzip transparently; Accept-Encoding = %q — "+
+			"see scripts/pds-w47-export-wire-bytes-2026-09-17.md for what this costs", identityOffered)
+	}
+
+	// ARM 2 — the quiet one. Whatever the wire does, the receipt is the same tar.
+	if !bytes.Equal(identityBytes, payload) {
+		t.Fatalf("identity arm wrote %d bytes, want the %d-byte payload verbatim", len(identityBytes), len(payload))
+	}
+	if !bytes.Equal(gzipBytes, identityBytes) {
+		t.Fatalf("the two transports must land IDENTICAL bytes on disk: gzip arm %d bytes, identity arm %d bytes",
+			len(gzipBytes), len(identityBytes))
+	}
+
+	// The measurement itself: the send_file arm really does move more bytes.
+	if gzipWire >= identityWire {
+		t.Fatalf("the fixture no longer distinguishes the arms (gzip wire %d >= identity wire %d) — "+
+			"this test measures nothing until the payload compresses again", gzipWire, identityWire)
+	}
+	t.Logf("wire bytes: identity/send_file = %d, gzip/send_resp = %d (%.3fx), on-disk identical at %d bytes",
+		identityWire, gzipWire, float64(identityWire)/float64(gzipWire), len(identityBytes))
+}

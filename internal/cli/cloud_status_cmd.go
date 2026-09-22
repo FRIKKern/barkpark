@@ -486,6 +486,64 @@ func fillingReason(b cloudclient.Barkpark) string {
 // It is keyed on the PRESENCE of reported_at, not on its age: no measurement in
 // this wave justifies a staleness window, and inventing one would be exactly the
 // fabricated number the honesty law exists to refuse.
+// --- the suspension stamp (task-85c531c2adbf0dff) ----------------------------
+//
+// suspendedSinceMark renders `suspended_at` — the day the control plane stamped
+// the suspension — as a DAY, or as an explicit em dash when the plane did not
+// tell us. It is only ever called on a row the ladder already ranked
+// `suspended`, so the dash says one narrow thing: this box IS suspended and the
+// plane carries no stamp for it.
+//
+// WHY A DASH AND NOT A BLANK, AND NEVER A ZERO-VALUE DATE. The console shipped
+// the opposite of this and it was the whole defect cch-w54-bl existed to fix:
+// `suspendedCardBannerHtml` had no suspension day so it fell through to a
+// helper computed off `sub.current_period_end` — the NEXT renewal — and painted
+// a FUTURE date as a past-tense suspension day. Anything that LOOKS like a date
+// here is a claim about when billing cut the box off, so an unmeasured stamp
+// must look like nothing else on the line. `0001-01-01` (Go's zero time) and a
+// silently-dropped clause are both worse than a dash: the first is a lie with a
+// calendar behind it, the second is invisible.
+//
+// TWO HONEST POPULATIONS READ NIL, and neither is "suspended just now": a
+// control plane older than cch-w54-bl omits the key entirely, and any future
+// suspension path that forgets to stamp the column would too. NULL on a LIVE
+// box is a third thing this function never sees — `unsuspend_barkpark/1` and
+// the bulk resume clear suspended/suspended_reason/suspended_at together, so a
+// resumed box carries no stale stamp and never reaches the `suspended` arm.
+//
+// The DAY, not the instant: the producer sends `:utc_datetime_usec`
+// (`2026-09-01T12:34:56.000000Z`) and the operator question this answers is
+// "since when", to the day. A value that does not parse as RFC3339 is printed
+// verbatim rather than swallowed — an unexpected shape from the plane is a fact
+// worth seeing, not one worth hiding behind a dash that means something else.
+func suspendedSinceMark(b cloudclient.Barkpark) string {
+	if b.SuspendedAt == nil {
+		return "—"
+	}
+	raw := strings.TrimSpace(*b.SuspendedAt)
+	if raw == "" {
+		return "—"
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.UTC().Format("2006-01-02")
+	}
+	return raw
+}
+
+// suspendedDetail is the DETAIL cell for a `suspended` row: the control plane's
+// own suspension reason, then the day it happened, joined by the separator this
+// screen already uses. The "since" clause is unconditional — a suspended box
+// with no stamp prints `since —`, because "we do not know when" is the answer
+// the operator needs and an omitted clause reads as "nobody asked".
+func suspendedDetail(b cloudclient.Barkpark) string {
+	since := "since " + suspendedSinceMark(b)
+	reason := strings.TrimSpace(b.SuspendedReason)
+	if reason == "" {
+		return since
+	}
+	return reason + " · " + since
+}
+
 func unmeteredMarker(b cloudclient.Barkpark) string {
 	p := b.Pressure
 	if p == nil || p.ReportedAt == nil || strings.TrimSpace(*p.ReportedAt) == "" {
@@ -841,7 +899,7 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	case "failed":
 		reason = strings.TrimSpace(b.ProvisionError)
 	case "suspended":
-		reason = strings.TrimSpace(b.SuspendedReason)
+		reason = suspendedDetail(b)
 	case "strained":
 		reason = strainedReason(b)
 	case "filling":
@@ -1258,20 +1316,23 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		"git_commit_first_seen_at": r.BP.GitCommitFirstSeenAt,
 		// The 5xx tri-state (dr-w5-followup): nil-as-unmeasured, zero-as-zero,
 		// rate-as-itself — the json render where the three states stay three.
-		"err_5xx":                err5xxRow(r.BP),
-		"name":                   r.BP.Name,
-		"slug":                   r.BP.Slug,
-		"id":                     r.BP.ID,
-		"host":                   r.BP.Host,
-		"url":                    r.BP.URL,
-		"status":                 r.Status,
-		"bucket":                 r.Bucket,
-		"rank":                   r.Rank,
-		"detail":                 r.Detail,
-		"health_status":          r.BP.HealthStatus,
-		"agent_status":           r.BP.AgentStatus,
-		"update_state":           r.BP.UpdateState,
-		"suspended":              r.BP.Suspended,
+		"err_5xx":       err5xxRow(r.BP),
+		"name":          r.BP.Name,
+		"slug":          r.BP.Slug,
+		"id":            r.BP.ID,
+		"host":          r.BP.Host,
+		"url":           r.BP.URL,
+		"status":        r.Status,
+		"bucket":        r.Bucket,
+		"rank":          r.Rank,
+		"detail":        r.Detail,
+		"health_status": r.BP.HealthStatus,
+		"agent_status":  r.BP.AgentStatus,
+		"update_state":  r.BP.UpdateState,
+		"suspended":     r.BP.Suspended,
+		// `suspended_at` is NOT here: it is emitted conditionally below, because
+		// nil and a real stamp are different sentences and this map has no way to
+		// say the first one. See the block after the literal.
 		"update_running_release": r.BP.UpdateRunningRelease,
 		"update_latest_release":  r.BP.UpdateLatestRelease,
 		// update_checked_at is TRI-STATE below, with autoupdate_enabled and
@@ -1291,6 +1352,26 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 	// -o json is as honest as the table (nil = policy unknown, never a fake false).
 	if r.BP.AutoupdateEnabled != nil {
 		row["autoupdate_enabled"] = *r.BP.AutoupdateEnabled
+	}
+	// Tri-state, the SAME idiom, for the suspension stamp
+	// (task-85c531c2adbf0dff): emit `suspended_at` only when the control plane
+	// actually sent one. `"suspended": false` one block above is a real answer on
+	// every row, but the DAY is not — NULL means not suspended, and an older
+	// plane (pre-cch-w54-bl) omits the key entirely. Writing `""` would fuse
+	// those two with a real RFC3339 stamp into one shape a script cannot take
+	// apart, and — the dangerous half — it invites `time.Parse` on a value that
+	// measures nothing. An absent key forces the consumer to branch, exactly as
+	// update_checked_at and commit_distance argue directly above and below.
+	//
+	// An EMPTY STRING the plane actually sent is not a stamp either, so it is
+	// trimmed away for the same reason `refusal_phase` trims (PR #18566): there
+	// is no day to print. The pointer keeps the two distinguishable in the
+	// struct. The table's DETAIL cell says the same nil out loud as `since —`;
+	// this payload says it by silence, which is what a script wants.
+	if r.BP.SuspendedAt != nil {
+		if at := strings.TrimSpace(*r.BP.SuspendedAt); at != "" {
+			row["suspended_at"] = at
+		}
 	}
 	// Tri-state, the SAME idiom, three lines from its two neighbours
 	// (cch-w65-bl): emit update_checked_at only when the plane actually recorded

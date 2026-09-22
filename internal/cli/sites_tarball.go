@@ -147,16 +147,39 @@ type prebuiltArtifact struct {
 // fine as an ON-BOX build, because that path copies with `cp -a`. So the seam
 // is closed at the client: what the box will refuse never leaves the laptop.
 func packPrebuiltDir(dir string) (prebuiltArtifact, error) {
-	abs, err := validatePrebuiltDir(dir)
+	return packPrebuiltDirFor(dir, prebuiltRuntimeStatic)
+}
+
+// packPrebuiltDirFor is packPrebuiltDir with the site's RUNTIME TARGET supplied,
+// and the two runtimes pack differently in exactly one way.
+//
+// A node artifact must carry `.bp-node-abi` at its root (the wire shape lives in
+// sites_node_abi.go and, canonically, in deploy/site-deploy-node.sh's header).
+// The declaration is SYNTHESIZED INTO THE ARCHIVE rather than written into the
+// user's directory: `--prebuilt <dir>` is a read of a build output, and a packer
+// that mutates the tree it was asked to ship would leave a stale declaration
+// behind for the next, possibly cross-built, run to pick up. A tree that already
+// carries its own honest declaration keeps it; see nodeABIExtraFor.
+func packPrebuiltDirFor(dir string, runtime prebuiltRuntime) (prebuiltArtifact, error) {
+	abs, err := validatePrebuiltDirFor(dir, runtime)
 	if err != nil {
 		return prebuiltArtifact{}, err
 	}
 	root := strings.TrimSpace(dir)
 
+	var extra []tarballExtraFile
+	if runtime == prebuiltRuntimeNode {
+		extra, err = nodeABIExtraFor(abs, defaultNodeABIProbe())
+		if err != nil {
+			return prebuiltArtifact{}, err
+		}
+	}
+
 	art, err := bufferTarball(tarballOptions{
 		Root:     abs,
 		Ignores:  prebuiltTarballIgnores,
 		MaxBytes: prebuiltMaxUncompressedBytes,
+		Extra:    extra,
 	})
 	if err != nil {
 		return prebuiltArtifact{}, err
@@ -183,6 +206,37 @@ func packPrebuiltDir(dir string) (prebuiltArtifact, error) {
 // failed/exitGeneric); since the pre-mint arm always fires first on the real
 // command, a refusal from here surfaces as usage/exitUsage.
 func validatePrebuiltDir(dir string) (string, error) {
+	return validatePrebuiltDirFor(dir, prebuiltRuntimeStatic)
+}
+
+// prebuiltRuntime names WHICH root guard validatePrebuiltDirFor applies, and the
+// three values are not a style choice — they are three different states of
+// knowledge, and collapsing any two of them breaks one of the two call sites.
+//
+//   - prebuiltRuntimeStatic: the static symlink-swap lane. A root `index.html`
+//     is what the runtime serves and what HEALTH reads its markers out of.
+//   - prebuiltRuntimeNode: the node-slot lane. The uploaded tree IS the release
+//     root — a Next `output:'standalone'` tree with `server.js` at its top and
+//     `.next/static` + `public/` already folded in (there is no $SITE_SRC on the
+//     box to take them from). The engine refuses a tree without a top-level
+//     server.js with exit 11 BEFORE STAGE; this is that refusal, moved to the
+//     laptop where it costs nothing.
+//   - prebuiltRuntimeUnknown: the PRE-MINT arm, which by design has touched no
+//     network and therefore has not read the site row. It accepts EITHER root,
+//     because refusing one of them here would refuse the other lane's legitimate
+//     tree before anything could tell them apart. It is a union, not a hole: a
+//     project directory (neither root file) is still refused before the nonce is
+//     spent, and the runtime-specific guard runs later — still pre-mint, just
+//     after the one site read the lane already makes.
+type prebuiltRuntime int
+
+const (
+	prebuiltRuntimeUnknown prebuiltRuntime = iota
+	prebuiltRuntimeStatic
+	prebuiltRuntimeNode
+)
+
+func validatePrebuiltDirFor(dir string, runtime prebuiltRuntime) (string, error) {
 	root := strings.TrimSpace(dir)
 	if root == "" {
 		return "", fmt.Errorf("--prebuilt needs a directory (e.g. --prebuilt ./dist)")
@@ -217,16 +271,44 @@ func validatePrebuiltDir(dir string) (string, error) {
 	if len(entries) == 0 {
 		return "", fmt.Errorf("--prebuilt %s is empty — nothing to deploy (did the build run, and did it write here?)", root)
 	}
-	// A root index.html is what the static runtime serves and what HEALTH reads
-	// its markers out of. Without it the deploy would go green on bytes that 404.
-	idx, err := os.Stat(filepath.Join(abs, "index.html"))
-	if err != nil || !idx.Mode().IsRegular() {
-		return "", fmt.Errorf("--prebuilt %s has no index.html at its root — that is the build OUTPUT directory (e.g. ./dist), not the project directory", root)
+	if err := prebuiltRootFileFault(abs, root, runtime); err != nil {
+		return "", err
 	}
 	if err := preflightPrebuiltEntries(abs, root); err != nil {
 		return "", err
 	}
 	return abs, nil
+}
+
+// prebuiltRootFileFault is the per-runtime root guard: the ONE file whose
+// absence means the tree is not a release root at all.
+//
+// Both refusals mirror a refusal the box already makes, and that is the point —
+// the static engine 404s on a tree with no index.html and the node engine exits
+// 11 on a tree with no top-level server.js, both AFTER a nonced mint and a full
+// upload. Moving them here costs a stat.
+func prebuiltRootFileFault(abs, root string, runtime prebuiltRuntime) error {
+	regular := func(name string) bool {
+		st, err := os.Stat(filepath.Join(abs, name))
+		return err == nil && st.Mode().IsRegular()
+	}
+	switch runtime {
+	case prebuiltRuntimeNode:
+		if !regular("server.js") {
+			return fmt.Errorf("--prebuilt %s has no server.js at its root — a node release root IS the Next standalone tree, so pack from .next/standalone with .next/static and public/ already folded in (the box has no source to take them from) and not from the project directory", root)
+		}
+	case prebuiltRuntimeUnknown:
+		// The union arm. See prebuiltRuntime's doc comment: this runs before the
+		// site row has been read, so it may only refuse a tree that is NEITHER.
+		if !regular("index.html") && !regular("server.js") {
+			return fmt.Errorf("--prebuilt %s has neither an index.html nor a server.js at its root — that is the build OUTPUT directory (a static ./dist, or a node .next/standalone release root), not the project directory", root)
+		}
+	default:
+		if !regular("index.html") {
+			return fmt.Errorf("--prebuilt %s has no index.html at its root — that is the build OUTPUT directory (e.g. ./dist), not the project directory", root)
+		}
+	}
+	return nil
 }
 
 // prebuiltAcceptedTypeflags is the box's own accept list, transcribed from
@@ -393,6 +475,20 @@ type tarballOptions struct {
 	Root     string
 	Ignores  []string
 	MaxBytes int64
+	// Extra are SYNTHESIZED entries appended after the walk — content the
+	// archive must carry that does not exist on disk. They are written last and
+	// their names are checked against the walk's output, so an extra can never
+	// silently shadow a real file (tar has no such rule: a duplicate name
+	// extracts as last-one-wins, which would make "did the packer or the tree
+	// declare this?" unanswerable from the artifact).
+	Extra []tarballExtraFile
+}
+
+// tarballExtraFile is one synthesized archive entry. Name is a slash-separated
+// path relative to the archive root.
+type tarballExtraFile struct {
+	Name string
+	Body []byte
 }
 
 // streamTarball returns a reader that emits a gzip'd tar of `opts.Root`. The
@@ -428,8 +524,9 @@ func streamTarball(opts tarballOptions) (io.ReadCloser, error) {
 	ignoreSet := tarballIgnoreSet(root, opts.Ignores)
 
 	pr, pw := io.Pipe()
+	extra := opts.Extra
 	go func() {
-		_ = pw.CloseWithError(writeTarball(pw, root, ignoreSet, opts.MaxBytes))
+		_ = pw.CloseWithError(writeTarball(pw, root, ignoreSet, opts.MaxBytes, extra))
 	}()
 	return pr, nil
 }
@@ -512,15 +609,19 @@ func tarHeaderFor(path, rel string, info os.FileInfo) (*tar.Header, error) {
 
 // writeTarball is the goroutine body — walks `root`, writes each file into the
 // tar+gzip pipeline, and closes both writers cleanly.
-func writeTarball(w io.Writer, root string, ignores map[string]struct{}, maxBytes int64) error {
+func writeTarball(w io.Writer, root string, ignores map[string]struct{}, maxBytes int64, extra []tarballExtraFile) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 	written := int64(0)
+	seen := make(map[string]struct{}, len(extra))
 
 	err := walkTarballEntries(root, ignores, func(path, rel string, info os.FileInfo) error {
 		hdr, err := tarHeaderFor(path, rel, info)
 		if err != nil {
 			return err
+		}
+		if len(extra) > 0 {
+			seen[hdr.Name] = struct{}{}
 		}
 
 		if err := tw.WriteHeader(hdr); err != nil {
@@ -555,6 +656,9 @@ func writeTarball(w io.Writer, root string, ignores map[string]struct{}, maxByte
 		}
 		return nil
 	})
+	if err == nil {
+		err = writeTarballExtras(tw, seen, extra)
+	}
 	if err != nil {
 		_ = tw.Close()
 		_ = gz.Close()
@@ -565,6 +669,38 @@ func writeTarball(w io.Writer, root string, ignores map[string]struct{}, maxByte
 		return err
 	}
 	return gz.Close()
+}
+
+// writeTarballExtras appends the synthesized entries, refusing a name the walk
+// already emitted. That refusal is the load-bearing half: tar permits duplicate
+// names and an extractor takes the LAST one, so a silent append would produce an
+// archive whose on-box meaning ("what does this tree declare?") depends on entry
+// order rather than on any decision anyone made.
+func writeTarballExtras(tw *tar.Writer, seen map[string]struct{}, extra []tarballExtraFile) error {
+	for _, e := range extra {
+		name := strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(e.Name)), "./")
+		if name == "" {
+			return fmt.Errorf("refusing to synthesize an archive entry with no name")
+		}
+		if _, dup := seen[name]; dup {
+			return fmt.Errorf("refusing to synthesize %q: the packed tree already carries an entry by that name, and tar would leave which one wins to the extractor", name)
+		}
+		hdr := &tar.Header{
+			Name:     name,
+			Mode:     0o644,
+			Size:     int64(len(e.Body)),
+			Typeflag: tar.TypeReg,
+			Format:   tar.FormatPAX,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if _, err := tw.Write(e.Body); err != nil {
+			return err
+		}
+		seen[name] = struct{}{}
+	}
+	return nil
 }
 
 // isIgnored reports whether a relative path inside the project root matches

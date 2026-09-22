@@ -140,7 +140,14 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
     # A WRITE-capable api token. The denial path short-circuits before the
     # write, so a denied principal would price the CHEAP arm; the cost this row
     # asks about is the one a real editor pays.
-    {:ok, _} = Auth.create_token(@writer, "pds w42 latency", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @writer,
+        "pds w42 latency",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     :ok
   end
@@ -217,13 +224,74 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
 
     try do
       fun.()
-      # Force the view to drain its mailbox: the component route writes in a
-      # LATER handle_info, and counting before that drains reports a false 0.
-      :sys.get_state(view_pid)
+      # Drain the view's mailbox before counting: the component route writes in
+      # a LATER handle_info, and counting before that drains reports a false 0.
+      #
+      # This was ONE `:sys.get_state(view_pid)` until task-97bb0fb9c044192f. A
+      # `:sys.get_state` — like `Phoenix.LiveViewTest.render/1`, which resolves
+      # to a single `GenServer.call(pid, {:phoenix, :ping})`
+      # (deps/phoenix_live_view/lib/phoenix_live_view/channel.ex:53-55) — is ONE
+      # BARRIER, NOT A DRAIN. It orders itself only against messages ALREADY in
+      # the mailbox when it arrives, and says nothing about messages the
+      # LiveView enqueues TO ITSELF while handling the current one. CH-PAPEROP
+      # does exactly that: `PaperFieldBlock.persist/4` runs
+      # `send(self(), {:paper_op, ...})` from inside `handle_event`
+      # (paper_field_block.ex:350/352), so every op under measurement lands a
+      # generation LATER than the hook that caused it.
+      #
+      # Measured on this file at bd804ca23: with BOTH in-window barriers removed
+      # (this call and the tail `render(view)` in the component-route test) the
+      # site reds 8 of 10 — and it reds on the DERIVE COUNT, not on the store:
+      # `assert n == @derives_per_component_op` / `left: 1, right: 2`. The
+      # direct SELECT that follows is slow enough to let the write land, but the
+      # trace has already been drained. So the quantity a missed generation
+      # destroys here is the count this file exists to publish.
+      settle!(view_pid)
       drain_calls(%{})
     after
       :erlang.trace(view_pid, false, [:call])
       for mfa <- @probed, do: :erlang.trace_pattern(mfa, false, [:local])
+    end
+  end
+
+  # Barrier until the LiveView has nothing queued on two consecutive readings.
+  # One empty reading can be the window between a message arriving and the
+  # process dequeuing it; two, with a full barrier in between, cannot be the
+  # middle of a self-send chain — every generation here is enqueued BEFORE the
+  # barrier that precedes it is answered. Each iteration strictly advances the
+  # chain, so it terminates; the fuel only turns a hang into a named failure.
+  #
+  # The barrier is `:sys.get_state/1` and DELIBERATELY NOT `render/1`, and it is
+  # for the same reason this test hoisted `rev = paper_rev(view)` ABOVE its two
+  # `render_hook` calls: everything inside this window is COUNTED. `render/1`
+  # re-renders the LiveView and its components, which can itself reach a probed
+  # function and inflate the number the caller is measuring; `:sys.get_state/1`
+  # is a gen_server system message that calls none of `@probed`, so looping it
+  # adds exactly zero to every counter. A settle that changed the count would
+  # have loosened the measurement rather than protected it.
+  #
+  # Re-introducing `paper_rev(view)` between the hooks would NOT be an
+  # acceptable substitute: `paper_rev/1` is `:sys.get_state(view.pid)` reached
+  # through `socket_of/1`, i.e. a derive-window call placed at exactly the point
+  # the hoist removed it from — a barrier bought by corrupting the measurement.
+  defp settle!(view_pid, quiet \\ 0, fuel \\ 50)
+
+  defp settle!(_view_pid, 2, _fuel), do: :ok
+
+  defp settle!(_view_pid, _quiet, 0) do
+    flunk("""
+    the LiveView never went quiet inside derives_during/2: 50 :sys.get_state/1 \
+    barriers and its mailbox was still non-empty. Either a door under \
+    measurement grew a repeating self-message, or the process is wedged.
+    """)
+  end
+
+  defp settle!(view_pid, quiet, fuel) do
+    :sys.get_state(view_pid)
+
+    case :erlang.process_info(view_pid, :message_queue_len) do
+      {:message_queue_len, 0} -> settle!(view_pid, quiet + 1, fuel - 1)
+      _ -> settle!(view_pid, 0, fuel - 1)
     end
   end
 

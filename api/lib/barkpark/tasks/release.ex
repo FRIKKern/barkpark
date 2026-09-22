@@ -36,6 +36,7 @@ defmodule Barkpark.Tasks.Release do
       generate_rev: 0,
       fenced_content_write: 4,
       insert_mutation_event!: 5,
+      caller_stamp: 2,
       check_holder: 2,
       holder: 1,
       task_broadcast: 4,
@@ -50,6 +51,12 @@ defmodule Barkpark.Tasks.Release do
 
   def release(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
+    # task-56adb45f973e242f: release was the ONE mutation in the derived emit
+    # set that threaded no server identity at all — its `released_by` is the
+    # caller's own worker string and nothing else. Both values are optional, so
+    # an internal caller that names neither emits the same event byte for byte.
+    caller_token_id = Keyword.get(opts, :caller_token_id)
+    session = Keyword.get(opts, :session)
 
     result =
       Repo.transaction(fn ->
@@ -83,6 +90,7 @@ defmodule Barkpark.Tasks.Release do
                       "new_epoch" => observed_epoch + 1
                     }
                   }
+                  |> Map.merge(caller_stamp(caller_token_id, session))
                 )
 
               {:ok, updated, [task_broadcast(updated, @event_task_released, ev, doc.rev)]}

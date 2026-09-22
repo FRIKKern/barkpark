@@ -86,7 +86,9 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 // (corpus.go). One cache per fetcher — never a package global — so two boards,
 // or two tests, can never seed each other's corpus.
 func newSnapshotFetcher() func(*apiclient.Client) (Snapshot, DetailIndex, error) {
-	cc := &corpusCache{}
+	// live:true — this cache outlives one fetch, which is what licenses the brief
+	// prime projection and the rolling event tail (corpus.go primeView).
+	cc := &corpusCache{live: true}
 	return func(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 		return fetchSnapshotWith(c, cc)
 	}
@@ -122,7 +124,7 @@ func fetchSnapshotWith(c *apiclient.Client, cc *corpusCache) (Snapshot, DetailIn
 	}()
 	go func() {
 		defer wg.Done()
-		extras, primeErr = fetchPrime(ctx, c)
+		extras, primeErr = fetchPrime(ctx, c, cc.primeView())
 	}()
 	go func() {
 		defer wg.Done()
@@ -139,6 +141,11 @@ func fetchSnapshotWith(c *apiclient.Client, cc *corpusCache) (Snapshot, DetailIn
 	if primeErr != nil {
 		return Snapshot{}, nil, primeErr
 	}
+	// Rebuild the event tail the brief projection trims. On a one-shot cache
+	// primeView() returned "", the body already carried the full tail, and this
+	// is an identity (nothing stored, nothing to merge with) — so those verbs
+	// stay byte-identical in BOTH directions, request and Snapshot.
+	extras.events = cc.mergeEventTail(extras.events)
 	if inflightErr != nil {
 		return Snapshot{}, nil, inflightErr
 	}
@@ -184,6 +191,21 @@ func bareID(id string) string { return strings.TrimPrefix(id, draftsPrefix) }
 // BareID is the exported form of bareID for callers outside the package (the
 // CLI's `bp task frontier` renderer) that need the drafts.-stripped id.
 func BareID(id string) string { return bareID(id) }
+
+// isDraftID is the package's ONE prefix test — the Go half of THE DRAFT LABEL
+// CONTRACT (Barkpark.Tasks.Board's moduledoc, shipped in #18961). What marks a
+// row a draft is the `drafts.` spelling of its OWN stored doc_id and nothing
+// else: not status, not lifecycle_status, not content. A `drafts.`-spelled row
+// stored status:"published" is STILL a draft, which is exactly why this may
+// never become a status check. Elixir consolidated the same test into
+// Barkpark.Content.DraftId.draft?/1 (@canonical capability:draft-published-id)
+// after the scattered String.starts_with? calls drifted; this is the mirror of
+// that consolidation, so every caller in this package tests the prefix HERE —
+// `grep -rn 'strings.HasPrefix(.*drafts' internal/taskboard` must stay a single
+// site. It is deliberately the NEIGHBOUR of bareID: the test reads the RAW id,
+// bareID destroys the evidence, so the two live together and the ordering
+// (test, THEN strip) is visible in one screen.
+func isDraftID(id string) bool { return strings.HasPrefix(id, draftsPrefix) }
 
 // ChildrenOf returns the direct children of docID — every task whose
 // parent_id names it, drafts.-prefix-agnostic on both sides — oldest-inserted

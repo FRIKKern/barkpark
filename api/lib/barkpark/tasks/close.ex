@@ -5,7 +5,7 @@ defmodule Barkpark.Tasks.Close do
   # already-terminal guard, and the dependent-unblock walk all live together so
   # the close contract is one cohesive unit.
   #
-  # THE CLOSE HONESTY GATES (PDS-D288/D289/D290) — READ THIS BEFORE CHANGING THEM.
+  # THE CLOSE HONESTY GATES (PDS-D288/PDS-D289/PDS-D290) — READ THIS BEFORE CHANGING THEM.
   # Three checks ride the same in-lock `with` chain as the epoch fence:
   #
   #   * HOLDER — the closer must be (or have been) the lease holder. A foreign
@@ -81,7 +81,7 @@ defmodule Barkpark.Tasks.Close do
       fenced_content_write: 4,
       insert_mutation_event!: 3,
       insert_mutation_event!: 5,
-      caller_stamp: 1,
+      caller_stamp: 2,
       actor_stamp: 2,
       merge_criteria: 2,
       merge_landed: 2,
@@ -102,6 +102,7 @@ defmodule Barkpark.Tasks.Close do
   alias Barkpark.Tasks.Blockers
   alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edges
+  alias Barkpark.Tasks.FlightRecorder
   alias Barkpark.Tasks.WorkDigest
 
   @closed_lifecycle_statuses ~w(done cancelled blocked)
@@ -161,7 +162,12 @@ defmodule Barkpark.Tasks.Close do
     # callers), threaded into the task.closed mutation_event's document map.
     caller_token_id = Keyword.get(opts, :caller_token_id)
     session = Keyword.get(opts, :session)
-    # The two LOUD overrides (PDS-D288/D289). Each is a non-empty reason string;
+    # THE FLIGHT RECORDER'S CLOSING FRAME (task-a42dccec2fe4a406). Agent-written
+    # prose, already BOUNDED and already refused by the controller if it is over
+    # the wall — by the time it reaches here it is either a validated binary or
+    # `nil`, and `nil` writes NO key (see FlightRecorder.put_context_compact/2).
+    context_compact = Keyword.get(opts, :context_compact)
+    # The two LOUD overrides (PDS-D288/PDS-D289). Each is a non-empty reason string;
     # absent (or blank) means "no override", and the corresponding gate refuses.
     overrides = %{
       holder: override_reason(Keyword.get(opts, :holder_override)),
@@ -205,7 +211,8 @@ defmodule Barkpark.Tasks.Close do
           landed,
           caller_token_id,
           session,
-          overrides
+          overrides,
+          context_compact
         )
     end
   end
@@ -470,7 +477,8 @@ defmodule Barkpark.Tasks.Close do
          landed,
          caller_token_id,
          session,
-         overrides
+         overrides,
+         context_compact
        ) do
     result =
       Repo.transaction(fn ->
@@ -620,7 +628,8 @@ defmodule Barkpark.Tasks.Close do
                            worker_id
                          ),
                          caller_token_id,
-                         session
+                         session,
+                         context_compact
                        ) do
                   # THE CLOSER IS NAMED ON EVERY CLOSE (pds-bl-close-audit-gaps).
                   #
@@ -672,7 +681,7 @@ defmodule Barkpark.Tasks.Close do
                       # WRITTEN (`updated`) rather than from the request, so
                       # the event records what committed. A claimless close
                       # (container / root rows) stamps no `actor` key at all.
-                      caller_stamp(caller_token_id)
+                      caller_stamp(caller_token_id, session)
                       |> Map.put("closed_by", worker_id)
                       |> Map.merge(
                         actor_stamp(worker_id, get_in(updated.content, ["claim", "epoch"]))
@@ -981,7 +990,7 @@ defmodule Barkpark.Tasks.Close do
   # zero-criteria task; it fired on 9 of those 11 births and changed nothing,
   # because its only reader is the server journal. A second warning would have
   # been the same instrument aimed at the same blind spot. So this REFUSES — in the exact
-  # PDS-D288/D289 idiom, which means "refuse UNLESS you say why on the record",
+  # PDS-D288/PDS-D289 idiom, which means "refuse UNLESS you say why on the record",
   # not a wall: `--set ack_override="<reason>"` always lands.
   #
   # `blocked` is exempt BY NAME (the same honest-partial reasoning as the criteria
@@ -1346,7 +1355,8 @@ defmodule Barkpark.Tasks.Close do
          landed,
          override_record,
          caller_token_id,
-         session
+         session,
+         context_compact
        ) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -1371,6 +1381,12 @@ defmodule Barkpark.Tasks.Close do
             |> then(fn c ->
               if is_binary(session), do: Map.put(c, "closed_session", session), else: c
             end)
+            # Beside `closed_by` / `closed_at` because it IS close metadata: the
+            # compact of what this lease learned, stamped on the lease it
+            # learned it under. A close that carries none leaves the claim map
+            # byte-identical — there is no empty-compact arm, for the same
+            # reason there is no empty-override arm two functions down.
+            |> FlightRecorder.put_context_compact(context_compact)
 
           doc.content
           |> Map.put("lifecycle_status", new_status)

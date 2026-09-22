@@ -296,4 +296,97 @@ defmodule Barkpark.Plugins.Github.AcknowledgementTest do
       assert length(census.rows) == 2
     end
   end
+
+  describe "census/2 — the SEALED bucket: a reporter the loop can no longer reach" do
+    # Measured against the live ledger 2026-09-17: ELEVEN intake-born rows, SEVEN
+    # unacknowledged, and every one of the seven non-terminal. `closed` was 0, so
+    # the bucket documented as the one to act on FIRST was empty while four
+    # reporters — gh-8463, gh-8461, gh-6290, gh-11555 — had had their issues
+    # closed out from under them. This fixture is that shape, minimised.
+    defp detached_content(number, opts) do
+      number
+      |> intake_content(opts)
+      |> update_in(["github"], &Map.put(&1, "state", "detached"))
+    end
+
+    test "an unacknowledged row whose upstream issue detached is SEALED even though it is lifecycle-open" do
+      unmet = [Acknowledgement.criterion("FRIKKern/barkpark", 8463)]
+      insert_task!("drafts.gh-8463", detached_content(8463, criteria: unmet))
+
+      census = Acknowledgement.census(@dataset)
+      row = Enum.find(census.rows, &(&1.doc_id == "gh-8463"))
+
+      # The POSITIVE CONTROL: the one case we know by hand is owed an update.
+      assert row.lifecycle_status == "open"
+      assert row.sealed
+      assert row.seal_reason == "upstream_detached"
+      assert census.sealed == 1
+
+      # And the pre-existing buckets are untouched: it is still counted `open`,
+      # which is exactly why `open` could not be read as "not overdue".
+      assert census.closed == 0
+      assert census.open == 1
+    end
+
+    test "a live intake row is NOT sealed — the negative control that keeps the bucket from being everything" do
+      unmet = [Acknowledgement.criterion("FRIKKern/barkpark", 9531)]
+      insert_task!("drafts.gh-9531", intake_content(9531, criteria: unmet))
+
+      census = Acknowledgement.census(@dataset)
+      row = Enum.find(census.rows, &(&1.doc_id == "gh-9531"))
+
+      assert row.state == "intake"
+      refute row.sealed
+      assert row.seal_reason == nil
+      assert census.total == 1
+      assert census.sealed == 0
+    end
+
+    test "a terminal row is sealed by LIFECYCLE, and lifecycle is named first when both seals hold" do
+      unmet = [Acknowledgement.criterion("FRIKKern/barkpark", 11_555)]
+
+      insert_task!(
+        "drafts.gh-11555",
+        detached_content(11_555, criteria: unmet, lifecycle_status: "done")
+      )
+
+      census = Acknowledgement.census(@dataset)
+      row = Enum.find(census.rows, &(&1.doc_id == "gh-11555"))
+
+      assert row.sealed
+      assert row.seal_reason == "terminal_lifecycle"
+      assert census.sealed == 1
+      assert census.closed == 1
+    end
+
+    test "being ANSWERED outranks both seals — gh-6681 is detached, done, and absent" do
+      met =
+        "FRIKKern/barkpark"
+        |> Acknowledgement.criterion(6681)
+        |> Map.merge(%{"met" => true, "evidence" => "https://github.com/x/y/issues/6681#c1"})
+
+      insert_task!(
+        "gh-6681",
+        detached_content(6681, criteria: [met], lifecycle_status: "done")
+      )
+
+      census = Acknowledgement.census(@dataset)
+
+      assert census.total == 0
+      assert census.sealed == 0
+      assert census.rows == []
+    end
+
+    test "sealed is a PREDICATE, not a list: a row nobody enumerated joins the bucket unedited" do
+      unmet = [Acknowledgement.criterion("FRIKKern/barkpark", 99_999)]
+      insert_task!("drafts.gh-99999", detached_content(99_999, criteria: unmet))
+
+      census = Acknowledgement.census(@dataset)
+      row = Enum.find(census.rows, &(&1.doc_id == "gh-99999"))
+
+      assert row.sealed
+      assert row.seal_reason == "upstream_detached"
+      assert census.sealed == 1
+    end
+  end
 end

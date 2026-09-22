@@ -45,7 +45,7 @@ func TestRender_StudioFallback(t *testing.T) {
 func TestMaintenanceHandler_ShapeAndStatus(t *testing.T) {
 	h := MaintenanceHandler("  ")
 	for _, sub := range []string{
-		"  handle_errors {",
+		"  handle_errors 502 503 504 {", // the status list is load-bearing: a bare block eats file_server 404s
 		"header Retry-After \"15\"",
 		"respond 503 {",
 		"body <<BARKPARK_MAINTENANCE",
@@ -56,6 +56,60 @@ func TestMaintenanceHandler_ShapeAndStatus(t *testing.T) {
 			t.Errorf("maintenance handler missing %q:\n%s", sub, h)
 		}
 	}
+
+	// NEGATIVE ARM. The status list is the whole fix for the static-site 404
+	// incident: a bare `handle_errors {` also catches the 404 a file_server
+	// raises inside an armed handle_path /sites/<slug>/*, so every miss on a
+	// spawned static site answered this branded 503. Assert the bare opener is
+	// ABSENT, not merely that the scoped one is present — a renderer that
+	// emitted both would satisfy the positive arm alone.
+	if strings.Contains(h, "handle_errors {") {
+		t.Errorf("maintenance handler emits a status-LESS handle_errors block; it must be scoped to 502 503 504:\n%s", h)
+	}
+}
+
+// TestMaintenanceHandler_ContentTypeIsEmitted pins the second load-bearing line
+// of the reference form (deploy/caddy/barkpark-maintenance.caddy:19-20 states
+// the consequence in its own words). Caddy's `respond` with a body and NO
+// Content-Type answers `text/plain; charset=utf-8`, so the branded page arrives
+// as raw markup the browser paints verbatim. MEASURED, not asserted:
+// deploy/caddy-handle-errors-behaviour-proof.sh's ARM NO-CT boots a real Caddy
+// and reads the response header off the wire.
+//
+// This test is an ORDERING pin, not a presence grep. A `header` directive that
+// landed INSIDE the `respond` block would still satisfy `strings.Contains` and
+// would not set the response header, so the assertion is the index triple
+// Retry-After < Content-Type < respond — the exact placement the row asks for.
+func TestMaintenanceHandler_ContentTypeIsEmitted(t *testing.T) {
+	h := MaintenanceHandler("  ")
+
+	const ct = "  \theader Content-Type \"text/html; charset=utf-8\"\n"
+	if !strings.Contains(h, ct) {
+		t.Fatalf("maintenance handler emits a `respond 503` body with NO Content-Type; Caddy "+
+			"then answers text/plain and the browser paints the raw markup. Emit %q:\n%s", ct, h)
+	}
+
+	retry := strings.Index(h, "header Retry-After \"15\"")
+	ctIdx := strings.Index(h, "header Content-Type")
+	respond := strings.Index(h, "respond 503 {")
+	if retry < 0 || respond < 0 {
+		t.Fatalf("handler lost its Retry-After or respond 503 line entirely:\n%s", h)
+	}
+	if !(retry < ctIdx && ctIdx < respond) {
+		t.Errorf("Content-Type must sit directly after Retry-After and BEFORE `respond 503 {` "+
+			"(a header inside the respond block sets nothing on the response); got indices "+
+			"retry=%d content-type=%d respond=%d:\n%s", retry, ctIdx, respond, h)
+	}
+
+	// The one-per-site invariant: Render must carry it into every site block,
+	// not just into the handler read in isolation.
+	got := Render(Box{Sites: []Site{
+		{Slug: "a", Domains: []string{"a.com"}, Port: 7001},
+		{Slug: "b", Domains: []string{"b.com"}, Port: 7002},
+	}})
+	if n := strings.Count(got, "header Content-Type \"text/html; charset=utf-8\""); n != 2 {
+		t.Errorf("expected one Content-Type header per site (2), got %d:\n%s", n, got)
+	}
 }
 
 func TestRender_EverySiteGetsMaintenance(t *testing.T) {
@@ -65,7 +119,7 @@ func TestRender_EverySiteGetsMaintenance(t *testing.T) {
 			{Slug: "b", Domains: []string{"b.com"}, Port: 7002},
 		},
 	})
-	if n := strings.Count(got, "handle_errors {"); n != 2 {
+	if n := strings.Count(got, "handle_errors 502 503 504 {"); n != 2 {
 		t.Errorf("expected one maintenance handler per site (2), got %d:\n%s", n, got)
 	}
 }
@@ -352,7 +406,7 @@ func TestRender_MixedBox_StaticAndReverseProxy(t *testing.T) {
 		t.Errorf("expected exactly one reverse_proxy (proxied only), got %d:\n%s", n, got)
 	}
 	// Maintenance handler rides the proxied site only, not the static one.
-	if n := strings.Count(got, "handle_errors {"); n != 1 {
+	if n := strings.Count(got, "handle_errors 502 503 504 {"); n != 1 {
 		t.Errorf("expected exactly one maintenance handler (proxied only), got %d:\n%s", n, got)
 	}
 	// Slug order: flat (f) before proxied (p).

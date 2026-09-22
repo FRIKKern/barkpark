@@ -3,30 +3,54 @@
 
 A merge to `main` updates the affected **production** host automatically.
 `.github/workflows/deploy.yml` runs after the merge (CI/merge-gates already
-vetted the change) and is **path-filtered** so a docs-only commit never rebuilds
-a server.
+vetted the change) and is **path-filtered by TREE, not by file type**: there is
+no "docs are exempt" rule. A commit touching only trees absent from the routing
+list below rebuilds nothing — but `deploy/**` is in BOTH rows of that list, so a
+merge that edits only *this file* deploys BOTH production hosts. That is
+deliberate (a `deploy/**` change should roll the boxes); it is written down here
+because the page used to claim the opposite.
+
+**Routing — published here, DERIVED from the workflow.** The prefixes below are
+the `changes` job's classifier regexes, one row per job flag.
+`scripts/check-deployyml-filters.sh` extracts those regexes from
+`.github/workflows/deploy.yml`, extracts these rows from this page, and fails
+naming the difference if they are not the same set — in either direction. So
+this is a checked copy of the predicate, not a hand-maintained memory of it.
+
+- `cp` → **CONTROL PLANE** (barkpark.cloud / barkpark-cp, `deploy/cp-deploy.sh`) — deploys on `cloud/**` `cmd/**` `deploy/**` `internal/**`
+- `instance` → **CONTENT INSTANCE** (guerrilla, `deploy/instance-deploy.sh`) — deploys on `api/**` `cmd/**` `connectors/**` `deploy/**` `internal/**` `scripts/connectors/**` `templates/**`
+- excluded from both: `api/test/**` — dropped from the diff BEFORE either classifier runs, so a test-only merge starts the workflow and deploys nothing
+
+`internal/**` and `cmd/**` ride the control plane because bp-provisioner is
+cross-built from `./cmd/barkpark-provisioner`. `cmd/**` rides the content
+instance too — the one prefix both jobs claim, because `instance-deploy.sh` is
+the only thing that rebuilds `barkpark-agent`. `templates/**` and
+`scripts/connectors/**` ride it because the box builds sites, and the
+cloud-sandbox-runner, FROM those trees.
 
 ```
-merge to main
-   ├─ cloud/** | internal/** | cmd/** changed → deploy CONTROL PLANE  (barkpark.cloud / barkpark-cp)
-   │    (internal/ + cmd/ because bp-provisioner is cross-built from
-   │     ./cmd/barkpark-provisioner — an internal-only worker fix must roll the CP)
-   └─ api/** | internal/** | connectors/** changed → deploy CONTENT INSTANCE (guerrilla)
-        every deploy: build the IDLE blue/green slot (active one keeps serving)
-        → health-gate it → flip Caddy's upstream (graceful reload) → stop old.
-        Unhealthy new slot = it's stopped again, no swap — ZERO downtime either way.
+every deploy: build the IDLE blue/green slot (active one keeps serving)
+   → health-gate it → flip Caddy's upstream (graceful reload) → stop old.
+   Unhealthy new slot = it's stopped again, no swap — ZERO downtime either way.
 ```
 
 The path filter diffs from the **last successful run of this workflow**, not the
-previous push: the concurrency group keeps one pending run, so burst merges cancel
-intermediate runs before they deploy — anchoring to the last success makes the
-surviving run deploy the UNION of every push since (no cancelled range is ever
-skipped), while a docs-only stretch still resolves to a no-op.
+previous push, so a surviving run deploys the UNION of every push since that
+success and no range is ever skipped. Every push now gets its OWN concurrency
+group with `cancel-in-progress: false` (deploy.yml, `task-8e5eae5c71635a5e`):
+nothing is evicted and the oldest queued deploy keeps the FIFO position it
+earned. The retired single-group model evicted a pending run on every merge and
+reset its queue position, which starved deploys under a merge storm — so do NOT
+read a queued run here as one that GitHub will discard. Serialisation now lives on the box:
+`instance-deploy.sh` and `cp-deploy.sh` each take the deploy `flock` (waiting up
+to 30 min), then pull `origin/main`'s TIP under the lock, so a run whose tree a
+predecessor already shipped exits at the coalesce arm instead of deploying
+twice. A stretch of merges touching no listed tree still resolves to a no-op.
 
-| Target | Trigger paths | Script | Mechanism |
+| Target | Job flag | Script | Mechanism |
 |---|---|---|---|
-| Control plane | `cloud/**` | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → headroom guard (refuses to build below a 5G floor, `BARKPARK_MIN_FREE_GB` — 2026-08-31: never-pruned images filled the box to 100% and Postgres 500'd the fleet list) → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for instant `docker start` rollback) → prune unreferenced images + build cache (only on a PROVEN flip; the kept slot's stopped container anchors the rollback image through the prune). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
-| Content instance | `api/**`, `internal/**`, `connectors/**` | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/status.json` → flip Caddy → retire old slot + legacy `barkpark` unit. |
+| Control plane | `cp` (trigger paths: the routing list above) | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → headroom guard (refuses to build below a 5G floor, `BARKPARK_MIN_FREE_GB` — 2026-08-31: never-pruned images filled the box to 100% and Postgres 500'd the fleet list) → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for `cp-deploy.sh --rollback`, which RECREATES it — never `docker start`, which would replay the env baked in at creation) → prune unreferenced images + build cache (only on a PROVEN flip; the kept slot's stopped container anchors the rollback image through the prune). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
+| Content instance | `instance` (trigger paths: the routing list above) | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/status.json` → flip Caddy → retire old slot + legacy `barkpark` unit. |
 
 Both hosts overlap old+new code on the new schema for the swap window, so
 migrations must be expand/contract (backward-compatible).
@@ -34,18 +58,68 @@ migrations must be expand/contract (backward-compatible).
 **Maintenance page (no raw 502 when the app is down).** Every Caddy site block
 carries a `handle_errors` handler serving a branded 503 "Back in a moment" +
 `Retry-After` while the upstream is unreachable — blue/green keeps deploys
-seamless, this covers crashes/restarts outside deploys. Baked into the renderers
-(`internal/caddyfile/caddyfile.go`, `internal/cli/setup/caddy.go`,
-`internal/cli/setup/assets/deploy.sh`) so every provisioned instance gets it, and
-armed on running boxes by `instance-deploy.sh` (idempotent, `caddy validate`d,
-auto-reverting; port-flip-safe). Reference block + manual arming:
+seamless, this covers crashes/restarts outside deploys. Every renderer of that
+handler sets `Content-Type: text/html` explicitly: Caddy's `respond` defaults a
+body with no Content-Type to `text/plain`, which made the branded page arrive as
+raw markup the browser painted verbatim. That is a RENDERING fix only — the
+status was and stays an honest 503 + `Retry-After` on every path, `/assets/*.css`
+included, and a healthy upstream never reaches the handler (proved both ways by
+the harness's live-Caddy case). `instance-deploy.sh` also upgrades already-armed
+boxes in place, since the marker guard forbids a re-arm.
+
+Until 2026-09-18 that sentence described `instance-deploy.sh`'s handler ALONE
+and was false of the other three renderers — `internal/caddyfile/caddyfile.go`
+(`MaintenanceHandler`), `internal/cli/setup/assets/deploy.sh` and its
+byte-identical twin `deploy.sh` at the repo root all emitted a `respond 503`
+with no Content-Type, so a box provisioned by `bp setup` or root `deploy.sh` and
+never touched by `instance-deploy.sh` served the maintenance page as plain text
+indefinitely (`task-2ca3b45a2137aab4`). It is true of every renderer now, and
+the SECOND arm of `deploy/caddy-handle-errors-scope-check.sh` is what keeps it
+true: a maintenance `respond 503` emitted anywhere in the tree without a
+`header Content-Type "text/html…` line above it reds the check by name, with no
+stand-down. `deploy/caddy-handle-errors-behaviour-proof.sh` measures the claim
+itself — its `ARM NO-CT` boots a real Caddy with the header removed and reads
+`text/plain; charset=utf-8` off the wire, against `ARM CT`'s
+`text/html; charset=utf-8`, with the 503 status identical under both.
+
+The handler's status list `502 503 504` is load-bearing. `instance-deploy.sh`
+arms and repairs the corrected shape on existing boxes (idempotent, `caddy
+validate`d, auto-reverting; port-flip-safe), and as of 2026-09-18 every other
+renderer emits the corrected shape too. This page used to credit the Go/asset
+renderers with baking the same block "so every provisioned instance gets it"
+while they emitted the bare form; that sentence was withdrawn on 2026-09-17,
+and `task-859a0dbc8ab0583e` then fixed the four sites it named —
+`internal/caddyfile/caddyfile.go` (`MaintenanceHandler`, feeding
+`internal/cli/setup/caddy.go` and `internal/provisioner/attach_domain.go`),
+`internal/cli/setup/assets/deploy.sh`, its byte-identical twin `deploy.sh` at the
+repo root, and the walkthrough in `docs/ops/adding-a-domain.md`. A box
+provisioned by `bp setup` therefore no longer keeps the pre-fix shape when
+`site-deploy.sh` arms a `handle_path /sites/<slug>/*` `file_server` route into
+that same block. `deploy/caddy-handle-errors-scope-check.sh` is the standing
+predicate over every tracked file — not a list of renderers anyone must
+remember — and its dated stand-down is now EMPTY: a bare emission anywhere,
+including in those four files, reds immediately with no grace.
+
+The incident is MEASURED, not asserted:
+`bash deploy/caddy-handle-errors-behaviour-proof.sh` boots a real Caddy twice on
+one rig (dead upstream + an armed `handle_path /sites/demo/*` `file_server`) and
+observes the bare form answering a static-file miss with the branded **503**
+while the status-scoped form answers **404** — with two controls (an existing
+file → 200, the proxied path → 503) identical under both arms, so the difference
+is the status list and nothing else. Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script: `bash deploy/instance-deploy_test.sh` — 461 checks: slot selection,
+script: `bash deploy/instance-deploy_test.sh` — 494 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
 typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
-and their install guards, and the on-box-compile ruling below. Each of the three check counts on this page is READ
-BACK and asserted by the engine it describes, which fails naming both numbers
-when they disagree — so a count here cannot drift silently again.
+and their install guards, and the on-box-compile ruling below. EVERY `<engine> …
+<N> checks` count on this page is READ BACK and asserted by the engine it
+describes, which fails naming both numbers when they disagree — so a count here
+cannot drift silently again. The sentence names no total on purpose: it used to
+say "the three check counts" while the page carried five, and the fifth
+(`cp-cutover-gaps.sh`) was read back by nothing. `deploy/cp-deploy_test.sh` now
+holds the claim as a PREDICATE — it derives the anchor set from this page and
+asserts each named engine carries a self-anchored readback — so engine number
+six is judged the day its count is published.
 
 **Remote MCP endpoint (`/mcp`).** `instance-deploy.sh` arms an idempotent
 path-based Caddy route (`handle /mcp /mcp/*` → `localhost:4010`, marker
@@ -189,7 +263,7 @@ Caddy port-flip back (`<1 s`, no reboot/re-gate); a cold older release reboots t
 idle slot onto it + gates + flips. The slot unit is
 `deploy/systemd/barkpark-site@.service` (§below). Offline gate (fake
 `systemctl`/`caddy`/`npm`, no real systemd/network): `bash
-deploy/site-deploy-node.sh --self-test` — 497 checks: the six-stage protocol,
+deploy/site-deploy-node.sh --self-test` — 547 checks: the six-stage protocol,
 boot-in-place HEALTH with the marker-value gate, the marker-anchored port flip,
 retire protecting both live slots, the warm-rollback flip, and the fleet build
 admission gate (below) — including the hazard specific to THIS engine: HEALTH
@@ -283,7 +357,7 @@ SIGKILL. Fails OPEN and loudly (no `flock(1)`, unopenable lock) — a gate that
 denies every deploy is worse than the contention it prevents.
 
 Offline gate (no npm/caddy/systemd):
-`bash deploy/site-deploy.sh --self-test` — 557 checks: the symlink flip,
+`bash deploy/site-deploy.sh --self-test` — 559 checks: the symlink flip,
 forward/back rollback and retire-N over fixture
 release dirs, the marker reader, then the real script driven end-to-end against a
 fake npm (the six-stage protocol, a lying build failing HEALTH with exit 14 and
@@ -321,6 +395,56 @@ The control plane's `cloud/docker-compose.yml` also ships a self-hosted mail
 relay (`postfix` service) — see `cloud/postfix/README.md` for its DNS/TLS/
 Hetzner-port-25 setup; nothing extra is needed in this deploy pipeline.
 Its TLS cert renews on its own schedule — see below.
+
+## Smoke a box: read the Caddy upstream, or use the public URL
+
+**There is no repo-wide app port.** A single-checkout box (the `89.167.28.206`
+micro-block, `docs/ops/PROD_OPS.md`) serves one BEAM on `:4000`. A `.slots`
+blue/green host — guerrilla, and every host this pipeline deploys — runs
+`barkpark-slot@blue` on `:4000` and `@green` on `:4001`, and **only one of them
+is bound at a time**: whichever slot is live. The live port is not a constant
+and is not derivable from the repo; the only source of truth ON the box is the
+Caddy upstream line:
+
+```bash
+grep -n reverse_proxy /etc/caddy/Caddyfile   # the slot line, e.g. localhost:4001
+ss -ltnp | grep beam                         # exactly one beam.smp, on that port
+```
+
+**The portable smoke test is the PUBLIC URL, never a hardcoded port:**
+
+```bash
+curl -s https://<host>/status.json | jq -r .commit   # the sha the box RUNS
+curl -s -o /dev/null -w '%{http_code}\n' https://<host>/api/schemas
+```
+
+A hardcoded `curl http://localhost:4000/api/schemas` reads a **healthy**
+`.slots` box as dead. Measured on guerrilla (`157.180.90.121`) 2026-09-19
+08:51 UTC: `/etc/caddy/Caddyfile:144` is `reverse_proxy localhost:4001`, `ss
+-ltnp` shows one `beam.smp` on `*:4001` and no `:4000` row,
+`barkpark-slot@blue` is `inactive` / `@green` `active`, and from the box
+`127.0.0.1:4000/api/schemas` returns `000` while `:4001` returns `200` — while
+`https://guerrilla.barkpark.cloud/status.json` served commit `38075b447` and
+`/api/schemas` returned `200` the whole time. Probing the ports from OUTSIDE
+teaches nothing either way: they are firewalled asymmetrically (`:4000`
+refuses, rc=7; `:4001` times out, rc=28), so neither failure distinguishes
+"wrong port" from "box down".
+
+`CLAUDE.md` Golden Rule 6 still reads `curl http://localhost:4000/api/schemas`.
+That is correct only on the micro-block, and Golden Rules are verbatim-exempt
+(an edit needs explicit owner sign-off), so read it as "smoke it after deploy",
+with the port taken from the Caddy upstream — or the public URL — on any other
+host.
+
+**Stale `bp` server entries.** `~/.config/barkpark/config.json`'s
+`known_servers` is a cache of whatever `bp connect` was once pointed at, never
+a deploy artifact: nothing in this pipeline rewrites it when a slot flips. A
+`guerrilla-ip` entry of `http://157.180.90.121:4000` was still present on
+2026-09-19 and cannot connect (nothing is bound there, and the port is
+firewalled from outside anyway). Target a deployed host by its **hostname**
+entry (`https://guerrilla.barkpark.cloud`); re-run `bp connect <https URL>` to
+replace an `ip:port` entry, and treat any `ip:4000` row as stale by
+construction.
 
 ## A control-plane deploy eats a scheduled cron tick — the decision
 
@@ -549,10 +673,23 @@ re-issues the mail relay's Let's Encrypt cert via DNS-01, ships it to
   active one was never touched); scripts also leave the prior commit reachable
   (`git reset --hard <old>`) and, for the control plane, a
   `cloud-control_plane:rollback` image tag.
-- Instant manual rollback after a bad-but-healthy swap: flip the port in
-  `/etc/caddy/Caddyfile` back (4100↔4101 / 4000↔4001), `systemctl reload
-  caddy`, start the old slot (`docker start …` / `systemctl start
-  barkpark-slot@<slot>`).
+- Instant manual rollback after a bad-but-healthy swap:
+  - **Control plane** — `bash /opt/barkpark/deploy/cp-deploy.sh --rollback`
+    (`--rollback-preflight` first for a read-only "which slot, which port"). It
+    takes the deploy lock, retags `cloud-control_plane:rollback` → `:latest`,
+    sources `cloud/.env`, `--force-recreate`s the dormant slot, health-gates it
+    and only then flips Caddy; it refuses with a distinct exit code at every
+    precondition it cannot satisfy. **Never `docker start` the dormant slot.**
+    `docker start` resumes an existing container object and replays the
+    environment baked in when that container was *created*, so a slot older than
+    a `cloud/.env` change comes back serving stale secrets and allowlists with a
+    200 on every probe and no signal anywhere
+    (`gr-blk-cp-deploy-rollback-stale-env`).
+  - **Content instance** — flip the port in `/etc/caddy/Caddyfile` back
+    (4000↔4001), `systemctl reload caddy`, `systemctl start
+    barkpark-slot@<slot>`. This one is safe as written: the unit carries
+    `EnvironmentFile=/opt/barkpark/.slots/%i.env`, which systemd re-reads on
+    every start, so the slot cannot come back on stale env.
 
 ## Connectors `:cloud` runner (host prereqs)
 
@@ -657,6 +794,41 @@ The box says this too, in the build log the deployment names: a prebuilt deploy
 runs no build, so `DeployRunner` writes the run's provenance there itself —
 the digest, the staged path, and this unreproducible-release warning — instead of
 leaving the deployment pointing at an empty file.
+
+#### The node runtime target: the same arm, plus a declared ABI
+
+`deploy/site-deploy-node.sh` now carries the same `PLAN_MODE=prebuilt` arm — an
+uploaded tree is staged into `releases/<build_id>/`, `.bp-prebuilt-sha256`
+records the digest the control plane verified, no npm runs on the box, and a
+health-failed prebuilt release fails closed with "re-upload" instead of being
+rebuilt from the provisioned template.
+
+Two things differ, because a node release is a **process**, not a directory of
+files served by Caddy:
+
+* **The uploaded tree IS the release root.** Pack from `.next/standalone`, with
+  `.next/static` and `public/` already folded in (there is no `$SITE_SRC` on the
+  box to take them from). `server.js` must sit at its top; a tree without one is
+  refused with exit 11 before anything is staged.
+* **The artifact must DECLARE the node ABI it was built against**, in a
+  `.bp-node-abi` file at the root of the packed tree:
+
+      node_major=22
+      libc=glibc
+
+  Both keys are required; unknown keys are ignored. A traced `node_modules` can
+  carry compiled native addons bound to one `NODE_MODULE_VERSION` and one C
+  library — cross-machine, those do not 404, they abort at `require()`. Caught at
+  HEALTH that costs a full boot **and** leaves a release the box has no source to
+  rebuild, so the engine refuses a mismatch **before STAGE** (exit 17, zero
+  release dir, no slot booted). `node_major` must match exactly; a `libc`
+  mismatch refuses only when both sides name a real libc — `unknown` on either
+  side is undecided, and an undecided probe must not manufacture a refusal.
+
+**`bp cloud site deploy <site> --prebuilt <dir>` still refuses a non-static
+site** (`internal/cli/cloud_site_cmd.go`, `prebuiltStaticOnlyRefusal`). The box
+half is ready; the CLI packer that emits `.bp-node-abi` and the refusal's
+retirement are a separate change in the CLI fence.
 
 ### The fresh-box push-to-live acceptance run
 

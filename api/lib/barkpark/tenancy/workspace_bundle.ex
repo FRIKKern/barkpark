@@ -101,7 +101,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   nil to a fully-unscoped, all-tenant read → a cross-tenant leak into a
   single-workspace bundle).
 
-  ## Export profiles + dataset grain (PDS-D3/D4/D5/D7 · D27/D28/D29/D31)
+  ## Export profiles + dataset grain (PDS-D3/PDS-D4/PDS-D5/PDS-D7 · D27/D28/D29/D31)
 
   `export/2` takes two scope opts, both defaulting to today's behavior so the
   full-fidelity backup path is BYTE-IDENTICAL to before (the md5-parity suite
@@ -143,7 +143,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   and INTERSECT it with the target slug — a shared slug therefore yields the
   empty set, fail-closed.
 
-  ## `dataset_slugs` names the EXCLUSIVE set, and `declared_loss` says what that cost (PDS-D45/D46/D74)
+  ## `dataset_slugs` names the EXCLUSIVE set, and `declared_loss` says what that cost (PDS-D45/PDS-D46/PDS-D74)
 
   Two manifest keys that are easy to misread, so read them together:
 
@@ -177,7 +177,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   zero-byte `shares` member and said nothing. `shares` now travels; the rows that
   still cannot are counted out loud.
 
-  ## Import (charter D7 · PDS-D8/D9 · task-7889645a51769a36)
+  ## Import (charter D7 · PDS-D8/PDS-D9 · task-7889645a51769a36)
 
   The import needs NO superuser privilege. It used to run under
   `SET session_replication_role = replica` — a superuser-only parameter, which
@@ -1144,7 +1144,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     slug_partition = partition_dataset_slugs_for(ws.id)
     dataset_slugs = narrow_slugs(slug_partition.exclusive, target)
     # NOT fed to `export_ctx/4`: the bare-slug copy predicates must keep keying on
-    # the EXCLUSIVE half only (PDS-D21/D46). This half exists to be NAMED in the
+    # the EXCLUSIVE half only (PDS-D21/PDS-D46). This half exists to be NAMED in the
     # manifest, so a consumer can tell "this bundle carries no such dataset" from
     # "this bundle carries it, attributed by column, under a slug the exclusive
     # set is required to drop" (PDS-D75).
@@ -1253,7 +1253,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # reason `declared_loss` is: a key that appears only on collision cannot
         # be told apart from an engine too old to have one.
         "dataset_slugs_shared" => shared_dataset_slugs,
-        # PDS-D45/D74: what this bundle could NOT carry, said out loud. ALWAYS
+        # PDS-D45/PDS-D74: what this bundle could NOT carry, said out loud. ALWAYS
         # present (`[]` on the overwhelmingly common no-collision path) — a key
         # that appears only on loss cannot be told apart from an engine too old
         # to have one, which is the same silence in a new costume.
@@ -1368,7 +1368,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     |> List.flatten()
   end
 
-  # ── Profile + dataset scope resolution (PDS-D28/D29) ─────────────────────────
+  # ── Profile + dataset scope resolution (PDS-D28/PDS-D29) ─────────────────────────
 
   defp normalize_profile!(nil), do: :full
   defp normalize_profile!(profile) when profile in [:full, :dev], do: profile
@@ -1434,7 +1434,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   defp narrow_slugs(slugs, nil), do: slugs
   defp narrow_slugs(slugs, %{slug: slug}), do: Enum.filter(slugs, &(&1 == slug))
 
-  # ── Declared loss (PDS-D45/D74) ──────────────────────────────────────────────
+  # ── Declared loss (PDS-D45/PDS-D74) ──────────────────────────────────────────────
 
   # THE RULE THIS ENFORCES: a `:full` bundle that cannot carry something must SAY
   # SO. `Catalog.e3_dataset_unattributable/0` names the tables whose only tenant

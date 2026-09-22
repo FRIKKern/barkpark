@@ -12,6 +12,13 @@ defmodule BarkparkCloud.Repo do
   callers return the `{:error, :not_found}` (→ 404) the API documents for an
   absent/invalid id. A valid UUID passes through unchanged. This is the one home
   for the guard the codebase previously hand-rolled per call site.
+
+  The 500 is cloud-specific and is NOT a typo for api/'s 400: `api/` carries
+  `phoenix_ecto`, which maps both CastError structs to 400, while `cloud/` is
+  Plug.Router + Bandit with no `phoenix_ecto` at all — the only `Plug.Exception`
+  impl in cloud's deps is plug's `for: Any`, which answers 500. Pinned by a run
+  in `BarkparkCloud.CastErrorStatusContractTest`, which also reds if api/'s
+  answer is ever copied in here; do not "correct" the status above.
   """
   @spec uuid_or_nil(term()) :: binary() | nil
   def uuid_or_nil(id) when is_binary(id) do

@@ -227,12 +227,16 @@
 #   bash scripts/pds-record-parity.sh
 #   bash scripts/pds-record-parity.sh --axis a
 #   bash scripts/pds-record-parity.sh --axis d            # script citations vs charter
+#   bash scripts/pds-record-parity.sh --axis f            # harness thaw ledger (PDS-D759)
+#   bash scripts/pds-record-parity.sh --axis f --charter <copy>  # the PLANTED CONTROL
 #   bash scripts/pds-record-parity.sh --axis d --citation-root <dir>  # fixture tree
 #   bash scripts/pds-record-parity.sh --limit 400 --grace-hours 6
 #   bash scripts/pds-record-parity.sh --commits-file <file>  # axis A corpus, verbatim
 #   bash scripts/pds-record-parity.sh --fixture-dir <dir>   # hermetic, selftest
 #   bash scripts/pds-record-parity.sh --allocate-d <n> --for <label>  # MINT D numbers
 #   bash scripts/pds-record-parity.sh --check-alloc          # every mint was reserved
+#   bash scripts/pds-record-parity.sh --prefix D --charter <c> --alloc-ledger <l> --check-alloc
+#                                          # the SAME arbiter, a DIFFERENT charter (see D-PREFIX below)
 #   bash scripts/pds-record-parity.sh --print-defs [--charter <path>]  # the lens, alone
 #   bash scripts/pds-record-parity.sh --print-synthetic <a|d>          # the roster, alone
 
@@ -290,6 +294,58 @@ PRINT_SYNTHETIC=""       # --print-synthetic <a|d>: that axis's skip roster
 # THE RESERVATION LEDGER. The arbiter's whole substance: a durable record that
 # a number has been SPOKEN FOR, written BEFORE the charter is. See allocate_d.
 ALLOC_LEDGER="${PDS_D_ALLOC_LEDGER:-tooling/pds/d-number-reservations.tsv}"
+# ── THE D-PREFIX: ONE ARBITER, MANY CHARTERS ─────────────────────────────────
+# The allocation arms (--allocate-d / --check-alloc / --print-defs) are not
+# specific to the PDS charter: the defect they fix — two correct readers of one
+# unchanged document a minute apart minting the same number, because a document
+# is a lagging record of what has LANDED and cannot express what is IN FLIGHT —
+# belongs to every charter that numbers its decisions. It cost the DEPLOY
+# charter a collision on D614 on 2026-09-16 (#18700 kept it, #18701 rebased).
+#
+# So the token is a parameter, not a literal. `--prefix D --charter
+# .claude/workflows/bp-deploy-reliability-charter.md --alloc-ledger
+# deploy/d-number-reservations.tsv` runs THIS arbiter over THAT charter.
+# A SECOND copy of this logic is the outcome to avoid: two arbiters can drift,
+# and the lens in here has drifted once already (PDS-D679).
+#
+# The default is PDS-D, so every existing caller, fixture and CI arm is
+# byte-identical to before this parameter existed.
+D_PREFIX="${PDS_RECORD_PARITY_PREFIX:-PDS-D}"
+
+# ── THE RULING-NUMBER SHAPE: DIGITS WITH AN OPTIONAL LETTER SUFFIX ───────────
+#
+# A ruling number is NOT digits. The charter mints lettered rulings — 34 of them
+# on main at the time of writing (PDS-D448a, PDS-D448b, PDS-D449a, … PDS-D496a)
+# — and the scripts cite them: PDS-D220a x26, PDS-D220b x12, PDS-D391b, PDS-D480a.
+#
+# WHAT A DIGITS-ONLY PREDICATE COST, MEASURED. Every scan in here used to read
+# the prefix followed by digits only, so `PDS-D480a` was extracted as `PDS-D480`
+# — a DIFFERENT ruling. In all 34 cases the numeric base is itself a separately
+# defined ruling, so the merge was SILENT rather than a missing-definition red,
+# and the undefined-citation arm could not fire on a lettered typo at all: cite
+# `PDS-D448` with a stray trailing `z` and it RESOLVED, because `PDS-D448`
+# exists — and axis D would red on this very comment if it spelled that phantom
+# out, which is the widening proving itself in its own header. The guard's whole
+# purpose was defeated for that shape. Reproduced against a fixture tree, with a
+# numeric phantom as the control, BEFORE this was widened.
+#
+# THE SAME SHAPE `scripts/pds-citation-expand.sh` CARRIES. Its every segment
+# class is `[0-9]+[a-z]?` and its selftest arm 4b reds if anyone narrows it back.
+# This file gets the same treatment: the shapes are NAMED here, every scan reads
+# a name, and `pds-record-parity.test.sh` runs a PREDICATE over this whole file —
+# not a list of line numbers somebody eyeballed — that reds if a digit class ever
+# reappears beside the prefix. A constant nobody may bypass is the only form of
+# this rule that survives the next edit.
+D_NUM_RE='[0-9]+[a-z]?'          # a ruling number, as CITED and as DEFINED
+D_BASE_RE='[0-9]+'               # the ALLOCATION base — see below
+D_NAIVE_NUM_RE='[0-9]{3}[a-z]?'  # the contrast-only naive lens's fixed-width form
+
+# WHY THE ALLOCATION LEDGER STAYS ON THE BASE. A letter is a SUB-ruling of a
+# number that was already minted: `PDS-D448a` consumes no new number, and the
+# arbiter's pointer is arithmetic (`high + 1`). Feeding `448a` into `-gt` or
+# `sort -n` would be a type error wearing a widening's clothes. So the arbiter
+# reads bases (charter_defined_bases), the RESOLUTION lenses read full ids, and
+# neither borrows the other's shape.
 REPO="${PDS_RECORD_PARITY_REPO:-FRIKKern/barkpark}"
 LEDGER_BASE="${LEDGER_BASE:-https://guerrilla.barkpark.cloud}"
 DATASET="${LEDGER_DATASET:-production}"
@@ -316,6 +372,7 @@ while [ $# -gt 0 ]; do
     --allocate-d)    ALLOCATE_D="${2:-}"; shift 2 ;;
     --for)           ALLOC_FOR="${2:-}"; shift 2 ;;
     --alloc-ledger)  ALLOC_LEDGER="${2:-}"; shift 2 ;;
+    --prefix)        D_PREFIX="${2:-}"; shift 2 ;;
     --check-alloc)   CHECK_ALLOC=1; shift ;;
     --print-defs)    PRINT_DEFS=1; shift ;;
     --print-synthetic) PRINT_SYNTHETIC="${2:-}"; shift 2 ;;
@@ -324,10 +381,18 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$AXIS" in a|b|d|both) : ;; *) echo "pds-record-parity: --axis must be a|b|d|both, got '${AXIS}'" >&2; usage ;; esac
+case "$AXIS" in a|b|d|f|both) : ;; *) echo "pds-record-parity: --axis must be a|b|d|f|both, got '${AXIS}'" >&2; usage ;; esac
 case "$LIMIT" in ''|*[!0-9]*|0) echo "pds-record-parity: --limit must be a positive integer, got '${LIMIT}'" >&2; usage ;; esac
 case "$GRACE_HOURS" in ''|*[!0-9]*) echo "pds-record-parity: --grace-hours must be a non-negative integer, got '${GRACE_HOURS}'" >&2; usage ;; esac
 case "$RETRIES" in ''|*[!0-9]*|0) echo "pds-record-parity: PDS_RECORD_PARITY_RETRIES must be a positive integer, got '${RETRIES}'" >&2; usage ;; esac
+
+# The prefix is spliced into an ERE and into sed/awk patterns. Restrict it to
+# the shape a charter token actually has, so a metacharacter cannot silently
+# widen the lens into the "any D-number anywhere" scan this whole arm exists to
+# refuse. An empty prefix would match every bare integer; it is refused too.
+case "$D_PREFIX" in
+  '' | *[!A-Za-z0-9-]* ) echo "pds-record-parity: --prefix must be non-empty and only [A-Za-z0-9-], got '${D_PREFIX}'" >&2; usage ;;
+esac
 
 command -v jq >/dev/null 2>&1 || { echo "pds-record-parity: UNCHECKED: jq is not installed — the arm cannot read either the PR list or the ledger" >&2; exit 2; }
 
@@ -413,15 +478,65 @@ now_epoch() {
 # about a test fixture.
 charter_defined_numbers() {
   [ -f "$CHARTER" ] || return 1
+  # `sort -u` then `sort -n -s`, NEVER `sort -n -u`: under a numeric key `448`
+  # and `448a` compare EQUAL, so `-n -u` would silently drop one of them — the
+  # very collapse this widening exists to stop, reintroduced by the sort. The
+  # lexicographic `-u` dedups on the WHOLE id; the stable numeric pass then
+  # orders `404 448 448a 1000` and keeps `448` ahead of `448a`.
   {
-    grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+' "$CHARTER"
-    grep -oE '^#+[[:space:]]+PDS-D[0-9]+([[:space:]]|$)' "$CHARTER"
-  } | grep -oE 'PDS-D[0-9]+' | sed 's/^PDS-D//' | sort -n -u
+    grep -oE "^[[:space:]]*([-*][[:space:]]+)?\*\*${D_PREFIX}${D_NUM_RE}" "$CHARTER"
+    grep -oE "^#+[[:space:]]+${D_PREFIX}${D_NUM_RE}([[:space:]]|$)" "$CHARTER"
+  } | grep -oE "${D_PREFIX}${D_NUM_RE}" | sed "s/^${D_PREFIX}//" | sort -u | sort -n -s
+}
+
+# The same lens, projected onto the ALLOCATION base — `448a` -> `448`. This is
+# what the arbiter scores: a letter never consumed a number, so a lettered
+# definition must not read as an unreserved mint and must not move the pointer.
+charter_defined_bases() {
+  charter_defined_numbers | sed 's/[a-z]*$//' | sort -n -u
+}
+
+# ── THE CLAUSE LENS — AND WHY IT IS NOT "RESOLVE A LETTER BY ITS BASE" ───────
+#
+# Widening the extractor turns up a THIRD shape, live on main: `PDS-D220a` x26
+# and `PDS-D220b` x12 and `PDS-D391b`, which are not rulings at all. They name a
+# CLAUSE inside a ruling — D220's definition line literally reads
+#   `- **PDS-D220 — TWO PRE-MERGE INSTRUMENT FIXES …** (a) **THE ZERO-SAMPLE …`
+# and the scripts cite clause (a) as `PDS-D220a`. That is a real citation to a
+# real authority and must not red.
+#
+# THE TEMPTING FIX IS THE DEFECT AGAIN. "A lettered citation resolves if its
+# numeric base is defined" would green `PDS-D220a` — and green a `PDS-D448` with
+# a stray `z` with it, which is precisely the blind spot this file was widened to
+# close. The base
+# is not the discriminator. The CHARTER is: a clause reference resolves only if
+# the base's own definition BLOCK carries the literal marker `(a)`. D220's does;
+# D448's carries no `(z)`, and no charter block anywhere carries one. Measured on
+# main: 220a, 220b, 391b resolve here; the `z`-suffixed phantoms of 448, 480 and
+# 391 do not. (Spelled that way on purpose: a phantom written out in full in a
+# pds-*.sh comment is a citation, and axis D reds on it — as it should.)
+#
+# The block runs from the base's definition line to the NEXT definition line, so
+# a marker belonging to some other ruling cannot be borrowed.
+charter_clause_defined() { # charter_clause_defined <id, e.g. 220a> — rc 0 if it is a clause
+  case "$1" in *[a-z]) : ;; *) return 1 ;; esac
+  [ -f "$CHARTER" ] || return 1
+  local base="${1%[a-z]}" letter="${1##*[0-9]}"
+  awk -v pfx="$D_PREFIX" -v num="$D_NUM_RE" -v base="$base" -v l="$letter" '
+    BEGIN {
+      anydef = "^[ \t]*([-*][ \t]+)?\\*\\*" pfx num "|^#+[ \t]+" pfx num
+      # `[^0-9a-zA-Z]` after the base so 22 cannot claim 220s definition line.
+      thisdef = "^[ \t]*([-*][ \t]+)?\\*\\*" pfx base "[^0-9a-zA-Z]|^#+[ \t]+" pfx base "[^0-9a-zA-Z]"
+    }
+    $0 ~ anydef { if (inblock) exit; if ($0 ~ thisdef) inblock = 1 }
+    inblock && index($0, "(" l ")") { found = 1; exit }
+    END { exit(found ? 0 : 1) }
+  ' "$CHARTER"
 }
 
 alloc_ledger_numbers() { # every number this ledger has ever spoken for, seed excluded
   [ -f "$ALLOC_LEDGER" ] || return 0
-  awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { sub(/^PDS-D/, "", $1); print $1 }' "$ALLOC_LEDGER" | sort -n -u
+  awk -F'\t' -v pfx="$D_PREFIX" -v num="$D_BASE_RE" '$1 ~ "^" pfx num "$" { sub("^" pfx, "", $1); print $1 }' "$ALLOC_LEDGER" | sort -n -u
 }
 
 alloc_seed() { # the high-water mark at adoption; empty if the ledger has none
@@ -452,13 +567,13 @@ allocate_d() { # allocate_d <count>
   trap 'rm -rf -- "$WORKDIR"; rmdir "'"$lock"'" 2>/dev/null' EXIT
 
   local defs high_charter high_res high seed now
-  defs="$(charter_defined_numbers)" || {
+  defs="$(charter_defined_bases)" || {
     echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found — the arbiter will not" >&2
     echo "  mint a number against a corpus it cannot read." >&2
     rmdir "$lock" 2>/dev/null; return 2
   }
   high_charter="$(printf '%s\n' "$defs" | tail -1)"
-  [ -n "$high_charter" ] || { echo "pds-record-parity: UNCHECKED: ${CHARTER} defines no PDS-D at all" >&2; rmdir "$lock" 2>/dev/null; return 2; }
+  [ -n "$high_charter" ] || { echo "pds-record-parity: UNCHECKED: ${CHARTER} defines no ${D_PREFIX} at all" >&2; rmdir "$lock" 2>/dev/null; return 2; }
 
   # THE ARM UNDER MUTATION. Delete the next line and the pointer is `max(charter)
   # + 1` again — the pre-arbiter pointer that minted all eighteen pairs. The
@@ -474,7 +589,7 @@ allocate_d() { # allocate_d <count>
     # group creates the file first, so a test inside the group always sees it
     # existing and the header line is never written.
     local had_ledger=1; [ -f "$ALLOC_LEDGER" ] || had_ledger=0
-    { [ "$had_ledger" -eq 1 ] || printf '# PDS-D RESERVATION LEDGER — a number is SPOKEN FOR here before the charter carries it.\n# number\treserved_at\tfor\n'
+    { [ "$had_ledger" -eq 1 ] || printf '# %s RESERVATION LEDGER — a number is SPOKEN FOR here before the charter carries it.\n# number\treserved_at\tfor\n' "$D_PREFIX"
       printf 'SEED\t%s\t%s\thigh-water mark at adoption; numbers at or below it predate the arbiter\n' "$high_charter" "$now"
     } >> "$ALLOC_LEDGER" || { echo "pds-record-parity: UNCHECKED: cannot write ${ALLOC_LEDGER}" >&2; rmdir "$lock" 2>/dev/null; return 2; }
     seed="$high_charter"
@@ -483,9 +598,9 @@ allocate_d() { # allocate_d <count>
   local i=0 n
   while [ "$i" -lt "$count" ]; do
     n=$(( high + 1 + i ))
-    printf 'PDS-D%s\t%s\t%s\n' "$n" "$now" "${ALLOC_FOR:-(unattributed)}" >> "$ALLOC_LEDGER" || {
+    printf '%s%s\t%s\t%s\n' "$D_PREFIX" "$n" "$now" "${ALLOC_FOR:-(unattributed)}" >> "$ALLOC_LEDGER" || {
       echo "pds-record-parity: UNCHECKED: cannot append to ${ALLOC_LEDGER}" >&2; rmdir "$lock" 2>/dev/null; return 2; }
-    printf 'PDS-D%s\n' "$n"
+    printf '%s%s\n' "$D_PREFIX" "$n"
     i=$((i + 1))
   done
   rmdir "$lock" 2>/dev/null
@@ -508,15 +623,17 @@ check_alloc() {
     # to make that impossible. The selftest fixture below caught it.
     raise 2; return 0
   fi
-  defs="$(charter_defined_numbers)" || { echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found" >&2; raise 2; return 0; }
+  defs="$(charter_defined_bases)" || { echo "pds-record-parity: UNCHECKED: charter ${CHARTER} not found" >&2; raise 2; return 0; }
   res="$(alloc_ledger_numbers)"
   echo "D-NUMBER ALLOCATION — every number minted since the seed was reserved first"
+  echo "  prefix:     ${D_PREFIX}"
+  echo "  charter:    ${CHARTER}"
   echo "  ledger:     ${ALLOC_LEDGER}"
   echo "  seed:       ${seed} (numbers at or below it predate the arbiter and are not scored)"
   echo "  reserved:   $(printf '%s\n' "$res" | grep -c '[0-9]') number(s)"
   # A ledger that reserves one number twice is the defect wearing the fix's
   # clothes, so it is scored before anything else.
-  dupres="$(awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { c[$1]++ } END { n=0; for (k in c) if (c[k] > 1) n++; print n }' "$ALLOC_LEDGER" 2>/dev/null || echo 0)"
+  dupres="$(awk -F'\t' -v pfx="$D_PREFIX" -v num="$D_BASE_RE" '$1 ~ "^" pfx num "$" { c[$1]++ } END { n=0; for (k in c) if (c[k] > 1) n++; print n }' "$ALLOC_LEDGER" 2>/dev/null || echo 0)"
   if [ "${dupres:-0}" -gt 0 ]; then
     echo "  DIVERGENT: ${dupres} number(s) reserved MORE THAN ONCE — the arbiter minted a collision."
     raise 1
@@ -524,7 +641,7 @@ check_alloc() {
   for n in $defs; do
     [ "$n" -le "$seed" ] && continue
     if ! printf '%s\n' "$res" | grep -qx "$n"; then
-      echo "    UNRESERVED-MINT      PDS-D${n} — defined in the charter above the seed, never"
+      echo "    UNRESERVED-MINT      ${D_PREFIX}${n} — defined in the charter above the seed, never"
       echo "                         reserved. Somebody minted it by reading the charter, which"
       echo "                         is the pointer that produced all eighteen pairs."
       unreserved=$((unreserved + 1))
@@ -664,10 +781,13 @@ uniqueness_leg() { # uniqueness_leg <cites-file>
   # character classes and matches NOTHING for them — silently, which here would
   # mean `titled: 0` and a uniqueness leg that greens because it parsed nothing.
   # The selftest pins a non-zero titled count for exactly that reason.
-  awk '
-    match($0, /^[ \t]*([-*][ \t]+)?\*\*PDS-D[0-9]+ —/) ||
-    match($0, /^#+[ \t]+PDS-D[0-9]+ —/) {
-      if (match($0, /PDS-D[0-9]+/)) print substr($0, RSTART, RLENGTH), NR
+  # A DYNAMIC regex built from the named shapes above, not a literal, so this
+  # lens cannot drift away from the ones the axes resolve with. `\\*` inside a
+  # STRING regex is the escaped asterisk awk's regex compiler sees as `\*`.
+  awk -v pfx="$D_PREFIX" -v num="$D_NUM_RE" '
+    match($0, "^[ \t]*([-*][ \t]+)?\\*\\*" pfx num " —") ||
+    match($0, "^#+[ \t]+" pfx num " —") {
+      if (match($0, pfx num)) print substr($0, RSTART, RLENGTH), NR
     }
   ' "$CHARTER" > "$occ"
 
@@ -764,7 +884,7 @@ uniqueness_leg() { # uniqueness_leg <cites-file>
   # another decision's prose. The gap between the two counts is re-derived on
   # every run and every number in it must be named, or the arm says so.
   local naive="$WORKDIR/naive-dups"
-  grep -oE 'PDS-D[0-9]{3} —' "$CHARTER" | sed 's/ —$//' | sort | uniq -c \
+  grep -oE "${D_PREFIX}${D_NAIVE_NUM_RE} —" "$CHARTER" | sed 's/ —$//' | sort | uniq -c \
     | awk '$1 > 1 { print $2 }' | sort -k1.6n > "$naive"
   echo "  naive grep: $(wc -l < "$naive" | tr -d ' ') number(s) — the unanchored \`PDS-D### —\` count, for contrast only"
   local nn
@@ -916,7 +1036,7 @@ axis_a() {
     # It loses every bullet-defined number and is kept only to demonstrate what a
     # lens artifact looks like. Never the gate. See ruling (1).
     lens="LOOSE HEADING (lens-artifact demonstrator — NOT the gate)"
-    grep -oE '^#+[[:space:]].*PDS-D[0-9]+' "$CHARTER" | grep -oE 'PDS-D[0-9]+' | sort -u > "$defs"
+    grep -oE "^#+[[:space:]].*${D_PREFIX}${D_NUM_RE}" "$CHARTER" | grep -oE "${D_PREFIX}${D_NUM_RE}" | sort -u > "$defs"
   else
     # THE UNION OF THE TWO FORMS THE CHARTER DEFINES DECISIONS IN (ruling 1):
     #   a bold lead at the start of a line, optionally bulleted —
@@ -929,14 +1049,14 @@ axis_a() {
     # between this lens and --heading-lens.
     lens="DEFINITION FORMS — bold-lead bullet UNION own-line heading"
     {
-      grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+' "$CHARTER"
-      grep -oE '^#+[[:space:]]+PDS-D[0-9]+([[:space:]]|$)' "$CHARTER" # revert-marker: heading-arm
-    } | grep -oE 'PDS-D[0-9]+' | sort -u > "$defs"
+      grep -oE "^[[:space:]]*([-*][[:space:]]+)?\*\*${D_PREFIX}${D_NUM_RE}" "$CHARTER"
+      grep -oE "^#+[[:space:]]+${D_PREFIX}${D_NUM_RE}([[:space:]]|$)" "$CHARTER" # revert-marker: heading-arm
+    } | grep -oE "${D_PREFIX}${D_NUM_RE}" | sort -u > "$defs"
   fi
 
   if [ -n "$COMMITS_FILE" ]; then
     [ -f "$COMMITS_FILE" ] || { echo "  UNCHECKED: --commits-file ${COMMITS_FILE} not found" >&2; raise 2; return 0; }
-    grep -oE 'PDS-D[0-9]+' "$COMMITS_FILE" | sort -u > "$cites"
+    grep -oE "${D_PREFIX}${D_NUM_RE}" "$COMMITS_FILE" | sort -u > "$cites"
   else
     if ! git rev-parse --git-dir >/dev/null 2>&1; then
       echo "  UNCHECKED: not inside a git work tree — the commit corpus is unreachable" >&2
@@ -950,7 +1070,7 @@ axis_a() {
     if [ "$WALK_STATE" != "complete" ]; then
       local seen_commits seen_cites
       seen_commits="$(git rev-list --count HEAD 2>/dev/null)" || seen_commits=""
-      seen_cites="$(git log --format=%B 2>/dev/null | grep -oE 'PDS-D[0-9]+' | sort -u | wc -l | tr -d ' ')"
+      seen_cites="$(git log --format=%B 2>/dev/null | grep -oE "${D_PREFIX}${D_NUM_RE}" | sort -u | wc -l | tr -d ' ')"
       {
         if [ "$WALK_STATE" = "truncated" ]; then
           echo "  UNCHECKED: TRUNCATED WALK — this checkout's history is grafted ON HEAD, so"
@@ -973,7 +1093,7 @@ axis_a() {
       raise 2; return 0
     fi
 
-    git log --format=%B | grep -oE 'PDS-D[0-9]+' | sort -u > "$cites"
+    git log --format=%B | grep -oE "${D_PREFIX}${D_NUM_RE}" | sort -u > "$cites"
   fi
 
   # THE ROSTER, OUT OF THE CORPUS — the same declaration axis D reads, taken at
@@ -991,6 +1111,25 @@ axis_a() {
 
   comm -23 "$cites" "$defs" > "$unresolved"
 
+  # THE CLAUSE LENS, ON THIS AXIS TOO. A commit message cites clause (a) of a
+  # ruling as PDS-D220a exactly as a script does, so the two axes must resolve
+  # the same shape the same way — an axis that reds on what its sibling greens
+  # is a lens artifact wearing a finding's clothes. Same rule, not a softer one:
+  # the base's definition BLOCK must carry the literal (x) marker, so a letter
+  # that is a typo still reds here. COUNTED and PRINTED below.
+  local a_clause=0
+  if [ -s "$unresolved" ]; then
+    : > "$WORKDIR/a_unres_real"
+    while IFS= read -r cited; do
+      [ -n "$cited" ] || continue
+      if charter_clause_defined "${cited#"$D_PREFIX"}"; then
+        a_clause=$((a_clause + 1)); continue
+      fi
+      printf '%s\n' "$cited" >> "$WORKDIR/a_unres_real"
+    done < "$unresolved"
+    mv -f "$WORKDIR/a_unres_real" "$unresolved"
+  fi
+
   local n_def n_cite n_unres
   n_def="$(wc -l < "$defs" | tr -d ' ')"
   n_cite="$(wc -l < "$cites" | tr -d ' ')"
@@ -1001,6 +1140,7 @@ axis_a() {
   echo "  defined:    ${n_def} distinct PDS-D"
   echo "  cited:      ${n_cite} distinct PDS-D across the commit corpus"
   echo "  fixtures:   ${a_sent_skipped} dropped before resolving, off a roster of $(printf '%s' "$a_sent_nums" | wc -w | tr -d ' ') (PDS-D$(printf '%s' "$a_sent_nums" | sed 's/ /, PDS-D/g'))"
+  echo "  clauses:    ${a_clause} lettered citation(s) resolved as a CLAUSE of their base"
   echo "  unresolved: ${n_unres}"
 
   if [ "$n_unres" -gt 0 ]; then
@@ -1157,7 +1297,7 @@ axis_d() {
   local f_err="$WORKDIR/d_grep_err" f_refused="$WORKDIR/d_refused" grc=0
   : > "$f_refused"
   while IFS= read -r f; do
-    grep -I -noE 'PDS-D[0-9]+' "$f" 2>"$f_err" | sed "s|^|${f#"$CITATION_ROOT"/}:|" >> "$cites"
+    grep -I -noE "${D_PREFIX}${D_NUM_RE}" "$f" 2>"$f_err" | sed "s|^|${f#"$CITATION_ROOT"/}:|" >> "$cites"
     grc="${PIPESTATUS[0]}"
     [ "$grc" -le 1 ] && continue
     printf '%s (grep rc=%s) %s\n' "${f#"$CITATION_ROOT"/}" "$grc" "$(tr '\n' ' ' < "$f_err")" >> "$f_refused"
@@ -1176,7 +1316,7 @@ axis_d() {
   local n_files n_occ n_distinct
   n_files="$(wc -l < "$files" | tr -d ' ')"
   n_occ="$(wc -l < "$cites" | tr -d ' ')"
-  n_distinct="$(sed 's/.*:\(PDS-D[0-9]*\)$/\1/' "$cites" | sort -u | wc -l | tr -d ' ')"
+  n_distinct="$(sed -E "s/.*:(${D_PREFIX}${D_NUM_RE})\$/\1/" "$cites" | sort -u | wc -l | tr -d ' ')"
 
   if [ "$n_occ" -eq 0 ]; then
     echo "  UNCHECKED: ${n_files} file(s) in scope and ZERO citations in any of them." >&2
@@ -1194,14 +1334,20 @@ axis_d() {
 
   # NORMALISED to `path:line:number` — the bare number, so the allowlist below
   # can name an entry without itself becoming a citation of it.
-  sed 's/:PDS-D\([0-9][0-9]*\)$/:\1/' "$WORKDIR/d_cites_real" > "$WORKDIR/d_cites_norm"
+  sed -E "s/:${D_PREFIX}(${D_NUM_RE})\$/:\1/" "$WORKDIR/d_cites_real" > "$WORKDIR/d_cites_norm"
 
   # Undefined = the number is not in the definition lens's output.
   : > "$unres"
+  local n_clause=0
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     local num="${line##*:}"
-    grep -qx "$num" "$defs" || printf '%s\n' "$line" >> "$unres"
+    grep -qx "$num" "$defs" && continue
+    # A clause reference resolves against the base's definition BLOCK, never
+    # against the base's mere existence. COUNTED and PRINTED below, because a
+    # resolution path nobody can see in the run is the next silent merge.
+    if charter_clause_defined "$num"; then n_clause=$((n_clause + 1)); continue; fi
+    printf '%s\n' "$line" >> "$unres"
   done < "$WORKDIR/d_cites_norm"
 
   printf '%s\n' "$AXIS_D_ALLOWLIST" | sed '/^[[:space:]]*$/d' | sort -u > "$allow"
@@ -1212,6 +1358,10 @@ axis_d() {
   echo "  sentinels:  ${sent_skipped} occurrence(s) skipped (PDS-D$(printf '%s' "$sent_nums" | sed 's/ /, PDS-D/g'))"
   echo "  defined:    $(wc -l < "$defs" | tr -d ' ') distinct PDS-D in the charter"
   echo "  allowlist:  $(wc -l < "$allow" | tr -d ' ') entry(ies) — shrinks, never grows"
+  echo "  clauses:    ${n_clause} lettered citation(s) resolved as a CLAUSE of their base"
+  echo "              (the base's definition block carries the literal (x) marker;"
+  echo "               a letter whose base has no such marker still reds — that is"
+  echo "               the lettered-typo arm this axis was widened to get back)"
 
   : > "$fired"
   local n_allowed=0
@@ -1228,8 +1378,13 @@ axis_d() {
   if [ -s "$fired" ]; then
     while IFS= read -r line; do
       local num="${line##*:}" below above near=""
-      below="$(awk -v n="$num" '$1 < n {v=$1} END {print v}' "$defs")"
-      above="$(awk -v n="$num" '$1 > n {print $1; exit}' "$defs")"
+      # BASE-AWARE. `$1 < n` alone compares "1000" against "448a" as STRINGS the
+      # moment a letter enters the set, and prints a nearest number that is not
+      # near anything. The base orders; the whole id breaks the tie.
+      below="$(awk -v n="$num" 'function b(x){sub(/[a-z]+$/,"",x); return x+0}
+               b($1) < b(n) || (b($1) == b(n) && $1 < n) {v=$1} END {print v}' "$defs")"
+      above="$(awk -v n="$num" 'function b(x){sub(/[a-z]+$/,"",x); return x+0}
+               b($1) > b(n) || (b($1) == b(n) && $1 > n) {print $1; exit}' "$defs")"
       [ -n "$below" ] && near="PDS-D${below}"
       [ -n "$above" ] && near="${near:+${near}, }PDS-D${above}"
       echo "    UNDEFINED-CITATION   ${line%:*} cites PDS-D${num}"
@@ -1415,8 +1570,17 @@ axis_b() {
     printf '%s\t%s\t%s\n' "$id" "$num" "$merged" >> "$ids"
   done < <(jq -r '.[] | [(.number|tostring), .mergedAt, (.body // "" | @base64)] | @tsv' "$prs")
 
-  local n_ids
-  n_ids="$(cut -f1 "$ids" | sort -u | wc -l | tr -d ' ')"
+  # MATERIALISED, NOT PIPED, AND FOR ONE REASON: the count printed here is the
+  # SAME list the sweep below reads on fd 0. A `cut | sort -u` in the header and
+  # a second one in the loop's redirect are two enumerations that a reader is
+  # invited to assume are one; writing it once makes `n_ids` the denominator of
+  # the count identity after the loop instead of a coincidentally equal number.
+  # `awk 'NF'`, not `wc -l`: it counts NON-BLANK lines, which is exactly what the
+  # loop counts (its first statement skips a blank id), so the two sides of the
+  # identity are the same population by construction.
+  local n_ids uids="$WORKDIR/axis-b-uids"
+  cut -f1 "$ids" | sort -u > "$uids"
+  n_ids="$(awk 'NF { n++ } END { print n+0 }' "$uids")"
   echo "  extractor:  ${EXTRACTOR} --extract-task-id  (absence = EMPTY STDOUT, never \$?)"
   echo "  task ids:   ${n_ids} distinct across ${i} PRs"
   echo "  no trailer: ${no_trailer} PRs carry no Task: trailer (advisory — predates the gate)"
@@ -1437,8 +1601,23 @@ axis_b() {
   local n_terminal=0 n_open=0 n_notfound=0 n_unchecked=0 n_grace=0 n_root=0
   local n_leaf_open=0 n_leaf_ghost=0
   local tid latest prlist lifecycle parent has_result age
-  while read -r tid; do
+  # `n_swept` COUNTS ITERATIONS. It is not a tally of any disposition — every
+  # `continue` arm below has already been counted by the time it fires, because
+  # an id that was HANDED to the loop was swept whichever branch disposed of it.
+  # The identity after the loop is therefore exactly "iterations == lines handed".
+  local n_swept=0
+  # `|| [ -n "$tid" ]` — `sort -u` always terminates its last line, so this can
+  # not fire today; it is here so the identity below can never refuse a COMPLETE
+  # list as short if this redirect is ever pointed at a file that lacks one.
+  while read -r tid || [ -n "$tid" ]; do
     [ -n "$tid" ] || continue
+    n_swept=$((n_swept + 1))
+    # The marker below is a NO-OP on every real run. It exists so the control
+    # arm in scripts/pds-record-parity.test.sh can splice a stdin-draining child
+    # into this loop body at a unique, greppable point and prove the identity
+    # above actually fires — a guard nothing has ever been seen to trip is a
+    # guard nobody can tell from a comment.
+    : # MUT-BODY: axis-b-loop-body
     # The row's own recency is the MAX mergedAt across every PR naming it —
     # a task whose latest PR merged an hour ago is inside grace even if its
     # first one merged days back.
@@ -1521,7 +1700,32 @@ axis_b() {
     echo "    DIVERGENT  ${tid}  lifecycle=${lifecycle}  parent=${parent}  merged over an OPEN row  ${prlist}"
     printf '%s\t%s\t%s\n' "$parent" "$tid" "$prlist" >> "$leaves"
     n_leaf_open=$((n_leaf_open + 1)); raise 1
-  done < <(cut -f1 "$ids" | sort -u)
+  done < "$uids"
+
+  # ── THE COUNT IDENTITY ─────────────────────────────────────────────────────
+  # WHY IT EXISTS (task-d5485c04e0e63488). The sweep above reads the unique task
+  # id list on fd 0 and runs children in its body. Any body child that reads
+  # stdin — a future `gh` without `</dev/null`, a `psql`, an `ssh` into the box —
+  # swallows the remaining ids and the loop ENDS EARLY with no error and no
+  # non-zero status. Every tally below is then SMALLER and the divergent set is
+  # EMPTY, so a sweep of 1 id in 200 prints a GREEN AXIS B in the same words as a
+  # real one. The failure direction is silence, which is the direction a parity
+  # check cannot afford: the rows that would have redded it were never fetched.
+  #
+  # No `-eq 0` floor can see that — zero separates "nothing" from "something",
+  # never "some" from "all". Only the identity can, and it names BOTH numbers so
+  # a reader can see how much of the window was actually examined.
+  # MUT-ANCHOR: axis-b-count-identity
+  if [ "$n_swept" -ne "$n_ids" ]; then
+    echo "  UNCHECKED: axis B swept ${n_swept} of ${n_ids} task id(s) the enumeration handed it." >&2
+    echo "             The sweep loop ended before its id list did (a loop-body child that reads" >&2
+    echo "             stdin consumes the remaining ids silently). A partial sweep must never" >&2
+    echo "             print this axis's tally in the same words as a complete one, so the tally" >&2
+    echo "             is WITHHELD: the numbers it would print are true of a corpus nobody chose." >&2
+    raise 2
+    return 0
+  fi
+  # MUT-END: axis-b-count-identity
 
   local n_divergent=$(( n_open + n_notfound ))
   local n_leaf=$(( n_leaf_open + n_leaf_ghost ))
@@ -1563,14 +1767,36 @@ axis_b() {
     echo "  PER-OWNER REPORT — ${n_leaf} leaf red(s), grouped by the rows' own parent_id"
     echo "    (a REPORT, never a gate: most of these belong to epics that never"
     echo "     consented to this instrument. Hand each owner their own block.)"
+    # THE SAME FD-0 EXPOSURE, ONE LOOP LATER. The reconciliation below compares
+    # `wc -l "$leaves"` to the tally — two numbers computed OUTSIDE this loop, so
+    # neither moves when the loop itself ends early. A body child that drained fd 0
+    # would print one OWNER block, report `owners: 1`, and still pass the coverage
+    # check word for word. So this loop gets its own identity against its own
+    # materialised list.
+    local owners_list="$WORKDIR/axis-b-owners"
+    cut -f1 "$leaves" | sort | uniq -c | sort -rn | awk '{ $1=""; sub(/^ /,""); print }' > "$owners_list"
+    local n_owners_enum
+    n_owners_enum="$(awk 'NF { n++ } END { print n+0 }' "$owners_list")"
     local owner n_owners=0 owner_rows
-    while read -r owner; do
+    while read -r owner || [ -n "$owner" ]; do
       [ -n "$owner" ] || continue
       n_owners=$((n_owners + 1))
+      # A NO-OP on every real run; the control arm splices a stdin-draining
+      # child here. See the note on the sweep loop's marker above.
+      : # MUT-BODY: axis-b-owner-body
       owner_rows="$(awk -F'\t' -v o="$owner" '$1==o' "$leaves" | wc -l | tr -d ' ')"
       echo "    OWNER ${owner}  —  ${owner_rows} leaf red(s)"
       awk -F'\t' -v o="$owner" '$1==o { printf "      %s  %s\n", $2, $3 }' "$leaves"
-    done < <(cut -f1 "$leaves" | sort | uniq -c | sort -rn | awk '{ $1=""; sub(/^ /,""); print }')
+    done < "$owners_list"
+    # MUT-ANCHOR: axis-b-owner-identity
+    if [ "$n_owners" -ne "$n_owners_enum" ]; then
+      echo "  UNCHECKED: the per-owner report printed ${n_owners} of ${n_owners_enum} owner block(s)." >&2
+      echo "             The grouping loop ended before its owner list did; the blocks above are a" >&2
+      echo "             PREFIX of the report, not the report." >&2
+      raise 2
+      return 0
+    fi
+    # MUT-END: axis-b-owner-identity
     # THE HEADLINE MUST EQUAL WHAT IS UNDER IT. A per-owner block that prints
     # fewer rows than the tally counted is the shape where a reader trusts a
     # number nothing under it descends from, so the two are reconciled out loud
@@ -1587,9 +1813,212 @@ axis_b() {
   return 0
 }
 
+# ── AXIS F — THE HARNESS THAW LEDGER (PDS-D759) ───────────────────────────────
+#
+# THE LAW, POINTED AT THE FREEZE. Axis A rules that a commit may not cite an
+# authority that does not exist. Axis F is its mirror image: a commit may not
+# MOVE the frozen harness without leaving an authority behind. Every commit that
+# changes `scripts/pds-pull-proof.sh` is a THAW, sanctioned or not, and the
+# charter must be able to answer, after the fact, "which PDS-D records this
+# thaw, and what post-merge blob OID did it produce?".
+#
+# THE JOIN KEY IS THE POST-MERGE BLOB OID AND NOTHING ELSE. It is read with
+# `git rev-parse <sha>:scripts/pds-pull-proof.sh` and NEVER with `shasum`
+# (PDS-D154). A PR number was measured as a join key and REJECTED: the charter
+# cites PR numbers for a dozen reasons that have nothing to do with a freeze,
+# so a PR-number join resolves commits the charter never recorded as thaws
+# (measured on origin/main: PR-number join 9/25, blob join 3/25 — the extra six
+# were all coincidental mentions). A 40-hex blob OID in this charter can only
+# ever have got there as a freeze record.
+#
+# HOW THIS DOES NOT REOPEN PDS-D732. D732 rules the freeze identity is READ,
+# never TYPED, because a hand-typed hash manufactures a false THAWED verdict the
+# day a sanctioned thaw lands. A recorded OID here is `FREEZE_BLOB_HISTORICAL`
+# in D732's own taxonomy — a HISTORICAL record OF ONE THAW, never a statement of
+# the current freeze, which stays DERIVED at run time by
+# `scripts/pds-climb-preflight.sh:128`. This arm reads the charter's OIDs as a
+# LEDGER OF THE PAST and never compares any of them to origin/main's live blob;
+# that comparison is the preflight's job and this arm does not do it.
+#
+# THE WINDOW BOUNDARY IS A FLOOR THAT ONLY RATCHETS BACK — IT IS NOT READ OUT OF
+# THE LEDGER THIS ARM GUARDS. The first cut derived the boundary entirely from the
+# charter: the anchor was the OLDEST harness-moving commit whose blob the charter
+# recorded, and everything older was EXEMPT. That is a guard whose expected value
+# is read from the thing it guards, and it is inert against exactly one edit —
+# DELETING THE OLDEST LEDGER ROW. The deleted commit did not become unrecorded; it
+# became the new anchor's elder and therefore EXEMPT, the window shrank by one to
+# match, and the arm printed PARITY rc 0. Measured: deleting `e219e97cc…` took the
+# window 20 -> 19 and stayed green; deleting the four oldest rows in one pass took
+# it 20 -> 16 and stayed green. Induction erases the ledger from the bottom, one
+# row per commit, with the arm green at every step. The realistic adversary is not
+# a malicious deletion but a charter SPLIT or REWRITE that drops the oldest rows
+# as historical noise — and that edit landed green.
+#
+# SO THE BOUNDARY IS NOW THE OLDER OF TWO VALUES:
+#
+#   1. AXIS_F_FLOOR_COMMIT — a LITERAL 40-hex commit in THIS FILE. It is the last
+#      harness edit before the freeze doctrine (#4686, 2026-07-20, "the last legal
+#      harness edit before the freeze"), so every thaw of the doctrine era is at or
+#      newer than it. A charter edit cannot move it: it does not live in the
+#      charter, it lives in scripts/, which is a different file, a different fence
+#      and a different review. Deleting every ledger row in the charter leaves this
+#      value untouched and the window at its full 21 commits, so the deletion shows
+#      up as N unrecorded rows and reds, naming each commit.
+#
+#   2. the oldest harness-moving commit the charter records, used ONLY when it is
+#      strictly OLDER than the floor.
+#
+# Direction is the whole point. The charter can still move the boundary BACK —
+# record an older thaw and the window widens by itself, which is the predicate
+# property the first cut was built for and which an enumeration of exempt shas
+# would have lost. It can never move it FORWARD. A ledger row is now a claim the
+# arm checks, never an input to the question it asks.
+#
+# The exemption's mechanical test is unchanged and still printed, not implied:
+# `git merge-base --is-ancestor <sha> <boundary>`.
+#
+# WHY A PINNED COMMIT AND NOT A MONOTONIC COUNT FLOOR. A count floor (the idiom in
+# scripts/pds-charter-anchors-check.sh's DEF_FLOOR) needs raising on every thaw and
+# reds in two directions; worse, it says a row went missing without saying WHICH.
+# A pinned boundary needs no maintenance as thaws land — new thaws are newer than
+# it by construction — and it names the exact commit whose record was dropped.
+axis_f_harness_path() { printf '%s\n' "scripts/pds-pull-proof.sh"; }
+
+# The last harness edit before the freeze doctrine: 1f15017bf, #4686, 2026-07-20.
+# OVERRIDABLE FOR FIXTURES ONLY, and a non-default value is printed loudly — a
+# fixture repo has no such commit, so a selftest must be able to say so.
+AXIS_F_FLOOR_COMMIT_DEFAULT="1f15017bf3d51ac85c34d3e4f5aa2f903a0815a6"
+AXIS_F_FLOOR_COMMIT="${AXIS_F_FLOOR_COMMIT:-$AXIS_F_FLOOR_COMMIT_DEFAULT}"
+
+axis_f() {
+  local hp charter anchor anchor_blob sha blob n_total n_window n_resolved n_unrec
+  hp="$(axis_f_harness_path)"
+  charter="$CHARTER"
+  echo
+  echo "axis F — THE HARNESS THAW LEDGER (does every thaw of ${hp} name a ${D_PREFIX}?)"
+
+  if [ ! -f "$charter" ]; then
+    echo "  UNCHECKED: no charter at ${charter}." >&2; raise 2; return 0
+  fi
+  if ! git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    echo "  UNCHECKED: not a git checkout." >&2; raise 2; return 0
+  fi
+
+  local base="origin/main"
+  git rev-parse --verify --quiet "$base" >/dev/null 2>&1 || base="HEAD"
+
+  local commits; commits="$(git log --format=%H "$base" -- "$hp")"
+  if [ -z "$commits" ]; then
+    echo "  UNCHECKED: no commit in this checkout has ever touched ${hp}." >&2; raise 2; return 0
+  fi
+  n_total="$(printf '%s\n' "$commits" | wc -l | tr -d ' ')"
+
+  # THE CONTROL THAT MAKES AN EMPTY READ INADMISSIBLE. Before any per-commit
+  # grep is believed, prove the grep can fire on this charter at all. A charter
+  # that answers 0 to everything reads exactly like a perfectly-recorded one.
+  local ctl; ctl="$(grep -c -- "${D_PREFIX}" "$charter" 2>/dev/null || true)"
+  case "$ctl" in ''|0)
+    echo "  UNCHECKED: the control grep for '${D_PREFIX}' found 0 hits in ${charter}." >&2
+    echo "             Every per-commit 0 below would be an artifact of the lens." >&2
+    raise 2; return 0 ;;
+  esac
+  echo "  control grep .......... ${ctl} '${D_PREFIX}' hit(s) in ${charter} — the lens fires"
+
+  # THE PINNED FLOOR. A literal in this file, not a value read back out of the
+  # charter — see the block above axis_f_harness_path() for why. Absent from this
+  # checkout (a shallow clone, a fixture repo) the arm refuses to score rather
+  # than falling back to the ledger it is guarding: a fallback would reinstate the
+  # exact hole the floor exists to close, and would do it silently.
+  local floor_sha
+  floor_sha="$(git rev-parse --verify --quiet "${AXIS_F_FLOOR_COMMIT}^{commit}" 2>/dev/null || true)"
+  if [ -z "$floor_sha" ]; then
+    echo "  UNCHECKED: the pinned window floor ${AXIS_F_FLOOR_COMMIT} is not a commit in this" >&2
+    echo "             checkout. The arm will NOT fall back to deriving the boundary from the" >&2
+    echo "             charter — that is the defect this floor exists to close." >&2
+    raise 2; return 0
+  fi
+  if ! git merge-base --is-ancestor "$floor_sha" "$base" 2>/dev/null; then
+    echo "  UNCHECKED: the pinned window floor $(git rev-parse --short=9 "$floor_sha") is not an" >&2
+    echo "             ancestor of ${base}; history has been rewritten under the floor." >&2
+    raise 2; return 0
+  fi
+  if [ "$AXIS_F_FLOOR_COMMIT" != "$AXIS_F_FLOOR_COMMIT_DEFAULT" ]; then
+    echo "  !! FLOOR OVERRIDDEN via AXIS_F_FLOOR_COMMIT — this is a FIXTURE run, not the real ledger."
+  fi
+
+  # THE LEDGER MAY ONLY WIDEN THE WINDOW. The oldest harness-moving commit the
+  # charter records is consulted, but it replaces the floor ONLY when it is
+  # strictly older. Deleting ledger rows moves this value FORWARD, which the
+  # min() below discards — so a deletion can no longer shrink the window.
+  anchor=""; anchor_blob=""
+  while IFS= read -r sha; do
+    blob="$(git rev-parse --verify --quiet "${sha}:${hp}" 2>/dev/null || true)"
+    [ -n "$blob" ] || continue
+    if grep -q -- "$blob" "$charter"; then anchor="$sha"; anchor_blob="$blob"; fi
+  done <<< "$commits"
+
+  local boundary="$floor_sha" boundary_src="pinned floor (a literal in $(basename "$0"), not in the charter)"
+  if [ -n "$anchor" ] && [ "$anchor" != "$floor_sha" ] &&
+     git merge-base --is-ancestor "$anchor" "$floor_sha" 2>/dev/null; then
+    boundary="$anchor"
+    boundary_src="charter-recorded thaw OLDER than the floor, blob ${anchor_blob} — the ledger widened the window"
+  fi
+
+  echo "  pinned window floor ... $(git rev-parse --short=9 "$floor_sha") (${AXIS_F_FLOOR_COMMIT})"
+  if [ -n "$anchor" ]; then
+    echo "  oldest ledger row ..... $(git rev-parse --short=9 "$anchor") (blob ${anchor_blob}) — may widen the window, never narrow it"
+  else
+    echo "  oldest ledger row ..... NONE — the charter records no harness blob at all; every in-window thaw below is unrecorded"
+  fi
+  echo "  window boundary ....... $(git rev-parse --short=9 "$boundary")  [${boundary_src}]"
+  echo "  exemption test ........ git merge-base --is-ancestor <sha> $(git rev-parse --short=9 "$boundary")  → EXEMPT (pre-doctrine)"
+
+  local unrec; unrec="$(mktemp)"
+  n_window=0; n_resolved=0
+  while IFS= read -r sha; do
+    [ "$sha" = "$boundary" ] && continue
+    git merge-base --is-ancestor "$sha" "$boundary" 2>/dev/null && continue   # out of window: EXEMPT
+    blob="$(git rev-parse --verify --quiet "${sha}:${hp}" 2>/dev/null || true)"
+    if [ -z "$blob" ]; then
+      echo "  UNCHECKED: ${hp} has no blob at ${sha}; the walk cannot be scored." >&2
+      raise 2; rm -f "$unrec"; return 0
+    fi
+    n_window=$((n_window + 1))
+    if grep -q -- "$blob" "$charter"; then
+      n_resolved=$((n_resolved + 1))
+    else
+      printf '%s\t%s\t%s\t%s\n' "$(git rev-parse --short=9 "$sha")" "$blob" \
+        "$(git log -1 --format=%cs "$sha")" "$(git log -1 --format=%s "$sha" | cut -c1-72)" >> "$unrec"
+    fi
+  done <<< "$commits"
+
+  n_unrec="$(wc -l < "$unrec" | tr -d ' ')"
+  # TWO NUMBERS, NEVER ONE VERDICT.
+  echo "  harness-moving commits, all history .... ${n_total}"
+  echo "  harness-moving commits IN WINDOW ....... ${n_window}  (the boundary itself excluded; older ones EXEMPT)"
+  echo "  ...of those, resolving to a ${D_PREFIX} record .. ${n_resolved}"
+  echo "  ...unrecorded .......................... ${n_unrec}"
+
+  if [ "$n_unrec" -gt 0 ]; then
+    echo "  DIVERGENT — these thaws moved ${hp} and no ${D_PREFIX} records the blob they produced:" >&2
+    while IFS=$'\t' read -r s b d t; do
+      echo "    ${s}  ${d}  blob ${b}" >&2
+      echo "        ${t}" >&2
+    done < "$unrec"
+    echo "    Record each under a ${D_PREFIX} minted through --allocate-d, as a HISTORICAL" >&2
+    echo "    thaw record (PDS-D732: never as a statement of the current freeze)." >&2
+    raise 1
+  else
+    echo "  PARITY — every in-window thaw names the ${D_PREFIX} that records its blob."
+  fi
+  rm -f "$unrec"
+  return 0
+}
+
 case "$AXIS" in a|both) axis_a ;; esac
 case "$AXIS" in b|both) axis_b ;; esac
 case "$AXIS" in d|both) axis_d ;; esac
+case "$AXIS" in f|both) axis_f ;; esac
 
 echo
 case "$WORST" in

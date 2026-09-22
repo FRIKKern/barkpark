@@ -740,6 +740,18 @@ defmodule Barkpark.Tasks.Stage do
       checkable. What is refused is a rerun that CANNOT FAIL — see
       `forbidden_rerun_shapes/0` — with `{:error, {:unfalsifiable_rerun, code,
       value}}` and NOTHING written.
+    * `:clear_rerun` — `true` REMOVES `content.#{@disposition_rerun_key}`: after
+      the stage the key is ABSENT, not `nil`. The only door that can subtract
+      this field — `:rerun ""` is blank-is-absent (a no-op) and the raw
+      `/v1/data/mutate` seam refuses the key by name — and the precondition for
+      PDS-D750's REMOVE arm, where a reason that is a pure ruling is made honest
+      by taking the probe away rather than by inventing one. Passing it together
+      with `:rerun` is `{:error, :contradictory_rerun}` and writes NOTHING.
+    * `:keep_rerun` — `true` states that the rerun ALREADY on the row still
+      binds the reason being written. Writes nothing itself; it is the
+      deliberate-keep door past `{:error, {:rerun_would_orphan, existing}}`, and
+      the kept/shared shape it opts into is the honest majority case
+      (PDS-D391b(b), PDS-D336(a)).
     * `:instruction` (alias `:operating_instruction`) — a durable OPERATING
       INSTRUCTION: standing guidance for whoever touches this row next
       (task-bd7476eecdede252). Written to `content.#{@operating_instruction_key}`
@@ -779,6 +791,14 @@ defmodule Barkpark.Tasks.Stage do
       replaced a DIFFERENT non-blank reason already on the row and `:supersede`
       was not passed. `existing` is that reason IN FULL, so the refusal can
       show the caller what it just saved. NOTHING is written.
+    * `{:error, {:rerun_would_orphan, existing}}` — the `:note` would have
+      DISPLACED a different non-blank reason on a row carrying a non-blank
+      `content.#{@disposition_rerun_key}`, and the call said nothing about that
+      probe. `existing` is the rerun IN FULL. `:supersede` alone NEVER satisfies
+      this door — the ways through are `:rerun` (re-bind), `:clear_rerun`
+      (remove) or `:keep_rerun` (it still binds). NOTHING is written.
+    * `{:error, :contradictory_rerun}` — `:rerun` and `:clear_rerun` in one
+      call. NOTHING is written.
     * `{:error, :stale_claim}` — CAS lost (rare under the advisory lock).
   """
   @spec stage(binary(), String.t(), keyword()) ::
@@ -792,7 +812,9 @@ defmodule Barkpark.Tasks.Stage do
              | {:missing_reopen_trigger, String.t()}
              | {:unfalsifiable_rerun, atom(), term()}
              | {:instruction_would_supersede, String.t()}
-             | {:note_would_supersede, String.t()}}
+             | {:note_would_supersede, String.t()}
+             | {:rerun_would_orphan, String.t()}
+             | :contradictory_rerun}
   def stage(task_id, to, opts \\ []) when is_binary(task_id) and is_binary(to) do
     object = Keyword.get(opts, :object) || "research"
     holder = Keyword.get(opts, :holder)
@@ -805,6 +827,8 @@ defmodule Barkpark.Tasks.Stage do
 
     supersede = Keyword.get(opts, :supersede) == true
     supersede_instruction = Keyword.get(opts, :supersede_instruction) == true
+    clear_rerun = Keyword.get(opts, :clear_rerun) == true
+    keep_rerun = Keyword.get(opts, :keep_rerun) == true
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
     result =
@@ -828,14 +852,18 @@ defmodule Barkpark.Tasks.Stage do
                  {:ok, disposition} <- check_disposition(Keyword.get(opts, :disposition)),
                  :ok <- check_reopen_trigger(doc, disposition, reopen_trigger),
                  :ok <- check_rerun(rerun),
+                 :ok <- check_rerun_conflict(rerun, clear_rerun),
                  :ok <- check_note_supersession(doc, note, supersede),
                  :ok <-
-                   check_instruction_supersession(doc, instruction, supersede_instruction) do
+                   check_instruction_supersession(doc, instruction, supersede_instruction),
+                 :ok <-
+                   check_rerun_orphan(doc, note, rerun, clear_rerun, keep_rerun) do
               adj = %{
                 note: note,
                 disposition: disposition,
                 reopen_trigger: reopen_trigger,
                 rerun: rerun,
+                clear_rerun: clear_rerun,
                 instruction: instruction
               }
 
@@ -1033,6 +1061,84 @@ defmodule Barkpark.Tasks.Stage do
     end
   end
 
+  # A CALL CANNOT SAY BOTH THINGS ABOUT ONE FIELD.
+  #
+  # `:rerun` re-binds the probe, `:clear_rerun` removes it; a call carrying both
+  # has stated two incompatible intentions about a single key and the writer
+  # must not pick one on the caller's behalf. Refused BEFORE anything is
+  # written, like every other check in the `with`, so the retry is the whole
+  # remedy.
+  defp check_rerun_conflict(rerun, true) when is_binary(rerun),
+    do: {:error, :contradictory_rerun}
+
+  defp check_rerun_conflict(_rerun, _clear), do: :ok
+
+  # THE BINDING DOOR (task-5509618e1868d9f2 / task-fcc590f205433209, PDS-D750).
+  #
+  # `content.#{@disposition_rerun_key}` is not free-standing: it is the command
+  # that could prove THIS ROW'S REASON wrong. Replace the reason and say nothing
+  # about the probe and the row keeps a GREEN, RECENT, SYMBOL-SPECIFIC check
+  # attached to a claim it no longer makes — which is strictly worse than
+  # carrying no rerun at all, because an absent rerun is an honest "this reason
+  # refuses to be checked" while an orphaned one passes about something nobody
+  # asserted. The parent filing measured 136 such rows on the ledger, 125 of
+  # them minted by exactly this call shape.
+  #
+  # NEVER `:supersede`. That flag is the caller saying they read the REASON they
+  # are replacing; it is not them saying they read the probe. The codebase's own
+  # words at `check_instruction_supersession/3`: "Two slots with one key to both
+  # locks is one slot wearing a costume." The doors that leave the row honest
+  # are the ones that SAY something about the rerun itself:
+  #
+  #   * `:rerun`      — re-bind the probe to the reason being written
+  #   * `:clear_rerun`— remove it, because the new reason is a pure ruling
+  #   * `:keep_rerun` — state that the EXISTING probe still binds the new
+  #     reason. The shared/kept shape is honest (PDS-D391b(b), PDS-D336(a)) and
+  #     is the majority case; without this door the only way to record a kept
+  #     probe would be to re-send it verbatim through `:rerun`, i.e. to make the
+  #     honest shape the awkward one.
+  #
+  # ORDER MATTERS: this runs AFTER `check_note_supersession/3`, so an unflagged
+  # displacement is still `{:note_would_supersede, _}` (one refusal per call,
+  # and the note is the thing the caller must read first). This door is reached
+  # only once the caller has already said, with `:supersede`, that replacing the
+  # reason is deliberate.
+  #
+  # SIX QUIET SHAPES, none of which can orphan anything:
+  #
+  #   * no `:note` (blank included — `normalize_note/1` collapsed it): nothing
+  #     is displaced;
+  #   * the row's existing reason is blank/absent: nothing is displaced;
+  #   * the new note is the SAME normalized text: a re-stage is not a
+  #     replacement;
+  #   * the row carries no rerun, or a blank one: nothing to orphan;
+  #   * `:rerun` / `:clear_rerun` / `:keep_rerun` on the same call;
+  #   * NO distinctness check, ever — a SHARED rerun across distinct rows still
+  #     writes (PDS-D391b(b) / PDS-D336(a); the parent filing measured that a
+  #     distinctness refusal would have refused 191 correct writes).
+  #
+  # Runs under the advisory lock and BEFORE the CAS, so a refusal leaves the row
+  # byte-identical on BOTH keys. The refusal carries the rerun IN FULL: a
+  # truncated command cannot be judged, and judging whether it still binds is
+  # the entire decision being asked for.
+  defp check_rerun_orphan(_doc, nil, _rerun, _clear, _keep), do: :ok
+  defp check_rerun_orphan(_doc, _note, rerun, _clear, _keep) when is_binary(rerun), do: :ok
+  defp check_rerun_orphan(_doc, _note, _rerun, true, _keep), do: :ok
+  defp check_rerun_orphan(_doc, _note, _rerun, _clear, true), do: :ok
+
+  defp check_rerun_orphan(%Document{content: content}, note, _rerun, _clear, _keep) do
+    map = content_map(content)
+    existing_reason = map |> Map.get(@durable_reason_key) |> normalize_note()
+    existing_rerun = map |> Map.get(@disposition_rerun_key) |> normalize_note()
+
+    cond do
+      is_nil(existing_rerun) -> :ok
+      is_nil(existing_reason) -> :ok
+      String.trim(existing_reason) == String.trim(note) -> :ok
+      true -> {:error, {:rerun_would_orphan, existing_rerun}}
+    end
+  end
+
   defp check_rerun(nil), do: :ok
 
   defp check_rerun(rerun) when is_binary(rerun) do
@@ -1117,7 +1223,7 @@ defmodule Barkpark.Tasks.Stage do
       |> apply_durable_reason(adj.note)
       |> apply_adjudication_key(@disposition_key, adj.disposition)
       |> apply_adjudication_key(@reopen_trigger_key, adj.reopen_trigger)
-      |> apply_adjudication_key(@disposition_rerun_key, adj.rerun)
+      |> apply_rerun(adj.rerun, adj.clear_rerun)
       |> apply_adjudication_key(@operating_instruction_key, adj.instruction)
 
     # PDS-D451: the receipt is the STORED row, not a reconstruction of intent.
@@ -1213,6 +1319,30 @@ defmodule Barkpark.Tasks.Stage do
   defp apply_adjudication_key(content, _key, nil), do: content
   defp apply_adjudication_key(content, key, value), do: Map.put(content, key, value)
 
+  # THE ONE PLACE A RERUN CAN LEAVE THE ROW (task-fcc590f205433209).
+  #
+  # `apply_adjudication_key/3`'s "absent means leave it alone" rule is right for
+  # every adjudication key — a stage that says nothing about the probe must not
+  # erase it — but it made REMOVAL unreachable at every door: `:rerun ""` is
+  # collapsed to `nil` by `normalize_note/1` (blank counts as absent, so it is a
+  # no-op, not a clear), and the raw `/v1/data/mutate` seam refuses
+  # `#{@disposition_rerun_key}` by name. Measured on guerrilla 2026-09-17
+  # against task-a5b928e4d5dfba60: both doors, both no path.
+  #
+  # So `:clear_rerun` is the subtraction verb, and it is a `Map.delete/2`, not a
+  # write of `nil`: after it the KEY IS ABSENT, which is the same shape a row
+  # that never carried a rerun has. A rerun written as `nil` would read back as
+  # present-and-null to every consumer that tests for the key, and PDS-D750's
+  # REMOVE arm needs absence.
+  #
+  # A call carrying BOTH `:rerun` and `:clear_rerun` never reaches here — it is
+  # refused up front by `check_rerun_conflict/2` — so the clause order below is
+  # a statement of intent, not a tiebreak.
+  defp apply_rerun(content, nil, true), do: Map.delete(content, @disposition_rerun_key)
+
+  defp apply_rerun(content, rerun, _clear),
+    do: apply_adjudication_key(content, @disposition_rerun_key, rerun)
+
   # When the written lease dies, as an ISO-8601 instant. Derived from the same
   # `ts` the sweeper compares against, so this is a statement about the actual
   # enforcement, not a guess.
@@ -1261,6 +1391,10 @@ defmodule Barkpark.Tasks.Stage do
         "reopen_trigger_key" => adj.reopen_trigger && @reopen_trigger_key,
         "disposition_rerun" => adj.rerun,
         "disposition_rerun_key" => adj.rerun && @disposition_rerun_key,
+        # Additive (charter D8): a SUBTRACTION is invisible in a payload that
+        # only ever echoes what was written, so the clear says its own name.
+        # `false` on every other stage, exactly as it reads today.
+        "disposition_rerun_cleared" => Map.get(adj, :clear_rerun) == true,
         "operating_instruction" => adj.instruction,
         "operating_instruction_key" => adj.instruction && @operating_instruction_key,
         "lapses_at" => engagement && Map.get(engagement, "lapses_at")

@@ -151,7 +151,9 @@ defmodule Barkpark.PluginEnvTest do
       assert :ok = PluginEnv.with_plugins([DummyPlugin], ctx)
 
       # The sibling: a helper that keys its own cleanup on the bare context,
-      # exactly as with_async_target/1 does.
+      # exactly as with_async_target/1 used to.
+      # on-exit-ref-gate: allow-bare-ref — the bare ref IS the subject of this
+      # test; rewriting it to a module-scoped ref would delete the regression.
       ExUnit.Callbacks.on_exit(ctx, fn -> :ok end)
     end
 

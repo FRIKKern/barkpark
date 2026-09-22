@@ -21,6 +21,7 @@ defmodule BarkparkCloud.Health.StalenessWorkerTest do
 
   alias BarkparkCloud.{Accounts, Billing, Notifications, Registry}
   alias BarkparkCloud.Health.StalenessWorker
+  alias BarkparkCloud.Notifications.{EmailSettings, EventEmail}
 
   @unreachable_subject "Your Barkpark is unreachable"
 
@@ -152,6 +153,92 @@ defmodule BarkparkCloud.Health.StalenessWorkerTest do
     # An :agent_unreachable alert went to the team owner (main's Notifications
     # dispatch → team members).
     assert_email_sent(subject: @unreachable_subject, to: {"", owner.email})
+  end
+
+  # cch-w29-bl-agent-unreachable-letter-has-no-next-step
+  #
+  # A REAL unreachable event, driven by the REAL producer, landing in a REAL
+  # mailbox — not `EventEmail.build/4` called by hand. The row's defect was that
+  # the whole letter was one sentence ("<name> stopped reporting and may be
+  # down.") with nothing for the reader to do, so the assertion is on the BODY
+  # the worker's own dispatch put in the inbox.
+  #
+  # RED-ON-REVERT: delete `Render.unreachable_next_step/0` from
+  # `EventEmail.render(:agent_unreachable, …)` and every `=~` below fails. Each
+  # clause is asserted separately so a partial revert cannot pass on a substring
+  # that happens to survive.
+  test "the letter a person actually receives carries the next step" do
+    {team, owner} = subscribed_team_with_owner()
+    _bp = silent_online_instance(team)
+
+    assert :ok = tick()
+    assert :ok = tick()
+
+    assert_email_sent(fn email ->
+      assert email.subject == @unreachable_subject
+      assert email.to == [{"", owner.email}]
+
+      body = email.text_body
+
+      # The fact, unchanged — the next step is ADDED, it does not replace the
+      # sentence the reader already knows.
+      assert body =~ "stopped reporting and may be down."
+
+      # 1. WHAT BARKPARK ALREADY TRIED, honestly: nothing it can do more of.
+      assert body =~ "Barkpark only knows what the box reports"
+      assert body =~ "there is no probe that can reach in and look"
+      assert body =~ "will not restart the box, retry it, or send another message"
+
+      # 2. WHAT TO CHECK — three concrete things, on the box, in an order.
+      assert body =~ "Worth checking on the box, in this order:"
+      assert body =~ "the machine is powered on and on the network"
+      assert body =~ "the Barkpark agent is running on it"
+      assert body =~ "the agent can still reach Barkpark Cloud"
+
+      # 3. WHAT HAPPENS IF THEY DO NOTHING, and how it ends.
+      assert body =~ "If you do nothing, nothing changes here until the agent reports again."
+      assert body =~ "Barkpark notices on its own and marks the instance reachable"
+
+      # 4. AND NO INVENTED CAUSE. The producer passed a name and nothing else;
+      #    the letter must not imply the plane measured why, how long, or how
+      #    many ticks. This arm is what stops the next editor "helpfully"
+      #    adding a reason the code never had — the exact defect this epic
+      #    exists to catch.
+      refute body =~ ~r/because/i
+      refute body =~ ~r/\bcrash/i
+      refute body =~ ~r/\bfor \d+ (second|minute|hour)/i
+      refute body =~ ~r/\b\d+ (missed |health )?check/i
+
+      # `assert_email_sent/1` asserts on the FUNCTION'S RETURN VALUE, and
+      # `refute/1` returns `false` — so a trailing refute would fail the
+      # assertion no matter what the body said. Every check above raises on its
+      # own; this line only keeps the predicate truthy.
+      true
+    end)
+  end
+
+  # THE CONTROL — it stays quiet when it should.
+  #
+  # The next step belongs to the UNREACHABLE letter. If it ever leaks onto the
+  # good-news arm, a team gets told to go check a box that just told them it is
+  # fine. `:agent_reachable` is rendered by the same module off the same
+  # `render/3` clause list, so this is a live sibling, not a hypothetical.
+  #
+  # Paired with the tick-1 test above: below the debounce gate NO mail is sent
+  # at all, so the copy cannot reach anyone before the flip either.
+  test "CONTROL: the recovery letter carries no next step" do
+    email =
+      EventEmail.build(
+        %EmailSettings{},
+        :agent_reachable,
+        %{name: "acme"},
+        "ops@example.com"
+      )
+
+    assert email.subject == "Your Barkpark is reachable again"
+    assert email.text_body == "acme is reporting healthy again."
+    refute email.text_body =~ "Worth checking on the box"
+    refute email.text_body =~ "there is no probe"
   end
 
   test "tick 3 is a no-op: the now-offline row is no longer a candidate (backoff)" do

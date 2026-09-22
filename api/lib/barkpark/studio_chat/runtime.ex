@@ -546,6 +546,34 @@ defmodule Barkpark.StudioChat.Runtime do
     end
   end
 
+  # `String.to_atom/1` is applied to `provider`, which arrives as `ref.provider`
+  # — `to_string/1` of the persisted `chat_sessions.provider` column. That
+  # column is the bound, and it is held TWICE:
+  #
+  #   * `Barkpark.StudioChat.Session.create_changeset/2` runs
+  #     `validate_inclusion(:provider, @providers)`, where the module attribute
+  #     `@providers` is `~w(claude codex)`. `create_changeset/2` is that
+  #     module's ONLY changeset and nothing in `Barkpark.StudioChat` writes
+  #     `:provider` via `update_all`, so the column is create-only.
+  #   * The Postgres CHECK constraint `:chat_sessions_provider_check`
+  #     (`provider IN ('claude', 'codex')`), created by migration
+  #     `20260714140000_add_provider_execution_identity_to_chat_sessions` and
+  #     dropped by no later migration.
+  #
+  # The bound is NOT `adapter/1`'s `provider in ["claude", :claude]` /
+  # `["codex", :codex]` guards. `adapter/1` is not on this path at all: the
+  # `execution_target: "registered_host"` clause of `open/2` never calls it,
+  # only the managed clause does. Nor is an `adapter/1`-shaped check reliably
+  # upstream — of the three callers that reach `Recorder.ensure/1`,
+  # `Barkpark.CycleFleet`'s `recorder_opts/2` has none. Do not re-derive the
+  # justification from that guard; it does not run here.
+  #
+  # Pinned by `test/barkpark/studio_chat/provider_atom_bound_test.exs`, which
+  # reds if `@providers` widens or the CHECK constraint goes.
+  #
+  # Inline rather than a line-pinned `.sobelow-skips` row so the waiver travels
+  # with the function.
+  # sobelow_skip ["DOS.StringToAtom"]
   defp registered_provider_ready(host, provider) do
     capabilities = Map.get(host, :capabilities) || Map.get(host, "capabilities") || %{}
     providers = Map.get(capabilities, "providers") || Map.get(capabilities, :providers) || %{}

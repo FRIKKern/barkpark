@@ -175,6 +175,70 @@ defmodule BarkparkCloud.UsageTest do
     end
   end
 
+  describe "ring context — window_s + err_5xx_per_s ride the meters, never as meters" do
+    test "window_s attaches to BOTH ring meters and to nothing else" do
+      m = meters(%{telemetry: telemetry(%{req_per_s: 12, p95_ms: 120, window_s: 60})})
+      assert m.req_per_s.window_s == 60
+      assert m.p95_ms.window_s == 60
+      # A window qualifies the rates it was measured with — it says nothing
+      # about a disk percent or a seat count, and attaching it there would
+      # invent a measurement span for numbers that have none.
+      refute Map.has_key?(m.cpu, :window_s)
+      refute Map.has_key?(m.disk, :window_s)
+      refute Map.has_key?(m.seats, :window_s)
+    end
+
+    test "an unmeasured window omits the key — never the documented 60s default" do
+      for w <- [-1, 0, nil, "a minute"] do
+        m = meters(%{telemetry: telemetry(%{req_per_s: 12, window_s: w})})
+
+        refute Map.has_key?(m.req_per_s, :window_s),
+               "window_s #{inspect(w)} published a span nobody measured"
+      end
+    end
+
+    test "err_5xx_per_s hangs on the REQUEST-RATE meter (charter D103), on no other" do
+      m = meters(%{telemetry: telemetry(%{req_per_s: 12, p95_ms: 120, err_5xx_per_s: 0.22})})
+      assert m.req_per_s.err_5xx_per_s == 0.22
+      # D103: the error rate must never be readable apart from the volume that
+      # bounds it. On p95 (or on its own) it could be screenshotted with no
+      # denominator on screen — 0.22 5xx/s is 14.4% of traffic at one request
+      # rate and 2.0% at another.
+      refute Map.has_key?(m.p95_ms, :err_5xx_per_s)
+      refute Map.has_key?(m.cpu, :err_5xx_per_s)
+    end
+
+    test "a measured 0.0 5xx/s LANDS; the -1 sentinel and an absent key do not" do
+      landed = meters(%{telemetry: telemetry(%{req_per_s: 12, err_5xx_per_s: 0.0})})
+
+      assert landed.req_per_s.err_5xx_per_s == 0.0,
+             "a measured zero is the good news the carriage exists to deliver"
+
+      for bad <- [-1, nil, "none"] do
+        m = meters(%{telemetry: telemetry(%{req_per_s: 12, err_5xx_per_s: bad})})
+
+        refute Map.has_key?(m.req_per_s, :err_5xx_per_s),
+               "#{inspect(bad)} became a fabricated 5xx reading — " <>
+                 "\"no errors\" and \"nobody looked\" are opposite facts"
+      end
+    end
+
+    test "the 5xx rate survives an UNMETERED request rate — the alarming half is not suppressed" do
+      # An older instance can expose the error probe and not the request one.
+      # Dropping the error rate because its denominator is missing hides the
+      # more alarming number; the SURFACE words it as unbounded instead.
+      m = meters(%{telemetry: telemetry(%{req_per_s: -1, err_5xx_per_s: 0.9})})
+      assert m.req_per_s.value == "unmetered"
+      assert m.req_per_s.err_5xx_per_s == 0.9
+    end
+
+    test "neither key becomes a meter — the fixed vocabulary is unchanged" do
+      m = meters(%{telemetry: telemetry(%{req_per_s: 12, window_s: 60, err_5xx_per_s: 0.22})})
+      refute Map.has_key?(m, :window_s)
+      refute Map.has_key?(m, :err_5xx_per_s)
+    end
+  end
+
   describe "flow meters — always unmetered (D31)" do
     test "api_requests + bandwidth are unmetered on empty input" do
       m = meters(%{})

@@ -218,26 +218,121 @@ jobs:
               echo "::warning::deploy-supersede-exit could not decide (rc=${super_rc}) — proceeding to deploy (fail-open)."
             fi
           fi
-          # Diff since the last SUCCESSFUL deploy of THIS workflow, not just the
-          # previous push. Every push now gets its own concurrency group (see the
-          # stanza above), so a run is no longer evicted before it starts — but it
-          # can still be OVERTAKEN: the box resets to origin/main's tip, so the
-          # run ahead of us routinely ships commits from later pushes than its
-          # own. Basing the path filter on `github.event.before` (this run's own
+          # ── THE ANCHOR IS THE LAST RUN THAT DEPLOYED, NOT THE LAST THAT
+          #    SUCCEEDED (task-220b847a8072f82e) ────────────────────────────────
+          #
+          # Diff since the last deploy of THIS workflow, not just the previous
+          # push. Every push now gets its own concurrency group (see the stanza
+          # above), so a run is no longer evicted before it starts — but it can
+          # still be OVERTAKEN: the box resets to origin/main's tip, so the run
+          # ahead of us routinely ships commits from later pushes than its own.
+          # Basing the path filter on `github.event.before` (this run's own
           # range) would then re-deploy a range someone else already carried, and
           # under the OLD single-group scheme would silently DROP the paths of an
-          # evicted run. Anchoring to the last success means a run always deploys
+          # evicted run. Anchoring to the last DEPLOY means a run always deploys
           # the UNION of every push not yet shipped — no range is ever skipped —
           # while still letting a docs-only stretch resolve to "nothing changed".
-          base="$(gh run list --workflow=deploy.yml --branch=main --status=success \
-                    --limit=1 --json headSha --jq '.[0].headSha' 2>/dev/null || true)"
+          #
+          # WHY NOT RUN-LEVEL `--status=success`, WHICH THIS USED TO BE. Two arms
+          # of THIS VERY STEP finish a run in seconds having deployed nothing —
+          # "superseded at start" (deploy-supersede-exit.sh rc 3, above) and
+          # "already covered" (below). Both write cp=false + instance=false and
+          # `exit 0`, and a run whose only job succeeded is a `success` run. So
+          # the last SUCCESSFUL run was routinely a run that touched no box, the
+          # next run anchored its diff on that sha, the range collapsed, and
+          # every deployable file merged BEFORE it dropped out of the
+          # classification under a green run. MEASURED 2026-09-18: run
+          # 35334681747 (bfbdd50ff) exited superseded -> success; run 35335602083
+          # (ffb3b90c9) then printed `diff base: bfbdd50ff…` and classified
+          # instance=false while api/lib changes from #19327 sat undeployed.
+          # Run-success stopped implying box-deployed when those exits were added
+          # (#18010 and the already-covered arm) and nobody moved the anchor.
+          #
+          # SO THE ANCHOR NOW KEYS ON A LEG, NOT ON THE RUN: the newest run on
+          # main whose `control-plane` or `instance` JOB concluded success. Those
+          # jobs are `if: needs.changes.outputs.cp/instance == 'true'`, so an
+          # early-exit run has them SKIPPED, never success — a leg conclusion is
+          # the one thing a run that touched no box cannot fake.
+          #
+          # WHY THE JOBS API AND NOT THE ALTERNATIVES. (a) A marker artifact
+          # written only by a leg needs `actions: write` plus artifact upload and
+          # cross-run download, adds retention as a new failure mode, and is
+          # blind to every run in history that predates it — the first run after
+          # this merge would find no marker at all. (b) The box's own served sha
+          # (barkpark.cloud/health, guerrilla status.json) is TWO shas for two
+          # hosts where the diff needs ONE anchor, can be a hand deploy that is
+          # no run head, and makes an unreachable box strand the anchor. (c) The
+          # jobs API needs only `actions: read`, which this job already holds,
+          # and answers for runs that happened before this change shipped.
+          #
+          # FAIL-OPEN, like everything around it. A gh failure, an unparseable
+          # answer, or an unknown conclusion all count as "did not deploy", which
+          # walks us to an OLDER anchor — a WIDER diff. A redundant deploy
+          # coalesces on the box's lock; a narrowed one strands a commit. If no
+          # run in the scanned window proves a leg, `base` becomes the OLDEST
+          # scanned success (widest available range) and `last_deployed` stays
+          # EMPTY, which disarms the already-covered exit rather than letting it
+          # read an unproven sha as "on the box".
+          base=""
           # Kept SEPARATELY from $base, because the two fallbacks below replace
           # $base with a plain diff anchor. A parent commit says where to start a
           # diff; it is NOT evidence that anything was ever deployed, and the
-          # already-covered test below must never read one as if it were.
+          # already-covered test below must never read one as if it were. Only a
+          # run with a leg-proven deploy is ever written here.
           last_deployed=""
-          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
-            last_deployed="$base"
+          anchor_widest=""
+          # ── A SHORT SCAN IS NEVER A NARROWED BASE (task-5c4cd03a726b0a0c) ──
+          #
+          # The loop below reads its candidates from fd 0. Any child in the body
+          # that also reads fd 0 — an `ssh` without -n, a `-` operand, a
+          # `docker exec -i` — swallows the rest of the heredoc; the loop then
+          # ends after ONE iteration and NOTHING says so, because "read returned
+          # non-zero" looks identical whether stdin was exhausted or STOLEN.
+          # The list is NEWEST FIRST, so $anchor_widest is left holding the
+          # NEWEST candidate instead of the oldest scanned: the diff NARROWS,
+          # and :171 above says what that costs — a narrowed base strands a
+          # commit (the 2026-09-18 incident, task-220b847a8072f82e).
+          #
+          # So COUNT, do not merely guard. The `</dev/null` redirections added
+          # to today's children are fd discipline the next edit can undo; the
+          # identity below notices a short scan whoever caused it, including a
+          # cause nobody has thought of. $anchor_broke records the ONE
+          # legitimate early exit — a leg-proven anchor was found — where
+          # examined < listed is CORRECT and the unscanned tail cannot matter
+          # because $base is already set.
+          anchor_candidates="$(gh run list --workflow=deploy.yml --branch=main --status=success \
+              --limit=30 --json databaseId,headSha \
+              --jq '.[] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)"
+          anchor_listed="$(printf '%s\n' "$anchor_candidates" | awk 'NF' | wc -l | tr -d ' ')"
+          anchor_examined=0
+          anchor_broke=0
+          while read -r cand_id cand_sha; do
+            [ -n "$cand_id" ] && [ -n "$cand_sha" ] || continue
+            anchor_examined=$((anchor_examined + 1))
+            git cat-file -e "$cand_sha^{commit}" </dev/null 2>/dev/null || continue
+            anchor_widest="$cand_sha"
+            cand_legs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${cand_id}/jobs?per_page=100" \
+                           --jq '[.jobs[] | select(.name == "control-plane" or .name == "instance") | select(.conclusion == "success")] | length' \
+                         </dev/null 2>/dev/null || echo 0)"
+            if [ "${cand_legs:-0}" -gt 0 ] 2>/dev/null; then
+              base="$cand_sha"
+              last_deployed="$cand_sha"
+              anchor_broke=1
+              echo "anchor: run $cand_id ($cand_sha) is the newest run whose control-plane/instance job concluded success"
+              break
+            fi
+            echo "anchor: run $cand_id ($cand_sha) succeeded but no deploy leg ran (superseded-at-start / already-covered) — not an anchor"
+          done <<ANCHOR_RUNS
+          $anchor_candidates
+          ANCHOR_RUNS
+          echo "anchor: candidates examined ${anchor_examined} of ${anchor_listed} listed"
+          if [ "$anchor_broke" -eq 0 ] && [ "$anchor_examined" -ne "$anchor_listed" ]; then
+            echo "::warning title=anchor scan short read::examined ${anchor_examined} of ${anchor_listed} listed candidates and proved no deploy leg — the scan ended BEFORE its input was exhausted, so \$anchor_widest holds the NEWEST candidate, not the oldest scanned. Widening to it would NARROW the diff and strand a commit; falling back to the safe base instead."
+            anchor_widest=""
+          fi
+          if [ -z "$base" ] && [ -n "$anchor_widest" ]; then
+            base="$anchor_widest"
+            echo "anchor: no run in the scanned window proved a deploy leg — widening to the OLDEST scanned success $base (already-covered stays disarmed)"
           fi
           if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
             base="${{ github.event.before }}"
@@ -377,8 +472,17 @@ jobs:
         # only the bare form, so the run that is ABOUT TO DEPLOY took the gate's
         # green on trust while never asking whether the gate could still lose.
         run: |
-          bash scripts/check-deploy-smoke.sh --selftest
-          bash scripts/check-deploy-smoke.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/check-deploy-smoke.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/check-deploy-smoke.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
   control-plane:
     needs: changes

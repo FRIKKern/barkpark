@@ -31,6 +31,12 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DOCTOR="$HERE/doctor.sh"
+# Section 2's ladder lives in a sourced library — doctor.sh owns the prose and
+# the remedy per rung, scripts/lib/bp-staleness.sh owns the reading, and
+# scripts/local-update.sh (the FIXER doctor points at) now calls the same
+# function instead of deciding the rebuild from its own pull delta. Every
+# fixture below therefore carries the library next to the copied doctor.sh.
+BP_STALENESS="$HERE/lib/bp-staleness.sh"
 fails=0
 pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
@@ -117,8 +123,9 @@ base_repo() {
   $GIT init --quiet "$work"
   $GIT -C "$work" symbolic-ref HEAD refs/heads/main
   $GIT -C "$work" remote add origin "$origin"
-  mkdir -p "$work/scripts" "$work/internal/cli/setup/assets"
+  mkdir -p "$work/scripts/lib" "$work/internal/cli/setup/assets"
   cp "$DOCTOR" "$work/scripts/doctor.sh"
+  cp "$BP_STALENESS" "$work/scripts/lib/bp-staleness.sh"
   printf 'echo deploy v1\n' > "$work/deploy.sh"
   cp "$work/deploy.sh" "$work/internal/cli/setup/assets/deploy.sh"   # keep §4 quiet
   printf 'package main\n\nfunc main() {}\n' > "$work/main.go"
@@ -215,7 +222,8 @@ assert_has "7. no-stamp: loud RED for unstamped bp" "$(run_doctor "$W7" "$R7/bin
 # The bare merge-base form false-greens here; ours must LOUD-skip.
 R8="$TMP/c8"; mkdir -p "$R8"; W8="$R8/work"
 $GIT init --quiet "$W8"; $GIT -C "$W8" symbolic-ref HEAD refs/heads/main
-mkdir -p "$W8/scripts"; cp "$DOCTOR" "$W8/scripts/doctor.sh"
+mkdir -p "$W8/scripts/lib"; cp "$DOCTOR" "$W8/scripts/doctor.sh"
+cp "$BP_STALENESS" "$W8/scripts/lib/bp-staleness.sh"
 printf 'echo deploy\n' > "$W8/deploy.sh"; printf 'package main\n' > "$W8/main.go"
 $GIT -C "$W8" add -A; $GIT -C "$W8" commit --quiet -m A
 A8="$($GIT -C "$W8" rev-parse HEAD)"     # exists → cat-file passes; no origin/main

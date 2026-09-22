@@ -1147,12 +1147,19 @@ defmodule Barkpark.Tasks.Query do
   # empty-list shape. LEFT UNGATED (board.ex count-vs-text law): `title`
   # (promoted, `@system_filterable`), `lifecycle_status` (system-filterable),
   # and the two derived COUNTS — `dependency_count` and `criteria_progress` —
-  # which carry no field text, only cardinality.
+  # which carry no field text, only cardinality. `doc_id` joins that ungated set
+  # (PDS-D749, task-b258d691989c7a99): it is the document's ADDRESS, not schema
+  # field text — the same class as `title` — and it is the ONLY carrier of the
+  # `drafts.` spelling this projection can still see. `row_from_task/1` reads it
+  # to derive the row's `draft` boolean; strip it here and no painter downstream
+  # can label a draft even in principle. It is not itself projected onto the
+  # snapshot row.
   defp to_render_map(%Document{} = doc, unmet, readable?) do
     content = doc.content || %{}
 
     %{
       "title" => doc.title,
+      "doc_id" => doc.doc_id,
       "lifecycle_status" => Map.get(content, "lifecycle_status"),
       "priority" => if(readable?.("priority"), do: Map.get(content, "priority")),
       "assignee" => if(readable?.("assignee"), do: Map.get(content, "assignee")),

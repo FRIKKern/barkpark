@@ -15,6 +15,16 @@ name: Shell harnesses
 # per file: D26's finding was that a `pr-task-gate.sh` edit did not even trigger
 # this workflow, so every script a job here executes gets its own entry.
 #
+# D26 HAS EXACTLY ONE AMENDED EXCEPTION, and it is stated where it applies (the
+# pds-* block in the pull_request list): for a family whose membership is a
+# PREDICATE rather than a list, the glob is the honest entry, because an
+# enumeration is a snapshot and the corpus is a rule. That exception is earned
+# by arm B2 of scripts/shell-harnesses-dispatch.test.sh, which re-derives the
+# corpus from the tree and reds if any member is untriggered or unrostered. It
+# is NOT a budget: the 21000-char expression cap that used to force globs here
+# stopped applying when the dispatcher body moved to
+# scripts/shell-harness-dispatch.sh (task-ca50ed283930706a).
+#
 # Third tenant: scripts/release-scan.test.sh, the verdict-derivation matrix for
 # scripts/release-scan.sh — the one machine reader of CI state the
 # release-curation agent trusts. NOTHING in .github/workflows/** invoked
@@ -129,6 +139,11 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # doctor.sh section 2 sources its staleness ladder from this library,
+      # and scripts/local-update.sh — the FIXER doctor points at — calls the
+      # same function. An edit here can flip BOTH harnesses below, so it must
+      # be able to trigger this workflow.
+      - "scripts/lib/bp-staleness.sh"
       # TASK DUP SWEEP (task-a8eec40f9ae36364). The fixture is a SUBJECT, not an
       # input: its 243 frozen rows and its pinned ledger IDF table ARE the
       # calibration, so an edit there changes what the known pairs score without
@@ -153,6 +168,13 @@ on:
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
+      # MERGE-CHECK (task-73d2dc0989787be9, 2026-09-17). Its `--selftest` had NO
+      # caller of any kind — no workflow, no Makefile target — while it carried
+      # the arm that let #18497 merge under a live `hold` label. It rides the
+      # merge-verb job because it is the same claim read by the same operators:
+      # merge-check prints the verdict, bp-merge.sh acts on it, and the two must
+      # not disagree about what a hold is.
+      - "scripts/merge-check.sh"
       - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
@@ -182,6 +204,13 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # THE LOCAL GATE'S PIN (task-561ac06ea4ebb607). console-harness.sh
+      # READS the test-count pin out of console-harness.yml instead of
+      # carrying a second literal that can drift from CI's. The .yml is
+      # already an entry above as the ratchet's subject; these two are the
+      # SCRIPT and its harness, so an edit to either re-runs the pair.
+      - "scripts/console-harness.sh"
+      - "scripts/console-harness-pin.test.sh"
       # THE CLOUD/CONSOLE AGGREGATOR SHAPE RATCHET
       # (cch-w11-bl-aggregator-decide-shape-ratchet). It reads all THREE
       # aggregator workflows — cloud.yml and console-harness.yml as subjects,
@@ -199,6 +228,8 @@ on:
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
       - "scripts/pds-record-parity.test.sh"
+      - "scripts/pds-secret-scan.sh"
+      - "scripts/pds-secret-scan_test.sh"
       # THE TWO PURE-TREE INPUTS OF THE D-NUMBER ARBITER (task-6fd11672fdeefd0b).
       # `--check-alloc` reads the charter AND the reservation ledger; `--axis a`
       # reads the charter AND this checkout's git log. An edit to either FILE can
@@ -206,6 +237,28 @@ on:
       # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
       - ".claude/workflows/bp-pds-charter.md"
       - "tooling/pds/d-number-reservations.tsv"
+      # THE DEPLOY CHARTER'S ARBITER INPUTS (task-8f908f721d054032). Exactly the
+      # same three-file shape as the PDS rows above, for the SECOND charter the
+      # one arbiter now serves. `deploy/d-number-arbiter.sh --check-alloc` reads
+      # .claude/workflows/bp-deploy-reliability-charter.md AND
+      # deploy/d-number-reservations.tsv; the wrapper itself is the third input
+      # because it binds WHICH two (three variable bindings, no logic), so an
+      # edit there can flip the verdict without touching either data file.
+      # MEASURED, AND NARROWER THAN THE FILING SAID. The row that produced this
+      # (and D616's own "WHAT IS NOT DONE HERE") states the charter "appears in
+      # no workflow path filter anywhere". IT DOES NOT: doc-gates.yml matches it
+      # on BOTH `**/*.md` and `.claude/workflows/**`, on both the pull_request
+      # and push arms, and pr-task-gate.yml / task-lease-renew.yml are unfiltered
+      # entirely. Re-measured against origin/main's .github/workflows by
+      # translating each `paths:` list to a regex -- doc-gates fired there too.
+      # WHAT WAS ACTUALLY TRUE, and is the defect this fixes: no workflow ran the
+      # ARBITER, and shell-harnesses.yml -- the one workflow that owns
+      # scripts/pds-record-parity.sh -- did not trigger on the charter at all.
+      # A guard that does not watch the file it guards is not a guard; a charter
+      # watched only by the doc-budget lane is not watched by its own arbiter.
+      - ".claude/workflows/bp-deploy-reliability-charter.md"
+      - "deploy/d-number-reservations.tsv"
+      - "deploy/d-number-arbiter.sh"
       # AXIS D'S CORPUS. `--axis d` resolves every PDS-D literal carried in the
       # PDS scripts against the charter, so ANY of them is an input: the PR that
       # produced this axis edited only scripts/pds-secret-scan.sh, which was not
@@ -314,6 +367,8 @@ on:
       - ".github/workflows/go-format.yml"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
+      - "tooling/fleet/spend-aggregate.py"
+      - "tooling/fleet/spend-aggregate.test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
       - "scripts/paper_structure.py"
@@ -364,6 +419,24 @@ on:
       - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
       - "scripts/shell-harnesses-dispatch.test.sh"
+      # THE DISPATCHER ITSELF (task-ca50ed283930706a). The `changes` job's
+      # body moved out of an interpolated `run:` scalar into this file, so the
+      # 21000-char expression cap stopped bounding the roster. It is implicit
+      # in EVERY harness set (like the workflow file, and like it NOT a roster
+      # row) — but implicit-in-every-set is worthless if an edit to it starts
+      # no run at all, so it is an entry here: D26, "every script a job here
+      # executes gets its own entry".
+      - "scripts/shell-harness-dispatch.sh"
+      # ── THE MATRIX COLLAPSE'S OWN INPUTS (task-1afb6eaf3a04b8ea). The legs
+      # file IS the job list now, the check-run baseline IS the name contract,
+      # and the three scripts are what turn one into the other. An edit to any
+      # of them must fire the dispatch-selftest leg, which is where the census
+      # and the partition guard both run.
+      - ".github/shell-harness-legs.json"
+      - ".github/shell-harness-check-runs.txt"
+      - "scripts/shell-harness-matrix.py"
+      - "scripts/shell-harness-run.sh"
+      - "scripts/shell-harness-name-census.sh"
       # ── MERGE-GATE AUTOSTAMP BRIDGE (task-8fb6aa7b6d57f737) ─────────────────
       # Per file, never a directory glob — D26. The controller and the App
       # manifest are INPUTS to the parity tripwire, not merely neighbours: the
@@ -700,11 +773,86 @@ on:
       - "scripts/workflow-owner-check.sh"
       - "scripts/ci-pr-checkrun-floor.sh"
       - ".github/workflow-owners.json"
+      # ── THE PDS CHARTER'S OWN CONTENT ANCHORS (task-ceada0e53f6d2f1d) ──────
+      # Not neighbours, not harnesses: the fifteen files the PDS charter CITES
+      # as content anchors. scripts/pds-charter-anchors-check.sh (arm A of the
+      # pds-harnesses job) resolves each citation against the LINE it names, so
+      # an edit to any of them can ROT an anchor without touching one line of
+      # PDS shell — bp-pds-charter.md's input relationship, read backwards.
+      # Eleven of the fifteen could reach NEITHER half of this file. The cost was
+      # measured: api/lib/barkpark/tasks/board.ex rotted THREE times on
+      # 2026-09-17 (#18909, #18986, the repair between them), each time in
+      # SILENCE on the PR that rotted it, each time surfacing later as a red on
+      # an unrelated PDS PR (#18949's rollup) that could neither have caused it
+      # nor repaired it from its own fence.
+      #
+      # FIVE GLOBS, NOT ELEVEN FILES — AND AS OF task-ca50ed283930706a THIS IS A
+      # CHOICE AGAIN, NOT A RATION. D26 IS AMENDED HERE, AND THE AMENDMENT IS
+      # THIS: FOR A FAMILY WHOSE MEMBERSHIP IS A PREDICATE, THE GLOB IS THE
+      # HONEST ENTRY AND THE ENUMERATION IS THE DISHONEST ONE — an enumeration
+      # is a snapshot of the corpus on the day it was written, a glob is the
+      # rule the corpus is actually defined by, and the next scripts/pds-*.sh
+      # file is covered by the rule and missed by the snapshot.
+      #
+      # WHAT CHANGED, so nobody re-derives the wrong reason from this comment.
+      # These globs used to be a BUDGET decision. Every roster row must be a
+      # VERBATIM entry of this list (clause A of
+      # scripts/shell-harnesses-dispatch.test.sh), the roster used to live
+      # inside the `changes` job's interpolated `run:` block, and GitHub parses
+      # such a block as ONE expression capped at 21000 characters. That block
+      # was 19968 bytes on main — 32 under the 20000 fail floor of
+      # scripts/workflow-run-block-length-check.sh. Eleven per-file rows pushed
+      # it over and GitHub refused the WHOLE FILE — `Invalid workflow file …
+      # Exceeded max expression length 21000`, a startup failure with zero jobs,
+      # every harness dark, not just pds. #19446 needed two rows and cost 98
+      # bytes against 32, so it backed them out. The roster now lives in
+      # scripts/shell-harness-dispatch.sh and that scalar is 38 literal bytes,
+      # so the cap no longer bounds anything: per-file rows are affordable again
+      # (measured: the two rows #19446 backed out leave the guard at rc=0).
+      #
+      # D26 therefore HOLDS UNAMENDED everywhere else in these lists: a named
+      # script a job executes gets its own entry, and no cap excuses skipping
+      # it — scripts/shell-harness-dispatch.sh above is itself such an entry.
+      # The pds-* family is the ONE exception, and it earns it by having a
+      # predicate: arm B2 of scripts/shell-harnesses-dispatch.test.sh re-derives
+      # the axis-d corpus from the tree on every run and demands of EVERY member
+      # that it match both an entry here and a `pds-harnesses` roster row. A
+      # glob that stopped covering the corpus reds there. An enumeration that
+      # silently fell behind it would not.
+      #
+      # scripts/pds-*.py is its own entry because `scripts/pds-*.sh` above misses
+      # it ON ITS EXTENSION ALONE — a path in a lane that believes itself covered.
+      #
+      # This WIDENS a trigger, it does not add a gate: shell-harnesses.yml is not
+      # one of main's four required contexts.
+      #
+      # THE PREDICATE, NOT THIS LIST, IS THE GUARD. Arm E of
+      # scripts/pds-charter-anchors-check.sh re-derives the cited set from the
+      # charter on every run, ceiling now locked at 0, so the NEXT anchor pointed
+      # at an untriggerable file reds when it is WRITTEN, not in a later sweep.
+      - "api/lib/barkpark/tasks/*.ex"
+      - "internal/taskboard/*.go"
+      - "internal/cli/tasks_next_cmd.go"
+      - "docs/contracts/canonical-impl-markers.md"
+      - "scripts/pds-*.py"
+      # ECHO-INTO-JQ CORRUPTION (task-8a5fb4bf0915b5b2). The fixture is a
+      # SUBJECT, not an input: it is a frozen captured bp row, and its escape
+      # sequences ARE what an escape-interpreting echo destroys — strip them and
+      # the check stops measuring anything. The SKILL.md is the other subject:
+      # its fenced recipes are what an agent pastes into zsh.
+      - "scripts/echo-json-parse-guard.test.sh"
+      - "scripts/fixtures/echo-json-parse-row.json"
+      - ".claude/skills/session/SKILL.md"
   push:
     branches: [main]
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # doctor.sh section 2 sources its staleness ladder from this library,
+      # and scripts/local-update.sh — the FIXER doctor points at — calls the
+      # same function. An edit here can flip BOTH harnesses below, so it must
+      # be able to trigger this workflow.
+      - "scripts/lib/bp-staleness.sh"
       # TASK DUP SWEEP (task-a8eec40f9ae36364). The fixture is a SUBJECT, not an
       # input: its 243 frozen rows and its pinned ledger IDF table ARE the
       # calibration, so an edit there changes what the known pairs score without
@@ -729,6 +877,13 @@ on:
       - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
+      # MERGE-CHECK (task-73d2dc0989787be9, 2026-09-17). Its `--selftest` had NO
+      # caller of any kind — no workflow, no Makefile target — while it carried
+      # the arm that let #18497 merge under a live `hold` label. It rides the
+      # merge-verb job because it is the same claim read by the same operators:
+      # merge-check prints the verdict, bp-merge.sh acts on it, and the two must
+      # not disagree about what a hold is.
+      - "scripts/merge-check.sh"
       - "scripts/required-checks-verify.sh"
       - "scripts/release-scan.sh"
       - "scripts/release-scan.test.sh"
@@ -759,6 +914,13 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # THE LOCAL GATE'S PIN (task-561ac06ea4ebb607). console-harness.sh
+      # READS the test-count pin out of console-harness.yml instead of
+      # carrying a second literal that can drift from CI's. The .yml is
+      # already an entry above as the ratchet's subject; these two are the
+      # SCRIPT and its harness, so an edit to either re-runs the pair.
+      - "scripts/console-harness.sh"
+      - "scripts/console-harness-pin.test.sh"
       # THE CLOUD/CONSOLE AGGREGATOR SHAPE RATCHET
       # (cch-w11-bl-aggregator-decide-shape-ratchet). It reads all THREE
       # aggregator workflows — cloud.yml and console-harness.yml as subjects,
@@ -776,6 +938,8 @@ on:
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
       - "scripts/pds-record-parity.test.sh"
+      - "scripts/pds-secret-scan.sh"
+      - "scripts/pds-secret-scan_test.sh"
       # THE TWO PURE-TREE INPUTS OF THE D-NUMBER ARBITER (task-6fd11672fdeefd0b).
       # `--check-alloc` reads the charter AND the reservation ledger; `--axis a`
       # reads the charter AND this checkout's git log. An edit to either FILE can
@@ -783,6 +947,28 @@ on:
       # of the pds-harnesses job in exactly the way scripts/pds-record-parity.sh is.
       - ".claude/workflows/bp-pds-charter.md"
       - "tooling/pds/d-number-reservations.tsv"
+      # THE DEPLOY CHARTER'S ARBITER INPUTS (task-8f908f721d054032). Exactly the
+      # same three-file shape as the PDS rows above, for the SECOND charter the
+      # one arbiter now serves. `deploy/d-number-arbiter.sh --check-alloc` reads
+      # .claude/workflows/bp-deploy-reliability-charter.md AND
+      # deploy/d-number-reservations.tsv; the wrapper itself is the third input
+      # because it binds WHICH two (three variable bindings, no logic), so an
+      # edit there can flip the verdict without touching either data file.
+      # MEASURED, AND NARROWER THAN THE FILING SAID. The row that produced this
+      # (and D616's own "WHAT IS NOT DONE HERE") states the charter "appears in
+      # no workflow path filter anywhere". IT DOES NOT: doc-gates.yml matches it
+      # on BOTH `**/*.md` and `.claude/workflows/**`, on both the pull_request
+      # and push arms, and pr-task-gate.yml / task-lease-renew.yml are unfiltered
+      # entirely. Re-measured against origin/main's .github/workflows by
+      # translating each `paths:` list to a regex -- doc-gates fired there too.
+      # WHAT WAS ACTUALLY TRUE, and is the defect this fixes: no workflow ran the
+      # ARBITER, and shell-harnesses.yml -- the one workflow that owns
+      # scripts/pds-record-parity.sh -- did not trigger on the charter at all.
+      # A guard that does not watch the file it guards is not a guard; a charter
+      # watched only by the doc-budget lane is not watched by its own arbiter.
+      - ".claude/workflows/bp-deploy-reliability-charter.md"
+      - "deploy/d-number-reservations.tsv"
+      - "deploy/d-number-arbiter.sh"
       # AXIS D'S CORPUS. `--axis d` resolves every PDS-D literal carried in the
       # PDS scripts against the charter, so ANY of them is an input: the PR that
       # produced this axis edited only scripts/pds-secret-scan.sh, which was not
@@ -891,6 +1077,8 @@ on:
       - ".github/workflows/go-format.yml"
       - "tooling/fleet/fleet-run.sh"
       - "tooling/fleet/fleet-run-verdict-test.sh"
+      - "tooling/fleet/spend-aggregate.py"
+      - "tooling/fleet/spend-aggregate.test.sh"
       - "scripts/audit-paper-readers.sh"
       - "scripts/audit-paper-readers-test.sh"
       - "scripts/paper_structure.py"
@@ -955,6 +1143,24 @@ on:
       - "scripts/check-doc-budgets.sh"
       - ".github/workflows/shell-harnesses.yml"
       - "scripts/shell-harnesses-dispatch.test.sh"
+      # THE DISPATCHER ITSELF (task-ca50ed283930706a). The `changes` job's
+      # body moved out of an interpolated `run:` scalar into this file, so the
+      # 21000-char expression cap stopped bounding the roster. It is implicit
+      # in EVERY harness set (like the workflow file, and like it NOT a roster
+      # row) — but implicit-in-every-set is worthless if an edit to it starts
+      # no run at all, so it is an entry here: D26, "every script a job here
+      # executes gets its own entry".
+      - "scripts/shell-harness-dispatch.sh"
+      # ── THE MATRIX COLLAPSE'S OWN INPUTS (task-1afb6eaf3a04b8ea). The legs
+      # file IS the job list now, the check-run baseline IS the name contract,
+      # and the three scripts are what turn one into the other. An edit to any
+      # of them must fire the dispatch-selftest leg, which is where the census
+      # and the partition guard both run.
+      - ".github/shell-harness-legs.json"
+      - ".github/shell-harness-check-runs.txt"
+      - "scripts/shell-harness-matrix.py"
+      - "scripts/shell-harness-run.sh"
+      - "scripts/shell-harness-name-census.sh"
       # ── ORPHAN SWEEP II (cgsiw-s3) — mirrors the pull_request list above,
       # globs included. A lane wired on PRs only goes dark the moment a merge
       # lands, and these two lists staying set-equal is itself now guarded (by
@@ -1230,6 +1436,22 @@ on:
       - "scripts/workflow-owner-check.sh"
       - "scripts/ci-pr-checkrun-floor.sh"
       - ".github/workflow-owners.json"
+      # ── THE PDS CHARTER'S OWN CONTENT ANCHORS (task-ceada0e53f6d2f1d) —
+      # mirrors the pull_request list above. A lane wired on PRs only goes dark
+      # the moment a merge lands, and arm E needs the two lists set-equal.
+      - "api/lib/barkpark/tasks/*.ex"
+      - "internal/taskboard/*.go"
+      - "internal/cli/tasks_next_cmd.go"
+      - "docs/contracts/canonical-impl-markers.md"
+      - "scripts/pds-*.py"
+      # ECHO-INTO-JQ CORRUPTION (task-8a5fb4bf0915b5b2). The fixture is a
+      # SUBJECT, not an input: it is a frozen captured bp row, and its escape
+      # sequences ARE what an escape-interpreting echo destroys — strip them and
+      # the check stops measuring anything. The SKILL.md is the other subject:
+      # its fenced recipes are what an agent pastes into zsh.
+      - "scripts/echo-json-parse-guard.test.sh"
+      - "scripts/fixtures/echo-json-parse-row.json"
+      - ".claude/skills/session/SKILL.md"
 
 permissions:
   contents: read
@@ -1302,6 +1524,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
+      # THE TWO OUTPUTS THE COLLAPSE ADDED. `matrix` is the leg list the
+      # `harness` job fans out over; `any` exists because an EMPTY matrix does
+      # not skip a job, it DELETES it — a job that renders no check run at all
+      # is indistinguishable from a workflow that never started, so the
+      # zero-selection case is gated into an explicit skip instead.
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      any: ${{ steps.matrix.outputs.any }}
       task-dup-sweep: ${{ steps.sets.outputs.task-dup-sweep }}
       node-test-floor: ${{ steps.sets.outputs.node-test-floor }}
       doctor-matrix: ${{ steps.sets.outputs.doctor-matrix }}
@@ -1315,6 +1544,7 @@ jobs:
       deploy-convergence: ${{ steps.sets.outputs.deploy-convergence }}
       deploy-concurrency: ${{ steps.sets.outputs.deploy-concurrency }}
       console-path-ratchet: ${{ steps.sets.outputs.console-path-ratchet }}
+      console-harness-pin: ${{ steps.sets.outputs.console-harness-pin }}
       console-refusal-capture: ${{ steps.sets.outputs.console-refusal-capture }}
       weekly-changelog-backfill-guard: ${{ steps.sets.outputs.weekly-changelog-backfill-guard }}
       pds-harnesses: ${{ steps.sets.outputs.pds-harnesses }}
@@ -1355,6 +1585,7 @@ jobs:
       scheduled-arm-health: ${{ steps.sets.outputs.scheduled-arm-health }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
       scratchpad-reaper: ${{ steps.sets.outputs.scratchpad-reaper }}
+      echo-json-parse: ${{ steps.sets.outputs.echo-json-parse }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1368,2871 +1599,170 @@ jobs:
           # `git cat-file -e` miss it, which the step below treats as a hard
           # failure, never as "nothing changed".
           fetch-depth: 0
+          # `filter: blob:none` — a BLOBLESS partial clone, and it is NOT
+          # shallowness. It fetches every commit and every tree and omits only
+          # blob CONTENTS; `git cat-file -e <base>^{commit}`, `git merge-base`
+          # and `git diff --name-only` read commits and trees, so this job's
+          # verdict is bit-identical. `fetch-depth: 0` above STAYS: drop it and
+          # actions/checkout falls back to depth 1, which has no merge base
+          # whether blobless or not. Equivalence is provable, not asserted:
+          #     bash scripts/dispatch-blobless-proof.sh
+          # MEASURED on merged head b71d22875b (2026-09-17): this checkout step
+          # took 36s here, while the already-blobless dispatchers on the
+          # same head (elixir/cloud/ci/console/compose) took 13-15s.
+          filter: blob:none
 
       - id: sets
         name: Compute the changed-path set per harness
+        # THE BODY IS A FILE, NOT A SCALAR (task-ca50ed283930706a). It used to
+        # live here, roster and all, and it carried the two `${{ }}` values
+        # below inline. That made GitHub compile the WHOLE scalar into ONE
+        # expression and measure it against the 21000-character max expression
+        # length: at 19968 bytes on main it sat 32 bytes under
+        # scripts/workflow-run-block-length-check.sh's 20000 fail floor, and
+        # over GitHub's cap the failure is a STARTUP FAILURE with ZERO jobs —
+        # every harness in this file dark at once, invisible to every local
+        # YAML gate because the file is valid YAML (#19291, 2026-09-18).
+        #
+        # The roster is a partition that grows every wave, so the cap had
+        # started deciding dispatch policy: #19227, #19291 and #19317 each
+        # traded per-file rows for globs to stay under it, and #19446 BACKED
+        # OUT two rows it needed (98 bytes against 32 available). Passing the
+        # two GitHub values as `env:` leaves this scalar a LITERAL — no `${{`,
+        # so the expression parser never sees it — and the roster can grow.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        # THE ABSENT-FILE FALLBACK (task-ecb7fc56b5868bfc). The checkout above is
+        # the PR HEAD; the workflow FILE comes from the merge ref. So a head
+        # whose merge base predates befc8cbbf — the commit that created this
+        # script — carries the new `run:` line and NOT the script:
+        # `bash: scripts/shell-harness-dispatch.sh: No such file or directory`,
+        # exit 127. And because this job feeds the matrix, the failure is not a
+        # red leg, it is NO LEG AT ALL: every harness check run is ABSENT, which
+        # reads exactly like "nothing to run". MEASURED on run 35517160933 job
+        # 106094923976 (head 1badf9dc5, 42 open PRs affected at 18:35Z).
+        # So: the head's OWN copy when it has one — a PR that edits the
+        # dispatcher must test its edit — else the base branch's copy.
         run: |
           set -euo pipefail
-
-          # One row per (job, path). The first column is the job id, the second
-          # a VERBATIM entry of this workflow's on.pull_request.paths (globs
-          # included — bash `case` matches them, and `**` reads as `*`). Rows
-          # come from the grouped comments of that list plus each job's steps:
-          # a script a job sources or reads (scripts/lib/check-runs.sh,
-          # scripts/pr-task-gate.sh, .github/workflows/*.yml for the corpus
-          # readers) is a row for every job that consumes it. When in doubt a
-          # path is IN — over-running a harness is cheap; a false skip is the
-          # defect. This workflow file is in every set implicitly (see below)
-          # and is deliberately not a row.
-          #
-          # AXIS D'S CORPUS IS TWO GLOBS, AND THEY ARE ROWS (task-74f54db3b1f353d2).
-          # scripts/pds-record-parity.sh --axis d resolves the PDS-D literals carried
-          # in `scripts/pds-*.sh` + `tooling/pds/**` against the charter, and the
-          # pds-harnesses job runs that arm. Both globs were added to the paths lists
-          # when axis d landed; NEITHER got a roster row, so the half that dispatches
-          # the workflow and the half that selects the job disagreed: an edit to
-          # scripts/pds-secret-scan.sh started a run in which every one of the 48 jobs
-          # was skipped. Neither glob is an exclusion — a PREDICATE, not the
-          # enumerated pds rows above, is what makes the corpus and the roster the
-          # same set. The enumerated rows stay: they are cheap, and several name
-          # inputs (the charter, docs/setup/personal-local.md) the globs do not cover.
-          roster='
-          node-test-floor scripts/node-test-floor.mjs
-          node-test-floor scripts/node-test-floor.test.sh
-          node-test-floor sdk/package.json
-          node-test-floor web/package.json
-          node-test-floor apps/hundesteder/package.json
-          node-test-floor templates/search-starter/package.json
-          node-test-floor templates/astro-search-starter/package.json
-          node-test-floor .github/workflows/hundesteder.yml
-          node-test-floor .github/workflows/astro-search-finder-test.yml
-          node-test-floor .github/workflows/search-starter-smoke.yml
-          task-dup-sweep scripts/task-dup-sweep.mjs
-          task-dup-sweep scripts/fixtures/task-dup-sweep-selftest.json
-          doctor-matrix scripts/doctor.sh
-          doctor-matrix scripts/doctor.test.sh
-          merge-verb-table scripts/bp-merge.sh
-          merge-verb-table scripts/bp-merge.test.sh
-          merge-verb-table scripts/required-checks-verify.sh
-          merge-verb-table scripts/lib/check-runs.sh
-          merge-verb-table scripts/lib/check-runs.test.sh
-          release-scan-verdict scripts/release-scan.sh
-          release-scan-verdict scripts/release-scan.test.sh
-          release-curator-draft-guard scripts/release-curator-draft.sh
-          release-curator-draft-guard scripts/release-curator-draft.test.sh
-          release-curator-draft-guard .github/workflows/release-curator-draft.yml
-          zero-criteria-census scripts/epic-zero-criteria-census.sh
-          zero-criteria-census scripts/ledger-epic-roster.sh
-          webhook-fanout-guard scripts/webhook-fanout-watch.sh
-          webhook-fanout-guard scripts/webhook-fanout-watch.test.sh
-          seal-run-guard scripts/seal-run.sh
-          seal-run-guard scripts/seal-run.test.sh
-          seal-run-guard cloud/priv/static/__preview__/seal-predicate.mjs
-          seal-run-guard .github/workflows/cloud.yml
-          registration-sample-bar scripts/registration-sample.sh
-          registration-sample-bar scripts/registration-sample.test.sh
-          registration-sample-bar scripts/lib/check-runs.sh
-          registration-sample-bar scripts/cloud-path-escape-check.sh
-          registration-sample-bar scripts/console-path-escape-check.sh
-          deploy-convergence scripts/deploy-convergence-check.sh
-          deploy-convergence scripts/deploy-convergence-check.test.sh
-          deploy-convergence .github/workflows/deploy.yml
-          deploy-concurrency scripts/deploy-concurrency-check.sh
-          deploy-concurrency scripts/deploy-concurrency-check.test.sh
-          deploy-concurrency scripts/main-run-concurrency-check.sh
-          deploy-concurrency scripts/deploy-supersede-exit.sh
-          deploy-concurrency scripts/deploy-supersede-exit.test.sh
-          deploy-concurrency .github/workflows/deploy.yml
-          deploy-concurrency .github/workflows/*.yml
-          console-path-ratchet scripts/console-path-escape-check.sh
-          console-path-ratchet scripts/console-path-escape-check.test.sh
-          console-path-ratchet .github/workflows/console-harness.yml
-          console-path-ratchet scripts/cloud-console-gate-shape.test.sh
-          console-path-ratchet .github/workflows/cloud.yml
-          console-path-ratchet .github/workflows/elixir.yml
-          console-refusal-capture scripts/console-refusal-capture.mjs
-          console-refusal-capture scripts/*.test.mjs
-          weekly-changelog-backfill-guard scripts/weekly-changelog-backfill.test.sh
-          weekly-changelog-backfill-guard .github/workflows/weekly-changelog.yml
-          pds-harnesses scripts/pds-ledger-census.sh
-          pds-harnesses scripts/pds-ledger-census_test.sh
-          pds-harnesses scripts/pds-record-parity.sh
-          pds-harnesses scripts/pds-record-parity.test.sh
-          pds-harnesses .claude/workflows/bp-pds-charter.md
-          pds-harnesses tooling/pds/d-number-reservations.tsv
-          pds-harnesses scripts/pds-*.sh
-          pds-harnesses tooling/pds/**
-          pds-harnesses scripts/pds-scratch-target.sh
-          pds-harnesses scripts/pds-scratch-target_test.sh
-          pds-harnesses scripts/pds-read-preflight-audit.sh
-          pds-harnesses scripts/pds-read-preflight-audit_test.sh
-          pds-harnesses scripts/pds-threshold-move-guard.sh
-          pds-harnesses scripts/pds-threshold-move-guard_test.sh
-          pds-harnesses scripts/pds-crown-stamp.sh
-          pds-harnesses scripts/pds-personal-local-smoke_test.sh
-          pds-harnesses docs/setup/personal-local.md
-          pds-harnesses scripts/pr-task-gate.sh
-          ci-failure-issue-filer scripts/file-ci-failure-issue.sh
-          ci-failure-issue-filer scripts/file-ci-failure-issue.test.sh
-          distribution-harnesses scripts/install-cli.sh
-          distribution-harnesses scripts/install-cli.test.sh
-          distribution-harnesses scripts/fetch-prebuilt.sh
-          distribution-harnesses scripts/fetch-prebuilt.test.sh
-          distribution-harnesses scripts/deploy-rebuild.sh
-          distribution-harnesses scripts/deploy-rebuild.test.sh
-          distribution-harnesses deploy/site-runtime-install.sh
-          distribution-harnesses deploy/site-runtime-install_test.sh
-          tooling-harnesses tooling/task-obsession/reland_check.py
-          tooling-harnesses tooling/task-obsession/reland_check.test.sh
-          tooling-harnesses tooling/task-obsession/reland_fetch.py
-          tooling-harnesses tooling/task-obsession/reland_workflow_sim.py
-          tooling-harnesses tooling/task-obsession/reland_loudfail.test.sh
-          tooling-harnesses tooling/task-obsession/fixtures/*.json
-          tooling-harnesses .github/workflows/reland-check.yml
-          tooling-harnesses tooling/fleet/fleet-run.sh
-          tooling-harnesses tooling/fleet/fleet-run-verdict-test.sh
-          tooling-harnesses scripts/audit-paper-readers.sh
-          tooling-harnesses scripts/audit-paper-readers-test.sh
-          tooling-harnesses scripts/paper_structure.py
-          tooling-harnesses scripts/paper_structure_test.py
-          tooling-harnesses tooling/gate-map/gate-map.mjs
-          tooling-harnesses tooling/gate-map/gate-map.test.mjs
-          tooling-harnesses scripts/relandcheck-diff-producer.test.sh
-          tooling-harnesses .github/workflows/go-tests.yml
-          tooling-harnesses scripts/go-path-escape-check.sh
-          tooling-harnesses scripts/go-path-escape-check.test.sh
-          tooling-harnesses scripts/main-red-breaker.sh
-          tooling-harnesses scripts/main-red-breaker.test.sh
-          tooling-harnesses scripts/main-red-breaker.runner-local.json
-          tooling-harnesses scripts/breaker-capture.sh
-          tooling-harnesses scripts/stale-tree-regression-check.sh
-          tooling-harnesses scripts/stale-tree-ci-wiring.test.sh
-          tooling-harnesses scripts/breaker-step-names-drift.test.sh
-          tooling-harnesses .github/workflows/required-checks-drift.yml
-          tooling-harnesses .github/workflows/doc-gates.yml
-          tooling-harnesses .github/workflows/security.yml
-          tooling-harnesses .github/workflows/compose-smoke.yml
-          tooling-harnesses .github/workflows/go-format.yml
-          tooling-harnesses scripts/console-slice-gate.mjs
-          tooling-harnesses scripts/console-slice-gate.test.mjs
-          launcher-boot-selftest bin/barkpark
-          launcher-boot-selftest scripts/barkpark-boot-selftest.sh
-          workflow-portability scripts/workflow-portability-check.sh
-          workflow-portability scripts/workflow-portability-check.test.sh
-          workflow-portability scripts/workflow-module-exec-smoke.sh
-          workflow-portability scripts/workflow-module-exec-smoke.test.sh
-          workflow-portability .claude/workflows/*.workflow.js
-          workflow-portability scripts/workflow-run-shell-check.sh
-          workflow-portability .github/workflows/*.yml
-          breaker-measure-precondition scripts/breaker-measure-precondition.sh
-          breaker-measure-precondition scripts/breaker-measure-precondition.test.sh
-          breaker-measure-precondition scripts/ci-measure.sh
-          breaker-measure-precondition scripts/main-red-breaker.sh
-          exit-runner-guard scripts/deploy-reliability-exit-run.sh
-          exit-runner-guard scripts/deploy-reliability-exit-run.test.sh
-          exit-runner-guard internal/cloudclient/client.go
-          exit-runner-guard internal/cli/cloud_deploy_census_cmd.go
-          exit-runner-guard scripts/deploy-reliability-exit-2026-08-10.md
-          exit-runner-guard scripts/check-doc-budgets.sh
-          exit-runner-guard scripts/seal-run.sh
-          cloud-static-gz scripts/cloud-static-gz-guard.sh
-          cloud-static-gz cloud/priv/static/**
-          cloud-static-gz cloud/.gitignore
-          cloud-static-gz cloud/Dockerfile
-          cloud-static-gz cloud/lib/barkpark_cloud/web/router.ex
-          pds-hetzner-offline scripts/pds-live-hetzner-placement-group.sh
-          pds-hetzner-offline scripts/pds-live-hetzner-placement-group_test.sh
-          pds-hetzner-offline scripts/lib/pds-live-lib.sh
-          pds-hetzner-offline internal/cli/testdata/pds_live_hetzner_*.json
-          task-lease-renew scripts/task-lease-renew.sh
-          task-lease-renew scripts/task-lease-renew.test.sh
-          task-lease-renew scripts/task-lease-sweep.sh
-          task-lease-renew scripts/task-lease-sweep.test.sh
-          task-lease-renew .github/workflows/task-lease-renew.yml
-          task-lease-renew scripts/pr-task-gate.sh
-          merge-sweep-review-hold .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh
-          merge-sweep-review-hold .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh
-          landed-mark scripts/landed-mark.sh
-          landed-mark scripts/landed-mark.test.sh
-          landed-mark scripts/fixtures/landed-mark/**
-          landed-mark scripts/pr-task-gate.sh
-          landed-mark .github/workflows/landed-mark.yml
-          landed-mark scripts/landed-open-report.sh
-          landed-mark scripts/landed-open-report.test.sh
-          landed-mark scripts/lib/landed_open_report.py
-          landed-mark scripts/landed-open-report-schedule.sh
-          landed-mark scripts/landed-open-report-schedule.test.sh
-          landed-mark .github/workflows/landed-open-report.yml
-          landed-mark scripts/stale-pr-citation-detector.sh
-          doc-gates-paths-parity scripts/doc-gates-paths-parity-check.sh
-          doc-gates-paths-parity .github/workflows/doc-gates.yml
-          merge-gate-bridge scripts/github-webhook-subscription-parity.sh
-          merge-gate-bridge scripts/github-webhook-subscription-parity.test.sh
-          merge-gate-bridge scripts/merge-gate-autostamp-liveness.sh
-          merge-gate-bridge scripts/merge-gate-autostamp-liveness.test.sh
-          merge-gate-bridge api/lib/barkpark_web/controllers/github_webhook_controller.ex
-          merge-gate-bridge scripts/github-app-bootstrap.py
-          merge-gate-bridge docs/ops/github-sync.md
-          fleet-coordination-harnesses scripts/already-fixed.sh
-          fleet-coordination-harnesses scripts/already-fixed.test.sh
-          fleet-coordination-harnesses scripts/branch-owner.sh
-          fleet-coordination-harnesses scripts/branch-owner.test.sh
-          fleet-coordination-harnesses scripts/pr-overlap.sh
-          fleet-coordination-harnesses scripts/pr-overlap.test.sh
-          principal-gate-harnesses scripts/media-smoke.sh
-          principal-gate-harnesses scripts/pdf-efficiency-proof.sh
-          principal-gate-harnesses scripts/pdf-kill-listener-proof.sh
-          principal-gate-harnesses scripts/lib/principal-gate.sh
-          compose-smoke-dispatcher scripts/compose-smoke-dispatch.test.sh
-          compose-smoke-dispatcher .github/workflows/compose-smoke.yml
-          compose-smoke-dispatcher scripts/env-census.py
-          compose-smoke-dispatcher scripts/compose-smoke.sh
-          compose-smoke-dispatcher scripts/compose-smoke.test.sh
-          workflow-trigger-coverage scripts/workflow-trigger-coverage.sh
-          workflow-trigger-coverage scripts/workflow-trigger-coverage.test.sh
-          workflow-trigger-coverage .github/workflows/*.yml
-          undispatched-target scripts/undispatched-target-check.sh
-          undispatched-target scripts/*-path-escape-check.sh
-          undispatched-target .github/workflows/*.yml
-          dispatch-selftest scripts/shell-harnesses-dispatch.test.sh
-          orphan-harnesses scripts/local-update.sh
-          orphan-harnesses scripts/local-update.test.sh
-          orphan-harnesses scripts/pdf-efficiency-proof.sh
-          orphan-harnesses scripts/pdf-efficiency-proof.test.sh
-          orphan-harnesses scripts/refute-on-absence-capture-log-check.sh
-          orphan-harnesses scripts/refute-on-absence-capture-log-check.test.sh
-          selftest-wiring-census scripts/selftest-wiring-census.sh
-          selftest-wiring-census scripts/*.test.sh
-          selftest-wiring-census scripts/*.test.mjs
-          selftest-wiring-census scripts/*_test.sh
-          selftest-wiring-census scripts/*-selftest.sh
-          claim-health scripts/ledger/claim-health.sh
-          claim-health scripts/ledger/claim-health-selftest.sh
-          selftest-wiring-census .github/workflows/*.yml
-          registry-impact-check scripts/registry-impact-check.sh
-          registry-impact-check scripts/registry-impact-check.test.sh
-          exit-laundering-sweep scripts/exit-laundering-sweep.sh
-          workflow-owner scripts/workflow-owner-check.sh
-          workflow-owner scripts/ci-pr-checkrun-floor.sh
-          workflow-owner .github/workflow-owners.json
-          workflow-owner .github/workflows/*.yml
-          workflow-owner .github/required-checks.json
-          which-gates scripts/which-gates.sh
-          which-gates scripts/which-gates.test.sh
-          which-gates scripts/cloud-path-escape-check.sh
-          which-gates cloud/test/barkpark_cloud/payload_key_set_census_test.exs
-          which-gates internal/cloudclient/**
-          which-gates scripts/console-path-escape-check.sh
-          which-gates scripts/go-path-escape-check.sh
-          which-gates .github/workflows/cloud.yml
-          which-gates .github/workflows/console-harness.yml
-          which-gates .github/workflows/go-tests.yml
-          orchestrate-launch-recipe scripts/orchestrate-launch-recipe.test.sh
-          orchestrate-launch-recipe .claude/skills/orchestrate-tasks/SKILL.md
-          orchestrate-launch-recipe .claude/skills/orchestrate-tasks/LEAD-BRIEF.md
-          orchestrate-launch-recipe .claude/skills/orchestrate-tasks/helpers/*.sh
-          bp-curl scripts/lib/bp-curl.sh
-          bp-curl scripts/lib/bp-curl.test.sh
-          migration-version-collision scripts/migration-version-collision-check.sh
-          migration-version-collision .github/workflows/cloud.yml
-          main-workflow-rollup scripts/main-workflow-rollup.sh
-          main-workflow-rollup scripts/main-workflow-rollup.test.sh
-          main-workflow-rollup .github/required-checks.json
-          scheduled-arm-health scripts/scheduled-arm-health.sh
-          scheduled-arm-health scripts/scheduled-arm-health.test.sh
-          scheduled-arm-health .github/workflows/studio-journey-smoke.yml
-          landed-mark scripts/lib/bp-curl.sh
-          task-lease-renew scripts/lib/bp-curl.sh
-          deploy-receipt-honesty scripts/deploy-receipt-failure.test.sh
-          deploy-receipt-honesty Makefile
-          deploy-receipt-honesty .githooks/post-merge
-          deploy-receipt-honesty scripts/deploy-rebuild.sh
-          deploy-receipt-honesty scripts/merged-at-committer-tripwire.sh
-          deploy-receipt-honesty scripts/merged-at-committer-tripwire.test.sh
-          deploy-receipt-honesty .github/workflows/deploy.yml
-          place-directory-install templates/place-directory/install.sh
-          place-directory-install templates/place-directory/seed-places.json
-          place-directory-install templates/place-directory/schemas/place.json
-          place-directory-install scripts/*.test.sh
-          sunset-route-consumers scripts/sunset-route-consumers.test.sh
-          sunset-route-consumers scripts/deploy-rebuild.sh
-          sunset-route-consumers scripts/compose-smoke.sh
-          sunset-route-consumers scripts/pds-scratch-target.sh
-          sunset-route-consumers scripts/create-quickstart-smoke.sh
-          sunset-route-consumers docker-compose.yml
-          sunset-route-consumers internal/cli/cloud/support.go
-          sunset-route-consumers deploy/README.md
-          sunset-route-consumers deploy/uptime-kuma/README.md
-          mix-test-strict scripts/mix-test-strict.sh
-          mix-test-strict scripts/mix-test-strict.test.sh
-          scratchpad-reaper scripts/scratchpad-reaper.sh
-          scratchpad-reaper scripts/scratchpad-reaper.test.sh
-          scratchpad-reaper scripts/disk-headroom-guard.sh
-          '
-          self=".github/workflows/shell-harnesses.yml"
-
-          refuse() {
-            echo "::error::dispatcher: $1"
-            exit 1
-          }
-
-          # The job list is DERIVED from the roster, in first-appearance order,
-          # so a job cannot be dispatched without at least one row.
-          jobs="$(printf '%s\n' "$roster" | awk 'NF { print $1 }' | awk '!seen[$0]++')"
-          [ -n "$jobs" ] || refuse "the roster is empty — nothing to dispatch."
-
-          emit_all() {
-            for j in $jobs; do
-              echo "${j}=$1" >> "$GITHUB_OUTPUT"
-            done
-            echo "verdict: every harness=$1"
-          }
-
-          event="${{ github.event_name }}"
-          if [ "$event" != "pull_request" ]; then
-            # push-to-main (and anything else): NEVER skip. Main is what every
-            # PR is compared against and there is no reviewer left to notice a
-            # partial main.
-            echo "event '$event' is not a pull_request — every harness set is true."
-            emit_all true
-            exit 0
+          src=scripts/shell-harness-dispatch.sh
+          if [ -f "$src" ]; then
+            echo "dispatcher: HEAD copy ($src)"
+          else
+            base="${GITHUB_BASE_REF:-main}"
+            echo "dispatcher: this head has no $src (it predates befc8cbbf) — running origin/$base's copy"
+            src="$RUNNER_TEMP/shell-harness-dispatch.sh"
+            git show "origin/$base:scripts/shell-harness-dispatch.sh" >"$src" || {
+              git fetch --depth=1 origin "$base"
+              git show "FETCH_HEAD:scripts/shell-harness-dispatch.sh" >"$src"
+            }
           fi
-
-          base="${{ github.event.pull_request.base.sha }}"
-          [ -n "$base" ] || refuse "the PR carries no base sha. Refusing to guess — a guessed base skips harnesses and reports green."
-
-          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            # Absent during burst merges. Try once, then give up LOUDLY.
-            git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
+          bash "$src"
+      - name: Emit the harness matrix
+        id: matrix
+        # The verdicts the step above wrote are read back as ONE object rather
+        # than re-derived, so the matrix cannot disagree with the outputs the
+        # roster guard checks. scripts/shell-harness-matrix.py REFUSES (exit 2)
+        # if any leg in .github/shell-harness-legs.json got no verdict — a leg
+        # silently dropped from dispatch is the failure this collapse could
+        # introduce, and it is the one thing an empty matrix would hide.
+        env:
+          SELECTION: ${{ toJSON(steps.sets.outputs) }}
+        # Same absent-file fallback as the step above, for the same reason: a
+        # head that predates this script would exit 127 here and delete the
+        # matrix just as silently.
+        run: |
+          set -euo pipefail
+          src=scripts/shell-harness-matrix.py
+          if [ -f "$src" ]; then
+            echo "matrix: HEAD copy ($src)"
+          else
+            base="${GITHUB_BASE_REF:-main}"
+            echo "matrix: this head has no $src — running origin/$base's copy"
+            src="$RUNNER_TEMP/shell-harness-matrix.py"
+            git show "origin/$base:scripts/shell-harness-matrix.py" >"$src" || {
+              git fetch --depth=1 origin "$base"
+              git show "FETCH_HEAD:scripts/shell-harness-matrix.py" >"$src"
+            }
           fi
-          git cat-file -e "${base}^{commit}" 2>/dev/null || refuse "PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base." # MUT: unresolvable-base
+          python3 "$src" "$SELECTION" >> "$GITHUB_OUTPUT"
 
-          # No common ancestor makes the three-dot diff exit 128 with a raw
-          # `fatal:` and no annotation. Name it, and refuse a two-dot fallback,
-          # which sweeps in the base's ENTIRE content and dispatches true for
-          # the wrong reason.
-          git merge-base "$base" HEAD >/dev/null 2>&1 || refuse "PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Rebase the branch onto its base branch."
-
-          echo "diff base: ${base} (three-dot against HEAD)"
-          # `-z` + `--no-renames` are both load-bearing (measured in
-          # security.yml): plain --name-only QUOTES odd paths so they miss the
-          # match, and rename detection prints only the destination.
-          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
-          echo "changed files:"
-          printf '%s\n' "$changed"
-
-          if [ -z "$changed" ]; then
-            # RARE BUT LEGAL: a revert pair or a branch-sync PR nets to nothing.
-            # Run everything: expensive, never wrong. Never false.
-            echo "::warning::dispatcher: the changed-file set is EMPTY against ${base}. Dispatching every harness rather than skipping any — a skip here would green a check nothing measured."
-            emit_all true
-            exit 0
-          fi
-
-          hits=" "
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            if [ "$f" = "$self" ]; then
-              # This file is in EVERY set: an edit to the roster, the gating or
-              # a step changes what every harness means.
-              echo "$f changed — every harness set is true."
-              emit_all true
-              exit 0
-            fi
-            while read -r job pat; do
-              [ -n "$job" ] || continue
-              # The roster entry IS a glob (cloud/priv/static/**, *.yml) and
-              # must match as one; quoting it would match literally. SC2254.
-              # shellcheck disable=SC2254
-              case "$f" in
-                $pat)
-                  case "$hits" in
-                    *" $job "*) ;;
-                    *) hits="${hits}${job} " ;;
-                  esac
-                  ;;
-              esac
-            done <<EOF
-          $roster
-          EOF
-          done <<EOF
-          $changed
-          EOF
-
-          for j in $jobs; do
-            case "$hits" in
-              *" $j "*) v=true ;;
-              *) v=false ;;
-            esac
-            echo "verdict: ${j}=${v}"
-            echo "${j}=${v}" >> "$GITHUB_OUTPUT"
-          done
-  task-dup-sweep:
+  # ── THE HARNESS MATRIX ───────────────────────────────────────────────────────
+  # 53 sibling jobs, each gated by one uniform
+  # `if: needs.changes.outputs.<slug> == 'true'`, collapsed into ONE matrix job.
+  #
+  # WHAT IT BUYS, measured. GitHub renders a check run for a job it SKIPS, so
+  # the old shape published 54 names on every head that started this workflow —
+  # and on a head whose diff hit a broad path all 53 BOOTED. PR #18915:
+  # 0 skipped / 54 success, 09:02:10Z -> 09:17:21Z, more real runner compute than
+  # all four REQUIRED workflows combined, while PR #18922 on the same day ran
+  # 47 skipped / 7 success off the same file. A matrix leg that is not in the
+  # matrix renders NOTHING, so N selected harnesses now cost N+1 check-run
+  # names, not 54.
+  #
+  # THE NAMES DID NOT MOVE, and that is the load-bearing claim. An explicit
+  # `name:` on a matrix job is rendered VERBATIM — GitHub appends the `(leg)`
+  # suffix only to a matrix job that has no name of its own — so every one of
+  # the 53 names is byte-identical to what its sibling job published.
+  # `.github/shell-harness-check-runs.txt` is the committed set and
+  # `scripts/shell-harness-name-census.sh --compare-file` proves the workflow
+  # still publishes exactly it, offline, on a shallow checkout, in the
+  # `dispatch-selftest` leg of this very workflow.
+  #
+  # WHAT IS NOT REQUIRED HERE: .github/required-checks.json requires exactly
+  # Cloud gate / Console gate / Elixir gate / PR references an active task.
+  # This workflow publishes none of them and is upstream `needs:` of none, so a
+  # name that stops rendering here cannot deadlock main. Checked, not assumed.
+  #
+  # ARM SEMANTICS ARE PRESERVED BY scripts/shell-harness-run.sh, not by luck.
+  # Each old job's `run:` steps carried
+  # `if: ${{ !cancelled() && steps.setup.outcome == 'success' }}`: every arm ran
+  # even after an earlier arm failed. The runner reproduces that exactly — each
+  # arm under its own `bash`, statuses OR-ed, every failing arm named — where a
+  # naive `set -e` over the same commands would stop at the first red and hide
+  # the rest.
+  harness:
     needs: [changes]
-    if: needs.changes.outputs.task-dup-sweep == 'true'
-    name: task-dup-sweep calibration + vacuity arms
+    # `any`, and not a comparison against the matrix JSON: see the dispatcher's
+    # outputs above for why an empty matrix must never reach this job.
+    if: needs.changes.outputs.any == 'true'
+    # WHERE THE LEG NAMES COME FROM, for scripts/required-checks-generate.sh.
+    # A `name:` that is nothing but `${{ … }}` can only become the regex `^.+$`,
+    # and that generator refuses such a template outright — a pattern matching
+    # every rendered name would hand this job's provenance to other workflows'
+    # checks. This line is the finite answer: the 53 rendered names are the
+    # `name` field of every leg in the committed legs file, so the generator
+    # expands ONE index row per literal name instead of one wildcard row. Take
+    # this comment away and the generator refuses again, by design.
+    # required-checks: matrix-name-legs .github/shell-harness-legs.json .[].name
+    name: ${{ matrix.leg.name }}
+    strategy:
+      # fail-fast would CANCEL sibling harnesses on the first red, inverting the
+      # old shape: 53 independent jobs never cancelled one another, and a
+      # cancelled harness reports nothing and reads as "did not run".
+      fail-fast: false
+      matrix:
+        leg: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ matrix.leg.timeout }}
     steps:
       - uses: actions/checkout@v4
+        id: setup
+        with:
+          # Per-leg, because five legs genuinely need a full clone (they build
+          # fixture repos and diff against a real merge-base) and the rest do
+          # not. Carried as data in .github/shell-harness-legs.json.
+          fetch-depth: ${{ matrix.leg.fetch_depth }}
       - uses: actions/setup-node@v4
-        id: setup
+        id: node
+        if: ${{ matrix.leg.node != '' }}
         with:
-          node-version: "22"
-      - name: task-dup-sweep.mjs syntax check
-        run: node --check scripts/task-dup-sweep.mjs
-      - name: "calibration + vacuity arms (frozen 243-row fixture, no bp, no network)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # NINE assertions over four arms, and the point of every one is that the
-        # instrument it guards REPLACES one that could not see its own true
-        # positives: the create-path lexical wall scores the two
-        # human-confirmed duplicate pairs 0.109 and 0.077 against its own 0.55
-        # refuse threshold, and ranks the partner 955th and 1065th of 9,209.
-        #   · two VACUITY arms — an empty corpus and a pair generator that
-        #     yields nothing must REFUSE (exit 3, named line). A sweep that
-        #     compares nothing otherwise reports a beautiful zero that is
-        #     indistinguishable from a clean ledger.
-        #   · KNOWN POSITIVES — both confirmed pairs must be reported at the
-        #     recall operating point, at the score and rank a live 9,210-row run
-        #     gives them (the fixture pins term weights to a frozen ledger IDF
-        #     precisely so the fixture cannot invent its own easier numbers).
-        #   · KNOWN NEGATIVES — five pairs read by hand and judged DISTINCT must
-        #     stay out of the tight point. The arm also PRINTS that all five ARE
-        #     reported at the recall point, which is why that point is documented
-        #     as a candidate pool and never as a duplicate rate.
-        #   · PLANTED DUPLICATE — a row restating an existing row's defect in
-        #     different words is caught when present and absent when removed.
-        run: node scripts/task-dup-sweep.mjs --selftest
-  node-test-floor:
-    needs: [changes]
-    if: needs.changes.outputs.node-test-floor == 'true'
-    name: node-test-floor.mjs mutation matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node
-        id: setup
-        # fs.globSync needs node >= 22; the runner refuses BY NAME below that
-        # rather than throwing a TypeError that reads like a bug in the suite.
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: node-test-floor.test.sh syntax check
-        run: bash -n scripts/node-test-floor.test.sh
-      - name: "node-test-floor mutation matrix (hermetic mktemp fixtures, no network)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # Thirty-eight assertions; the ones that matter prove the runner can
-        # FAIL: a zero-match pattern, a file registering zero tests (node
-        # reports that file as `# tests 1` -- the FILE counted as its own
-        # passing test, which defeats a naive tests>0 floor and defeated the
-        # first version of this one), a missing path beside a real one, a
-        # forwarded --test-reporter, a suite that SHRANK below its committed
-        # `--floor N` literal, and the per-file TAP blocks staying whole and in
-        # FILE order under the pool. The shrink pair is the load-bearing one:
-        # case 8 runs a gutted tree WITHOUT a floor and asserts GREEN, case 10
-        # runs the same shape WITH one and asserts RED, so the only variable is
-        # the literal -- every other assertion this runner makes is derived from
-        # the tree it measures and therefore agrees with a gutted tree. The
-        # ordering case is not decoration either: streaming the pool instead of
-        # buffering keeps the SUM correct while scrambling the order, so a
-        # position-keyed consumer breaks silently -- verified by mutation.
-        run: bash scripts/node-test-floor.test.sh
-  doctor-matrix:
-    needs: [changes]
-    if: needs.changes.outputs.doctor-matrix == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-        with:
-          # The harness builds fixture repos and diffs merge-base(bp, origin/main);
-          # nothing here reaches the real origin/main, but a full checkout keeps
-          # git operations unsurprising (no shallow-clone edge cases).
-          fetch-depth: 0
-      - name: doctor.sh syntax check
-        run: bash -n scripts/doctor.sh
-      - name: doctor.sh section-2 verdict matrix
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/doctor.test.sh
-
-  merge-verb-table:
-    needs: [changes]
-    if: needs.changes.outputs.merge-verb-table == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: bp-merge.sh syntax check
-        run: bash -n scripts/bp-merge.sh
-      - name: bp-merge refusal-string table (captured fixtures, no live GitHub)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/bp-merge.test.sh
-      - name: the shared check-run reader survives a feed larger than an argument
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # scripts/lib/check-runs.sh is read by this job's own verifier, by
-        # release-scan.sh and by absent-context-census.sh, and had no harness of
-        # its own until it broke in production by putting the whole feed on ARGV.
-        # The fixture is SIZED from getconf, not typed, and the harness refuses
-        # to measure if it does not exceed the platform's argument limit.
-        run: bash scripts/lib/check-runs.test.sh
-
-      - name: required-checks-verify selftest (every clause mutation-proven)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The merge verb's pre-flight IS this script, so its own selftest rides
-        # the same lane. It needs no token: --selftest drives temp fixtures only.
-        run: bash scripts/required-checks-verify.sh --selftest
-
-  release-scan-verdict:
-    needs: [changes]
-    if: needs.changes.outputs.release-scan-verdict == 'true'
-    name: release-scan.sh CI-verdict derivation
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-        with:
-          # MUST be a full clone: the harness proves release-scan.sh's own
-          # shallow-clone guard both directions, and the green direction needs
-          # a checkout that is genuinely not shallow.
-          fetch-depth: 0
-      - name: release-scan.sh syntax check
-        run: bash -n scripts/release-scan.sh
-      - name: release-scan.sh verdict matrix (recorded fixtures, no network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The advisory/cancelled cases replay API payloads captured from two
-        # FROZEN shas (025c2497, 2c8fe0da) through a fake `gh` on PATH, so a
-        # sibling task making Sobelow green can never turn this green
-        # vacuously. Set RELEASE_SCAN_TEST_LIVE=1 locally to re-verify the
-        # recordings against the real API.
-        run: bash scripts/release-scan.test.sh
-
-  release-curator-draft-guard:
-    needs: [changes]
-    if: needs.changes.outputs.release-curator-draft-guard == 'true'
-    name: release-curator-draft.sh drafts only (no tag, no publish)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: release-curator-draft.sh syntax check
-        run: bash -n scripts/release-curator-draft.sh
-      - name: draft-only invariant matrix (fake gh, real git, no network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The harness builds real git repos with real bare origins and puts a
-        # fake `gh` plus a LOGGING `git` on PATH, so `git ls-remote --tags
-        # origin` in the subject answers for real instead of being stubbed into
-        # agreement — a stubbed ls-remote would make the no-tag assertion
-        # vacuous, which is the one defect this job exists to prevent. Its
-        # static arm parses .github/workflows/release-curator-draft.yml and
-        # reds if any `on:` key other than schedule/workflow_dispatch appears,
-        # or if any step runs `git tag`/`git push`/`gh release create` without
-        # `--draft`. Both arms are mutation-proved in the harness header.
-        run: bash scripts/release-curator-draft.test.sh
-
-  zero-criteria-census:
-    needs: [changes]
-    if: needs.changes.outputs.zero-criteria-census == 'true'
-    name: epic-zero-criteria-census.sh self-test
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: python3 is present (the classifier is python3; absence would be exit 2)
-        id: setup
-        # The census turns a missing python3 into exit 2 UNKNOWN — correctly red,
-        # but illegibly so. ubuntu-latest ships python3 preinstalled (as
-        # deploy-harnesses.yml and reland-check.yml already rely on); this step
-        # makes that dependency explicit so an image change fails by NAME here
-        # rather than as a mysterious UNKNOWN from the census.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image — add actions/setup-python" >&2
-            exit 1
-          }
-          python3 --version
-      - name: syntax check (both rails)
-        run: |
-          bash -n scripts/epic-zero-criteria-census.sh
-          bash -n scripts/ledger-epic-roster.sh
-      - name: census self-test (26 assertions over 9 arms, mktemp fixtures, no bp/network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/epic-zero-criteria-census.sh --self-test
-      - name: token-free reader self-test (25 assertions, stubbed ledger, no network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # scripts/ledger-epic-roster.sh is the TOKEN-FREE port of the census's
-        # ledger read: curl against the public query route, no credential of any
-        # kind, bounded exponential retry, and an unreachable ledger lands on an
-        # explicitly worded exit 2 rather than a green. Its self-test pins the
-        # outage, the auth-refusal, the malformed-2xx and the paging-loss arms
-        # against a stubbed ledger, so this step needs no network either.
-        run: bash scripts/ledger-epic-roster.sh --self-test
-      - name: the census no longer needs bp (the reason it could never be required)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # THE ARM THAT MAKES THIS ROW'S POINT. `bp` is not on a GitHub runner,
-        # so for the whole life of this harness the LIVE ratchet could not be
-        # wired here: it printed "UNKNOWN: bp is not on PATH" and exited 2 on
-        # every PR forever, and a gate that can only lose is not a gate. This
-        # step proves the default rail no longer asks for bp at all, without
-        # touching the network: the legacy rail must still red for exactly that
-        # reason, and the token-free rail must get past it.
-        # `set +e` is deliberate and is the point of the step. GitHub runs this
-        # body under `bash -e`, and EVERY assertion here is about a command that
-        # EXITS NON-ZERO ON PURPOSE (the legacy rail must exit 2). Under -e the
-        # step would abort at the first one and red without ever comparing
-        # anything — a gate failing for a reason unrelated to its subject, which
-        # is the exact fault pr-task-gate.sh's own header records.
-        run: |
-          set +e
-          set -u
-          if command -v bp >/dev/null 2>&1; then
-            echo "bp is unexpectedly ON this runner — this control cannot measure what it claims" >&2
-            exit 1
-          fi
-          echo "control: bp is absent from this runner, as expected"
-
-          bash scripts/epic-zero-criteria-census.sh --via-bp task-fb4fb869490b4213 >/dev/null 2>via-bp.err
-          rc=$?
-          if [ "$rc" != "2" ]; then
-            echo "expected the LEGACY rail to exit 2 without bp, got $rc" >&2; cat via-bp.err >&2; exit 1
-          fi
-          if ! grep -q "bp is not on PATH" via-bp.err; then
-            echo "the legacy rail red for some OTHER reason:" >&2; cat via-bp.err >&2; exit 1
-          fi
-          echo "legacy rail: exit 2, 'bp is not on PATH' — the original defect, still reproducible"
-
-          # The token-free rail must get PAST the bp check. It is deliberately
-          # NOT asserted green here: this step must not depend on the ledger
-          # being up (see the promotion note in scripts/ledger-epic-roster.sh).
-          # Reaching the ledger at all — or failing with the reader's OWN
-          # outage wording — both prove bp is out of the path.
-          bash scripts/epic-zero-criteria-census.sh task-fb4fb869490b4213 >/dev/null 2>token-free.err
-          rc=$?
-          if grep -q "bp is not on PATH" token-free.err; then
-            echo "the token-free rail STILL asks for bp — the port did not land" >&2; cat token-free.err >&2; exit 1
-          fi
-          echo "token-free rail: exit ${rc}, and it never asked for bp"
-          cat token-free.err
-          exit 0
-
-  webhook-fanout-guard:
-    needs: [changes]
-    if: needs.changes.outputs.webhook-fanout-guard == 'true'
-    name: webhook-fanout-watch.sh mutation matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: jq is present (the row parser is jq; absence would be exit 3)
-        id: setup
-        # The watch turns a missing jq into exit 3 CONFIGURATION FAULT — correctly
-        # red, but illegibly so. ubuntu-latest ships jq; this step makes the
-        # dependency fail BY NAME if an image change ever removes it.
-        run: |
-          command -v jq >/dev/null || {
-            echo "jq missing on the runner image — the webhook row parser needs it" >&2
-            exit 1
-          }
-          jq --version
-      - name: webhook-fanout-watch.sh syntax check
-        run: bash -n scripts/webhook-fanout-watch.sh
-      - name: webhook-fanout-watch.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/webhook-fanout-watch.test.sh
-      - name: live-row guard mutation matrix (hermetic fixtures, no bp/network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # NO `continue-on-error` here or anywhere in this file. It launders a red
-        # into a green JOB conclusion — the thing branch protection and the fleet
-        # actually read — leaving only an X nobody scrolls to. A deploy guard that
-        # cannot lose is the disease this epic exists to cure.
-        #
-        # ONLY the hermetic half. The LIVE verdict needs `bp` plus a control-plane
-        # read credential; neither is on runners, so a scheduled live job would
-        # exit 3 forever. It is a runbook command + the named open human gate
-        # dr-w19-hg-cloud-control-plane-read-token (see the script's header).
-        run: bash scripts/webhook-fanout-watch.test.sh
-
-  # ── ORPHAN SWEEP (deploy-reliability W30) ──────────────────────────────────
-  # Every job below runs a harness that, before this change, NO workflow
-  # executed. Each was measured green against a clean `git archive origin/main`
-  # extract first; registration-sample was the one exception (40/3, RC 1) and is
-  # repaired in the same change rather than wired red.
-
-  seal-run-guard:
-    needs: [changes]
-    if: needs.changes.outputs.seal-run-guard == 'true'
-    name: seal-run.sh probe matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        # FULL checkout, not a sparse one: with only scripts/ present the harness
-        # drops to 63 passed / 2 FAILED — its e2e fixture copies the real seal
-        # predicate and .github/workflows/cloud.yml into a temp repo. It does NOT
-        # need full git history (it builds its own shallow fixture from a file://
-        # clone), so the default fetch-depth is correct here.
-      - name: node is present (seal-run.test.sh exits 2 without it)
-        id: setup
-        # The harness drives a Node stand-in predicate and hard-refuses at :43
-        # with exit 2 — correctly red, but illegibly so. ubuntu-latest ships node;
-        # this makes the dependency fail BY NAME if an image change removes it,
-        # matching the python3 and jq name-checks above.
-        run: |
-          command -v node >/dev/null || {
-            echo "node missing on the runner image — seal-run.test.sh drives a node predicate" >&2
-            exit 1
-          }
-          node --version
-      - name: seal-run.sh syntax check
-        run: bash -n scripts/seal-run.sh
-      - name: seal-run.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/seal-run.test.sh
-      - name: seal-run probe matrix (hermetic, offline, stand-in predicate)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # Neither scripts/seal-run.sh NOR its harness appeared in any of the 48
-        # workflow files: the runner the fleet seals waves with was itself
-        # uninvoked. Tracked as dr-seal-run-harness-runs-in-no-ci.
-        run: bash scripts/seal-run.test.sh
-
-  registration-sample-bar:
-    needs: [changes]
-    if: needs.changes.outputs.registration-sample-bar == 'true'
-    name: registration-sample.sh mutation matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: registration-sample.sh syntax check
-        run: bash -n scripts/registration-sample.sh
-      - name: registration-sample.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/registration-sample.test.sh
-      - name: the sampler can still REFUSE (control + 3 plants + 2 traps)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # THE REASON THIS LANE EXISTS. #11082 widened CLOUD_PATHS with
-        # `internal/**`; the harness's control fixture head `internal/tui/x.go`
-        # stopped being NEITHER-shape and three `of which NEITHER` expectations
-        # went stale in one commit, with nothing running to say so. The
-        # expectations now DERIVE from the same ratchets the sampler consults, and
-        # both ratchets are in this workflow's paths list, so a path-set edit
-        # RE-RUNS this job on the PR that makes it and the expectations track the
-        # edit instead of going stale. That is a RUN, not a red: deriving is
-        # exactly why a reclassification does not red here (planted narrowing,
-        # `internal/**` removed from CLOUD_PATHS: 60 pass / 0 fail, derived text
-        # following the move). This job REDS when the edit destroys the fixture's
-        # classification COVERAGE — no NEITHER-shape qualifier left among the
-        # control's qualifying heads, no BOTH-shape head, or a plant-B reshape the
-        # ratchets no longer score zero-NEITHER — each asserted explicitly, in
-        # both directions, by scripts/registration-sample.test.sh.
-        run: bash scripts/registration-sample.test.sh
-
-  deploy-convergence:
-    needs: [changes]
-    if: needs.changes.outputs.deploy-convergence == 'true'
-    name: deploy-convergence-check.sh ancestry + strand matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: deploy-convergence-check.sh syntax check
-        run: bash -n scripts/deploy-convergence-check.sh
-      - name: the real deploy.yml still yields BOTH per-target filters
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The script derives relevance from deploy.yml rather than copying it —
-        # the whole defect class here is two lists that must agree and nothing
-        # making them. That derivation is silent when it breaks: an empty filter
-        # would make every box read converged for free. `filters` prints what it
-        # derived and exits 2 when a set is empty, so a rename inside the
-        # `changes` job reds on the PR that does it rather than months later.
-        run: bash scripts/deploy-convergence-check.sh filters
-      - name: ancestry beats wall clock, and a real strand still reds
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # 11 cases over real git repos in mktemp — no network, no gh, no box, so
-        # it cannot rot into a skip. The load-bearing pair is 6 and 7: 6 proves
-        # the not-yet-owed guard suppresses a merge-race false red, 7 proves that
-        # same guard did NOT blind the instrument to a strand that is genuinely
-        # owed. A guard with only the first half trades a false positive for a
-        # false negative, which on this axis means a silent stale production.
-        run: bash scripts/deploy-convergence-check.sh --selftest
-      - name: the convergence job CONCLUDES on its verdict (task-103b5cc5ec4a8ccd)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # 20 cases: `adjudicate` in both directions (stranded+nothing-coming
-        # reds, stranded+in-flight stays green) and the deploy.yml wiring
-        # EXTRACTED by a YAML parser — B6 asserts the check step's LAST
-        # statement exits the adjudicated rc, and B7 proves B6 loses on the
-        # pre-fix `exit 0`. deploy.yml is in this job's paths for that reason.
-        run: bash scripts/deploy-convergence-check.test.sh
-
-  # ── DEPLOY STARVATION (task-8e5eae5c71635a5e) ──────────────────────────────
-  # deploy-convergence above answers "did the box end up on the right commit?".
-  # This one answers the question upstream of it: can a queued deploy REACH a
-  # runner at all? Measured 2026-09-02 — one concurrency group for every push,
-  # so each merge evicted the pending run and the survivor was re-queued at the
-  # BACK of a 390-run FIFO. Six consecutive push runs were cancelled before
-  # starting and production sat 1.5 h behind main, with nothing red anywhere:
-  # a cancelled-before-start run reports no failure to report.
-  deploy-concurrency:
-    needs: [changes]
-    if: needs.changes.outputs.deploy-concurrency == 'true'
-    name: a queued deploy or main gate run cannot be evicted (per-sha groups + already-covered exit)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        # DEFAULT depth. Every git object this harness needs it creates itself,
-        # in a throwaway repo under mktemp.
-      - name: python3 + PyYAML are present (both subjects are yaml-PARSED, not grepped)
-        id: setup
-        # Same idiom as the doc-gates parity job below: INSTALL rather than
-        # demand. Whether the runner image ships PyYAML is an image fact, and a
-        # red reading `ModuleNotFoundError: yaml` teaches nothing about this
-        # repo. A missing python3 stays a hard, named failure.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image" >&2
-            exit 1
-          }
-          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
-          python3 -c "import yaml; print('PyYAML', yaml.__version__)"
-      - name: deploy-concurrency-check.sh syntax check
-        run: bash -n scripts/deploy-concurrency-check.sh
-      - name: deploy-concurrency-check.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/deploy-concurrency-check.test.sh
-      - name: the gate can still LOSE (16 cases incl. the verbatim pre-fix stanza)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The harness drives the gate END-TO-END on exit codes, not scan text,
-        # and its part B EXTRACTS the `changes` job's detect step from the real
-        # deploy.yml and dry-runs it over planted shas with a stubbed `gh`. Both
-        # halves refuse rather than pass when they cannot measure: an
-        # unsubstituted `${{ }}` left in the extracted body, a missing
-        # already-covered arm, or zero cases run are all exit 2. Disarming the
-        # arm in a scratch copy took it to 14 passed / 2 FAILED.
-        run: bash scripts/deploy-concurrency-check.test.sh
-      - name: then the live deploy.yml stanza itself
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # Harness FIRST, subject second — the house selftest-first idiom. A gate
-        # that has lost the ability to fail must red before its green is read.
-        run: bash scripts/deploy-concurrency-check.sh
-      # ── exit-at-START for a superseded sha (task-01f48337d83a0d15) ──────────
-      # Same family: per-sha groups stop EVICTION, but a merge storm still runs
-      # N full deploys at once. deploy-supersede-exit.sh decides — by main
-      # ANCESTRY, never wall clock — whether THIS run is superseded and must
-      # exit before any scp/ssh. Harness FIRST (its own --selftest matrix), then
-      # the classifier's --selftest, then the wiring harness that EXTRACTS the
-      # changes step from the live deploy.yml. Disarming the exit in a scratch
-      # copy took the harness to 16 passed / 2 FAILED.
-      - name: deploy-supersede-exit.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/deploy-supersede-exit.sh
-      - name: deploy-supersede-exit.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/deploy-supersede-exit.test.sh
-      - name: the classifier can still LOSE (11-arm ancestry matrix)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/deploy-supersede-exit.sh --selftest
-      - name: the exit-at-start wiring both directions + the live deploy.yml
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/deploy-supersede-exit.test.sh
-      # The same eviction shape on the MAIN runs of the gate workflows
-      # (task-b04364c216f877e6): 37 of 40 main elixir runs since 10:27Z on
-      # 2026-09-02 were cancelled by the next merge. Per-sha group on main.
-      #
-      # Harness FIRST, subject second. The selftest matters more here than it
-      # looks: this gate USED to read a hardcoded two-file corpus and reported
-      # "2 workflow(s) keep one group per main sha" while go-tests.yml carried
-      # the pre-fix stanza on main (13 of its last 20 main runs cancelled). It
-      # now DISCOVERS its corpus, and the selftest is what proves the discovery
-      # still reds on a workflow nobody added to a list.
-      - name: the main-run gate can still LOSE (discovery, both directions)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/main-run-concurrency-check.sh --selftest
-      - name: every main-triggered workflow keeps one group per main sha
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/main-run-concurrency-check.sh
-
-  console-path-ratchet:
-    needs: [changes]
-    if: needs.changes.outputs.console-path-ratchet == 'true'
-    name: console-path-escape-check.sh classification matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: console-path-escape-check.sh syntax check
-        run: bash -n scripts/console-path-escape-check.sh
-      - name: console path classification + console-harness.yml skip-shim invariants
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # Its four appearances in console-harness.yml and elixir.yml are all
-        # COMMENTS — mention is not execution. The cloud and elixir siblings are
-        # deliberately absent from this file: they are already REACHED by a wired
-        # parent's --selftest (cloud.yml:175, elixir.yml:241), and wiring them
-        # twice would buy a second runner for the same assertions.
-        run: bash scripts/console-path-escape-check.test.sh
-      - name: python3 + PyYAML are present (the shape ratchet yaml-PARSES three workflows)
-        id: pyyaml
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # INSTALL rather than demand, the same idiom as deploy-concurrency
-        # above: whether the runner image ships PyYAML is an image fact, and a
-        # red reading `ModuleNotFoundError: yaml` teaches nothing about this
-        # repo. A missing python3 stays a hard, named failure.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image" >&2
-            exit 1
-          }
-          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
-          python3 -c "import yaml; print('PyYAML', yaml.__version__)"
-      - name: cloud.yml + console-harness.yml aggregator shape (73 assertions, 22 planted mutants)
-        if: ${{ !cancelled() && steps.pyyaml.outcome == 'success' }}
-        # Selftest AND subject in one run, by construction: case 5 re-runs the
-        # very emitter that produced the live verdicts over deliberately-broken
-        # copies of both workflows, so a neutered detector reds here before its
-        # green is read. Both directions the row names are in it — softening
-        # decide()'s skipped arm moves the executed 24-cell grid, and a job
-        # outside the aggregator's needs-set lands in blocking_not_in_needs.
-        run: bash scripts/cloud-console-gate-shape.test.sh
-
-  console-refusal-capture:
-    needs: [changes]
-    if: needs.changes.outputs.console-refusal-capture == 'true'
-    # WHY IT IS A TENANT (task-1cea7edd271d588b, 2026-09-10). #17162 added
-    # scripts/console-refusal-capture.test.mjs beside the capture module and
-    # wired neither: no workflow ran the test, no workflow ran its parent, and
-    # the file carried no `MANUAL PROOF — not wired:` header — so
-    # selftest-wiring-census.sh printed ORPHAN and reddened, in an advisory
-    # context, from the merge onward. R3 was not available (the parent appears
-    # in no workflow either), so this is R1: a direct tenant.
-    #
-    # MEASURED BEFORE BEING WIRED, never wired on inspection: `node --test
-    # scripts/console-refusal-capture.test.mjs` is 9/9 in 0.1 s on this tree,
-    # hermetic — it reads files under cloud/priv/static/ and launches no browser.
-    name: console-refusal-capture.mjs controls
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: the capture module parses
-        run: node --check scripts/console-refusal-capture.mjs
-      - name: "console-refusal-capture.test.mjs (measured 0 s / 9 tests, hermetic)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: node --test scripts/console-refusal-capture.test.mjs
-
-  weekly-changelog-backfill-guard:
-    needs: [changes]
-    if: needs.changes.outputs.weekly-changelog-backfill-guard == 'true'
-    name: weekly-changelog-backfill.test.sh drift check
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: python3 + PyYAML is present (the harness parses the workflow with it)
-        id: setup
-        # The harness reads .github/workflows/weekly-changelog.yml through
-        # PyYAML to pin the week-collection snippet; absence would fail the
-        # harness for the WRONG reason. ubuntu-latest ships python3, and
-        # PyYAML is preinstalled on the runner image; this step makes that
-        # dependency fail by NAME if an image change ever drops it.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image" >&2
-            exit 1
-          }
-          python3 -c "import yaml" || {
-            echo "PyYAML missing on the runner image — the harness parses weekly-changelog.yml with it" >&2
-            exit 1
-          }
-      - name: weekly-changelog-backfill.test.sh syntax check
-        run: bash -n scripts/weekly-changelog-backfill.test.sh
-      - name: weekly-changelog-backfill.test.sh (pins weekly-changelog.yml's fixed collection shape)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/weekly-changelog-backfill.test.sh
-
-  pds-harnesses:
-    needs: [changes]
-    if: needs.changes.outputs.pds-harnesses == 'true'
-    name: PDS census / parity / scratch-target harnesses
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # FULL HISTORY, AND IT IS LOAD-BEARING FOR THE ARBITER STEP BELOW.
-          # actions/checkout@v4 is `--depth 1` by default. pds-record-parity.sh's
-          # ruling 4 fails CLOSED on a truncated walk: under depth 1 a graft sits
-          # on HEAD's own history, `--axis a` prints TRUNCATED and exits 2
-          # (UNCHECKED), and the step below treats 2 as RED. So a shallow checkout
-          # here would not publish a vacuous green -- it would red every run.
-          # Full history is what makes the arm able to LOOK.
-          fetch-depth: 0
-      - name: jq is present (pds-record-parity.test.sh exits 99 without it)
-        id: setup
-        # :143 turns a missing jq into exit 99 TEST HARNESS FAIL while building
-        # fixtures. Fail by name instead.
-        run: |
-          command -v jq >/dev/null || {
-            echo "jq missing on the runner image — the PDS fixtures are built with jq" >&2
-            exit 1
-          }
-          jq --version
-      - name: pds-ledger-census ordering + response-shape matrix
-        run: bash scripts/pds-ledger-census_test.sh
-      - name: pds-record-parity 108-check matrix
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/pds-record-parity.test.sh
-      - name: pds-scratch-target two-root coexistence + teardown
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/pds-scratch-target_test.sh
-      - name: pds-read-preflight-audit census ratchet + crown-stamp refusal/read-back pairs (stub bp, no server)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # 5 arms, each a mutation beside a control. pds-crown-stamp.sh is a
-        # subject of arms 3 and 5, so an edit to it re-runs this job. Arm 5 is
-        # the read-back evidence diff: a stub bp that ACKS a met-to-met stamp and
-        # drops the evidence must red, the honest stub must stay green.
-        run: bash scripts/pds-read-preflight-audit_test.sh
-      - name: pds-threshold-move-guard 15-arm mutation matrix (hermetic git fixture)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # THE PAIR THIS JOB EXISTS TO KEEP HONEST is arms 2 and 3: the SAME head
-        # tree, the same moved cap, REFUSED at exit 1 and then PASS at exit 0
-        # once the PR body states both values with a reason. A guard that could
-        # only refuse would be a freeze on caps that legitimately move, and a
-        # freeze gets deleted the first week it costs someone a merge.
-        #
-        # FULL HISTORY IS LOAD-BEARING HERE TOO, and it is already provided by
-        # the checkout above. Arm 12 replays the real incident -- commit
-        # c3b0421cb (PR #9601), which raised js/packages/react/.size-limit.json
-        # from 22.5 KB to 22.75 KB in the same commit a criterion cited the
-        # 22.5 KB cap against. Under a shallow checkout that arm STANDS DOWN and
-        # says so in the log rather than passing silently, so a depth regression
-        # shows up as a named stand-down, never as a quieter green.
-        run: bash scripts/pds-threshold-move-guard_test.sh
-
-      - name: personal-local cold-reader smoke — the --dry-run arm (no boot)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # ONLY `--dry-run`, AND THAT IS THE WHOLE DESIGN — never widen this to
-        # `--boot`. The dry-run arm reads ONE file (docs/setup/personal-local.md),
-        # resolves eleven literal anchors, prints each beside its line number and
-        # exits 1 if any is gone: no mix, no Postgres, no BEAM, no network, no
-        # credential, ~0.14 s of CPU. `--boot` walks the guide for real — mix
-        # deps.get, `bin/barkpark up`, a raw-blob PUT — which needs a Postgres
-        # toolchain this runner does not have and minutes it should not spend. The
-        # arm that belongs in a lane is the one that reds when the DOC rots, which
-        # is the failure this row exists to catch.
-        #
-        # This job is NOT a required context (an S4 PATHS-FILTERED exclusion in
-        # .github/required-checks.json), so wiring the arm makes it RUN, not BLOCK.
-        run: bash scripts/pds-personal-local-smoke_test.sh --dry-run
-      - name: "PDS-D allocation arbiter: --check-alloc and --axis a over the merged tree"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # THE NAMED TRIGGER (task-6fd11672fdeefd0b) for two charter rulings that
-        # were, until this step, enforced by nothing at all: `--axis a` reports no
-        # NEW unbaselined DUPLICATE-DEFINITION after each wave, and `--check-alloc`
-        # runs at the end of every wave DECIDE block. Both were written as
-        # obligations in prose. A written finding does not fire by itself.
-        #
-        # ONLY THE TWO PURE-TREE ARMS, AND THAT IS THE WHOLE DESIGN.
-        # scripts/pds-record-parity.sh declares itself, in its own run output,
-        # "REPORTER, never a gate": its AXIS B resolves a few hundred task ids
-        # against the LIVE ledger over `gh` and reds on OTHER epics' open rows --
-        # red by design, which is exactly how scripts/pds-door-census.sh
-        # dispositions it (`pds-record-parity.sh RED-BY-DESIGN-REPORTER ... its
-        # only non-vacuous axis resolves task ids against the LIVE ledger and is
-        # red by design. A reporter must never carry a required check name.`).
-        # `--check-alloc` (charter + tooling/pds/d-number-reservations.tsv) and
-        # `--axis a` (charter + this checkout's git log) touch NO network, NO gh,
-        # NO token and NO ledger: they ask only whether this tree agrees with
-        # itself. Running the bare script -- or `--axis b`, or `--axis both` --
-        # here would import that by-design red. Never widen this step to them.
-        # This job is also NOT a required context (an S4 PATHS-FILTERED exclusion
-        # in .github/required-checks.json), so wiring the arm makes it RUN, not
-        # BLOCK -- the census's "never a required check name" still holds.
-        #
-        # EXIT 2 IS RED, NOT A PASS. Verbatim from the script's own exit table:
-        #   0  PARITY    -- every axis checked, nothing divergent
-        #   1  DIVERGENT -- at least one leaf slice merged over an open row, a
-        #                   cited D that the charter does not define, or a
-        #                   D-number defined twice that the pinned baseline does
-        #                   not already carry (and the mirror: a baselined pair
-        #                   that has vanished)
-        #   2  UNCHECKED -- the arm could not look (no gh, no credentials, ledger
-        #                   down, no charter, a TRUNCATED commit walk) OR it
-        #                   REFUSED to run vacuously (grace >= span)
-        #   3  USAGE     -- bad invocation
-        # and --check-alloc's own tail line: "UNCHECKED -- the allocation ledger
-        # could not be scored. NOT a pass." The loop below fails the step on ANY
-        # non-zero rc and NAMES which of the four it was, so an UNCHECKED can
-        # never read as a green in this log.
-        #
-        # THE POSITIVE CONTROL is the three counts printed first. The script
-        # prints the seed and the reserved count but never the two high-water
-        # marks, and a verdict with no numbers beside it cannot be told from a
-        # verdict over an empty corpus -- so the step derives them, with the
-        # script's own definition lens, and prints them before it runs anything.
-        run: |
-          set -uo pipefail
-
-          CHARTER=.claude/workflows/bp-pds-charter.md
-          ALLOC=tooling/pds/d-number-reservations.tsv
-
-          for f in "$CHARTER" "$ALLOC"; do
-            [ -f "$f" ] || { echo "RED: $f is missing from this tree -- the arbiter has nothing to compare" >&2; exit 1; }
-          done
-
-          # The definition lens, byte-for-byte charter_defined_numbers() from
-          # scripts/pds-record-parity.sh: bold-lead bullet UNION own-line heading.
-          # NOT "any PDS-D anywhere" -- the charter's prose names the synthetic
-          # fixtures PDS-D777/PDS-D999 and a looser lens would read them as a
-          # high-water mark of 999.
-          charter_hw=$( { grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+' "$CHARTER" || true
-                          grep -oE '^#+[[:space:]]+PDS-D[0-9]+([[:space:]]|$)' "$CHARTER" || true
-                        } | grep -oE 'PDS-D[0-9]+' | sed 's/^PDS-D//' | sort -n -u | tail -1 )
-          ledger_hw=$(awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { sub(/^PDS-D/, "", $1); print $1 }' "$ALLOC" | sort -n -u | tail -1)
-          res_count=$(awk -F'\t' '$1 ~ /^PDS-D[0-9]+$/ { print $1 }' "$ALLOC" | sort -u | wc -l | tr -d ' ')
-          seed=$(awk -F'\t' '$1 == "SEED" { print $2; exit }' "$ALLOC")
-
-          echo "── the three counts this step compares (derived HERE, from this tree) ──"
-          echo "  charter high-water:  PDS-D${charter_hw:-<none>}   (highest number DEFINED in $CHARTER)"
-          echo "  ledger  high-water:  PDS-D${ledger_hw:-<none, only the SEED row>}   (highest number RESERVED in $ALLOC)"
-          echo "  reservations:        ${res_count} number(s) reserved above the seed"
-          echo "  seed:                ${seed:-<none>}   (at or below it predates the arbiter, not scored)"
-          [ -n "${charter_hw:-}" ] || { echo "RED: the charter defines no PDS-D at all -- the lens is measuring itself, not the corpus" >&2; exit 1; }
-
-          rc_total=0
-          # `--axis d` joins the loop: it is PURE-TREE like --check-alloc (charter
-          # + the PDS scripts, no network, no git walk), so it runs everywhere
-          # --axis a does and cannot go UNCHECKED on a shallow checkout.
-          for arm in --check-alloc "--axis a" "--axis d"; do
-            echo "── bash scripts/pds-record-parity.sh $arm ──"
-            # `|| rc=$?` and NOT a bare call followed by `rc=$?`: the default
-            # shell for a `run:` block is `bash -e {0}`, which would exit on the
-            # non-zero BEFORE the case below ever classified it -- the step would
-            # still be red, but the log would never say DIVERGENT or UNCHECKED.
-            rc=0
-            # shellcheck disable=SC2086
-            bash scripts/pds-record-parity.sh $arm || rc=$?
-            case "$rc" in
-              0) echo "  rc=0 PARITY" ;;
-              1) echo "  rc=1 DIVERGENT -- RED. The charter, the reservation ledger and the commit corpus disagree; see above." >&2; rc_total=1 ;;
-              2) echo "  rc=2 UNCHECKED -- RED, NOT A PASS. The arm could not look (truncated walk, missing charter, no SEED row)." >&2; rc_total=1 ;;
-              3) echo "  rc=3 USAGE -- RED. This step invoked the script wrongly." >&2; rc_total=1 ;;
-              *) echo "  rc=$rc UNKNOWN -- RED." >&2; rc_total=1 ;;
-            esac
-          done
-          exit "$rc_total"
-
-  ci-failure-issue-filer:
-    needs: [changes]
-    if: needs.changes.outputs.ci-failure-issue-filer == 'true'
-    name: file-ci-failure-issue.sh behaviour matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: file-ci-failure-issue.sh syntax check
-        run: bash -n scripts/file-ci-failure-issue.sh
-      - name: issue-filer matrix (fake gh on PATH, no live GitHub)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/file-ci-failure-issue.test.sh
-
-  distribution-harnesses:
-    needs: [changes]
-    if: needs.changes.outputs.distribution-harnesses == 'true'
-    name: install-cli / fetch-prebuilt / site-runtime-install harnesses
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: install-cli.sh syntax check
-        run: bash -n scripts/install-cli.sh
-      - name: install-cli replay matrix (fake curl, temp HOME, no network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/install-cli.test.sh
-      - name: fetch-prebuilt.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/fetch-prebuilt.sh
-      - name: fetch-prebuilt replay matrix (fake curl, no network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/fetch-prebuilt.test.sh
-      - name: deploy-rebuild.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/deploy-rebuild.sh
-      - name: deploy-rebuild behavior matrix (fake mix/systemctl, no service touched)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # task-273d965359c14e7d: migrate runs on the new code BEFORE the swap and
-        # restart; a failed migrate fails CLOSED (exit 13, old code serving, no
-        # restart); the pre-restart flight-recorder record is written.
-        run: bash scripts/deploy-rebuild.test.sh
-      - name: site-runtime-install.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n deploy/site-runtime-install.sh
-      - name: site-runtime-install replays (fake-only PATH, no box touched)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # cp-ops.yml ships this script to a real box on manual dispatch; until
-        # now nothing checked it could still be parsed, let alone that it behaves.
-        run: bash deploy/site-runtime-install_test.sh
-
-  tooling-harnesses:
-    needs: [changes]
-    if: needs.changes.outputs.tooling-harnesses == 'true'
-    name: reland-check / fleet-run-verdict / paper-reader-audit harnesses
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: python3 is present (reland_check.py is the classifier)
-        id: setup
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image — add actions/setup-python" >&2
-            exit 1
-          }
-          python3 --version
-      - name: reland_check damper matrix
-        # reland-check.yml runs reland_check.py in anger (and swallows its
-        # stderr with `|| true`); its harness ran nowhere.
-        run: bash tooling/task-obsession/reland_check.test.sh
-      - name: reland-check loud-fail matrix (HTTP error, truncation, zero digest)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The re-land job is `continue-on-error: true`, so its green conclusion
-        # carries NO information — these fixtures are the only thing that proves
-        # it can still tell an error envelope, a 16%-of-the-corpus scan, and a
-        # signal-less ledger apart from a clean scan. RELAND_REQUIRE_YAML makes a
-        # missing PyYAML a failure instead of a silently skipped section.
+          node-version: ${{ matrix.leg.node }}
+      - name: harness arms
+        # steps.node.outcome is 'skipped' for every leg that declares no node,
+        # so this admits them; it excludes only a node setup that actually FAILED.
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && steps.node.outcome != 'failure' }}
         env:
-          RELAND_REQUIRE_YAML: "1"
-        run: |
-          # The sim reads reland-check.yml itself, so PyYAML is load-bearing here.
-          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
-          bash tooling/task-obsession/reland_loudfail.test.sh
-      - name: go-path-escape-check.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/go-path-escape-check.test.sh
-      - name: "go-tests' Dispatch job gives a stale head a path verdict and NAMES the missing ratchet"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The ratchet step body is EXTRACTED from go-tests.yml and EXECUTED
-        # against two heads: one without scripts/go-path-escape-check.sh (the
-        # shape that died exit 127 in 5 of the last 100 PR runs — the dispatcher
-        # must still emit a verdict and must NAME the absence) and this tree,
-        # which has it (unchanged: selftest count line, then the check verdict).
-        # Case 4 restores the pre-fix two-liner on a copy and proves 127 comes
-        # back — the harness has been shown to lose. PyYAML is load-bearing: the
-        # harness exits 2 (HARNESS-UNAVAILABLE, never a pass) without it.
-        run: |
-          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
-          bash scripts/go-path-escape-check.test.sh
-      - name: relandcheck-diff-producer.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/relandcheck-diff-producer.test.sh
-      - name: reland-check.yml's changed-file producer keeps quote-bearing paths and rename sources
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The step body is EXTRACTED from reland-check.yml and EXECUTED against
-        # real git fixtures, so this cannot drift into a paraphrase of what CI
-        # runs. Case 4 restores the PRE-FIX producer on a copy and proves both
-        # false-green shapes reappear — the harness has been shown to lose.
-        # PyYAML is load-bearing: the harness exits 2 (HARNESS-UNAVAILABLE,
-        # never a pass) without it, so install rather than skip.
-        run: |
-          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
-          bash scripts/relandcheck-diff-producer.test.sh
-      - name: main-red-breaker.sh syntax + harness (stub curl + fixtures, no network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: |
-          bash -n scripts/main-red-breaker.sh
-          bash scripts/main-red-breaker.test.sh
-      - name: "stale-tree CI wiring (job, job-level if, concurrency, breaker arm, Decide step)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The `Head does not silently revert main (stale tree)` job in
-        # required-checks-drift.yml is a six-place change and five of those
-        # places fail SILENTLY — a deleted Decide step over three
-        # continue-on-error gate steps is a job that cannot go red. The harness
-        # mutates a COPY of the workflow for each clause and asserts the red.
-        # PyYAML is load-bearing: without it the harness exits 2
-        # (HARNESS-UNAVAILABLE, never a pass), so install rather than skip.
-        run: |
-          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
-          bash -n scripts/stale-tree-regression-check.sh
-          bash scripts/stale-tree-ci-wiring.test.sh
-      - name: "STEP_NAMES maps match their gate steps (every breaker-wired workflow)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The sibling above is hard-pinned to ONE job in required-checks-drift.yml.
-        # This one DERIVES its subject set from `git grep -l STEP_NAMES --
-        # .github/workflows` (5 files, 61 gate ids today) and refuses an empty
-        # set, so a sixth breaker-wired workflow is covered the day it lands.
-        # Mutants run on a COPY of doc-gates.yml (the largest map): id removed,
-        # step added without an entry, step renamed under a stale name.
-        # PyYAML is load-bearing: without it the harness exits 2
-        # (HARNESS-UNAVAILABLE, never a pass), so install rather than skip.
-        run: |
-          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
-          bash -n scripts/breaker-step-names-drift.test.sh
-          bash scripts/breaker-step-names-drift.test.sh
-      - name: fleet-run verdict matrix
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash tooling/fleet/fleet-run-verdict-test.sh
-      - name: audit-paper-readers.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/audit-paper-readers.sh
-      - name: "gate-map: the composed slice gate still finds __css_check over breakpoint-sweep.mjs"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The wave-16 red this composer exists for. Its selftest is built to
-        # LOSE — a planted map entry, a removed instrument, a narrowed scan set,
-        # an empty population glob and a collapsed population each red it — so a
-        # green here is evidence, not a tally.
-        #
-        # THERE IS NO COMMITTED SNAPSHOT (task-294d79c9345d59dd). There was, and
-        # it was a treadmill: any merge adding a file under POPULATION_GLOBS
-        # staled tooling/gate-map/gate-map.json, so two PRs each green apart —
-        # one adding an instrument, one holding a fresh snapshot — reded MAIN
-        # together and every open PR inherited the refusal. Measured three times
-        # in 24 h. The map is now derived on every run (~1 s), and `--verify`
-        # checks the DERIVATION instead: every population glob still matches,
-        # the population clears a floor, nothing is dropped, and the wave-16
-        # edge still resolves. Each of those can only be broken by a diff that
-        # REMOVES something — i.e. always by the PR that is red.
-        run: |
-          node --check tooling/gate-map/gate-map.mjs
-          node tooling/gate-map/gate-map.mjs --verify
-          node --test tooling/gate-map/gate-map.test.mjs
-
-      - name: "console-slice-gate: an axis-blind CSS slice gate is REFUSED, not merely listed"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The wave-17 red (cch-w17-bl-css-slice-gate-must-include-leg-a). The
-        # sibling above COMPOSES a gate; this one REFUSES a proposed gate that
-        # omits an instrument reading the touched paths — and its selftest is
-        # built to lose: reverting breakpoint-sweep.mjs's source declaration
-        # reds 5 of its 9 arms (measured in the PR that wired it). Hermetic,
-        # sub-second, no browser.
-        run: |
-          node --check scripts/console-slice-gate.mjs
-          node --test scripts/console-slice-gate.test.mjs
-
-      - name: paper-reader audit fixture
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # paper-readers.yml executes audit-paper-readers.sh on every run; its
-        # fixture harness — the only thing that proves the audit can report a
-        # miss — executed nowhere.
-        run: bash scripts/audit-paper-readers-test.sh
-
-      - name: paper_structure.py audit unit suite
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # paper-readers.yml (cron "17 5 * * *") folds this module's summary
-        # STRAIGHT into the nightly ok expression — `$structure | length == 1
-        # and .[0].violations == 0` in audit-paper-readers.sh — so a regression
-        # in paper_structure.py either reds the nightly or passes it wrongly.
-        # Its unit suite shipped next to it and ran NOWHERE: shell-harnesses.yml
-        # referenced scripts/paper_structure_test.py zero times.
-        #
-        # Invoked BY PATH, not as a module, and that is what makes the
-        # `from paper_structure import audit_documents, ...` at the top of the
-        # suite resolve: python3 puts the SCRIPT'S OWN directory at sys.path[0],
-        # so scripts/ is already on the path and no PYTHONPATH is needed. (An
-        # earlier draft of this step set PYTHONPATH=scripts and claimed it was
-        # load-bearing; a control run without it passed 19/19, so the setting
-        # was inert and the claim false. Measured 2026-09-14.)
-        #
-        # No pipe and no `|| true`: unittest's non-zero exit IS this step's
-        # exit status. A `| tee` here would report tee's status and green a
-        # failing suite.
-        run: python3 scripts/paper_structure_test.py -v
-
-  launcher-boot-selftest:
-    needs: [changes]
-    if: needs.changes.outputs.launcher-boot-selftest == 'true'
-    name: bin/barkpark up/stop differential selftest
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # MANDATORY. The selftest is DIFFERENTIAL against a PINNED pre-fix
-          # blob (0bff57e4f500e9c9fc99424fa2635ca9988be725:bin/barkpark, an
-          # ancestor of main). On a shallow checkout that object is absent and
-          # the script exits 2 on every run forever — a gate that can only lose.
-          fetch-depth: 0
-      - name: the pinned pre-fix reference blob is readable
-        id: setup
-        # Fail by NAME if history ever stops carrying the pin, rather than as an
-        # opaque exit 2 from the selftest itself.
-        run: git cat-file -e 0bff57e4f500e9c9fc99424fa2635ca9988be725:bin/barkpark
-      - name: bin/barkpark syntax check
-        run: bash -n bin/barkpark
-      - name: up/stop selftest (6 differential fixtures, 2 controls, no postgres)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # Hermetic: temp BARKPARK_HOME, a probed-free port, curl/mix stubs, and
-        # only pids the harness itself spawned are ever signalled.
-        run: bash scripts/barkpark-boot-selftest.sh
-
-  workflow-portability:
-    needs: [changes]
-    if: needs.changes.outputs.workflow-portability == 'true'
-    name: .claude/workflows engines load on a machine that is not this one
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        # The DEFAULT depth is correct here. Clause G asks `git cat-file -e
-        # HEAD:<path>`, which needs HEAD's tree and nothing older, and the
-        # harness builds its own fixture repos from mktemp. No history required.
-      - name: node is present (clauses P/M1/M2/C/W are node-parsed)
-        id: setup
-        # The tripwire turns a missing node into a RED by design (clause N: a
-        # blind check must never skip). That is correct but illegible; fail by
-        # NAME here instead, matching the python3/jq name-checks above.
-        run: |
-          command -v node >/dev/null || {
-            echo "node missing on the runner image — the workflow engines are parsed with it" >&2
-            exit 1
-          }
-          node --version
-      - name: workflow-portability-check.sh syntax check
-        run: bash -n scripts/workflow-portability-check.sh
-      - name: workflow-portability-check.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/workflow-portability-check.test.sh
-      - name: the tripwire can still LOSE (19 mutation cases, hermetic git fixtures)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # THE FAIL-BEFORE PROOF, and it lives here rather than in a chartered
-        # before/after because a guard and its fixes cannot co-merge and still
-        # demonstrate the red. Case 2 mutates an engine into a syntax error that
-        # `node --check` reports GREEN; case 6 plants a reference that exists on
-        # disk and is untracked — the vacuous pass a working-tree oracle gives.
-        # No `continue-on-error` anywhere in this file: it launders a red into a
-        # green JOB conclusion, which is the only thing the fleet reads.
-        run: bash scripts/workflow-portability-check.test.sh
-      - name: workflow-module-exec-smoke.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/workflow-module-exec-smoke.sh
-      - name: workflow-module-exec-smoke.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/workflow-module-exec-smoke.test.sh
-      - name: the EXECUTION gate can still LOSE (TDZ + schema-tripwire mutants)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The fail-before proof for the module-scope execution gate. Every gate
-        # this repo had for these engines only PARSES them, which is structurally
-        # blind to a temporal-dead-zone crash (a runtime ReferenceError) and
-        # leaves the engines' own module-scope tripwires as dead code. Cases 2
-        # and 3 each run BOTH gates on the same mutant and assert the split:
-        # parse-only GREEN, execution RED. Commit f8977af85c is the time this
-        # class actually took the epic-cycle engine out.
-        run: bash scripts/workflow-module-exec-smoke.test.sh
-      - name: the live corpus LOADS (module scope executes, fenced at first spend)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # Complements "is portable" rather than replacing it: portability parses,
-        # this one RUNS module scope with stub globals and stops at the first
-        # agent/parallel/pipeline call, so nothing is ever spawned or billed.
-        run: bash scripts/workflow-module-exec-smoke.sh
-      - name: the live corpus is portable
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The ratchet proper. ADVISORY by decision D4 — this workflow is not one
-        # of main's required contexts (those are exactly: Elixir gate, PR
-        # references an active task, Cloud gate, Console gate), so wiring makes
-        # this RUN, not BLOCK. Promotion is a separate evidence-gated decision,
-        # filed as ecd-bl-tripwire-promotion.
-        run: bash scripts/workflow-portability-check.sh .claude/workflows
-
-      # ── .github/workflows run: bodies are shell nothing ever parsed ─────────
-      # STEPS IN AN EXISTING JOB, deliberately: a new blocking job is a
-      # seven-place change (job, needs, decide binding, every `env -i`
-      # simulator, the spec-authority marker, the merge-authority claim count,
-      # the hermetic suite's --expect-unrendered acknowledgement). Steps cost
-      # none of them, and this job is already the home for "harnesses that read
-      # workflow files".
-      - name: workflow-run-shell-check.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # Runs on the runner's bash 5, but the script is ALSO required to parse
-        # under macOS bash 3.2 — see the header. That constraint is why its
-        # embedded python block carries no apostrophes.
-        run: bash -n scripts/workflow-run-shell-check.sh
-      - name: the run-body gate can still LOSE (13 arms, hermetic fixtures)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # THE FAIL-BEFORE PROOF. Arm (a) is the defect that motivated the gate,
-        # reproduced verbatim: an apostrophe inside a single-quoted `node -e`
-        # body truncates the program, node dies with SyntaxError, and the step
-        # exits 1 — ci-boundary.mjs's REGRESSION code, so a step that could not
-        # START was indistinguishable from one that had found architectural
-        # debt. Arms (e) and (f) are the ones that keep this gate honest rather
-        # than merely present: an unparseable workflow REFUSES by name instead
-        # of being silently skipped, and a run over zero bodies FAILS instead of
-        # reporting the success that any gate over no inputs reports.
-        run: bash scripts/workflow-run-shell-check.sh --selftest
-      # Quoted: an unquoted plain scalar cannot contain ": " — it is read as a
-      # mapping and the whole workflow stops parsing. Caught by this very gate.
-      - name: "every workflow run: body parses as shell, and no piped script exits mid-write"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # TWO ARMS, both clean-tree and both measured before they were written.
-        #
-        # ARM A — all 447 shell bodies across the corpus parse (2 more declare a
-        # non-shell `shell:` and are skipped by name).
-        #
-        # ARM B — no script a workflow PIPES calls process.exit(). Node does not
-        # flush a pending stdout write before exit, so into a pipe that can
-        # truncate the payload silently while the exit status still looks fine.
-        # The 21 sites that existed across 5 piped scripts were adjudicated in
-        # the PR that added this arm: terminal-after-stdout ones converted to
-        # process.exitCode, guards that must abort kept as exit() with a
-        # greppable `pipe-exit-ok:` marker and a stated reason.
-        #
-        # Neither arm has a baseline, and no baseline is a baseline that cannot
-        # rot. Both fail on zero inputs rather than reporting the success any
-        # gate over nothing reports.
-        run: bash scripts/workflow-run-shell-check.sh
-
-  breaker-measure-precondition:
-    needs: [changes]
-    if: needs.changes.outputs.breaker-measure-precondition == 'true'
-    name: the breaker measurement's preconditions can still be UNMET
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        # Default depth. The arms are fixture-only - no clock, no network, no
-        # history. The --report mode does read `git show -s` on two commits, but
-        # this lane deliberately does NOT run --report (see below).
-      - name: python3 is present (judge_mapping's envelope is python3-shaped)
-        id: setup
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image - add actions/setup-python" >&2
-            exit 1
-          }
-          python3 --version
-      - name: breaker-measure-precondition.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/breaker-measure-precondition.sh
-      - name: breaker-measure-precondition.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/breaker-measure-precondition.test.sh
-      - name: the precondition detector can still red, go quiet, and REFUSE (6 arms, offline)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # WHAT THIS LANE PROTECTS, and what it deliberately does not.
-        # It runs --selftest ONLY. The arms prove the detector reds on a
-        # two-valued reader (a1/a6), goes quiet on a three-valued one (a2), and
-        # REFUSES rather than printing a vacuous pass when the generator emits
-        # fewer than two distinct verdicts (a3 - the control). a4/a5 prove the
-        # reader under test is EXTRACTED from ci-measure.sh rather than copied,
-        # so an empty extraction cannot masquerade as a total collapse.
-        # It does NOT run --report. That mode reads the live ci-measure.sh and
-        # today exits 1 with NOT YET MEASURABLE, because breaker_verdict() has no
-        # name for OWNERSHIP-UNDETERMINED. Wiring a known, filed gap into a PR
-        # gate would red every PR over something no PR author can fix.
-        # No `continue-on-error` here: it launders a red into the green JOB
-        # conclusion the fleet reads.
-        run: bash scripts/breaker-measure-precondition.test.sh
-
-  exit-runner-guard:
-    needs: [changes]
-    if: needs.changes.outputs.exit-runner-guard == 'true'
-    name: deploy-reliability-exit-run.sh mutation matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        # The DEFAULT depth is correct here. The harness builds every fixture with
-        # `git init` in mktemp (and its shallow case from a `--depth 1` file://
-        # clone), so it needs no history of this repository. The single probe that
-        # would use `origin/main` — seal-run.sh byte identity — refuses to fake a
-        # verdict when the ref is unresolvable and reports the skip BY NAME.
-      - name: python3 is present (the census stub's envelope is python3-shaped)
-        id: setup
-        # scripts/deploy-reliability-exit-run.test.sh:48 hard-refuses with exit 2
-        # when python3 is missing — correctly red, but illegibly so. Fail by NAME,
-        # matching the python3/jq/node name-checks above.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image — add actions/setup-python" >&2
-            exit 1
-          }
-          python3 --version
-      - name: deploy-reliability-exit-run.sh syntax check
-        run: bash -n scripts/deploy-reliability-exit-run.sh
-      - name: deploy-reliability-exit-run.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/deploy-reliability-exit-run.test.sh
-      - name: the exit runner's refusals can still LOSE (96 assertions, offline)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # THE REASON THIS LANE EXISTS: `grep -rln deploy-reliability-exit-run
-        # .github/` matched nothing, so the epic's headline instrument — the one
-        # that re-derives the never-covered number — had 96 assertions guarding
-        # it and no runner to execute them. Every refusal here is proven by
-        # MUTATION: the guard's `if` is neutralised by its `# MUT:` anchor and the
-        # refusal is watched disappearing, and the mutation step asserts the sed
-        # changed a line, so a renamed anchor reds instead of no-opping.
-        # No `continue-on-error` here or anywhere in this file — it launders a red
-        # into the green JOB conclusion the fleet reads.
-        run: bash scripts/deploy-reliability-exit-run.test.sh
-
-  # ── ORPHAN SWEEP II (CI gate-wiring + spec-generator wave, cgsiw-s3) ────────
-  #
-  # Two guards that were already WRITTEN, already GREEN, and already carried a
-  # mutation-proven selftest — and that no workflow in .github/workflows/ ever
-  # invoked. `grep -rln cloud-static-gz-guard .github/` and `grep -rln
-  # pds-live-hetzner-placement-group .github/` both matched NOTHING. That is the
-  # wave's premise in its purest form: a guard can be perfectly written and
-  # still vacuous AS A GATE, because the wiring never runs it on the PR that
-  # breaks the thing it guards. Wiring is the whole fix.
-  #
-  # Each rides the house selftest-first idiom — two bare lines in one `run: |`
-  # block, no `&&` (a multi-line GitHub `run:` is `bash -e`, so line one failing
-  # already stops the step; `&&` would only make a two-line chain harder to
-  # read), exactly as doc-gates.yml does for never-cancel-main-check.sh. The
-  # selftest goes FIRST on purpose: if the guard has lost the ability to fail,
-  # that is reported before its verdict on the live tree is believed.
-
-  cloud-static-gz:
-    needs: [changes]
-    if: needs.changes.outputs.cloud-static-gz == 'true'
-    name: cloud-static-gz-guard.sh (uncommitted siblings, both halves wired)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-        # The DEFAULT depth is correct. Check 1 asks `git ls-files`, which reads
-        # the index, and the selftest builds its own `git init` repo in mktemp.
-        # No history of this repository is required.
-      - name: cloud-static-gz-guard.sh syntax check
-        run: bash -n scripts/cloud-static-gz-guard.sh
-      - name: the gz guard can still LOSE, then the live tree passes
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The selftest builds a throwaway repo from the REAL files and breaks
-        # each invariant in turn — the `*.gz` ignore rule deleted, the Dockerfile
-        # gzip step deleted, that step reordered ABOVE `COPY priv priv` (the
-        # ordering is what makes source and sibling born together), and the
-        # router losing `gzip: true` — asserting a red on each. Baseline on
-        # origin/main: `10 passed, 0 failed`. Hermetic: git + bash, no network,
-        # no `bp`, and it plants nothing in the tree.
-        run: |
-          bash scripts/cloud-static-gz-guard.sh --selftest
-          bash scripts/cloud-static-gz-guard.sh
-
-  pds-hetzner-offline:
-    needs: [changes]
-    if: needs.changes.outputs.pds-hetzner-offline == 'true'
-    name: pds-live-hetzner-placement-group.sh --selftest-offline
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: python3 is present (the manifest emitter and its validators are python3)
-        id: setup
-        # Matching the python3/jq/node name-checks above: an image change that
-        # drops python3 should fail BY NAME here rather than as a mysterious
-        # refusal from inside the offline arm.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image — the manifest emitter is python3" >&2
-            exit 1
-          }
-          python3 --version
-      - name: pds-live-hetzner-placement-group.sh syntax check
-        run: bash -n scripts/pds-live-hetzner-placement-group.sh
-      - name: the credential-free arm (ONLY --selftest-offline is CI-able)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # ONE ARM, DELIBERATELY. Per the script's own usage block, `--selftest`
-        # HARD-REFUSES at exit 3 without a Hetzner credential — two of its four
-        # credential states are PROCEED states and would pass vacuously with
-        # none — and `--harvest-only` keeps the credential fence too. Wiring
-        # either here would manufacture a permanent red that says nothing.
-        # `--selftest-offline` is the arm the script itself names as "the
-        # CREDENTIAL-FREE arm and the CI-able gate": it scrubs every
-        # HCLOUD_*/HETZNER_* variable out of its own environment, re-execs,
-        # COUNTS what survived (must be zero), then runs four mutation blocks
-        # plus the harvest validators — including a proof that the committed
-        # fixture manifest is byte-identical to what this script's own emitter
-        # produces. There is no bare run to pair it with: the bare script is the
-        # LIVE arm and needs the credential.
-        run: bash scripts/pds-live-hetzner-placement-group.sh --selftest-offline
-      - name: pds-live-hetzner-placement-group_test.sh (offline diagnostic harness, stub bp, no credential)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The eighth derived *_test.sh harness (#17687). Eight arms drive the
-        # runner's --selftest-probe entry point against a stub bp: 4 diagnostic
-        # (a failed read must quote bp's own sentence), 3 artifact-dir lifecycle,
-        # 1 positive control. Hermetic: no HCLOUD_* credential, no network.
-        run: bash scripts/pds-live-hetzner-placement-group_test.sh
-
-  # ── TASK LEASE RENEW (task-16e56d05b809dd39) ───────────────────────────────
-  # scripts/task-lease-renew.sh is the CI half of the ledger lease extension: it
-  # POSTs /v1/tasks/:doc_id/renew so a claim does not lapse underneath its own
-  # open pull request while it waits out a 60-90 minute queue. The API half
-  # (Barkpark.Tasks.Renew) shipped INERT — nothing called it — and this is the
-  # caller.
-  #
-  # ADVISORY BY CONSTRUCTION, not by a flag. The subject exits 0 on EVERY ledger
-  # state it can meet (row gone, no live claim, cap spent, ledger down), because
-  # a red for a ledger state is the confusion the row was filed against. Exactly
-  # ONE arm is non-zero: 401/403, a refused BARKPARK_TASK_TOKEN, which would
-  # otherwise make every future run a silent no-op. The harness drives both
-  # directions rather than reading the table.
-  #
-  # Hermetic: a stub `curl` on PATH answers with canned codes and bodies and
-  # logs its argv, so the REAL request the subject builds is asserted rather
-  # than assumed. No network, no token, no bp — it cannot rot into a skip.
-  task-lease-renew:
-    needs: [changes]
-    if: needs.changes.outputs.task-lease-renew == 'true'
-    name: task-lease-renew response classification
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: python3 is present (the response reader is python3)
-        id: setup
-        # The subject turns a missing python3 into exit 2 CANNOT MEASURE —
-        # correctly refusing rather than skipping, but illegibly so. Resolve it
-        # by NAME here, matching this file's idiom.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image — task-lease-renew's response reader needs it" >&2
-            exit 1
-          }
-          python3 --version
-      - name: task-lease-renew.sh + harness syntax check
-        run: |
-          bash -n scripts/task-lease-renew.sh
-          bash -n scripts/task-lease-renew.test.sh
-          bash -n scripts/task-lease-sweep.sh
-          bash -n scripts/task-lease-sweep.test.sh
-      - name: every response class lands on its verdict (stub curl, no network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/task-lease-renew.test.sh
-      - name: the 20-min sweep drives the whole chain per open PR (stub curl + stub gh, no network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/task-lease-sweep.test.sh
-
-  landed-mark:
-    needs: [changes]
-    if: needs.changes.outputs.landed-mark == 'true'
-    name: landed-mark.sh selftest + idempotency mutation
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        # DEFAULT depth is enough and is deliberate: every git repo the selftest
-        # walks is built with `git init` under mktemp. Nothing here reads this
-        # repo's history, so a shallow checkout cannot make it lie.
-      - name: python3 is present (the row reader and patch builder are python3)
-        id: setup
-        # The script turns a missing python3 into exit 2 CANNOT MEASURE —
-        # correctly refusing rather than skipping, but illegibly so. Resolve it
-        # by NAME here, matching this file's idiom for jq and PyYAML.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image — landed-mark's row reader needs it" >&2
-            exit 1
-          }
-          python3 --version
-      - name: landed-mark.sh + harness syntax check
-        run: |
-          bash -n scripts/landed-mark.sh
-          bash -n scripts/landed-mark.test.sh
-      - name: the selftest is green, then its idempotency arm is DISARMED and reds
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The harness runs the 41-assertion selftest armed, then replaces the
-        # MUT-IDEMPOTENT condition with an unconditional false in a scratch copy
-        # and requires exactly the three re-run assertions to go red while three
-        # unrelated arms stay green. It asserts the anchor matched EXACTLY ONCE
-        # and that the copy really differs before executing the mutant — a
-        # mutation that did not apply is not a catch.
-        #
-        # Hermetic: mktemp git repos, mktemp fixture ledgers, no network, no
-        # token, no bp. There is no live arm to skip into.
-        run: bash scripts/landed-mark.test.sh
-      - name: the instrument reproduces the 2026-09-01 finding from its fixture
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # Criterion 1 of task-2e16f1390ffc064f. The three rows lead-reconcile
-        # named were sealed BY HAND hours after the measurement, so a live read
-        # correctly returns nothing and would be misread as "no defect". The
-        # frozen capture is the only way to re-run the original measurement;
-        # scripts/fixtures/landed-mark/2026-09-01T2000Z/PROVENANCE.txt records
-        # exactly which bytes are captured and which are reconstructed.
-        run: |
-          set -uo pipefail
-          out="$(bash scripts/landed-mark.sh --list-open \
-            --fixture scripts/fixtures/landed-mark/2026-09-01T2000Z)"
-          echo "$out"
-          for want in task-b68092d5bac508e0 task-9009e2e4f0e5b5b6 task-076ca42e29836029; do
-            grep -q "$want" <<<"$out" || { echo "the fixture no longer reproduces $want" >&2; exit 1; }
-          done
-          # The negative direction. A listing that only ever lists is not a
-          # measurement: this row was sealed and must be WITHHELD.
-          if grep -q task-a4ad081d07a2e203 <<<"$out"; then
-            echo "a SEALED row was listed — the instrument stopped discriminating" >&2
-            exit 1
-          fi
-          grep -q "scanned 5 commit(s); 3 row(s)" <<<"$out" || {
-            echo "the scan count moved — the fixture and the instrument disagree" >&2; exit 1; }
-      - name: landed-open-report.sh + harness syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: |
-          bash -n scripts/landed-open-report.sh
-          bash -n scripts/landed-open-report.test.sh
-          bash -n scripts/landed-open-report-schedule.sh
-          bash -n scripts/landed-open-report-schedule.test.sh
-          python3 -c "import ast,sys; ast.parse(open('scripts/lib/landed_open_report.py').read())"
-      - name: the READER's selftest is green, then nine arms are DISARMED and red
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The consumer for the back-link this job's writer produces. Its own
-        # selftest proves it SEES (a live landed row present, a done one and an
-        # unlabelled one absent, PARENT and GATE? rows listed AND flagged) and
-        # that a failed read never prints like a zero. The mutation harness
-        # then breaks nine arms one at a time in scratch copies and requires
-        # the selftest to go red for each — a guard whose selftest survives the
-        # guard being deleted is theatre.
-        #
-        # Hermetic: fixture pages on disk, no network, no token, no bp. There
-        # is no live arm to skip into, so this cannot rot into a green skip.
-        run: |
-          bash scripts/landed-open-report.sh --selftest
-          bash scripts/landed-open-report.test.sh
-
-      - name: a comment whose CLAIM the repo contradicts, where it cites a PR
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # scripts/stale-pr-citation-detector.sh --selftest ONLY. The live scan
-        # is an AUDIT AID, not a gate, and the file header carries the measured
-        # numbers that say so: on the full tree the wide arm scored ~14%
-        # precision (1 of 7 sampled), and --strict scored 1 of 2 over 2081
-        # citation lines. Neither earns the merge button; both are useful to a
-        # human. Running the live scan here would red main on prose.
-        #
-        # The selftest is hermetic (throwaway git repo, no network, no token)
-        # and asserts BOTH directions: a known-positive fixture IS detected and
-        # a known-negative is NOT, so it cannot pass with the detector deleted.
-        run: bash scripts/stale-pr-citation-detector.sh --selftest
-
-      - name: the CONSUMER refuses a failed read, and that refusal is load-bearing
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # scripts/landed-open-report-schedule.sh is the step body of
-        # .github/workflows/landed-open-report.yml — the thing that finally
-        # RUNS the reader (task-f5be1a6dbf914096). It lives in scripts/ so this
-        # harness can execute the same bytes CI executes; the alternative, a
-        # predicate inside a YAML `run:` block, is how pr-task-gate silently
-        # dropped every backtick-wrapped trailer for weeks.
-        #
-        # Hermetic: a STUB `bp` on LANDED_REPORT_BP, no token, no network. It
-        # proves the 401 arm exits non-zero carrying the reader's own CANNOT
-        # READ line, that an unset token is a failure and not a skip, that the
-        # population floor refuses a thin read, and that [PARENT] / [GATE?]
-        # reach $GITHUB_STEP_SUMMARY — then deletes each of those refusals in a
-        # scratch tree and requires the run to stop refusing.
-        run: bash scripts/landed-open-report-schedule.test.sh
-
-  doc-gates-paths-parity:
-    needs: [changes]
-    if: needs.changes.outputs.doc-gates-paths-parity == 'true'
-    name: doc-gates.yml push.paths == pull_request.paths
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        # DEFAULT depth. The guard reads one file out of the working tree and
-        # builds every fixture under mktemp.
-      - name: python3 + PyYAML are present (the workflow is yaml-PARSED, not grepped)
-        id: setup
-        # The guard turns a missing python3/PyYAML into exit 2
-        # HARNESS-UNAVAILABLE — correctly refusing rather than skipping, but
-        # illegibly so. Resolve it by NAME here instead. PyYAML is INSTALLED
-        # rather than demanded, matching this file's own idiom at the
-        # reland-check step above: whether the runner image happens to ship it
-        # is an image fact, not a finding about this repo, and a red that says
-        # `ModuleNotFoundError: yaml` teaches a reader nothing about doc-gates'
-        # paths lists. A missing python3 is still a hard, named failure — pip3
-        # cannot repair that.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image" >&2
-            exit 1
-          }
-          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
-          python3 -c "import yaml; print('PyYAML', yaml.__version__)"
-      - name: doc-gates-paths-parity-check.sh syntax check
-        run: bash -n scripts/doc-gates-paths-parity-check.sh
-      - name: the parity guard can still LOSE, then the live doc-gates.yml passes
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # doc-gates.yml hosts ~14 guards behind a hand-enumerated `paths:`
-        # filter, and behind it TWICE — push and pull_request each carry their
-        # own ~70-entry copy. They have ALREADY drifted (70 vs 69). The 22-case
-        # selftest proves BOTH directions (a matched pair passes, a one-sided
-        # pair reds), the fail-closed arm (a zero-entry or unparseable block is
-        # exit 2 HARNESS-UNAVAILABLE, never a pass — `[] == []` is the vacuous
-        # green this refuses), and the terminal unknown-argument refusal. The
-        # comparison itself was disarmed in a scratch copy and the selftest went
-        # 11 passed / 4 FAILED; that proof is recorded in the guard's header.
-        run: |
-          bash scripts/doc-gates-paths-parity-check.sh --selftest
-          bash scripts/doc-gates-paths-parity-check.sh
-      # THIS FILE'S OWN twin lists, through the same guard. The 2026-09-01
-      # measurement found them drifted 94 vs 85 — nine entries wired on
-      # pull_request and missing from push, every one added by hand and never
-      # mirrored, so the autostamp-bridge and weekly-changelog lanes stopped
-      # running the moment code landed on main — the one event they exist to
-      # observe. The nine were adjudicated
-      # (all mirrored, none PR-only by design) and PINS is empty on purpose —
-      # this run is CLEAN-TREE, and a new one-sided entry reds the PR that adds
-      # it instead of going dark for weeks. The job NAME still says doc-gates;
-      # renaming a job renames its check-run context, which is wiring, not
-      # cosmetics — the step name and this comment carry the wider truth
-      # instead. Self-watching is not self-certifying: the guard parses the
-      # YAML it is defined in, and an edit that breaks that parse is a
-      # HARNESS-UNAVAILABLE exit 2, never a silent pass.
-      - name: shell-harnesses.yml push.paths == pull_request.paths (same guard, second target)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        env:
-          DOC_GATES_PATHS_PARITY_TARGET: .github/workflows/shell-harnesses.yml
-          DOC_GATES_PATHS_PARITY_PINS: ""
-        run: bash scripts/doc-gates-paths-parity-check.sh
-
-  # ── MERGE-GATE AUTOSTAMP BRIDGE (task-8fb6aa7b6d57f737) ────────────────────
-  # #5742 shipped a `pull_request` consumer with five green unit tests and no
-  # subscription for the event, so the handler was never invoked once in 29 days
-  # and 9 merge-gated tasks went unstamped by hand while CI stayed green. Both
-  # harnesses below exist because a unit test on a handler cannot see a delivery
-  # that never happens.
-  merge-gate-bridge:
-    needs: [changes]
-    if: needs.changes.outputs.merge-gate-bridge == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: subscription-parity syntax check
-        run: bash -n scripts/github-webhook-subscription-parity.sh
-      - name: liveness syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/merge-gate-autostamp-liveness.sh
-      - name: consumed events are subscribed events (code vs App manifest vs runbook)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # NO `continue-on-error`. This is the check whose absence let the bridge
-        # ship dead; laundering its red into a green job conclusion would rebuild
-        # exactly the condition it was written to end.
-        run: bash scripts/github-webhook-subscription-parity.sh
-      - name: parity tripwire mutation proofs (incl. the real pre-fix tree)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/github-webhook-subscription-parity.test.sh
-      - name: liveness detector proofs (hermetic fixtures, no gh/bp/network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # ONLY the hermetic half. The LIVE verdict shells `gh` and `bp` against
-        # the real ledger; `bp` is not on runners and the live path is currently
-        # BROKEN pending a human GitHub-App change, so a wired live job would
-        # exit 1 forever — a watch that can only lose. It is a runbook command
-        # plus the named open human gate (see the script header and
-        # docs/ops/github-sync.md §1).
-        run: bash scripts/merge-gate-autostamp-liveness.test.sh
-
-  # ── FLEET COORDINATION HARNESSES (task-f89c2aed221d9fdb) ───────────────────
-  # Three subjects and three harnesses that no workflow named until now. Every
-  # one of the six was absent from this file, from .githooks/, from the Makefile
-  # and from docs/, so each self-test was unreachable: it could not fire and it
-  # could not lose. The logic underneath is live fleet tooling, not a prototype.
-  #
-  # already-fixed.sh answers "is this on origin/main?" by CONTENT — git show,
-  # git grep, git log -S — and structurally refuses to read a PR's `merged`
-  # flag in any mode, using `gh` only as an enumerator. That refusal is the
-  # whole point: a squash rewrites the commit, so `--is-ancestor` on a PR head
-  # is always false, and a stacked PR reports merged:true while its code sits
-  # in the parent branch, absent from main. Harness case 13 pins exactly that.
-  #
-  # branch-owner.sh reads a bp claim FLAT at `.claim` and carries a measured
-  # BSD-date fix: `date -j` accepted a trailing Z, reinterpreted the stamp as
-  # local time, exited 0 silently, and on a CEST host aged every claim by 120
-  # minutes — turning a live owner into POSSIBLY-STALE.
-  #
-  # pr-overlap.sh exits 2 HOLD and prints no map when any `gh` call fails,
-  # because an empty overlap map is indistinguishable from "none found".
-  #
-  # All three harnesses stub git, gh and bp; nothing reaches the network, a
-  # credential, or the real repo. python3 is the sole unstubbed dependency.
-  principal-gate-harnesses:
-    needs: [changes]
-    if: needs.changes.outputs.principal-gate-harnesses == 'true'
-    name: media-smoke / pdf-proof principal-gate matrices
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: python3 is present (the gate parses the receipt with it)
-        id: setup
-        # pg_url_host and pg_capabilities_tier are python3 one-liners. Without
-        # python3 every host would parse as '' and every arm would refuse — the
-        # suite would go green on a gate that cannot read anything. Make the
-        # dependency fail BY NAME instead.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image — the principal gate parses URLs and receipts with it" >&2
-            exit 1
-          }
-          python3 --version
-      - name: principal-gate library syntax check
-        run: bash -n scripts/lib/principal-gate.sh
-      - name: media-smoke.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/media-smoke.sh
-      - name: media-smoke principal gate (4 arms, fake curl, no network)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # NO `continue-on-error` here or anywhere in this file. It launders a
-        # red into a green job conclusion.
-        run: bash scripts/media-smoke.sh --selftest
-      - name: pdf-efficiency-proof.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/pdf-efficiency-proof.sh
-      - name: pdf-efficiency-proof principal gate (5 arms, no scratch boot)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/pdf-efficiency-proof.sh --selftest
-      - name: pdf-kill-listener-proof.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/pdf-kill-listener-proof.sh
-      - name: pdf-kill-listener-proof principal gate (5 arms, no scratch boot)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/pdf-kill-listener-proof.sh --selftest
-
-  # ── THE MERGE SWEEP'S REVIEW HOLD (task-435620b0f02720b2) ──────────────────
-  # The subject merges PRs to main with no human in the loop. Two measured
-  # near-misses on 2026-09-06 (#16615 taken two minutes before its author's
-  # follow-up push; a console PR saved only by being converted to draft) came
-  # from the sweep being unable to tell "green and reviewed" from "green and
-  # awaiting review". The hold is now GitHub's own review state, and this job
-  # is the only thing in CI that executes the sweep's merge/refuse loop.
-  merge-sweep-review-hold:
-    needs: [changes]
-    if: needs.changes.outputs.merge-sweep-review-hold == 'true'
-    name: an open review holds a PR from the unattended merge sweep
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: jq and python3 are present (both stubs exit 2 without them)
-        id: setup
-        # The harness's gh stub applies the caller's own --jq filter with real
-        # jq, and merge-sweep.sh parses `gh pr view` with python3. Absence of
-        # either turns this job into a correct but illegible exit 2; naming the
-        # dependency here makes an image change fail BY NAME.
-        run: |
-          command -v jq >/dev/null || { echo "jq missing — the gh stub applies the sweep's own --jq with it" >&2; exit 1; }
-          command -v python3 >/dev/null || { echo "python3 missing — merge-sweep.sh reads title/body with it" >&2; exit 1; }
-          jq --version; python3 --version
-      - name: merge-sweep.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh
-      - name: merge-sweep.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh
-      - name: the trailer + review-hold decision table (hermetic, no gh)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # NO `continue-on-error` here or anywhere in this file. It launders a
-        # red into a green job conclusion.
-        run: ORCH="$RUNNER_TEMP" bash .claude/skills/orchestrate-tasks/helpers/merge-sweep.sh --selftest
-      - name: one sweep run REFUSES the reviewed PR and MERGES the identical one
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash .claude/skills/orchestrate-tasks/helpers/merge-sweep.test.sh
-
-  fleet-coordination-harnesses:
-    needs: [changes]
-    if: needs.changes.outputs.fleet-coordination-harnesses == 'true'
-    name: already-fixed / branch-owner / pr-overlap harnesses
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: python3 is present (two subjects exit 2 without it)
-        id: setup
-        # pr-overlap.sh:105 hard-refuses without python3, and branch-owner.sh
-        # uses it for iso_to_epoch and claim_fields. Both turn absence into a
-        # correct but illegible exit 2. ubuntu-latest ships python3; this step
-        # makes the dependency fail BY NAME if an image change removes it.
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image — pr-overlap and branch-owner parse timestamps with it" >&2
-            exit 1
-          }
-          python3 --version
-      - name: already-fixed.sh syntax check
-        run: bash -n scripts/already-fixed.sh
-      - name: already-fixed.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/already-fixed.test.sh
-      - name: content beats a merged flag (hermetic, git and gh stubbed)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # NO `continue-on-error` here or anywhere in this file. It launders a
-        # red into a green job conclusion, which is the one signal the fleet
-        # and branch protection actually read.
-        run: bash scripts/already-fixed.test.sh
-      - name: branch-owner.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/branch-owner.sh
-      - name: branch-owner.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/branch-owner.test.sh
-      - name: claim-freshness matrix (hermetic, git and gh and bp stubbed)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/branch-owner.test.sh
-      - name: pr-overlap.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/pr-overlap.sh
-      - name: pr-overlap.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/pr-overlap.test.sh
-      - name: a failed gh call must HOLD and print no map
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/pr-overlap.test.sh
-
-  # ── COMPOSE-SMOKE DISPATCHER (task-d6c8da73955e4820) ───────────────────────
-  # compose-smoke.yml decides smoke=true|false from a hand-written grep over the
-  # changed-file set. That predicate was anchored to the repo root plus ^api/,
-  # while the job it gates runs env-census over BOTH runtime roots. So the gate
-  # censused cloud/ and no cloud/ change could start it — present, and blind to
-  # half its own subject.
-  #
-  # The harness EXTRACTS the predicate from compose-smoke.yml rather than
-  # copying it, and re-derives the census's roots from env-census.py's own
-  # --root choices, so a third root or a re-narrowed filter reds by name.
-  compose-smoke-dispatcher:
-    needs: [changes]
-    if: needs.changes.outputs.compose-smoke-dispatcher == 'true'
-    name: compose-smoke dispatcher covers the census roots
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: harness syntax check
-        run: bash -n scripts/compose-smoke-dispatch.test.sh
-      - name: the dispatcher can fire on every root the census reads
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/compose-smoke-dispatch.test.sh
-      # GREEN-ARM CAUSE ATTRIBUTION (task-98b3df6eab045a78, PR #16509;
-      # extended by task-a6ef8e3b2c78054f + task-0b75a09ab8057598). The harness
-      # ships a fake `docker` on PATH, so it needs no daemon and no image build.
-      # It refuses to pass vacuously: 59 unconditional cases with an internal
-      # count floor of 50, and its mutation proofs assert the anchors matched
-      # exactly seven (container-alive) and two (the census + LiveView probes)
-      # times before they can read as a catch. The seven container-alive sites
-      # are ALSO pinned BY NAME (their second-argument label set), so a probe
-      # that moves reds with its own name printed and the pin cannot be
-      # satisfied by bumping a number (task-7f59063625b9a410).
-      #
-      # THESE NUMBERS ARE A REGISTRY, NOT DECORATION. They were 27/22/three and
-      # went stale when the build-identity probe landed, which left the harness
-      # RED ON MAIN — four failures nobody was looking at, because this job is
-      # paths-filtered and not a required context. If you add or remove a probe,
-      # move these numbers in the SAME commit.
-      - name: Syntax-check the green-arm cause harness
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/compose-smoke.test.sh
-      - name: Green-arm cause attribution
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/compose-smoke.test.sh
-  # ── WORKFLOW TRIGGER COVERAGE (task-8556d43c305b2747) ──────────────────────
-  # A path filter alternative that matches nothing can never fire, and the
-  # workflow still reads as gated. twoslash.yml gated on apps/docs/** — zero of
-  # 10,490 files — while the docs app is js/docs/. The repo already recorded
-  # that the path was fictional and nobody changed the filter.
-  #
-  # Clean-tree, not never-worse: this was the ONLY dead alternative across 630
-  # globs in 58 workflows, so there is no debt to grandfather and no baseline
-  # that can rot. If it ever reds, a filter really is pointing at nothing.
-  workflow-trigger-coverage:
-    needs: [changes]
-    if: needs.changes.outputs.workflow-trigger-coverage == 'true'
-    name: every workflow path filter matches something
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: subject syntax check
-        run: bash -n scripts/workflow-trigger-coverage.sh
-      - name: harness syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/workflow-trigger-coverage.test.sh
-      - name: prove the check can lose (hermetic, synthetic trees)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/workflow-trigger-coverage.test.sh
-      - name: no declared path alternative is dead
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/workflow-trigger-coverage.sh
-
-  # SCHEDULED ARM HEALTH (task-2c762aa7dfca5bd8). A cron'd job that gates
-  # nothing still has to be READ: studio-journey-smoke failed 47 of 47 scheduled
-  # runs over six weeks and cost nobody a second, while the same workflow's
-  # all-events count read success=51 and looked healthy. The harness below is
-  # hermetic — scratch trees, fixture payloads, a pinned --now, no network — and
-  # every case is a PAIR, so the reader is shown losing and winning on inputs
-  # that differ in one field. The LIVE both-directions proof against real named
-  # workflows is not run here on purpose: a green that depends on GitHub's run
-  # history rots the moment that history moves.
-  scheduled-arm-health:
-    needs: [changes]
-    if: needs.changes.outputs.scheduled-arm-health == 'true'
-    name: a cron that has never succeeded is visible
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: subject syntax check
-        run: bash -n scripts/scheduled-arm-health.sh
-      - name: harness syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/scheduled-arm-health.test.sh
-      - name: prove the reader can lose (hermetic, fixture payloads)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/scheduled-arm-health.test.sh
-
-  undispatched-target:
-    needs: [changes]
-    if: needs.changes.outputs.undispatched-target == 'true'
-    name: every declared dispatch target actually dispatches
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: subject syntax check
-        run: bash -n scripts/undispatched-target-check.sh
-      - name: prove the check can lose (hermetic, synthetic trees)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/undispatched-target-check.sh --selftest
-      - name: no declared target is undispatched
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/undispatched-target-check.sh
-
-  # ── DISPATCHER SELFTEST ──────────────────────────────────────────────────
-  # The `changes` job above partitions this workflow's paths list per harness.
-  # Two lists that must agree and nothing making them is the defect class this
-  # whole file keeps finding in other workflows, so the partition is guarded:
-  # every roster row is a verbatim workflow-level entry (SUBSET), every
-  # workflow-level entry has a row (UNION == list), every job except `changes`
-  # is gated on its own output and has an output to be gated on, and the
-  # dispatcher body itself is EXTRACTED and RUN over mktemp git fixtures —
-  # push, empty diff, the measured router.ex case, the unresolvable base — with
-  # the unresolvable-base refusal proven load-bearing by mutation. Gated on its
-  # own inputs like every other job here; this file is in every set.
-  dispatch-selftest:
-    name: shell-harnesses dispatcher partition + fixture matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [changes]
-    if: needs.changes.outputs.dispatch-selftest == 'true'
-    steps:
-      - uses: actions/checkout@v4
-        # DEFAULT depth. The harness reads this file from the working tree and
-        # builds every git fixture under mktemp.
-      - name: python3 + PyYAML are present (the workflow is yaml-PARSED, not grepped)
-        id: setup
-        run: |
-          command -v python3 >/dev/null || {
-            echo "python3 missing on the runner image" >&2
-            exit 1
-          }
-          python3 -c 'import yaml' 2>/dev/null || pip3 install --quiet pyyaml
-          python3 -c "import yaml; print('PyYAML', yaml.__version__)"
-      - name: harness syntax check
-        run: bash -n scripts/shell-harnesses-dispatch.test.sh
-      - name: partition invariants + dispatcher fixture matrix (incl. mutation arm)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/shell-harnesses-dispatch.test.sh
-
-  orphan-harnesses:
-    needs: [changes]
-    if: needs.changes.outputs.orphan-harnesses == 'true'
-    # ORPHAN SWEEP III (task-8780f3b465edea5b). Three harnesses that no workflow
-    # executed, each RUN before being wired rather than wired on inspection —
-    # the row that filed this asked for exactly that, and two of its own guesses
-    # were wrong: local-update.test.sh was recorded as "exceeded a 90 s cap, NOT
-    # verified" (it is 0 s, 18/18) and pdf-efficiency-proof.test.sh as a
-    # "live-journey harness" out of budget (it is hermetic — a python3 stub on
-    # 127.0.0.1 — and 1 s, 22/22).
-    #
-    # The last step runs the GATE, not its selftest. That is the point of the
-    # tenant: scripts/refute-on-absence-capture-log-check.sh appears in no
-    # workflow, no Makefile and no script, yet
-    # api/test/barkpark/tenancy/auth_principal_kind_test.exs:45 says it "pins the
-    # combination". A PIN NOTHING RUNS IS NOT A PIN. This makes the sentence
-    # true for edits to the gate itself; making it true for edits to api/test/**
-    # needs a step in elixir.yml beside unreachable-assert-message-check.sh
-    # (elixir.yml:940), which is the api lane's call, not this one's.
-    name: orphan harnesses (local-update · pdf-efficiency-proof · refute-on-absence)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-
-      - name: "local-update.test.sh (measured 0 s / 18 assertions)"
-        run: bash scripts/local-update.test.sh
-
-      - name: "pdf-efficiency-proof.test.sh (measured 1 s / 22 assertions, hermetic stub)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/pdf-efficiency-proof.test.sh
-
-      - name: "refute-on-absence-capture-log-check.test.sh (measured 4 s / 9 arms)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/refute-on-absence-capture-log-check.test.sh
-
-      - name: "the GATE itself, over the real api/test tree"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/refute-on-absence-capture-log-check.sh
-
-  mix-test-strict:
-    needs: [changes]
-    if: needs.changes.outputs.mix-test-strict == 'true'
-    name: mix-test-strict.sh refusal + pass-through matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: mix-test-strict.sh syntax check
-        run: bash -n scripts/mix-test-strict.sh
-      - name: refusal + pass-through + mutation matrix (mktemp fixtures, no mix, no database)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # 22 cases. The REFUSAL half proves the reproduction in miniature (a
-        # nonexistent path riding alongside a real one must exit 2 and name the
-        # offender); the PASS-THROUGH half proves argv is forwarded unchanged —
-        # that is the control behind "same test count as bare mix test"; the
-        # MUTATION half neutralises each guard by its `# MUT:` anchor in a
-        # scratch copy and requires the case it owns to STOP refusing, so a
-        # guard that is not the detector reds here.
-        run: bash scripts/mix-test-strict.test.sh
-
-  workflow-owner:
-    needs: [changes]
-    if: needs.changes.outputs.workflow-owner == 'true'
-    # A WORKFLOW OFF THE PR PATH MUST HAVE A NAMED OWNER (task-dee226be3107a98b
-    # c4). posix-vacuous-green-census.yml stood red on main's tip for ELEVEN
-    # HOURS across EIGHT runs and cost nobody a second: advisory, so no merge
-    # blocked; push-only, so no PR surfaced it; and a lane close-out reads its
-    # own PRs, never main's health. scripts/main-red-owner.sh answers "somebody
-    # must be told"; this answers "WHO", and reds the moment a workflow is moved
-    # off the PR path without a row in .github/workflow-owners.json.
-    #
-    # THE POPULATION IS A PREDICATE, recomputed from the trigger blocks each run,
-    # so the guard cannot go stale in the commit that strands the next workflow.
-    #
-    # HARNESS FIRST, SUBJECT SECOND. The selftest drives six refusals off real
-    # fixture trees plus two quiet arms and a discrimination control; its first
-    # draft bound the tree root at file scope, so all six refusal arms measured
-    # the REAL repo, passed against a clean tree, and proved nothing. That is why
-    # --selftest runs BEFORE the live check: a subject that passes because its
-    # harness cannot fire is the exact failure this job exists to catch.
-    name: workflow-owner-check.sh named-owner guard
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: syntax
-        run: |
-          bash -n scripts/workflow-owner-check.sh
-          bash -n scripts/ci-pr-checkrun-floor.sh
-
-      - name: "workflow-owner-check.sh --selftest (6 refusal arms + 2 quiet + control)"
-        run: bash scripts/workflow-owner-check.sh --selftest
-
-      - name: "ci-pr-checkrun-floor.sh --selftest (hermetic: required-context map + the completeness control both ways)"
-        run: bash scripts/ci-pr-checkrun-floor.sh --selftest
-
-      - name: "LIVE: every workflow off the PR path has a named owner"
-        run: bash scripts/workflow-owner-check.sh
-
-      - name: "watcher cadence (reported, not enforced — the watcher is not this file's to fix)"
-        run: bash scripts/workflow-owner-check.sh --cadence
-
-  which-gates:
-    needs: [changes]
-    if: needs.changes.outputs.which-gates == 'true'
-    # THE GATE-LIST DERIVER (task-cb42bf8ab0539891). which-gates.sh answers
-    # "which CI gates does this change dispatch?" by SHELLING the very
-    # `*-path-escape-check.sh --match` primitives the dispatchers shell, and it
-    # discovers those call sites by scanning .github/workflows/*.yml. Both
-    # halves rot if nothing runs them: a renamed primitive, a rewritten
-    # dispatcher, or a new `--match` call site all change its answer, and the
-    # measured failure it exists to prevent (#16608: two REQUIRED contexts red
-    # because the gate list came from the LANE, not the workflows) returns the
-    # day it starts lying quietly.
-    #
-    # Harness FIRST, subject second — the harness's case 4 renames a primitive
-    # away in a scratch copy of the tree and requires a CANNOT READ line and a
-    # non-zero exit, so the subject step below cannot pass by swallowing a
-    # missing primitive as `false`.
-    name: which-gates.sh gate-list deriver
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-
-      - name: which-gates.sh syntax check
-        run: bash -n scripts/which-gates.sh
-
-      - name: "which-gates.test.sh (both file sets + the renamed-primitive mutation)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/which-gates.test.sh
-
-
-  selftest-wiring-census:
-    needs: [changes]
-    if: needs.changes.outputs.selftest-wiring-census == 'true'
-    # THE DURABLE ARM (task-8780f3b465edea5b c0/c1): every scripts/ self-test is
-    # executed by CI or carries a machine-readable exemption, and a harness added
-    # tomorrow with neither reds HERE rather than accumulating in silence. The
-    # census resolves execution over four routes (direct, glob, a wired parent's
-    # --selftest, an ExUnit door) because the hand-run basename grep that filed
-    # this row was wrong in BOTH directions — the script's own header carries the
-    # list of faults.
-    name: selftest wiring census
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-
-      # The selftest FIRST: it plants an unlisted, unexempted harness in a
-      # scratch copy and requires the census to red and to name it, then adds
-      # the exemption marker and requires green. A census that cannot lose would
-      # pass the step below over any tree at all.
-      - name: Prove the census can fail (--selftest)
-        run: bash scripts/selftest-wiring-census.sh --selftest
-
-      - name: The census over this tree
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/selftest-wiring-census.sh --list
-
-  registry-impact-check:
-    needs: [changes]
-    if: needs.changes.outputs.registry-impact-check == 'true'
-    # A FENCE AROUND A FILE DOES NOT COVER THE REGISTRIES THAT COUNT THINGS IN IT.
-    # scripts/registry-impact-check.sh derives, from the tree, every census,
-    # ratchet and pin that counts or enumerates anything in a changed path, and
-    # names what the author must declare in the SAME PR. What runs here is its
-    # harness, and the arms that carry it are two REAL main-reddenings replayed
-    # by path set: #18213 against the .github/run-level-readers.allow row whose
-    # count it moved, and deploy/assets-survive-gap against the deploy/README.md
-    # count guard from #18191. A new check's first green is the least
-    # trustworthy green there is, so the load-bearing arms MUST FIND SOMETHING.
-    name: registry impact check harness
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-        with:
-          # MUST be a full clone. The replays resolve commits 7d56df653 and
-          # 90d63a4dd and the branch origin/deploy/assets-survive-gap. On a
-          # shallow checkout those arms SKIP, and a skipped arm measures nothing
-          # — the harness says so in its tally rather than counting them green.
-          fetch-depth: 0
-      - name: registry-impact-check harness (two historical replays + controls)
-        run: bash scripts/registry-impact-check.test.sh
-  claim-health:
-    needs: [changes]
-    if: needs.changes.outputs.claim-health == 'true'
-    # THE SUITE THAT RAN GREEN AGAINST A SHAPE THE SERVER NEVER EMITS
-    # (task-d64ecb4727209800). claim-health.sh resolved the claim at
-    # `.content.claim`; the ledger puts it at `.claim`. On a live
-    # `bp task ls --status in_progress` page 19 of 19 rows were held and the
-    # tool reported ZERO holders. claim-health-selftest.sh could not catch it:
-    # it had exactly ONE fixture builder and that builder emitted the claim
-    # under the SAME WRONG PATH the reader used, so the suite and its subject
-    # agreed with each other, both disagreed with the server, and the suite
-    # passed. #18376 fixed the fixtures (real shape, legacy shape kept as an
-    # explicit compatibility arm). This job is the second-order half: NOTHING
-    # RAN THAT SUITE, so the next fixture drift would have been equally
-    # invisible, and a selftest nobody runs is how the first one survived.
-    #
-    # WIRED, NOT EXEMPTED. The exemption marker is for a slow or
-    # environment-dependent proof; this one is neither. Every arm feeds the
-    # subject a `--from-file` fixture built by printf in the harness — no `bp`,
-    # no token, no network, no database — and a full run is 16 arms, 0 failed,
-    # under two seconds (measured 2026-09-15 at 1e7231858 in a clean worktree).
-    name: claim-health resolves the claim by shape (16 arms)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-
-      - name: claim-health.sh syntax check
-        run: bash -n scripts/ledger/claim-health.sh
-
-      - name: claim-health-selftest.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/ledger/claim-health-selftest.sh
-
-      # No pipe and no `|| true`. The suite's own exit status IS this step's:
-      # `[ "$FAIL" = 0 ] || exit 1` is its last line, and a `| tee` here would
-      # report tee's status and green a failing suite — the exact laundering
-      # scripts/exit-laundering-sweep.sh exists to find.
-      - name: "the suite (16 arms: real shape, doc envelope, legacy compat, 2 disjoint mutations, 3 controls)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/ledger/claim-health-selftest.sh
-
-  exit-laundering-sweep:
-    needs: [changes]
-    if: needs.changes.outputs.exit-laundering-sweep == 'true'
-    # THE INSTRUMENT, NOT THE CENSUS (task-20fe68463c87e136). What runs here is
-    # `--selftest`: three planted positives (the verbatim #14371 `--out` shape,
-    # the `> file` redirect, a workflow step), five negative controls (docker
-    # teardown, a `2>&1` CAPTURE that keeps the message, an unread artifact, an
-    # early-exit guard, a `%{http_code}` surrogate), and a FALSIFIER that
-    # deletes the consumer and requires the finding to be RETRACTED. A checker
-    # that cannot be shown to fail has not been shown to work, and the
-    # false-positive arms are the whole difficulty: a naive grep answers 1193
-    # on this corpus and 1023 of those are correct best-effort teardown.
-    name: exit-laundering predicate (planted controls, both directions)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: exit-laundering-sweep.sh syntax check
-        run: bash -n scripts/exit-laundering-sweep.sh
-      - name: Prove the predicate can lose (--selftest)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/exit-laundering-sweep.sh --selftest
-
-  deploy-receipt-honesty:
-    needs: [changes]
-    if: needs.changes.outputs.deploy-receipt-honesty == 'true'
-    name: deploy receipts descend from a measurement (or refuse)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: the three subjects parse
-        run: |
-          bash -n Makefile 2>/dev/null || true
-          bash -n .githooks/post-merge
-          bash -n scripts/deploy-rebuild.sh
-      - name: deploy-receipt-failure.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/deploy-receipt-failure.test.sh
-      - name: "make deploy / post-merge / deploy-rebuild.sh receipt matrix (hermetic: stub PATH, no network, no build, no service)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # 54 checks, ~2s. POLARITY: every assertion names a REFUSAL or a
-        # measured green, so this matrix is RED against the pre-repair sources
-        # (35 of 54 failed there, the build-fail and migrate-fail arms being the
-        # controls green in both directions) and GREEN against the repair.
-        # It is also the tripwire for the impurity it closed: deploy-rebuild.sh
-        # prepends /usr/local/go/bin to PATH, and on a runner with Go installed
-        # the pre-repair script reached a REAL `make wasm` around the stubs —
-        # four arms assert the escape log is empty.
-        run: bash scripts/deploy-receipt-failure.test.sh
-      - name: merged-at-committer-tripwire.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/merged-at-committer-tripwire.sh
-      - name: merged-at-committer-tripwire.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/merged-at-committer-tripwire.test.sh
-      - name: "merged_at's NULL arm can still LOSE (30 cases, incl. the mutated committer literal)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # THE ONE ARM THAT MATTERS is F: a scratch copy of the tripwire whose
-        # BLESSED_MERGE_COMMITTER has been rewritten to a foreign address is run
-        # over the batch that is GREEN against the real script, and must exit 1.
-        # That is the incident played forwards — the day merges stop arriving
-        # under GitHub's own merge committer, EVERY platform_deliveries row's
-        # `merged_at` goes NULL while the recorder keeps answering
-        # delivered=true, and before this harness nothing anywhere reddened.
-        # Arm G is its companion: the wiring assertion, with both controls (call
-        # removed, literal re-hardcoded) proving it is not vacuous.
-        # Hermetic — mktemp fixtures, no git, no network, no gh, no bp.
-        run: bash scripts/merged-at-committer-tripwire.test.sh
-
-  bp-curl:
-    needs: [changes]
-    if: needs.changes.outputs.bp-curl == 'true'
-    # THE SHARED 429 BACKOFF (task-ca8fffa7ca885413). On origin/main f618d1675
-    # 27 shell/CI/.mjs curl owners against the BP API had ZERO 429 handling;
-    # scripts/lib/bp-curl.sh is the one place the branch now lives, so this
-    # harness is the proof for every consumer that sources it. Hermetic: a
-    # python3 http.server on 127.0.0.1 answers a scripted 429-then-200 / 500 /
-    # Retry-After sequence and LOGS every request, so "retried" and "not
-    # retried" are REQUEST COUNTS, not inferred from the exit code. The header
-    # VALUE is proven to be the one slept (2 vs 0) and a mutant helper with the
-    # retry_after read replaced by a constant reds on that case.
-    name: bp-curl.sh 429 backoff matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: python3 is present (the fake server is python3; absence would be exit 2)
-        id: setup
-        run: |
-          command -v python3 >/dev/null || { echo "::error::python3 is not on PATH; the bp-curl harness cannot run its fake server"; exit 1; }
-      - name: bp-curl.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/lib/bp-curl.sh
-      - name: bp-curl.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/lib/bp-curl.test.sh
-      - name: "bp-curl backoff matrix (48 assertions, fake loopback server, ~12s of measured sleeps)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/lib/bp-curl.test.sh
-
-  place-directory-install:
-    needs: [changes]
-    if: needs.changes.outputs.place-directory-install == 'true'
-    # THE TEMPLATE INSTALLER'S SUCCESS CLAIMS (pds-bl-place-directory-install-
-    # echoes-transport). The wave-23 census found exactly three real product
-    # success claims in the whole shell population, all three in this one file,
-    # and ruled that a repo-wide shell guard would green vacuously over 22
-    # occurrences of harness plumbing. So the fix is two named sites and THIS
-    # harness is the only thing that can keep them fixed.
-    #
-    # Hermetic: a fake `curl` on a PATH-only bin dir, no network, no writes
-    # outside mktemp. Its arm D runs the PRE-FIX `post … && printf ✓` shape
-    # against arm A's own empty-state fixture and requires it to exit 0 with
-    # both ticks — the same fixture greens the old shape and reds the new one,
-    # which is what makes arm A a detector rather than a wish.
-    name: place-directory install.sh read-back claims
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: install.sh syntax check (POSIX sh)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: sh -n templates/place-directory/install.sh
-      - name: harness syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/place-directory-install.test.sh
-      - name: "place-directory-install.test.sh (27 assertions, 4 arms incl. the mutation)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/place-directory-install.test.sh
-
-  sunset-route-consumers:
-    needs: [changes]
-    if: needs.changes.outputs.sunset-route-consumers == 'true'
-    # THE POST-SUNSET WORLD (task-a6613aa3eddb3c80). `/api/schemas` carries a
-    # PUBLISHED removal date (`sunset: Wed, 31 Dec 2026 23:59:59 GMT`), and
-    # every health consumer in the deploy surface gates on the STATUS CODE — so
-    # on 2027-01-01 a healthy box turns each of them red. #17772 retargeted the
-    # fenced consumers to /status.json and shipped the harness that proves it,
-    # but wired the harness to nothing: it was the sole `ORPHAN` in
-    # scripts/selftest-wiring-census.sh on main from 8970ea272 until this job.
-    #
-    # Hermetic and fast: one python3 fake box on 127.0.0.1 that 404s the sunset
-    # route and 200s /status.json, measured 0.3 s / 11 assertions locally. No
-    # probe string is retyped in the harness — each consumer's URL is EXTRACTED
-    # from the consumer file at run time, which is why the guarded subjects sit
-    # in this job's roster rows above: a revert reds HERE without anyone editing
-    # the harness. Two controls run before any verdict (the box really 404s the
-    # sunset route; it really 200s /status.json), so a green cannot be free.
-    name: sunset-route health consumers survive 2027-01-01
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: harness syntax check
-        run: bash -n scripts/sunset-route-consumers.test.sh
-      - name: "sunset-route-consumers.test.sh (11 assertions incl. both fixture controls, hermetic loopback server)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/sunset-route-consumers.test.sh
-
-  main-workflow-rollup:
-    needs: [changes]
-    if: needs.changes.outputs.main-workflow-rollup == 'true'
-    # THE DENOMINATOR IS THE TREE (task-b4aa15924d214156). main-gate-watch.sh
-    # derives its roster from the contexts branch protection holds, and
-    # stale-verdict-watch.sh derives its from the open-PR population; neither
-    # can report a workflow nobody told it to look at, so one that drifted out
-    # of the watched set — or that has
-    # never had a run on main at all — reads as an absence, and an absence
-    # reads as a green. This roll-up enumerates .github/workflows/ off the
-    # tree, prints the count it enumerated, and prints a zero-run workflow in
-    # words. Only the HERMETIC harness rides here: synthetic workflow trees, a
-    # recorded actions/runs payload, an injected clock, and a `gh` stub that
-    # exits 97 on any call, so it cannot rot into a network skip. The LIVE
-    # roll-up is a runbook command (it needs a token that can list runs) and is
-    # deliberately not wired as a scheduled job in this change.
-    name: every workflow's main verdict (roll-up denominator + grace window)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-        # DEFAULT depth. Every fixture is built under mktemp; the only tree the
-        # harness reads is the working copy of .github/workflows.
-      - name: subject syntax check
-        run: bash -n scripts/main-workflow-rollup.sh
-      - name: harness syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/main-workflow-rollup.test.sh
-      - name: "both directions on fixtures + the three named mutations (staleness, roster, spec label)"
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/main-workflow-rollup.test.sh
-
-  migration-version-collision:
-    needs: [changes]
-    if: needs.changes.outputs.migration-version-collision == 'true'
-    # A MIGRATION VERSION MUST IDENTIFY ONE FILE (task-ac34d17c2aba4458).
-    # Measured 2026-09-10: a cloud migration minted as 20260910160000 met a
-    # concurrent lane's 20260910160000 already recorded in the SHARED
-    # barkpark_cloud_test schema_migrations. Ecto keys that table on the version
-    # integer alone, so `mix ecto.migrate` printed `Migrations already up`,
-    # applied nothing, exited 0, and the suite was one command away from
-    # measuring a schema the PR never created. Found only by hand-querying
-    # information_schema.
-    #
-    # Hermetic here: mktemp fixture trees, `git init` repos, and a
-    # --db-versions-file standing in for schema_migrations, so detectors B and C
-    # are proven without a database and this lane cannot rot into a skip. The
-    # harness ALSO runs a real `createdb` fixture database when one answers (the
-    # P-arm) and prints its own NOT RUN line when none does — on a runner with no
-    # postgres the P-arm is disclosed, never silently counted as a pass.
-    #
-    # The blocking half lives in cloud.yml's `test` job (a required context),
-    # which runs the same script with --require-db BEFORE `mix test`. That is why
-    # cloud.yml is a path entry for this job: an edit that drops the step must be
-    # able to red here.
-    name: migration version collision matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: migration-version-collision-check.sh syntax check
-        run: bash -n scripts/migration-version-collision-check.sh
-      - name: migration-version-collision-check.test.sh syntax check
-        if: ${{ !cancelled() }}
-        run: bash -n scripts/migration-version-collision-check.test.sh
-      - name: "collision mutation matrix (plant two files on one version, red naming both; remove, green)"
-        if: ${{ !cancelled() }}
-        run: bash scripts/migration-version-collision-check.test.sh
-      - name: the Cloud gate still runs this check BEFORE mix test
-        if: ${{ !cancelled() }}
-        # The wiring assertion. A harness that proves the script and says nothing
-        # about its caller is how a gate gets deleted and stays green. Both
-        # clauses are asserted: the step exists, and it is ORDERED before the
-        # `mix test` step in the same job.
-        run: |
-          set -euo pipefail
-          f=.github/workflows/cloud.yml
-          call=$(grep -n 'migration-version-collision-check.sh' "$f" | cut -d: -f1 | sed -n '1p')
-          if [ -z "$call" ]; then
-            echo "::error::$f no longer invokes scripts/migration-version-collision-check.sh"
-            exit 1
-          fi
-          test_line=$(grep -n '^        run: mix test$' "$f" | cut -d: -f1 | sed -n '1p')
-          if [ -z "$test_line" ]; then
-            echo "::error::$f has no 'run: mix test' step; this assertion cannot bind and refuses rather than passing"
-            exit 1
-          fi
-          if [ "$call" -ge "$test_line" ]; then
-            echo "::error::the collision check (line $call) runs at or AFTER mix test (line $test_line); a silent no-op would reach a green suite"
-            exit 1
-          fi
-          echo "cloud.yml: collision check at line $call, mix test at line $test_line — ordered correctly"
-
-  scratchpad-reaper:
-    needs: [changes]
-    if: needs.changes.outputs.scratchpad-reaper == 'true'
-    name: scratchpad-reaper.sh skip-gate + floor matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-        id: setup
-      - name: scratchpad-reaper.sh syntax check
-        run: bash -n scripts/scratchpad-reaper.sh
-      - name: scratchpad-reaper.test.sh syntax check
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash -n scripts/scratchpad-reaper.test.sh
-      - name: the reaper's skip gates can still LOSE (49 checks, 3 differential controls, mktemp git fixtures)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # This is the one harness in this file whose subject DELETES DIRECTORIES,
-        # so it is also the one that must never be allowed to rot into a
-        # presence check. The three controls are differential, not observational:
-        # the SAME fixture path flips SKIP-WORKTREE -> WOULD-REAP when the
-        # registration is removed, SKIP-UNPUSHED -> WOULD-REAP when the commit
-        # is pushed, and the floor REFUSES (2) then PASSES (0) on one path in
-        # one run. A skip that could not flip would prove nothing about the
-        # gate. Every fixture is built under mktemp -d (resolved with pwd -P,
-        # because git prints /private/var while $TMPDIR says /var and the
-        # registration assertion would otherwise compare two spellings and
-        # measure nothing); no real session directory is named or read.
-        run: bash scripts/scratchpad-reaper.test.sh
-      - name: the free-space guard the reaper delegates its verdict to still bites
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # --floor does not grow a second definition of "full": it runs
-        # disk-headroom-guard.sh and propagates its exit code. That makes the
-        # guard's own self-test an input to this lane — until this job existed
-        # the guard had ZERO callers repo-wide.
-        run: bash scripts/disk-headroom-guard.sh --self-test
-      - name: --floor refuses ON THIS RUNNER above its measured free space, and passes below it
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        # The harness proves this against a temp dir; this step proves it once
-        # more against the runner's own volume, so the refusal is demonstrated
-        # on a real filesystem and not only on fixtures.
-        run: |
-          # `set +e` is LOAD-BEARING and its absence failed this step on
-          # 2026-09-13: GitHub runs every `run:` body as `bash -e {0}`, so the
-          # deliberate non-zero REFUSAL below aborted the step before
-          # `rc_refuse=$?` could read it — the step reporting a failure for
-          # doing exactly what it was asserting. `set -uo pipefail` does not
-          # cancel an inherited -e.
-          set +e
-          set -uo pipefail
-          avail_gb=$(df -P -k . | awk 'NR==2 {print int($4/1024/1024)}')
-          case "$avail_gb" in
-            ''|*[!0-9]*)
-              echo "::error::CANNOT READ — df gave no GiB figure for the workspace; refusing to report a floor verdict it did not measure"
-              exit 1 ;;
-          esac
-          above=$((avail_gb + 1000))
-          bash scripts/scratchpad-reaper.sh --floor "$above" .
-          rc_refuse=$?
-          bash scripts/scratchpad-reaper.sh --floor 0 .
-          rc_pass=$?
-          echo "measured: ${avail_gb} GiB free · floor ${above} GiB -> rc=${rc_refuse} · floor 0 GiB -> rc=${rc_pass}"
-          if [ "$rc_refuse" != "2" ]; then
-            echo "::error::a floor above the measured free space returned $rc_refuse, not the REFUSED code 2"
-            exit 1
-          fi
-          if [ "$rc_pass" != "0" ]; then
-            echo "::error::a floor of 0 GiB returned $rc_pass, not OK"
-            exit 1
-          fi
-          echo "the floor is distinguishable: REFUSED=2, OK=0, on the same path."
-  orchestrate-launch-recipe:
-    needs: [changes]
-    if: needs.changes.outputs.orchestrate-launch-recipe == 'true'
-    # THE LAUNCH-RECIPE CONTROL (task-018fc84f61c33923, task-50d7d1a599dd14dd).
-    # Two findings that prose alone cannot hold. A headless builder launched as
-    # `nohup claude -p … --model opus --dangerously-skip-permissions` terminates
-    # its own background tasks at 600 s, mid-Elixir-compile, and exits looking
-    # like a calm finish (five builders, five deaths, 2026-09-05); the fix is one
-    # env var in a line people retype from memory. And two sessions of ONE lane
-    # sharing one set of filenames removed a live row from a pulse list and
-    # rewrote a status file 149 lines -> 94 (2026-09-07); the fix is per-SESSION
-    # names, which rot the moment a doc or a reader goes back to `status.md`.
-    #
-    # The harness DERIVES the recipe set by grepping the skill rather than
-    # listing it, refuses (exit 2) when it finds ZERO recipes instead of passing
-    # vacuously, and arm 9 mutates a scratch copy with the env var deleted and
-    # asserts the harness reds on it. Hermetic: no bp, no network, no claude
-    # binary — it reads files and runs two helper selftests.
-    name: orchestrate-tasks launch recipe + per-session lane files
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: harness + helper syntax check
-        run: |
-          bash -n scripts/orchestrate-launch-recipe.test.sh
-          bash -n .claude/skills/orchestrate-tasks/helpers/session-files.sh
-          bash -n .claude/skills/orchestrate-tasks/helpers/launch-headless-builder.sh
-      - name: "orchestrate-launch-recipe.test.sh (21 assertions incl. the env-var mutation)"
-        run: bash scripts/orchestrate-launch-recipe.test.sh
+          LEG: ${{ matrix.leg.slug }}
+        run: bash scripts/shell-harness-run.sh "$LEG"

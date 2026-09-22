@@ -317,6 +317,21 @@ rewrite_pin() {
   ' "$WF" > "$tmp" && mv "$tmp" "$WF"
 }
 
+# ── The functional pin literals of one step ──────────────────────────────────
+# The SAME five anchored slots rewrite_pin writes, read back out of the file:
+#   `<N>-test`  ·  `-ne <N>`  ·  `pin is <N>`  ·  `bump every <N>`  ·  `pin <N>`
+# Scanned from the step's `- name:` line (the `N-test` slot lives there) through
+# the end of its run body, comment lines EXCLUDED — a pin comment's history
+# sentences ("PIN 1459 — bumped 2026-09-15 from 1456") are the record and are
+# supposed to hold old numbers. Prints the sorted-unique set, space-joined; a
+# consistent step prints exactly its own pin and nothing else.
+functional_literals() {
+  sed -n "${1},${2}p" "$WF" | grep -v '^[[:space:]]*#' \
+    | { grep -oE -e '-ne [0-9]+' -e 'bump every [0-9]+' -e 'pin is [0-9]+' -e 'pin [0-9]+' -e '[0-9]+-test' || true; } \
+    | sed -E 's/^.*[^0-9]([0-9]+)$/\1/; s/^([0-9]+)-test$/\1/' \
+    | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
+
 # ── selftest — the predicate must be able to say YES and to say NO ───────────
 selftest() {
   pass=0; fail=0
@@ -348,9 +363,22 @@ selftest() {
       *"$TALLY_AWK"*) ok "…sums \`# pass N\` field-wise, not \`# tests N\`" ;;
       *) bad "…does not use the recognised \`# pass N\` awk" ;;
     esac
-    others="$(sed -n "${f},${l}p" "$WF" | grep -v '^[[:space:]]*#' | grep -oE '\-ne [0-9]+' | awk '{print $2}' | sort -u | tr '\n' ' ' | sed 's/ $//')"
-    if [ "$others" = "$pv" ]; then ok "…and every \`-ne\` in the step reads $pv"
-    else bad "$nm: the step's \`-ne\` literals are [$others] but its red sentence says $pv — this pin is already internally inconsistent"; fi
+    # EVERY FUNCTIONAL SLOT, NOT ONLY \`-ne\` (task-4a591a26279e7d24). A pin is
+    # spelled out in FIVE places per step — the step NAME's \`N-test\`, the
+    # gutted-tree self-test's \`-ne N\`, the verdict's \`-ne N\`, the red
+    # sentence's \`pin is N\`, its \`bump every N\` instruction to the next
+    # author, and the green line's \`exact pin N\`. Checking one of them let a
+    # HALF-DONE bump pass: with \`-ne\`/\`pin is\` at the new number and the name,
+    # the \`bump every\` instruction and the green line still at the old one, the
+    # gate stayed green and the workflow went on TELLING the next author to bump
+    # a number that is no longer the pin. Same slot set the rewriter writes
+    # (rewrite_pin), scanned over the step NAME line through the run body, so
+    # what is rewritten is exactly what is checked. Comment lines are excluded:
+    # the PIN-history log is the record of what the count USED to be and must
+    # keep saying so.
+    others="$(functional_literals "$nl" "$l")"
+    if [ "$others" = "$pv" ]; then ok "…and every functional pin literal in the step (name \`N-test\`, \`-ne\`, \`pin is\`, \`bump every\`, \`pin\`) reads $pv"
+    else bad "$nm: the step's functional pin literals are [$others] but its red sentence says $pv — this pin is internally inconsistent, so at least one hardcoded count here is a number no instrument stands behind (a half-done bump leaves the old value in the slots nobody edited)"; fi
   done > "$d.sel" 2>"$d.selerr" || true
   cat "$d.sel"; cat "$d.selerr" >&2
   # The loop above runs in a pipeline subshell, so re-derive the verdict from

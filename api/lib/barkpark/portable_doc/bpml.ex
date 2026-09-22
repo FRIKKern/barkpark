@@ -69,6 +69,19 @@ defmodule Barkpark.PortableDoc.Bpml do
   across nodes and moves exactly when the grammar moves (the same
   derive-don't-hand-bump doctrine as the renderer's source digest). Clients
   echo the digest to detect that their generated types have gone stale.
+
+  ### Deliberate grammar moves (the digest moved here on purpose)
+
+    * `<stat verdict>` (task-8bdef19b5acef8a8) — the stat VERDICT shipped in the
+      render leg (`render/data_viz.ex` `stat_html/1` paints `.bp-stat__v--loss` /
+      `--peace`) and its JS mirror, but NOT in BPML: `<stat>` spelled
+      `label value denom` only, so an authored verdict was dropped the moment a
+      document round-tripped through BPML, silently repainting the digits back to
+      `--paper-ink`. `verdict` now rides LAST in the `<stat>` attribute row — a
+      widening, so every pre-existing verdict-free stat prints byte-identically
+      and only clients that want the new key need regenerate. This IS the
+      deliberate decision the printer's comment asked someone to make; it is not
+      a silent widening.
   """
   @spec vocabulary() :: map()
   def vocabulary do

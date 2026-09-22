@@ -54,8 +54,12 @@ defmodule Mix.Tasks.Barkpark.Paper.DoctrineBackfill do
       both revs from the new blocks so every derived surface stays honest
       (render parity). Row scope columns and `status` are preserved.
 
-  A paper that would still violate `Template.validate/1` after the plan is
-  REFUSED (never written) and surfaced as UNFIXABLE. Conforming papers are left
+  A paper whose POST-migration blocks would be HOLLOW (skeleton-only \u2014 e.g. a
+  legacy paper whose ONLY block is the heading the title is synthesized from) is
+  REFUSED, never written, and reported under its own `would-be-hollow` count and
+  list as well as the UNFIXABLE tally. A paper that would still violate
+  `Template.validate/1` after the plan is likewise REFUSED and surfaced as
+  UNFIXABLE. Conforming papers are left
   BYTE-IDENTICAL.
   """
   @shortdoc "Backfill the doctrine template (title@0 + featured@1) onto legacy papers (dry-run by default; --apply to write)"
@@ -68,7 +72,22 @@ defmodule Mix.Tasks.Barkpark.Paper.DoctrineBackfill do
 
   @impl Mix.Task
   def run(args) do
-    Mix.Task.run("app.start")
+    # NOT `app.start` (task-12b07c13e3cc08b6, following #18596). `app.start`
+    # boots the FULL tree with whatever runtime env the shell carries: on
+    # guerrilla, 2026-09-02, `PHX_SERVER` was set and a one-shot's endpoint
+    # tried to bind the LIVE slot's port ("port 4001 already in use"),
+    # killing the run before the sweep started; the same boot put up a
+    # second Oban draining the live queues and the onixedit codelist
+    # seeders (`ERROR 57014 query_canceled`).
+    #
+    # MEASURED, not assumed (the edges precedent: dropping SchemaBootstrap
+    # took the projected edge count from 962 to ZERO while still exiting 0).
+    # The narrowed tree is correct for THIS task because `DoctrineBackfill` is `Repo.all` + a no-broadcast `Repo.update`
+    # (an offline migration, not a live edit) — no endpoint read, no Oban job.
+    # The dev-corpus dry run reports the identical tally under both boots —
+    # see the PR body.
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     {opts, _argv, invalid} = OptionParser.parse(args, strict: @switches)
 

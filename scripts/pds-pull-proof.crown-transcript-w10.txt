@@ -46,7 +46,7 @@ that refusal was explicitly NOT permanent. Wave 10's job was to pay it or to
 refuse it again in writing.
 
 The premise this wave was NOT allowed to use: an armed post-deploy rig. That is
-refuted (PDS-D190/D191, on top of PDS-D93). A deploy is a memory TROUGH first,
+refuted (PDS-D190/PDS-D191, on top of PDS-D93). A deploy is a memory TROUGH first,
 it breaks precondition (a) by moving the served sha out from under rung 0a's
 pin, and it aborts on precondition (d) in 4 of 4 measured deploys.
 
@@ -147,7 +147,7 @@ restart:
 The single leg-(ii) pass in 61 draws is the FIRST sample, at BEAM uptime 17:59.
 It crossed the 100000 kB ceiling by uptime ~18:30 and never came back under it.
 So leg (ii) is satisfiable only inside roughly the first eighteen minutes after a
-slot restart — which is precisely the interval PDS-D93/D190/D191 refuted for
+slot restart — which is precisely the interval PDS-D93/PDS-D190/PDS-D191 refuted for
 firing. The predicate's one open window sits inside the one region the charter
 forbids entering.
 

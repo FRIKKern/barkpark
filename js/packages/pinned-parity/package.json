@@ -7,9 +7,9 @@
   "license": "Apache-2.0",
   "scripts": {
     "prepare:pinned": "node scripts/prepare-pinned.mjs",
-    "test": "pnpm run prepare:pinned && vitest run",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint tests scripts vitest.config.ts"
+    "lint": "eslint tests scripts vitest.config.ts vitest.globalSetup.ts"
   },
   "dependencies": {
     "@barkpark/core": "workspace:^",

@@ -41,6 +41,9 @@ on:
       # of root.html.heex and main was red for 14 h with no run to say so.
       - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      # __callout_parity.test.mjs derives the callout tone VOCABULARY from the
+      # reader's own clauses every run, so a tone added here must run this job.
+      - "api/lib/barkpark/portable_doc/render/walk.ex"
       # corpus 1 of the rendered sweep below — a golden fixture added or
       # re-frozen here is a new block this workflow must render, and without
       # this line the job that renders it cannot see it.
@@ -57,6 +60,9 @@ on:
       # of root.html.heex and main was red for 14 h with no run to say so.
       - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      # __callout_parity.test.mjs derives the callout tone VOCABULARY from the
+      # reader's own clauses every run, so a tone added here must run this job.
+      - "api/lib/barkpark/portable_doc/render/walk.ex"
       # corpus 1 of the rendered sweep below — a golden fixture added or
       # re-frozen here is a new block this workflow must render, and without
       # this line the job that renders it cannot see it.
@@ -197,6 +203,54 @@ jobs:
           blocks=$(grep -c '^\(PASS\|FAIL\)  no block overflows on a token plain prose survives, at ' "$out" || true)
           if [ "$golden" -ne 2 ] || [ "$blocks" -ne 2 ]; then
             echo "::error::expected 2 golden-corpus and 2 hostile-token assertions (one per width in BP_NARROW_WIDTHS=390,320); got $golden and $blocks. The run did not measure what this job claims to measure."
+            exit 1
+          fi
+
+          exit "$status"
+
+      # ── the generic canvas harness, wired at last ────────────────────────────
+      #
+      # `src/canvas/__harness_generic_run.mjs` proves four things no other gate
+      # measures: a real published capture mounts clean and round-trips, five
+      # malformed fixture shapes are REJECTED VISIBLY, a mutated block reds the
+      # same way, and Chromium contacted nothing but the in-process static
+      # server. Until this step it was invoked by NOTHING — not a workflow, not
+      # a script, not an npm chain (`grep -rn __harness_generic .github scripts
+      # tooling` matched zero lines on origin/main at b73585c3f). Its own header
+      # explains why it is not in `npm test` (the suite must run without a
+      # browser) and points at __harness_lock.test.mjs as the always-on half —
+      # but the always-on half is a BYTE LOCK on __harness.html; it says nothing
+      # about whether the generic harness still validates anything.
+      #
+      # MEASURED, 2026-09-18 on this branch, node v22.22.0, system Chrome:
+      #   RED ARM   — gut __harness_generic.html's empty-`blocks` refusal
+      #               (line 171, `return "…nothing to mount."` -> `return null`):
+      #               __harness_generic_run.mjs -> "1 FAILING", exit 1, while
+      #               __harness_lock.test.mjs -> OK exit 0 and
+      #               __test_chain_census.mjs -> "0 drift" exit 0. Every
+      #               CI-reachable guard stayed green on a harness that had
+      #               stopped refusing an empty document.
+      #   QUIET ARM — the same tree unmutated: 8 PASS arms, "OK
+      #               __harness_generic_run.mjs", exit 0.
+      #
+      # It runs here rather than in its own job because this job already
+      # installs chrome-headless-shell and exports BP_CHROME, and a SKIP is
+      # failed below for the same reason the sweep above fails one.
+      - name: Drive the generic canvas harness in the browser
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/harness-generic.txt"
+          status=0
+          node src/canvas/__harness_generic_run.mjs > "$out" 2>&1 || status=$?
+          cat "$out"
+
+          if grep -q '^SKIP  browser arms' "$out"; then
+            echo "::error::the generic harness found no browser and skipped its browser arms. A skipped run is not a passing run."
+            exit 1
+          fi
+          arms=$(grep -c '^\(PASS\|FAIL\)  ' "$out" || true)
+          if [ "$arms" -lt 8 ]; then
+            echo "::error::expected at least 8 harness arms (1 clean mount + 1 network isolation + 5 malformed shapes + 1 mutated block); got $arms. The run did not measure what this step claims to measure."
             exit 1
           fi
 

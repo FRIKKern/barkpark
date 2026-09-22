@@ -609,6 +609,158 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     refute body =~ "% failed on attempted"
   end
 
+  ## ── THE BOUNDARY STRADDLE SAYS WHEN IT STOPS ──────────────────────────────
+  ##
+  ## dr-w27-s8-f1-seven-day-door-refuses-until-boundary-ages-out. The refusal is
+  ## CORRECT and stays: a window blending two refusal vocabularies has no rate,
+  ## and clipping the window (`from = max(now - 7d, boundary)`) to rescue one
+  ## would keep the label "last 7d" over a window that is not seven days long.
+  ## What was missing was the reader's next question — is this broken, or is it
+  ## waiting — and the answer to that is a DATE.
+
+  # The instant `DeployLedger` refuses ratios across, READ rather than re-typed,
+  # so this file cannot green itself against a constant the ledger has moved.
+  @boundary BarkparkCloud.DeployLedger.refusal_boundary().instant
+
+  # A door with EXPLICIT bounds, because every other window in this file is
+  # pinned at `@read_at - 24h` and none of them straddles anything.
+  defp door_between(label, from, to, door, deferred, failed, rate, settled) do
+    %{
+      label: label,
+      from: from,
+      to: to,
+      door: door,
+      deferred: deferred,
+      failed: failed,
+      settled: settled,
+      rate: rate,
+      terminal_rate: refused_rate(settled, "boundary")
+    }
+  end
+
+  test "a 7d door straddling the boundary names the date it measures again" do
+    to = ~U[2026-08-09 06:00:00Z]
+    from = DateTime.add(to, -604_800, :second)
+
+    deploy =
+      health([
+        door_between(
+          "last 7d",
+          from,
+          to,
+          9_156,
+          6_002,
+          311,
+          refused_rate(9_156, "the window STRADDLES the deferred settle status boundary"),
+          3_154
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    # The window really does straddle — asserted against the ledger's OWN
+    # predicate, so a green here cannot come from a fixture that merely looks
+    # like it spans the instant.
+    assert BarkparkCloud.DeployLedger.straddles_refusal_boundary?(from, to)
+    assert DateTime.compare(from, @boundary) == :lt
+    assert DateTime.compare(to, @boundary) == :gt
+
+    # THE REFUSAL SURVIVES. This row is not a licence to print a number.
+    assert body =~ "failure rate on attempted UNMEASURED"
+    refute body =~ "% failed on attempted"
+
+    # AND THE COUNTS STILL PRINT.
+    assert body =~ "9,156 attempted, of which 6,002 deferred by a busy box"
+
+    # THE HORIZON: boundary + this door's own 7-day span = 2026-08-12 21:13 UTC.
+    assert body =~
+             "Nothing here is broken and the boundary is not being moved to rescue the percentage: this door measures again from 2026-08-12 21:13 UTC, the first moment a whole last 7d window sits after the deferred settle status boundary. Until then the attempted and deferred counts above are real and only the ratio is withheld"
+  end
+
+  test "the horizon is derived from the door's OWN span, not typed once" do
+    to = ~U[2026-08-06 06:00:00Z]
+    from = DateTime.add(to, -86_400, :second)
+
+    deploy =
+      health([
+        door_between(
+          "last 24h",
+          from,
+          to,
+          400,
+          120,
+          9,
+          refused_rate(400, "the window STRADDLES the deferred settle status boundary"),
+          280
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert BarkparkCloud.DeployLedger.straddles_refusal_boundary?(from, to)
+
+    # boundary + 24h, NOT boundary + 7d — the same code, a different door.
+    assert body =~ "this door measures again from 2026-08-06 21:13 UTC"
+    refute body =~ "2026-08-12 21:13 UTC"
+    assert body =~ "a whole last 24h window sits after"
+  end
+
+  ## THE QUIET ARM. A rate refused for a SMALL SAMPLE is not a boundary
+  ## straddle, and a horizon there would be a date the reader waits on for
+  ## nothing — the sample does not grow because a boundary aged out.
+  test "a rate refused for a small sample collects NO boundary horizon" do
+    deploy =
+      health([window("last 24h", 74, 12, 3, refused_rate(74, "sample 74 below min_sample 200"))])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    # The precondition: this window is wholly AFTER the boundary, so the quiet
+    # is the predicate answering `false` and not a renderer that never fires.
+    refute BarkparkCloud.DeployLedger.straddles_refusal_boundary?(
+             DateTime.add(~U[2026-08-09 06:00:00Z], -86_400, :second),
+             ~U[2026-08-09 06:00:00Z]
+           )
+
+    assert body =~ "failure rate on attempted UNMEASURED (sample 74 below min_sample 200)"
+    refute body =~ "measures again from"
+    refute body =~ "is not being moved to rescue"
+  end
+
+  ## THE ANTI-VACUITY ARM. A door that refuses on every clock is a different
+  ## lie. Drive the SAME renderer with a clock past the boundary and the SAME
+  ## door shape renders a real percentage — no UNMEASURED, no horizon.
+  test "the same 7d door renders a real figure once the boundary has aged out" do
+    to = ~U[2026-09-16 06:00:00Z]
+    from = DateTime.add(to, -604_800, :second)
+
+    deploy =
+      health([
+        %{
+          label: "last 7d",
+          from: from,
+          to: to,
+          door: 9_156,
+          deferred: 6_002,
+          failed: 311,
+          settled: 3_154,
+          rate: measured_rate(311, 9_156),
+          terminal_rate: terminal_rate(311, 3_154, nil)
+        }
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    # The window has aged past the boundary — the predicate, not the calendar in
+    # my head, says so.
+    refute BarkparkCloud.DeployLedger.straddles_refusal_boundary?(from, to)
+    assert DateTime.compare(from, @boundary) == :gt
+
+    assert body =~ "3.4% failed on attempted (311 of 9,156 attempted)"
+    assert body =~ "9.86% failed on settled (311 of 3,154 settled)"
+    refute body =~ "failure rate on attempted UNMEASURED"
+    refute body =~ "measures again from"
+  end
+
   ## ── THE DEFERRAL WAIT ─────────────────────────────────────────────────────
   ##
   ## The count answers "how often did a box say not now". Only the wait answers

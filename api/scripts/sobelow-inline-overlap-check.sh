@@ -606,7 +606,18 @@ scan_binding() {
           # was built and MEASURED on api/lib at 2 rows — `prune_build_logs/1`
           # and `cleanup_mcp/1`, whose File work happens in helpers they call.
           # Those are inert waivers, not displacement, and a gate that reds main
-          # on them is a gate that gets switched off. TRANSFER therefore requires
+          # on them is a gate that gets switched off.
+          #
+          # BOTH OF THOSE TWO ARE NOW GONE (task-2bb9535b28720b26): `mix sobelow
+          # --skip` reported 0 findings with them present and 0 with them deleted,
+          # while deleting a waiver one function away (`cleanup_mcp_file/1`) moved
+          # 0 -> 1 — so they really did suppress nothing and the annotations were
+          # removed rather than re-spelled. Re-measured after that removal the
+          # bare relevance rule reports TEN rows on api/lib, not zero: waivers on
+          # defs that DO call `File.` but only through `stat`/`lstat`/`regular?`,
+          # which are absent from Traversal.FileModule`s token list. That is a
+          # third class again — neither displacement nor a dead annotation — so
+          # the victim requirement stays. TRANSFER therefore requires
           # BOTH halves of the displacement: the annotated def cannot be flagged
           # by the type it waives, AND an IMMEDIATELY NEIGHBOURING def — the one
           # above or the one below, outside its own clause group so this never
@@ -849,9 +860,17 @@ run_binding_check() {
 #   e.g. Traversal.FileModule => a `File.` call). It DOES catch the incident:
 #   `operator_grant/1` makes no File call. But run over api/lib it reports 2
 #   rows on a clean origin/main — `prune_build_logs/1` and `cleanup_mcp/1`,
-#   whose File work happens in helpers they call. Those are plausibly inert
-#   waivers worth their own look, but they are NOT displacement, and a gate that
-#   reds main on them would be turned off within a day.
+#   whose File work happens in helpers they call. Those two were confirmed inert
+#   and DELETED (task-2bb9535b28720b26), and re-running relevance afterwards
+#   still reports ten rows — waivers over `File.stat`/`lstat`/`regular?`, which
+#   Sobelow`s own token map does not flag. So relevance remains a gate that reds
+#   main, and would be turned off within a day.
+#
+#   THE PIN IS ALREADY THE RATCHET FOR THIS. Re-adding either deleted annotation
+#   puts a PAIR row back that the committed pin does not carry, and the exact
+#   diff below reds naming the function. An inert waiver that comes back does not
+#   need a sixth predicate to catch it; it needs the pin nobody may regenerate
+#   unread.
 #
 #   BEFORE/AFTER DIFF, the shape that found this in the first place: compute the
 #   pairing, compare against the previous tree. In CI there IS no "before"

@@ -160,11 +160,22 @@ defmodule BarkparkCloud.Accounts.Authz do
   def rank(role), do: Map.get(@rank, role, 0)
 
   @doc """
-  Anti-escalation guard (Coolify `app/Models/Member.php` — an admin cannot
-  promote past their own rank). The actor must be a team admin AND must not
-  grant a role at or above their OWN rank: an admin can add a member but cannot
-  mint an owner; an owner can grant admin/member. Returns `:ok |
-  {:error, :forbidden}`.
+  Anti-escalation guard, modelled on Coolify `app/Models/Member.php`.
+
+  THE SHIPPED RULE, said the way the `cond` below says it: the actor must be a
+  team admin AND the target role must not rank STRICTLY ABOVE their own. The
+  comparison is `>`, NOT `>=`, so EQUAL RANK IS PERMITTED — an admin can add a
+  member AND mint another admin, and cannot mint an owner; an owner can grant
+  any role, owner included. Returns `:ok | {:error, :forbidden}`.
+
+  The earlier wording here said "must not grant a role at or above their OWN
+  rank", which described `>=` and contradicted its own next clause. Whether
+  equal-rank granting SHOULD be permitted is an OPEN POLICY QUESTION for an
+  owner, not a settled one — Coolify's own guard is the stricter form. The
+  measured behaviour is pinned in both directions by the
+  "PINS CURRENT BEHAVIOUR" arm in
+  `test/barkpark_cloud/accounts/authz_test.exs`: if the comparison here is ever
+  flipped to `>=`, that arm is the thing to UPDATE, not a guard to work around.
   """
   @spec can_grant?(actor(), team(), String.t()) :: :ok | {:error, :forbidden}
   def can_grant?(actor, team, target_role) do

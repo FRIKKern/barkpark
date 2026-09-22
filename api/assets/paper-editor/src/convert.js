@@ -918,19 +918,33 @@ function orderedListSource(block) {
   return block.ordered === true || block.type === "ordered-list" || block.type === "numbered_list";
 }
 
+// A checklist is `{type:"list", task:true, items:[{content|text, checked, children?}…]}`; it mounts
+// as TipTap's taskList/taskItem so the checkbox is a native control, and comes back through
+// listItemFromTiptap with `checked` on every item map.
 function listToTiptap(block, path, nested = false) {
+  const task = block.task === true;
+  const itemChecked = (item) => item && typeof item === "object" && !Array.isArray(item) && item.checked === true;
   const items = (Array.isArray(block.items) ? block.items : []).map((item, index) => ({
-    type: "listItem",
-    attrs: { bpListSource: { item: deepCloneJson(item) } },
+    type: task ? "taskItem" : "listItem",
+    attrs: { bpListSource: { item: deepCloneJson(item) }, ...(task ? { checked: itemChecked(item) } : {}) },
     content: [{ type: "paragraph", content: inlineArrayToTiptap(listItemToInlineArray(item)) },
       ...(Array.isArray(item?.children) ? item.children.flatMap((child, at) =>
         supportedListChild(child) ? [listToTiptap(child, `${path}/${index}/${at}`, true)] : []) : [])],
   }));
   return {
-    type: orderedListSource(block) ? "orderedList" : "bulletList",
+    type: task ? "taskList" : orderedListSource(block) ? "orderedList" : "bulletList",
     ...(nested ? { attrs: { bpListFrameSource: { block: deepCloneJson(block), path } } } : {}),
-    content: items.length ? items : [{ type: "listItem", content: [{ type: "paragraph" }] }],
+    content: items.length ? items : [{ type: task ? "taskItem" : "listItem", ...(task ? { attrs: { checked: false } } : {}), content: [{ type: "paragraph" }] }],
   };
+}
+
+// The item as the wire wants it for a checklist: always a map carrying `checked`.
+function withChecked(result, li, content) {
+  const checked = li.attrs?.checked === true;
+  if (result && typeof result === "object" && !Array.isArray(result)) return { ...result, checked };
+  if (Array.isArray(result)) return { content: result, checked };
+  if (typeof result === "string") return { text: result, checked };
+  return { content: tiptapInlineToPd(content), checked };
 }
 
 function nestedListFromTiptap(node, seen) {
@@ -938,8 +952,9 @@ function nestedListFromTiptap(node, seen) {
   const ownsSource = source?.block && !seen.has(source.path);
   if (ownsSource) seen.add(source.path);
   const ordered = node.type === "orderedList";
+  const task = node.type === "taskList";
   const items = (node.content || []).map(li => listItemFromTiptap(li, seen));
-  if (!ownsSource) return { type: "list", ordered, items };
+  if (!ownsSource) return { type: "list", ordered, items, ...(task ? { task: true } : {}) };
   const fields = deepCloneJson(source.block);
   // An empty source list needs a schema placeholder, not a new persisted item.
   const emptyPlaceholder = fields.items.length === 0 && node.content?.length === 1 &&
@@ -948,6 +963,10 @@ function nestedListFromTiptap(node, seen) {
   if (ordered !== orderedListSource(fields)) {
     fields.type = "list";
     fields.ordered = ordered;
+  }
+  if (task !== (fields.task === true)) {
+    fields.type = "list";
+    fields.task = task;
   }
   return fields;
 }
@@ -958,15 +977,16 @@ function listItemFromTiptap(li, seen = new Set()) {
   const item = source && Object.hasOwn(source, "item")
     ? inlineCarrierFromTiptap(source.item, content) : tiptapInlineToPd(content);
   const nested = (li.content || []).slice(1).filter(node =>
-    node.type === "bulletList" || node.type === "orderedList").map(node => nestedListFromTiptap(node, seen));
+    node.type === "bulletList" || node.type === "orderedList" || node.type === "taskList").map(node => nestedListFromTiptap(node, seen));
   const original = Array.isArray(source?.item?.children) ? source.item.children : [];
-  if (!nested.length && !original.some(supportedListChild)) return item;
+  const finish = (result) => li.type === "taskItem" ? withChecked(result, li, content) : result;
+  if (!nested.length && !original.some(supportedListChild)) return finish(item);
   let index = 0;
   const children = original.flatMap(child => supportedListChild(child)
     ? index < nested.length ? [nested[index++]] : [] : [deepCloneJson(child)]);
   children.push(...nested.slice(index));
-  return item && typeof item === "object" && !Array.isArray(item)
-    ? { ...item, children } : { content: tiptapInlineToPd(content), children };
+  return finish(item && typeof item === "object" && !Array.isArray(item)
+    ? { ...item, children } : { content: tiptapInlineToPd(content), children });
 }
 
 function inlineCarrierFromTiptap(item, content) {
@@ -1026,10 +1046,12 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
       return { text, level };
     }
     case "list": {
-      const ordered = top.type === "orderedList";
+      const task = top.type === "taskList";
+      const ordered = !task && top.type === "orderedList";
       const seen = new Set();
       const items = (top.content || []).map(li => listItemFromTiptap(li, seen));
-      return { ordered, items };
+      // `task` rides only when true; run-convert adds task:false when a checklist turns back into a plain list.
+      return task ? { ordered, items, task: true } : { ordered, items };
     }
     case "paragraph":
     default: {

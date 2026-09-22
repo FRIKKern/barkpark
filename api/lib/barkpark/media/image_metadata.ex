@@ -177,7 +177,7 @@ defmodule Barkpark.Media.ImageMetadata do
   # `@lqip_preset` and that preset's own declared format. This call passes NO
   # opts, so `watermark_profile/1` yields "none" and the suffix is the empty
   # string — no argument of `maybe_lqip/2` reaches any path component.
-  # `Media.file_path/1` (lib/barkpark/media.ex:930) then joins that under
+  # `Media.file_path/1` (lib/barkpark/media.ex, `def file_path`) then joins that under
   # `Media.upload_dir/0`, so the read is confined to one file inside the
   # rendition cache root.
   # sobelow_skip ["Traversal.FileModule"]

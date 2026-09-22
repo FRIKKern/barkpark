@@ -363,6 +363,7 @@ set -euo pipefail
 CLOUD_PATHS='cloud/**
 cloud/lib/**
 .github/workflows/**
+.claude/workflows/bp-cloud-console-hardening-charter.md
 cloud/priv/audit-actions.json
 deploy/**
 deploy/site-deploy.sh

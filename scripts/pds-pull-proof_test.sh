@@ -484,7 +484,7 @@ else
 fi
 # pds-bl-step6-tag-exclusion-stale-comment: tag IS guarded, excluded for scope
 if grep -q 'outside the guard$' "$PROOF" || grep -q 'outside the guard entirely' "$PROOF"; then
-  bad 'the THE 34 block no longer says `tag` is outside the guard' "PDS-D125/D126 put TagRegistry behind the SAME Tenancy.pulled_schema_row/2 predicate (api/lib/barkpark/content/tag_registry.ex:101); the exclusion is a SCOPING decision and the comment must say so"
+  bad 'the THE 34 block no longer says `tag` is outside the guard' "PDS-D125/PDS-D126 put TagRegistry behind the SAME Tenancy.pulled_schema_row/2 predicate (api/lib/barkpark/content/tag_registry.ex:101); the exclusion is a SCOPING decision and the comment must say so"
 else
   ok 'the THE 34 block no longer claims `tag` is written outside the guard'
 fi
@@ -535,7 +535,7 @@ printf '\n'
 
 # ── RUNG 6's SENTINEL COVERAGE, AND THE TWO DEMOS THE THAW OWES ─────────────
 # (pds-bl-legb-visibility-control-n3 · pds-bl-rung6-percolumn-invisible-on-green
-#  · PDS-D742/D743/D744)
+#  · PDS-D742/PDS-D743/PDS-D744)
 #
 # PDS-D744 licenses the thaw only against a SHOWN failure, and neither demo may
 # be a live target mutation (PDS-D31: no guerrilla export is spent here). Both
@@ -609,7 +609,7 @@ old_verdict="$(columns_where same "$AGG_SENTINELLED" "$AGG_CLOBBERED_FULL")"
 if [ -z "$old_verdict" ]; then
   ok 'DEMO(i) OLD code PASSES on the same fixture — columns_where same finds NOTHING to complain about, so rung 6 went green with its visibility control proving nothing'
 else
-  bad 'DEMO(i) the OLD shape passes on the all-private fixture' "columns_where same named '$old_verdict' on a full clobber; if the pre-fix code already redded here there is no failure for this thaw to have fixed (PDS-D100/D743)"
+  bad 'DEMO(i) the OLD shape passes on the all-private fixture' "columns_where same named '$old_verdict' on a full clobber; if the pre-fix code already redded here there is no failure for this thaw to have fixed (PDS-D100/PDS-D743)"
 fi
 
 # ── DEMO (ii): a deliberately partial revert must NAME the missing columns ───
@@ -755,6 +755,152 @@ fi
 
 printf '\n'
 
+# ── cond_d's COUNT IDENTITY (task-adad29e7487ed2b6) ─────────────────────────
+# gate_d_verdict is worst-case over the pairs it is HANDED, so a run the loop
+# never examined is not represented at all. The loop reads `$gh_out` on fd 0
+# (a heredoc) and runs `gh run view` in its body: a body child that reads stdin
+# swallows the remaining run ids, the loop ENDS EARLY with no error and no
+# non-zero status, and a 3-run listing in which run 222 is shipping to the
+# source box reads as "every one of them is CONTROL-PLANE ONLY" — the same
+# sentence a true clear uses. Nothing in the block could tell "3 of 3" from
+# "1 of 3", because both look like a completed loop.
+#
+# BOTH DIRECTIONS ARE DRIVEN HERE, against a `gh` STUB on PATH — no network, no
+# token, no live export (PDS-D31). The drain arm SPLICES `cat >/dev/null` into
+# the shipped loop body at its MUT anchor, which is the body child nobody
+# remembered reads fd 0; the RED-WITHOUT arm additionally CUTS the identity
+# block between its MUT markers and shows the same short scan going GREEN.
+printf 'pds-pull-proof_test: cond_d refuses a verdict built over fewer runs than it was handed\n'
+
+if ! declare -f gate_d_conditions >/dev/null 2>&1; then
+  printf 'pds-pull-proof_test: gate_d_conditions is not defined after sourcing %s — the count-identity arms would be testing nothing\n' "$PROOF" >&2
+  exit 1
+fi
+
+# The `gh` the loop body calls, stubbed. Run 111 is cloud-only (instance
+# skipped); 222 and 333 have a LIVE instance job, i.e. they are shipping to the
+# source box. `gh run view <id> --json jobs -q …` => $3 is the id.
+STUB="$TMP/stub"; mkdir -p "$STUB"
+cat > "$STUB/gh" <<'GHSTUB'
+#!/usr/bin/env bash
+T="$(printf '\t')"
+case "${3-}" in
+  111) printf 'changes%scompleted%ssuccess\ncontrol-plane%sin_progress%s\ninstance%scompleted%sskipped\n' "$T" "$T" "$T" "$T" "$T" "$T" ;;
+  *)   printf 'changes%scompleted%ssuccess\ncontrol-plane%scompleted%sskipped\ninstance%sin_progress%s\n' "$T" "$T" "$T" "$T" "$T" "$T" ;;
+esac
+GHSTUB
+chmod +x "$STUB/gh"
+
+# A mutated COPY of the shipped script, loaded through its own library mode.
+# `lib` is symlinked because the script resolves lib/bp-curl.sh off
+# ${BASH_SOURCE[0]}; SCRIPT_DIR comes off $0, which is set to this harness so
+# the sibling scripts it sources still resolve in the real scripts/ directory.
+MUTDIR="$TMP/mut"; mkdir -p "$MUTDIR"
+ln -sf "$REPO_ROOT/scripts/lib" "$MUTDIR/lib"
+
+# mk_mut <outfile> <drain 0|1> <keep-identity 0|1>
+mk_mut() {
+  awk -v drain="$2" -v ident="$3" '
+    index($0, "# MUT-ANCHOR: gate-d-body-child") { if (drain == 1) print "      cat >/dev/null"; print; next }
+    index($0, "# MUT-ANCHOR: gate-d-count-identity") { if (ident == 0) skip = 1 }
+    skip == 1 { if (index($0, "# MUT-END: gate-d-count-identity")) skip = 0; next }
+    { print }
+  ' "$PROOF" > "$1"
+}
+
+# gate_d_at <script> <gh_out> -> prints the verdict; returns gate_d_conditions' rc
+gate_d_at() {
+  PATH="$STUB:$PATH" bash -c '
+    PDS_PROOF_LIB=1 . "$1" >/dev/null 2>&1 || { printf "LOAD-FAILED\n"; exit 99; }
+    set +e
+    declare -f gate_d_conditions >/dev/null 2>&1 || { printf "NO-FUNCTION\n"; exit 98; }
+    gate_d_conditions 0 "$2"
+  ' "$REPO_ROOT/scripts/pds-pull-proof_test.sh" "$1" "$2"
+}
+
+MUT_INTACT="$MUTDIR/intact.sh"; mk_mut "$MUT_INTACT" 0 1
+MUT_DRAIN="$MUTDIR/drain.sh";   mk_mut "$MUT_DRAIN"  1 1
+MUT_NOID="$MUTDIR/noid.sh";     mk_mut "$MUT_NOID"   1 0
+
+# The mutations must BITE. A splice that matched nothing, or an excision that
+# cut nothing, would make the arms below measure the same file three times.
+if ! cmp -s "$PROOF" "$MUT_INTACT"; then
+  printf 'pds-pull-proof_test: the unmutated copy differs from %s — the mutator is rewriting lines it was told to pass through\n' "$PROOF" >&2
+  exit 1
+fi
+for _m in "$MUT_DRAIN" "$MUT_NOID"; do
+  if cmp -s "$PROOF" "$_m"; then
+    printf 'pds-pull-proof_test: %s is byte-identical to the shipped script — the MUT anchors no longer match, so the control arms would prove nothing\n' "$_m" >&2
+    exit 1
+  fi
+done
+
+RUNS3="$(printf '111\n222\n333\n')"
+
+# (1) POSITIVE CONTROL — the unmutated loop over the same 3-run fixture. All
+# three pairs get built, so the instance-targeting runs are SEEN and the gate
+# aborts by id. Without this arm the refusal arms below could be satisfied by a
+# function that refuses everything.
+d="$(gate_d_at "$MUT_INTACT" "$RUNS3")"; rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$d" | grep -q '222' && printf '%s' "$d" | grep -q '333' && ! printf '%s' "$d" | grep -q 'SHORT RUN SCAN'; then
+  ok 'an INTACT loop examines all 3 in-flight runs and aborts naming the instance-targeting ones'
+else
+  bad 'an INTACT loop examines all 3 in-flight runs and aborts naming the instance-targeting ones' "rc=$rc, text='$d'. The identity must not change the verdict of a complete scan, and a complete scan of this fixture is an abort naming 222 and 333"
+fi
+
+# (2) The identity must not MANUFACTURE a refusal on a complete short listing.
+d="$(gate_d_at "$MUT_INTACT" "$(printf '111\n')")"; rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$d" | grep -q 'CONTROL-PLANE ONLY'; then
+  ok 'one cloud-only run, fully examined, still PASSES (1 pair of 1 enumerated)'
+else
+  bad 'one cloud-only run, fully examined, still PASSES (1 pair of 1 enumerated)' "rc=$rc, text='$d'. An identity that reds a 1-of-1 scan has replaced a false clear with a false abort"
+fi
+
+# (3) The empty listing never reaches the identity at all — zero pairs over zero
+# runs is the quiet case, not a short scan.
+d="$(gate_d_at "$MUT_INTACT" "")"; rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$d" | grep -q 'no deploy.yml run in progress'; then
+  ok 'no in-flight run at all is still the quiet OK, never a SHORT RUN SCAN'
+else
+  bad 'no in-flight run at all is still the quiet OK, never a SHORT RUN SCAN' "rc=$rc, text='$d'. The empty listing must stay OK; reporting it as a short scan would red every healthy export"
+fi
+
+# (4) THE FIRING CONTROL (c1). A stdin-draining child is spliced into the loop
+# body. The loop now ends after ONE of the three runs, and the refusal fires
+# naming BOTH numbers.
+d="$(gate_d_at "$MUT_DRAIN" "$RUNS3")"; rc=$?
+if [ "$rc" -ne 0 ] && [ "${d#UNKNOWN}" != "$d" ] \
+   && printf '%s' "$d" | grep -q 'SHORT RUN SCAN' \
+   && printf '%s' "$d" | grep -q 'built 1 run/verdict pair(s) from the 3 in-flight'; then
+  ok 'a stdin-draining child in the loop body makes cond_d REFUSE, naming 1 pair of 3 runs'
+else
+  bad 'a stdin-draining child in the loop body makes cond_d REFUSE, naming 1 pair of 3 runs' "rc=$rc, text='$d'. A loop that examined one run of three must not hand gate_d_verdict a truncated pair list; the refusal must name both numbers so a reader can see how much of the listing was looked at"
+fi
+
+# (5) RED-WITHOUT. The same short scan with the identity block CUT between its
+# MUT markers — i.e. the pre-change code — reports a CLEAR over run 111 alone
+# while runs 222 and 333 are shipping to the source box. This is the defect,
+# demonstrated, and arm (4) is what stops it.
+d="$(gate_d_at "$MUT_NOID" "$RUNS3")"; rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$d" | grep -q 'CONTROL-PLANE ONLY' && ! printf '%s' "$d" | grep -q '222'; then
+  ok 'RED-WITHOUT: with the identity cut, the same drained loop CLEARS over 1 run of 3 and never mentions 222'
+else
+  bad 'RED-WITHOUT: with the identity cut, the same drained loop CLEARS over 1 run of 3 and never mentions 222' "rc=$rc, text='$d'. This arm is the visibility control for the identity: if the pre-change code no longer false-clears here, arm (4) is guarding a defect this fixture can no longer reproduce and the fixture must be rebuilt, not the assertion relaxed"
+fi
+
+# (6) BLANK LINES ARE COUNTED THE SAME ON BOTH SIDES. The body's own
+# `[ -n "$d_run" ] || continue` appends no pair for a blank line, so the
+# enumeration must not count one either — `awk NF` and that guard have to agree
+# or a listing with a stray blank line would refuse itself.
+d="$(gate_d_at "$MUT_INTACT" "$(printf '111\n\n222\n333\n')")"; rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$d" | grep -q '222' && ! printf '%s' "$d" | grep -q 'SHORT RUN SCAN'; then
+  ok 'a blank line in the listing is not counted on either side — 3 pairs of 3, no self-refusal'
+else
+  bad 'a blank line in the listing is not counted on either side — 3 pairs of 3, no self-refusal' "rc=$rc, text='$d'. The two counts must define non-empty identically; a mismatch here means the identity reds on input the loop handles correctly"
+fi
+
+printf '\n'
+
 # ── the receipt's own arithmetic is an arm ──────────────────────────────────
 # The headline total used to be hand-typed beside a hand-typed breakdown, and a
 # wave that added 17 arms typed 58 over a breakdown summing to 57. Nothing local
@@ -764,8 +910,8 @@ printf '\n'
 # checks itself three ways before it is printed: the breakdown must SUM to the
 # declared total, and the declared total must equal the arms this run actually
 # printed. A miscount now reds here, in the second it is typed.
-ARMS_DECLARED=76
-ARMS_BREAKDOWN='13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording, 9 rung-6 sentinel coverage, 10 cond_d job discrimination'
+ARMS_DECLARED=82
+ARMS_BREAKDOWN='13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination, 4 lifecycle precondition, 10 control-PG verdict, 3 non-relocatable, 7 pin triple, 5 rss attribution, 5 honesty wording, 9 rung-6 sentinel coverage, 10 cond_d job discrimination, 6 cond_d short-run identity'
 breakdown_sum="$(printf '%s' "$ARMS_BREAKDOWN" | tr ',' '\n' | awk '{s += $1} END {print s + 0}')"
 if [ "$breakdown_sum" -ne "$ARMS_DECLARED" ]; then
   bad 'the receipt adds up' "the declared total is $ARMS_DECLARED but the breakdown sums to $breakdown_sum — one of the two was typed and not counted"
