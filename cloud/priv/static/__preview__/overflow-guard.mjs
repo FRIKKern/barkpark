@@ -14480,6 +14480,21 @@ async function main() {
         // to paint one.
         { scen: "webhooks-autodisabled", ready: `document.querySelector('section.view:not([hidden]) .wh-card')`,
           click: "section.view:not([hidden]) [data-wh-deliveries]", settle: "section.view:not([hidden]) .wh-del-err", sels: [".wh-del-err"] },
+        // THE SECOND PRODUCER OF THE SAME CLASS. `.wh-del-err` is painted by
+        // TWO functions in app.js — `deliveryRowHtml` (the webhooks panel,
+        // above, off `d.last_error_text`) and `notifDeliveryRowHtml` (the
+        // notifications delivery log, here, off `d.last_error`). One CSS rule,
+        // two render paths, and the case above measured only one of them: the
+        // notifications row carries `.wh-del-meaning`, `.wh-del-proof` and
+        // `.wh-del-meta` siblings the webhook row never emits, so it is a
+        // different flex line reaching the same `flex-basis: 100%` span. This
+        // log is NOT behind a control — `notifDeliveriesShellHtml` mounts
+        // `#notif-deliveries-body` with a `Loading delivery log…` placeholder
+        // and fills it from GET /v1/notifications/deliveries — so there is no
+        // click, only a SETTLE, and a measurement taken in that gap would
+        // report a perfect table about a spinner.
+        { scen: "notif-configured", ready: `document.querySelector('section.view:not([hidden]) #notif-deliveries-body')`,
+          settle: "section.view:not([hidden]) #notif-deliveries-body .wh-del-err", sels: [".wh-del-err"] },
         { scen: "activity", ready: `document.querySelector('section.view:not([hidden]) .tlv-row')`, click: "section.view:not([hidden]) .tlv-toggle",
           sels: [".tlv-detail"] },
         { scen: "timeline", ready: `document.querySelector('section.view:not([hidden]) .tlv-row')`, click: "section.view:not([hidden]) .tlv-toggle",
@@ -14495,6 +14510,29 @@ async function main() {
         if (!covered.has(sel)) {
           return die(`${D}: \`${sel}\` is one of the seven this row owns and no case in this leg renders it — the population would be measured six-sevenths and reported whole`);
         }
+      }
+      // A SELECTOR IS NOT A RENDER PATH, and the coverage check above cannot
+      // tell them apart: it is satisfied the moment ONE case paints a class.
+      // `.wh-del-err` has two producers in app.js and for a full wave only one
+      // of them was driven, so a regression on the notifications path was
+      // unguarded while this leg printed a clean table naming the class.
+      // The pairing is named here AND the population is counted off app.js, so
+      // a THIRD producer appearing is a refusal rather than a silent
+      // two-thirds measurement — an enumeration is a snapshot, a count read
+      // from the source is a rule.
+      const PRODUCERS = [
+        { sel: ".wh-del-err", fn: "deliveryRowHtml", field: "last_error_text", scen: "webhooks-autodisabled" },
+        { sel: ".wh-del-err", fn: "notifDeliveryRowHtml", field: "last_error", scen: "notif-configured" },
+      ];
+      for (const pr of PRODUCERS) {
+        if (!CASES.some((c) => c.scen === pr.scen && c.sels.includes(pr.sel))) {
+          return die(`${D}: \`${pr.sel}\` is painted by \`${pr.fn}\` off \`${pr.field}\` and no case in this leg drives \`${pr.scen}\` for it — the class would be measured on one of its ${PRODUCERS.length} render paths and reported as the class`);
+        }
+      }
+      const APP_JS = fs.readFileSync(path.join(ROOT, "app.js"), "utf8");
+      const errEmitters = (APP_JS.match(/class="wh-del-err"/g) || []).length;
+      if (errEmitters !== PRODUCERS.length) {
+        return die(`${D}: app.js emits \`class="wh-del-err"\` from ${errEmitters} site(s), and this leg names ${PRODUCERS.length} (${PRODUCERS.map((pr) => pr.fn).join(", ")}) — the population moved under the leg, so the table below would be a claim about ${PRODUCERS.length} of ${errEmitters} render paths`);
       }
       for (const c of CASES) {
         if (!hashOf(c.scen)) {
@@ -14518,16 +14556,34 @@ async function main() {
         `var ns=[].slice.call(document.querySelectorAll('section.view:not([hidden]) '+SEL))` +
         `  .filter(function(e){return e.getClientRects().length;});` +
         `var d=document.documentElement;` +
-        `if(!ns.length) return {n:0,psw:d.scrollWidth,pcw:d.clientWidth};` +
+        `if(!ns.length) return {n:0,psw:d.scrollWidth,pcw:d.clientWidth,tsn:0,tsbad:[]};` +
         // THE CASCADE IS READ BEFORE THE SUBSTITUTION, off the shipped sheet.
         `var cs0=getComputedStyle(ns[0]);` +
+        // THE TIMESTAMP COLUMN'S CEILING, read here and asserted below. The
+        // walk skips `.bp-console-ts` / `.deploy-console-ts` (see the note at
+        // the skip), and the reason it may is a claim about app.js, not about
+        // this probe — so the claim is MEASURED on the live text rather than
+        // taken on trust. Read before the substitution for the same reason the
+        // cascade is: after it, this would be reading the fixture.
+        `var tss=[].slice.call(document.querySelectorAll('section.view:not([hidden]) .bp-console-ts,section.view:not([hidden]) .deploy-console-ts'));` +
+        `var tsbad=tss.map(function(e){return (e.textContent||'');})` +
+        `  .filter(function(t){return !/^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]$/.test(t);});` +
         `var saved=[],hit=0;` +
         `ns.forEach(function(e){var w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT,null);var n;` +
         // The timestamp column of a console line is `flex: 0 0 auto`: putting
         // the cruel host THERE manufactures a spill no string the product can
         // emit would cause, and the leg would be asserting against its own
-        // fixture. Measured: it drove .bp-console-line to 626/224 and 1993.9px
-        // of single-character line boxes on a tree that is otherwise clean.
+        // fixture. Measured by deleting this skip and re-running the leg: it
+        // drove .bp-console-line to 626/224 at 320 and 626/334 at 430, with
+        // 1993.9px of single-character line boxes, and .deploy-console-line to
+        // 579/230 and 1636.3px — on a tree that is otherwise clean.
+        // THE SKIP IS LEGITIMATE BECAUSE OF A CEILING, NOT BECAUSE IT IS
+        // CONVENIENT: both spans are filled by `newFmtConsoleTime`, which
+        // returns "" or exactly `HH:MM:SS` from two-digit-padded
+        // getHours/getMinutes/getSeconds — 8 characters, never a token a
+        // `flex: 0 0 auto` column cannot hold. That claim is app.js's, so it
+        // is asserted below against the LIVE text of every timestamp painted
+        // in this leg rather than left as a comment.
         `  while((n=w.nextNode())){var t=n.nodeValue||'';if(!t.trim()) continue;` +
         `    if(n.parentElement&&n.parentElement.closest('.bp-console-ts,.deploy-console-ts')) continue;` +
         `    var toks=t.split(/(\s+)/);var bi=-1,bl=0;` +
@@ -14542,10 +14598,11 @@ async function main() {
         `    pw:pr?+pr.width.toFixed(2):-1,psw2:pe?pe.scrollWidth:-1,pcw2:pe?pe.clientWidth:-1,` +
         `    h:+r.height.toFixed(1)};});` +
         `var out={n:ns.length,hit:hit,rows:rows,psw:d.scrollWidth,pcw:d.clientWidth,` +
-        `  wb:cs0.wordBreak,ow:cs0.overflowWrap};` +
+        `  wb:cs0.wordBreak,ow:cs0.overflowWrap,tsn:tss.length,tsbad:tsbad.slice(0,3)};` +
         `saved.forEach(function(x){x[0].nodeValue=x[1];});void d.offsetWidth;` +
         `return out;})()`;
       let cells = 0, elsSeen = 0, subs = 0, spills = 0, cascadeBad = 0, pageOver = 0, tallest = 0;
+      let tsSeen = 0, tsBad = 0;
       for (const c of CASES) {
         for (const theme of ["light", "dark"]) {
           // Enter WIDE and assert the landed screen through the readiness
@@ -14561,17 +14618,24 @@ async function main() {
             if (!clicked) {
               return die(`${D}: ${c.scen} rendered no \`${c.click}\` to open — \`${c.sels.join("/")}\` is behind that control, so a run without it would report a perfect table about a collapsed row`);
             }
-            if (c.settle) {
-              const t0 = Date.now();
-              let ok = false;
-              while (Date.now() - t0 < 5000) {
-                ok = !!(await evalJs(`!!document.querySelector(${JSON.stringify(c.settle)})`));
-                if (ok) break;
-                await sleep(100);
-              }
-              if (!ok) {
-                return die(`${D}: ${c.scen} never painted \`${c.settle}\` within 5000ms of opening \`${c.click}\` — the delivery log did not arrive, so this case would have measured an empty box`);
-              }
+          }
+          // THE SETTLE IS NOT THE CLICK'S DEPENDANT. It used to be nested
+          // inside `if (c.click)`, which made "arrives on a fetch" and "is
+          // behind a control" the same property — and the notifications
+          // delivery log is the first case that is the first WITHOUT being the
+          // second. A case declaring `settle` with no `click` would have
+          // skipped the wait entirely and measured the `Loading delivery log…`
+          // placeholder as a clean zero-spill row.
+          if (c.settle) {
+            const t0 = Date.now();
+            let ok = false;
+            while (Date.now() - t0 < 5000) {
+              ok = !!(await evalJs(`!!document.querySelector(${JSON.stringify(c.settle)})`));
+              if (ok) break;
+              await sleep(100);
+            }
+            if (!ok) {
+              return die(`${D}: ${c.scen} never painted \`${c.settle}\` within 5000ms${c.click ? ` of opening \`${c.click}\`` : " of the route landing"} — the delivery log did not arrive, so this case would have measured an empty box`);
             }
           }
           const row = [];
@@ -14609,6 +14673,19 @@ async function main() {
                 }
                 if (r.h > tallest) tallest = r.h;
               }
+              // THE TIMESTAMP COLUMN, whose `flex: 0 0 auto` this leg's walk
+              // steps around. Unbounded it is a real overflow (the numbers at
+              // the skip above); bounded it is not reachable, and THIS is where
+              // the bound is checked rather than believed.
+              // ONCE PER CELL, not once per selector: every selector in a case
+              // shares one screen, so counting per selector would report the
+              // same timestamps two and three times and inflate the ok-line's
+              // population into a number nothing painted.
+              if (sel === c.sels[0]) tsSeen += m.tsn || 0;
+              if (sel === c.sels[0] && m.tsbad && m.tsbad.length) {
+                tsBad += m.tsbad.length;
+                fail(D, `${c.scen}/${theme}@${width} ${sel}: a \`.bp-console-ts\`/\`.deploy-console-ts\` carries ${JSON.stringify(m.tsbad)} — not the \`HH:MM:SS\` \`newFmtConsoleTime\` is the only producer of. The column is \`flex: 0 0 auto\` with no min-width escape, and this leg's walk SKIPS it on the strength of that ceiling; with the ceiling gone the skip is a blind spot rather than a fixture-discipline (deleting the skip drove .bp-console-line to 626/224 and .deploy-console-line to 579/230)`);
+              }
               if (m.psw > m.pcw) {
                 pageOver++;
                 fail(D, `${c.scen}/${theme}@${width} ${sel}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the screen is off-screen sideways under the cruel host`);
@@ -14645,6 +14722,14 @@ async function main() {
           `deletion lands the same way AND, at the four sites this row did NOT convert, drives the page to ` +
           `668/320 (.rail-row .v) and 665/320 (.new-step-probe) — so the written reason at each of those four ` +
           `declarations is falsifiable here rather than decorative`,
+        );
+        okLine(
+          `THE TIMESTAMP COLUMN'S CEILING, MEASURED: ${tsSeen} painted \`.bp-console-ts\`/\`.deploy-console-ts\` read across ` +
+          `this run, ${tsBad} outside \`HH:MM:SS\`. That column is \`flex: 0 0 auto\` and the cruel-host walk steps ` +
+          `around it — legitimately, because \`newFmtConsoleTime\` is its only producer and it returns "" or eight ` +
+          `characters. Delete the skip and the unbounded column drives .bp-console-line to 626/224 (1993.9px of ` +
+          `single-character line boxes) and .deploy-console-line to 579/230, so the ceiling is what makes the skip ` +
+          `discipline instead of a blind spot, and it is checked here rather than asserted at the declaration alone`,
         );
         okLine(
           `VERTICAL COST, REPORTED AND NOT PINNED: the tallest box the cruel host produced anywhere in this run ` +

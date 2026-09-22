@@ -2362,6 +2362,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    overflow-guard.mjs W24-word-break-alias-population. */
 .deploy-console-line { display: flex; gap: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .deploy-console-line.dim { color: var(--console-dim); } /* dim on the dark console = its own theme-invariant token (5.21:1) */
+/* cch-w27: this `flex: 0 0 auto` is held by a CEILING ON ITS CONTENT, not by
+   anything in this file. `newFmtConsoleTime` is the span's only producer and it
+   returns "" or exactly `HH:MM:SS` — eight characters, so no string the product
+   can emit makes this column claim more room than the line has. Delete
+   overflow-guard's skip of this span and substitute a 78-char host into it and
+   `.deploy-console-line` goes to 579/230 with 1636.3px of single-character line
+   boxes, while the page stays 320/320: the column is the driver, and the
+   ceiling is the only thing keeping it off the road. A wider formatter here is
+   therefore a geometry change, not a copy change. Guard: overflow-guard.mjs
+   W24-word-break-alias-population holds every painted timestamp to `HH:MM:SS`,
+   so the ceiling is measured on each run rather than asserted here. */
 .deploy-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .deploy-console-text { flex: 1 1 auto; }
 
@@ -3674,6 +3685,18 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    numbers. Guard: overflow-guard.mjs W24-word-break-alias-population. */
 .bp-console-line { display: flex; gap: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .bp-console-empty { color: var(--console-dim); }
+/* cch-w27: this `flex: 0 0 auto` is held by a CEILING ON ITS CONTENT, not by
+   anything in this file. `newFmtConsoleTime` is the span's only producer and it
+   returns "" or exactly `HH:MM:SS` — eight characters, so no string the product
+   can emit makes this column claim more room than the line has. Delete
+   overflow-guard's skip of this span and substitute a 78-char host into it and
+   `.bp-console-line` goes to 626/224 at 320 (626/334 at 430) with 1993.9px of
+   single-character line boxes, while the page stays 320/320: the column is the
+   driver, and the ceiling is the only thing keeping it off the road. A wider
+   formatter here is therefore a geometry change, not a copy change. Guard:
+   overflow-guard.mjs W24-word-break-alias-population holds every painted
+   timestamp to `HH:MM:SS`, so the ceiling is measured on each run rather than
+   asserted here. */
 .bp-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .bp-console-text { flex: 1 1 auto; }
 
