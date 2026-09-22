@@ -52,6 +52,11 @@ defmodule BarkparkCloud.Web.RouterSuspendedRefusalAuditTest do
   @site "https://acme-blog.vercel.app"
   @refusal_action "barkpark.suspended_refused"
 
+  # The foreign twin's url. It CANNOT be `@instance_url`: `barkparks_url_unique_idx`
+  # is a global unique index, so the url is the one field the DATABASE forces
+  # apart between the in-team fixture and its foreign twin.
+  @victim_url "https://victim.barkpark.cloud"
+
   @router_source Path.expand("../../../lib/barkpark_cloud/web/router.ex", __DIR__)
 
   # The eleven suspended-refusal clause heads, by the SHAPE each one has in
@@ -315,6 +320,122 @@ defmodule BarkparkCloud.Web.RouterSuspendedRefusalAuditTest do
 
       assert [_row] = refusal_rows(team, bp)
       assert refusal_rows(other_team, bp) == []
+    end
+  end
+
+  ## The tenancy guard ON the suspended arm — the clause nothing reached
+
+  describe "TENANCY on the suspended arm — a FOREIGN suspended box is an unknown id" do
+    # cch-w13 (task-578415f2b7050530). Both reveal routes refuse a suspended box
+    # with
+    #
+    #     %Barkpark{team_id: tid, suspended: true} = bp when tid == team.id ->
+    #
+    # and the `when tid == team.id` on THAT clause is the only thing that stops
+    # another team's suspended box from answering `409 suspended` — which would
+    # leak both the id's existence and the victim team's billing state — and
+    # from minting a `barkpark.suspended_refused` row carrying the CALLER's
+    # team_id against a box the caller does not own.
+    #
+    # No fixture in this repo reached it. Every suspended-box test above builds
+    # the box IN-TEAM, and every cross-team test elsewhere builds it
+    # UNSUSPENDED, so the sibling `suspended: true` pattern matched first on
+    # every input and the guard could be deleted in silence (MUTATION M6: the
+    # full cloud suite stayed green but for the SOURCE CENSUS below, which reads
+    # router.ex's TEXT and asserts nothing about behaviour).
+    #
+    # Each test below is the FOREIGN TWIN of the in-team 409 fixture in "GET
+    # /credentials and GET /bootstrap — the REVEAL refusals leave rows too":
+    # same builder, the SAME `suspended_attrs()` map (bound once, so even
+    # `suspended_at` is identical), differing only in the team the row is
+    # registered to. `name`/`slug`/`id` differ as a FORCED consequence of
+    # `bootstrapped_barkpark/2`'s uniqueness, and `url` as a FORCED consequence
+    # of the `barkparks_url_unique_idx` unique index (two rows CANNOT share a
+    # url; run-proved — the first cut of these tests raised
+    # `Ecto.ConstraintError` on exactly that index). None of the four is a
+    # free choice and none is read by `when tid == team.id`, which reads
+    # `team_id` and nothing else.
+
+    test "GET /credentials — a FOREIGN suspended box answers 404, byte-identical to an unknown id" do
+      {_user, team, session} = user_with_team("owner")
+      {_victim, victim_team, _victim_session} = user_with_team("owner")
+
+      attrs = suspended_attrs()
+      in_team = bootstrapped_barkpark(team, attrs)
+      foreign = bootstrapped_barkpark(victim_team, Map.put(attrs, :url, @victim_url))
+
+      # PRECONDITION — the twin is a twin. If this drifts, a 404 below could be
+      # explained by some field other than the one under test.
+      assert foreign.suspended == in_team.suspended
+      assert foreign.suspended_reason == in_team.suspended_reason
+      assert foreign.suspended_at == in_team.suspended_at
+      # FORCED, not chosen: `barkparks_url_unique_idx` forbids a shared url.
+      assert foreign.url == @victim_url
+      assert foreign.host == in_team.host
+      assert foreign.template == in_team.template
+      # The CIPHERTEXTS differ by construction — `Vault.encrypt/1` draws a fresh
+      # IV per call, so equal bytes here would mean the vault was broken. The
+      # PLAINTEXT is what the twin shares, and it is what the reveal would have
+      # handed back had the guard let the request through.
+      assert Vault.decrypt(foreign.admin_token_encrypted) == {:ok, @admin_token}
+      assert Vault.decrypt(in_team.admin_token_encrypted) == {:ok, @admin_token}
+      assert foreign.team_id == victim_team.id
+      assert in_team.team_id == team.id
+
+      # CONTROL — the guard's own arm still fires for the caller's own box, so a
+      # 404 on the foreign twin is the GUARD refusing, not the arm being dead.
+      mine = call(:get, "/v1/barkparks/#{in_team.id}/credentials", nil, session)
+      assert mine.status == 409
+      assert Jason.decode!(mine.resp_body)["error"] == "suspended"
+
+      unknown = call(:get, "/v1/barkparks/#{Ecto.UUID.generate()}/credentials", nil, session)
+      theirs = call(:get, "/v1/barkparks/#{foreign.id}/credentials", nil, session)
+
+      assert theirs.status == 404
+      assert theirs.status == unknown.status
+      assert theirs.resp_body == unknown.resp_body
+      assert Jason.decode!(theirs.resp_body) == %{"error" => "not_found"}
+
+      # c2 — NO mis-attributed trail, on EITHER side of the fence. Team-scoped
+      # reads, not `Repo.aggregate/3`: a global count would see other lanes' rows.
+      assert refusal_rows(team, foreign) == []
+      assert refusal_rows(victim_team, foreign) == []
+    end
+
+    test "GET /bootstrap — a FOREIGN suspended box answers 404, byte-identical to an unknown id" do
+      {_user, team, session} = user_with_team("owner")
+      {_victim, victim_team, _victim_session} = user_with_team("owner")
+
+      attrs = suspended_attrs()
+      in_team = bootstrapped_barkpark(team, attrs)
+      foreign = bootstrapped_barkpark(victim_team, Map.put(attrs, :url, @victim_url))
+
+      assert foreign.suspended == in_team.suspended
+      assert foreign.suspended_reason == in_team.suspended_reason
+      assert foreign.suspended_at == in_team.suspended_at
+      assert foreign.bootstrap_workspace == in_team.bootstrap_workspace
+      assert foreign.bootstrap_dataset == in_team.bootstrap_dataset
+      # Ciphertext differs by construction (fresh IV per `Vault.encrypt/1`);
+      # the secret the twin carries is the same one.
+      assert Vault.decrypt(foreign.bootstrap_read_token_encrypted) == {:ok, "bp_read_secret"}
+      assert Vault.decrypt(in_team.bootstrap_read_token_encrypted) == {:ok, "bp_read_secret"}
+      assert foreign.team_id == victim_team.id
+      assert in_team.team_id == team.id
+
+      mine = call(:get, "/v1/barkparks/#{in_team.id}/bootstrap", nil, session)
+      assert mine.status == 409
+      assert Jason.decode!(mine.resp_body)["error"] == "suspended"
+
+      unknown = call(:get, "/v1/barkparks/#{Ecto.UUID.generate()}/bootstrap", nil, session)
+      theirs = call(:get, "/v1/barkparks/#{foreign.id}/bootstrap", nil, session)
+
+      assert theirs.status == 404
+      assert theirs.status == unknown.status
+      assert theirs.resp_body == unknown.resp_body
+      assert Jason.decode!(theirs.resp_body) == %{"error" => "not_found"}
+
+      assert refusal_rows(team, foreign) == []
+      assert refusal_rows(victim_team, foreign) == []
     end
   end
 

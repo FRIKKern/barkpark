@@ -129,6 +129,11 @@ defmodule BarkparkWeb.Studio.RowPressStateGuardTest do
       assert String.contains?(s, ~S|#studio-panes [aria-busy="true"]::after|),
              "the state is invisible to a sighted user — the row-level half of the fix is gone"
 
+      # spd-w19-press-answer-outside-panes: the same bar, on the chrome bar that
+      # carries the top-bar actions and the studio-tab strip.
+      assert String.contains?(s, ~S|.studio-bar [aria-busy="true"]::after|),
+             "a sighted user pressing a top-bar control is back to the wordless tint"
+
       assert String.contains?(s, "@keyframes bp-row-busy"),
              "a still mark is exactly what the owner already reads as dead; the paint must move"
 
@@ -140,7 +145,7 @@ defmodule BarkparkWeb.Studio.RowPressStateGuardTest do
       s = sheet()
 
       assert s =~
-               ~r/prefers-reduced-motion: reduce\)\s*\{\s*#studio-panes \[aria-busy="true"\]::after \{\s*animation: none; transform: scaleX\(1\)/,
+               ~r/prefers-reduced-motion: reduce\)\s*\{\s*#studio-panes \[aria-busy="true"\]::after,\s*\.studio-bar \[aria-busy="true"\]::after \{\s*animation: none; transform: scaleX\(1\)/,
              "`animation: none` alone leaves the bar at scaleX(0) — invisible, which hands reduced-motion users the dead control back"
     end
   end
