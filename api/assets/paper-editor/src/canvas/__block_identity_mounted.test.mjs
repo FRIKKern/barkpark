@@ -77,6 +77,10 @@ for(const mutation of ['split','reorder','delete']){
   assert.equal(second.afterBlocks[0].id,listId);assert.ok(second.ops.every(op=>op.op!=='remove-block'&&op.op!=='insert-after'),'checklist edit must patch its existing identity');
   canvas.acknowledgeOps(second.seq,true);const saved=structuredClone(canvas.blocks);
   canvas.applyServerBlocks(saved);assert.deepEqual(canvas.recoverySnapshot().blocks,saved);assert.deepEqual(saved[1],seed[1]);
+  e.view.dispatch(closeHistory(e.state.tr));canvas.querySelector('input[type="checkbox"]').click();canvas.flushPendingChanges();
+  const checked=canvas._inflightOps;assert.ok(checked);assert.equal(checked.afterBlocks[0].id,listId);assert.equal(checked.afterBlocks[0].items[0].checked,true);canvas.acknowledgeOps(checked.seq,true);
+  e.commands.undo();canvas.flushPendingChanges();const undo=canvas._inflightOps;assert.ok(undo);canvas.acknowledgeOps(undo.seq,true);assert.deepEqual(canvas.blocks,saved,'checkbox Undo preserves all content and identities');
+  e.commands.redo();canvas.flushPendingChanges();const redo=canvas._inflightOps;assert.ok(redo);canvas.acknowledgeOps(redo.seq,true);assert.deepEqual(canvas.blocks,checked.afterBlocks);
   const reopened=document.createElement('bp-paper-canvas');reopened.blocks=saved;document.body.append(reopened);
   try{assert.deepEqual(reopened.recoverySnapshot().blocks,saved,'reloaded checklist retains its stored ID');}finally{reopened.remove();}
   console.log('PASS checklist conversion, incremental acknowledgement and reload retain exact identity');
