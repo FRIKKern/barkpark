@@ -3463,6 +3463,42 @@ jobs:
     # ONE LINE ON PURPOSE. A folded (`>-`) scalar preserves the newline of any
     # more-indented continuation line, so a prettier multi-line version of this
     # expression ships literal newlines inside the `${{ }}`. Do not re-wrap it.
+    #
+    # ── THE NAME IS A TEMPLATE, SO IT DECLARES ITS OWN FINITE LEG SET ────────
+    #
+    # A `name:` that is ENTIRELY interpolation renders a string no static
+    # reader of this file can derive, and two instruments refuse exactly that:
+    # `required-checks-generate.sh`'s CATCH-ALL JOB NAME clause (its regex
+    # becomes `^.*$`, which matches — and so CLAIMS — every other workflow's
+    # check-run name), and, downstream of the same index, the blocking-closure
+    # builder in `required-checks-verify.sh`, which resolves each required
+    # context to the FIRST index row whose regex matches it. Between 2026-09-22
+    # 09:53Z (7b991dec9) and this commit that first row was THIS job: every
+    # required context resolved here, the closure collapsed to one job, and
+    # four unrelated workflow files (landed-open-report.yml, pr-meta.yml,
+    # pr-task-gate.yml, search-starter-smoke.yml) fell out of it and were
+    # reported as UNRESOLVED file-header blocking prose (4 > 3). `Elixir
+    # path-escape ratchet` and `merge-verb-table` were red on main for that
+    # whole window, and NEITHER check name named this job.
+    #
+    # The directive below is the repo's own answer (landed 2026-09-17 in
+    # #18949): the template is resolved to a FINITE set of literals read from a
+    # committed file, so the check-run names this job can publish ARE derivable
+    # from the tree under review, every one of them is accountable to the name
+    # census, and the regex can never widen. It is not an exemption — an
+    # undeclared, missing, empty, non-literal or duplicated leg set still dies
+    # by name in the generator.
+    #
+    # THE NAME CHANNEL IS UNCHANGED, WHICH IS THE POINT. The verdict still
+    # leaves this job as `check_runs[].name`, which GitHub does not ration; the
+    # `::notice::` in the aggregator above is still the rationed copy. Nothing
+    # here moves the disclosure into an annotation budget.
+    #
+    # THE LEG FILE IS NOT FREE TO DRIFT. `scripts/console-gate-subject-names.test.sh`
+    # re-derives the quoted literals out of the `name:` expression below and
+    # refuses any disagreement with the committed file — a stale leg set would
+    # re-open the invisibility this directive closes, silently.
+    # required-checks: matrix-name-legs .github/console-gate-subject-names.json .[]
     name: "${{ needs.console-gate.result != 'success' && 'Console gate subject: the Console gate is NOT GREEN — read it, not this' || (needs.console-gate.outputs.nothing_ran == '1' && 'Console gate subject: NOTHING CONSOLE RAN — that green is NOT APPLICABLE to this diff' || 'Console gate subject: the console harness RAN and measured this head') }}"
     if: always()
     needs: [console-gate]

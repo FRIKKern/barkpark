@@ -1576,6 +1576,108 @@ wf_tmpl_to_regex() {
   printf '%s' "$t"
 }
 
+# ── a whole-expression job name that DECLARES its finite leg set ─────────────
+#
+# A `name:` that is entirely `${{ … }}` renders a string no static reader can
+# derive. wf_tmpl_to_regex turns it into `^.+$`, and the closure builder below
+# resolves each required context to the FIRST index row whose regex matches it —
+# so ONE such row silently claims every required context, collapses the blocking
+# closure to that single job, and reports every other workflow's header prose as
+# UNRESOLVED. That is not hypothetical: it is what `merge-verb-table` was red
+# about from 7b991dec9 (2026-09-22T09:53Z), where the four files it named
+# (landed-open-report.yml, pr-meta.yml, pr-task-gate.yml, search-starter-smoke.yml)
+# were bystanders, not the defect.
+#
+# required-checks-generate.sh already resolves this shape: the job declares
+# `# required-checks: matrix-name-legs <committed-file> <jq-filter>` and the
+# template expands into that many LITERAL rows. This function is the SAME
+# resolution for this guard's own index — the same directive, the same file, the
+# same promise. Keeping it local (like wf_tmpl_to_regex above) is deliberate:
+# this guard must not depend on the generator it exists to be independent of.
+#
+# WHAT SURVIVES, AND IT IS THE POINT: only a name that is ENTIRELY interpolation
+# is touched; a partial template (`Test (${{ matrix.otp }})`) passes through
+# unchanged. A row with NO declaration also passes through unchanged, so the
+# existing UNRESOLVED-interpolation refusal still says its own sentence about
+# it. Expansion can only ever produce LITERALS read out of a committed file — an
+# unreadable file, a filter that yields nothing, or a "literal" that is itself an
+# interpolation leaves the row exactly as it was. No path here widens a regex.
+wf_expand_name_legs() {
+  local idx="$1" tmp_out="$1.expanded"
+  local tag file job jobline jname matrixed needs namehit stephit adjhit mark
+  local bare d legsfile filter legsroot legspath names nm ok
+  : > "$tmp_out"
+  while IFS=$'\t' read -r tag file job jobline jname matrixed needs namehit stephit adjhit mark; do
+    if [ "$tag" != "JOB" ]; then
+      if [ -n "$file" ]; then printf '%s\t%s\n' "$tag" "$file" >> "$tmp_out"
+      else printf '%s\n' "$tag" >> "$tmp_out"; fi
+      continue
+    fi
+    bare="$(printf '%s' "$jname" | sed -E 's/\$\{\{[^}]*\}\}//g')"
+    if [ -n "$bare" ] || ! grep -q '\${{' <<<"$jname"; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$tag" "$file" "$job" "$jobline" "$jname" "$matrixed" "$needs" "$namehit" "$stephit" "$adjhit" "$mark" >> "$tmp_out"
+      continue
+    fi
+    d="$(awk -v want="$job" '
+      /^jobs:/ { injobs = 1; next }
+      injobs && /^[a-z]/ { injobs = 0 }
+      injobs && /^  [A-Za-z0-9_.-]+:/ { j = $0; sub(/^  /, "", j); sub(/:.*$/, "", j); cur = j; next }
+      injobs && cur == want && /^[ \t]*#[ \t]*required-checks:[ \t]*matrix-name-legs[ \t]/ {
+        line = $0
+        sub(/^[ \t]*#[ \t]*required-checks:[ \t]*matrix-name-legs[ \t]+/, "", line)
+        sub(/[ \t]+$/, "", line)
+        print line; exit
+      }
+    ' "$WORKFLOWS_DIR/$file" 2>/dev/null)"
+    legsfile="${d%%[[:space:]]*}"
+    filter="${d#*[[:space:]]}"
+    names=""
+    if [ -n "$d" ] && [ -n "$legsfile" ] && [ -n "$filter" ] && [ "$filter" != "$d" ]; then
+      case "$legsfile" in
+        /*|*..*) : ;;
+        *)
+          legsroot="$(cd "$WORKFLOWS_DIR/../.." 2>/dev/null && pwd)" || legsroot=""
+          legspath=""
+          if [ -n "$legsroot" ] && [ -f "$legsroot/$legsfile" ]; then legspath="$legsroot/$legsfile"
+          elif [ -f "$REPO_ROOT/$legsfile" ]; then legspath="$REPO_ROOT/$legsfile"; fi
+          if [ -n "$legspath" ]; then
+            # Same charset guard as the generator: a readable jq path, nothing else.
+            if grep -qE '^[]A-Za-z0-9_.@:|()[ "'"'"'-]+$' <<<"$filter"; then
+              names="$(jq -r "[ $filter ] | map(if type == \"string\" then . else error(\"not a string\") end) | .[]" "$legspath" 2>/dev/null)" || names=""
+            fi
+          fi
+          ;;
+      esac
+    fi
+    ok=0
+    if [ -n "$names" ]; then
+      ok=1
+      while IFS= read -r nm; do
+        # A blank row, or a "literal" that still interpolates, is not an
+        # enumeration — one bad leg voids the whole expansion rather than
+        # half-resolving the template.
+        { [ -n "$nm" ] && ! grep -q '\${{' <<<"$nm"; } || { ok=0; break; }
+      done <<LEGCHECK
+$names
+LEGCHECK
+    fi
+    if [ "$ok" -eq 1 ]; then
+      while IFS= read -r nm; do
+        [ -n "$nm" ] || continue
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "$tag" "$file" "$job" "$jobline" "$nm" "0" "$needs" "$namehit" "$stephit" "$adjhit" "$mark" >> "$tmp_out"
+      done <<LEGS
+$names
+LEGS
+    else
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$tag" "$file" "$job" "$jobline" "$jname" "$matrixed" "$needs" "$namehit" "$stephit" "$adjhit" "$mark" >> "$tmp_out"
+    fi
+  done < "$idx"
+  mv "$tmp_out" "$idx"
+}
+
 blocking_authority_check() {
   [ -d "$WORKFLOWS_DIR" ] \
     || blocked "cannot read $WORKFLOWS_DIR — the blocking-authority clause has nothing to scan (a HOLD, never a skip)"
@@ -1714,6 +1816,7 @@ blocking_authority_check() {
     END { endfile() }
   ' 2>&1)" || { rm -rf "$tmp"; blocked "blocking-authority scan could not run: $out"; }
   printf '%s\n' "$out" > "$idx"
+  wf_expand_name_legs "$idx"
 
   local njobs nfiles
   njobs="$(grep -c '^JOB	' "$idx" || true)"

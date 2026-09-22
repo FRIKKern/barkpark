@@ -519,6 +519,41 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh merge-authority-claim -- bash scripts/merge-authority-claim-check.sh
 
+      # ── a templated job name's declared leg set is the names it can render ─
+      # `.github/workflows/console-harness.yml` job `console-gate-subject`
+      # publishes its verdict as the check-run NAME, because a name is the one
+      # field of a check run GitHub does not ration. Its `name:` is therefore a
+      # whole-expression template, and an unresolvable job name is a CATCH-ALL:
+      # `required-checks-generate.sh` turns it into `^.*$`, it claims every
+      # other workflow's rendered name, and `required-checks-verify.sh`'s
+      # blocking-closure builder then resolves every required context to it.
+      # MEASURED: from 7b991dec9 (2026-09-22T09:53Z) until the fix this step
+      # guards, `Elixir path-escape ratchet` and `merge-verb-table` were both
+      # red on main for that reason, and neither check NAME named the job.
+      #
+      # The generator's `# required-checks: matrix-name-legs <file> <filter>`
+      # directive is the repo's answer: the template resolves to a finite set of
+      # literals read from a committed file. The generator proves that file
+      # yields literals. NOTHING proved those literals are the strings the
+      # expression can actually render — a leg file left behind by an edit to
+      # the expression re-opens the hole with every instrument still green.
+      # This is that missing half, and it is why the directive is safe to use.
+      #
+      # HERE, for the reason every step above it is here: this job carries no
+      # `if:`, no continue-on-error and no `needs`, the aggregator judges it
+      # NEVER, and `Elixir gate` is required — so the guard cannot be skipped
+      # into a green. A STEP, not a job: a new job here reds the sibling
+      # path-escape harnesses via `blocking_not_in_needs`, and a step publishes
+      # no check-run name, so required-checks-verify.sh's roster is unchanged.
+      # THE HARNESS RUNS FIRST, same ordering rule as the ratchets above it.
+      - name: The templated-job-name leg guard must be able to fail (4-arm harness)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh console-gate-subject-names-selftest -- bash scripts/console-gate-subject-names-check.sh --selftest
+
+      - name: Every name a templated job can render is declared in its leg file
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh console-gate-subject-names -- bash scripts/console-gate-subject-names-check.sh
+
       # ── the unrecognised-top-level default (task-fb7857b984ff5ff8) ────────
       # Every path set in this tree fails OPEN. Re-derived live on origin/main
       # ad7f16319 with each ratchet's own `--match`, a head touching only
