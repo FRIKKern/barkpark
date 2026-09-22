@@ -5954,6 +5954,15 @@ fi
 # same claim, and a clause in a merge-blocking suite must not red on a re-flow.
 # The rewrap control below proves that rather than asserting it.
 rc21_flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
+rc21_ordinal_word() { # <n> -> the English ORDINAL this page spells
+  case "$1" in
+    1) printf 'first' ;;  2) printf 'second' ;; 3) printf 'third' ;;
+    4) printf 'fourth' ;; 5) printf 'fifth' ;;  6) printf 'sixth' ;;
+    7) printf 'seventh' ;; 8) printf 'eighth' ;; 9) printf 'ninth' ;;
+    10) printf 'tenth' ;;
+    *) printf '%sth' "$1" ;;
+  esac
+}
 rc21_num_word() { # <n> -> the English word this page spells, digits past ten
   case "$1" in
     0) printf 'zero' ;; 1) printf 'one' ;;  2) printf 'two' ;;   3) printf 'three' ;;
@@ -5965,7 +5974,7 @@ rc21_num_word() { # <n> -> the English word this page spells, digits past ten
 # <workflow-dir> <spec-json> <doc> -> one PROSE line per count word that
 # disagrees with the derivation, or UNRESOLVED when a side came back empty.
 rc21_prose_report() {
-  local gates ctxs flat req_total req_emit nonreq_emit want
+  local gates ctxs flat req_total req_emit nonreq_emit want nonemit_req nonemit_n pos
   gates="$(rc21_emitters "$1" | cut -f2 | sort -u)"
   ctxs="$(jq -r '.protection.required_status_checks.checks[].context' "$2" | sort -u)"
   if [ -z "$gates" ] || [ -z "$ctxs" ]; then
@@ -5987,6 +5996,36 @@ rc21_prose_report() {
   want="takes the required set $req_total -> $((req_total + 1))"
   grep -qF -- "$want" <<<"$flat" \
     || printf 'PROSE\t%s\tthe page does not carry this derived transition off a required set of %s\n' "$want" "$req_total"
+  # 4. THE ORDINAL, which the three phrases above do not reach. The sentence
+  # naming the one required context that does NOT emit calls it by its POSITION
+  # among the required rows — `The fourth, \`PR references an active task\`, is
+  # **exempt by construction**`. That is a count word beneath the table with the
+  # same shape as the one dr-w29-s8 repaired by hand: promote a fifth required
+  # context above it and the ordinal is silently wrong, while every clause above
+  # stays green because none of them reads an ordinal. The position is derived
+  # from the roster's own order intersected with the spec, never typed.
+  nonemit_req="$(comm -13 <(printf '%s\n' "$gates") <(printf '%s\n' "$ctxs"))"
+  nonemit_n="$(printf '%s\n' "$nonemit_req" | { grep -c . || true; } | tr -d ' ')"
+  if [ "$nonemit_n" -ne 1 ]; then
+    printf 'PROSE\t(ordinal sentence no longer applies)\tthe page says `The <ordinal>, … is **exempt by construction**`, which assumes exactly ONE required context that does not emit; the sources now derive %s, so that paragraph must be rewritten rather than renumbered\n' "$nonemit_n"
+  else
+    # The position comes from THE SPEC'S OWN ORDER, not from the page's table:
+    # the arms below re-run this report against a 40-column fold of the page,
+    # which destroys every markdown row, so a roster-derived index would red on
+    # a pure re-wrap and make a merge-blocking suite hostile to re-flowing a
+    # doc. required-checks.json lists the contexts in the order the roster
+    # tables them, and clause 3 already forces the two sets to agree.
+    pos="$(jq -r --arg c "$nonemit_req" '
+             [.protection.required_status_checks.checks[].context]
+             | index($c) | if . == null then empty else . + 1 end' "$2")"
+    if [ -z "$pos" ]; then
+      printf 'PROSE\t(ordinal unresolvable)\t`%s` emits nothing and is not in the spec'"'"'s required list — the ordinal sentence cannot be derived\n' "$nonemit_req"
+    else
+      want="The $(rc21_ordinal_word "$pos"), \`$nonemit_req\`, is **exempt by construction**"
+      grep -qF -- "$want" <<<"$flat" \
+        || printf 'PROSE\t%s\tthe page does not carry this derived ordinal: the one non-emitting required context is position %s of the required set\n' "$want" "$pos"
+    fi
+  fi
 }
 RC21_PROSE_OUT="$(rc21_prose_report "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC")"
 if [ -z "$RC21_PROSE_OUT" ]; then
@@ -6025,6 +6064,26 @@ if [ "$(printf '%s\n' "$RC21_PROSE_MUT_OUT" | { grep -c '^PROSE' || true; } | tr
 else
   bad "editing a count word under the roster changed nothing — the prose is still gated by nothing, which is the state this clause exists to end:"
   printf '%s\n' "$RC21_PROSE_MUT_OUT" | sed 's/^/       /' >&2
+fi
+# …and the ORDINAL arm, the same mutation one sentence later: renumbering the
+# exempt row WITHOUT touching the table or any cardinal must red too. Until this
+# landed, `The fourth` was the last count word beneath the roster that nothing
+# read — the three cardinal phrases above all stayed green through it.
+RC21_ORD_MUT="$TMP/rc21-prose-reordinaled.md"
+sed 's/^The fourth, `PR references an active task`,/The fifth, `PR references an active task`,/' \
+  "$MERGE_GATES_DOC" > "$RC21_ORD_MUT"
+if ! cmp -s "$MERGE_GATES_DOC" "$RC21_ORD_MUT"; then
+  ok "…plant confirmed: the ordinal mutation actually edited the scratch page (the arm below is not reading an unmodified copy)"
+else
+  bad "the ordinal mutation changed nothing on the scratch page — the arm below would prove nothing"
+fi
+RC21_ORD_MUT_OUT="$(rc21_prose_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC21_ORD_MUT")"
+if [ "$(printf '%s\n' "$RC21_ORD_MUT_OUT" | { grep -c '^PROSE' || true; } | tr -d ' ')" -eq 1 ] \
+   && grep -q 'exempt by construction' <<<"$RC21_ORD_MUT_OUT"; then
+  ok "…and changing the ORDINAL alone (fourth -> fifth, every cardinal and the whole table untouched) reds by the phrase — exactly one PROSE line naming the derived sentence, so the position word is gated too"
+else
+  bad "renumbering the exempt row under the roster changed nothing — the ordinal is still the one count word beneath the table that nothing reads:"
+  printf '%s\n' "$RC21_ORD_MUT_OUT" | sed 's/^/       /' >&2
 fi
 # …and THE REFUSAL: a spec with no required contexts leaves one side empty, and
 # an empty side must refuse rather than agree with a page it never read.

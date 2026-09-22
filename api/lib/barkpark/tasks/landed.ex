@@ -280,7 +280,7 @@ defmodule Barkpark.Tasks.Landed do
         {:error, :criterion_already_met}
 
       not merge_shaped?(entry) ->
-        {:error, :criterion_not_merge_shaped}
+        {:error, not_merge_shaped_reason(entry)}
 
       # MERGE-SHAPED, BUT A MERGE CANNOT DISCHARGE IT. The shape question is
       # answered; this is the second one, and it is the only guard between a
@@ -346,6 +346,34 @@ defmodule Barkpark.Tasks.Landed do
       true -> true
       false -> false
       _ -> Criteria.merge_gated?(entry) or landing_worded?(criterion_text(entry))
+    end
+  end
+
+  # WHICH DOOR THE REFUSAL CAME THROUGH (task-c5ca82cb0a49ab53). `merge_shaped?/1`
+  # says NO for two structurally different reasons, and until this split the 409
+  # said the same sentence for both — a sentence that is FALSE for one of them:
+  #
+  #   * `:vetoed` — the author wrote an explicit `"merge_gate": false`. The
+  #     predicate SHORT-CIRCUITS on that flag and never reads the prose, so the
+  #     old message's "its wording says nothing about being merge-gated" claimed
+  #     a property of an arm it did not take. Measured on 2026-09-22 over the
+  #     live corpus (9,463 published task rows / 39,394 criteria), 29 criteria
+  #     carry an explicit `false` TOGETHER WITH marker wording — for every one of
+  #     them the old sentence was a lie, and the documented exemption door is
+  #     precisely the case where the wording IS merge-shaped. A reader who
+  #     believed it went looking for a rewrite instead of the field.
+  #   * `:unmarked` — no flag at all, and the stored text really does say nothing
+  #     merge-shaped. Here the old sentence was and stays TRUE.
+  #
+  # The two need DIFFERENT remedies from the reader (delete/flip the flag vs.
+  # stamp it as work, or mark the row), so they get different messages. The wire
+  # `reason` token is unchanged for both — `Params.reason_to_string/1` collapses
+  # the tuple back to `criterion_not_merge_shaped`, which the bp CLI and every
+  # existing caller string-match on.
+  defp not_merge_shaped_reason(entry) do
+    case explicit_key(entry, "merge_gate", :merge_gate) do
+      false -> {:criterion_not_merge_shaped, :vetoed}
+      _ -> :criterion_not_merge_shaped
     end
   end
 

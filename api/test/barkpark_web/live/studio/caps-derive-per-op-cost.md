@@ -88,8 +88,25 @@ to Claude Code, so `argon2_elixir`'s NIF build fails with `error: unknown option
 '-g'` and the run aborts in under a second — six rows, zero tests, no A/B
 difference at all (n=200 and n=5000 both ~0.5 s). The tell was the script's own
 header: *"A meter that reads zero is broken, not fast."* Run it as
-`CC=/usr/bin/cc bash caps-meter.sh …`, and before trusting any row, run one arm
-WITHOUT the redirect and read `N tests, 0 failures`.
+`CC=/usr/bin/cc bash caps-meter.sh …`.
+
+**THE METER NOW REFUSES INSTEAD (task-878b408c5abca5e2).** "Before trusting any
+row, run one arm without the redirect and read `N tests, 0 failures`" was the
+right instruction and it is not a guard — a written finding does not fire by
+itself. Two refusals now carry it in code:
+
+* **Per arm.** The arm's output goes to a LOG rather than `/dev/null` (the
+  redirect stays — it is why the `time` line is readable). The ExUnit summary
+  line must be present with N > 0, or the meter prints NO timing row for that
+  arm, names it, dumps the arm's own error text, and exits **2**.
+* **Per run.** The A/B difference must clear a floor of
+  `4 × (HI − LO) × 10 µs` — an order of magnitude below the measured 96–107 µs
+  band, so a healthy run clears it ~10x while a difference of ~0 never can.
+  Exits **3**. This is the tell that caught the original defect made mechanical.
+
+`caps-meter-selftest.sh` beside the meter drives the real meter with a stub
+`mix` on `PATH` and proves both refusals **and** a healthy six-row exit-0 run in
+one output.
 
 Three things this price does NOT cover, said here rather than left implied:
 

@@ -2073,6 +2073,14 @@ defmodule BarkparkWeb.TasksController.Params do
     do: "acknowledgement_unposted:#{issue || "?"}"
 
   def reason_to_string({:sentinel_worker_id, worker}), do: "sentinel_worker_id:#{worker}"
+
+  # The landing mark's not-merge-shaped refusal carries WHICH DOOR it came
+  # through (`Tasks.Landed.not_merge_shaped_reason/1`) so the hint below can say
+  # two different true things. The WIRE token must not move: the bp CLI
+  # (`landedCriterionGuard`) and every existing caller string-match
+  # `criterion_not_merge_shaped`, and this refusal's identity did not change —
+  # only its explanation did.
+  def reason_to_string({:criterion_not_merge_shaped, _door}), do: "criterion_not_merge_shaped"
   def reason_to_string(other), do: inspect(other)
 
   # ─── Criteria-conflict hints (D56 — the guard must TEACH, not just refuse) ──
@@ -2192,6 +2200,36 @@ defmodule BarkparkWeb.TasksController.Params do
   # messages therefore have to name the STRUCTURAL fix, not just the wall:
   # `merge_gate: true` on the row is what makes a landing mark able to seal it,
   # and a human stamp is what a non-merge row still needs.
+  # THE VETOED DOOR (task-c5ca82cb0a49ab53). `merge_shaped?/1` short-circuits on
+  # an explicit `"merge_gate": false` and NEVER reads the prose, so the flagless
+  # message below — "its wording says nothing about being merge-gated" —
+  # described an arm this refusal did not take, and was FALSE for every row using
+  # the documented exemption door: the wording there usually says a great deal
+  # about being merge-gated, which is exactly WHY its author wrote the `false`.
+  # Re-measured 2026-09-22 over the live corpus (9,463 published task rows /
+  # 39,394 criteria): 29 criteria carry an explicit `false` TOGETHER WITH marker
+  # wording, so 29 rows were told a lie about their own text. The remedy differs
+  # too — here it is the FIELD, not a rewrite — which is why this is a separate
+  # sentence rather than a hedge bolted onto the one below.
+  def criteria_hint({:criterion_not_merge_shaped, :vetoed}, :landed),
+    do:
+      ~s|`landed` may only flip a merge-shaped criterion — one the lead seals when the PR merges. | <>
+        ~s|That row is not, and its WORDING IS NOT WHY: its author declared "merge_gate": false on this criterion, | <>
+        ~s|and that declaration VETOES the wording outright — the guard never reads the text when the flag is there, | <>
+        ~s|so whatever the criterion says about being merge-gated or about a PR merging to main was not consulted | <>
+        ~s|and rewriting it will change nothing. Nothing was written (the flip and the landing sentence ride one CAS). | <>
+        ~s|A criterion proven by WORK is stamped by whoever did the work — `bp task stamp <id> <worker> <epoch> | <>
+        ~s|--criterion N --criterion-text-file <file holding the exact wording> --met --evidence "…"` | <>
+        ~s|(the wording rides a FILE, never an inline shell argument — a `backticked code span` in it would be | <>
+        ~s|COMMAND SUBSTITUTION). If the `false` is wrong and this row really is the lead's merge gate, | <>
+        ~s|change that flag to "merge_gate": true and the landing mark will seal it. | <>
+        ~s|Re-run without --criterion to record the landing sentence alone.|
+
+  # THE FLAGLESS DOOR — unchanged, and deliberately so. Here there is no explicit
+  # `merge_gate` key at all and the stored text genuinely carries no marker, so
+  # the sentence about the wording is TRUE and the remedy IS to mark the row.
+  # Collapsing this into the vetoed message above would tell half these callers
+  # to go looking for a flag that is not on their row.
   def criteria_hint(:criterion_not_merge_shaped, :landed),
     do:
       ~s|`landed` may only flip a merge-shaped criterion — one the lead seals when the PR merges. | <>

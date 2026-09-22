@@ -1245,6 +1245,127 @@ const SSH = ['-i', path.join(os.homedir(), '.ssh/barkpark_indx'), '-o', 'Connect
 
 // ── playwright ───────────────────────────────────────────────────────────────
 
+/**
+ * ── THE COVERAGE BOUNDARY, ATTACHED TO THE MATRIX ────────────────────────────
+ *
+ * spd-b30-instrument-coverage-one-document-one-path. This object rides in EVERY
+ * run this instrument writes (`run.coverage_boundary`) and is printed under
+ * every human table. It is the single place the boundary is stated, and it is
+ * stated where the numbers are.
+ *
+ * WHY HERE AND NOT IN A DOC. A matrix says nine widths, three faces, two states
+ * and 54 rows. It does not say one platform, one engine, one document, one
+ * navigation path, one surface, one scrollbar model and one motion regime — and
+ * a reader who has the JSON in front of them has no way to learn any of that
+ * from it. The boundary lived in prose in a task description, in a charter
+ * decision and in this file's own header comments, none of which travel with
+ * the artifact. This lane has spent a shift on artefacts that assert a property
+ * the system lacks; a coverage claim nobody can check from the artifact is the
+ * same failure with the sign flipped. So it travels.
+ *
+ * `uncovered` is the load-bearing half. Naming what a matrix does NOT cover is
+ * the criterion's own second branch — an explicit "this is Chromium-only on
+ * macOS and says nothing about other engines" is worth more than a second
+ * engine measured badly.
+ */
+export const COVERAGE_BOUNDARY = {
+  statement:
+    'This matrix measures ONE document, reached by ONE navigation path, in ONE browser engine, ' +
+    'on ONE platform, in ONE motion regime. Everything outside that is UNMEASURED, which is not ' +
+    'the same as working.',
+  platform: {
+    covered: 'macOS (darwin), the platform every committed matrix was produced on',
+    scrollbar_model: 'OVERLAY — scrollbar_width_px is 0 in every row',
+    uncovered:
+      'Windows and Linux/GTK paint a CLASSIC ~15px scrollbar, which removes that much layout width ' +
+      'at every viewport. Derived, not guessed: scripts/studio-desk-scrollbar-bound.mjs replays this ' +
+      'matrix at any scrollbar width and REFUSES unless its model first reproduces the matrix at the ' +
+      'width it was actually measured at. Against the committed 54-row run the bound is 0px in 35 ' +
+      'rows, -15px in 18, -27.632px in 1; the @container gate closes at 1024/user-opened and ' +
+      '764/user-opened (both sit on 720.0px exactly); the floor-binding set goes 6 -> 5; and three ' +
+      '55ch verdicts flip true -> false. Gate reachability at user-opened moves from 764px to 779px ' +
+      'of CSS viewport, exactly. Pinned in scripts/studio-desk-scrollbar-bound.test.mjs.',
+  },
+  engine: {
+    covered: 'CHROMIUM ONLY. `browser_policy` / `browser_version` in this run name the exact build.',
+    uncovered:
+      'Gecko and WebKit measure NOTHING here, and no claim in this matrix extends to them. `ch` is a ' +
+      'font measurement and the three engines differ in font fallback, in sub-pixel layout rounding ' +
+      'and in whether a scrollbar is classic by default, so a 55ch verdict is a Chromium verdict. ' +
+      'A second-engine run is not blocked by design — it is blocked by no Gecko/WebKit host being ' +
+      'available to this epic, and an engine measured badly would be worse than this sentence.',
+  },
+  document: {
+    covered: 'ONE document per run — `measured_doc` / `measured_doc_source` name it and why it was reachable.',
+    uncovered:
+      'Other documents of the SAME type are assumed equivalent because the geometry measured here is ' +
+      'the surface and the column, not the content. Documents whose content forces horizontal ' +
+      'overflow are not represented; `overflow` is recorded per row so a run that met one would say so.',
+  },
+  path: {
+    covered: 'ONE navigation path: root desk -> Papers pane -> a named row, by real clicks.',
+    uncovered:
+      'A cold load straight to the document URL is NOT swept. It was an axis once (`entry_state`), ' +
+      'measured twice at nine widths and three faces, and agreed in 54 of 54 cells both times (D110) ' +
+      '— which is why it was retired in favour of `inspector_state`. That is a measured equivalence, ' +
+      'not an untested assumption, and it is the only path claim this matrix makes.',
+  },
+  surface: {
+    covered:
+      'ONE surface class: a PAPER (`.bp-paper-surface` inside `.editor-panel`), plus the desk panes ' +
+      'the drill passes through.',
+    uncovered:
+      'Classic non-paper documents (sheets, tickets, quiz, ONIX records) render their own editors and ' +
+      'are NOT measured — `.bp-paper-surface` does not exist on them, and this instrument asserts its ' +
+      'selector match counts before trusting a number, so it would refuse rather than report a ' +
+      'confident zero. Additional `.editor-panel` roots (the sheet grid and the graph view both mount ' +
+      'inside one) are likewise unmeasured. Anything this matrix says about reading width applies to ' +
+      'papers and to nothing else.',
+  },
+  motion: {
+    covered:
+      'The browser default, i.e. prefers-reduced-motion: no-preference. Rows are taken after ' +
+      'waitForDeskSettled(), which outlasts every transition on the desk.',
+    ruling:
+      'MEASURED, on deployed guerrilla at f703de669 (scripts/studio-desk-motion-probe.mjs, ' +
+      'scripts/measurements/spd-b30-desk-motion-*.json — the dated filename is deliberately NOT a literal '
+      + 'here, so this file keeps passing its own no-dated-slug guard): a live transition DOES exist on ' +
+      'the desk — `.pane-column` transitions width/min-width/max-width over 0.15s and ' +
+      '`.pane-column--collapsed > *` runs bp-pane-strip-in — and the reduce arm really reaches them ' +
+      '(the box transition collapses to `background` alone, the animation goes to `none`). But every ' +
+      'element THIS matrix measures — `.editor-panel`, `.editor-panel-main.bp-paper-body`, ' +
+      '`.bp-paper-surface` — reports transition-duration 0s and animation-name none in BOTH regimes. ' +
+      'So the motion is real, it is on the desk chrome, and it is not on the measured geometry: the ' +
+      'matrix is motion-regime-independent by measurement rather than by assumption.',
+    uncovered:
+      'A matrix swept under prefers-reduced-motion: reduce has not been produced, because the ' +
+      'measured elements carry no motion in either regime. If a transition is ever added to the ' +
+      'surface or the reading column, that ruling expires and the probe above is how to re-take it.',
+  },
+  what_would_change_this: [
+    'a Gecko or WebKit host becoming available to the epic',
+    'a classic-scrollbar host becoming available — the bound above becomes checkable rather than derived',
+    'a transition or animation appearing on .bp-paper-surface / .editor-panel-main.bp-paper-body',
+    'a non-paper editor gaining a .bp-paper-surface, which would silently widen what this matrix claims',
+  ],
+  owner_task: 'spd-b30-instrument-coverage-one-document-one-path',
+  companion_artifact: 'scripts/measurements/README-spd-b30-coverage-boundary.md',
+};
+
+/** The boundary as table lines. Same object, two renderings — a printed
+ *  boundary that could drift from the JSON one would be its own defect. */
+export function coverageBoundaryLines(b = COVERAGE_BOUNDARY) {
+  const out = ['  COVERAGE BOUNDARY (spd-b30) — what this matrix does and does not cover:', `    ${b.statement}`];
+  for (const k of ['platform', 'engine', 'document', 'path', 'surface', 'motion']) {
+    out.push(`    ${k.toUpperCase()}`);
+    out.push(`      covered:   ${b[k].covered}`);
+    if (b[k].ruling) out.push(`      ruling:    ${b[k].ruling}`);
+    out.push(`      UNCOVERED: ${b[k].uncovered}`);
+  }
+  out.push(`    Companion artifact: ${b.companion_artifact}`);
+  return out;
+}
+
 export function resolvePlaywright() {
   const tried = [];
   const candidates = [];
@@ -4329,6 +4450,7 @@ async function main() {
     browser_version: browser.version(),
     node_version: process.version,
     platform: `${os.platform()} ${os.arch()}`,
+    coverage_boundary: COVERAGE_BOUNDARY,
     platform_note:
       'macOS overlay scrollbars: scrollbar_width_px is 0 here. A classic 15px-scrollbar ' +
       'platform removes ~15px from the panel at EVERY width, pushing viewport 1280 further ' +
@@ -5645,6 +5767,9 @@ export function printTable(run) {
     for (const w of run.warnings) L(`    - ${w}`);
     L('');
   }
+
+  for (const line of coverageBoundaryLines(run.coverage_boundary ?? COVERAGE_BOUNDARY)) L(line);
+  L('');
 
   // Last line of the printer, deliberately: it proves the state derivation held
   // for every loop above rather than only for the first one.
