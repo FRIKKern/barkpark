@@ -224,6 +224,44 @@ on:
       # the `scripts/*.test.mjs` entry below, but an edit to the capture module
       # it imports could invalidate the 9 controls without touching the test.
       - "scripts/console-refusal-capture.mjs"
+      # ── THE FENCE ITSELF, AS THREE GLOBS (task-ea44d7b4a12eaf38) ──────────
+      # The two entries above are the harness and the module it imports. They
+      # are NOT what breaks this check. The test's DERIVED arms enumerate a
+      # POPULATION from the tree — scripts/console-refusal-capture.mjs's
+      # FENCE_GLOBS, which is literally
+      #     cloud/priv/static/*.mjs
+      #     cloud/priv/static/__preview__/*.mjs
+      #     scripts/console-*.mjs
+      # — and red when a file with an exit-2 path lands in it and no manifest
+      # row names it. That red therefore belongs to the PR that ADDED the file,
+      # and until now it could not reach one: the leg dispatched on the harness
+      # and the module only, so #19654 (which added
+      # cloud/priv/static/__preview__/accent-role-separation.mjs) ran none of
+      # these 13 tests, merged clean, and reddened MAIN'S TIP for 18h24m until
+      # a THIRD row (task-3f76bb5b8bcc15f8) closed the same instance again.
+      #
+      # THIS IS THE D26 AMENDED EXCEPTION, not a convenience glob. The fence is
+      # a PREDICATE, not a list: the file whose arrival this check exists to
+      # catch does not exist yet, so an enumeration of today's 28 emitters would
+      # go dark on exactly the PR that matters. The three globs below are a
+      # verbatim transcription of FENCE_GLOBS, so the trigger and the corpus are
+      # the same set BY CONSTRUCTION, and the derived arms themselves red if the
+      # two ever disagree.
+      #
+      # THE FIRST TWO WIDEN NOTHING AT THE WORKFLOW LEVEL: `cloud/priv/static/**`
+      # is already an entry (the cloud-static-gz guard), so these are strict
+      # subsets of a trigger that already fires. They exist so the per-leg
+      # dispatcher in scripts/shell-harness-dispatch.sh can name them under
+      # clause A (a roster row must be a verbatim entry here) WITHOUT billing
+      # this leg for every app.js / app.css / image edit under that directory.
+      - "cloud/priv/static/*.mjs"
+      - "cloud/priv/static/__preview__/*.mjs"
+      # The third DOES add one file to the workflow-level trigger —
+      # scripts/console-tdz-order-check.mjs, the only scripts/console-*.mjs not
+      # already listed (the capture module above and console-slice-gate.mjs are
+      # both entries). MEASURED over the last 500 first-parent commits of
+      # origin/main: ZERO touched it.
+      - "scripts/console-*.mjs"
       - "scripts/pds-ledger-census.sh"
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
@@ -934,6 +972,44 @@ on:
       # the `scripts/*.test.mjs` entry below, but an edit to the capture module
       # it imports could invalidate the 9 controls without touching the test.
       - "scripts/console-refusal-capture.mjs"
+      # ── THE FENCE ITSELF, AS THREE GLOBS (task-ea44d7b4a12eaf38) ──────────
+      # The two entries above are the harness and the module it imports. They
+      # are NOT what breaks this check. The test's DERIVED arms enumerate a
+      # POPULATION from the tree — scripts/console-refusal-capture.mjs's
+      # FENCE_GLOBS, which is literally
+      #     cloud/priv/static/*.mjs
+      #     cloud/priv/static/__preview__/*.mjs
+      #     scripts/console-*.mjs
+      # — and red when a file with an exit-2 path lands in it and no manifest
+      # row names it. That red therefore belongs to the PR that ADDED the file,
+      # and until now it could not reach one: the leg dispatched on the harness
+      # and the module only, so #19654 (which added
+      # cloud/priv/static/__preview__/accent-role-separation.mjs) ran none of
+      # these 13 tests, merged clean, and reddened MAIN'S TIP for 18h24m until
+      # a THIRD row (task-3f76bb5b8bcc15f8) closed the same instance again.
+      #
+      # THIS IS THE D26 AMENDED EXCEPTION, not a convenience glob. The fence is
+      # a PREDICATE, not a list: the file whose arrival this check exists to
+      # catch does not exist yet, so an enumeration of today's 28 emitters would
+      # go dark on exactly the PR that matters. The three globs below are a
+      # verbatim transcription of FENCE_GLOBS, so the trigger and the corpus are
+      # the same set BY CONSTRUCTION, and the derived arms themselves red if the
+      # two ever disagree.
+      #
+      # THE FIRST TWO WIDEN NOTHING AT THE WORKFLOW LEVEL: `cloud/priv/static/**`
+      # is already an entry (the cloud-static-gz guard), so these are strict
+      # subsets of a trigger that already fires. They exist so the per-leg
+      # dispatcher in scripts/shell-harness-dispatch.sh can name them under
+      # clause A (a roster row must be a verbatim entry here) WITHOUT billing
+      # this leg for every app.js / app.css / image edit under that directory.
+      - "cloud/priv/static/*.mjs"
+      - "cloud/priv/static/__preview__/*.mjs"
+      # The third DOES add one file to the workflow-level trigger —
+      # scripts/console-tdz-order-check.mjs, the only scripts/console-*.mjs not
+      # already listed (the capture module above and console-slice-gate.mjs are
+      # both entries). MEASURED over the last 500 first-parent commits of
+      # origin/main: ZERO touched it.
+      - "scripts/console-*.mjs"
       - "scripts/pds-ledger-census.sh"
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
