@@ -22,7 +22,16 @@ const seed=[{id:'origin',type:'paragraph',content:[{type:'text',value:'Before af
   const before=JSON.parse(JSON.stringify(canvas._editor.state.doc.toJSON()));
   canvas.recoverySnapshot();
   assert.deepEqual(JSON.parse(JSON.stringify(canvas._editor.state.doc.toJSON())),before,'recovery projection must never mutate live nested schema attrs');
-  console.log('PASS recovery projection preserves live schema attributes');
+  const e=canvas._editor,history=()=>e.state.plugins.find(p=>p.key.startsWith('history$')).getState(e.state);
+  canvas.querySelector('input[type="checkbox"]').click();canvas.flushPendingChanges();const checked=canvas._inflightOps;assert.ok(checked);canvas.acknowledgeOps(checked.seq,true);canvas.applyServerBlocks(checked.afterBlocks);
+  const afterChecked=JSON.parse(JSON.stringify(e.state.doc.toJSON())),depth=history().done.eventCount;
+  for(let i=0;i<3;i++)canvas.recoverySnapshot();
+  const paragraph=canvas.querySelector('li p');paragraph.setAttribute('data-reparse-probe','true');e.view.domObserver.flush();await new Promise(resolve=>setTimeout(resolve,0));
+  assert.deepEqual(JSON.parse(JSON.stringify(e.state.doc.toJSON())),afterChecked,'DOM reparse keeps exact schema defaults and metadata');
+  assert.equal(history().done.eventCount,depth,'read plus DOM reparse must not add phantom history');
+  assert.equal(e.commands.undo(),true);canvas.flushPendingChanges();const undone=canvas._inflightOps;assert.ok(undone);assert.equal(undone.afterBlocks[0].items[0].checked,false);canvas.acknowledgeOps(undone.seq,true);
+  assert.equal(e.commands.redo(),true);assert.deepEqual(canvas.recoverySnapshot().blocks,checked.afterBlocks);
+  console.log('PASS recovery projection and DOM reparse preserve schema attributes and checkbox history');
  }finally{canvas.remove();}
 }
 const c=document.createElement('bp-paper-canvas');c.blocks=structuredClone(seed);c.acknowledgedSaves=true;document.body.append(c);

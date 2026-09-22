@@ -465,7 +465,10 @@ function figurePastePlan(slice) {
 function normalizeCanvasDoc(doc) {
   const stripNested = (node) => {
     if (node && node.attrs) {
-      const a = node.attrs;
+      // ProseMirror toJSON retains each live attrs object by reference.
+      // Normalize a projection-owned bag; deleting live defaults creates
+      // phantom DOM-reparse edits and poisons native Undo history.
+      const a = node.attrs = { ...node.attrs };
       if (a.bpParagraphSource == null) delete a.bpParagraphSource;
       if (a.bpListFrameSource == null) delete a.bpListFrameSource;
       if (
