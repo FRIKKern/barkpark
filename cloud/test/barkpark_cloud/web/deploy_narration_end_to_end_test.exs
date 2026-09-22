@@ -157,7 +157,9 @@ defmodule BarkparkCloud.Web.DeployNarrationEndToEndTest do
       sha = String.duplicate("a1", 20)
 
       # -- LEG 1: the signed push mints a queued row ------------------------
-      conn = github_push(ctx.site.id, sha, "delivery-success-#{System.unique_integer([:positive])}")
+      conn =
+        github_push(ctx.site.id, sha, "delivery-success-#{System.unique_integer([:positive])}")
+
       assert conn.status == 201
       minted = body_of(conn)
       dep_id = minted["deployment_id"]
@@ -270,7 +272,9 @@ defmodule BarkparkCloud.Web.DeployNarrationEndToEndTest do
       ctx = setup_pipeline()
       sha = String.duplicate("b2", 20)
 
-      conn = github_push(ctx.site.id, sha, "delivery-failure-#{System.unique_integer([:positive])}")
+      conn =
+        github_push(ctx.site.id, sha, "delivery-failure-#{System.unique_integer([:positive])}")
+
       assert conn.status == 201
       dep_id = body_of(conn)["deployment_id"]
       assert console_lines(dashboard_read(ctx, dep_id)) == []
@@ -345,7 +349,9 @@ defmodule BarkparkCloud.Web.DeployNarrationEndToEndTest do
       ctx = setup_pipeline()
       sha = String.duplicate("d4", 20)
 
-      conn = github_push(ctx.site.id, sha, "delivery-reclaim-#{System.unique_integer([:positive])}")
+      conn =
+        github_push(ctx.site.id, sha, "delivery-reclaim-#{System.unique_integer([:positive])}")
+
       assert conn.status == 201
       dep_id = body_of(conn)["deployment_id"]
 
@@ -407,7 +413,9 @@ defmodule BarkparkCloud.Web.DeployNarrationEndToEndTest do
       ctx = setup_pipeline()
       sha = String.duplicate("c3", 20)
 
-      conn = github_push(ctx.site.id, sha, "delivery-bounded-#{System.unique_integer([:positive])}")
+      conn =
+        github_push(ctx.site.id, sha, "delivery-bounded-#{System.unique_integer([:positive])}")
+
       assert conn.status == 201
       dep_id = body_of(conn)["deployment_id"]
 
