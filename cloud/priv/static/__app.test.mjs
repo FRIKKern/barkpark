@@ -36074,3 +36074,132 @@ test("PDF-D11: rosterBeatAgeMs is total over junk and never renders a beat in th
   assert.equal(hooks.rosterStalenessText(null, GV_NOW), "No beat recorded");
   assert.equal(hooks.rosterStalenessText({ last_seen: GV_FIXTURE.now }, GV_NOW), "Beat 0s ago");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-bl-scroll-driven-cue-firefox-fallback — THE EDGE CUE IN AN ENGINE WITH NO
+// SCROLL TIMELINE.
+//
+// The defect is a BROWSER fact and its proof is a driven Firefox measurement
+// recorded in the charter (D904): Firefox 156.0.1 computes --set-matrix-fade and
+// --archive-cli-fade at 0px while both scrollers are genuinely clipped. Every
+// sweep in this epic drives Chrome only, so none of them can see it and these
+// tests do not pretend to. What they own is the smaller thing a node run CAN
+// own: that the fallback's three load-bearing parts cannot silently revert.
+//
+// EVERY EXPECTED VALUE BELOW IS READ OUT OF THE THING IT GUARDS — the fade
+// lengths come from the @keyframes, the selectors come from app.js's own
+// EDGE_CUES table. A literal retyped beside the guarded one is a guard that
+// stays green while the guarded code regresses.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The @supports block, and the two (selector, class, keyframe) triples the rest
+// of this section measures against.
+function firefoxFallbackFixture() {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const js = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const at = css.indexOf("@supports not (animation-timeline: scroll())");
+  assert.ok(at > 0, "the no-timeline fallback must be gated on @supports not (animation-timeline: scroll()) — a UA sniff or a bare override would also fire in Chrome and Safari");
+  const block = css.slice(at, css.indexOf("\n}\n", at) + 3);
+  // app.js's table is the source of truth for WHICH surfaces are cued and under
+  // WHICH class. Parsed, never retyped: adding a third scroller to that table
+  // with no CSS rule reds here.
+  const table = /var EDGE_CUES = \[([\s\S]*?)\n  \];/.exec(js);
+  assert.ok(table, "app.js must declare the EDGE_CUES table");
+  const cues = [...table[1].matchAll(/\{ sel: "([^"]+)", cls: "([^"]+)" \}/g)].map((m) => ({ sel: m[1], cls: m[2] }));
+  assert.equal(cues.length, 2, "both scrollers, not just the newer one: .set-matrix (W12) and the archives CLI chip (W15-S2)");
+  return { css, js, block, cues };
+}
+
+test("cch-bl-scroll-driven-cue-firefox-fallback: the fallback is TWO-STATE and its length is the keyframe's, not a retyped literal", () => {
+  const { css, block, cues } = firefoxFallbackFixture();
+  for (const { sel, cls } of cues) {
+    // The cue property this surface paints, read off its own mask declaration.
+    const ruleAt = css.indexOf(sel + " {");
+    assert.ok(ruleAt > 0, `app.css must still carry the base rule for ${sel}`);
+    const prop = /mask-image: linear-gradient\(to right, currentColor calc\(100% - var\((--[a-z-]+)\)\)/.exec(css.slice(ruleAt));
+    assert.ok(prop, `${sel} must still paint a horizontal edge mask from a registered length`);
+    const cue = prop[1];
+    // THE EXPECTED VALUE COMES FROM THE GUARDED THING. The `from` keyframe is
+    // what the scroll-driven engines paint at rest while clipped; the fallback
+    // must paint exactly that, or the two engines disagree about the same state.
+    const kf = new RegExp(`@keyframes [a-z-]+ \\{\\s*from \\{ ${cue}: (\\d+px); \\}\\s*to \\{ ${cue}: 0px; \\}`).exec(css);
+    assert.ok(kf, `${cue} must keep a from->0px keyframe pair; the fallback derives its length from it`);
+    // PRESENT WHILE CLIPPED — and only then. The length hangs off the measured
+    // class, never off the bare selector: a constant fade is the CUE_STUCK lie
+    // at the widths where the surface fits whole.
+    const onClass = `${sel}.${cls} { ${cue}: ${kf[1]}; }`;
+    const parts = block.split(onClass);
+    assert.equal(parts.length, 2, `the fallback for ${sel} must key ${cue}=${kf[1]} on the MEASURED class .${cls}, exactly once`);
+    // ABSENT WHILE IT FITS — i.e. the length is never declared unconditionally
+    // inside the block. With the class rule taken out, no declaration of this
+    // cue may remain anywhere in it.
+    assert.ok(!parts.join("").includes(cue + ":"),
+      `${cue} must not be set unconditionally inside the fallback — that is a fade that never retracts`);
+  }
+});
+
+test("cch-bl-scroll-driven-cue-firefox-fallback: animation-name:none cancels the leftover document-timeline animation", () => {
+  const { block, cues } = firefoxFallbackFixture();
+  // THE LINE WITHOUT WHICH THE WHOLE FALLBACK IS INERT, and it is not defensive.
+  // Gecko drops the unsupported `animation-timeline` and keeps the ANIMATION,
+  // which runs on the document timeline to `finished`; `animation-fill-mode:
+  // both` then pins the property to the `to` keyframe (0px), and an animation's
+  // effect value outranks a plain declaration in the cascade. Driven in Firefox
+  // 156.0.1 in one evaluation: the class declaration ALONE computes 0px, the
+  // same declaration plus this line computes 48px.
+  for (const { sel } of cues) {
+    assert.match(block, new RegExp(`${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{ animation-name: none; \\}`),
+      `${sel} must cancel its animation inside the fallback, or the finished document-timeline animation holds the cue at 0px and the fallback paints nothing`);
+  }
+});
+
+test("cch-bl-scroll-driven-cue-firefox-fallback: Chrome and Safari keep the scroll-driven cue, untouched", () => {
+  const { css, cues } = firefoxFallbackFixture();
+  // The row is explicit that this closes the last third of the browser matrix
+  // and does not undo the fix. The scroll timeline stays the source of truth
+  // wherever it exists — there the fallback block is inert and the fade still
+  // RETRACTS progressively rather than snapping.
+  for (const { sel } of cues) {
+    const ruleAt = css.indexOf(sel + " {");
+    const rule = css.slice(ruleAt, css.indexOf("\n}", ruleAt));
+    assert.match(rule, /animation-timeline: scroll\(self inline\)/,
+      `${sel} must still drive its cue from its own inline scroll timeline`);
+    assert.match(rule, /animation-fill-mode: both/);
+  }
+  // And the fallback may never be reachable in an engine that HAS the timeline:
+  // exactly one @supports block, and its condition is the negation.
+  assert.equal(css.split("@supports not (animation-timeline: scroll())").length - 1, 1);
+});
+
+test("cch-bl-scroll-driven-cue-firefox-fallback: the state is MEASURED, plural, and re-measured on every trigger that changes it", () => {
+  const { js } = firefoxFallbackFixture();
+  // navStripCue's ruling (cch-w14-s2), same predicate and the same 1px floor.
+  assert.match(js, /el\.scrollWidth - el\.clientWidth - el\.scrollLeft > 1/,
+    "the cue must read live geometry — a scroll timeline is exactly what is missing in the engine this serves");
+  // PLURAL. An archives panel renders one .cli-chip-code PER ARCHIVED ROW, so a
+  // singleton read would cue row one and leave every other row silent.
+  assert.match(js, /var els = document\.querySelectorAll\(EDGE_CUES\[i\]\.sel\)/,
+    "the sweep must be plural: the chip's population is one per archived row");
+  // Two global triggers. Capture phase, because `scroll` does not bubble: ONE
+  // delegated listener can only see a descendant scroller during capture — and
+  // that is what makes it survive every repaint of both surfaces.
+  assert.match(js, /document\.addEventListener\("scroll", edgeCueSync, true\)/);
+  assert.match(js, /window\.addEventListener\("resize", edgeCueSync\)/);
+  assert.match(js, /wireEdgeCues\(\);/, "the cue must be wired at boot");
+  // And the two PAINTS, each of which creates fresh elements whose class
+  // nothing has measured yet. BOUNDED WINDOWS, not an open `(?:.*\n)*?` reach:
+  // an unbounded one is satisfied by the OTHER paint's call a thousand lines
+  // away, so deleting either trigger leaves it green. Proven by mutation — that
+  // is exactly how the first draft of this assertion failed.
+  for (const [anchor, what] of [
+    ["box.innerHTML = notifPageHtml(s, { canManage: canManage, state: meSt });", "the notifications paint"],
+    ["panel.innerHTML = archivesPanelHtml(model);", "the archives paint"],
+  ]) {
+    const at = js.indexOf(anchor);
+    assert.ok(at > 0, `app.js must still carry ${what}`);
+    assert.ok(js.indexOf(anchor, at + 1) < 0, `${what} must have exactly one site, or this window measures the wrong one`);
+    const window_ = js.slice(at, at + 600);
+    assert.ok(window_.includes("edgeCueSync();"),
+      `${what} must re-measure the cue: every element it just created carries no class, and in a no-timeline engine the class IS the cue`);
+  }
+});

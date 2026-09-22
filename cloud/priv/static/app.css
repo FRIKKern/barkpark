@@ -5655,6 +5655,56 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   from { --archive-cli-fade: 32px; }
   to { --archive-cli-fade: 0px; }
 }
+
+/* ── THE SAME CUE IN AN ENGINE WITH NO SCROLL TIMELINE ───────────────────────
+   cch-bl-scroll-driven-cue-firefox-fallback. Both of this console's horizontal
+   edge cues — `.set-matrix` (W12) and the chip above (W15-S2) — are
+   `animation-timeline: scroll(self inline)`. That is the right idiom where it
+   is implemented, and NOTHING BELOW TOUCHES IT: in Chrome and Safari this whole
+   block is inert, the timeline stays the source of truth, and the fade still
+   RETRACTS progressively as you reach the end rather than snapping.
+
+   FIREFOX DOES NOT SHIP IT, AND THE ABSENCE WAS DRIVEN. Firefox 156.0.1 over
+   WebDriver BiDi, committed preview fixtures, both themes: `--set-matrix-fade`
+   computes 0px at 768/430/390 with the matrix genuinely clipped (scrollWidth
+   520 vs clientWidth 446/356/316), and `--archive-cli-fade` computes 0px at
+   390/430 with the chip clipped (367 vs 290/330). Nothing is cut and nothing
+   overflows — the affordance is simply ABSENT, so a Firefox operator never
+   learns the resurrect command continues past the right edge. The same probe,
+   same page, with `layout.css.scroll-driven-animations.enabled=true` reads 48px
+   and 32px, so that 0px is the ENGINE and not the instrument.
+
+   `animation-name: none` IS THE LOAD-BEARING LINE, AND IT IS NOT DEFENSIVE.
+   Gecko drops the unsupported `animation-timeline` declaration but KEEPS the
+   animation, which then runs on the document timeline to `finished`; with
+   `animation-fill-mode: both` that pins the property to the `to` keyframe —
+   0px — and an animation's effect value outranks a plain declaration in the
+   cascade. Measured in that Firefox, in ONE evaluation: adding only
+   `--set-matrix-fade: 48px` under this very `@supports` condition computes
+   **0px** (an inert rule that looks correct), and adding `animation-name: none`
+   with it computes **48px**. Delete this line and the fallback silently stops
+   painting while every source-level reading of it still looks right.
+
+   TWO-STATE, NOT A CONSTANT. A fade that is always on is the CUE_STUCK lie at
+   the widths where the surface FITS (the chip fits whole at >= 721). So the
+   length is keyed on a class app.js MEASURES — `edgeCueSync` reads
+   scrollWidth - clientWidth - scrollLeft live on every element, on scroll,
+   on resize and after each of the two paints — which is the ruling
+   `--nav-fade` already took (cch-w14-s2) for the same reason: both surfaces
+   are painted by JS after load. The lengths here are the `from` keyframes
+   above; __app.test.mjs derives the expected value FROM those keyframes rather
+   than from a literal beside this block, so moving one without the other reds.
+
+   WHAT THIS DOES NOT CLAIM: the browser axis of every sweep in this epic is
+   still Chrome-only, so nothing here is regression-guarded by a driven run.
+   The proof above is a hand-driven Firefox measurement recorded in the charter
+   (D904), not a gate. */
+@supports not (animation-timeline: scroll()) {
+  .set-matrix { animation-name: none; }
+  .set-matrix.is-matrix-clipped { --set-matrix-fade: 48px; }
+  .archive-resurrect .cli-chip-code { animation-name: none; }
+  .archive-resurrect .cli-chip-code.is-cli-clipped { --archive-cli-fade: 32px; }
+}
 .archive-resurrect-btn {
   flex: 0 0 auto;
 }
