@@ -359,6 +359,64 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       assert decode(conn)["error"] == "invalid_parent"
     end
 
+    # console-r21n / task-c88670851cb7e968 — the FOREIGN TWIN of the in-team
+    # "a support cannot be a parent → 422" fixture directly above. Every field is
+    # identical (owner session, a main, a support registered as "Existing
+    # Support"/"existing-support" with token_id "t", posted as parent_id under
+    # the name "Grandchild") EXCEPT the team_id those two rows carry. That single
+    # difference is exactly what the invalid_parent arm's `when tid == team.id`
+    # guard decides, and until this test NO fixture reached it: both cross-team
+    # tests supplied a MAIN, both support-as-parent tests built the support
+    # in-team, so the sibling `fleet_role: "support"` clause shadowed the guard
+    # on every input. Delete `when tid == team.id` and this test reds — a foreign
+    # support would answer 422 invalid_parent, confirming both that the id exists
+    # and that it is a support row on someone else's team.
+    test "a FOREIGN support as parent → 404, indistinguishable from an unknown id" do
+      {_u_a, team_a, token_a} = user_with_role("owner")
+      team_b = team_fixture()
+      main_b = main_fixture(team_b)
+
+      {:ok, foreign_support} =
+        Registry.register_support_barkpark(team_b, %{
+          name: "Existing Support",
+          slug: "existing-support",
+          parent_id: main_b.id,
+          token_id: "t"
+        })
+
+      conn =
+        call(
+          :post,
+          "/v1/fleet/supports",
+          %{name: "Grandchild", parent_id: foreign_support.id},
+          token_a
+        )
+
+      # The not-found CONTROL: the same request naming an id that exists nowhere.
+      unknown =
+        call(
+          :post,
+          "/v1/fleet/supports",
+          %{name: "Grandchild", parent_id: Ecto.UUID.generate()},
+          token_a
+        )
+
+      assert conn.status == 404
+      assert decode(conn)["error"] == "not_found"
+      # Same status AND the same bytes as the unknown id — no existence leak.
+      assert conn.status == unknown.status
+      assert conn.resp_body == unknown.resp_body
+
+      # Nothing created: team_a gained no row, team_b still holds exactly its
+      # main + its one support.
+      assert Registry.list_barkparks(team_a) == []
+      assert length(Registry.list_barkparks(team_b)) == 2
+      refute Enum.any?(Registry.list_barkparks(team_b), &(&1.name == "Grandchild"))
+      # And no provision job was enqueued against either team_b row.
+      assert support_jobs(foreign_support.id) == []
+      assert support_jobs(main_b.id) == []
+    end
+
     test "missing name → 422; missing parent_id → 422" do
       {_u, team, token} = user_with_role("owner")
       main = main_fixture(team)
@@ -986,6 +1044,57 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
 
       assert conn.status == 422
       assert decode(conn)["error"] == "invalid_parent"
+    end
+
+    # console-r21n / task-c88670851cb7e968 — the FOREIGN TWIN of the in-team
+    # "a support as parent → 422 invalid_parent" fixture directly above, on the
+    # mode:"provision" lane. Identical in every field (owner session, a LIVE
+    # main, a support registered as "Existing"/"existing" with token_id "t",
+    # posted as barkpark_id under the name "Grandchild") EXCEPT the team_id those
+    # rows carry — the one thing fleet_provision_support/1's `when tid ==
+    # team.id` guard decides. Delete that guard and this test reds with 422
+    # invalid_parent.
+    test "a FOREIGN support as parent → 404, indistinguishable from an unknown id" do
+      {_u_a, team_a, token_a} = user_with_role("owner")
+      team_b = team_fixture()
+      main_b = live_main_fixture(team_b)
+
+      {:ok, foreign_support} =
+        Registry.register_support_barkpark(team_b, %{
+          name: "Existing",
+          slug: "existing",
+          parent_id: main_b.id,
+          token_id: "t"
+        })
+
+      conn =
+        call(
+          :post,
+          "/v1/fleet/supports",
+          %{name: "Grandchild", barkpark_id: foreign_support.id, mode: "provision"},
+          token_a
+        )
+
+      # The not-found CONTROL: the same request naming an id that exists nowhere.
+      unknown =
+        call(
+          :post,
+          "/v1/fleet/supports",
+          %{name: "Grandchild", barkpark_id: Ecto.UUID.generate(), mode: "provision"},
+          token_a
+        )
+
+      assert conn.status == 404
+      assert decode(conn)["error"] == "not_found"
+      assert conn.status == unknown.status
+      assert conn.resp_body == unknown.resp_body
+
+      # No row created and no job enqueued.
+      assert Registry.list_barkparks(team_a) == []
+      assert length(Registry.list_barkparks(team_b)) == 2
+      refute Enum.any?(Registry.list_barkparks(team_b), &(&1.name == "Grandchild"))
+      assert support_jobs(foreign_support.id) == []
+      assert support_jobs(main_b.id) == []
     end
 
     test "a cross-team parent → 404, nothing created" do
