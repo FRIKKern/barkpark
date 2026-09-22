@@ -330,6 +330,7 @@ const DEFECTS = [
   "W21m-member-head-title-floor",
   "W21m-wizard-refusal-row-field-floor",
   "W24-word-break-alias-population",
+  "W21n-group-table-phone-band",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -935,6 +936,16 @@ const SITE_PHONE_WIDTHS = [320, 340, 360, 375, 390, 412, 430, 480, 495, 496, 620
 // Its 22 cells are still asserted — a page that starts scrolling sideways on a
 // never-deployed site is a defect too, and this is the only leg that would see it.
 const SITE_PHONE_SCENS = ["rollback", "site-states", "site-binding-bound"];
+
+// ── PDF-D11 GROUP TABLE: the widths, and WHY THESE ─────────────────────────
+// `.group-row` is a FIVE-column grid that becomes two at 899 (`grep -n
+// "group-row" cloud/priv/static/app.css`) — the only five-column grid on the
+// instance route, and the newest surface in the corpus to have a route at all.
+// The band is the four phone widths every leg here drives, plus the BOUNDARY
+// walked from both sides (898/899/900): a collapse asserted only below its own
+// edge is a collapse nobody has watched happen.
+const GROUP_BAND_WIDTHS = [320, 360, 390, 430, 898, 899, 900, 1000];
+const GROUP_BAND_SCEN = "fleet-group-view";
 
 // W17-S6: THE CHIP'S OWN WIDTH SET, BECAUSE THIS FILE USED TO ASK ITS QUESTION
 // AT ONE WIDTH. The money-message read below sat behind `await setViewport(768)`
@@ -3078,6 +3089,168 @@ async function main() {
           `${wrapped} of ${links} link(s) render on more than one line box (the wrap remedy doing its job);` +
           ` ${linkBoxed} with a non-zero clientWidth — the CLIP assertion is inert while that count is 0` +
           ` and goes live the moment the link stops being an inline box, which is exactly how a page-level green would be bought`,
+        );
+      }
+    }
+
+    // ── pdf-bl-fleet-group-route: THE GROUP TABLE, THE FIRST SURFACE IN THIS
+    //    FILE WHOSE CONTENT ARRIVES AFTER AN ASYNC READ.
+    //    Every leg above measures markup the loader paints synchronously. The
+    //    PDF-D11 group panel paints "Reading the roster…" first and is replaced
+    //    only when the browser-direct GET /v1/fleet/roster lands — so the nav
+    //    predicate below waits for `.group-table`, and a leg that cannot get
+    //    past that predicate is telling you the ROUTE is broken, not the CSS.
+    //    That is also why this leg is worth its cells: it is the only place in
+    //    the corpus where a real browser proves the route's async paint.
+    if (requested.includes("W21n-group-table-phone-band")) {
+      const D = "W21n-group-table-phone-band";
+      // ROUTE AND POPULATION BOTH DERIVED FROM THE FIXTURE (charter D228). A
+      // transcribed hash that drifts renders #overview and every number below
+      // is phantom; a transcribed row count goes quietly stale the moment the
+      // fixture changes, and a leg that merely tallies what it finds prints a
+      // happy total over a table that stopped rendering.
+      const { SCENARIOS } = await import("./scenarios.mjs");
+      const sc = SCENARIOS[GROUP_BAND_SCEN];
+      if (!sc || typeof sc.deepLink !== "string" || !/^#instance\/[^/]+\/group$/.test(sc.deepLink)) {
+        return die(`${D}: SCENARIOS["${GROUP_BAND_SCEN}"] no longer carries an #instance/<id>/group deepLink — the route this leg certifies cannot be reached, so every cell would measure some other screen`);
+      }
+      const mainId = sc.deepLink.slice("#instance/".length).split("/")[0];
+      const bps = (sc.data && Array.isArray(sc.data.barkparks)) ? sc.data.barkparks : [];
+      const main = bps.find((b) => b && b.id === mainId);
+      if (!main) return die(`${D}: the deepLink points at ${mainId}, which is not in the fixture's own data.barkparks`);
+      // What the surface OWES, read off the fixture the mock serves:
+      //   · one row per support of this main (plus the header row);
+      //   · the `.group-others` sentence iff the roster carries a worker that
+      //     matches no support — the unmatched-listener observation.
+      const supports = bps.filter((b) => b && b.fleet_role === "support" && String(b.fleet_parent_id) === String(mainId));
+      const roster = (sc.data && Array.isArray(sc.data.fleetRoster)) ? sc.data.fleetRoster : [];
+      const known = new Set(supports.flatMap((b) => [b.slug, b.name].filter((x) => x != null).map(String)));
+      const strays = roster.filter((r) => r && r.worker != null && !known.has(String(r.worker)));
+      if (!supports.length) return die(`${D}: the fixture has no supports, so the table this leg is named after would have zero body rows and every assertion below would measure nothing`);
+      const wantRows = supports.length + 1; // + the header row
+      const wantOthers = strays.length ? 1 : 0;
+      process.stdout.write(
+        `\n${D} — 1 fixture x ${GROUP_BAND_WIDTHS.length} widths x 2 themes ` +
+        `(${GROUP_BAND_WIDTHS.length * 2} cells; ${supports.length} support row(s) + head, ` +
+        `${strays.length} unmatched listener row(s) -> ${wantOthers} .group-others line)\n`,
+      );
+      let cells = 0, cellsSeen = 0, collapsed = 0;
+      for (const theme of ["light", "dark"]) {
+        // Enter ABOVE the band and WAIT FOR THE ASYNC PAINT. `.group-table`
+        // exists only after the roster read resolves — entering on the frame-1
+        // placeholder would measure a one-paragraph card and call it a table.
+        await setViewport(1000);
+        await nav(
+          `${BASE}/?scen=${GROUP_BAND_SCEN}&theme=${theme}${sc.deepLink}`,
+          `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+          `return !!(v && v.id==='view-instance' && v.querySelector('#instance-group-view .group-table'));})()`,
+        );
+        const row = [];
+        for (const width of GROUP_BAND_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){var d=document.documentElement;var R=function(v){return Math.round(v*100)/100;};` +
+            `var v=document.querySelector('section.view:not([hidden])');` +
+            `var p=(v||document).querySelector('#instance-group-view');` +
+            `var t=p?p.querySelector('.group-table'):null;` +
+            `var cols=t?getComputedStyle(t.querySelector('.group-row')).gridTemplateColumns:'';` +
+            `var cs=[].slice.call(p?p.querySelectorAll('.group-cell'):[]).map(function(c){` +
+            `  var rr=c.getBoundingClientRect();` +
+            `  return {right:R(rr.right),sw:c.scrollWidth,cw:c.clientWidth,t:(c.textContent||'').trim().slice(0,40)};});` +
+            `var o=p?p.querySelector('.group-others'):null;` +
+            `return {sw:d.scrollWidth,cw:d.clientWidth,view:v?v.id:'none',theme:d.getAttribute('data-theme'),` +
+            ` panel:!!p,table:!!t,state:p&&p.querySelector('[data-group-state]')?p.querySelector('[data-group-state]').getAttribute('data-group-state'):null,` +
+            ` rows:p?p.querySelectorAll('.group-row').length:0,cols:cols,cells:cs,` +
+            ` others:o?1:0,osw:o?o.scrollWidth:null,ocw:o?o.clientWidth:null,` +
+            ` oright:o?R(o.getBoundingClientRect().right):null};})()`,
+          );
+          cells++;
+          // (1) THE ROUTE LANDED AND THE READ PAINTED. Without both, every
+          //     number below is about some other screen or about frame 1.
+          if (m.view !== "view-instance") {
+            fail(D, `${theme}@${width}: rendered section.view "${m.view}", asked for "view-instance" — the group hash did not route`);
+            continue;
+          }
+          if (!m.table) {
+            fail(D, `${theme}@${width}: #instance-group-view carries no .group-table — the panel is still on its "Reading the roster…" frame, so the roster read never painted at this width`);
+            continue;
+          }
+          if (m.state !== "working") {
+            fail(D, `${theme}@${width}: the panel reads data-group-state="${m.state}", expected "working" — the surface is not deriving the fixture's own roster plane`);
+          }
+          if (m.theme !== theme) fail(D, `${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+          // (2) THE POPULATION IS THE FIXTURE'S, not whatever rendered.
+          if (m.rows !== wantRows) {
+            fail(D, `${theme}@${width}: ${m.rows} .group-row, expected ${wantRows} (${supports.length} support(s) + the header row) — the table and its fixture have drifted apart, so the cells below are not the cells this leg names`);
+          }
+          if (m.others !== wantOthers) {
+            fail(D, `${theme}@${width}: ${m.others} .group-others line(s), expected ${wantOthers} — the fixture's roster carries ${strays.length} worker(s) matching no support, and the unmatched-listener observation ${wantOthers ? "must" : "must not"} render`);
+          }
+          // (3) THE PAGE. A five-column grid on a 320px phone is exactly how a
+          //     table walks off the screen.
+          const overhang = m.sw - m.cw;
+          if (overhang > 0) {
+            fail(D, `${theme}@${width}#group: documentElement scrollWidth ${m.sw} > clientWidth ${m.cw} — ${overhang}px of the group surface is off-screen at rest, with no cue`);
+          }
+          // (4) EVERY CELL, BOUNDED AND NOT CLIPPED. `.group-cell` carries
+          //     `overflow-wrap: anywhere`, so a clip here means the wrap stopped
+          //     applying — and a task title or a worker name silently losing its
+          //     tail is the whole reason this column exists.
+          for (const c of m.cells) {
+            cellsSeen++;
+            if (c.right > m.cw + 1) {
+              fail(D, `${theme}@${width}#group: a .group-cell's right edge ${c.right} is past the ${m.cw}px viewport — "${c.t}" paints off-screen`);
+            }
+            if (c.sw > c.cw + 1) {
+              fail(D, `${theme}@${width}#group: .group-cell scrollWidth ${c.sw} > clientWidth ${c.cw} — "${c.t}" is CLIPPED, not wrapped`);
+            }
+          }
+          if (m.others && m.osw > m.ocw + 1) {
+            fail(D, `${theme}@${width}#group: .group-others scrollWidth ${m.osw} > clientWidth ${m.ocw} — the unmatched-listener sentence hides ${m.osw - m.ocw}px of itself`);
+          }
+          if (m.others && m.oright > m.cw + 1) {
+            fail(D, `${theme}@${width}#group: .group-others right edge ${m.oright} is past the ${m.cw}px viewport`);
+          }
+          // (5) THE COLLAPSE ACTUALLY HAPPENS, watched from BOTH sides of its
+          //     own edge. Two track values below 900 and five at 900+.
+          //     TOP-LEVEL tokens only: Chrome resolves the narrow arm as
+          //     "minmax(0px, 1fr) minmax(0px, 1fr)", and a bare /\s+/ split
+          //     reads that two-track value as FOUR — a refusal that names the
+          //     collapse and is really naming the parser. Depth-counted.
+          const tracks = (function (v) {
+            let depth = 0, n = 0, inTok = false;
+            for (const ch of String(v || "")) {
+              if (ch === "(") depth++;
+              else if (ch === ")") depth--;
+              if (depth === 0 && /\s/.test(ch)) { inTok = false; continue; }
+              if (!inTok) { inTok = true; n++; }
+            }
+            return n;
+          })(m.cols);
+          const wantTracks = width <= 899 ? 2 : 5;
+          if (tracks !== wantTracks) {
+            fail(D, `${theme}@${width}#group: .group-row resolves ${tracks} grid track(s) ("${m.cols}"), expected ${wantTracks} — the 899px collapse did not take on this side of its own edge`);
+          }
+          if (tracks === 2) collapsed++;
+          row.push(`${width}:${m.sw}/${tracks}c${overhang > 0 ? "!" : ""}`);
+        }
+        process.stdout.write(`   ${GROUP_BAND_SCEN}/${theme}  ${row.join(" ")}\n`);
+        if (row.length !== GROUP_BAND_WIDTHS.length) fail(D, `${theme}: ${row.length} of ${GROUP_BAND_WIDTHS.length} widths measured`);
+      }
+      // AN EMPTY POPULATION IS NOT A CLEAN ONE.
+      if (cellsSeen === 0) {
+        fail(D, `zero .group-cell measured across ${cells} cells — the table this leg is named after rendered nothing, which is not a pass`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${GROUP_BAND_WIDTHS[0]}-${GROUP_BAND_WIDTHS[GROUP_BAND_WIDTHS.length - 1]}` +
+          ` on the routed group tab x 2 themes; ${cellsSeen} .group-cell measured,` +
+          ` ${collapsed} of ${cells} cells took the 899px two-column collapse (the rest are the 5-track grid above it)`,
+        );
+        okLine(
+          `the route's ASYNC paint is proven in a real browser: the nav predicate waits for` +
+          ` #instance-group-view .group-table, which exists only after the browser-direct roster read lands —` +
+          ` frame 1 is a "Reading the roster…" card with no state attribute at all`,
         );
       }
     }
