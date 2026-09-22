@@ -1,8 +1,7 @@
 defmodule Barkpark.StudioChat.ProviderAtomBoundTest do
   @moduledoc """
   The premise behind the `DOS.StringToAtom` sobelow waiver on
-  `Barkpark.StudioChat.Runtime.registered_provider_ready/2`
-  (`lib/barkpark/studio_chat/runtime.ex:554`):
+  `Barkpark.StudioChat.Runtime.registered_provider_ready/2`:
 
       Map.get(providers, provider) || Map.get(providers, String.to_atom(provider)) || %{}
 
@@ -12,43 +11,57 @@ defmodule Barkpark.StudioChat.ProviderAtomBoundTest do
   nowhere a test could refute — so nothing red if a future caller widened it.
 
   THIS FILE IS THAT PREMISE. Its subject is the REACHABILITY of the atom site,
-  not the line itself.
+  not the line it sits on. NOTHING BELOW CITES A LINE NUMBER, deliberately:
+  the waiver this file explains was itself written line-free because line
+  citations rot, and an earlier revision of this moduledoc proved the point by
+  pointing at a line an unrelated annotation edit had already moved twice.
+  Navigate by module plus function, or by the named attribute or constraint.
 
-  The value at the atom site is `ref.provider`, `to_string(provider)` from
-  `Runtime.open/2` (runtime.ex:344-346), whose only `lib/` caller is
-  `Recorder.init/1` (recorder.ex:326) reading `Map.get(opts, :provider, "claude")`
-  (recorder.ex:259). `Recorder.ensure/1` has exactly THREE `lib/` callers, and
-  all three pass the PERSISTED `chat_sessions.provider` column:
+  The value at the atom site is `ref.provider`, which `Runtime.open/2` builds as
+  `to_string(provider)`. `open/2`'s only `lib/` caller is
+  `Barkpark.StudioChat.Recorder.init/1`, which reads
+  `Map.get(opts, :provider, "claude")` from the opts it was started with.
+  `Recorder.ensure/1` has exactly THREE `lib/` callers, and all three pass the
+  PERSISTED `chat_sessions.provider` column:
 
-    * `barkpark_web/controllers/chat_controller.ex:1013` — `session.provider`
-    * `barkpark_web/live/studio/chat_live.ex:4710` — `socket.assigns.provider`,
-      written only by `handle_event("set-provider", …)` (chat_live.ex:692-694),
-      which guards `provider in StudioChat.Session.providers()`, or from
-      `session.provider || "claude"` (chat_live.ex:4990)
-    * `cycle_fleet.ex:1748` — `recorder_opts/2` → `session.provider`
-      (cycle_fleet.ex:4707); its own session is minted with a literal `"codex"`
-      (cycle_fleet.ex:4694)
+    * `BarkparkWeb.ChatController` — `session.provider`
+    * `BarkparkWeb.Studio.ChatLive` — `socket.assigns.provider`, written only by
+      `handle_event("set-provider", …)`, which guards
+      `provider in StudioChat.Session.providers()`, or by the session-assign
+      helper as `session.provider || "claude"`
+    * `Barkpark.CycleFleet` — `recorder_opts/2` → `session.provider`; its own
+      session is minted by `create_attempt_session/2` with a literal `"codex"`
 
-  So the bound is NOT `Runtime.adapter/1` (runtime.ex:146/149): the
+  COUNTING THE CALLERS: `Barkpark.CycleFleet` does NOT call the recorder
+  directly. It resolves an INJECTED module first — `recorder = value(opts,
+  :recorder, Recorder)` — and then calls `recorder.ensure(…)` through that
+  variable. So a grep for the direct call `Recorder.ensure(` over `api/lib`
+  returns TWO hits, not three; the third is only found by also grepping the
+  lowercase `recorder.ensure(`, or by grepping `:recorder` for the injection
+  point. A reader who re-verifies the three-caller claim with the obvious
+  capitalised grep alone will get a false two and conclude this moduledoc is
+  wrong when it is right.
+
+  So the bound is NOT `Runtime.adapter/1`: the
   `execution_target: "registered_host"` clause of `open/2` never calls
-  `adapter/1` at all. The bound is the chat_sessions.provider COLUMN, held
+  `adapter/1` at all. The bound is the `chat_sessions.provider` COLUMN, held
   twice over — by `Session.create_changeset/2`'s
-  `validate_inclusion(:provider, ~w(claude codex))` (session.ex:26, :209) and by
-  the Postgres `chat_sessions_provider_check` CHECK constraint
-  (priv/repo/migrations/20260714140000_…:22-23). `provider` is create-only:
-  `create_changeset/2` is session.ex's ONLY changeset and no `update_all` in
-  `studio_chat.ex` touches the column.
+  `validate_inclusion(:provider, @providers)` over `@providers ~w(claude codex)`,
+  and by the Postgres `chat_sessions_provider_check` CHECK constraint added in
+  `20260714140000_add_provider_execution_identity_to_chat_sessions`. `provider`
+  is create-only: `create_changeset/2` is `Session`'s ONLY changeset and no
+  `Repo.update_all` in `Barkpark.StudioChat` sets the column.
 
   NON-VACUITY, measured not asserted. Widening `@providers` to
-  `~w(claude codex gpt)` (session.ex:26) reds 2 of the 5 arms — the
-  atom-minting arm and the roster-drift arm — 5 tests, 2 failures. A SECOND
-  mutation, deleting `validate_inclusion(:provider, @providers)` from
-  `create_changeset/2` outright, stayed GREEN at 5/0: the create path is
-  refused by `check_constraint(:provider, …)` at the database instead, under
-  the same "is invalid" message. So the "changeset refuses" arm below pins the
-  OUTCOME of the create path, deliberately NOT which of the two layers
-  produced it — it reds only if BOTH go. The DB arm below is the one that
-  isolates the constraint.
+  `~w(claude codex gpt)` reds 2 of the 5 arms — the atom-minting arm and the
+  roster-drift arm — 5 tests, 2 failures. A SECOND mutation, deleting
+  `validate_inclusion(:provider, @providers)` from `create_changeset/2`
+  outright, stayed GREEN at 5 tests, 0 failures: the create path is refused by
+  `check_constraint(:provider, …)` at the database instead, under the same
+  "is invalid" message. So the "changeset refuses" arm below pins the OUTCOME
+  of the create path, deliberately NOT which of the two layers produced it — it
+  reds only if BOTH go. The DB arm below is the one that isolates the
+  constraint: dropping the CHECK constraint reds it alone.
   """
   use Barkpark.DataCase, async: true
 
@@ -56,7 +69,7 @@ defmodule Barkpark.StudioChat.ProviderAtomBoundTest do
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.{Runtime, Session}
 
-  describe "the value reaching String.to_atom/1 at runtime.ex:554" do
+  describe "the value reaching String.to_atom/1 in registered_provider_ready/2" do
     test "creates NO new atom: every roster provider is already an existing atom" do
       # `String.to_atom/1` is only a DoS vector when it MINTS. For every value
       # the roster admits, the atom already exists (compiled into `adapter/1`'s
@@ -64,13 +77,14 @@ defmodule Barkpark.StudioChat.ProviderAtomBoundTest do
       for provider <- Session.providers() do
         assert is_atom(String.to_existing_atom(provider)),
                "#{inspect(provider)} is in the roster but is not an existing atom — " <>
-                 "runtime.ex:554 would MINT it"
+                 "registered_provider_ready/2 would MINT it"
       end
     end
 
     test "CONTROL: a non-roster string is NOT an existing atom, so the site would mint" do
       # Proves the arm above measures something: an off-roster value is exactly
-      # the input that makes runtime.ex:554 dangerous.
+      # the input that makes the `String.to_atom/1` in
+      # `registered_provider_ready/2` dangerous.
       off_roster = "provider-#{System.unique_integer([:positive])}"
       refute off_roster in Session.providers()
 
