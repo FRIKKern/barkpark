@@ -1372,8 +1372,14 @@
       background: var(--bg-card);
       /* spd-s5: the space negotiation is a MOVE, not a jump. Collapsing a
          pane swaps .pane-column ⇄ .pane-column--collapsed, i.e. 260px ⇄
-         44px; without a transition the row teleports and reads as a glitch
-         (measured live: transitionDuration 0s on every desk element).
+         44px; without a transition the row teleports and reads as a glitch.
+         (That parenthesis used to read "measured live: transitionDuration 0s
+         on every desk element" in the PRESENT tense, directly above the rule
+         that makes it false — it described the desk BEFORE this line existed.
+         Re-measured on deployed guerrilla at f703de669, in a real browser, in
+         both motion regimes: this element reports 0.15s on width/min-width/
+         max-width, and `.bp-paper-surface` / `.editor-panel-main` report 0s.
+         scripts/studio-desk-motion-probe.mjs, spd-b30.)
          Both states declare the same box transition so the morph plays in
          BOTH directions. The duration was a hardcoded 0.15s until spd-b21:
          design/tokens.json carried motion.dur-* but design/emit.mjs emitted
