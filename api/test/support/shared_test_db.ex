@@ -67,12 +67,34 @@ defmodule Barkpark.SharedTestDb do
       instance somebody already hit.
 
     * **`:concurrent_backends`** — other live Postgres backends on OUR database
-      that started more than `:backend_age_seconds` before our own connection.
-      Our whole pool (`pool_size: 20`) connects within a moment of each other at
-      app boot, so the age threshold excludes us and catches a suite already
-      running. LIMIT OF THIS PROBE, stated plainly: a peer whose suite starts
-      inside the same window is NOT caught. It is the weakest of the three and
-      it is the one the other two do not need.
+      that were opened BEFORE THIS BEAM STARTED. A connection cannot predate the
+      OS process that opened it, so a backend older than our runtime is
+      necessarily somebody else's: that is an IDENTITY, not an estimate.
+
+      IT WAS AN AGE HEURISTIC AND THE HEURISTIC WAS WRONG. The first shape of
+      this probe counted backends more than `:backend_age_seconds` (30) older
+      than THE CONNECTION ASKING THE QUESTION, on the premise that "our whole
+      pool connects within a moment of each other at app boot". Under
+      `Ecto.Adapters.SQL.Sandbox` the pool does NOT connect at boot — an
+      ownership pool opens connections as tests check them out, across the whole
+      run. So the reference instant MOVED with the asker, and in a long suite a
+      late-opened connection read its own 19 pool siblings as a foreign suite.
+      MEASURED: green in a 1.6s single-file run, red at minute 23 of the CI
+      suite (run 35676197841, job 106583201638) with the message "our own pool
+      is being counted as a foreign suite at the shipped threshold". A wider
+      threshold would only have moved the duration at which it lies.
+
+      The BEAM's start instant is fixed for the life of the run, so the verdict
+      cannot drift as the suite gets longer. It is computed IN DATABASE TIME
+      (`clock_timestamp() - uptime`), so no app-host/db-host clock comparison
+      happens and no skew tolerance constant is needed.
+
+      `backend_type = 'client backend'` keeps an autovacuum worker or another
+      background worker from ever being read as a peer suite.
+
+      LIMIT OF THIS PROBE, stated plainly: a peer whose suite starts AFTER ours
+      is not caught — its backends are younger than our runtime. It is the
+      weakest of the three and it is the one the other two do not need.
 
     * **`:sibling_partitions`** — other `barkpark_test%` databases with live
       backends. Evidence, not a verdict: it says other agents are running
@@ -101,7 +123,10 @@ defmodule Barkpark.SharedTestDb do
 
   @residue_cap 1000
 
-  @default_backend_age_seconds 30
+  # `:erlang.statistics(:wall_clock)` counts milliseconds since THIS BEAM
+  # started. Subtracting it from the database's own clock names the instant our
+  # runtime came up, in the database's time base. Fixed for the whole run.
+  defp runtime_uptime_ms, do: :erlang.statistics(:wall_clock) |> elem(0)
 
   @doc """
   Run the probes against a live repo. Returns an observation map. NEVER raises:
@@ -110,13 +135,15 @@ defmodule Barkpark.SharedTestDb do
   Options:
 
     * `:tables` — census table list (default `#{inspect(@census_tables)}`)
-    * `:backend_age_seconds` — how much older than our own connection another
-      backend must be to count as foreign (default `#{@default_backend_age_seconds}`)
+    * `:runtime_uptime_ms` — milliseconds this BEAM has been up; a backend
+      opened before that is not ours (default `:erlang.statistics(:wall_clock)`).
+      Passing `0` moves the reference to NOW and makes EVERY other live backend
+      count — that is how the test proves the statement can see backends at all.
     * `:migrations_path` — where the checkout's migrations live
   """
   def observe(repo, opts \\ []) do
     tables = Keyword.get(opts, :tables, @census_tables)
-    age = Keyword.get(opts, :backend_age_seconds, @default_backend_age_seconds)
+    uptime_ms = Keyword.get(opts, :runtime_uptime_ms, runtime_uptime_ms())
     migrations_path = Keyword.get(opts, :migrations_path, default_migrations_path())
 
     %{
@@ -126,7 +153,7 @@ defmodule Barkpark.SharedTestDb do
       tables_inspected: tables,
       applied_versions: probe(fn -> applied_versions(repo) end),
       checkout_versions: probe(fn -> checkout_versions(migrations_path) end),
-      concurrent_backends: probe(fn -> concurrent_backends(repo, age) end),
+      concurrent_backends: probe(fn -> concurrent_backends(repo, uptime_ms) end),
       sibling_partitions: probe(fn -> sibling_partitions(repo) end)
     }
   end
@@ -245,8 +272,8 @@ defmodule Barkpark.SharedTestDb do
 
   defp explain({:concurrent_backends, n}),
     do:
-      "#{n} other Postgres backend(s) are live on this database and predate our pool. " <>
-        "Another suite is running here right now."
+      "#{n} other Postgres backend(s) are live on this database and were opened BEFORE this BEAM started. " <>
+        "They cannot be ours. Another suite is running here right now."
 
   defp explain({:sibling_partitions, siblings}),
     do:
@@ -349,17 +376,32 @@ defmodule Barkpark.SharedTestDb do
     _ -> "priv/repo/migrations"
   end
 
-  defp concurrent_backends(repo, age_seconds) do
-    scalar(repo, """
+  @doc """
+  The foreign-backend statement, as SQL, taking the BEAM uptime in milliseconds
+  as `$1`.
+
+  Public so a test can run the SAME statement from a connection OTHER than the
+  pool's — which is exactly the situation that broke the age-based shape. A
+  predicate whose answer depends on WHICH of our own connections asks it is not
+  an identity, and the only way to show this one does not is to ask it twice,
+  from two different connections, and get the same number.
+  """
+  def concurrent_backends_sql do
+    """
     SELECT count(*)
       FROM pg_stat_activity a
      WHERE a.datname = current_database()
        AND a.pid <> pg_backend_pid()
-       AND a.backend_start < (
-             SELECT s.backend_start - interval '#{age_seconds} seconds'
-               FROM pg_stat_activity s WHERE s.pid = pg_backend_pid()
-           )
-    """)
+       AND a.backend_type = 'client backend'
+       AND a.backend_start < clock_timestamp() - ($1::bigint * interval '1 millisecond')
+    """
+  end
+
+  defp concurrent_backends(repo, uptime_ms) do
+    %{rows: [[count]]} =
+      Ecto.Adapters.SQL.query!(repo, concurrent_backends_sql(), [uptime_ms])
+
+    count
   end
 
   defp sibling_partitions(repo) do

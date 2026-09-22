@@ -223,25 +223,120 @@ defmodule Barkpark.SharedTestDbTest do
     end
   end
 
-  describe "REAL: the concurrent-backend probe, controlled by the threshold alone" do
-    test "a threshold our own pool satisfies counts backends; the shipped threshold does not" do
+  describe "REAL: the concurrent-backend probe, and its independence from WHO asks" do
+    # A fresh Postgres connection, opened NOW, outside the Ecto pool. It stands
+    # in for the late-opened pool member that broke the previous shape: under
+    # `Ecto.Adapters.SQL.Sandbox` the pool is an ownership pool and opens
+    # connections across the whole run, not at boot.
+    defp foreign_lookalike_conn do
+      opts =
+        Barkpark.Repo.config()
+        |> Keyword.take([:hostname, :port, :username, :password, :database, :socket_dir, :ssl])
+
+      # Linked to the test process on purpose: it dies with the test, so there
+      # is no teardown to race. An explicit `GenServer.stop/1` in `on_exit/1`
+      # loses that race and reds the test on a connection that was already
+      # shutting down.
+      {:ok, conn} = Postgrex.start_link(opts)
+      conn
+    end
+
+    defp count_on(conn, sql, params) do
+      %Postgrex.Result{rows: [[n]]} = Postgrex.query!(conn, sql, params)
+      n
+    end
+
+    # The retired predicate, verbatim in shape: foreign = older than the ASKING
+    # connection by more than N seconds. N is 0 in the arms below only so the
+    # contrast needs no elapsed time; at N=30 the same divergence appears once
+    # the run is 30 seconds old, which is why CI went red at minute 23 of the
+    # suite and a 1.6-second single-file run stayed green.
+    @old_age_shape """
+    SELECT count(*)
+      FROM pg_stat_activity a
+     WHERE a.datname = current_database()
+       AND a.pid <> pg_backend_pid()
+       AND a.backend_start < (
+             SELECT s.backend_start - ($1::bigint * interval '1 second')
+               FROM pg_stat_activity s WHERE s.pid = pg_backend_pid()
+           )
+    """
+
+    test "loud/quiet on the SAME statement: the reference instant is the only difference" do
       {loud, quiet} =
         Sandbox.unboxed_run(Barkpark.Repo, fn ->
-          {SharedTestDb.observe(Barkpark.Repo, backend_age_seconds: -3600),
-           SharedTestDb.observe(Barkpark.Repo, backend_age_seconds: 30)}
+          {SharedTestDb.observe(Barkpark.Repo, runtime_uptime_ms: 0),
+           SharedTestDb.observe(Barkpark.Repo)}
         end)
 
-      # Same SQL, same live pool, one number different. The loud arm proves the
-      # statement can see backends at all — without it, the quiet arm's 0 could
-      # be a query that matches nothing under any condition.
+      # NON-VACUITY. With the reference moved to NOW every other live backend
+      # predates it, so a zero here would mean the statement matches nothing
+      # under any condition and the quiet arm would prove nothing.
       assert is_integer(loud.concurrent_backends) and loud.concurrent_backends > 0,
-             "the backend probe saw no connection even with an hour of slack; it measures nothing"
+             "the backend probe saw no connection even with the reference at NOW; it measures nothing"
 
       assert quiet.concurrent_backends == 0,
-             "our own pool is being counted as a foreign suite at the shipped threshold"
+             "our own pool is being counted as a foreign suite: #{inspect(quiet.concurrent_backends)}"
 
       {:ok, quiet_findings} = SharedTestDb.assess(quiet)
       refute Enum.any?(quiet_findings, &match?({:concurrent_backends, _}, &1))
+    end
+
+    test "THE REGRESSION, reproduced in seconds: the OLD age shape answers differently depending on WHICH of our own connections asks" do
+      late = foreign_lookalike_conn()
+      uptime_ms = :erlang.statistics(:wall_clock) |> elem(0)
+
+      {old_from_pool, new_from_pool} =
+        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+          %{rows: [[old_n]]} = Ecto.Adapters.SQL.query!(Barkpark.Repo, @old_age_shape, [0])
+
+          %{rows: [[new_n]]} =
+            Ecto.Adapters.SQL.query!(
+              Barkpark.Repo,
+              SharedTestDb.concurrent_backends_sql(),
+              [uptime_ms]
+            )
+
+          {old_n, new_n}
+        end)
+
+      old_from_late = count_on(late, @old_age_shape, [0])
+      new_from_late = count_on(late, SharedTestDb.concurrent_backends_sql(), [uptime_ms])
+
+      # THE DEFECT: the retired predicate's reference is the asker's own
+      # backend_start, so a connection opened later sees strictly more of our
+      # own pool as "foreign". Two of OUR connections, one database, two answers.
+      assert old_from_late > old_from_pool,
+             "the old age shape did not diverge between two of our own connections " <>
+               "(pool #{old_from_pool}, late #{old_from_late}); this control measured nothing"
+
+      assert old_from_late > 0,
+             "the old age shape counted none of our own pool from a late connection"
+
+      # THE FIX: the reference is this BEAM's start, which no connection of ours
+      # can predate. Same database, same statement, two askers, one answer.
+      assert new_from_pool == 0 and new_from_late == 0,
+             "the runtime-start predicate counted our own pool " <>
+               "(pool #{new_from_pool}, late #{new_from_late})"
+    end
+
+    test "a backend that genuinely predates this runtime IS counted, and reaches assess/1" do
+      # Positive arm on the REAL statement: claim a zero uptime, which places
+      # the reference instant at NOW — after our pool opened. Our own backends
+      # are then, by the predicate's own rule, older than the runtime and must
+      # be counted. Without this the quiet arms could be a statement that never
+      # fires.
+      n =
+        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+          %{rows: [[n]]} =
+            Ecto.Adapters.SQL.query!(Barkpark.Repo, SharedTestDb.concurrent_backends_sql(), [0])
+
+          n
+        end)
+
+      assert n > 0
+      {:ok, findings} = SharedTestDb.assess(%{concurrent_backends: n})
+      assert {:concurrent_backends, n} in findings
     end
   end
 end
