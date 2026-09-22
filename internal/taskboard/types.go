@@ -117,6 +117,14 @@ type CriterionItem struct {
 	// proof was refuted at least once — read it before trusting Evidence, which
 	// is deliberately the SUPERSEDED text on a withdrawn row.
 	Withdrawals []CriterionWithdrawal
+	// MarkedMissed is the honest miss as the BOARD PROJECTION reports it.
+	// `?view=board` carries `content_digest.criteria_marks` — one character per
+	// criterion, "m"/"a"/"o" — instead of the criteria themselves, so a row
+	// decoded from that projection has the miss WITHOUT the attempt notes that
+	// prove it under the full view. The server derives the "a" with the exact
+	// tolerance decodeAttempts applies here (an attempt counts only when it is a
+	// map), so the two routes agree rung for rung.
+	MarkedMissed bool
 }
 
 // CriterionWithdrawal is one recorded withdrawal of a stamped proof (D745's
@@ -148,7 +156,9 @@ type CriterionAttempt struct {
 // met seal — the amber "!" rung on the board's criteria ladder. A met
 // criterion is never "missed" (the seal supersedes the trail), and an
 // untouched one (no attempts) stays the dim ○.
-func (c CriterionItem) Missed() bool { return !c.Met && len(c.Attempts) > 0 }
+func (c CriterionItem) Missed() bool {
+	return !c.Met && (len(c.Attempts) > 0 || c.MarkedMissed)
+}
 
 // Event is one recent task.% mutation from prime.
 type Event struct {

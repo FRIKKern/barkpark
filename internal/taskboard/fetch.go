@@ -610,6 +610,77 @@ type taskWire struct {
 	// content is a non-object, or whose fields are oddly shaped, degrades to
 	// zero values rather than failing the whole list decode.
 	Content json.RawMessage `json:"content"`
+	// ContentDigest is what `?view=board` sends INSTEAD of Content: the bounded
+	// stand-in for the two things this file reads out of the echo on the ROW
+	// path — the per-criterion ladder states and the completeness booleans.
+	// Absent on the full view (where Content itself is the better source) and
+	// absent from any server too old to emit it, and in both cases the Content
+	// path below is unchanged. RawMessage + a tolerant decode for the same
+	// reason as every field above it: one oddly-shaped digest must never fail
+	// the whole list decode.
+	//
+	// PRODUCER: api/lib/barkpark_web/controllers/tasks_controller/params.ex,
+	// `put_content_digest/2` (read its `:board` header before changing either
+	// side — the two are asserted against each other by
+	// api/test/barkpark_web/contract/tasks_board_view_test.exs).
+	ContentDigest json.RawMessage `json:"content_digest"`
+}
+
+// contentDigest is the decoded `content_digest` object — see taskWire's field.
+type contentDigest struct {
+	CriteriaMarks   string `json:"criteria_marks"`
+	HasDescription  bool   `json:"has_description"`
+	HasDependencies bool   `json:"has_dependencies"`
+	HasPaper        bool   `json:"has_paper"`
+}
+
+// decodeContentDigest reads the board projection's content_digest, or nil when
+// the row carries none (the full view, or a pre-digest server). Tolerant like
+// every other decoder in this file: a null, a scalar, a list or an
+// oddly-typed member yields nil rather than an error, so the row keeps every
+// other field and the Content path decides alone.
+func decodeContentDigest(raw json.RawMessage) *contentDigest {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var d contentDigest
+	if json.Unmarshal(raw, &d) != nil {
+		return nil
+	}
+	return &d
+}
+
+// criteriaItemsFromMarks rebuilds the ladder's per-rung state from the board
+// projection's compact `criteria_marks` string — one character per criterion,
+// in checklist order:
+//
+//	"m"  met
+//	"a"  an honest recorded miss (attempts, which the projection does not ship)
+//	"o"  untouched — and so is anything else, because an unknown character from
+//	     a newer server must read as "no claim about this rung", never as a
+//	     seal or a miss.
+//
+// The items carry NO Criterion text, NO Evidence and NO Attempts, because the
+// projection ships none: this is exactly enough for criteriaLadder, which
+// switches on Met/Missed() only, and for the HasCriteria rubric input. A
+// detail pane wanting the text asks for the row (GET /v1/tasks/:doc_id, always
+// full) — the thing the board card's comment used to claim it already did.
+func criteriaItemsFromMarks(marks string) []CriterionItem {
+	if marks == "" {
+		return nil
+	}
+	items := make([]CriterionItem, 0, len(marks))
+	for _, r := range marks {
+		switch r {
+		case 'm':
+			items = append(items, CriterionItem{Met: true})
+		case 'a':
+			items = append(items, CriterionItem{MarkedMissed: true})
+		default:
+			items = append(items, CriterionItem{})
+		}
+	}
+	return items
 }
 
 // claimWire is content.claim. The engine writes the lease timestamp as
@@ -742,14 +813,33 @@ func (w taskWire) toTask() Task {
 	if len(papers) == 0 {
 		papers = strList(rawList(w.Papers))
 	}
+	// THE BOARD PROJECTION'S STAND-IN, read only where the echo is absent.
+	// `?view=board` deletes `content` and sends `content_digest` in its place,
+	// so on that route the two reads below — the per-criterion ladder and the
+	// completeness booleans — have no source unless this runs. Every arm is
+	// additive: with `content` present the digest cannot change an answer, so
+	// the full view decodes exactly as it did before.
+	digest := decodeContentDigest(w.ContentDigest)
+	if len(t.CriteriaItems) == 0 && digest != nil {
+		t.CriteriaItems = criteriaItemsFromMarks(digest.CriteriaMarks)
+	}
+	hasDependencies := t.DependencyCount > 0 || len(strList(m["dependencies"])) > 0
+	hasPaper := strField(m, "design_doc") != "" || len(papers) > 0
+	hasDescription := false
+	if digest != nil {
+		hasDescription = digest.HasDescription
+		hasDependencies = hasDependencies || digest.HasDependencies
+		hasPaper = hasPaper || digest.HasPaper
+	}
 	t.Completeness = ScoreCompleteness(CompletenessInput{
 		Title:           t.Title,
 		Description:     strField(m, "description"),
+		HasDescription:  hasDescription,
 		HasCriteria:     len(t.CriteriaItems) > 0,
 		Placement:       t.ParentID,
 		Priority:        t.Priority,
-		HasDependencies: t.DependencyCount > 0 || len(strList(m["dependencies"])) > 0,
-		HasPaper:        strField(m, "design_doc") != "" || len(papers) > 0,
+		HasDependencies: hasDependencies,
+		HasPaper:        hasPaper,
 	})
 	return t
 }

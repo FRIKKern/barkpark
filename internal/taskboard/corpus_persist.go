@@ -30,8 +30,13 @@ import (
 // detail pane: criteriaLadder (charter D11) renders one rung per
 // content.acceptance_criteria entry, and completenessBadge scores
 // content.description / dependencies / design_doc / papers. A board fed
-// `?view=board` today would silently lose both on every row. Persisting the
-// base costs NO fidelity at all — the rows it reloads are the exact rows the
+// `?view=board` BEFORE 2026-09-22 would silently lose both on every row.
+// THAT HALF IS NOW FIXED (task-9289217dc43ad78f): the projection carries
+// `content_digest` — the compact per-criterion marks and the completeness
+// booleans — and fetch.go decodes them, so a board fed `?view=board` keeps
+// its ladder and its badge. This file is still the right answer to a
+// DIFFERENT question: the digest cheapens each walk, while persisting the
+// base removes the cold walk. Persisting the base costs NO fidelity at all — the rows it reloads are the exact rows the
 // last exhaustive walk decoded.
 //
 // TWO CONTRACTS, inherited verbatim from cache.go, keep this an optimization

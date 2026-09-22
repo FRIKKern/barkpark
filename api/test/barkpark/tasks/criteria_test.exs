@@ -115,6 +115,79 @@ defmodule Barkpark.Tasks.CriteriaTest do
   # close_test.exs. Counting MUST agree with `Criteria.progress/1` above — a gate
   # that disagrees with the badge is a gate nobody can predict.
 
+  describe "marks/1 — the compact per-criterion state sequence" do
+    # The board's ladder (internal/taskboard/components.go, criteriaLadder)
+    # draws ONE RUNG PER CRITERION off each item's own state, and progress/1 is
+    # a FRACTION. marks/1 is what lets `?view=board` carry the ladder without
+    # carrying the criteria. One character per entry, always.
+
+    test "m for met, a for an honest miss, o for untouched" do
+      list = [
+        %{"criterion" => "sealed", "met" => true},
+        %{"criterion" => "missed", "met" => false, "attempts" => [%{"note" => "not yet"}]},
+        %{"criterion" => "untouched", "met" => false}
+      ]
+
+      assert Criteria.marks_of_list(list) == "mao"
+      assert Criteria.marks(%{"acceptance_criteria" => list}) == "mao"
+    end
+
+    test "the met rule is progress/1's rule — EXACTLY boolean true" do
+      for not_true <- ["yes", 1, nil, "true"] do
+        assert Criteria.marks_of_list([%{"criterion" => "c", "met" => not_true}]) == "o",
+               "met: #{inspect(not_true)} must not seal a rung"
+      end
+
+      assert Criteria.marks_of_list([%{"criterion" => "c"}]) == "o"
+      assert Criteria.marks_of_list([%{"criterion" => "c", "met" => true}]) == "m"
+    end
+
+    test "an attempt counts only when it is a MAP — the consumer's own tolerance" do
+      # internal/taskboard/fetch.go decodeAttempts skips every non-map element,
+      # so a non-list attempts, or a list of scalars, decodes to NO attempts and
+      # therefore to no amber rung. marks/1 must agree, or the two routes to the
+      # same row disagree rung for rung.
+      assert Criteria.marks_of_list([%{"criterion" => "c", "attempts" => "nope"}]) == "o"
+      assert Criteria.marks_of_list([%{"criterion" => "c", "attempts" => []}]) == "o"
+      assert Criteria.marks_of_list([%{"criterion" => "c", "attempts" => ["nope", 7]}]) == "o"
+      assert Criteria.marks_of_list([%{"criterion" => "c", "attempts" => [%{}]}]) == "a"
+      assert Criteria.marks_of_list([%{"criterion" => "c", "attempts" => [7, %{}]}]) == "a"
+    end
+
+    test "a met criterion is m even when it also carries attempts" do
+      # The seal outranks the history — the same precedence criteriaLadder
+      # applies (a met rung outranks a recorded miss).
+      assert Criteria.marks_of_list([
+               %{"criterion" => "c", "met" => true, "attempts" => [%{"note" => "was a miss"}]}
+             ]) == "m"
+    end
+
+    test "a non-map entry keeps its slot, unmet" do
+      # The length must always track progress/1's total, or the ladder and the
+      # fraction describe different rows.
+      list = ["a bare string", 7, nil, %{"criterion" => "c", "met" => true}]
+      assert Criteria.marks_of_list(list) == "ooom"
+      assert String.length(Criteria.marks_of_list(list)) == Criteria.of_list(list).total
+    end
+
+    test "absent, empty or non-list criteria are nil — omit, never an empty string" do
+      # The same omission law as progress/1 (wire §4): an empty marks string is
+      # "0/0" wearing a different type.
+      for garbage <- [nil, [], %{}, "criteria", 7] do
+        assert Criteria.marks_of_list(garbage) == nil
+      end
+
+      assert Criteria.marks(%{}) == nil
+      assert Criteria.marks(%{"acceptance_criteria" => []}) == nil
+      assert Criteria.marks(nil) == nil
+    end
+
+    test "atom keys work, mirroring progress/1's in-memory callers" do
+      assert Criteria.marks_of_list([%{criterion: "c", met: true}]) == "m"
+      assert Criteria.marks_of_list([%{criterion: "c", attempts: [%{note: "x"}]}]) == "a"
+    end
+  end
+
   describe "Internal.unmet_criteria/1 — what the D289 gate measures" do
     test "returns each unmet row's index and wording, in list order" do
       content = %{

@@ -167,9 +167,12 @@ defmodule BarkparkWeb.TasksController.Params do
   #   * `brief` — the AXI brief card v2: a different KEY SET (criteria_met /
   #     criteria_total, no `type`, no `dependency_count`), a deliberate diet
   #     for agent list reads.
-  #   * `board` — the FULL card with the `content` echo REMOVED, and nothing
-  #     else changed. See `render_doc/2`'s `:board` clause for why this is a
-  #     subtraction and not a third key set.
+  #   * `board` — the FULL card with the `content` echo REMOVED and ONE key
+  #     added in its place: `content_digest`, the bounded per-criterion state
+  #     sequence + completeness booleans the board reads on the ROW path and
+  #     cannot rebuild from the fraction. See `render_doc/2`'s `:board` clause
+  #     for why this is a subtraction and not a third key set, and for what
+  #     the digest carries.
   @views ~w(full brief board)
 
   def parse_view("brief"), do: :brief
@@ -357,8 +360,32 @@ defmodule BarkparkWeb.TasksController.Params do
   # BOARD does not render. The board draws a row from `doc_id`, `rev`, `title`,
   # `lifecycle_status`, `kind`, `parent_id`, `priority`, `labels`, `claim`,
   # `criteria_progress`, `dependency_count`/`dependent_count` and the two
-  # timestamps (`internal/taskboard/fetch.go`, `taskWire`), and fetches a row's
-  # prose separately when a pane opens.
+  # timestamps (`internal/taskboard/fetch.go`, `taskWire`).
+  #
+  # WHAT THE BOARD READS OUT OF `content`, ON THE ROW PATH, FOR EVERY ROW.
+  # An earlier revision of this comment said the board "fetches a row's prose
+  # separately when a pane opens". THAT SENTENCE WAS FALSE, and it was the
+  # justification this whole subtraction was designed against. The truth, and
+  # the Go side has said so in writing at `fetch.go`'s `Content` field the
+  # entire time ("Content is the full render_doc content map. The board reads
+  # content.acceptance_criteria out of it"):
+  #
+  #   * `internal/taskboard/fetch.go`, `taskWire.toTask` —
+  #     `t.CriteriaItems = decodeAcceptanceCriteria(w.Content)`, per LIST row;
+  #     `internal/taskboard/components.go`, `criteriaLadder` draws ONE RUNG per
+  #     decoded item off that item's own `Met`/`Missed()`. `criteria_progress`
+  #     cannot rebuild it — `Barkpark.Tasks.Criteria.progress/1` is a FRACTION
+  #     with no per-item state.
+  #   * `internal/taskboard/fetch.go`, `taskWire.toTask` —
+  #     `t.Completeness = ScoreCompleteness(...)` reads `content.description`,
+  #     `content.dependencies` and `content.design_doc` out of the same map,
+  #     per LIST row, for the completeness badge.
+  #
+  # So `:board` as a bare subtraction was NOT ADOPTABLE by its only intended
+  # consumer: it collapsed every row's ladder to a bare fraction and silently
+  # degraded every completeness badge to a lower, plausible-looking score.
+  # `content_digest` below is the fix — the two quantities the board actually
+  # needs, without the prose they are derived from.
   #
   # WHY A SUBTRACTION AND NOT A THIRD KEY SET. `:brief` already exists and is a
   # DIFFERENT SHAPE — it renames the criteria pair to `criteria_met` /
@@ -382,12 +409,92 @@ defmodule BarkparkWeb.TasksController.Params do
   # needs the prose asks for the row: `GET /v1/tasks/:doc_id`, which is always
   # full.
   #
+  # ── `content_digest` — THE ONE KEY THE BOARD CARD ADDS ────────────────
+  #
+  # task-9289217dc43ad78f. The board needs two quantities out of the deleted
+  # echo, and both are small and BOUNDED — no criterion text, no evidence, no
+  # attempt notes, nothing that scales with prose:
+  #
+  #   `criteria_marks`    one character per acceptance criterion, in checklist
+  #                       order: "m" met / "a" an honest recorded miss /
+  #                       "o" untouched. Owned by `Barkpark.Tasks.Criteria`
+  #                       (`marks/1`), the SAME module that owns the fraction,
+  #                       so one place decides what "met" and "attempted" mean.
+  #                       One byte per criterion — a 6-criterion row pays 6.
+  #   `has_description`   } the booleans `ScoreCompleteness`
+  #   `has_dependencies`  } (`internal/taskboard/completeness.go`) consumes,
+  #   `has_paper`         } NEVER the prose they are derived from.
+  #
+  # WHY THOSE THREE AND NOT SEVEN. The rubric takes seven inputs. `title`,
+  # `placement` (`parent_id`) and `priority` are already top-level on this
+  # card, and `criteria` is recoverable from `criteria_progress.total`. The
+  # other three are the ones the deletion actually took, and two of them are
+  # only PARTLY recoverable, which is exactly the shape of a silent wrong
+  # answer: `dependency_count` counts UNMET blockers, so a row whose blockers
+  # have all been met reads `has_dependencies: false` off the counts alone;
+  # and `papers` is top-level but `content.design_doc` — the other half of the
+  # consumer's `HasPaper` — is not. A board scoring off the survivors would
+  # not go blank, it would render a LOWER score that looks like a real one.
+  #
+  # OMISSION LAW (wire §4). `criteria_marks` follows `criteria_progress`
+  # exactly: omitted when the row has no criteria, never an empty string.
+  # `content_digest` ITSELF is emitted on every board card, including the
+  # all-false one, and that is the same law read correctly rather than an
+  # exception to it: the law forbids an AMBIGUOUS segment ("0/0" cannot be
+  # told from "no criteria"). Three booleans reading false is unambiguous —
+  # it says "this row carries none of the three". An ABSENT `content_digest`
+  # is the ambiguous shape, because the consumer could not tell "a bare row"
+  # from "a server too old to emit it" and would fall back to a `content` that
+  # is not there. Emitting it always is what makes the absence meaningful.
+  #
   # NOT THE DEFAULT, and not proposed as one. The default view is a contract a
   # great many readers depend on; this is an opt-in the caller that knows it
   # renders a board asks for by name.
   def render_doc(%Document{} = doc, :board) do
-    doc |> render_doc(:full) |> Map.delete(:content)
+    content = doc.content || %{}
+
+    doc
+    |> render_doc(:full)
+    |> Map.delete(:content)
+    |> put_content_digest(content)
   end
+
+  # The board card's stand-in for the deleted `content` echo — see the
+  # `content_digest` block in the `:board` header above for what each key is
+  # for and why the set is exactly this size.
+  #
+  # BOARD-ONLY ON PURPOSE. The full card still carries `content`, so a full
+  # reader derives all four of these from the source rather than from a
+  # summary; adding the digest there would be a SECOND copy of the same facts
+  # on the one card that does not need it, and two copies of a fact are two
+  # things to drift.
+  defp put_content_digest(map, content) do
+    digest =
+      %{
+        has_description: present_text?(Map.get(content, "description")),
+        has_dependencies: present_list?(Map.get(content, "dependencies")),
+        has_paper:
+          present_text?(Map.get(content, "design_doc")) or
+            present_list?(Map.get(content, "papers"))
+      }
+      |> put_criteria_marks(content)
+
+    Map.put(map, :content_digest, digest)
+  end
+
+  # Same omission law as put_criteria_progress/2: no criteria, no key.
+  defp put_criteria_marks(digest, content) do
+    case Criteria.marks(content) do
+      marks when is_binary(marks) and marks != "" -> Map.put(digest, :criteria_marks, marks)
+      _ -> digest
+    end
+  end
+
+  defp present_text?(v) when is_binary(v), do: String.trim(v) != ""
+  defp present_text?(_), do: false
+
+  defp present_list?(v) when is_list(v), do: v != []
+  defp present_list?(_), do: false
 
   # axi-w2-s2 (charter decisions 15+16): brief card v2 — the nine measured
   # cuts, ENTIRELY inside the brief path (:full untouched):
@@ -1142,11 +1249,16 @@ defmodule BarkparkWeb.TasksController.Params do
   # The `?view=board` LIST card: `render_doc_with_counts/3` — the SAME function
   # the default view uses, so `dependency_count`, `dependent_count`,
   # `comment_count` and `child_count` are computed by one owner — with the
-  # `content` echo removed. Defined as a wrapper rather than a forked builder
-  # precisely so a future key added to the full card reaches the board card for
-  # free; the ONLY difference between the two is the deleted key.
+  # `content` echo removed and `content_digest` put in its place. Defined as a
+  # wrapper rather than a forked builder precisely so a future key added to the
+  # full card reaches the board card for free; the ONLY differences between the
+  # two are the deleted `content` and the added `content_digest`, and
+  # `tasks_board_view_test.exs`'s no-drift arm asserts exactly that pair.
   def render_board_with_counts(%Document{} = doc, counts, child_counts \\ %{}) do
-    doc |> render_doc_with_counts(counts, child_counts) |> Map.delete(:content)
+    doc
+    |> render_doc_with_counts(counts, child_counts)
+    |> Map.delete(:content)
+    |> put_content_digest(doc.content || %{})
   end
 
   # C2: a lightweight child summary — just enough to render the rail without
