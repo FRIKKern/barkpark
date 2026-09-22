@@ -6198,6 +6198,122 @@
     }, true);
     // BP-INFLIGHT-GUARD-END
 
+    // ── PRE-JOIN PRESS QUEUE (spd-w18 / task-c2dd40c6f433a787) ────────────
+    //
+    // A SECOND, DIFFERENT SWALLOW, and it is not the in-flight one above.
+    // Measured on served e02e4296d: `#item-paper` is in the DOM and pressable
+    // at t=61ms after load, and the LiveView joins at t=254ms. A real press
+    // inside that 193ms window puts ZERO `"type":"click"` frames on
+    // /live/websocket and the URL never moves. In the SAME session, joined,
+    // the same button on the same page puts one frame on the wire and patches
+    // the URL — so the counter can report the opposite and the window, not the
+    // button, is what is broken.
+    //
+    // IT IS NOT bindClick's EARLY RETURN. `data-phx-ref-src` cannot arrive in
+    // this window at all: `View.pushWithReply` returns
+    // `Promise.reject(new Error("no connection"))` BEFORE it calls the ref
+    // generator, so `putRef` never runs and no ref is ever stamped. A
+    // MutationObserver armed before the first byte of page script saw its
+    // FIRST self-arriving `data-phx-ref-src` at t=254ms — at join, on
+    // `#studio-panes`, from the WidthBucket hook's own mount push — and none
+    // before it. The pre-join press is dropped by the connection check; the
+    // in-flight press is dropped by bindClick. Two mechanisms, two remedies.
+    //
+    // WHY QUEUE-AND-REPLAY HERE AND UNPRESSABLE THERE. A pre-join press is
+    // unambiguous: nothing has patched the DOM yet, so the element the user
+    // aimed at is still the element the replay will hit, and the join either
+    // arrives or the socket is dead — there is no third outcome to guess at.
+    // An in-flight press is the opposite: the reply that clears the ref is
+    // precisely the thing that re-renders the row under the pointer, so
+    // replaying it could fire an event at a control that no longer means what
+    // it meant, which is the "press goes somewhere WRONG" hazard that
+    // removing `pointer-events: none` was about. And unpressable loses here
+    // for a reason a reader can weigh: the pre-join window covers EVERY
+    // control on a freshly loaded desk, so disabling the desk for the duration
+    // of socket join makes the desk visibly dead on 100% of loads to fix a
+    // press that is lost on some of them — a worse trade than the one it
+    // replaces. Shrinking the window further is not on this list: it is what
+    // already happened (4.9s join then, 0.2s now) and the press is still lost.
+    //
+    // ONLY AN ELEMENT WITH AN ID IS QUEUED. The replay re-resolves the control
+    // by id, because the join patch may replace the node the listener saw. An
+    // id-less `phx-click` cannot be re-resolved honestly, so it is released
+    // with the words rather than replayed at a guess.
+    //
+    // BP-PREJOIN-QUEUE-BEGIN
+    (function () {
+      var PREJOIN_CEILING = 8000; // ms — the same named ceiling as the press answer
+      var pendingId = null, pendingTimer = 0;
+
+      function region() { return document.getElementById("bp-press-answer"); }
+      function say(text) {
+        var el = region();
+        if (!el || el.textContent === text) return;
+        el.textContent = text;
+      }
+      function joined() {
+        var main = document.querySelector("[data-phx-main]");
+        return !!main && main.classList.contains("phx-connected");
+      }
+      function release(text) {
+        if (pendingTimer) { window.clearTimeout(pendingTimer); pendingTimer = 0; }
+        pendingId = null;
+        if (text !== null) say(text);
+      }
+      function replay() {
+        if (!pendingId) return;
+        var id = pendingId;
+        release(null);
+        var el = document.getElementById(id);
+        if (!el) { say("That press was not sent — press it again."); return; }
+        // The press-answer hook's bubble listener sees this synthetic click and
+        // says "Working on …" itself, so nothing is announced here.
+        el.click();
+      }
+
+      document.addEventListener("click", function (ev) {
+        var t = ev.target;
+        if (!t || !t.closest) return;
+        var el = t.closest("[phx-click]");
+        if (!el || !el.closest("#studio-panes, .studio-bar")) return;
+        if (joined()) return;                              // the socket is up: not ours
+        if (el.hasAttribute("data-phx-ref-src")) return;   // in-flight: the guard above owns it
+        // A real anchor navigates without the socket and must keep working.
+        var href = el.getAttribute("href");
+        if (el.tagName === "A" && href && href !== "#") return;
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        if (!el.id) { say("Still connecting — that press was not sent. Press it again in a moment."); return; }
+        release(null);
+        pendingId = el.id;
+        say("Still connecting — your press will be sent when the desk is ready.");
+        pendingTimer = window.setTimeout(function () {
+          pendingTimer = 0;
+          release("The desk never finished connecting — that press was not sent.");
+        }, PREJOIN_CEILING);
+      }, true);
+
+      var mo = new MutationObserver(function () { if (joined()) replay(); });
+      // ARMING IS NOT OPTIONAL. A first draft bailed out when
+      // `document.documentElement` was null and armed nothing — the click
+      // listener above still swallowed the press, the watcher never fired, and
+      // the queue held it until the ceiling. That is a WORSE desk than the one
+      // this fixes, and it was silent. Caught by
+      // `scripts/studio-prejoin-live-probe.mjs --with-fix`, which injects this
+      // fence ahead of the served page's own scripts and so reaches the state
+      // the shipped body script never does. The retry is the whole point.
+      function arm() {
+        if (!document.documentElement) {
+          document.addEventListener("readystatechange", arm, { once: true });
+          return;
+        }
+        mo.observe(document.documentElement, { attributes: true, subtree: true, attributeFilter: ["class"] });
+        if (joined()) replay();
+      }
+      arm();
+    })();
+    // BP-PREJOIN-QUEUE-END
+
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: () => ({
         _csrf_token: csrfToken,
