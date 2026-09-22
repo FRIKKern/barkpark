@@ -7666,6 +7666,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* The per-support table. A CSS grid rather than a <table> so the status cell
    can carry the presence chip's own inline-flex layout unchanged. */
+/* The unmatched-roster-row observation. Muted, under the table: it names
+   listener sessions this server's supports do not account for, and it is
+   deliberately NOT a state badge — nothing reads it as a verdict. */
+.group-others { margin: 0; color: var(--muted-text); font-size: 12.5px; }
 .group-table { display: flex; flex-direction: column; }
 .group-row {
   display: grid; gap: 10px; align-items: center;

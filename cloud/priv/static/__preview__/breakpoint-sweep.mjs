@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  143 scenarios, 24 rendered, 119 in a COMMITTED residue literal.
+//   SCENARIO  144 scenarios, 25 rendered, 119 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -210,7 +210,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
 //  costs roughly a second per cell (0.73s measured). The full render leg is
-//  25 cells x 2 themes x ONE height x 21 boundary widths = 1050 renders: budget
+//  26 cells x 2 themes x ONE height x 21 boundary widths = 1092 renders: budget
 //  MINUTES. The height axis multiplies that and is therefore OPT-IN — all three
 //  declared HEIGHTS make it 2700 renders (32.9 min), the number that decided
 //  the default loop (HEIGHT_REASONS[800]). The width numeral here is
@@ -461,6 +461,13 @@ export const CELLS = [
   { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", sentinel: "#instance-tabpanel .metrics-grid" },
   { name: "inst-webhooks", scen: "webhooks-panel", hash: `#instance/${INST}/webhooks`, view: "view-instance", sentinel: "#instance-tabpanel .wh-card" },
   { name: "inst-update-refused", scen: "instance-update-credential-refused", hash: `#instance/${REFUSED}`, view: "view-instance", sentinel: '#instance-tabpanel .update-badge[data-update-state="unknown"]' },
+  // A CELL rather than a hash:#instance residue entry, and the difference is
+  // geometry the other instance cells do not have: `.group-table` is a FIVE
+  // column grid that collapses to two at 640 (`grep -n "group-row" app.css`),
+  // the only such table on the instance route. Its sentinel is the painted
+  // table, which exists only after the browser-direct roster read lands — so
+  // this cell also proves the route's async paint in a real browser.
+  { name: "inst-group", scen: "fleet-group-view", hash: `#instance/${INST}/group`, view: "view-instance", sentinel: "#instance-tabpanel .group-table" },
   { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
   { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
 ];
@@ -485,7 +492,7 @@ export const HEIGHTS = [390, 667, 800];
 export const HEIGHT_REASONS = {
   390: "LANDSCAPE. 720x390 is the binding height for the fold bar — the shipped 34vh cap read 0.4836 of H here while passing casual inspection at 800, so a height set without it cannot see the defect cch-w15-s1 fixed.",
   667: "SHORT PORTRAIT. iPhone SE / small-phone portrait: the shortest height at which the folded shell is a normal reading posture rather than an edge case.",
-  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 25 cells x 2 themes x 1 height x 21 widths = 1050 renders (12.8 min at the measured 0.73s/cell) to 3150 (38.3 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
+  800: "THE DRIVEN DEFAULT, AND THE DEFAULT LOOP IS ONE HEIGHT — DECIDED, WITH THE NUMBER. Leg B renders at 800 unless --height says otherwise, and every Q3 number this epic quotes was taken there. Walking all three declared heights by default would take the full leg from 26 cells x 2 themes x 1 height x 21 widths = 1092 renders (13.3 min at the measured 0.73s/cell) to 3276 (39.9 min), on an axis whose only measured yield so far is the fold number Q3 already prints at every height it is asked for. So the height axis is OPT-IN (--height 390,667,800), the declared set is what --height will accept, and 390/667 are no longer declared-and-undrivable: cch-w16-bl-legb-drives-one-of-three-heights.",
 };
 // THE EPIC'S HEIGHTS DISAGREE, AND THIS IS THE DISAGREEMENT STATED RATHER THAN
 // HIDDEN: modal-oracle/overflow-guard commit to 900, the fold identity is
@@ -560,7 +567,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 143 scenarios · 25 cells over 24 DISTINCT
+// THE CENSUS THIS RECONCILES AGAINST: 144 scenarios · 26 cells over 25 DISTINCT
 // scenarios (mixed-fleet is used twice) · residue exactly 119 · 14 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
@@ -749,6 +756,17 @@ export const RESIDUE_FAMILY_REASONS = {
 // one: the sweep exited 2 with `UNLISTED scenario "fleet-archives-member"
 // (family hash:#fleet)` until the entry below was written.
 //
+// pdf-bl-fleet-group-route moved it by one, and it is the first move in a long
+// while that adds a CELL rather than a residue entry: `fleet-group-view` is the
+// 144th scenario and the 26th cell (distinct covered 24 -> 25), because the
+// PDF-D11 group tab paints `.group-table` — a five-column grid that collapses
+// to two at 640 — which is geometry no other instance cell walks. Residue (119)
+// and families (14) are DELIBERATELY UNMOVED: a cell is not residue, and adding
+// one creates no family. Every integer was RE-DERIVED by RUNNING
+// `node breakpoint-sweep.mjs` and reading the `>> scenarios` line it PRINTED
+// (`144 scenarios · 25 distinct covered by 26 cells · 119 residue over 14
+// families`), never by adding one.
+//
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527; recut by
 // cch-w48-bl-the-scenario-census-five-numerals-cannot-lose). The old header here
 // read "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed
@@ -765,7 +783,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
 // below is now recounted, either from `scenarioReport` or from these same
 // committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
-//   * 143 / 25 / 24 / 119 / 14 — "the census five in breakpoint-sweep.mjs's
+//   * 144 / 26 / 25 / 119 / 14 — "the census five in breakpoint-sweep.mjs's
 //     prose are recounted from the derived report", which reads BOTH typed
 //     copies out of the committed bytes (this bullet and "THE CENSUS THIS
 //     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
@@ -2532,7 +2550,7 @@ async function legRender(rep) {
       ? `              targets    FRESH per (cell, width) — ${total} cross-document loads. Any --widths order is accepted. This is the equivalence path.\n`
       : `              targets    REUSED across the WIDTH axis — ${cells.length * themes.length * heights.length} group(s) of (cell, theme, height), each ONE load then ${widths.length} metrics override(s), widths ASCENDING [${widths.join(",")}]. Theme and height stay FRESH loads; reuse across heights is untested and assumed unsafe. --fresh-targets restores the per-width path.\n`);
     if (!heightFilter) {
-      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 25x2x1x21 = 1050 renders (12.8 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 3150 (38.3 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
+      out(`              height loop = 1 BY DEFAULT (${RENDER_HEIGHT}px). The full leg is 26x2x1x21 = 1092 renders (13.3 min at 0.73s/cell); walking all ${HEIGHTS.length} declared heights makes it 3276 (39.9 min). Opt in with --height ${HEIGHTS.join(",")}.\n`);
     }
     const dead = [], q1f = [], q2f = [], q3f = [], notes = [], honest = [];
     // The shell's own pin, alongside Q3's screen number — this row's whole

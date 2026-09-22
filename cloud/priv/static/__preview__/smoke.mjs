@@ -5911,6 +5911,58 @@ const EXPECTATIONS = {
     includes: ["fleet-support-card", "No support servers yet", 'id="fleet-add-support-cta"'],
     excludes: ["fleet-support-row"],
   },
+  // ── PDF-D11 GROUP VIEW — the ROUTE (#instance/<main>/group) ───────────────
+  // The parent slice's surface was a pure renderer nothing could navigate to.
+  // This is the only scenario in the corpus that reaches it, and it reaches it
+  // the way a person does: a hash, the console's own loader, and the roster off
+  // the wire. Nothing here folds a fixture module through the hooks to fake a
+  // render — the assertions read the PAINTED panel.
+  "fleet-group-view": {
+    what: "the Group tab reached by hash — the panel renders from the LIVE roster read, under ONE group state, with the unmatched listener session named and not counted",
+    check(reg, hooks, ctx) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      // 1. THE ROUTE EXISTS. The tab strip offers it and it is the active tab.
+      assert.ok(body.includes('href="#instance/' + SCENARIOS["fleet-group-view"].data.barkparks[0].id + '/group"'),
+        "the instance workspace offers no Group tab — the surface is unreachable again");
+      assert.ok(/class="inst-tab is-active" href="[^"]*\/group"/.test(body),
+        "the Group tab is not the active one on its own hash");
+      assert.ok(body.includes('id="instance-group-view"'), "the group panel did not mount");
+
+      // 2. THE READ HAPPENED, BROWSER-DIRECT AND EXACTLY ONCE. Two reads of one
+      // endpoint on one screen is the shape of a second cache being born.
+      const rosterCalls = ctx.calls.filter((c) => /\/v1\/fleet\/roster$/.test(c.path));
+      assert.equal(rosterCalls.length, 1,
+        "the group screen read the roster " + rosterCalls.length + " time(s) — it must take exactly one");
+      assert.ok(/^https?:\/\//.test(rosterCalls[0].path), "the roster read must be browser-direct against the MAIN's absolute url");
+      assert.ok(ctx.calls.some((c) => c.method === "POST" && /\/app-token$/.test(c.path)),
+        "the app token must be minted for the direct read");
+
+      // 3. THE PANEL IS PAINTED FROM THAT READ, not from frame 1. Frame 1
+      // carries NO state at all (a null roster is the shape of a read that
+      // FAILED, which resolves to offline — announcing that before asking would
+      // be a fabricated verdict), so a state attribute here proves the answer
+      // arrived and was rendered.
+      const gv = (reg.get("instance-group-view") || {}).innerHTML || "";
+      assert.ok(!gv.includes("Reading the roster"), "the panel is still on frame 1 — the roster read never painted");
+      assert.ok(gv.includes('data-group-state="working"'),
+        "the routed panel did not derive `working` from the live roster plane");
+      assert.ok(gv.includes("group-state--working") && gv.includes(">Working<"));
+      // The support's row is the SHIPPED presence chip and the validated
+      // capacity object, off the same read.
+      assert.ok(gv.includes("fleet-presence--working"), "the group row paints no presence chip of its own vocabulary");
+      assert.ok(gv.includes("heavy · 2/4 slots free · $20 budget"), "the validated capacity object did not render");
+      assert.ok(gv.includes("Reindex 400k ONIX records"), "the joined current task did not render");
+
+      // 4. THE UNMATCHED ROSTER ROW IS NAMED AND DECIDES NOTHING. `pelle-laptop`
+      // is a listener session, not a support of this main; Fleet's roster is
+      // every LISTENER the workspace owns, so ranking it as a group state would
+      // let somebody's laptop take a working group out of `working`.
+      assert.ok(gv.includes("group-others") && gv.includes("pelle-laptop"),
+        "the roster row matching no support was silently dropped — the panel claims to show the group and does not");
+      assert.ok(gv.includes('data-group-state="working"'),
+        "the unmatched listener moved the group's state — it is an observation, not a predicate");
+    },
+  },
   // ── MVP-0 OFFLOAD (pdf-mvp0-offload-spa): the order watch ladder ───────────
   // The offload button renders on the ONLINE support row (static, observable in
   // #instance-body). The watch panel itself mounts AFTER a click+submit, which

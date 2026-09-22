@@ -784,7 +784,14 @@ const PIN_MEMBER_SCENARIOS = 16;
 // RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the committed
 // corpus grew to 143 scenario(s), pinned at 141") and the actor-set line, which
 // still says 16 — never by adding one.
-const PIN_TOTAL_SCENARIOS = 143;
+// 143 -> 144 (pdf-bl-fleet-group-route): `fleet-group-view`, the first scenario
+// to reach the PDF-D11 group tab — the surface the parent slice shipped with no
+// route at all. The member slice STAYS at 16: its actor is the corpus's OWNER
+// `me("Acme Inc", ...)`, so it cannot answer role="member" by construction. 144
+// was RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the
+// committed corpus grew to 144 scenario(s), pinned at 143") and the actor-set
+// line, which still says 16 — never by adding one.
+const PIN_TOTAL_SCENARIOS = 144;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).
