@@ -6849,10 +6849,27 @@
   // C4/C5 instance-API proxy spine). #instance/<id> (the legacy-stable hash
   // `bp cloud open` mints, D14) maps to "overview" forever; an unknown/stale tab
   // suffix degrades to overview rather than 404ing a bookmark.
-  var INSTANCE_TABS = ["overview", "timeline", "webhooks", "usage", "metrics"];
+  var INSTANCE_TABS = ["overview", "timeline", "webhooks", "usage", "metrics", "group"];
   var INSTANCE_TAB_DEFAULT = "overview";
   function instanceTabOf(tab) {
     return INSTANCE_TABS.indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
+  }
+
+  // WHICH TABS A GIVEN BOX HAS — ONE decider, because a second one drifts.
+  // `instanceTabOf` above is the ROUTER's parse and knows only the string; it
+  // cannot know whose screen it is. "Group" is about a MAIN and the supports
+  // filed under it, and a support has no group of its own, so it is the one
+  // registered tab that is not offered everywhere. Everything that renders a
+  // tab list (the strip, the sidebar morph) and everything that resolves WHICH
+  // panel to paint goes through these two, so a support deep-linked to
+  // `#instance/<id>/group` degrades to Overview exactly the way an unknown tab
+  // suffix does (D49/D14: never 404 a bookmark).
+  function instanceTabsFor(bp) {
+    if (!isSupportBp(bp)) return INSTANCE_TABS.slice();
+    return INSTANCE_TABS.filter(function (t) { return t !== "group"; });
+  }
+  function instanceTabFor(bp, tab) {
+    return instanceTabsFor(bp).indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
   }
 
   // Charter decisions 6 + 14: the IA moved, but no deep link may ever break.
@@ -7264,7 +7281,12 @@
   function paintInstanceSections(id, activeTab) {
     var box = $("#nav-instance-sections");
     if (!box) return;
-    box.innerHTML = INSTANCE_TABS.map(function (tab) {
+    // Same decider the strip takes (instanceTabsFor): the morph must not offer
+    // a support a Group link that resolves back to Overview. `fleetLookup` can
+    // answer null on frame 1 (the fleet is still in flight), and a null bp is
+    // not a support — so the unknown case offers the full set, which is the
+    // pre-existing behaviour rather than a new hidden-tab bug.
+    box.innerHTML = instanceTabsFor(fleetLookup(id)).map(function (tab) {
       var href = "#instance/" + encodeURIComponent(id) + (tab === INSTANCE_TAB_DEFAULT ? "" : "/" + tab);
       var on = instanceTabOf(activeTab) === tab;
       return '<a class="nav-link nav-sub' + (on ? " is-active" : "") + '" href="' + esc(href) + '"' +
@@ -9774,7 +9796,7 @@
   // decides — the lifecycleActionsModel precedent, and the only shape the node
   // harness can drive without a meCache.
   function instanceDetailHtml(bp, tab, opts, authority) {
-    tab = instanceTabOf(tab);
+    tab = instanceTabFor(bp, tab);
     authority = authority || "grant";
     // S11b + GR24: the lifecycle surface between the header and the tabs is now
     // the collapsible "bp CLI" card (screens/02), disclosed by the header's
@@ -9791,6 +9813,7 @@
       instanceTabStripHtml(bp, tab) +
       '<div id="instance-tabpanel" class="inst-tabpanel" data-inst="' + esc(bp.id) + '">' +
         (tab === "overview" ? instanceOverviewHtml(bp, opts, authority) : "") +
+        (tab === "group" ? instanceGroupPanelHtml(bp) : "") +
       "</div>";
   }
 
@@ -9798,10 +9821,10 @@
   // Back/deep-links/copy work, the active one carrying aria-current="page"; the
   // house focus-visible ring is applied in app.css.
   function instanceTabStripHtml(bp, tab) {
-    tab = instanceTabOf(tab);
-    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks", usage: "Usage", metrics: "Metrics" };
+    tab = instanceTabFor(bp, tab);
+    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks", usage: "Usage", metrics: "Metrics", group: "Group" };
     return '<nav class="inst-tabs" aria-label="Instance sections">' +
-      INSTANCE_TABS.map(function (t) {
+      instanceTabsFor(bp).map(function (t) {
         var on = t === tab;
         return '<a class="inst-tab' + (on ? " is-active" : "") + '" href="#instance/' +
           esc(bp.id) + "/" + t + '"' + (on ? ' aria-current="page"' : "") + ">" +
@@ -10363,6 +10386,9 @@
     if (!isSupportBp(bp)) wireOffloadActions(bp, supportsOf(fleetCache, bp.id));
     // PDF-D94: each live support's paste-a-key delivery form.
     if (!isSupportBp(bp)) wireAgentKeyForms(bp, supportsOf(fleetCache, bp.id));
+    // PDF-D11: the group tab's roster read. DOM-gated (the panel only exists on
+    // that tab) AND data-gated (a support has no group), like its siblings.
+    wireGroupView(bp);
   }
 
   // cch-w46-s3 — WHAT THE MOUNTED RAIL IS MADE OF: {bp, caps} for the instance
@@ -11470,12 +11496,16 @@
   // moment the two clocks drift, and would silently overrule a `ttl_s` the box
   // itself declared. `groupViewState` reaches `chip.online` and nothing else.
   //
-  // WHAT THIS SURFACE DOES NOT DO YET: order history (named in the backlog row's
-  // prose, in neither acceptance criterion) is absent, and so is any route — no
-  // hash lands here yet. `groupViewHtml` is a pure renderer, node-pinned through
-  // `__bpTestHook` and driven by one preview scenario per state
-  // (`__preview__/group-view-scenarios.mjs`); mounting it on a route is the
-  // next slice.
+  // THE ROUTE: `#instance/<main-id>/group`, the "group" tab of a MAIN's instance
+  // workspace (`instanceGroupPanelHtml` paints it, `wireGroupView` fills it from
+  // `readFleetRoster` — the SAME read `loadSupportPresence` takes). It is still
+  // a pure renderer: the mount hands it `documents` off the wire and holds none
+  // of it.
+  //
+  // WHAT THIS SURFACE STILL DOES NOT DO: order history, named in the backlog
+  // row's prose and in neither of its criteria. It is deliberately not built —
+  // whether an order log belongs on this surface at all is a product question,
+  // and the follow-up row says so in as many words.
 
   // THE catalogue, in PRECEDENCE order — the first predicate that holds names
   // the group's state. This array is the ONE enumeration: the render, the copy
@@ -11569,6 +11599,65 @@
       else seen[c.worker] = true;
     });
     return dupes;
+  }
+
+  // ── THE OTHER TWO COLLISION SHAPES, AND WHY NEITHER IS A CATALOGUE STATE ───
+  // `roster-conflict` above classifies ONE fleet-payload/roster disagreement
+  // (two supports, one roster identity). The follow-up row named two more and
+  // asked for each to be classified or ruled out with a reason HERE. Both are
+  // ruled out of the catalogue, for different reasons, and the first is
+  // surfaced as an OBSERVATION instead.
+  //
+  // (a) A ROSTER ROW THAT MATCHES NO SUPPORT is not a fault, so it must not be
+  //     a state. The roster is not a list of supports: `Barkpark.Tasks.Fleet`'s
+  //     own moduledoc defines its subject as "a listener (a dev-server/agent
+  //     session running the fleet-listener protocol)", and `roster/2` returns
+  //     "every listener in `dataset` THE CALLER'S WORKSPACE OWNS". A developer's
+  //     own laptop session running the listener protocol registers there under
+  //     its own worker name, beside the provisioned supports. Ranking that as a
+  //     group state would put a healthy group into a non-working state because
+  //     somebody opened a listener on their machine — a false alarm built in by
+  //     design. It IS worth saying out loud (until now these rows were silently
+  //     dropped, so the surface claimed to show "the group" while rendering only
+  //     the part of it the control plane minted), so `groupOtherListeners` names
+  //     them under the table and NOTHING reads it as a predicate.
+  //
+  // (b) A SUPPORT WHOSE `dataset` DIFFERS FROM THE ROSTER'S SCOPE cannot be
+  //     detected from this payload at all, and the reason is structural rather
+  //     than a gap worth filling later. `Fleet.to_row/3` serializes exactly
+  //     worker / agent / scope / status / capacity / last_seen / ttl_s / task —
+  //     there is NO `dataset` key on the wire — and `load_listeners/2` selects
+  //     `where: d.dataset == ^dataset`, so every row this console receives is in
+  //     the queried dataset BY CONSTRUCTION. A support beating into a different
+  //     dataset is therefore not a divergent row; it is an ABSENT one, and an
+  //     absent row is already `presenceChip`'s honest "No heartbeat yet" — the
+  //     same answer as a box registered but never beat, which is the truth
+  //     available to a reader that cannot tell those two apart. Classifying it
+  //     would mean inventing a distinction the payload does not carry. Giving
+  //     the console a way to tell them apart is a SERVER change (a `dataset` on
+  //     the row, or a per-support scope echo), not a console one.
+  //
+  // Roster rows whose `worker` matches no support in this group. PURE, and
+  // deliberately NOT consulted by `groupViewState`.
+  function groupOtherListeners(cells, rosterDocs) {
+    if (!rosterDocs) return []; // a read that never landed knows of no listeners
+    var claimed = {};
+    (cells || []).forEach(function (c) { if (c && c.worker != null) claimed[String(c.worker)] = true; });
+    return rosterDocs.filter(function (row) {
+      return row && row.worker != null && !claimed[String(row.worker)];
+    });
+  }
+
+  // The observation sentence for those rows. Never a verdict — it says what
+  // they are (listener sessions), so the count does not read as an alarm.
+  function groupOtherListenersHtml(others) {
+    if (!others || !others.length) return "";
+    var names = others.map(function (r) { return String(r.worker); });
+    return '<p class="group-others">Also on this roster: ' +
+      esc(names.join(", ")) +
+      " &mdash; " + (names.length === 1 ? "a listener session" : "listener sessions") +
+      " beating into this workspace that no support of this server accounts for." +
+    "</p>";
   }
 
   // THE STATE. First predicate in `GROUP_VIEW_STATES` order that holds. Every
@@ -11665,6 +11754,7 @@
           cells.map(groupSupportRowHtml).join("") +
         "</div>";
     }
+    body += groupOtherListenersHtml(groupOtherListeners(cells, rosterDocs));
     return '<section class="card group-view" data-group-state="' + esc(state) + '">' +
       '<div class="group-head">' +
         '<h2 class="group-title">' + esc(bp.name || "Group") + "</h2>" +
@@ -11673,6 +11763,31 @@
       '<p class="group-detail">' + esc(copy.detail) + "</p>" +
       body +
     "</section>";
+  }
+
+  // ── THE ROUTE (#instance/<main-id>/group) ──────────────────────────────────
+  // What `groupViewHtml` was missing: a way in. The surface is the "group" tab
+  // of a MAIN's instance workspace, which is the screen that already owns this
+  // main and its supports, so the tab strip and the back stack come for free
+  // and no new detail view has to be invented.
+  //
+  // FRAME 1 IS NOT `groupViewHtml(bp, supports, null, now)`. A null roster is
+  // the shape of a read that FAILED — the `roster-unreachable` control pins
+  // exactly that, and it resolves the GROUP to `offline`. This read has not
+  // been ISSUED yet, so painting "Offline — no live support is beating" before
+  // asking would be a fabricated verdict about boxes nobody has questioned:
+  // the same lie, one frame earlier, that the control exists to forbid. The
+  // panel says it is reading, and `wireGroupView` replaces it with the derived
+  // surface once the roster answers (including when it answers with a failure,
+  // which IS the null-roster shape and IS honestly offline).
+  function instanceGroupPanelHtml(bp) {
+    var b = bp || {};
+    return '<div id="instance-group-view" data-group-bp="' + esc(b.id) + '">' +
+      '<section class="card group-view">' +
+        '<div class="group-head"><h2 class="group-title">' + esc(b.name || "Group") + "</h2></div>" +
+        '<p class="group-detail">Reading the roster&hellip;</p>' +
+      "</section>" +
+    "</div>";
   }
 
   // ── Add-support flow (PDF-D83: the CP provisions server-side) ───────────────
@@ -11809,9 +11924,34 @@
     }).catch(function () { return { status: 0, documents: null }; });
   }
 
-  // Paint every live support's presence slot from ONE roster read. A 401 (the
-  // cached token expired) drops the cache and retries the mint exactly once.
-  function loadSupportPresence(mainBp, supports, retried) {
+  // THE ROSTER READ, named once. Mint the app token (401 = the cached one
+  // expired: drop it and re-mint EXACTLY once), read the main's roster
+  // browser-direct, hand the caller `documents` — or null, which means the read
+  // itself never landed and must never be rendered as a box that answered.
+  //
+  // This was inlined in `loadSupportPresence` until the group route needed the
+  // same answer. It is extracted rather than copied for the reason PDF-D11's
+  // criterion [1] is about: a second roster read is a second place where a
+  // liveness answer gets cached, compared or aged, and the surface's one rule
+  // is that liveness comes from the plane it is handed. Both consumers now pass
+  // the SAME `documents` array straight into the shipped derivations.
+  function readFleetRoster(mainBp, then, retried) {
+    if (!mainBp || !mainBp.url) { then(null); return; }
+    mintAppToken(mainBp.id).then(function (token) {
+      if (!token) { then(null); return; }
+      fetchFleetRoster(mainBp.url, token).then(function (r) {
+        if (r.status === 401 && !retried) {
+          delete appTokenCache[mainBp.id];
+          readFleetRoster(mainBp, then, true);
+          return;
+        }
+        then(r.documents);
+      });
+    });
+  }
+
+  // Paint every live support's presence slot from ONE roster read.
+  function loadSupportPresence(mainBp, supports) {
     var targets = (supports || []).filter(function (s) { return instanceLifecycle(s).live; });
     if (!targets.length || !mainBp || !mainBp.url) return;
     var paint = function (documents) {
@@ -11827,16 +11967,25 @@
         if (slot) slot.innerHTML = presenceSlotHtml(documents, s);
       });
     };
-    mintAppToken(mainBp.id).then(function (token) {
-      if (!token) { paint(null); return; }
-      fetchFleetRoster(mainBp.url, token).then(function (r) {
-        if (r.status === 401 && !retried) {
-          delete appTokenCache[mainBp.id];
-          loadSupportPresence(mainBp, supports, true);
-          return;
-        }
-        paint(r.documents);
-      });
+    readFleetRoster(mainBp, paint);
+  }
+
+  // The group tab's ONE mount. Same read, same derivations, no cache of its
+  // own: `documents` goes straight from the wire into `groupViewHtml`, which
+  // rebuilds every cell through `presenceChip`. Nothing here remembers, ages or
+  // re-decides "online" — that is criterion [1] surviving the routing, and the
+  // absence is what the mutation pin measures.
+  function wireGroupView(bp) {
+    var box = $("#instance-group-view");
+    if (!box || !bp || isSupportBp(bp)) return;
+    var supports = supportsOf(fleetCache, bp.id);
+    readFleetRoster(bp, function (documents) {
+      // The panel that asked must still be the panel on screen — a drill-down
+      // to another instance while this read was in flight must not be painted
+      // with the previous main's group.
+      var live = $("#instance-group-view");
+      if (!live || live.getAttribute("data-group-bp") !== String(bp.id)) return;
+      live.innerHTML = groupViewHtml(bp, supports, documents, Date.now());
     });
   }
 
@@ -30485,6 +30634,7 @@
       instanceTimelineHtml: instanceTimelineHtml, mountInstanceTimeline: mountInstanceTimeline,
       // C6 instance-workspace tabs + the Webhooks tab (charter D49/D46/D51/D18/D5).
       instanceTabOf: instanceTabOf, instanceTabs: INSTANCE_TABS.slice(),
+      instanceTabsFor: instanceTabsFor, instanceTabFor: instanceTabFor,
       instanceDetailHtml: instanceDetailHtml, instanceTabStripHtml: instanceTabStripHtml,
       webhookCliChip: webhookCliChip, cliChipHtml: cliChipHtml,
       webhookEventsHtml: webhookEventsHtml, webhookBannerHtml: webhookBannerHtml,
@@ -31231,6 +31381,8 @@
       groupViewStateCopy: groupViewStateCopy, groupStateBadgeHtml: groupStateBadgeHtml,
       groupSupportCell: groupSupportCell, groupSupportCells: groupSupportCells,
       groupRosterConflicts: groupRosterConflicts, groupSupportRowHtml: groupSupportRowHtml,
+      groupOtherListeners: groupOtherListeners, groupOtherListenersHtml: groupOtherListenersHtml,
+      instanceGroupPanelHtml: instanceGroupPanelHtml,
       groupViewHtml: groupViewHtml, rosterBeatAgeMs: rosterBeatAgeMs,
       rosterStalenessText: rosterStalenessText, rosterSlotsFree: rosterSlotsFree,
       // MVP-0 offload (PDF-D87/D92, pdf-mvp0-offload-spa): the order-doc

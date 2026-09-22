@@ -7890,8 +7890,9 @@ test("C6: the tab codec + webhook builders + mount seam are exported", () => {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
   // C8 registered the Timeline tab between Overview and Webhooks; C10 appended
-  // Usage; S12 (azure-hetzner hosting) appended Metrics.
-  assert.deepEqual([...hooks.instanceTabs], ["overview", "timeline", "webhooks", "usage", "metrics"]);
+  // Usage; S12 (azure-hetzner hosting) appended Metrics; PDF-D11's follow-up
+  // appended Group — the route the group surface was missing.
+  assert.deepEqual([...hooks.instanceTabs], ["overview", "timeline", "webhooks", "usage", "metrics", "group"]);
 });
 
 // ── parseHash tab codec (D49/D14): #instance/<id>/<tab>, legacy hash → overview ─
@@ -35585,6 +35586,127 @@ test("PDF-D11: the empty state is the group's own sentence, not an empty table",
   assert.ok(html.includes('data-group-state="empty"'));
   assert.ok(html.includes("group-empty"));
   assert.ok(!html.includes("group-table"), "the empty group still rendered a header row for nothing");
+});
+
+// ── THE ROUTE (the follow-up slice): #instance/<main-id>/group ──────────────
+
+const GV_MAIN_BP = { id: "main-1", name: "Production", slug: "production", host: "production.barkpark.cloud", url: "https://production.barkpark.cloud", provision_status: "succeeded" };
+const GV_SUPPORT_BP = { id: "sup-1", name: "muscle-1", slug: "muscle-1", host: "muscle-1.fleet.internal", fleet_role: "support", fleet_parent_id: "main-1", provision_status: "succeeded" };
+
+test("PDF-D11 route: Group is a registered tab, and instanceTabsFor is the ONE decider of who is offered it", () => {
+  // The tab exists on the router's registry (so a bookmark resolves) …
+  assert.equal(hooks.instanceTabOf("group"), "group");
+  // … and the per-box decider offers it to a MAIN and withholds it from a
+  // SUPPORT, which has no group of its own.
+  assert.ok([...hooks.instanceTabsFor(GV_MAIN_BP)].includes("group"));
+  assert.ok(![...hooks.instanceTabsFor(GV_SUPPORT_BP)].includes("group"));
+  // A support deep-linked to /group degrades to Overview the way an unknown
+  // suffix does — never a 404, and never a Group panel with no group.
+  assert.equal(hooks.instanceTabFor(GV_SUPPORT_BP, "group"), "overview");
+  assert.equal(hooks.instanceTabFor(GV_MAIN_BP, "group"), "group");
+  // The STRIP follows the same decider rather than the raw registry: the
+  // failure this guards is a second tab list drifting from the first.
+  assert.ok(hooks.instanceTabStripHtml(GV_MAIN_BP, "group").includes("#instance/main-1/group"));
+  assert.ok(!hooks.instanceTabStripHtml(GV_SUPPORT_BP, "overview").includes("/group"));
+  // A null bp (the fleet still in flight) is not a support — the full set, the
+  // pre-existing behaviour, never a silently hidden tab.
+  assert.deepEqual([...hooks.instanceTabsFor(null)], [...hooks.instanceTabs]);
+});
+
+test("PDF-D11 route: the main's workspace mounts the group panel, and frame 1 states NO verdict", () => {
+  const html = hooks.instanceDetailHtml(GV_MAIN_BP, "group", {}, "grant");
+  assert.match(html, /id="instance-group-view"/, "the group tab painted no mount point for wireGroupView to fill");
+  assert.match(html, /data-group-bp="main-1"/, "the mount carries no instance identity, so a stale read could paint the wrong group");
+  assert.match(html, /Reading the roster/);
+
+  // THE POINT OF THE FRAME-1 SHAPE. A null roster is the shape of a read that
+  // FAILED, and it resolves the group to `offline` — so painting groupViewHtml
+  // before the read is ISSUED would announce "no live support is beating"
+  // about boxes nobody has asked yet. The panel must carry no state at all.
+  assert.ok(!html.includes("data-group-state="),
+    "the group panel declared a state before the roster read was issued — a fabricated verdict");
+  assert.ok(!hooks.instanceGroupPanelHtml(GV_MAIN_BP).includes("group-state--offline"));
+  // The control: the SAME renderer with a landed (failed) read DOES say offline,
+  // so the absence above is a property of frame 1 and not of the markup generally.
+  assert.match(hooks.groupViewHtml(GV_MAIN_BP, [GV_SUPPORT_BP], null, Date.parse("2026-07-24T12:00:00Z")),
+    /data-group-state="offline"/);
+});
+
+test("PDF-D11 route c[2] MUTATION: the ROUTED markup collapses with presenceChip too — routing added no second decider", () => {
+  // The parent slice proved the absence through groupViewState. Routing wired a
+  // real fetch, which is exactly when a second cache of "online" gets
+  // introduced by accident, so the proof is re-run against the thing the ROUTE
+  // actually paints: the rendered surface's own state attribute and badge.
+  const ANCHOR = '      online: s !== "offline", // PDF-D89: online is DERIVED, never stored';
+  const mutant = evalApp(replaceUnique(APP_SRC_FOR_MUTATION, ANCHOR, '      online: false, // MUTANT',
+    { what: "presenceChip's online derivation, re-run against the routed render" })).hooks;
+
+  for (const state of ["working", "cap-hit"]) {
+    const sc = GV_AXIS(hooks).find((s) => s.state === state);
+    // Shipped: the surface paints its own state.
+    assert.match(hooks.groupViewHtml(sc.main, sc.supports, sc.roster, sc.now),
+      new RegExp('data-group-state="' + state + '"'));
+    // Mutated: it collapses to offline, badge and all.
+    const after = mutant.groupViewHtml(sc.main, sc.supports, sc.roster, sc.now);
+    assert.match(after, /data-group-state="offline"/,
+      `the routed render still said "${state}" with the single decider broken — something else is deciding online`);
+    assert.match(after, /group-state--offline/);
+  }
+});
+
+// ── THE TWO REMAINING COLLISION SHAPES ──────────────────────────────────────
+// Both are ruled OUT of the catalogue, for different reasons written at the
+// site in app.js. These pin the decisions so neither can be quietly reversed.
+
+test("PDF-D11: a roster row matching no support is an OBSERVATION, never a state — a listener session must not demote a healthy group", () => {
+  const sc = GV_AXIS(hooks).find((s) => s.state === "working");
+  const stray = { worker: "pelle-laptop", agent: "fleet-listener", scope: "production", status: "idle", capacity: "1 task", last_seen: "2026-07-24T11:59:59Z", ttl_s: 120, task: null };
+  const roster = [...sc.roster, stray];
+
+  // It is NAMED (before this slice these rows were silently dropped and the
+  // surface claimed to show "the group" while rendering only the minted part).
+  const cells = hooks.groupSupportCells(sc.supports, roster, sc.now);
+  assert.deepEqual([...hooks.groupOtherListeners(cells, roster)].map((r) => r.worker), ["pelle-laptop"]);
+  const html = hooks.groupViewHtml(sc.main, sc.supports, roster, sc.now);
+  assert.match(html, /group-others/);
+  assert.match(html, /pelle-laptop/);
+
+  // And it decides NOTHING. Fleet's own moduledoc defines a listener as "a
+  // dev-server/agent session running the fleet-listener protocol" and roster/2
+  // returns every listener the WORKSPACE owns — so an unmatched row is routine,
+  // and ranking it in the catalogue would let somebody's laptop take a working
+  // group out of `working`.
+  assert.equal(hooks.groupViewState(cells), "working");
+  assert.ok(html.includes('data-group-state="working"'));
+  assert.ok(!hooks.GROUP_VIEW_STATES.some((s) => /stray|unmatched|orphan/.test(s)),
+    "an unmatched roster row was promoted to a catalogue state — read the rule-out at the site first");
+
+  // A read that never LANDED knows of no listeners — null is not "zero others".
+  assert.deepEqual([...hooks.groupOtherListeners(hooks.groupSupportCells(sc.supports, null, sc.now), null)], []);
+  // The control: with no stray, the sentence is absent — so the match above is
+  // measuring the row and not a line the surface always prints.
+  assert.ok(!hooks.groupViewHtml(sc.main, sc.supports, sc.roster, sc.now).includes("group-others"));
+});
+
+test("PDF-D11: a support whose dataset differs from the roster scope is ABSENT, not divergent — the payload carries no dataset to diverge", () => {
+  // The rule-out's premise, asserted against the SHIPPED SERVER rather than
+  // quoted: Barkpark.Tasks.Fleet.to_row/3 serializes eight keys and `dataset`
+  // is not among them, and load_listeners/2 filters on the queried dataset, so
+  // every row the console receives is in scope by construction.
+  const fleetEx = fs.readFileSync(new URL("../../../api/lib/barkpark/tasks/fleet.ex", import.meta.url), "utf8");
+  const row = fleetEx.slice(fleetEx.indexOf("defp to_row("), fleetEx.indexOf("defp presence_status("));
+  assert.ok(row.includes('"worker" =>') && row.includes('"ttl_s" =>'), "to_row/3 moved — re-read it before trusting this pin");
+  assert.ok(!row.includes('"dataset"'),
+    "the roster row now carries a dataset — the console CAN tell a divergent scope from an absent row, and the rule-out in app.js is stale");
+  assert.ok(fleetEx.includes("d.dataset == ^dataset"), "load_listeners/2 no longer scopes by dataset");
+
+  // What the console therefore sees: no row, which is presenceChip's honest
+  // unknown — the same answer as a support registered but never beat. That is
+  // the truth available to a reader that cannot tell the two apart.
+  const chip = hooks.presenceChip(hooks.rosterRowFor([], GV_SUPPORT_BP));
+  assert.equal(chip.state, "unknown");
+  assert.equal(chip.online, false);
+  assert.equal(chip.label, "No heartbeat yet");
 });
 
 test("PDF-D11: rosterBeatAgeMs is total over junk and never renders a beat in the future", () => {
