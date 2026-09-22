@@ -11954,6 +11954,13 @@
   function loadSupportPresence(mainBp, supports) {
     var targets = (supports || []).filter(function (s) { return instanceLifecycle(s).live; });
     if (!targets.length || !mainBp || !mainBp.url) return;
+    // DOM-gated as well as data-gated. wireInstanceActions runs on EVERY tab,
+    // and the presence slots this paints live in the Overview panel's fleet
+    // card — so off Overview this used to mint a token and read the roster to
+    // paint nothing. Harmless until the group tab started reading the same
+    // roster for its own render, at which point the group screen issued TWO
+    // reads of one endpoint. No slot on screen, no read.
+    if (!document.querySelectorAll("[data-support-presence]").length) return;
     var paint = function (documents) {
       targets.forEach(function (s) {
         // Attribute-scan rather than an interpolated selector: an exotic id
@@ -11975,16 +11982,24 @@
   // rebuilds every cell through `presenceChip`. Nothing here remembers, ages or
   // re-decides "online" — that is criterion [1] surviving the routing, and the
   // absence is what the mutation pin measures.
+  // WHOSE group panel is on screen. The lifecycleRail / instanceAuthorityMount
+  // precedent: module state rather than an attribute read, because the answer
+  // has to survive the panel's own re-renders and be readable the instant the
+  // read lands. Rewritten on EVERY loadInstance paint (wireInstanceActions
+  // re-enters), and nulled the moment the panel is not mounted — so a
+  // drill-down to another instance, or a move to another tab, invalidates an
+  // in-flight read instead of letting it paint the previous main's group.
+  var groupViewMount = null;
+
   function wireGroupView(bp) {
     var box = $("#instance-group-view");
-    if (!box || !bp || isSupportBp(bp)) return;
+    groupViewMount = (box && bp && !isSupportBp(bp)) ? String(bp.id) : null;
+    if (!groupViewMount) return;
     var supports = supportsOf(fleetCache, bp.id);
     readFleetRoster(bp, function (documents) {
-      // The panel that asked must still be the panel on screen — a drill-down
-      // to another instance while this read was in flight must not be painted
-      // with the previous main's group.
+      if (groupViewMount !== String(bp.id)) return;
       var live = $("#instance-group-view");
-      if (!live || live.getAttribute("data-group-bp") !== String(bp.id)) return;
+      if (!live) return;
       live.innerHTML = groupViewHtml(bp, supports, documents, Date.now());
     });
   }

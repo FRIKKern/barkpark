@@ -736,7 +736,16 @@
 # nothing in this diff adds a construct the CSSOM parses differently from the
 # authored text — every added head is a plain class selector, one of them with a
 # :hover pseudo-class, two of them inside an existing-shape media block.
-1357
+# 1357 -> 1358, +1 authored rule head, pdf-bl-fleet-group-route: `.group-others`,
+# the muted sentence the routed PDF-D11 group panel prints under its table when the
+# roster carries a listener row no support of this main accounts for. ONE plain class
+# selector in the top-level cascade — no media query, no nesting, nothing the CSSOM
+# parses differently from the authored text.
+# NOT arithmetic: 1358 is what cssom-parity.mjs PRINTED on this branch ("1358 authored
+# rule heads, sidecar baseline is 1357 (+1)") with MISSES 0, which is what makes this
+# an unrecorded ADD rather than a parity defect — the distinction the ratchet's own
+# failure text says to confirm before bumping.
+1358
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout

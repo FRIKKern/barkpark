@@ -2893,6 +2893,37 @@ const fleetRosterFixture = [
   },
 ];
 
+// PDF-D11 GROUP VIEW — the roster as the ROUTED group tab reads it. Two rows,
+// and they are deliberately different KINDS: muscle-2 is a provisioned support
+// of this main (the fleet payload knows it), while `pelle-laptop` is a listener
+// session beating into the same workspace that no support accounts for. The
+// second one is the point — Barkpark.Tasks.Fleet's roster is every LISTENER the
+// workspace owns ("a dev-server/agent session running the fleet-listener
+// protocol"), not a list of supports, so an unmatched row is routine and the
+// surface names it under the table WITHOUT letting it move the group's state.
+const groupRosterFixture = [
+  {
+    worker: "muscle-2",
+    agent: "claude",
+    scope: "production",
+    status: "working",
+    capacity: { size_class: "heavy", slots_total: 4, slots_free: 2, budget: 20 },
+    last_seen: tMinus(9),
+    ttl_s: 120,
+    task: { title: "Reindex 400k ONIX records" },
+  },
+  {
+    worker: "pelle-laptop",
+    agent: "claude",
+    scope: "production",
+    status: "idle",
+    capacity: "1 task",
+    last_seen: tMinus(24),
+    ttl_s: 120,
+    task: null,
+  },
+];
+
 // ── MVP-0 offload fixtures (pdf-mvp0-offload-spa, PDF-D87/D92) ───────────────
 // An order is an ASSIGNEE-ROUTED type:task doc filed on the MAIN via the
 // browser-direct mutate seam; the listener (muscle-2, the online support above)
@@ -6082,6 +6113,25 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: [],
       audit: [],
+    },
+  },
+  // ── PDF-D11 GROUP VIEW — the ROUTED surface (#instance/<main>/group) ────────
+  // The tab the group surface was missing. It renders from the LIVE roster
+  // plane: the app-token mint + the browser-direct GET /v1/fleet/roster both
+  // land on mock.js's existing arms, and `wireGroupView` hands those documents
+  // straight to the shipped renderer. Nothing here is a group-view fixture
+  // module — this is the real console reading the real (mocked) wire.
+  "fleet-group-view": {
+    label: "Group tab — the main's supports under ONE group state, read live off the roster, with the unmatched listener session named but not counted",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/group",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      fleetRoster: groupRosterFixture,
     },
   },
   // ── MVP-0 OFFLOAD (pdf-mvp0-offload-spa, PDF-D87/D92): the order watch ladder ─

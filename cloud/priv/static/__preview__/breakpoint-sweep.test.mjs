@@ -755,8 +755,8 @@ test("the DEFAULT loop is ONE height, and the decision carries its own render co
   // instead of quietly stale.
   const one = CELLS.length * THEMES.length * 1 * WIDTHS.length;
   const all = CELLS.length * THEMES.length * HEIGHTS.length * WIDTHS.length;
-  assert.equal(one, 1050);
-  assert.equal(all, 3150);
+  assert.equal(one, 1092);
+  assert.equal(all, 3276);
   const reason = HEIGHT_REASONS[RENDER_HEIGHT];
   assert.ok(reason.includes(String(one)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state the default-loop render count ${one}`);
   assert.ok(reason.includes(String(all)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state what walking all ${HEIGHTS.length} heights costs (${all})`);
@@ -1266,9 +1266,21 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // 143rd scenarios and the 118th and 119th residue entries; the sweep refused
   // at exit 2 (`UNLISTED scenario "instance-pin-version" (family
   // hash:#instance)`) until both entries were written.
-  assert.equal(r.total, 143);
-  assert.equal(r.cells, 25);
-  assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
+  // pdf-bl-fleet-group-route moves it by ONE, and unlike the last several it
+  // moves the CELL axis: `fleet-group-view` is the 144th scenario and the FIRST
+  // to reach the PDF-D11 group tab (`#instance/<main>/group`), which the parent
+  // slice shipped with no route at all. It gets a CELL, not a residue entry,
+  // because `.group-table` is a five-column grid collapsing to two at 640 —
+  // geometry none of the 23 hash:#instance residue entries shares, and its
+  // sentinel exists only after the browser-direct roster read lands, so the
+  // cell also walks the route's async paint. Total 143 -> 144, cells 25 -> 26,
+  // distinctCovered 24 -> 25. Residue (119) and families (14) are DELIBERATELY
+  // UNMOVED: a cell is not residue, and a cell creates no family. Every integer
+  // was RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` and reading the
+  // `>> scenarios` line it PRINTED, never by adding one.
+  assert.equal(r.total, 144);
+  assert.equal(r.cells, 26);
+  assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
   assert.equal(r.residue, 119, "119 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
