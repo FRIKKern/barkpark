@@ -459,43 +459,6 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_content_digest(content)
   end
 
-  # The board card's stand-in for the deleted `content` echo — see the
-  # `content_digest` block in the `:board` header above for what each key is
-  # for and why the set is exactly this size.
-  #
-  # BOARD-ONLY ON PURPOSE. The full card still carries `content`, so a full
-  # reader derives all four of these from the source rather than from a
-  # summary; adding the digest there would be a SECOND copy of the same facts
-  # on the one card that does not need it, and two copies of a fact are two
-  # things to drift.
-  defp put_content_digest(map, content) do
-    digest =
-      %{
-        has_description: present_text?(Map.get(content, "description")),
-        has_dependencies: present_list?(Map.get(content, "dependencies")),
-        has_paper:
-          present_text?(Map.get(content, "design_doc")) or
-            present_list?(Map.get(content, "papers"))
-      }
-      |> put_criteria_marks(content)
-
-    Map.put(map, :content_digest, digest)
-  end
-
-  # Same omission law as put_criteria_progress/2: no criteria, no key.
-  defp put_criteria_marks(digest, content) do
-    case Criteria.marks(content) do
-      marks when is_binary(marks) and marks != "" -> Map.put(digest, :criteria_marks, marks)
-      _ -> digest
-    end
-  end
-
-  defp present_text?(v) when is_binary(v), do: String.trim(v) != ""
-  defp present_text?(_), do: false
-
-  defp present_list?(v) when is_list(v), do: v != []
-  defp present_list?(_), do: false
-
   # axi-w2-s2 (charter decisions 15+16): brief card v2 — the nine measured
   # cuts, ENTIRELY inside the brief path (:full untouched):
   #
@@ -543,6 +506,43 @@ defmodule BarkparkWeb.TasksController.Params do
     |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
     |> prune_nils()
   end
+
+  # The board card's stand-in for the deleted `content` echo — see the
+  # `content_digest` block in the `:board` header above for what each key is
+  # for and why the set is exactly this size.
+  #
+  # BOARD-ONLY ON PURPOSE. The full card still carries `content`, so a full
+  # reader derives all four of these from the source rather than from a
+  # summary; adding the digest there would be a SECOND copy of the same facts
+  # on the one card that does not need it, and two copies of a fact are two
+  # things to drift.
+  defp put_content_digest(map, content) do
+    digest =
+      %{
+        has_description: present_text?(Map.get(content, "description")),
+        has_dependencies: present_list?(Map.get(content, "dependencies")),
+        has_paper:
+          present_text?(Map.get(content, "design_doc")) or
+            present_list?(Map.get(content, "papers"))
+      }
+      |> put_criteria_marks(content)
+
+    Map.put(map, :content_digest, digest)
+  end
+
+  # Same omission law as put_criteria_progress/2: no criteria, no key.
+  defp put_criteria_marks(digest, content) do
+    case Criteria.marks(content) do
+      marks when is_binary(marks) and marks != "" -> Map.put(digest, :criteria_marks, marks)
+      _ -> digest
+    end
+  end
+
+  defp present_text?(v) when is_binary(v), do: String.trim(v) != ""
+  defp present_text?(_), do: false
+
+  defp present_list?(v) when is_list(v), do: v != []
+  defp present_list?(_), do: false
 
   # LABELS ON THE BRIEF CARD (task-14eac58b39fd3692), additive and pruned.
   #
