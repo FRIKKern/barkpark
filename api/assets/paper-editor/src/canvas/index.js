@@ -3405,10 +3405,18 @@ class BpPaperCanvas extends HTMLElement {
     const tr = state.tr;
     let index = 0;
     let mutated = false;
-    state.doc.descendants((node, pos) => {
+    const topIds = new Set();
+    state.doc.descendants((node, pos, parent) => {
       const stable = stableNodes[index++];
       const stableId = stable?.attrs?.bpId;
-      if (!node.isText && node.attrs?.bpId == null && stableId != null) {
+      // Enter inherits the original paragraph's attrs. normalizeCanvasDoc
+      // treats only the second top-level occurrence as new; materialize its
+      // projected ID too, otherwise every subsequent save/read mints it again.
+      // Keep the first occurrence and all unrelated/nested identities intact.
+      const id = node.attrs?.bpId;
+      const duplicateTopId = parent === state.doc && id != null && topIds.has(id);
+      if (parent === state.doc && id != null) topIds.add(id);
+      if (!node.isText && (id == null || duplicateTopId) && stableId != null) {
         const bpType = node.attrs.bpType == null ? stable.attrs?.bpType : node.attrs.bpType;
         if (node.type.name === "note") {
           // Keep pre-save label/lead AttrSteps mapped to this same note.

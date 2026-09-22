@@ -30,5 +30,39 @@ try{
  assert.ok(!batches.at(-1).ops.some(op=>op.op==='remove-block'||op.op==='insert-after'),'later text edit is an incremental patch');
  c._editor.commands.undo();const undone=save();assert.deepEqual(undone,saved,'Undo removes only later human typing');
  c._editor.commands.redo();assert.deepEqual(save(),next,'Redo restores content under the same identity');
+ c._editor.view.dispatch(closeHistory(c._editor.state.tr));
+ c._editor.commands.setTextSelection(8);c._editor.commands.splitBlock();c.flushPendingChanges();
+ const pending=c._inflightOps;assert.ok(pending);const pendingIds=pending.afterBlocks.map(b=>b.id);
+ assert.equal(new Set(pendingIds).size,pendingIds.length,'repeated splits produce unique IDs');
+ assert.equal(pendingIds[0],'origin');assert.equal(pendingIds.at(-1),'reference');
+ c._editor.commands.insertContent('Before acknowledgement');c.flushPendingChanges();
+ assert.deepEqual(c.recoverySnapshot().blocks.map(b=>b.id),pendingIds,'typing while a split save is in flight keeps its identity');
+ c.acknowledgeOps(pending.seq,true);const following=c._inflightOps;assert.ok(following);c.acknowledgeOps(following.seq,true);
+ const settled=structuredClone(c.blocks);assert.deepEqual(c.recoverySnapshot().blocks,settled);
+ assert.deepEqual(settled.map(b=>b.id),pendingIds);assert.deepEqual(settled.at(-1),seed[1]);
+ c.applyServerBlocks(pending.afterBlocks,{mode:'own-stale'});
+ assert.deepEqual(c.recoverySnapshot().blocks,settled,'delayed first receipt cannot revert current text or IDs');
  console.log('PASS split IDs, complete recovery equality, repeated edits, caret, references and Undo/Redo');
-}finally{c.remove();window.close();}
+}finally{c.remove();}
+for(const mutation of ['split','reorder','delete']){
+ const canvas=document.createElement('bp-paper-canvas');canvas.blocks=structuredClone(seed);canvas.acknowledgedSaves=true;document.body.append(canvas);
+ try{
+  const e=canvas._editor;e.commands.setTextSelection(8);e.commands.splitBlock();canvas.flushPendingChanges();
+  const first=canvas._inflightOps;assert.ok(first);const childId=first.afterBlocks[1].id;
+  if(mutation==='split'){e.commands.setTextSelection(e.state.doc.child(0).nodeSize+3);e.commands.splitBlock();}
+  if(mutation==='delete'){const start=e.state.doc.child(0).nodeSize;e.view.dispatch(e.state.tr.delete(start,start+e.state.doc.child(1).nodeSize));}
+  if(mutation==='reorder'){const start=e.state.doc.child(0).nodeSize,n=e.state.doc.child(1);e.view.dispatch(e.state.tr.delete(start,start+n.nodeSize).insert(0,n));}
+  canvas.flushPendingChanges();const intended=canvas.recoverySnapshot().blocks;
+  assert.equal(new Set(intended.map(b=>b.id)).size,intended.length);
+  canvas.acknowledgeOps(first.seq,true);const second=canvas._inflightOps;assert.ok(second);
+  assert.deepEqual(canvas.recoverySnapshot().blocks,intended,'first receipt cannot stamp an obsolete position after '+mutation);
+  assert.deepEqual(second.afterBlocks,intended,'next posted snapshot matches live identities after '+mutation);
+  canvas.acknowledgeOps(second.seq,true);assert.deepEqual(canvas.blocks,intended);assert.deepEqual(canvas.recoverySnapshot().blocks,intended);
+  assert.deepEqual(intended.find(b=>b.id==='reference'),seed[1]);assert.ok(intended.find(b=>b.id==='origin'));
+  if(mutation==='delete')assert.ok(!intended.find(b=>b.id===childId));
+  if(mutation==='reorder')assert.equal(intended[0].id,childId);
+  canvas.applyServerBlocks(first.afterBlocks,{mode:'own-stale'});assert.deepEqual(canvas.recoverySnapshot().blocks,intended);
+  console.log('PASS in-flight '+mutation+' preserves posted identities and rejects stale positional stamping');
+ }finally{canvas.remove();}
+}
+window.close();
