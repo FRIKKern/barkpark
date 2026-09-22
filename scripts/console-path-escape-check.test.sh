@@ -843,6 +843,44 @@ emit("agg_needs", ",".join(agg.get("needs", [])))
 coe = [n for n, j in jobs.items() if j.get("continue-on-error") is True]
 emit("coe_jobs", ",".join(sorted(coe)))
 emit("coe_in_needs", ",".join(sorted(set(coe) & set(agg.get("needs", [])))))
+# ── THE POST-GREEN REPORTER CATEGORY (cch-w44) ─────────────────────────────
+# A SECOND shape of job that legitimately cannot live in `needs`, exempt for the
+# same structural reason as the post-verdict reporter above: wiring it in is a
+# CYCLE, not a choice somebody declined to make.
+#
+# WHY IT EXISTS. Until this slice the aggregator's nothing-ran disclosure was a
+# single `::notice::`. Measured 2026-09-16 on PR #18693's head 22dc98ba7 (a
+# docs-only diff): `Console gate | success | title=null | summary=null |
+# text=null | ann=1` against `ann=0` for a head that really ran the harness —
+# the empty green and the measured green differ by exactly one annotation, and
+# GitHub keeps only the first 10 annotations per level per step and drops the
+# rest without a word. A check-run NAME is not rationed, so the disclosure is
+# now ALSO rendered as one, and rendering a name needs a job of its own.
+#
+# A job is a post-green reporter iff ALL FOUR hold. This is STRICTER than the
+# blanket `coe_jobs = ""` it replaces, not laxer: that pin banned a population,
+# this one bans a population AND demands four structural properties AND an
+# exact roster.
+#   (1) needs == [<the aggregator>] EXACTLY — the cycle, again;
+#   (2) its `if:` is EXACTLY always() — it reports on every conclusion and
+#       gates none of them. Anything narrower is a job pretending to report;
+#   (3) it IS continue-on-error — so it can never turn a verdict red and the
+#       exemption costs the aggregator nothing. Note this is the OPPOSITE
+#       requirement to the post-verdict reporter, which is granted its
+#       exemption precisely BECAUSE it keeps its exit-1: that one must be able
+#       to lose, this one must be unable to win or lose anything;
+#   (4) NO job lists it in `needs`. A failed continue-on-error job reads
+#       `success` through `needs.<job>.result` — that is the entire hazard of
+#       (3), and this clause removes its consumer rather than trusting one.
+_needed_by = {n for _j in jobs.values() for n in (_j.get("needs") or [])}
+def post_green_shape(name, j):
+    return (list(j.get("needs") or []) == ["console-gate"]
+            and str(j.get("if", "")).strip() == "always()"
+            and j.get("continue-on-error") is True
+            and name not in _needed_by)
+post_green = {n for n, j in jobs.items() if post_green_shape(n, j)}
+emit("post_green_reporters", ",".join(sorted(post_green)))
+emit("coe_not_reporter", ",".join(sorted(set(coe) - post_green)))
 # THE POST-VERDICT CATEGORY. Exactly one shape of blocking job legitimately
 # cannot live in `needs`: a reporter that runs AFTER the aggregator concluded,
 # to carry main's own red to a human. Wiring it in is not a trade-off, it is a
@@ -1030,7 +1068,11 @@ PY
   assert_fact agg_matrix False
   assert_fact agg_if "always()"
   assert_fact agg_name "Console gate"
-  assert_fact coe_jobs ""
+  # `coe_jobs` stays EMITTED (the mutation matrix below reads it) but the
+  # assertion moved to the predicate: a continue-on-error job is allowed only
+  # if it is a post-green reporter, and the roster of those is pinned exactly.
+  assert_fact coe_not_reporter ""
+  assert_fact post_green_reporters "console-gate-subject"
   assert_fact coe_in_needs ""
   # Every blocking job must be in the aggregator's needs set. Without this, a
   # future slice can add a blocking job and the required context stays green
@@ -1263,12 +1305,17 @@ PY
   pv smuggled    "report-main-failure,sneaky-lint" ""        ""
   pv deleted     ""                    ""                    ""
   # The muted reporter reds TWICE: post_verdict_muted names it, and so does the
-  # `coe_jobs = ""` assertion above. Both, so relaxing either one alone leaves
+  # `coe_not_reporter = ""` assertion above. Both, so relaxing either one alone leaves
   # the escape closed.
-  if [ "$(sed -n 's|^coe_jobs=||p' "$TMPROOT/pv-coe.facts")" = "report-main-failure" ]; then
-    ok "  post-verdict[coe]: coe_jobs = report-main-failure — the SECOND red"
+  # Read through `coe_not_reporter`, not `coe_jobs`: the shipped tree now has
+  # one legitimate continue-on-error job (the post-green reporter), so `coe_jobs`
+  # is no longer an empty baseline. The muted post-verdict reporter is NOT a
+  # post-green reporter — its `if:` is failure()-anchored, not always() — so the
+  # predicate still names it, which is the point of asserting through it.
+  if [ "$(sed -n 's|^coe_not_reporter=||p' "$TMPROOT/pv-coe.facts")" = "report-main-failure" ]; then
+    ok "  post-verdict[coe]: coe_not_reporter = report-main-failure — the SECOND red"
   else
-    no "  post-verdict[coe]: coe_jobs did not name the muted reporter"
+    no "  post-verdict[coe]: coe_not_reporter did not name the muted reporter"
   fi
   # And the exactness of the pin, proven in both directions. A `_min`-style
   # lower bound of 1 would PASS both of these — the smuggled job only adds a
