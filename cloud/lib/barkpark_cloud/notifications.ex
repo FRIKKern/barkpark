@@ -2631,6 +2631,25 @@ defmodule BarkparkCloud.Notifications do
   # `Accounts.list_team_members/1` already selects the role — no new query shape,
   # no migration. An address missing from this map (impossible today; both reads
   # are the same join) renders as NOT an owner, which is the honest direction.
+  #
+  # task-a342dccd023211d5 asked whether to COLLAPSE the two reads into this one,
+  # which already returns both the address and the role. Answer: NO, and the cost
+  # was measured rather than argued. Counting `[:barkpark_cloud, :repo, :query]`
+  # across one `dispatch_event/3`, the membership reads are a CONSTANT 2 (one
+  # `team_memberships`, one `users`) at every team size, while the fan-out writes
+  # one `notification_deliveries` row per member and sends each mail
+  # SYNCHRONOUSLY: 5 queries at 1 member, 7 at 3, 14 at 10. Collapsing saves
+  # exactly one query out of 3+N, and its share shrinks as the audience grows —
+  # it is noise beside the per-recipient mail I/O.
+  #
+  # The saving is small; the thing it would spend is not. Collapsing moves the
+  # AUDIENCE onto a query that DOES select role — precisely the shape in which a
+  # later role predicate would narrow who is told about an alert while looking
+  # like a copy change. `owner_only_remedy_test.exs` now fences that mechanically
+  # ("the audience is exactly list_team_member_emails/1, with no role predicate"):
+  # a three-role team where both non-owners are still mailed, with the recipient
+  # set pinned to `Accounts.list_team_member_emails/1`'s own output. Anyone who
+  # does collapse these reads must keep that block green.
   defp team_member_roles(team_id) do
     team_id
     |> Accounts.list_team_members()
