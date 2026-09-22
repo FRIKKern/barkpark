@@ -148,9 +148,49 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       `scripts/fetch-prebuilt.sh` uses (verify → extract aside → swap), this
       repo's one working precedent.
 
-  Every refusal is a typed code (`E_*`) with a human message. The caller maps it
-  to a 400 — a refused artifact is a CALLER error, never a box error, and never
-  a silent fallback to a box build.
+    * **Two NAMED zlib error classes are typed; everything else CRASHES, on
+      purpose.** `run_stream/3` runs the whole pass inside one `try`, and its
+      `catch` is an allowlist of ATOMS — never a bare `rescue`. Read it as the
+      answer to "whose fault is a raise from inside the stream?":
+
+      | Raised inside the stream | Answer | Why |
+      |---|---|---|
+      | `:data_error`, `:stream_error`, `:buf_error` | `E_MALFORMED` (400) | zlib's verdict ON THE BYTES: the member is corrupt or cut. The caller repacks. |
+      | `:enomem`, `:system_limit` | `E_EXTRACT_EXHAUSTED` (500) | THE BOX could not get the memory to inflate. The bytes may be perfect. |
+      | anything else | **crash** | not a fact about the archive — a fact about a bug. |
+
+      The third row is the load-bearing one and it is a DECISION, not an
+      omission. `:badarg` means this module handed zlib something zlib rejects;
+      `:not_initialized` means the stream was never `inflateInit/2`'d or was
+      already ended; `:not_on_controlling_process` means the stream crossed a
+      process boundary. All three are bugs HERE or in the caller, and a typed
+      refusal would file them under the archive and make them unfindable. Nor is
+      a `{:need_dictionary, _, _}` RETURN given a clause in `drain/3`: gzip has
+      no FDICT bit, so at `@gzip_window_bits` (31, gzip-only) zlib cannot produce
+      one — if it ever does, the window bits changed underneath this module and
+      the resulting `CaseClauseError` is the right, loud answer. The same goes
+      for a `FunctionClauseError` out of the tar state machine: the parser is
+      ours, and a parser bug must never render as "the archive is malformed".
+
+      WIDENING THIS IS A REGRESSION, not a hardening. A `rescue _ -> {:error,
+      "E_MALFORMED", ...}` would make every future bug in the 900 lines below
+      answer 400 "your tarball is bad" about bytes that were fine. The list is
+      the point; add an atom to it deliberately, with a reason, or leave it out.
+
+      MEASURED, not reasoned: before `E_EXTRACT_EXHAUSTED` existed, an `:enomem`
+      raised from `:zlib.safeInflate/2` on the 20th call of a 41-entry archive —
+      9 728 bytes of tar already parsed — left `stage/4` with no return value at
+      all and killed the caller (`drain/3` → `feed_all/3` → `run_stream/3`,
+      exactly the shape a memory-pressured CI run was seen to produce). It also
+      leaked the whole `<dest>.staging-<n>` tree, because the `rm_rf` that makes
+      "a refusal leaves NO partial tree" true only runs on the RETURN path.
+      `prebuilt_artifact_stream_fault_test.exs` holds both arms.
+
+  Every refusal is a typed code (`E_*`) with a human message, and the code says
+  WHOSE fault it is: `caller_fault_codes/0` renders 400, `internal_failure_codes/0`
+  renders 5xx. A refused artifact is a caller error and never a silent fallback
+  to a box build; a box that could not stage a valid artifact is the box's
+  problem and must not tell the caller to repack.
 
   ## Caps
 
@@ -195,6 +235,18 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # zlib window bits 31 = 16 + 15 = "gzip only". NOT 47 (auto-detect
   # zlib-or-gzip): the contract says `.tar.gz` and that is what is accepted.
   @gzip_window_bits 31
+
+  # The zlib errors `run_stream/3` TYPES, as two NAMED classes. Everything
+  # absent from both still crashes — see the moduledoc's table for why that is
+  # the design and not a gap. Keep these as atom lists, never a `rescue`.
+  #
+  #   * CORRUPT — zlib's verdict about the BYTES. A caller fault, 400.
+  #   * EXHAUSTED — the allocator refused. A box fault, 5xx: the caller cannot
+  #     repack their way out of this machine's memory pressure, and the caps
+  #     (`E_TOTAL_TOO_LARGE` / `E_ENTRY_TOO_LARGE` / `E_COMPRESSION_RATIO`)
+  #     already own the case where the ARCHIVE is the thing that is too big.
+  @zlib_corrupt_errors [:data_error, :stream_error, :buf_error]
+  @zlib_exhausted_errors [:enomem, :system_limit]
   @inflate_chunk_bytes 64 * 1024
 
   @block 512
@@ -272,7 +324,7 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # own failure class instead of the caller's, and the OPERATOR who clears the
   # disk (or fixes the permissions) is the one who re-fires the deploy. The
   # caller's bytes are untouched and must not be repacked.
-  @internal_failure_codes ~w(E_STAGING_FAILED E_SWAP_FAILED E_WRITE_FAILED)
+  @internal_failure_codes ~w(E_EXTRACT_EXHAUSTED E_STAGING_FAILED E_SWAP_FAILED E_WRITE_FAILED)
 
   @caller_fault_codes ~w(
     E_ABSOLUTE_PATH E_BAD_NAME E_COMPRESSION_RATIO E_DIGEST_MISMATCH
@@ -413,18 +465,39 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
           close_io(state, {:error, code, message})
       end
     catch
-      # zlib raises on a corrupt member. Caught NARROWLY (only zlib's own
-      # errors) so a bug in the parser above surfaces as a crash, not as a
-      # misleading "the archive is malformed".
-      :error, %ErlangError{original: original}
-      when original in [:data_error, :stream_error, :buf_error] ->
-        {:error, "E_MALFORMED", "the gzip stream is corrupt (#{original})"}
+      # zlib raises on a corrupt member. Caught NARROWLY (two NAMED atom lists,
+      # never a bare rescue) so a bug in the parser above surfaces as a crash,
+      # not as a misleading "the archive is malformed". The moduledoc's table
+      # says which atoms are here and which are deliberately absent — read it
+      # before adding one.
+      :error, %ErlangError{original: original} when original in @zlib_corrupt_errors ->
+        corrupt_member(original)
 
-      :error, original when original in [:data_error, :stream_error, :buf_error] ->
-        {:error, "E_MALFORMED", "the gzip stream is corrupt (#{original})"}
+      :error, original when original in @zlib_corrupt_errors ->
+        corrupt_member(original)
+
+      # The allocator refused. NOT the caller's fault: the archive may be
+      # perfectly well-formed and within every cap, and this box simply could
+      # not get the memory to inflate it. Typed so the box ANSWERS instead of
+      # dying, and classed INTERNAL so the door renders 5xx and the deploy
+      # ledger files it under the box rather than telling the caller to repack.
+      :error, %ErlangError{original: original} when original in @zlib_exhausted_errors ->
+        extraction_exhausted(original)
+
+      :error, original when original in @zlib_exhausted_errors ->
+        extraction_exhausted(original)
     after
       _ = :zlib.close(z)
     end
+  end
+
+  defp corrupt_member(original),
+    do: {:error, "E_MALFORMED", "the gzip stream is corrupt (#{original})"}
+
+  defp extraction_exhausted(original) do
+    {:error, "E_EXTRACT_EXHAUSTED",
+     "this box ran out of memory inflating the artifact (#{original}) — the artifact " <>
+       "was NOT rejected and must not be repacked; retry once the box has memory"}
   end
 
   # Did the gzip MEMBER terminate? `inflateEnd/1` is the only thing that answers
@@ -433,18 +506,18 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # of a trailer-cut body still inflates, so the tar underneath looks whole and
   # the truncation is otherwise INVISIBLE.
   #
-  # Called from inside `run_stream/3`'s `try`, so anything outside zlib's own
-  # narrow error set still surfaces through that existing catch rather than being
-  # mistranslated here.
+  # Called from inside `run_stream/3`'s `try`, so anything outside THIS clause's
+  # list still surfaces through that outer catch — an `:enomem` from
+  # `inflateEnd/1` becomes `E_EXTRACT_EXHAUSTED` there, and anything in neither
+  # list crashes — rather than being mistranslated here as a truncation.
   defp stream_complete(z) do
     :zlib.inflateEnd(z)
     :ok
   catch
-    :error, %ErlangError{original: original}
-    when original in [:data_error, :stream_error, :buf_error] ->
+    :error, %ErlangError{original: original} when original in @zlib_corrupt_errors ->
       truncated_in_transit(original)
 
-    :error, original when original in [:data_error, :stream_error, :buf_error] ->
+    :error, original when original in @zlib_corrupt_errors ->
       truncated_in_transit(original)
   end
 
