@@ -465,4 +465,67 @@ defmodule BarkparkWeb.Studio.PressAnswerRegionGuardTest do
              "the direct textContent write is gone; a write routed through the server would land in the same diff as a flash"
     end
   end
+
+  # ── THE TEARDOWN IS PART OF THE PRESS (task-3f18da89b058b886) ─────────────
+  #
+  # MEASURED, NOT SUPPOSED. On the deployed build (served e02e4296d) a tab-strip
+  # anchor press wrote "Opening “API”…" at dt=0.4ms and the SAME synchronous
+  # click dispatch wiped it at dt=0.9ms through
+  # `LiveSocket.destroyAllViews -> View.destroy -> destroyHook -> destroyed()
+  # -> _paRelease("")`. The first requestAnimationFrame after the press read the
+  # region EMPTY: zero painted frames. The control that made that zero mean
+  # something was a top-bar press on the same page with the same instrument,
+  # which kept its word for 30 of 30 sampled frames.
+  #
+  # `__press_answer_watchdog.test.mjs` now drives the real teardown bodies and
+  # reds on the shipped layout — but it runs under `paper-editor.yml`, which
+  # publishes NO required context, so a red there blocks nothing. These arms
+  # carry the same two claims into the REQUIRED Elixir gate, and each one has a
+  # mutation, because a guard nobody has seen fail is not a guard.
+  describe "the navigation word survives the teardown the same click causes" do
+    @keep ~S|if (this._paKeepWordThroughTeardown()) { this._paDropPending(true); return; }|
+    @conditional ~S|return !!(this._paNavAway && this._paFadeT);|
+
+    # `destroyed()` and the `pagehide` closure are the only two synchronous
+    # wipes in the click dispatch, so BOTH have to hold the guard: fixing one
+    # leaves the other to erase the word before a frame is painted.
+    defp guarded_endings(s), do: length(String.split(s, @keep)) - 1
+
+    test "both teardown paths refuse to clear a word they did not write" do
+      assert guarded_endings(sheet()) == 2,
+             "a teardown that clears unconditionally wipes the navigation answer inside the same click dispatch — zero painted frames, nothing for assistive technology to announce"
+    end
+
+    test "MUTATION — drop the guard: the count reds" do
+      refute guarded_endings(String.replace(sheet(), @keep, ~S|this._paRelease("");|)) == 2,
+             "this check cannot lose, so it is not a check"
+    end
+
+    test "MUTATION — guard only ONE ending: still reds" do
+      refute guarded_endings(
+               String.replace(sheet(), @keep, ~S|this._paRelease("");|, global: false)
+             ) ==
+               2,
+             "half a fix must not read as a whole one: pagehide and destroyed can each wipe the word on their own"
+    end
+
+    # THE OVER-FIX CONTROL. "Never clear on teardown" is not the remedy: a hook
+    # going away while the page stays (a pane re-render dropping #studio-panes)
+    # must still take its word with it. The predicate is what keeps the two
+    # apart, so it must stay CONDITIONAL.
+    test "the keep is conditional, not a blanket refusal to clear" do
+      assert String.contains?(sheet(), @conditional),
+             "the teardown now keeps EVERY word, including one written by a press on a desk that is still here — a stranded announcement instead of a wiped one"
+    end
+
+    test "MUTATION — make the predicate unconditional: the over-fix reds" do
+      mutant = String.replace(sheet(), @conditional, "return true;")
+
+      assert String.contains?(mutant, "_paKeepWordThroughTeardown() {"),
+             "the mutation must leave the predicate in place — the point is that it stops discriminating, not that it disappears"
+
+      refute String.contains?(mutant, @conditional),
+             "this check cannot lose, so it is not a check"
+    end
+  end
 end

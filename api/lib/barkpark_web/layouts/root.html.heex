@@ -5404,15 +5404,17 @@
         return !!el && el.getAttribute("aria-pressed") !== witness.value;
       },
 
-      // Drop the pending press and every timer it owns, then say `text` (empty
-      // = the region disappears). This is the ONLY place a pending is released,
-      // so ref-drop, detach, ceiling and unload all clear through one path and
-      // none of them can strand.
-      _paRelease(text) {
+      // Drop the pending press and every timer it owns, and touch NOTHING the
+      // reader can see. `keepFade` leaves the fade timer armed, and exactly one
+      // caller passes it: a teardown that must not wipe a word written in the
+      // same click dispatch (`_paKeepWordThroughTeardown` below). The fade is
+      // then the only thing left that can ever clear the region, which is why
+      // it must survive — a dropped fade there would strand the word forever.
+      _paDropPending(keepFade) {
         if (this._paPoll) { window.clearInterval(this._paPoll); this._paPoll = 0; }
         if (this._paProbe) { window.clearTimeout(this._paProbe); this._paProbe = 0; }
         if (this._paCeil) { window.clearTimeout(this._paCeil); this._paCeil = 0; }
-        if (this._paFadeT) { window.clearTimeout(this._paFadeT); this._paFadeT = 0; }
+        if (!keepFade && this._paFadeT) { window.clearTimeout(this._paFadeT); this._paFadeT = 0; }
         // THE ROW-LEVEL CLEAR (charter D263 follow-up). `#bp-press-answer`
         // above is PAGE-level: a screen-reader user is told what happened, a
         // sighted user looking at the pressed row still sees only the wordless
@@ -5430,6 +5432,14 @@
         var prev = this._paPending;
         if (prev && prev.el) prev.el.removeAttribute("aria-busy");
         this._paPending = null;
+      },
+
+      // Drop the pending press and every timer it owns, then say `text` (empty
+      // = the region disappears). This is the ONLY place a pending is released,
+      // so ref-drop, detach, ceiling and unload all clear through one path and
+      // none of them can strand.
+      _paRelease(text) {
+        this._paDropPending(false);
         this._paSay(text || "");
         if (text) {
           this._paFadeT = window.setTimeout(() => {
@@ -5490,13 +5500,36 @@
         );
       },
 
+      // IS THE WORD ON SCREEN THE ONE THIS HOOK JUST WROTE FOR A NAVIGATION IT
+      // IS LOSING THE PAGE TO? Two conditions, and both are needed. `_paNavAway`
+      // says the anchor branch wrote a navigation word; a live `_paFadeT` says
+      // that word is still the region's contents and has not already faded, so
+      // the flag cannot go stale and silence an unrelated teardown minutes
+      // later. It is deliberately NOT a timestamp: the fade timer already is
+      // the lifetime of the announcement, and a second clock would be a second
+      // thing to keep in sync.
+      _paKeepWordThroughTeardown() {
+        return !!(this._paNavAway && this._paFadeT);
+      },
+
       // A CHROME ANCHOR IS A NAVIGATION, NOT A SOCKET PRESS, and the difference
       // is load-bearing. There is no ref to watch, no settle and no ceiling, so
       // this shape must never arm the watchdog: doing so would announce "that
       // press did not reach the server" about a navigation that is working
-      // perfectly, which is a worse lie than the silence it replaces. It says
-      // its word and releases in the same task — the words are on screen before
-      // the browser tears the page down.
+      // perfectly, which is a worse lie than the silence it replaces.
+      //
+      // SAYING THE WORD IS NOT KEEPING IT, and this comment used to claim it
+      // was: "the words are on screen before the browser tears the page down."
+      // Measured on the deployed desk (served e02e4296d), they were not. The
+      // SAME synchronous click dispatch that ran this branch at dt=0.4ms ran
+      // `LiveSocket.destroyAllViews -> View.destroy -> destroyHook ->
+      // destroyed() -> _paRelease("")` at dt=0.9ms, and the first
+      // requestAnimationFrame after the press read the region EMPTY: zero
+      // painted frames, nothing for assistive technology to announce. So the
+      // word is written here and DEFENDED in two places — `destroyed()` and
+      // the `pagehide` handler both refuse to clear a region whose contents
+      // they did not write, while `_paKeepWordThroughTeardown()` holds. The
+      // fade timer, which survives both, is what finally clears it.
       _paOnChromeAnchor(ev, t) {
         // Something already claimed this press (a JS command, a menu, a hook).
         if (ev.defaultPrevented) return;
@@ -5513,6 +5546,9 @@
         var to;
         try { to = new URL(a.href, location.href); } catch (e) { return; }
         if (to.protocol !== "http:" && to.protocol !== "https:") return;
+        // PAST THE LAST REFUSAL: this press IS a navigation off this document,
+        // so every word below has to outlive the teardown it is about.
+        this._paNavAway = true;
         var name = this._paName(a);
         // THE HONESTY RULE, ANCHOR SHAPE. The ACTIVE tab's href IS the page you
         // are already on: the press answers, the browser re-fetches, and the
@@ -5648,6 +5684,7 @@
         this._paProbe = 0;
         this._paCeil = 0;
         this._paFadeT = 0;
+        this._paNavAway = false;
         // BUBBLE PHASE ON DOCUMENT — never capture, and never on window.
         // Running before LiveView's click listener is the whole mechanism, and
         // it survives the move off this container: LiveView binds on `window`
@@ -5662,8 +5699,15 @@
         // the same choice, for the same reason, as the in-flight guard below.
         this._paOnClick = (ev) => this._paOnPress(ev);
         document.addEventListener("click", this._paOnClick);
-        // A navigation away must not leave a pending announcement behind.
-        this._paOnPageHide = () => this._paRelease("");
+        // A navigation away must not leave a pending announcement behind — but
+        // the ANSWER TO THAT NAVIGATION is not a leftover, it is the whole
+        // point, and `pagehide` fires while the outgoing document is still the
+        // one on screen. Clearing there would wipe the word during exactly the
+        // window a reader has to hear it.
+        this._paOnPageHide = () => {
+          if (this._paKeepWordThroughTeardown()) { this._paDropPending(true); return; }
+          this._paRelease("");
+        };
         window.addEventListener("pagehide", this._paOnPageHide);
       },
       destroyed() {
@@ -5671,6 +5715,12 @@
         if (this._raf) window.cancelAnimationFrame(this._raf);
         document.removeEventListener("click", this._paOnClick);
         window.removeEventListener("pagehide", this._paOnPageHide);
+        // THE TEARDOWN IS PART OF THE PRESS, NOT AFTER IT. A tab-strip anchor
+        // click runs this hook and then `LiveSocket.destroyAllViews` in ONE
+        // synchronous dispatch, so an unconditional clear here wipes the
+        // navigation word before a single frame is painted. Timers and the
+        // row's `aria-busy` still go; the region does not.
+        if (this._paKeepWordThroughTeardown()) { this._paDropPending(true); return; }
         this._paRelease("");
       }
     };
