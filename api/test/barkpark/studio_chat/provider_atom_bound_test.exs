@@ -62,6 +62,15 @@ defmodule Barkpark.StudioChat.ProviderAtomBoundTest do
   of the create path, deliberately NOT which of the two layers produced it — it
   reds only if BOTH go. The DB arm below is the one that isolates the
   constraint: dropping the CHECK constraint reds it alone.
+
+  ORDER INDEPENDENCE. This file is `async: true` and ExUnit shuffles its arms by
+  `--seed`. The atom-minting arm needs `Runtime` LOADED (that is where `:claude`
+  and `:codex` are interned) and establishes that itself with an explicit
+  `Code.ensure_loaded!/1` rather than inheriting it from whichever sibling arm
+  happened to be scheduled first. Do not replace that call with a pinned
+  `--seed` or with `async: false`: the first hides the dependency behind a
+  number the next author will change, the second pays for one arm's precondition
+  with every other test's parallelism.
   """
   use Barkpark.DataCase, async: true
 
@@ -74,6 +83,26 @@ defmodule Barkpark.StudioChat.ProviderAtomBoundTest do
       # `String.to_atom/1` is only a DoS vector when it MINTS. For every value
       # the roster admits, the atom already exists (compiled into `adapter/1`'s
       # guards as `:claude` / `:codex`), so the site allocates nothing.
+      #
+      # THE PRECONDITION, ESTABLISHED HERE RATHER THAN INHERITED. `:claude` and
+      # `:codex` are interned when the BEAM LOADS the module whose literals
+      # carry them — `Runtime`, which is also the module holding the atom site
+      # under test. Elixir loads modules lazily, so in a run of this file alone
+      # nothing has loaded `Runtime` until some arm touches it. The sibling arm
+      # "the roster the atom site is bounded by IS the roster adapter/1
+      # resolves" calls `Runtime.adapter/1` and loads it as a side effect, and
+      # ExUnit shuffles arms within a module by `--seed`: before this line
+      # existed, this arm passed on the seeds that happened to schedule that
+      # sibling FIRST and failed with `not an already existing atom` on the
+      # roughly half that did not (measured on origin/main ee9351906: green on
+      # seeds 1/3/6/7/8/10 and 902959, red on 0/2/4/5/9/11).
+      #
+      # Loading it explicitly is not a thumb on the scale: it is the condition
+      # that holds by construction wherever the atom site can actually RUN,
+      # since reaching `registered_provider_ready/2` means `Runtime` is loaded.
+      # The arm asserts about a loaded `Runtime`, so it loads one.
+      Code.ensure_loaded!(Runtime)
+
       for provider <- Session.providers() do
         assert is_atom(String.to_existing_atom(provider)),
                "#{inspect(provider)} is in the roster but is not an existing atom — " <>
