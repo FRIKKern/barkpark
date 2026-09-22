@@ -981,8 +981,66 @@ if [ "$MODE" = selftest ]; then
     *) fail_selftest "a freeze literal past the ceiling did not print its ceiling FAIL line — the red came from something else" ;;
   esac
 
+  # k9/k10: THE DISCOVERY COUNT IDENTITY, PROVED IN BOTH DIRECTIONS. The loop
+  #     at the header-discovery arm reads fd 0 through a process substitution
+  #     and spawns children in its body; a child that drains fd 0 ends the walk
+  #     with no error anywhere. The FLOOR cannot see it (118 over a ~167-doc
+  #     corpus leaves ~88 docs droppable at exit 0), so the identity is what
+  #     refuses. Two arms, because an identity asserted only on a mutation
+  #     might be firing on every run, and one asserted only on a clean run
+  #     might never fire at all.
+  #
+  # k9: CONTROL — the unmutated copy on the planted green root must stay green,
+  #     must NOT print the refusal, and must REACH the verdict the refusal sits
+  #     in front of. If the identity spoke here it would be a permanent red.
+  cp "$SELF" "$caps_probe"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 0 ] \
+    || fail_selftest "the INTACT copy exited $caps_rc on the planted green root with the discovery count identity in place — the identity reds a good run, so no mutation arm below is attributable. Its last lines: $(printf '%s' "$caps_out" | tail -3 | tr '\n' ' ')"
+  case "$caps_out" in
+    *"CANNOT MEASURE"*) fail_selftest "the INTACT copy printed CANNOT MEASURE — the discovery count identity fires on a complete walk, so it says nothing about an incomplete one" ;;
+    *) ;;
+  esac
+  case "$caps_out" in
+    *"budget gate reached"*) ;;
+    *) fail_selftest "the INTACT copy never reached the \`budget gate reached\` verdict — the identity's exit is firing ahead of it on a clean run" ;;
+  esac
+
+  # k10: MUTATION — plant ONE stdin-draining child in the discovery loop body.
+  #     `cat >/dev/null` consumes the whole process substitution on the first
+  #     iteration, so the walk stops at 1 of N with nothing else wrong: the
+  #     exact latent shape this identity exists to catch. The refusal must fire,
+  #     name BOTH numbers, and exit non-zero.
+  awk '{ print }
+       /^    DISCOVERY_ROWS_WALKED=\$\(\(DISCOVERY_ROWS_WALKED \+ 1\)\)$/ && !done_drain { print "    cat >/dev/null"; done_drain = 1 }' \
+      "$SELF" > "$caps_probe"
+  grep -q '^    cat >/dev/null$' "$caps_probe" \
+    || fail_selftest "the stdin-draining injection did not apply — this arm would have proven nothing"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -ne 0 ] \
+    || fail_selftest "a discovery loop TRUNCATED by a stdin-draining child exited 0 — the count identity does not refuse, so a short walk prints \`ok: budget gate reached\` over docs it never opened. Its last lines: $(printf '%s' "$caps_out" | tail -3 | tr '\n' ' ')"
+  case "$caps_out" in
+    *"CANNOT MEASURE: the discovery loop walked 1 path(s),"*"but its enumeration handed in "*) ;;
+    *) fail_selftest "a TRUNCATED discovery loop did not print \`CANNOT MEASURE: the discovery loop walked 1 path(s), but its enumeration handed in <n>\` — the refusal must name BOTH numbers or the next reader cannot tell a short walk from a shrunken corpus. Its last lines: $(printf '%s' "$caps_out" | tail -3 | tr '\n' ' ')"
+  esac
+  # And the enumerated side must be a real count, not a second 1: an identity
+  # whose two numbers both come from the truncated walk would agree with itself.
+  selftest_enumerated=$(printf '%s\n' "$caps_out" | sed -n 's/.*enumeration handed in \([0-9][0-9]*\).*/\1/p' | sed -n 1p)
+  [ -n "$selftest_enumerated" ] && [ "$selftest_enumerated" -gt 1 ] \
+    || fail_selftest "the refusal named enumeration count '$selftest_enumerated' — the identity is comparing the truncated walk against itself and can never differ"
+  case "$caps_out" in
+    *"budget gate reached"*) fail_selftest "a TRUNCATED discovery loop still printed a \`budget gate reached\` verdict — the refusal must come BEFORE the verdict, or the gate publishes a number computed over docs it never reached" ;;
+    *) ;;
+  esac
+
   SELFTEST_COMPLETED=1
-  echo "check-doc-budgets --selftest: PASS (30 arms: pristine, in-span plant," \
+  echo "check-doc-budgets --selftest: PASS (32 arms: pristine, in-span plant," \
        "re-pin, marker relocation, span cap, missing golden, no markers, bad arg," \
        "span-cap clamp both directions, retired env var inert, caps green control," \
        "caps-table dark, caps-table unpinned row, over-cap file, missing capped" \
@@ -990,7 +1048,9 @@ if [ "$MODE" = selftest ]; then
        "doc, paid frozen doc, stale freeze row, unpinned freeze row, harness" \
        "aborts non-zero, unpinned exemption row, discovery-only control+scope," \
        "discovery-only DARK, discovery-only over-header doc, discovery-only env" \
-       "var inert, freeze ceiling — every" \
+       "var inert, freeze ceiling, discovery count identity silent on an intact" \
+       "walk, discovery count identity REFUSES a walk truncated by a" \
+       "stdin-draining child — every" \
        "probe arm asserts the EXIT CODE and its own message)"
   exit 0
 fi
@@ -1149,6 +1209,19 @@ DOC_BUDGET_BYTES_PER_TOKEN=4
 # Cards and $ONRAMP_DOC are out of the sum on purpose: the card arm pins its own
 # count at exactly 7, and the onramp doc is a single named path.
 GATED_DOCS_FLOOR=118
+
+# The discovery enumeration, as a function so the loop below and its count
+# identity read the SAME set. The two `find` lines keep their exact original
+# indentation: the --selftest DISCOVERY-DARK arm blinds them by anchored sed.
+discovery_enumeration() {
+  {
+      find docs -name '*.md' -not -path 'docs/cli/fixtures/*'
+      find scripts -maxdepth 1 -name '*.md'
+      for surface in CLAUDE.md AGENTS.md api/CLAUDE.md js/CLAUDE.md web/AGENTS.md; do
+        if [ -f "$surface" ]; then echo "$surface"; fi
+      done
+  } 2>/dev/null | sed 's|^\./||' | sort -u
+}
 
 DISCOVERY_HEADER_RE='^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-z0-9._-]+ \| budget: [0-9]+tok -->'
 
@@ -1412,7 +1485,41 @@ APPEND_ONLY
     echo "ok:   freeze table walked all $FREEZE_ROWS_WALKED frozen row(s)"
   fi
 
-  while IFS= read -r dpath; do
+  # THE COUNT IDENTITY FOR THE ONE LOOP THAT ONLY HAD A FLOOR.
+  #
+  # This loop reads from a process substitution on fd 0 and its body spawns
+  # children (head, wc, printf|awk, printf|sed). None of them reads fd 0 TODAY
+  # — but nothing stops the next one from doing so, and a child that drains fd 0
+  # ends the walk early with no error anywhere: `read` simply sees EOF, the loop
+  # falls out, and every unreached doc is silently unchecked.
+  #
+  # THE FLOOR DOES NOT CLOSE THAT. GATED_DOCS_FLOOR=118 against a ~167-doc
+  # corpus plus 39 already-walked caps rows means the walk need only reach
+  # 118-39 = 79 of the 167 it was handed; it can drop 88 documents — more than
+  # half the corpus, every one unchecked against its own byte cap — and still
+  # print `ok: budget gate reached 118 gated doc(s)` at exit 0. A floor
+  # distinguishes NOTHING from SOMETHING; it never distinguishes SOME from ALL.
+  #
+  # THE FLOOR STAYS, because it catches a DIFFERENT failure: the corpus itself
+  # shrinking (spine docs deleted or retiered away). The identity below catches
+  # a short walk over an intact corpus. Neither implies the other.
+  #
+  # The enumeration is a FUNCTION so both sides read the same one — counting a
+  # re-typed copy would be an identity between two texts, not between the walk
+  # and its input. The count uses `awk 'NF'` rather than `wc -l` so a final
+  # unterminated line cannot make the identity refuse a good run, and the read
+  # carries `|| [ -n "$dpath" ]` so that same line is still WALKED.
+  #
+  # This is the shape already carried at :859 (CAPS_ROWS_WALKED), :1018
+  # (FREEZE_ROWS_WALKED) and :1066 (APPEND_ONLY_ROWS_WALKED) — each a walked
+  # count against a pinned expectation. Those three read heredocs, so their
+  # expectation must be pinned by hand; this one reads a COMPUTED set, so its
+  # expectation is computed from the same enumeration and needs no literal.
+  DISCOVERY_ENUMERATED=$(discovery_enumeration | awk 'NF { n++ } END { print n+0 }')
+  DISCOVERY_ROWS_WALKED=0
+  while IFS= read -r dpath || [ -n "$dpath" ]; do
+    [ -n "$dpath" ] || continue
+    DISCOVERY_ROWS_WALKED=$((DISCOVERY_ROWS_WALKED + 1))
     if [ ! -f "$dpath" ]; then continue; fi
     dhead=$(head -n 1 "$dpath")
     printf '%s\n' "$dhead" | grep -Ec "$DISCOVERY_HEADER_RE" >/dev/null || continue
@@ -1465,15 +1572,24 @@ $dpath
     else
       echo "ok:   $dpath ${dsize}B <= ${dcap}B (header ${dtok}tok x $DOC_BUDGET_BYTES_PER_TOKEN)"
     fi
-  done < <(
-    {
-      find docs -name '*.md' -not -path 'docs/cli/fixtures/*'
-      find scripts -maxdepth 1 -name '*.md'
-      for surface in CLAUDE.md AGENTS.md api/CLAUDE.md js/CLAUDE.md web/AGENTS.md; do
-        if [ -f "$surface" ]; then echo "$surface"; fi
-      done
-    } 2>/dev/null | sed 's|^\./||' | sort -u
-  )
+  done < <(discovery_enumeration)
+
+  # REFUSE BEFORE VERDICTING. If the walk is short, every number downstream is
+  # about a corpus nobody measured: GATED_DOCS_REACHED would print an `ok:` off
+  # a truncated walk, and the FREEZE-stale arm below would read the same
+  # truncated DISCOVERY_SEEN and denounce every unreached freeze row as dead —
+  # pointing the next reader at deleting GOOD rows instead of at the short walk.
+  # So this exits here rather than setting FAIL=1 and printing on: a verdict
+  # computed from an unmeasured corpus is worse than no verdict.
+  if [ "$DISCOVERY_ROWS_WALKED" -ne "$DISCOVERY_ENUMERATED" ]; then
+    echo "CANNOT MEASURE: the discovery loop walked $DISCOVERY_ROWS_WALKED path(s)," \
+         "but its enumeration handed in $DISCOVERY_ENUMERATED. Something in the loop" \
+         "body consumed stdin (the loop reads fd 0, and every child it spawns shares" \
+         "it) — redirect that child's stdin from /dev/null, or read on a dedicated fd." \
+         "No budget verdict follows: $((DISCOVERY_ENUMERATED - DISCOVERY_ROWS_WALKED))" \
+         "doc(s) were never reached, and the floor below cannot see that."
+    exit 1
+  fi
 
   GATED_DOCS_REACHED=$((CAPS_ROWS_WALKED + DISCOVERY_WALKED))
   if [ "$GATED_DOCS_REACHED" -lt "$GATED_DOCS_FLOOR" ]; then
