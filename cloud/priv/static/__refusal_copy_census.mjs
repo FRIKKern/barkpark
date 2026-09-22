@@ -1171,6 +1171,29 @@ const PIN = [
   { key: "FN|archivesPanelHtml|9d773160", verdict: "AUTHORED", copy: "No archives yet. Archive an instance with" },
   { key: "FN|archivesPanelHtml|2a86a13b", verdict: "AUTHORED", copy: "bp cloud instance archive <name>" },
   { key: "FN|archivesPanelHtml|7c79cc42", verdict: "AUTHORED", copy: "to keep a portable, cross-provider bundle you can resurrect..." },
+  // console-w28 — providerIdentityModel BECAME a refusal renderer, and the two
+  // sentences below are NOT new copy: they shipped in cch-w13 and are unchanged
+  // byte for byte. What changed is that the function now branches on a typed
+  // server error (`typeof payload.error === "string"`, so a 502
+  // credential_unreadable keeps its own sentence instead of being rounded off to
+  // the absent arm), which trips the census's `/\.error\s*===/` predicate and
+  // brings the whole function into scope for the first time. That is the census
+  // working, not drifting: the function reads a server cause now, so its copy is
+  // exactly what this pin is for.
+  //
+  // BOTH ARE CONSULTED, not AUTHORED. Each is reached only AFTER the server's own
+  // payload has been read and found wanting, and each names the specific thing
+  // that was missing rather than inventing a cause:
+  //   · the first fires when the payload carries no `identity` KEY at all —
+  //     `provider_identity/2` always emits the key (identity_absent/2 fills it
+  //     with value:nil + a reason), so its absence means a control plane older
+  //     than D899, which is what the sentence says.
+  //   · the second fires when the key IS there with a null value but the server
+  //     sent no `reason` — every committed identity_absent/2 call site passes
+  //     one, so this is the honest fallback for a reason-less payload rather
+  //     than a blank that would look known.
+  { key: "FN|providerIdentityModel|46965ca1", verdict: "CONSULTED", copy: "This control plane doesn't report which account a connectio..." },
+  { key: "FN|providerIdentityModel|4c83c181", verdict: "CONSULTED", copy: "This connection doesn't say which account it points at." },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
