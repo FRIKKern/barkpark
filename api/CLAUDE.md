@@ -1,5 +1,5 @@
 <!-- doc-tier: agent | canonical-for: api-surface | budget: 1600tok -->
-# api/ — Phoenix API + LiveView Studio
+# api/ â€” Phoenix API + LiveView Studio
 
 Elixir/Phoenix backend: CRUD, real-time, plugins, Studio. Dev: `mix phx.server` on `:4000`. Plugin contract: `lib/barkpark/plugin.ex` @moduledoc.
 
@@ -8,16 +8,16 @@ Elixir/Phoenix backend: CRUD, real-time, plugins, Studio. Dev: `mix phx.server` 
 | File | Purpose |
 |---|---|
 | `lib/barkpark/content.ex` | Document + schema CRUD, publish/unpublish, perspectives, PubSub broadcasts |
-| `lib/barkpark/plugin.ex` | `Barkpark.Plugin` behaviour — CANONICAL plugin contract (@moduledoc) |
-| `lib/barkpark/plugins/` | Registry, resolver chain, Bootstrap, `tasks.ex`, `bulldocs.ex`, `sheets.ex` (§§ below), `onixedit/` |
+| `lib/barkpark/plugin.ex` | `Barkpark.Plugin` behaviour â€” CANONICAL plugin contract (@moduledoc) |
+| `lib/barkpark/plugins/` | Registry, resolver chain, Bootstrap, `tasks.ex`, `bulldocs.ex`, `sheets.ex` (Â§Â§ below), `onixedit/` |
 | `lib/barkpark/plugins/onixedit/export/*.ex` | ONIX 3.0 export submodules (header, message, codelists, validator, detail composites) |
-| `lib/barkpark/tasks.ex` | Task substrate utilities — claim/close/relabel, `mutation_events` emit |
+| `lib/barkpark/tasks.ex` | Task substrate utilities â€” claim/close/relabel, `mutation_events` emit |
 | `lib/barkpark_web/router.ex` | All routes incl. `GET /v1/capabilities`; scoped `/w/:workspace_slug/p/:project_slug` mirror |
-| `lib/barkpark_web/live/studio/studio_live.ex` | Multi-pane Studio LiveView — section index in its header comment |
-| `lib/barkpark_web/studio/pane_builder.ex` | Pane construction — **under `studio/`, NOT `live/studio/`** |
+| `lib/barkpark_web/live/studio/studio_live.ex` | Multi-pane Studio LiveView â€” section index in its header comment |
+| `lib/barkpark_web/studio/pane_builder.ex` | Pane construction â€” **under `studio/`, NOT `live/studio/`** |
 | `lib/barkpark_web/studio/presence_state.ex` | Studio presence tracking |
 | `lib/barkpark_web/controllers/` | Query (also `/v1/preview`), Mutate, Schema, Listen, Media, Tasks, Capabilities, Webhook, Legacy |
-| `priv/repo/seeds.exs` → `Barkpark.Seeds.run/0` | dispatches by `BARKPARK_SEED_PROFILE` (`demo`\|`clean`); demo (`seeds/demo.ex`) seeds 8 schemas + ~27 docs + dev token; tail (`seeds.ex`) runs `Bootstrap.register_all_schemas/0` |
+| `priv/repo/seeds.exs` â†’ `Barkpark.Seeds.run/0` | dispatches by `BARKPARK_SEED_PROFILE` (`demo`\|`clean`); demo (`seeds/demo.ex`) seeds 8 schemas + ~27 docs + dev token; tail (`seeds.ex`) runs `Bootstrap.register_all_schemas/0` |
 
 ## Bulldocs (the Papers surface)
 
@@ -30,7 +30,7 @@ Elixir/Phoenix backend: CRUD, real-time, plugins, Studio. Dev: `mix phx.server` 
 - **Plugin module:** `register_schemas/1` + `register_routes/1` expose the `:public_root` reader and `:ingest` API (`/v1/plugins/bulldocs/*`) for reuse.
 - **Sessions:** 2nd blocks type (whitelist `{paper, session}`); routes `/v1/plugins/bulldocs/sessions*`; private+unwalled schema; Studio pane read-only v1 (`bp session publish` writes).
 
-**Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` for legacy producers — externally gated, do NOT drop. Ingest auth: `:ingest_token` from `BARKPARK_INGEST_TOKEN` (legacy `PAPERFLOW_INGEST_TOKEN`). See `docs/decisions/deferred.md`.
+**Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` for legacy producers â€” externally gated, do NOT drop. Ingest auth: `:ingest_token` from `BARKPARK_INGEST_TOKEN` (legacy `PAPERFLOW_INGEST_TOKEN`). See `docs/decisions/deferred.md`.
 
 HTML table clipboard handling normalizes ordinary cell paragraphs/BRs to PortableDoc newlines before the schema parses them. Nested structures and merged headers keep the clipboard intact and show plain-text paste guidance. Canvas regression: `__html_table_paste.test.mjs`.
 
@@ -40,7 +40,7 @@ Mounted save-ack tests await native blur before settlement assertions; press-wat
 
 ## Sheets
 
-`type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot — Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant). Core is `Barkpark.Plugins.Sheets.{Core,Engine,Session,Structure}` + `SheetsReaderLive` / `Studio.SheetGrid`; the plugin (`plugins/sheets.ex`) declares the `sheet` schema, a before_save gate, the `:ingest` import/export/ops API and the `/sheets/:slug` reader; embeds refresh via `content/sheets.ex`.
+`type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot â€” Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant). Core is `Barkpark.Plugins.Sheets.{Core,Engine,Session,Structure}` + `SheetsReaderLive` / `Studio.SheetGrid`; the plugin (`plugins/sheets.ex`) declares the `sheet` schema, a before_save gate, the `:ingest` import/export/ops API and the `/sheets/:slug` reader; embeds refresh via `content/sheets.ex`.
 
 Owner (caps, formula subset, error envelopes, embed pipeline, session deltas): `docs/contracts/sheets-engine.md`.
 
@@ -59,7 +59,7 @@ TUI desk = server tree (`GET /v1/structure/:dataset`).
 
 ## Dev constants
 
-Token `barkpark-dev-token` (all permissions); SHA256-hashed in `api_tokens` (`ApiToken.hash_token/1`). Rotate before prod — `docs/auth.md`.
+Token `barkpark-dev-token` (all permissions); SHA256-hashed in `api_tokens` (`ApiToken.hash_token/1`). Rotate before prod â€” `docs/auth.md`.
 
 ## Document shape + draft/published
 
@@ -68,13 +68,15 @@ Token `barkpark-dev-token` (all permissions); SHA256-hashed in `api_tokens` (`Ap
  "title":"My Post","status":"published","content":{"author":"Knut"}}
 ```
 
-Sanity's `drafts.` prefix convention (api-v1.md §6) — `Content.publish_document/3`, `unpublish_document/3`, `discard_draft/3`. Perspectives: `published` (default public), `drafts` (Studio/TUI), `raw` (everything). Schema `visibility`: `"public"` = anonymous reads; `"private"` = 404 on public API, token required.
+Sanity's `drafts.` prefix convention (api-v1.md Â§6) â€” `Content.publish_document/3`, `unpublish_document/3`, `discard_draft/3`. Perspectives: `published` (default public), `drafts` (Studio/TUI), `raw` (everything). Schema `visibility`: `"public"` = anonymous reads; `"private"` = 404 on public API, token required.
 
 ## PubSub topics
 
-After every mutation `Content` broadcasts (content/broadcast.ex — `tap_broadcast` / `broadcast_document_mutation`):
+After every mutation `Content` broadcasts (content/broadcast.ex â€” `tap_broadcast` / `broadcast_document_mutation`):
 
-- `"documents:#{dataset}"` — global per-dataset stream (legacy, untouched)
-- `"documents:ws:#{workspace_id}:#{dataset}"` — additive workspace-scoped stream (only if the doc carries `workspace_id`)
+- `"documents:#{dataset}"` â€” global per-dataset stream (legacy, untouched)
+- `"documents:ws:#{workspace_id}:#{dataset}"` â€” additive workspace-scoped stream (only if the doc carries `workspace_id`)
 
-`/v1/data/listen/:dataset` streams these as SSE. Task mutations emit `mutation_events` rows — 17 kinds: `task.{claimed,closed,compacted,compaction_restored,criterion,discharged,engagement_lapsed,landed,lease_expired,lease_renewed,mutated,pulse,referenced,relabeled,released,reparented,staged}` (`tasks.ex`, `tasks/landed.ex`, `tasks/renew.ex`, `tasks/ttl_sweeper.ex`, `tasks/compactor.ex`). The `@event_task_*` attributes own this roster — EMITTED names only, never verbs like `task.get`; `scripts/roster-drift-check.sh` re-derives and diffs this line. A consumer on a stale subset drops kinds silently.
+`/v1/data/listen/:dataset` streams these as SSE. Task mutations emit `mutation_events` rows â€” 17 kinds: `task.{claimed,closed,compacted,compaction_restored,criterion,discharged,engagement_lapsed,landed,lease_expired,lease_renewed,mutated,pulse,referenced,relabeled,released,reparented,staged}` (`tasks.ex`, `tasks/landed.ex`, `tasks/renew.ex`, `tasks/ttl_sweeper.ex`, `tasks/compactor.ex`). The `@event_task_*` attributes own this roster â€” EMITTED names only, never verbs like `task.get`; `scripts/roster-drift-check.sh` re-derives and diffs this line. A consumer on a stale subset drops kinds silently.
+
+Image upload completion stays outside native Undo history. Per-editor upload receipts restore settled metadata when Redo revives a pending node; they never replay uploads or cross editor teardown. Later human URL/alt edits win. Regression: `__upload_history_audit.test.mjs`.

@@ -643,6 +643,9 @@ class BpPaperCanvas extends HTMLElement {
     // picture goes (the host's Barkpark media); unset → the image node says so.
     this._mediaUploader = null;
     this._uploadSeq = 0;
+    // Settled receipts survive native history while this editor is mounted.
+    // They contain metadata only, never another upload request.
+    this._uploadResults = new Map();
     this._tagRange = null; // { from, to } PM range to replace on the current pick
     this._emoji = null; // WikilinkMenu instance reused for the `:` emoji picker (lazy)
     this._emojiRange = null; // { from, to } PM range to replace on the current pick
@@ -1084,6 +1087,7 @@ class BpPaperCanvas extends HTMLElement {
         // never race the Editor construction.
       },
       onUpdate: () => {
+        this._restoreUploadResults();
         this._clearFigureConstraint();
         this._scheduleEmit();
         // P4 mutual-exclusion chain (ported from ../index.js's onUpdate ~174-193):
@@ -1331,6 +1335,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _teardownDisconnected() {
+    this._uploadResults.clear();
     this._clearResumeFocusIntent();
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
@@ -2043,6 +2048,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _findUploadNode(key) {
+    if (!this._editor || this._editor.isDestroyed) return null;
     let found = null;
     this._editor.state.doc.descendants((node, pos) => {
       if (found) return false;
@@ -2052,36 +2058,58 @@ class BpPaperCanvas extends HTMLElement {
     return found;
   }
 
-  _patchUploadNode(key, patch) {
+  _patchUploadNode(key, receipt) {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed || receipt.editor !== editor) return;
     const hit = this._findUploadNode(key);
     if (!hit) return;
-    this._editor
-      .chain()
-      .command(({ tr }) => {
-        tr.setNodeMarkup(hit.pos, undefined, { ...hit.node.attrs, ...patch });
-        return true;
-      })
-      .run();
+    const patch = { ...receipt.patch };
+    // A person may edit the URL or alt while the request is in flight.
+    // Completion owns the pending upload, not those subsequent edits.
+    if (hit.node.attrs.src) delete patch.src;
+    if (hit.node.attrs.alt !== receipt.initialAlt) delete patch.alt;
+    editor.view.dispatch(editor.state.tr
+      .setNodeMarkup(hit.pos, undefined, { ...hit.node.attrs, ...patch })
+      .setMeta("addToHistory", false));
+  }
+
+  _restoreUploadResults() {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed || !this._uploadResults.size) return;
+    const keys = [];
+    editor.state.doc.descendants(node => {
+      if (node.type.name === "bpImage" && node.attrs.uploadKey && this._uploadResults.has(node.attrs.uploadKey)) keys.push(node.attrs.uploadKey);
+    });
+    for (const key of keys) this._patchUploadNode(key, this._uploadResults.get(key));
   }
 
   async _uploadImage(key, file, previewUrl) {
     const uploader = this._mediaUploader;
+    const editor = this._editor;
+    const initialAlt = this._findUploadNode(key)?.node.attrs.alt;
     const release = () => { if (previewUrl) { try { URL.revokeObjectURL(previewUrl); } catch (_) {} } };
+    const settle = patch => {
+      // A disconnected/remounted canvas must never consume an old callback.
+      if (this._editor !== editor || editor.isDestroyed) return;
+      const receipt = { editor, initialAlt, patch: { ...patch, uploadKey: null } };
+      this._uploadResults.set(key, receipt);
+      this._patchUploadNode(key, receipt);
+    };
     if (typeof uploader !== "function") {
-      this._patchUploadNode(key, { uploading: null, uploadError: "no media uploader is connected" });
+      settle({ uploading: null, uploadError: "no media uploader is connected" });
       return;
     }
     try {
       const result = await uploader(file);
       const src = result && typeof result === "object" ? result.src || result.url || "" : String(result || "");
       if (!src) throw new Error("the uploader returned no url");
-      const patch = { src, uploading: null, uploadError: null, uploadKey: null, previewUrl: null };
+      const patch = { src, uploading: null, uploadError: null, previewUrl: null };
       if (result && result.alt) patch.alt = String(result.alt);
-      this._patchUploadNode(key, patch);
+      settle(patch);
       // Let the <img> switch to the uploaded source before the object URL goes.
       setTimeout(release, 2000);
     } catch (e) {
-      this._patchUploadNode(key, { uploading: null, uploadError: (e && e.message) || String(e) });
+      settle({ uploading: null, uploadError: (e && e.message) || String(e) });
       setTimeout(release, 60000);
     }
   }
