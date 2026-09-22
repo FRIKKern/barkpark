@@ -1575,6 +1575,43 @@ jobs:
       - name: Singular-selector population census (overflow-guard.mjs)
         run: node cloud/priv/static/__preview__/view-scope-census.mjs --list
 
+      # ── THE BROWSER-AXIS CENSUS (task-76245d1de5d9ee16, D906) ──────────────
+      # WHICH INSTRUMENTS DRIVE A BROWSER, AND WHICH ENGINE EACH ONE DRIVES —
+      # derived from the source at run time, printed with its own per-file
+      # reasoning, never a committed list.
+      #
+      # WHY IT IS A STEP AND NOT A PARAGRAPH. D904 was found by driving a real
+      # Firefox by hand: both scroll-driven edge cues compute 0px there while
+      # the element is clipped. D168 had asserted the opposite, unqualified and
+      # with no browser named, off a Chromium-only green — and stood for four
+      # waves. The fleet's axis is 1 of 3 engine families, and D906 ACCEPTS
+      # that and RECORDS it at every banner instead of buying a second engine.
+      # This step is what makes "recorded" a check rather than a habit: every
+      # launcher under cloud/priv/static must PRINT a scope line, and the
+      # engine that line names is compared against the engine derived from that
+      # file's OWN discovery candidates — neither side typed twice. Add a
+      # Firefox path to a findChrome() and it reds until the banner says Gecko.
+      #
+      # DERIVED-FIRST, by the test the block below sets: it computes both sides
+      # of its own comparison and holds no pinned population. It needs no
+      # Chrome and no port, so it cannot join the class of instruments nothing
+      # runs. Its self-tests run INSIDE it, before the measurement — a
+      # predicate that cannot say NO, or a walk that finds zero launchers in a
+      # tree that has fifteen, refuses (exit 2) rather than reporting clean.
+      - name: Browser-axis census (which engine each driven instrument drives)
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/browser-axis-census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          echo "::error title=console-unit ${v} — browser-axis-census.mjs::browser-axis-census.mjs exited ${rc}. It named every launcher and the exact scope line each one must print, above."
+          exit 1
+
       # ── STEP ORDER IS PART OF THE INSTRUMENT (cch-w45, wave 45) ────────────
       #
       # THE SEVEN CENSUSES BELOW RUN DERIVED-FIRST, PINNED-SECOND, ON PURPOSE.
