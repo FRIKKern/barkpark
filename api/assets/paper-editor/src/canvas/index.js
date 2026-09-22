@@ -332,6 +332,56 @@ function attributeRefreshes(node, replacement, position) {
   return changes;
 }
 
+// Preserve positions inside unchanged descendants of a list or table. Only
+// recurse through an unchanged structural shape; inserted/deleted/retyped
+// containers retain the existing replacement path.
+const mappedContainers = new Set(["bulletList", "orderedList", "listItem", "taskList", "taskItem", "bpTable", "bpTableRow", "bpTableCell", "bpTableHeaderCell"]);
+function canMapExternalNode(node, next) {
+  if (node.eq(next)) return true;
+  if (node.type !== next.type) return false;
+  if (node.isTextblock) return true;
+  if (!mappedContainers.has(node.type.name) || node.childCount !== next.childCount) return false;
+  const oldId = node.attrs.bpListSource?.id;
+  const newId = next.attrs.bpListSource?.id;
+  if (oldId !== newId) return false;
+  for (let i = 0; i < node.childCount; i++) if (!canMapExternalNode(node.child(i), next.child(i))) return false;
+  return true;
+}
+function mapExternalNode(tr, node, next, position) {
+  if (node.eq(next)) return;
+  tr.setNodeMarkup(position, next.type, next.attrs, next.marks);
+  if (node.isTextblock) {
+    const bare = content => {
+      const children = []; content.forEach(child => children.push(child.mark([])));
+      return Fragment.fromArray(children);
+    };
+    if (bare(node.content).eq(bare(next.content))) {
+      // Marks and link destinations do not delete text. Mark steps have empty
+      // position maps, retaining forward/backward selections and local history.
+      tr.removeMark(position + 1, position + 1 + node.content.size);
+      next.forEach((child, offset) => {
+        for (const mark of child.marks) tr.addMark(position + 1 + offset, position + 1 + offset + child.nodeSize, mark);
+      });
+      return;
+    }
+    const start = node.content.findDiffStart(next.content);
+    if (start != null) {
+      const end = node.content.findDiffEnd(next.content);
+      let oldEnd = end.a, newEnd = end.b;
+      const overlap = start - Math.min(oldEnd, newEnd);
+      if (overlap > 0) { oldEnd += overlap; newEnd += overlap; }
+      tr.replaceWith(position + 1 + start, position + 1 + oldEnd, next.content.cut(start, newEnd));
+    }
+    return;
+  }
+  // Apply from the end so earlier child positions remain valid when text grows.
+  let offset = position + 1 + node.content.size;
+  for (let i = node.childCount - 1; i >= 0; i--) {
+    const child = node.child(i); offset -= child.nodeSize;
+    mapExternalNode(tr, child, next.child(i), offset);
+  }
+}
+
 // One-shot, id-guarded self-inject of the standalone stylesheet — IDENTICAL
 // contract to ../index.js:ensureStyles (same <link>, same id-guard, same
 // BP_PAPER_EDITOR_NO_INJECT opt-out). Both elements share the one stylesheet, so
@@ -3349,18 +3399,8 @@ class BpPaperCanvas extends HTMLElement {
                 tr.setNodeMarkup(refresh.position, target.type, target.attrs, target.marks);
               }
             }
-          } else if (node.isTextblock && replacement.isTextblock && node.type === replacement.type) {
-            // Keep a caret inside a changed paragraph/heading mapped to that
-            // same block. Whole-node replacement pushes it into the next sibling.
-            tr.setNodeMarkup(position, replacement.type, replacement.attrs, replacement.marks);
-            const start = node.content.findDiffStart(replacement.content);
-            if (start != null) {
-              const end = node.content.findDiffEnd(replacement.content);
-              let oldEnd = end.a, newEnd = end.b;
-              const overlap = start - Math.min(oldEnd, newEnd);
-              if (overlap > 0) { oldEnd += overlap; newEnd += overlap; }
-              tr.replaceWith(position + 1 + start, position + 1 + oldEnd, replacement.content.cut(start, newEnd));
-            }
+          } else if (canMapExternalNode(node, replacement)) {
+            mapExternalNode(tr, node, replacement, position);
           } else {
             tr.replaceWith(position, position + node.nodeSize, replacement);
           }
