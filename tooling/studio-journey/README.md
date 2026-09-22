@@ -36,13 +36,46 @@ Credentials for `live`/`report` come from `~/.config/barkpark/config.json` (the
 `JOURNEY_BASE` + `JOURNEY_TOKEN` **together**. `--keep` leaves the document the
 run created; by default the run deletes it, so re-running never litters.
 
-The sweep is bounded twice: a candidate must have been created **after** the `+`
-press *and* still look untouched (no title of its own, no more blocks than the
-seeded `tpl-title` + `tpl-body` template). A document with a title or with
-authored content is never deleted, whatever its timestamp says. What remains is
-a seconds-wide window in which an empty untitled draft created by somebody else
-could be swept — pass `--keep` when running against a host other people are
-using right now.
+### The sweep keys on PROVENANCE, not on the title
+
+Every document the run creates is stamped over the API the moment the run learns
+its id and **before** the TYPE beat:
+
+    journeyRun: { harness: "tooling/studio-journey/journey.mjs", run_id, host, stamped_at }
+
+and the sweep has two arms.
+
+**Arm 1 — stamped.** Any draft carrying that mark is this harness's, whatever its
+title, its content or its age, and it is reclaimed when it belongs to *this* run
+or to a run that is provably dead (older than `STALE_DEBRIS_MS`, 30 minutes — two
+orders of magnitude past the slowest observed run). A concurrent run's in-flight
+document is therefore never taken. The query is a server-side filter
+(`filter[journeyRun.harness][eq]`), not a fifty-row recency page, so old debris
+cannot fall out of the window.
+
+**Arm 2 — unstamped, window + shape.** The one class the stamp cannot reach: a
+`+` that *creates without navigating*, whose id the run never learns and so
+cannot patch. Those must have been created **after** the `+` press *and* still
+look untouched (no title of their own, no more blocks than the seeded
+`tpl-title` + `tpl-body` template). A seconds-wide window remains in which an
+empty untitled draft somebody else created could be swept — pass `--keep` when
+running against a host other people are using right now.
+
+**Why the title could never work** (task-d582be9d064f35dc). The predicate used to
+require an empty or `Untitled` title — and this harness's own TYPE beat sets a
+title, so a run that died after TYPE left a draft no sweep could select, on that
+run or any later one. Six such drafts were measured on guerrilla on 2026-09-22.
+The time clause alone was already fatal: `since` is always *this* run's press, so
+a leftover is out of every later run's window whatever its title says. A longer
+list of titles was never the fix; a key nothing but this file writes is.
+
+`tooling/studio-journey/sweep-predicate.test.mjs` asserts the predicate offline,
+both directions, against the shapes read off the live host
+(`node --test tooling/studio-journey/sweep-predicate.test.mjs`). The browser
+self-test pre-seeds four specimens — a dead run's leftover that **must** be
+swept, a sibling run's live document, a human's paper and a pre-stamp untitled
+draft that all **must** survive — so the sweep is asserted in both directions
+end to end as well.
 
 ## Exit codes
 

@@ -827,29 +827,105 @@ function draftQueryUrl(ctx, type, id) {
   return `${ctx.base}/v1/data/query/${encodeURIComponent(ctx.dataset)}/${encodeURIComponent(type)}?${q}`;
 }
 
-/** Every draft of `type` created at or after `sinceIso`, newest first.
- *  THIS EXISTS BECAUSE THE "+" CAN CREATE WITHOUT NAVIGATING. Measured on
- *  guerrilla 4f046cce1: pressing "+" inserted a real `Untitled` draft and the URL
- *  never moved to it, so the URL-derived id was null while documents piled up —
- *  three per run, once clickUntil started retrying. An instrument that leaks a
- *  draft on every failed run is worse than no instrument, so cleanup is keyed off
- *  what the DATASET gained during the leg, not off what the URL admitted to.
+/** ─────────────────────────────────────────────────────────────────────────
+ *  THE SWEEP PREDICATE — provenance first, shape second.
+ *  ─────────────────────────────────────────────────────────────────────────
  *
- *  BOUNDED BY SHAPE, NOT ONLY BY TIME (review, spd-w18). The window is a real
- *  dataset on a real host, so "everything created since I pressed +" can in
- *  principle name a document a HUMAN created in the same seconds — and this
- *  function's caller DELETES what it returns. So a candidate must also still
- *  look like the thing the "+" makes and nobody has touched: no title of its
- *  own, and no more blocks than the seeded template (`tpl-title` + `tpl-body`).
- *  A document with a title or with authored content is NEVER a sweep candidate,
- *  whatever its timestamp says. The typed document is added by the caller from
- *  `run.created_doc_id`, so narrowing here cannot orphan the run's own paper.
- *  Residual risk, stated rather than hidden: an empty untitled draft created by
- *  someone else inside the same few seconds would still be swept. Use `--keep`
- *  on a busy host. */
+ *  WHAT THE OLD PREDICATE WAS AND WHY IT COULD NOT WORK (task-d582be9d064f35dc).
+ *  It was: "a draft, created inside THIS run's window, whose title is empty or
+ *  `Untitled`, with no more blocks than the seeded template". Every clause is
+ *  defensible on its own and the conjunction is a trap, because the TYPE beat of
+ *  this very harness writes text into the title-role block and the server then
+ *  derives a title from it. Measured on guerrilla 2026-09-22, the six drafts a
+ *  night of killed runs left behind carry titles like
+ *  `journey paragraph MUCA9FZ6` and
+ *  `journey paragraph MUCA8WHGJOURNEY HEADING MUCA8WHGjourney paragraph MUCA8WHG`.
+ *  So a run that dies AFTER TYPE and before its own cleanup leaves a document
+ *  the title clause rejects — on that run and on every future one.
+ *
+ *  AND THE TIME CLAUSE ALONE IS ALREADY FATAL, which the row's mechanism did not
+ *  say. `since` is always "two seconds before THIS run pressed +", so a leftover
+ *  is out of every later run's window no matter what its title is. The sixth
+ *  catalogued draft, `drafts.paper-8be087501234ae2d`, proves it: title `null`,
+ *  two blocks — it satisfies the title clause and the shape clause and it is
+ *  still permanent debris. A longer title vocabulary would not have reclaimed it.
+ *
+ *  THE REPLACEMENT. The harness STAMPS every document it creates, over the API,
+ *  the moment it learns the id and BEFORE it types anything:
+ *
+ *      journeyRun: { harness: "<this file's path>", run_id, host, stamped_at }
+ *
+ *  and the sweep selects on that stamp. Two arms, and they are deliberately not
+ *  symmetric:
+ *
+ *    ARM 1 — STAMPED (a rule). Any draft carrying `journeyRun.harness ===
+ *      HARNESS_MARK` is this harness's document, whatever its title, its content
+ *      or its age. No time bound: that is the point, because reclaiming a DEAD
+ *      run's debris is the whole defect. Bounded instead by OWNERSHIP — this
+ *      run's own run_id, or a stamped draft older than STALE_DEBRIS_MS, which no
+ *      live run can be (every cap in this file is tens of seconds; see the
+ *      constant). A concurrent run's in-flight document is therefore never
+ *      selected, which a bare "delete everything stamped" would get wrong.
+ *
+ *    ARM 2 — UNSTAMPED, WINDOW + SHAPE (unchanged, and still necessary). There
+ *      is exactly one document class the stamp cannot cover: the "+" that
+ *      CREATES WITHOUT NAVIGATING (guerrilla 4f046cce1), whose id the run never
+ *      learns and therefore cannot patch. Those are untitled, two-block, and
+ *      inside this run's own window, so the old predicate still catches them and
+ *      it stays exactly as it was. It is a snapshot, and it is used only where
+ *      the run's own seconds bound it.
+ *
+ *  WHY THE STAMP CANNOT BE DEFEATED THE WAY THE TITLE WAS. The title is written
+ *  by a BEAT OF THE JOURNEY — the harness attacks its own predicate every run,
+ *  and a human typing in the Studio writes the same field by the same route. The
+ *  stamp is written by NO beat and by no Studio affordance: `journeyRun` is not a
+ *  field the paper editor, the "+" handler or the template seeder ever sets, so a
+ *  document carries it if and only if this file PUT it there over
+ *  /v1/data/mutate. TYPE, autosave and reload rewrite `blocks`, `title`,
+ *  `body_html` and `preview`; they do not touch it — asserted live, not assumed,
+ *  and the killed-run evidence under tooling/studio-journey/evidence-sweep/ is a
+ *  document that was typed into, autosaved, and still carries its stamp.
+ *  The key is also a PREDICATE the server can evaluate:
+ *  `filter[journeyRun.harness][eq]=…` returns the stamped set directly, so the
+ *  sweep is no longer a 50-row recency scan that older debris falls out of.
+ *
+ *  Residual risk, stated rather than hidden: ARM 2 would still sweep an empty
+ *  untitled draft somebody else created inside the same few seconds. `--keep`
+ *  opts out on a busy host. ARM 1 carries no such risk — nothing but this file
+ *  writes the field it reads. */
 const SEEDED_TEMPLATE_BLOCKS = 2;
 
-function sweepCandidate(d, since) {
+/** The stamp's field and value. The value is this file's repo path, so the mark
+ *  NAMES its writer: a stamped document found by a human leads back here. */
+const STAMP_FIELD = "journeyRun";
+const HARNESS_MARK = "tooling/studio-journey/journey.mjs";
+
+/** How old a stamped draft from ANOTHER run must be before this run will reclaim
+ *  it. A journey run is bounded by its own caps (SETTLE_CAP, HYDRATE_CAP,
+ *  PERSIST_CAP, LEG_C_BUDGET) and the slowest observed guerrilla run is under two
+ *  minutes; 30 minutes is two orders of magnitude of headroom. Anything stamped
+ *  and older than this belongs to a process that is not coming back. This is the
+ *  ONLY guard between arm 1 and a concurrent run's live document, so it is a
+ *  named constant and not an inline number. */
+const STALE_DEBRIS_MS = 30 * 60 * 1000;
+
+/** THE PROVENANCE READ. `d.journeyRun.harness` and nothing else — not the title,
+ *  not the block count, not the id. */
+function harnessStamped(d) {
+  return typeof d?.[STAMP_FIELD]?.harness === "string" && d[STAMP_FIELD].harness === HARNESS_MARK;
+}
+
+/** ARM 1's ownership rule: MY run, or a run that is provably dead. */
+function stampedAndReclaimable(d, { runId = null, now = Date.now() } = {}) {
+  if (!harnessStamped(d)) return false;
+  if (runId && d[STAMP_FIELD].run_id === runId) return true;
+  const born = Date.parse(d._createdAt || 0);
+  return Number.isFinite(born) && now - born >= STALE_DEBRIS_MS;
+}
+
+/** ARM 2: the old predicate, unchanged, for the documents the stamp cannot
+ *  reach. Kept as its own named function so the self-test can red ONE arm. */
+function untitledTemplateShape(d, since) {
   if (!d?._draft || Date.parse(d._createdAt || 0) < since) return false;
   const title = (d.title ?? "").trim();
   if (title !== "" && title.toLowerCase() !== "untitled") return false;
@@ -857,14 +933,81 @@ function sweepCandidate(d, since) {
   return Array.isArray(blocks) && blocks.length <= SEEDED_TEMPLATE_BLOCKS;
 }
 
+function sweepCandidate(d, since, opts = {}) {
+  if (!d?._draft) return false;
+  if (harnessStamped(d)) return stampedAndReclaimable(d, opts);
+  return untitledTemplateShape(d, since);
+}
+
+/** Write the stamp. Called the instant the run learns the document's id and
+ *  BEFORE the TYPE beat — the ordering is the whole contract, because every
+ *  document the old predicate could not reclaim was killed between those two
+ *  points. A failed stamp is REPORTED and never fatal: the run's own cleanup
+ *  still deletes by id, and arm 2 still covers the untouched case. What is lost
+ *  on a failed stamp is only the ability of a LATER run to reclaim this one. */
+async function stampRun(ctx, type, id, mark) {
+  const r = await api(
+    ctx,
+    `${ctx.base}/v1/data/mutate/${encodeURIComponent(ctx.dataset)}`,
+    { method: "POST", body: JSON.stringify({ mutations: [{ patch: { id, type, set: { [STAMP_FIELD]: mark } } }] }) },
+    { attempts: 2 },
+  );
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
+/** ARM 1's query. A server-side filter on the stamp, NOT a recency page — the
+ *  50-row `_createdAt:desc` window is exactly how debris from an old run becomes
+ *  invisible once fifty documents are newer than it. Proven non-vacuous the same
+ *  way the id oracle is: `filter[journeyRun.harness][eq]=<a value nothing
+ *  carries>` returns count 0 against guerrilla, so a non-empty answer here is
+ *  documents and not the endpoint ignoring the filter. */
+async function stampedDrafts(ctx, type) {
+  const q = new URLSearchParams({ perspective: "drafts", limit: "50", order: "_createdAt:desc" });
+  q.set(`filter[${STAMP_FIELD}.harness][eq]`, HARNESS_MARK);
+  const r = await api(ctx, `${ctx.base}/v1/data/query/${encodeURIComponent(ctx.dataset)}/${encodeURIComponent(type)}?${q}`, { method: "GET" });
+  if (!r.ok) return { ok: false, error: r.error, docs: [] };
+  return { ok: true, docs: r.body?.result?.documents || [] };
+}
+
+/** ARM 2's query. Every draft of `type` created at or after `sinceIso`, newest
+ *  first. THIS EXISTS BECAUSE THE "+" CAN CREATE WITHOUT NAVIGATING. Measured on
+ *  guerrilla 4f046cce1: pressing "+" inserted a real `Untitled` draft and the URL
+ *  never moved to it, so the URL-derived id was null while documents piled up —
+ *  three per run, once clickUntil started retrying. An instrument that leaks a
+ *  draft on every failed run is worse than no instrument, so cleanup is keyed off
+ *  what the DATASET gained during the leg, not off what the URL admitted to. */
 async function draftsCreatedSince(ctx, type, sinceIso) {
   const q = new URLSearchParams({ perspective: "drafts", limit: "50", order: "_createdAt:desc" });
   const r = await api(ctx, `${ctx.base}/v1/data/query/${encodeURIComponent(ctx.dataset)}/${encodeURIComponent(type)}?${q}`, { method: "GET" });
   if (!r.ok) return { ok: false, error: r.error, ids: [] };
   const docs = r.body?.result?.documents || [];
   const since = Date.parse(sinceIso);
-  const ids = docs.filter((d) => sweepCandidate(d, since)).map((d) => d._id);
+  const ids = docs.filter((d) => untitledTemplateShape(d, since)).map((d) => d._id);
   return { ok: true, ids };
+}
+
+/** THE UNION, and it is what the self-clean calls. Returns BOTH arms separately
+ *  so the run report can say which rule claimed which document — "deleted 3" that
+ *  cannot say why is the shape of report that hid this defect for a night. */
+async function sweepTargets(ctx, type, sinceIso, { runId = null, now = Date.now() } = {}) {
+  const stamped = await stampedDrafts(ctx, type);
+  const recent = await draftsCreatedSince(ctx, type, sinceIso);
+  // Through sweepCandidate, not through stampedAndReclaimable directly, so the
+  // live path and the exported predicate are the SAME function — a sweep whose
+  // production code takes a different route from its tests is untested. `since`
+  // is Infinity here on purpose: this query already returned only stamped
+  // documents, so arm 2 must be unreachable and the stamp must be the only
+  // thing that can select one.
+  const byStamp = stamped.docs.filter((d) => sweepCandidate(d, Infinity, { runId, now })).map((d) => d._id);
+  const byShape = recent.ids.filter((id) => !byStamp.includes(id));
+  return {
+    ok: stamped.ok && recent.ok,
+    errors: [stamped.ok ? null : `stamped query: ${stamped.error}`, recent.ok ? null : `recent query: ${recent.error}`].filter(Boolean),
+    by_stamp: byStamp,
+    by_shape: byShape,
+    ids: [...byStamp, ...byShape],
+    stamped_seen: stamped.docs.map((d) => ({ id: d._id, run_id: d[STAMP_FIELD]?.run_id ?? null, created_at: d._createdAt, title: d.title ?? null })),
+  };
 }
 
 async function readDraft(ctx, type, id) {
@@ -1031,6 +1174,11 @@ async function legA(page, ctx, ledger, run) {
   const headingText = `JOURNEY HEADING ${stamp}`;
   const paraText = `journey paragraph ${stamp}`;
   run.markers = { heading: headingText, paragraph: paraText };
+  // The run's identity, written INTO the documents it creates. `run_id` is what
+  // arm 1 of the sweep uses to tell THIS run's in-flight document from a
+  // concurrent run's — see stampedAndReclaimable.
+  run.run_id = stamp;
+  run.run_mark = { harness: HARNESS_MARK, run_id: stamp, host: ctx.base, stamped_at: new Date().toISOString() };
 
   // ── AUTH ───────────────────────────────────────────────────────────────────
   // A degraded (anonymous) session renders a login page or an unprivileged
@@ -1202,6 +1350,20 @@ async function legA(page, ctx, ledger, run) {
     const clickedAdd = nav.clicked;
     docId = nav.value;
     run.created_doc_id = docId;
+    // ── THE PROVENANCE STAMP, AND ITS PLACEMENT IS THE FIX ────────────────
+    // Written HERE: after the id is known, before HYDRATE and before TYPE. Every
+    // document the old title-keyed sweep could never reclaim was killed between
+    // those two points, so a stamp written any later would miss exactly the
+    // class it exists for. Non-fatal by design — see stampRun's header. The
+    // failure is recorded on the run object and printed with the self-clean
+    // line, because a stamp that silently did not land is a run that has just
+    // manufactured the debris this predicate was built to prevent.
+    if (docId) {
+      const stamped = await stampRun(ctx, "paper", `drafts.${docId}`, run.run_mark);
+      run.stamp = { id: `drafts.${docId}`, mark: run.run_mark, ...stamped };
+    } else {
+      run.stamp = { id: null, mark: run.run_mark, ok: false, error: 'the "+" never produced an id — nothing to stamp (arm 2 covers this case)' };
+    }
     // What the screen says when the "+" did NOT produce a document. A flash is
     // the difference between "the server refused and told the user" and the
     // owner's actual complaint, which was silence.
@@ -2646,6 +2808,30 @@ function fixtureEditorHtml(site, id, doc) {
 </script></body>`;
 }
 
+/** The first text a block set carries, which is what the fixture's save uses as
+ *  the document's title. Shallow on purpose: the real derivation lives on the
+ *  server and this only has to produce the PROPERTY "non-empty, not Untitled". */
+function blockText(blocks) {
+  for (const b of blocks || []) {
+    const t = (b?.text ?? (b?.content || []).map((c) => c?.text || "").join("")).trim();
+    if (t) return t;
+  }
+  return "";
+}
+
+/** The four pre-seeded sweep specimens, named ONCE so the fixture and the
+ *  assertions cannot drift apart. Their expected fates are in SWEEP_EXPECT. */
+const SWEEP_SPECIMENS = {
+  dead_run: "drafts.paper-fx-deadrun",
+  live_sibling: "drafts.paper-fx-sibling",
+  human: "drafts.paper-fx-human",
+  pre_stamp: "drafts.paper-fx-prestamp",
+};
+/** true = the run must DELETE it; false = the run must LEAVE it. Both directions
+ *  on purpose: a sweep asserted only on what it removes is one edit away from
+ *  removing everything and still passing. */
+const SWEEP_EXPECT = { dead_run: true, live_sibling: false, human: false, pre_stamp: false };
+
 function startFixture() {
   // One store per site so /good/ and /rot/ can never read each other's writes.
   const store = { good: new Map(), rot: new Map() };
@@ -2663,6 +2849,54 @@ function startFixture() {
         _createdAt: at, _updatedAt: at, title: "Untitled", blocks: [],
       });
     }
+    // ── THE FOUR SWEEP SPECIMENS (task-d582be9d064f35dc) ──────────────────
+    // The run's OWN document can never test the sweep: the self-clean adds
+    // `run.created_doc_id` by hand, so a fixture run that completes deletes its
+    // paper whatever the predicate says. The class this row is about is a
+    // document left by a run that DIED, and only a pre-seeded one can stand in
+    // for it. All four are asserted, in both directions, in selfTest().
+    const long_ago = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+    const moments_ago = new Date(Date.now() - 5 * 1000).toISOString();
+    const typed = [
+      { id: "tpl-title", type: "heading", level: 1, role: "title", locked: true, text: "JOURNEY HEADING DEADRUN" },
+      { id: "tpl-body", type: "paragraph", content: [{ text: "journey paragraph DEADRUN" }] },
+    ];
+    // 1. MUST BE SWEPT. A dead run's leftover: stamped, TITLED by its own TYPE
+    //    beat, far older than STALE_DEBRIS_MS. The old title-keyed predicate
+    //    cannot select it — delete the stamp arm and the residue assertion reds.
+    store[site].set(SWEEP_SPECIMENS.dead_run, {
+      _id: SWEEP_SPECIMENS.dead_run, _publishedId: SWEEP_SPECIMENS.dead_run.slice(7), _type: "paper", _draft: true,
+      _createdAt: long_ago, _updatedAt: long_ago, title: "journey paragraph DEADRUN", blocks: typed,
+      [STAMP_FIELD]: { harness: HARNESS_MARK, run_id: "DEADRUN", host: "fixture", stamped_at: long_ago },
+    });
+    // 2. MUST SURVIVE. A CONCURRENT run's live document — stamped, titled, five
+    //    seconds old. This is the only thing standing between arm 1 and a
+    //    sibling run's in-flight paper, so it is asserted, not trusted.
+    store[site].set(SWEEP_SPECIMENS.live_sibling, {
+      _id: SWEEP_SPECIMENS.live_sibling, _publishedId: SWEEP_SPECIMENS.live_sibling.slice(7), _type: "paper", _draft: true,
+      _createdAt: moments_ago, _updatedAt: moments_ago, title: "journey paragraph SIBLING", blocks: typed,
+      [STAMP_FIELD]: { harness: HARNESS_MARK, run_id: "SIBLING", host: "fixture", stamped_at: moments_ago },
+    });
+    // 3. MUST SURVIVE. A HUMAN's paper: no stamp, a real title, old. Nothing may
+    //    ever select this, and it is what makes the sweep safe to run on a host
+    //    other people use.
+    store[site].set(SWEEP_SPECIMENS.human, {
+      _id: SWEEP_SPECIMENS.human, _publishedId: SWEEP_SPECIMENS.human.slice(7), _type: "paper", _draft: true,
+      _createdAt: long_ago, _updatedAt: long_ago, title: "Q3 board notes", blocks: typed,
+    });
+    // 4. MUST SURVIVE, AND IT IS A DELIBERATE LIMIT, not an oversight. This is
+    //    the live shape of drafts.paper-8be087501234ae2d: untitled, two blocks,
+    //    UNSTAMPED, and old. It is almost certainly harness debris from before
+    //    the stamp existed — and "almost certainly" is not a licence to delete a
+    //    document on a live host off a predicate that cannot tell it from an
+    //    empty draft a human opened and walked away from. Arm 2 stays bounded by
+    //    the run's own window; pre-stamp debris is DISPOSED OF BY HAND, WITH
+    //    AUTHORISATION, never by a sweep.
+    store[site].set(SWEEP_SPECIMENS.pre_stamp, {
+      _id: SWEEP_SPECIMENS.pre_stamp, _publishedId: SWEEP_SPECIMENS.pre_stamp.slice(7), _type: "paper", _draft: true,
+      _createdAt: long_ago, _updatedAt: long_ago, title: null,
+      blocks: [{ id: "tpl-title", type: "heading", level: 1, role: "title", locked: true, text: "" }, { id: "tpl-body", type: "paragraph", content: [] }],
+    });
   }
 
   const server = http.createServer((req, res) => {
@@ -2717,17 +2951,40 @@ function startFixture() {
       // The unfiltered, _createdAt:desc list — what the litter sweep reads. The
       // fixture must serve it or the sweep is untested, and an untested sweep is
       // how the leak got here.
-      const all = [...docs.values()].sort((a, b) => Date.parse(b._createdAt) - Date.parse(a._createdAt));
+      let all = [...docs.values()].sort((a, b) => Date.parse(b._createdAt) - Date.parse(a._createdAt));
+      // ARM 1's server-side filter, served here so the stamped query is
+      // EXERCISED offline rather than assumed. Guerrilla answers
+      // `filter[journeyRun.harness][eq]=<value nothing carries>` with count 0;
+      // this branch reproduces that, so a fixture run cannot go green off an
+      // endpoint that ignored the filter and handed back everything.
+      const wantMark = url.searchParams.get(`filter[${STAMP_FIELD}.harness][eq]`);
+      if (wantMark !== null) all = all.filter((d) => d?.[STAMP_FIELD]?.harness === wantMark);
       return json(200, { result: { perspective: "drafts", limit: 50, offset: 0, count: all.length, documents: all } });
     }
     if (rest.startsWith("/v1/data/mutate/") && req.method === "POST") {
       let body = "";
       req.on("data", (c) => { body += c; });
       req.on("end", () => {
-        let ids = [];
-        try { ids = (JSON.parse(body).mutations || []).map((x) => x.delete?.id).filter(Boolean); } catch { /* report below */ }
+        let muts = [];
+        try { muts = JSON.parse(body).mutations || []; } catch { /* report below */ }
+        const ids = muts.map((x) => x.delete?.id).filter(Boolean);
         for (const id of ids) { docs.delete(id); docs.delete(`drafts.${id}`); }
-        json(200, { results: ids.map((id) => ({ id, operation: "delete" })) });
+        // THE PROVENANCE STAMP'S WRITE PATH. `patch.set` only, which is all the
+        // harness sends; guerrilla refuses a patch with no `type` (422
+        // validation_failed, measured 2026-09-22) and so does this, or the
+        // fixture would green a request the deployment rejects.
+        const patched = [];
+        for (const m of muts) {
+          const pt = m.patch;
+          if (!pt) continue;
+          if (!pt.id || !pt.type) continue; // refuse, exactly as guerrilla does
+          const doc = docs.get(pt.id);
+          if (!doc) continue;
+          Object.assign(doc, pt.set || {});
+          doc._updatedAt = new Date().toISOString();
+          patched.push(pt.id);
+        }
+        json(200, { results: [...ids.map((id) => ({ id, operation: "delete" })), ...patched.map((id) => ({ id, operation: "update" }))] });
       });
       return;
     }
@@ -2754,6 +3011,18 @@ function startFixture() {
         const doc = docs.get(key);
         if (doc) {
           try { doc.blocks = JSON.parse(body).blocks; } catch { /* leave it */ }
+          // ── THE FIXTURE GIVES THE DOCUMENT A TITLE, AND THAT IS THE POINT ──
+          // Without this the fixture could NEVER reproduce
+          // task-d582be9d064f35dc: the harness's own drafts stayed title-less
+          // offline, so the title-keyed sweep swept them, so the residue
+          // assertion below was green on a predicate that leaves permanent
+          // debris on the deployment. The fixture reproduces the PROPERTY
+          // measured on guerrilla — after TYPE, the draft has a non-empty title
+          // that is not "Untitled" (live: `journey paragraph MUCA9FZ6`,
+          // `journey paragraph MUCA8WHGJOURNEY HEADING MUCA8WHG…`) — not the
+          // server's exact derivation, which concatenates block text in an order
+          // this fixture makes no claim about.
+          doc.title = blockText(doc.blocks) || doc.title || null;
           doc._updatedAt = new Date().toISOString();
         }
         json(200, { ok: true });
@@ -2964,9 +3233,14 @@ async function journeyOne(cdp, ctx, opts) {
   // and clickUntil retrying a "+" that creates every time. `--keep` opts out for
   // a human who wants to open the document afterwards.
   if (run.create_pressed_at) {
-    const swept = await draftsCreatedSince(ctx, "paper", run.create_pressed_at);
+    // BOTH ARMS. The stamped arm reclaims what a DEAD run left — the class the
+    // title-keyed predicate could never select, on this run or any other. The
+    // shape arm still covers the "+"-without-navigating orphans this run itself
+    // could not stamp because it never learned their ids.
+    const swept = await sweepTargets(ctx, "paper", run.create_pressed_at, { runId: run.run_id ?? null });
     const ids = new Set(swept.ids);
     if (run.created_doc_id) ids.add(`drafts.${run.created_doc_id}`);
+    run.sweep = { by_stamp: swept.by_stamp, by_shape: swept.by_shape, stamped_seen: swept.stamped_seen, errors: swept.errors };
     run.cleanup = { docs: [...ids], deleted: [], failed: [], skipped: opts.keep ? "--keep" : null };
     if (!opts.keep) {
       for (const id of ids) {
@@ -3091,7 +3365,7 @@ const SELF_TEST_REFSTUCK_KEY = "pane_item#item-sheet|Sheets";
 // it, so nothing legitimate is lost by making the hard floor the minimum: the
 // env var is honoured only where it makes the check STRICTER. A caller who wants
 // a weaker floor has to edit HARD_ASSERTION_FLOOR here, in the diff, in review.
-const HARD_ASSERTION_FLOOR = 40;
+const HARD_ASSERTION_FLOOR = 48;
 const SELF_TEST_ASSERTION_FLOOR = (() => {
   const raw = process.env.SELF_TEST_ASSERTION_FLOOR;
   if (raw === undefined || raw === '') return HARD_ASSERTION_FLOOR;
@@ -3113,7 +3387,7 @@ const SELF_TEST_ASSERTION_FLOOR = (() => {
 
 async function selfTest(opts) {
   const { server, port, store } = await startFixture();
-  const results = {}, exits = {}, residue = {}, censuses = {};
+  const results = {}, exits = {}, residue = {}, censuses = {}, survivors = {};
   const sites = opts.selfTestSite ? [opts.selfTestSite] : Object.keys(SELF_TEST_EXPECT);
   try {
     await withChrome(async (cdp) => {
@@ -3131,7 +3405,14 @@ async function selfTest(opts) {
         // and /rot/ is the interesting one — its "+" creates and its canvas never
         // hydrates, which is precisely the shape that was leaking a draft per
         // press against the deployment.
-        residue[site] = [...store[site].keys()].filter((k) => !FOSSILS.some((f) => f.draftId === k));
+        // The four sweep specimens have their OWN expectations (SWEEP_EXPECT),
+        // so they are excluded here and asserted by name below — folding them
+        // into "residue" would make one of them indistinguishable from a leak.
+        const named = new Set([...FOSSILS.map((f) => f.draftId), ...Object.values(SWEEP_SPECIMENS)]);
+        residue[site] = [...store[site].keys()].filter((k) => !named.has(k));
+        survivors[site] = Object.fromEntries(
+          Object.entries(SWEEP_SPECIMENS).map(([name, id]) => [name, store[site].has(id)]),
+        );
       }
     });
   } finally {
@@ -3258,6 +3539,33 @@ async function selfTest(opts) {
     check(left.length === 0, `${site}: the run LEFT LITTER on the dataset — ${left.join(", ")} (the self-clean sweep did not remove what the "+" created)`);
   }
 
+  // ── THE SWEEP PREDICATE, BOTH DIRECTIONS (task-d582be9d064f35dc) ───────────
+  // The run's own document proves nothing about the sweep: the self-clean adds
+  // it by id whatever the predicate says. These four specimens are the ones that
+  // only the predicate can decide, and they are asserted as a PAIR of directions
+  // per site — one that must be gone, three that must still be there.
+  //
+  // MUTATION-PROVEN, both ways, on this tree: delete the `harnessStamped` arm
+  // from sweepCandidate and `dead_run` survives and this reds; drop the
+  // STALE_DEBRIS_MS guard from stampedAndReclaimable and `live_sibling`
+  // disappears and this reds. Neither mutation moves any other assertion, so a
+  // green here is about the predicate and not about the fixture.
+  for (const site of Object.keys(SELF_TEST_EXPECT)) {
+    const seen = survivors[site] || {};
+    for (const [name, mustBeSwept] of Object.entries(SWEEP_EXPECT)) {
+      const stillThere = seen[name];
+      check(
+        stillThere === !mustBeSwept,
+        mustBeSwept
+          ? `${site}: the sweep LEFT ${name} (${SWEEP_SPECIMENS[name]}) — a stamped draft from a run that died ${
+              Math.round(STALE_DEBRIS_MS / 60000)}+ minutes ago is the permanent debris this predicate exists to reclaim. ` +
+            `A title-keyed sweep cannot select it, which is exactly the defect.`
+          : `${site}: the sweep DELETED ${name} (${SWEEP_SPECIMENS[name]}) — it must NOT have. ` +
+            `This is a document on a dataset other people use, and a sweep that takes it is worse than no sweep.`,
+      );
+    }
+  }
+
   // THE FLOOR ITSELF. A run that compared almost nothing must not be allowed to
   // print PASS — that is the whole shape this workflow's scheduled lane had for
   // six weeks. This is the LAST check, so the number it guards is final.
@@ -3313,6 +3621,25 @@ async function main() {
     const ctx = { ...srv, dataset: opts.dataset };
     const { ledger, run, wall, pre, post } = await withChrome((cdp) => journeyOne(cdp, ctx, opts));
     process.stdout.write(report(ledger, { base: ctx.base, mode: opts.report ? "REPORT" : "STRICT", wall, pre, post, legs: opts.legs }));
+    // THE STAMP, SAID OUT LOUD. A run whose stamp did not land has just created
+    // the exact document class task-d582be9d064f35dc exists for, and that must
+    // never be a silent fact buried in --json.
+    if (run.stamp) {
+      process.stdout.write(
+        run.stamp.ok
+          ? `   provenance stamp: ${STAMP_FIELD}.run_id=${run.stamp.mark.run_id} written to ${run.stamp.id}\n`
+          : `   provenance stamp: NOT WRITTEN to ${run.stamp.id ?? "(no id)"} — ${run.stamp.error}. A later run cannot reclaim this document by stamp.\n`,
+      );
+    }
+    if (run.sweep) {
+      const sw = run.sweep;
+      process.stdout.write(
+        `   sweep: ${sw.by_stamp.length} by STAMP${sw.by_stamp.length ? ` [${sw.by_stamp.join(", ")}]` : ""}` +
+          ` · ${sw.by_shape.length} by SHAPE+WINDOW${sw.by_shape.length ? ` [${sw.by_shape.join(", ")}]` : ""}` +
+          ` · ${sw.stamped_seen.length} stamped draft(s) seen on the host` +
+          `${sw.errors.length ? ` · QUERY ERRORS: ${sw.errors.join("; ")}` : ""}\n`,
+      );
+    }
     if (run.cleanup) {
       const c = run.cleanup;
       process.stdout.write(
@@ -3372,5 +3699,11 @@ async function main() {
 // is checkable) WITHOUT running the journey. `main()` fires only when this file
 // is the entry point — an unconditional call would make any import spawn Chrome.
 export { Cdp, Page, findChrome, withChrome, readServer, mintTicket, servedCommit, readDraft, poll, DESK_PATH, CANVAS_STATE, EDITOR_SHAPE };
+// The sweep predicate and its parts, exported so
+// tooling/studio-journey/sweep-predicate.test.mjs can drive BOTH arms in BOTH
+// directions offline, against the real shapes measured on guerrilla. A
+// predicate that deletes documents on a live host and is asserted only by the
+// browser self-test is asserted only where a browser is available.
+export { sweepCandidate, harnessStamped, stampedAndReclaimable, untitledTemplateShape, STAMP_FIELD, HARNESS_MARK, STALE_DEBRIS_MS, SEEDED_TEMPLATE_BLOCKS };
 
 if (import.meta.url === `file://${process.argv[1]}`) main();

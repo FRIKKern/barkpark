@@ -1,0 +1,62 @@
+{
+  "measured_at": "2026-09-22T12:34:02.701Z",
+  "host": "https://guerrilla.barkpark.cloud",
+  "since": "2026-09-22T12:33:21.442Z",
+  "killed_id": "drafts.paper-e64b438d91789273",
+  "subject": {
+    "exists_count": 1,
+    "id": "drafts.paper-e64b438d91789273",
+    "title": "journey paragraph MUCNNJX3",
+    "created_at": "2026-09-22T12:33:26.154591Z",
+    "updated_at": "2026-09-22T12:33:29.368978Z",
+    "blocks": 2,
+    "block_text": [
+      "journey paragraph MUCNNJX3",
+      ""
+    ],
+    "stamp": {
+      "harness": "tooling/studio-journey/journey.mjs",
+      "host": "https://guerrilla.barkpark.cloud",
+      "run_id": "MUCNNJX3",
+      "stamped_at": "2026-09-22T12:33:24.375Z"
+    },
+    "stamped": true,
+    "OLD_predicate_selects": false,
+    "NEW_predicate_selects_for_a_later_run": true,
+    "NEW_predicate_right_now_no_grace": false
+  },
+  "control_create_status": 200,
+  "control": {
+    "exists_count": 1,
+    "id": "drafts.paper-w13controlmucnodkq",
+    "title": null,
+    "created_at": "2026-09-22T12:34:02.915683Z",
+    "blocks": 2,
+    "stamped": false,
+    "OLD_predicate_selects": true,
+    "NEW_predicate_selects": true
+  },
+  "stamp_query": {
+    "status": 200,
+    "count": 2,
+    "ids": [
+      {
+        "id": "drafts.paper-e64b438d91789273",
+        "run_id": "MUCNNJX3",
+        "title": "journey paragraph MUCNNJX3",
+        "created_at": "2026-09-22T12:33:26.154591Z"
+      },
+      {
+        "id": "drafts.paper-w13probemucnckud",
+        "run_id": "PATCHED2",
+        "title": "W13 MARKER PROBE",
+        "created_at": "2026-09-22T12:24:52.524887Z"
+      }
+    ]
+  },
+  "stamp_query_CONTROL_wrong_value": {
+    "status": 200,
+    "count": 0,
+    "ids": []
+  }
+}
