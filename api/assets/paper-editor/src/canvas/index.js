@@ -30,6 +30,7 @@
 // The shipped <bp-paper-editor> behavior is byte-unchanged.
 
 import { Editor } from "@tiptap/core";
+import { clipboardPastePolicy } from "./clipboard-paste-policy.js";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItemSource } from "../list-item-source.js";
 import { HeadingSource } from "../heading-source.js";
@@ -1966,6 +1967,14 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   _onPaste(view, _event, slice) {
+    if (this._editable) {
+      const policy = clipboardPastePolicy(view, _event, slice);
+      if (policy?.blocked) {
+        this._showHTMLPasteNotice(`Nothing was pasted. ${policy.blocked}`);
+        return true;
+      }
+      if (policy?.plain && !isFigureSingletonCanvas(this)) return false;
+    }
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteImageFiles(view, _event)) return true;
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteHTMLTables(view, _event)) return true;
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteMarkdown(view, _event)) return true;
