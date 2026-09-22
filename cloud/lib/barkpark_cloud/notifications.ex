@@ -1609,6 +1609,39 @@ defmodule BarkparkCloud.Notifications do
   """
   @spec dispatch_event(Team.t() | binary(), atom(), map()) :: :ok
   def dispatch_event(team, event, payload \\ %{}) when is_atom(event) do
+    # task-6aadf4ff08101b20 asked whether the settings read here is a DUPLICATE
+    # that can be collapsed, the way task-a342dccd023211d5 asked it of the
+    # membership pair below. It is NOT, and the answer was measured rather than
+    # argued — `settings_query_cost_test.exs` is the mechanical form of every
+    # sentence here.
+    #
+    # The row was filed on a count of `[:barkpark_cloud, :repo, :query]` showing
+    # `email_notification_settings` at a CONSTANT 2 per dispatch (5 / 7 / 14
+    # total queries at team sizes 1 / 3 / 10). That count reproduces exactly.
+    # Bucketed by SQL VERB, which the original count did not do, the two are:
+    #
+    #     1x email_notification_settings SELECT
+    #     1x email_notification_settings INSERT
+    #
+    # — the two halves of `get_or_create_settings/1`'s own lazy create, on a
+    # team whose row does not exist yet. There is ONE call to it in this
+    # function; `enqueue_chat/3`, `should_send?/2` and `deliver_alert/2` are all
+    # handed the struct. Every other call site in this module is a separate
+    # entry point and none nests inside this one.
+    #
+    # So the second event is neither a read-after-write (the `{:ok, settings}`
+    # arm returns `insert`'s own struct and never re-reads — a re-read is
+    # mutation-proven to add a THIRD event), nor a cache miss, nor a duplicate.
+    # It is the CREATE, it happens once in a team's lifetime, and a second
+    # dispatch costs 1 settings query: `4 + N` becomes `3 + N`.
+    #
+    # Collapsing would mean deleting the create half, which is the lazy backstop
+    # for teams predating the signup auto-create — for them a dispatch would
+    # then run against a bare `%EmailSettings{}` and write no row. That is a
+    # behaviour change dressed as a query saving. It would also buy nothing
+    # worth having: this path sends N emails SYNCHRONOUSLY and writes one
+    # `notification_deliveries` row per recipient, so the mail I/O dominates at
+    # every team size above one.
     settings = get_or_create_settings(team)
 
     if should_send?(settings, event) do
