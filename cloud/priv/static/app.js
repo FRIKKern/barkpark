@@ -11457,7 +11457,7 @@
   // A dedicated surface for ONE main plus its supports: a per-support row with
   // status, capacity (both stored shapes) and the age of its last beat, under a
   // single GROUP state drawn from PDF-D11's catalogue —
-  //   empty / conflict / blocked / offline / provisioning / cap-hit / working.
+  //   empty / roster-conflict / blocked / offline / provisioning / cap-hit / working.
   //
   // THE ONE SOURCE OF TRUTH FOR "ONLINE" IS `presenceChip`, AND THIS SURFACE
   // ADDS NO SECOND ONE. Staleness is computed SERVER-SIDE (Barkpark.Tasks.Fleet
@@ -11482,7 +11482,16 @@
   // table and the preview scenarios are all keyed off it, so an eighth state
   // cannot be added in one place and forgotten in another (the pins walk this
   // list and refuse a state with no painted class, no copy, or no scenario).
-  var GROUP_VIEW_STATES = ["empty", "conflict", "blocked", "offline", "provisioning", "cap-hit", "working"];
+  // THE TOKEN IS `roster-conflict`, NOT `conflict`, AND THAT IS FORCED.
+  // console_reader_census_test.exs's Side B "counts a slug quoted ANYWHERE in
+  // app.js as read" — its own moduledoc names this as the false-read it cannot
+  // see. `conflict` is a CLASSIFIED wire code (seven `/v1/internal/*`
+  // provisioner settle routes whose 409 no console reader consumes), so
+  // spelling this state `conflict` made the census's rot arm report a reader
+  // that does not exist, and clearing it that way would have meant deleting
+  // seven TRUE rows on a string coincidence. The longer token is also the more
+  // accurate one: this is a roster identity collision, never an HTTP 409.
+  var GROUP_VIEW_STATES = ["empty", "roster-conflict", "blocked", "offline", "provisioning", "cap-hit", "working"];
 
   // Milliseconds since a roster row's `last_seen`, or null when there is no
   // parsable stamp. Total over junk. PURE — and deliberately NOT consulted by
@@ -11568,7 +11577,7 @@
   function groupViewState(cells) {
     cells = cells || [];
     if (!cells.length) return "empty";
-    if (groupRosterConflicts(cells).length) return "conflict";
+    if (groupRosterConflicts(cells).length) return "roster-conflict";
     var blocked = cells.filter(function (c) { return c.chip.state === "blocked"; });
     if (blocked.length) return "blocked";
     var liveCells = cells.filter(function (c) { return c.live; });
@@ -11585,7 +11594,7 @@
   // silent blank. PURE.
   var GROUP_VIEW_STATE_COPY = {
     "empty": { label: "No supports", detail: "This server has no support boxes yet." },
-    "conflict": { label: "Roster conflict", detail: "Two supports registered under the same worker name — status and capacity can't be attributed until one is renamed." },
+    "roster-conflict": { label: "Roster conflict", detail: "Two supports registered under the same worker name — status and capacity can't be attributed until one is renamed." },
     "blocked": { label: "Blocked", detail: "A support is blocked and needs attention before it takes more work." },
     "offline": { label: "Offline", detail: "No live support is beating — orders filed now would sit unclaimed." },
     "provisioning": { label: "Provisioning", detail: "Supports are still coming up." },
@@ -11607,7 +11616,7 @@
     var copy = groupViewStateCopy(state);
     var label = esc(copy.label);
     if (state === "empty") return '<span class="group-state group-state--empty">' + label + "</span>";
-    if (state === "conflict") return '<span class="group-state group-state--conflict">' + label + "</span>";
+    if (state === "roster-conflict") return '<span class="group-state group-state--roster-conflict">' + label + "</span>";
     if (state === "blocked") return '<span class="group-state group-state--blocked">' + label + "</span>";
     if (state === "offline") return '<span class="group-state group-state--offline">' + label + "</span>";
     if (state === "provisioning") return '<span class="group-state group-state--provisioning">' + label + "</span>";

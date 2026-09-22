@@ -35403,7 +35403,7 @@ import {
 
 test("PDF-D11: GROUP_VIEW_STATES is the 7-state catalogue, in precedence order", () => {
   assert.deepEqual([...hooks.GROUP_VIEW_STATES],
-    ["empty", "conflict", "blocked", "offline", "provisioning", "cap-hit", "working"]);
+    ["empty", "roster-conflict", "blocked", "offline", "provisioning", "cap-hit", "working"]);
 });
 
 test("PDF-D11 c[0]: every catalogue state has a preview scenario that PRODUCES it — the axis refuses, it does not narrow", () => {
@@ -35495,20 +35495,26 @@ test("PDF-D11 c[1] MUTATION: break presenceChip's online derivation and the grou
   // own liveness opinion, these states would survive the mutation.
   const ANCHOR = '      online: s !== "offline", // PDF-D89: online is DERIVED, never stored';
   const MUTANT = '      online: false, // MUTANT';
-  assert.equal(APP_SRC_FOR_MUTATION.split(ANCHOR).length - 1, 1,
-    "presenceChip's online derivation is no longer uniquely anchored — the mutation cannot be trusted");
-  const mutant = evalApp(APP_SRC_FOR_MUTATION.replace(ANCHOR, MUTANT)).hooks;
+  // replaceUnique, not a bare `.replace` (the anchored-replace ratchet, and the
+  // reason for it): a bare string needle that has DRIFTED silently matches
+  // nothing, the "mutant" is byte-identical to the source, and the test passes
+  // having mutated NOTHING — a green with no subject. replaceUnique refuses a
+  // drifted or ambiguous needle instead of answering one.
+  const mutatedSrc = replaceUnique(APP_SRC_FOR_MUTATION, ANCHOR, MUTANT,
+    { what: "presenceChip's online derivation (the single decider under test)" });
+  assert.notEqual(mutatedSrc, APP_SRC_FOR_MUTATION, "the mutation must actually change the source");
+  const mutant = evalApp(mutatedSrc).hooks;
 
   // The mutation LANDED (the one-decider check itself).
   assert.equal(mutant.presenceChip({ status: "working" }).online, false);
   assert.equal(hooks.presenceChip({ status: "working" }).online, true);
 
-  // Every state whose derivation reaches liveness moves. `empty`, `conflict`
+  // Every state whose derivation reaches liveness moves. `empty`, `roster-conflict`
   // and `blocked` are named EXEMPT: they are decided before any online read
   // (no supports / an unattributable roster / a box asking for attention), so
   // their survival is the derivation's precedence order holding, not a second
   // source hiding.
-  const EXEMPT = new Set(["empty", "conflict", "blocked"]);
+  const EXEMPT = new Set(["empty", "roster-conflict", "blocked"]);
   const moved = [];
   for (const sc of GV_AXIS(hooks)) {
     const after = mutant.groupViewState(mutant.groupSupportCells(sc.supports, sc.roster, sc.now));
@@ -35552,7 +35558,7 @@ test("PDF-D11 c[1]: a roster read that never landed says so — never a fabricat
 });
 
 test("PDF-D11: two supports on one roster identity is a CONFLICT, and the collision is named", () => {
-  const sc = GV_AXIS(hooks).find((s) => s.state === "conflict");
+  const sc = GV_AXIS(hooks).find((s) => s.state === "roster-conflict");
   const cells = hooks.groupSupportCells(sc.supports, sc.roster, sc.now);
   assert.deepEqual([...hooks.groupRosterConflicts(cells)], ["muscle-1"]);
   // Two boxes, ONE roster row — the collision, not a missing row.

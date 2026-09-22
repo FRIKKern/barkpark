@@ -7639,7 +7639,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* ═══ PDF-D11 GROUP VIEW (pdf-bl-fleet-group-view) — a main plus its supports
    as one surface, under the 7-state catalogue
-   (empty|conflict|blocked|offline|provisioning|cap-hit|working). The per-row
+   (empty|roster-conflict|blocked|offline|provisioning|cap-hit|working). The per-row
    status cell reuses .fleet-presence above: the group view paints no chip of
    its own, because "online" has exactly one renderer as it has exactly one
    deriver. One static class per state (__css_check E3). ═══ */
@@ -7656,7 +7656,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-radius: 999px; border: 1px solid var(--border);
 }
 .group-state--empty { color: var(--muted-text); }
-.group-state--conflict { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.group-state--roster-conflict { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
 .group-state--blocked { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
 .group-state--offline { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
 .group-state--provisioning { color: var(--info); background: var(--info-soft); border-color: transparent; }

@@ -33,7 +33,7 @@
       "supports": [],
       "roster": []
     },
-    "conflict": {
+    "roster-conflict": {
       "why": "Two supports resolve to the SAME roster row: sup-1's slug and sup-9's NAME are both \"muscle-1\", so the listener identity collides and neither box's status or capacity is attributable.",
       "supports": [
         { "id": "sup-1", "name": "muscle-1", "slug": "muscle-1", "host": "muscle-1.fleet.internal", "fleet_role": "support", "fleet_parent_id": "main-1", "provision_status": "succeeded" },
