@@ -76,12 +76,28 @@ assert.ok(
   "the watchdog must capture the exact clicked control's aria-pressed state",
 );
 const pressedWitness = new Function("el", pressedWitnessHelper[1]);
-const pressedChangedHelper = layout.match(/_paPressedChanged\(witness\) \{([\s\S]*?)\n      \},/);
+// `root` — spd-w19-press-answer-outside-panes. The witness is computed over the
+// press's OWN surface; the fixtures below pass it undefined, which falls back to
+// `this.el` and is exactly the scope this harness measured before.
+const pressedChangedHelper = layout.match(
+  /_paPressedChanged\(witness, root\) \{([\s\S]*?)\n      \},/,
+);
 assert.ok(
   pressedChangedHelper,
   "the watchdog must compare only the clicked control's aria-pressed state",
 );
-const pressedChanged = new Function("witness", pressedChangedHelper[1]);
+const pressedChanged = new Function("witness", "root", pressedChangedHelper[1]);
+
+// THE CHROME SCOPE. `_paOnPress` now asks which surface a press landed on, so
+// the handler cannot be exercised at all without it — extracted from the layout
+// rather than restated, so a change to the real resolver reaches this harness.
+const scopeForHelper = layout.match(/_paScopeFor\(el\) \{([\s\S]*?)\n      \},/);
+assert.ok(scopeForHelper, "the press answer must resolve the surface a press landed on");
+const scopeFor = new Function("el", scopeForHelper[1]);
+
+const chromeAnchorHelper = layout.match(/_paOnChromeAnchor\(ev, t\) \{([\s\S]*?)\n      \},/);
+assert.ok(chromeAnchorHelper, "the tab strip is plain anchors; it needs a navigation shape");
+const chromeAnchor = new Function("ev", "t", chromeAnchorHelper[1]);
 const settleHelper = layout.match(/_paSettleWord\(p\) \{([\s\S]*?)\n      \},/);
 assert.ok(settleHelper, "the watchdog settle classifier must remain present");
 const settleWord = new Function("p", settleHelper[1]);
@@ -90,6 +106,7 @@ const hook = {
   _paCurrentSig: () => "same-current",
   _paPressedWitness: pressedWitness,
   _paPressedChanged: pressedChanged,
+  _paScopeFor: scopeFor,
 };
 const betaMode = document.querySelector('[data-test-id="editor-mode-beta"]');
 const betaPressed = hook._paPressedWitness(betaMode);
@@ -200,7 +217,7 @@ assert.ok(
 // flips the stable Beta button only a little later. That transition must settle as
 // selected instead of emitting a premature lost-press warning.
 const transitionDom = new JSDOM(`
-  <main id="transition-panes">
+  <main id="studio-panes">
     <div class="editor-mode-toggle" role="group" aria-label="Editor mode" data-test-id="editor-mode-toggle">
       <button type="button" class="btn btn-sm btn-primary" phx-click="editor-set-mode" phx-value-mode="classic" aria-pressed="" data-test-id="editor-mode-classic">Classic</button>
       <button type="button" class="btn btn-sm btn-ghost" phx-click="editor-set-mode" phx-value-mode="beta" data-test-id="editor-mode-beta">Beta</button>
@@ -213,7 +230,7 @@ const transitionMessages = [];
 const onPressBody = onPress.slice(onPress.indexOf("{") + 1, onPress.lastIndexOf("\n      },"));
 const runOnPress = new Function("ev", onPressBody);
 const transitionHook = {
-  el: transitionDocument.getElementById("transition-panes"),
+  el: transitionDocument.getElementById("studio-panes"),
   _PA_PROBE: 16,
   _PA_POLL: 20,
   _PA_CEILING: 500,
@@ -229,6 +246,8 @@ const transitionHook = {
   _paPressedWitness: pressedWitness,
   _paPressedChanged: pressedChanged,
   _paNativeDisclosureOnly: nativeDisclosureOnly,
+  _paScopeFor: scopeFor,
+  _paOnChromeAnchor: chromeAnchor,
   _paSettleWord: settleWord,
   _paSay(text) {
     transitionMessages.push(text);
@@ -261,6 +280,13 @@ globalThis.document = transitionDocument;
 globalThis.location = transitionDom.window.location;
 try {
   const beta = transitionDocument.querySelector('[data-test-id="editor-mode-beta"]');
+  // PRECONDITION, not an afterthought: `_paOnPress` drops any press whose
+  // surface does not resolve, so without this the whole transition leg below
+  // would pass by never arming at all.
+  assert.ok(
+    transitionHook._paScopeFor(beta),
+    "the fixture control must sit on a surface the press answer covers, or every assertion below is vacuous",
+  );
   runOnPress.call(transitionHook, { target: beta });
   transitionDom.window.setTimeout(() => {
     transitionDocument.querySelector('[data-test-id="editor-mode-toggle"]').outerHTML = `
@@ -295,5 +321,90 @@ try {
   transitionDom.window.close();
 }
 
+// ── THE CHROME SURFACES (spd-w19-press-answer-outside-panes) ────────────────
+// The studio-tab strip carries NO phx-click: every `.studio-tab` is a plain
+// `<a href>`, so `_paOnPress` finds no binding and hands the press to the
+// navigation shape. Measured on the deployed desk, the shipped hook left the
+// region empty on exactly this press.
+const chromeDom = new JSDOM(`
+  <div class="studio-bar">
+    <div class="studio-bar-tabs">
+      <a id="tab-here" href="/w/default/studio" aria-current="page" aria-label="Structure"></a>
+      <a id="tab-away" href="/w/default/studio/media" aria-label="Media"></a>
+      <a id="tab-blank" href="/elsewhere" target="_blank" aria-label="Elsewhere"></a>
+    </div>
+    <button id="bar-action" phx-click="shares-open" aria-label="Network shares"></button>
+  </div>
+  <main id="studio-panes"><button id="row" phx-click="select" aria-label="Row"></button></main>
+  <div id="outside"><a id="stray" href="/somewhere" aria-label="Stray"></a></div>
+  <p id="bp-press-answer"></p>
+`, { pretendToBeVisual: true, url: "http://localhost/w/default/studio" });
+const chromeDocument = chromeDom.window.document;
+const said = [];
+const chromeHook = {
+  el: chromeDocument.getElementById("studio-panes"),
+  _PA_FADE: 500,
+  _paPending: null,
+  _paPoll: 0, _paProbe: 0, _paCeil: 0, _paFadeT: 0,
+  _paScopeFor: scopeFor,
+  _paOnChromeAnchor: chromeAnchor,
+  _paName(el) { return el.getAttribute("aria-label") || null; },
+  _paSay(text) { said.push(text); },
+  _paRelease(text) { this._paPending = null; this._paSay(text || ""); },
+};
+const priorChromeWindow = globalThis.window;
+const priorChromeDocument = globalThis.document;
+const priorChromeLocation = globalThis.location;
+globalThis.window = chromeDom.window;
+globalThis.document = chromeDocument;
+globalThis.location = chromeDom.window.location;
+try {
+  const press = (id) => {
+    said.length = 0;
+    const t = chromeDocument.getElementById(id);
+    chromeHook._paOnChromeAnchor.call(chromeHook, { defaultPrevented: false, target: t }, t);
+    return said.slice();
+  };
+
+  // THE SCOPE, both directions — the claim is symmetric, so both arms run.
+  assert.ok(chromeHook._paScopeFor(chromeDocument.getElementById("bar-action")),
+    "a top-bar control must resolve to the chrome surface");
+  assert.ok(chromeHook._paScopeFor(chromeDocument.getElementById("tab-away")),
+    "a studio-tab strip control must resolve to the chrome surface");
+  assert.ok(chromeHook._paScopeFor(chromeDocument.getElementById("row")),
+    "a pane row must still resolve, exactly as before");
+  assert.equal(chromeHook._paScopeFor(chromeDocument.getElementById("stray")), null,
+    "a surface this hook does not answer for must resolve to null and be left alone");
+
+  assert.deepEqual(press("tab-away"), ["Opening “Media”…"],
+    "a tab-strip press must say a named state, not the nothing the shipped build says");
+
+  // THE HONESTY RULE. The active tab's href IS this page: it answers and
+  // changes nothing, so it gets the neutral clear and never an "Opening".
+  assert.deepEqual(press("tab-here"), ["Done."],
+    "the active tab answers and changes nothing — naming it Opening would be a new lie");
+
+  // CONTROL — a check that cannot say no is not a check.
+  assert.notDeepEqual(press("tab-here"), press("tab-away"),
+    "the neutral clear and the named opening must be distinguishable, or neither assertion above measures anything");
+
+  assert.deepEqual(press("tab-blank"), [],
+    "a new-tab anchor changes nothing on THIS page and must not be announced");
+  assert.deepEqual(press("stray"), [],
+    "an anchor outside both surfaces must stay silent");
+
+  said.length = 0;
+  const away = chromeDocument.getElementById("tab-away");
+  chromeHook._paOnChromeAnchor.call(chromeHook, { defaultPrevented: true, target: away }, away);
+  assert.deepEqual(said, [],
+    "a press something else already claimed must not be announced as a navigation");
+} finally {
+  globalThis.window = priorChromeWindow;
+  globalThis.document = priorChromeDocument;
+  if (priorChromeLocation === undefined) delete globalThis.location;
+  else globalThis.location = priorChromeLocation;
+  chromeDom.window.close();
+}
+
 dom.window.close();
-console.log("press answer watchdog: native disclosure and fast mode-reply scenarios passed");
+console.log("press answer watchdog: native disclosure, fast mode-reply, and chrome-surface scenarios passed");
