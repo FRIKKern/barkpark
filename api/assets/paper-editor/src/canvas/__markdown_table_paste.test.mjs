@@ -1,9 +1,7 @@
 // Aligned GFM must survive production paste and native history.
-// __ime_composition.test.mjs — an open IME composition holds the ops debounce (Barkdown row 15).
-// ProseMirror reads the IME's candidate text into the doc while the composition is open; the canvas
-// must not emit that half-composed run as a patch. With `compositionstart` seen on the editable, a
-// change waits past the debounce; `compositionend` releases exactly one batch carrying the full run.
-// Run: node src/canvas/__ime_composition.test.mjs   (or: npm test)
+// Check parser alignment and inline content, source round-tripping, and mounted canvas paste.
+// Acknowledged paste, native Undo, and redo must retain the exact aligned table.
+// Run: node src/canvas/__markdown_table_paste.test.mjs   (or: npm test)
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
