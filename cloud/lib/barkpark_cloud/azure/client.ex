@@ -174,14 +174,22 @@ defmodule BarkparkCloud.Azure.RealClient do
   that would hit the wire returns `{:error, :http_client_not_configured}` — it
   can NEVER silently call Azure.
 
-  **NO ENVIRONMENT WIRES THAT KEY TODAY.** `config :barkpark_cloud,
-  BarkparkCloud.Azure, http_client: …` appears in none of `cloud/config/*.exs`;
-  the only `BarkparkCloud.Azure.*` transport configured anywhere is the
-  credential-free `BarkparkCloud.Azure.Pricing` one (config.exs, runtime.exs),
-  which is the control proving that grep sees what is there. So `verify/1` and
-  `list_catalog/1` fail closed in EVERY environment, prod included — which is
+  **PROD WIRES THAT KEY; NOTHING ELSE DOES** (task-2772b2cdd5001bfc).
+  `cloud/config/runtime.exs` sets `config :barkpark_cloud, BarkparkCloud.Azure,
+  http_client: &BarkparkCloud.Billing.HttpClient.request/1` inside the
+  `config_env() == :prod` block — the same verified-TLS `:httpc` transport the
+  billing/oauth/github/pricing seams use. `cloud/config/config.exs` keeps the
+  key at `nil` for dev/test, so outside prod this client still fails closed.
+  That is safe there because dev AND test select `Azure.FakeClient` at the
+  module seam (`:azure_http_client`) and never reach this key at all.
+  `cloud/test/barkpark_cloud/config/azure_transport_wiring_test.exs` evaluates
+  the real `runtime.exs` prod block and reds if the key goes missing again.
+
+  Before that wiring, the key was set in NO environment, so `verify/1` and
+  `list_catalog/1` failed closed in prod too and
+  `GET /v1/providers/azure/overview` and `…/catalog` were a flat 502 — which is
   why charter D898 declined to price a fifth ARM call onto a path whose first
-  three cannot fire. The wiring is its own row (`task-2772b2cdd5001bfc`), not a line in this doc.
+  three could not fire.
   """
   @behaviour BarkparkCloud.Azure.Client
 
