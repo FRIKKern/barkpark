@@ -65,4 +65,21 @@ for(const mutation of ['split','reorder','delete']){
   console.log('PASS in-flight '+mutation+' preserves posted identities and rejects stale positional stamping');
  }finally{canvas.remove();}
 }
+{
+ const canvas=document.createElement('bp-paper-canvas');canvas.blocks=structuredClone(seed);canvas.acknowledgedSaves=true;document.body.append(canvas);
+ try{
+  const e=canvas._editor;e.commands.setTextSelection(2);assert.equal(e.commands.toggleTaskList(),true);canvas.flushPendingChanges();
+  const first=canvas._inflightOps;assert.ok(first);const listId=first.afterBlocks[0].id;
+  assert.equal(e.state.doc.child(0).type.name,'taskList');
+  assert.equal(e.state.doc.child(0).attrs.bpId,listId,'task list schema must retain its materialized identity');
+  canvas.acknowledgeOps(first.seq,true);assert.deepEqual(canvas.recoverySnapshot().blocks,canvas.blocks);
+  e.commands.insertContent('typed');canvas.flushPendingChanges();const second=canvas._inflightOps;assert.ok(second);
+  assert.equal(second.afterBlocks[0].id,listId);assert.ok(second.ops.every(op=>op.op!=='remove-block'&&op.op!=='insert-after'),'checklist edit must patch its existing identity');
+  canvas.acknowledgeOps(second.seq,true);const saved=structuredClone(canvas.blocks);
+  canvas.applyServerBlocks(saved);assert.deepEqual(canvas.recoverySnapshot().blocks,saved);assert.deepEqual(saved[1],seed[1]);
+  const reopened=document.createElement('bp-paper-canvas');reopened.blocks=saved;document.body.append(reopened);
+  try{assert.deepEqual(reopened.recoverySnapshot().blocks,saved,'reloaded checklist retains its stored ID');}finally{reopened.remove();}
+  console.log('PASS checklist conversion, incremental acknowledgement and reload retain exact identity');
+ }finally{canvas.remove();}
+}
 window.close();
