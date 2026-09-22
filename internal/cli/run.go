@@ -892,6 +892,10 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// only on a page that actually carries a live claim, never on stdout — so
 	// `-o json` stays byte-identical (tasks_claim_path.go).
 	emitTaskClaimPathAdvisory(out, cmd, status, out.machineOut(), respBody)
+	// task-46e82dc40c385ed2: the do-not-build half of the same page. Unlike the
+	// claim advisory above it fires in BOTH human and machine mode — its reader
+	// is a lead skimming the table, not a jq script — and writes only to stderr.
+	emitTaskDispatchAdvisory(out, cmd, status, respBody)
 
 	var hinter func() string
 	if typed := taskGetTypedID(cmd, tail); typed != "" {
