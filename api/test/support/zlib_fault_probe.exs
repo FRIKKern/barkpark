@@ -35,7 +35,23 @@
 
 cfg = request_path |> File.read!() |> :erlang.binary_to_term()
 
-:persistent_term.put(:zlib_fault_probe_cfg, cfg)
+# THE PROCESS DICTIONARY, NOT `:persistent_term`. The stub below needs its
+# config and its call counter somewhere Erlang code can reach without an
+# argument, and the first draft of this file reached for `:persistent_term` —
+# which is VM-GLOBAL, so the value outlives the test, the module and the file,
+# and the next module the scheduler happens to run inherits it. That is the
+# ghost-failure-in-a-file-nobody-touched class, which is the very disease this
+# probe exists to diagnose; `scripts/test-env-leak-gate.sh` was right to red it.
+#
+# It is NOT allowlisted on the grounds that this runs in its own VM. That
+# argument is true today and silently false the day anyone calls this file from
+# inside the test node, and a waiver is permanent while the reasoning that
+# justified it is not. The process dictionary needs no such argument: it is
+# scoped to ONE process by construction, and this whole script — the `put`
+# below, `stage/4`, and every `:zlib` callback `stage/4` makes — runs in that
+# single process, asserted after the run rather than assumed.
+Process.put(:zlib_fault_probe_cfg, cfg)
+Process.put(:zlib_fault_probe_owner, self())
 
 # The stub. It does NOT inflate: it hands back a slice of the plaintext the
 # caller already computed, so the bytes reaching the tar state machine are
@@ -48,14 +64,20 @@ stub = ~S"""
 open() -> zlib_fault_probe_stream.
 
 inflateInit(_Z, _WindowBits) ->
-    persistent_term:put(zlib_fault_probe_calls, 0),
-    persistent_term:put(zlib_fault_probe_delivered, 0),
+    put(zlib_fault_probe_calls, 0),
+    put(zlib_fault_probe_delivered, 0),
     ok.
 
 safeInflate(_Z, _Data) ->
-    N = persistent_term:get(zlib_fault_probe_calls) + 1,
-    persistent_term:put(zlib_fault_probe_calls, N),
-    Cfg = persistent_term:get(zlib_fault_probe_cfg),
+    %% `get/1` answering `undefined` here would mean the caller is NOT the
+    %% process that wrote the config — the one assumption behind using the
+    %% process dictionary. Fail by name rather than by badmatch three lines on.
+    Cfg = case get(zlib_fault_probe_cfg) of
+              undefined -> erlang:error(zlib_fault_probe_config_not_in_this_process);
+              C -> C
+          end,
+    N = get(zlib_fault_probe_calls) + 1,
+    put(zlib_fault_probe_calls, N),
     #{plain := Plain, chunk := Chunk, fire_at := FireAt, error := Error} = Cfg,
     case N =:= FireAt of
         true -> erlang:error(Error);
@@ -69,7 +91,7 @@ safeInflate(_Z, _Data) ->
         false ->
             Take = min(Chunk, Size - Offset),
             Out = binary:part(Plain, Offset, Take),
-            persistent_term:put(zlib_fault_probe_delivered, Offset + Take),
+            put(zlib_fault_probe_delivered, Offset + Take),
             case Offset + Take >= Size of
                 true -> {finished, [Out]};
                 false -> {continue, [Out]}
@@ -107,7 +129,20 @@ File.write!(
   reply_path,
   :erlang.term_to_binary(%{
     outcome: outcome,
-    calls: :persistent_term.get(:zlib_fault_probe_calls, 0),
-    delivered: :persistent_term.get(:zlib_fault_probe_delivered, 0)
+    calls: Process.get(:zlib_fault_probe_calls, 0),
+    delivered: Process.get(:zlib_fault_probe_delivered, 0)
   })
 )
+
+# The assumption, ASSERTED rather than assumed: the counters the reply just
+# reported were written into THIS process's dictionary by the stub. If the
+# `:zlib` callbacks had run anywhere else these would both read 0, and a
+# fault-injection probe that reports zeros must refuse, not answer.
+owner = Process.get(:zlib_fault_probe_owner)
+
+unless owner == self() and Process.get(:zlib_fault_probe_calls, 0) > 0 do
+  raise "zlib_fault_probe: the stub's counters are not in the writing process " <>
+          "(owner #{inspect(owner)}, self #{inspect(self())}, " <>
+          "calls #{inspect(Process.get(:zlib_fault_probe_calls))}) — the " <>
+          "process-dictionary assumption this file rests on no longer holds"
+end
