@@ -2137,18 +2137,25 @@ class BpPaperCanvas extends HTMLElement {
     this.appendChild(notice);
     const viewport = this.ownerDocument.defaultView;
     const bounds = this.getBoundingClientRect();
-    const left = Math.max(8, bounds.left + 8);
-    const right = Math.min(viewport.innerWidth - 8, bounds.right - 8);
-    notice.style.width = `${Math.max(80, Math.min(420, right - left))}px`;
-    notice.style.left = `${left}px`;
+    const availableWidth = Math.max(1, Math.min(bounds.right, viewport.innerWidth) - Math.max(0, bounds.left) - 16);
+    const width = Math.min(420, availableWidth, Math.max(1, viewport.innerWidth - 16));
+    notice.style.width = `${width}px`;
+    notice.style.maxHeight = `${Math.max(1, viewport.innerHeight - 16)}px`;
+    notice.style.left = `${Math.max(8, Math.min(bounds.left + 8, viewport.innerWidth - width - 8))}px`;
+    notice.tabIndex = 0;
     const caret = this._caretRect();
     const height = notice.getBoundingClientRect().height;
     const below = caret.bottom + 8;
-    notice.style.top = `${Math.max(8, below + height <= viewport.innerHeight - 8 ? below : caret.top - height - 8)}px`;
+    const preferred = below + height <= viewport.innerHeight - 8 ? below : caret.top - height - 8;
+    notice.style.top = `${Math.max(8, Math.min(preferred, viewport.innerHeight - height - 8))}px`;
     // A fixed notice does not push the document. Dismiss when its anchor moves
     // or the person resumes work; no timeout can hide the recovery guidance.
     this._pasteNoticeDismiss = (event) => {
-      if (event.type !== "keydown" || event.key === "Escape") this._clearHTMLPasteNotice();
+      if (["pointerdown", "scroll"].includes(event.type) && notice.contains(event.target)) return;
+      if (event.type === "keydown" && event.key !== "Escape") return;
+      const restoreFocus = event.type === "keydown" && event.key === "Escape" && notice.contains(this.ownerDocument.activeElement);
+      this._clearHTMLPasteNotice();
+      if (restoreFocus) this._editor?.commands.focus();
     };
     for (const name of ["pointerdown", "scroll", "keydown"]) this.ownerDocument.addEventListener(name, this._pasteNoticeDismiss, true);
     viewport.addEventListener("resize", this._pasteNoticeDismiss);

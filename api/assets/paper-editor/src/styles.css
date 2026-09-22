@@ -1641,5 +1641,8 @@ bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn
   padding: 10px 12px; border: 1px solid var(--paper-rule, #aaa);
   border-radius: 8px; background: var(--paper-bg, Canvas); color: var(--paper-ink, CanvasText);
   box-shadow: 0 4px 18px #0002; font: 13px/1.45 var(--paper-font-ui, system-ui, sans-serif);
-  white-space: normal; overflow-wrap: anywhere; pointer-events: none;
+  white-space: normal; overflow-wrap: anywhere; overflow: auto; scrollbar-width: none;
 }
+
+[data-bp-paste-notice]::-webkit-scrollbar { display: none; }
+[data-bp-paste-notice]:focus-visible { outline: 2px solid var(--paper-ink-soft, currentColor); outline-offset: 2px; }
