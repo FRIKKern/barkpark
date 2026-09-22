@@ -1586,24 +1586,30 @@
            so — 0.18 read as a panel that mysteriously floats. */
         box-shadow: -16px 0 48px hsl(var(--bp-shadow-hsl) / 0.28);
       }
-      /* The scrim. It is the missing half of "this thing is ON TOP": without
-         it the document underneath still reads as live, editable surface.
-         ABSOLUTE, never fixed — the overlay is anchored to .editor-panel's
-         `position: relative`, so a fixed scrim would dim the whole viewport
-         (sidebar, topbar and neighbouring panes included) instead of the
-         document it covers. It also renders zero times outside this width,
-         because the :has() only matches while the sidebar is overlaid.
-         `pointer-events: none` is deliberate: CSS cannot carry a phx-click,
-         so a click-catching scrim would be a dead zone that swallows edits.
-         Tap-to-dismiss is spd-b12's job, in the .ex half. */
-      .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        z-index: 4;
-        background: hsl(var(--bp-scrim-hsl) / 0.55);
-        pointer-events: none;
-      }
+      /* NO SCRIM — the overlay does NOT dim the document underneath (D127).
+         This block used to generate one here, at 55% black:
+         `.editor-with-preview:has(.bp-doc-sidebar.is-open)::after`, so that
+         an inspector sitting OVER the prose would read as on top. Four
+         later rules then cancelled it one bucket at a time — the b29 guard
+         (below wide, never asked for), D170 (wide, unconditional), D155
+         (narrow/phone, user-opened) and D175/D187 (standard, user-opened) —
+         and between them they covered every shipped bucket x user-opened
+         cell. Measured before removal, with all five rules in place: `none`
+         at 861px AND at 860px in 8 of 8 cells. The generator painted nowhere.
+
+         SO THE RULING IS NOW EXPRESSED BY ABSENCE, not by one unreachable
+         rule propped up by four cancellations. D127's finding is that a 55%
+         wash over live prose is INDETERMINACY — a half-suspended read that is
+         neither a clean mode nor a viable dock — and every bucket has since
+         agreed. A panel that covers the pane says it is on top by being the
+         only thing there; a panel that does not cover it is not on top.
+
+         DO NOT RE-ADD ONE HERE. `scripts/studio-scrim-abolition-check.mjs`
+         reds if any rule in this sheet attaches a generated box to
+         `.editor-with-preview`, in either direction — a new generator and a
+         new `content: none` cancellation are both the shape this family grew
+         out of. `inspector_summoned_destination_test.exs` is the ExUnit half
+         of the same predicate. */
       /* Inspector label/value rows crowd once the panel can sit over
          arbitrary content — let them wrap instead of colliding. */
       .bp-doc-field { flex-wrap: wrap; }
@@ -2325,55 +2331,6 @@
     html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
       display: none;
     }
-    /* The scrim guard. The overlay scrim keys on `:has(.bp-doc-sidebar.is-open)`
-       and is otherwise correct — but `.is-open` is now true for a panel that
-       paints as a strip, so without this the desk would dim the document under
-       an inspector nobody can see. Suppressed, not rewritten: the scrim must
-       still render for a wide-bucket pane narrow enough to overlay, and for
-       any panel the user actually opened, so the condition being subtracted is
-       exactly "below wide AND never asked for". */
-    html:not([data-width-bucket="wide"])
-      .editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after {
-      content: none;
-    }
-    /* …AND THE WIDE SCRIM IS ABOLISHED TOO (charter D170). The guard above
-       carves `wide` out because a wide pane squeezed under 860px was assumed to
-       overlay a document that stays visible beside it — the one state where
-       dimming reads as an honest signal. Wave-11 measured that assumption and
-       it does not hold: the state is REACHABLE BY ARITHMETIC AND UNREACHABLE IN
-       FACT.
-
-       THE PAPER-ROUTING INVARIANT IS WHAT CARRIES IT. A document that has an
-       inspector at all is a paper, and papers route to a fixed two-pane shell —
-       a 44px yielded rail plus a 260px list column — so `.editor-panel` is
-       `vw - 304` at every wide viewport. The narrowest wide viewport is 1280,
-       giving panel = 976; the `@container panel (max-width: 860px)` generator
-       needs 860. Measured on the deployed sheet: 976 at 1280 and 1136 at 1440,
-       both clear of the threshold by more than 100px. The two shapes that could
-       breach 860 do not apply — deeper drills carry no inspector at all, and
-       the 360px `.bp-secondary-pane` that would eat the difference is
-       unreachable from the paper editor. So the wide scrim never painted for a
-       real desk; keeping the carve-out only preserved a rule nobody could
-       reach, over a document nobody could see dimmed.
-
-       WHAT THIS COSTS D153. The `wide` row used to be this sheet's POSITIVE
-       CONTROL — the proof that the scrim generator is live code rather than a
-       rule the suppressions had quietly killed everywhere. It cannot be that
-       any more, and the honest replacement is NOT this rule but the
-       FORCED-CONTAINER CONTROL: force `.editor-panel` to 861px and the computed
-       `::after` content is `none`, force it to 860px and it is `""`, verified at
-       both 1280 and 1440. That control exercises the generator's own threshold
-       instead of asserting a bucket keeps a scrim it never rendered — and it
-       still fails loudly if the generator is ever deleted.
-
-       Unconditional at `wide`, deliberately: `[data-user-opened]` is not
-       qualified here because the arithmetic above is indifferent to it. Both a
-       server-defaulted and a user-summoned inspector sit in the same [44,260]
-       shell, so neither can bring the pane under 860. */
-    html[data-width-bucket="wide"]
-      .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
-      content: none;
-    }
 
     /* ── The summoned destination (charter D155; D113 arithmetic, D127 Part 2) ──
        At `narrow` and `phone` the user-opened inspector stops being a panel
@@ -2392,18 +2349,20 @@
        box dims the prose rather than hiding it, so the reader is left in a
        half-suspended read that is neither a clean mode nor a viable dock. A
        panel that covers the pane completely needs no scrim to say it is on
-       top — it says so by being the only thing there. The scrim is therefore
-       switched OFF for this state (below), not lightened: nowhere does this
-       desk end up with prose at 55% black under a panel.
+       top — it says so by being the only thing there. This state therefore
+       ships with NO scrim rule at all: not a lightened one, and no longer a
+       `content: none` cancelling a generator elsewhere in the sheet, because
+       the generator is gone too. See the NO SCRIM note in the
+       `@container panel (max-width: 860px)` block above.
 
        WHY THIS IS A NEW SELECTOR AND NOT AN EDIT (D91/b29). The bucket-aware
-       default above carries `:not([data-user-opened])` on both its geometry
-       rule and its scrim guard, so neither of them fires for the state below —
-       the panel the user explicitly asked for is exactly what they carve out.
-       This rule is the other half of that carve-out, finally saying what the
-       asked-for panel DOES below `wide`, and `data-user-opened` is already
-       server-stamped from the `sidebar_user_opened` assign (components.ex), so
-       the signal it keys on is in the DOM at first paint.
+       default above carries `:not([data-user-opened])` on its geometry rule,
+       so it does not fire for the state below — the panel the user explicitly
+       asked for is exactly what it carves out. This rule is the other half of
+       that carve-out, finally saying what the asked-for panel DOES below
+       `wide`, and `data-user-opened` is already server-stamped from the
+       `sidebar_user_opened` assign (components.ex), so the signal it keys on
+       is in the DOM at first paint.
 
        WHY IT DECLARES ITS OWN GEOMETRY rather than leaning on the
        `@container panel (max-width: 860px)` overlay block above: that block is
@@ -2435,54 +2394,6 @@
          shadow onto, and nothing sits beside the border. */
       border-left: 0;
       box-shadow: none;
-    }
-    /* Dimming abolished for the summoned state. The overlay scrim is a
-       `::after` on `.editor-with-preview` keyed on `:has(.bp-doc-sidebar.is-open)`,
-       and `.is-open` is true here — so without this the desk would dim a
-       document that is already completely covered, which is both pointless and
-       the half-suspended read D127 ruled a defect. `content: none` is the same
-       suppression idiom as the b29 scrim guard directly above (a `::after` with
-       no `content` generates no box at all — this is zero rendered scrims, not
-       a transparent one). Specificity (0,5,1) over the container rule's (0,3,1)
-       and later in source order, so it wins on both counts. */
-    html[data-width-bucket="narrow"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after,
-    html[data-width-bucket="phone"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
-      content: none;
-    }
-    /* THE STANDARD BUCKET IS RULED, NOT LEFT TO ARITHMETIC (charter D175/D187;
-       D127 harden). A clean standard desk never brings the pane under the
-       860px generator — panel = vw − 44, which crosses 860 only at
-       viewport ≤ 904, inside `narrow` — but the COMPOUND state is real and
-       was executed on the deployed build: a 360px `.bp-secondary-pane` opened
-       on a task survives navigation into a paper (`Scope.select/2` is
-       push_patch, so `secondary_doc` rides along), and at standard/1024 the
-       pane is 620 = 1024 − 44 − 360 exactly. The generator matched and
-       PAINTED — mean luminance over the reading column 240.493 → 175.104
-       (Δ 65.389) — the exact half-suspended read D127 ruled a defect, with
-       the inspector genuinely docked beside the prose it dims. No suppressor
-       covered standard + `[data-user-opened]`: the b29 guard excludes
-       user-opened, the narrow/phone rule above is bucket-scoped away, and
-       D170's is wide-only. This rule closes that gap.
-
-       BOTH HALVES SHIP, DELIBERATELY (D175/D199). The behavioural half clears
-       `secondary_doc` on primary-document navigation; this suppressor is the
-       CSS half, and neither stands down because the other exists. Resting an
-       abolition on a routing invariant alone is precisely the mistake D170
-       already made once: its supporting arithmetic — panel = vw − 304 at
-       every wide viewport — is FALSIFIED the moment a 360px secondary pane
-       is open. Wide stays safe today only because D170's kill switch above
-       is UNCONDITIONAL — specificity (0,4,2) over the generator's (0,3,1) —
-       not because the geometry holds. An invariant can break; the
-       suppressor cannot.
-
-       Same idiom as the narrow/phone sibling directly above: `content: none`
-       on the `::after` generates no box at all — zero rendered scrims, not a
-       transparent one. Specificity (0,5,1) over the generator's (0,3,1) and
-       later in source order, so it wins on both counts; and it sits OUTSIDE
-       the 860px @container on purpose, unbounded by pane width, so no future
-       pane composition can slip back under the threshold and re-dim. */
-    html[data-width-bucket="standard"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
-      content: none;
     }
 
     /* ── THE STANDARD-BUCKET DOCK IS 260px, AND WIDE IS NOT TOUCHED ──────────
