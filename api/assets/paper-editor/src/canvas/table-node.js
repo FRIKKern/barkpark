@@ -773,7 +773,7 @@ export const BpTableCell = Node.create({
     return tableCellAttributes();
   },
   parseHTML() {
-    return [{ tag: "td" }, { tag: "th[scope='row']" }];
+    return [{ tag: "td", preserveWhitespace: "full" }, { tag: "th[scope='row']", preserveWhitespace: "full" }];
   },
   renderHTML({ node, HTMLAttributes }) {
     // A row header (the table's header column, plan #26) is a <th scope="row"> with the reader's
@@ -792,7 +792,7 @@ export const BpTableHeaderCell = Node.create({
     return tableCellAttributes();
   },
   parseHTML() {
-    return [{ tag: "th:not([scope='row'])" }];
+    return [{ tag: "th:not([scope='row'])", preserveWhitespace: "full" }];
   },
   renderHTML({ HTMLAttributes }) {
     return ["th", mergeAttributes(HTMLAttributes, { class: "bp-table__th" }), 0];

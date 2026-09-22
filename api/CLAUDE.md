@@ -32,6 +32,8 @@ Elixir/Phoenix backend: CRUD, real-time, plugins, Studio. Dev: `mix phx.server` 
 
 **Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` for legacy producers — externally gated, do NOT drop. Ingest auth: `:ingest_token` from `BARKPARK_INGEST_TOKEN` (legacy `PAPERFLOW_INGEST_TOKEN`). See `docs/decisions/deferred.md`.
 
+HTML table clipboard handling normalizes ordinary cell paragraphs/BRs to PortableDoc newlines before the schema parses them. Nested structures and merged headers keep the clipboard intact and show plain-text paste guidance. Canvas regression: `__html_table_paste.test.mjs`.
+
 ## Sheets
 
 `type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot — Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant). Core is `Barkpark.Plugins.Sheets.{Core,Engine,Session,Structure}` + `SheetsReaderLive` / `Studio.SheetGrid`; the plugin (`plugins/sheets.ex`) declares the `sheet` schema, a before_save gate, the `:ingest` import/export/ops API and the `/sheets/:slug` reader; embeds refresh via `content/sheets.ex`.

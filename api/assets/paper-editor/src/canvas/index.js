@@ -54,7 +54,8 @@ import TaskItem from "@tiptap/extension-task-item";
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
 // PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
 import { TextSelection, NodeSelection, Plugin } from "@tiptap/pm/state";
-import { Fragment, Slice, Mark } from "@tiptap/pm/model";
+import { Fragment, Slice, Mark, DOMParser as PMDOMParser } from "@tiptap/pm/model";
+import { prepareHTMLTablePaste } from "./html-table-paste.js";
 import { Extension } from "@tiptap/core";
 
 // PURE S0 projector + op-mapper — used verbatim (do NOT reinvent the diff).
@@ -1965,6 +1966,7 @@ class BpPaperCanvas extends HTMLElement {
 
   _onPaste(view, _event, slice) {
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteImageFiles(view, _event)) return true;
+    if (this._editable && !isFigureSingletonCanvas(this) && this._pasteHTMLTables(view, _event)) return true;
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteMarkdown(view, _event)) return true;
     if (!this._editable || !isFigureSingletonCanvas(this)) return false;
     const plan = figurePastePlan(slice);
@@ -2080,6 +2082,23 @@ class BpPaperCanvas extends HTMLElement {
 
   get mediaUploader() {
     return this._mediaUploader;
+  }
+
+  _pasteHTMLTables(view, event) {
+    // Shift-paste deliberately chooses the native plain-text path.
+    if ((view.input?.shiftKey && view.input.lastKeyCode !== 45) || view.state.selection.$from.parent.type.spec.code) return false;
+    const html = event?.clipboardData?.getData("text/html");
+    const plan = prepareHTMLTablePaste(html);
+    if (!plan) return false;
+    const insideTable = [...Array(view.state.selection.$from.depth).keys()]
+      .some((depth) => view.state.selection.$from.node(depth + 1).type.name === "bpTable");
+    if (plan.blocked || insideTable) {
+      this._showFigureConstraint(`${plan.blocked || "A table cannot be nested inside another table."} Nothing was pasted. Paste as plain text with Ctrl+Shift+V, or copy the cell text instead.`);
+      return true;
+    }
+    const parsed = PMDOMParser.fromSchema(view.state.schema).parse(plan.dom);
+    view.dispatch(view.state.tr.replaceSelection(new Slice(parsed.content, 0, 0)).scrollIntoView());
+    return true;
   }
 
   _pasteMarkdown(view, event) {
