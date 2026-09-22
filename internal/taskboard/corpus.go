@@ -117,6 +117,18 @@ type corpusCache struct {
 	// eventTail is the rolling union of every brief prime's `recent_events`,
 	// newest first, capped at primeEventTailDepth. Empty on a non-live cache.
 	eventTail []Event
+	// persistDir/persistKey address the ON-DISK base (corpus_persist.go) — the
+	// bp config dir and this board's scope key, the same pair cache.go's
+	// first-paint snapshot uses. Empty on every one-shot verb's cache, which is
+	// what keeps `bp task next`/`lint`/`frontier`/`cmux dispatch` byte-identical
+	// to before: they neither read nor write a base.
+	persistDir string
+	persistKey string
+	// diskRead records that the ONE disk read this cache is allowed has already
+	// happened. A miss must not be retried on every walk (a missing file would
+	// then cost a stat per re-list forever), and a hit must never re-seed over a
+	// base the live walks have since moved forward.
+	diskRead bool
 }
 
 // corpusFlight is one in-progress corpus read. Every caller that arrives while
@@ -210,10 +222,57 @@ func (cc *corpusCache) snapshot() corpusBase {
 	return cc.base
 }
 
+// baseForWalk is snapshot() plus the ONE-TIME disk seed: on a live board's very
+// first walk the in-memory base is empty, so the persisted base (written by the
+// last exhaustive walk of a previous process) is read and adopted — which is
+// what turns a launch's first re-list from the ~105 MB exhaustive walk into the
+// incremental head walk.
+//
+// THREE FENCES, all of them load-bearing:
+//
+//   - live only. A one-shot verb's bare cache never touches the disk, so every
+//     `bp task next`/`lint`/`frontier`/`cmux dispatch` walk stays byte-identical.
+//   - once only (diskRead). A miss must not re-stat per re-list; a hit must not
+//     overwrite a base the live walks have already advanced past.
+//   - never over an existing base. The read is attempted only while the
+//     in-memory base is still empty.
+//
+// It deliberately does NOT relax incrementalUsable: the loaded base carries the
+// lastFull of the walk that produced it, so a base older than fullResyncEvery is
+// refused by the SAME gate an in-memory one would be, and the walk falls back to
+// the honest exhaustive read.
+func (cc *corpusCache) baseForWalk() corpusBase {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	if cc.live && !cc.diskRead && cc.base.watermark.IsZero() {
+		cc.diskRead = true
+		if b, ok := loadPersistedCorpus(cc.persistDir, cc.persistKey); ok {
+			cc.base = b
+		}
+	}
+	return cc.base
+}
+
 func (cc *corpusCache) store(b corpusBase) {
 	cc.mu.Lock()
 	cc.base = b
 	cc.mu.Unlock()
+}
+
+// persist writes b as the next launch's base, on a live board only. It also
+// marks the disk read as DONE: a cache that has already produced its own
+// exhaustive base has nothing to learn from an older file, and skipping the
+// read keeps the seed a launch-time event rather than something that could fire
+// mid-session after a base was cleared.
+func (cc *corpusCache) persist(b corpusBase) {
+	cc.mu.Lock()
+	live, dir, key := cc.live, cc.persistDir, cc.persistKey
+	cc.diskRead = true
+	cc.mu.Unlock()
+	if !live {
+		return
+	}
+	savePersistedCorpus(dir, key, b)
 }
 
 // watermarkOf is the greatest non-zero UpdatedAt across tasks. A corpus in
@@ -338,7 +397,7 @@ func copyDetails(in DetailIndex) DetailIndex {
 // honestly answer, the exhaustive cursor when it cannot. It is what shipped as
 // fetchTaskCorpus before the single-flight wrapper above.
 func fetchTaskCorpusWalk(ctx context.Context, c *apiclient.Client, cc *corpusCache, now time.Time) ([]Task, DetailIndex, bool, error) {
-	base := cc.snapshot()
+	base := cc.baseForWalk()
 	if incrementalUsable(base, now) {
 		tasks, details, ok, err := fetchTaskHead(ctx, c, base)
 		if err != nil {
@@ -362,13 +421,21 @@ func fetchTaskCorpusWalk(ctx context.Context, c *apiclient.Client, cc *corpusCac
 		return nil, nil, false, err
 	}
 	if exhaustive {
-		cc.store(corpusBase{
+		fresh := corpusBase{
 			tasks:      tasks,
 			details:    details,
 			watermark:  watermarkOf(tasks),
 			exhaustive: true,
 			lastFull:   now,
-		})
+		}
+		cc.store(fresh)
+		// Persist ONLY here — the full-walk arm. The incremental arm above stores
+		// a base too, but it runs every few seconds on a busy ledger, and
+		// re-marshalling the whole corpus to disk at that cadence is the write
+		// amplification this file exists to avoid paying on the WIRE. The full
+		// walk runs at most once per fullResyncEvery plus once at launch, and its
+		// output is exactly the state a load is allowed to adopt.
+		cc.persist(fresh)
 	}
 	// A short walk must not become a base — the next incremental walk would
 	// stack a prefix on top of a hole and call the result complete — so the
