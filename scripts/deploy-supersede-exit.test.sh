@@ -255,15 +255,68 @@ else
   bad "B6 report-deploy-failure does not need both deploy jobs: $RDF_NEEDS"
 fi
 
-# ── B7 (criterion 3): the convergence (deploy_stalled) reader is gated on a
-#    deploy leg SUCCEEDING; a superseded run skips both, so it never reaches
-#    convergence or report-convergence-failure.
+# ── B7 (criterion 3): a SUPERSEDED run never reaches convergence or
+#    report-convergence-failure.
+#
+# WHAT THIS ARM PROTECTS, restated because its encoding changed (#18010 ->
+# task-c5955c660c7b9e55). The subject has always been SUPERSESSION: a superseded
+# run exits at START and skips BOTH deploy legs (B3a/B3b above), and such a run
+# must not reach this job and must not file a convergence issue.
+#
+# WHY THE OLD ENCODING WAS REPLACED. It asserted `needs.<leg>.result ==
+# 'success'` — a PROXY for "this run was not superseded", and a proxy that
+# over-reached. "No leg succeeded" is also true when both legs FAILED, and that
+# is not supersession; it is the one moment the operator most needs a liveness
+# check to speak. Under the old `if:` the convergence job SKIPPED itself in
+# exactly that case, so a stale production reported nothing at all. An
+# enumeration of the shapes that should not run had quietly become a rule that
+# silenced a real failure.
+#
+# THE RULE NOW ASSERTED, which is strictly narrower and covers the same case:
+# convergence must not run when BOTH legs are 'skipped'. Both-skipped means the
+# run attempted no deploy, so nothing can be concealed by staying out — which is
+# what distinguishes it from a leg that ran and failed.
 CONV_IF="$(fact CONV_IF)"
-if [[ "$CONV_IF" == *"needs.control-plane.result == 'success'"* \
-   || "$CONV_IF" == *"needs.instance.result == 'success'"* ]]; then
-  ok "B7 convergence is gated on a deploy leg SUCCEEDING — a superseded run (both legs skipped) does not reach it"
+# MATCH THE WHOLE NEGATED CONJUNCTION, not its parts. B7b2 below is what forced
+# this: a substring test for the two legs plus a `!(` also accepts
+# `!(cp skipped || instance skipped)`, which excludes every ORDINARY single-host
+# run too. The operator between the legs IS the rule, so it must be in the
+# pattern. Both leg orderings are accepted; the extractor already collapsed
+# whitespace.
+conv_excludes_superseded() { # $1 = the if: expression
+  local cp="needs.control-plane.result == 'skipped'"
+  local inst="needs.instance.result == 'skipped'"
+  [[ "$1" == *"!($cp && $inst)"* || "$1" == *"!($inst && $cp)"* ]]
+}
+if conv_excludes_superseded "$CONV_IF"; then
+  ok "B7 convergence excludes the superseded shape (BOTH legs skipped) — a superseded run does not reach it"
 else
-  bad "B7 convergence no longer requires a successful deploy leg: '$CONV_IF'"
+  bad "B7 convergence no longer excludes a superseded run (both legs skipped): '$CONV_IF'"
+fi
+
+# B7b — the arm must still REFUSE something. A guard rewritten to pass is a
+# guard the next person inherits as absent, so mutate the expression two ways
+# and require BOTH to be rejected. The plant is asserted (each mutant must
+# actually DIFFER from the real expression) before its verdict is read.
+b7_mut_bare="always() && github.ref == 'refs/heads/main'"
+b7_mut_or="always() && github.ref == 'refs/heads/main' && !(needs.control-plane.result == 'skipped' || needs.instance.result == 'skipped')"
+if [ "$b7_mut_bare" = "$CONV_IF" ] || [ "$b7_mut_or" = "$CONV_IF" ]; then
+  bad "B7b a mutant is identical to the shipped expression — B7 cannot be shown to discriminate"
+else
+  ok "B7b PLANT VERIFIED: both mutants differ from the shipped expression"
+  if conv_excludes_superseded "$b7_mut_bare"; then
+    bad "B7b the unconditional-always mutant PASSES B7 — a superseded run would reach convergence"
+  else
+    ok "B7b B7 rejects the unconditional-always mutant (a superseded run would reach convergence)"
+  fi
+  # The || mutant is the subtler one: it also excludes an ORDINARY single-host
+  # run, where one leg is legitimately skipped by the path filter and the other
+  # really did deploy. That would re-silence the check on most real runs.
+  if conv_excludes_superseded "$b7_mut_or"; then
+    bad "B7b2 the '||' mutant PASSES B7 — a single-host run would stop being checked"
+  else
+    ok "B7b2 B7 rejects the '||' mutant (it would silence ordinary single-host runs)"
+  fi
 fi
 
 # ── B8 (criterion 5 / D12): exit at START only — no cancel, cancel-in-progress

@@ -2017,14 +2017,27 @@ jobs:
     # green again and the anchor moves forward with it.
     name: Production serves the newest deploy-relevant main commit
     needs: [changes, control-plane, instance]
-    # NO LEG-SUCCESS PRECONDITION (task-c5955c660c7b9e55). This used to read
-    # `(control-plane success || instance success)`, which SKIPPED the whole
-    # check when both deploy legs failed — the exact moment an operator most
-    # needs it to speak. A skipped liveness check reads as "not applicable" and
-    # vanishes from the surface. It runs on every main run now and says CANNOT
-    # READ when it cannot look.
+    # THE PRECONDITION IS A RULE NOW, NOT AN ENUMERATION (task-c5955c660c7b9e55).
+    #
+    # It used to read `(control-plane success || instance success)`. That was a
+    # PROXY for the thing #18010 actually wanted excluded — a SUPERSEDED run,
+    # which exits at START and skips BOTH deploy legs, so it must not reach this
+    # job or file a convergence issue (deploy-supersede-exit.test.sh B7).
+    #
+    # The proxy over-reached. "No leg succeeded" is also true when both legs
+    # FAILED, and that is not supersession — it is the exact moment an operator
+    # most needs this check to speak. It is how three consecutive runs on
+    # 2026-09-22 could have gone SILENT instead of merely green, and a skipped
+    # liveness check reads as "not applicable" and vanishes from the one surface
+    # meant to say production is stale.
+    #
+    # So state the rule the proxy stood in for: run unless BOTH legs SKIPPED.
+    # Nothing is hidden by that. Both-skipped means this run attempted no deploy
+    # at all, so there is no attempt whose outcome could be concealed — which is
+    # what separates it from a leg that ran and failed.
     if: >-
-      always() && github.ref == 'refs/heads/main'
+      always() && github.ref == 'refs/heads/main' &&
+      !(needs.control-plane.result == 'skipped' && needs.instance.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 8
     outputs:

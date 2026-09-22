@@ -224,9 +224,11 @@ b_has "B10 it passes the instance leg's read state"  "--instance-state"
 b_has "B11 it names both shas for the red"           "--instance-served"
 b_has "B12 it records the leg's read state as a fact" "inst_state="
 
-# B13: the job must NOT gate itself on a leg having succeeded. That precondition
+# B13: the job must NOT gate itself on a leg having SUCCEEDED. That precondition
 # skipped the whole check when both deploy legs failed — a false green traded
-# for a silent one, which the row names as a wrong fix.
+# for a silent one, which the row names as a wrong fix. It must still exclude the
+# SUPERSEDED shape (both legs skipped), which is deploy-supersede-exit.test.sh's
+# B7 and is asserted there; this arm only guards the direction that row owns.
 cguard="$(python3 - "$WORKFLOW" <<'PYC'
 import sys, yaml
 d = yaml.safe_load(open(sys.argv[1]))
@@ -236,7 +238,7 @@ PYC
 case "$cguard" in
   *"needs.control-plane.result == 'success'"*|*"needs.instance.result == 'success'"*)
     bad "B13 convergence still skips itself unless a leg succeeded: $cguard" ;;
-  *"always()"*) ok "B13 convergence runs on every main run, leg results notwithstanding" ;;
+  *"always()"*) ok "B13 convergence no longer requires a leg to have SUCCEEDED: $cguard" ;;
   *) bad "B13 convergence's if: no longer starts from always(): $cguard" ;;
 esac
 
