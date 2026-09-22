@@ -760,6 +760,27 @@ jobs:
       # run after the bump, which is what reads the step `name:` slot a grep from
       # inside the shell step cannot see.
       #
+      # PIN 1528 — bumped 2026-09-22 on console-w28-cloudflare-identity
+      # (task-cc5125ed3a4da0c2): the Cloudflare connection card and its account
+      # echo. +8 tests, all ADDED, none deleted — the two connectable axes
+      # (connectable vs available, with the launch picker asserted unchanged),
+      # the three connect fields against cloudflare_credential_blob/1 plus the
+      # POST body shape, the four reused wave-13 client states, the
+      # 502-credential_unreadable-is-not-a-nil-identity pair WITH its
+      # source-mutation control, the never-verified label rule over every state,
+      # and three driven loadProviderIdentity legs (the /identity URL off a
+      # recording fetch, the 502 paint, the transport paint).
+      # RE-MEASURED, never arithmetic: `bash scripts/console-harness.sh` on this
+      # branch printed `# tests 1528 / # pass 1528 / # fail 0`. CONTROL: a
+      # separate detached worktree at this branch's base, origin/main 98a2f23e1,
+      # ran the same command and printed `# tests 1520 / # pass 1520 / # fail 0`
+      # — so main's own committed 1520 is what main MEASURES, and 1528 is that
+      # plus exactly these eight arms. The literal was rewritten by
+      # `bash scripts/console-pins.sh --write --skip 'Seal predicate'` (the
+      # seal-predicate pin is RED on a developer box at origin/main too — 10+
+      # reds there against 3 here — so it was deliberately excluded rather than
+      # read off a red suite), and `--selftest` was run after the bump: 23/0.
+      #
       # PIN 1485 — bumped 2026-09-17 from 1481 on console-r21-w14-studio-login:
       # the "Log in with Barkpark Cloud" resume path moved from a client-side
       # fleet match to POST /v1/auth/studio-signin. ONE test was DELETED (the
@@ -915,7 +936,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1520-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1528-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -931,14 +952,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1520 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1520 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1528 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1528 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1520 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1520 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1520 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1528 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1528 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1528 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1520 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1528 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It

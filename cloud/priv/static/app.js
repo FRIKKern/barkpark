@@ -2361,18 +2361,38 @@
   // =========================================================== PROVIDER FLOW
   // Forge-style picker → branded credential subform, both in the modal.
   // Only Hetzner is wired to the API; the rest are shown disabled ("Soon").
+  //
+  // TWO AXES, NOT ONE (console-w28). `available` is PROVISIONABLE — can this
+  // kind be a box source? It gates the launch hosting picker, the launch flow's
+  // default kind and the resurrect sheet, all of which fetch
+  // `/v1/providers/<kind>/catalog`. `connectable` is CAN A CREDENTIAL BE
+  // STORED, and it gates the providers page's connect card ONLY. The server
+  // keeps exactly this split — router.ex `@neutral_kinds ~w(hetzner azure)` is
+  // the catalog set, `@connectable_kinds ~w(hetzner azure cloudflare)` is a
+  // strict superset — and the console mirrored only half of it, which is why
+  // Cloudflare (connectable since D899, with a stored account_id the server
+  // already serves) had no row on this page at all. Putting it under
+  // `available` instead would have offered Cloudflare as a place to launch a
+  // Barkpark, which it cannot be: it has no `build_provider_catalog` clause and
+  // `/v1/providers/cloudflare/catalog` 404s unknown_kind.
   var PROVIDERS = [
     { kind: "hetzner", name: "Hetzner Cloud", sub: "Deploy on your own Hetzner account",
-      mark: "H", cls: "brand-hetzner", available: true, fields: "token",
+      mark: "H", cls: "brand-hetzner", available: true, connectable: true, fields: "token",
       console: "https://console.hetzner.cloud/",
       blurb: "Connect to your Hetzner Cloud account to deploy instances." },
     { kind: "azure", name: "Microsoft Azure", sub: "Deploy on your own Azure subscription",
-      mark: "Az", cls: "brand-azure", available: true, fields: "azure",
+      mark: "Az", cls: "brand-azure", available: true, connectable: true, fields: "azure",
       console: "https://portal.azure.com/",
       blurb: "Connect an Azure service principal so Barkpark can provision on your subscription." },
-    { kind: "digitalocean", name: "DigitalOcean", sub: "Coming soon", mark: "DO", cls: "brand-do", available: false },
-    { kind: "aws", name: "AWS", sub: "Coming soon", mark: "aws", cls: "brand-aws", available: false },
-    { kind: "vultr", name: "Vultr", sub: "Coming soon", mark: "V", cls: "brand-vultr", available: false }
+    // Cloudflare is an EDGE provider (DNS/TLS/CDN), never a box source: connectable,
+    // deliberately not available.
+    { kind: "cloudflare", name: "Cloudflare", sub: "DNS, TLS and CDN for your domains",
+      mark: "CF", cls: "brand-cloudflare", available: false, connectable: true, fields: "cloudflare",
+      console: "https://dash.cloudflare.com/profile/api-tokens",
+      blurb: "Connect a Cloudflare API token so Barkpark can manage DNS and certificates for your domains." },
+    { kind: "digitalocean", name: "DigitalOcean", sub: "Coming soon", mark: "DO", cls: "brand-do", available: false, connectable: false },
+    { kind: "aws", name: "AWS", sub: "Coming soon", mark: "aws", cls: "brand-aws", available: false, connectable: false },
+    { kind: "vultr", name: "Vultr", sub: "Coming soon", mark: "V", cls: "brand-vultr", available: false, connectable: false }
   ];
 
   // Azure's service-principal is a four-tuple (Decision 4 — the single
@@ -2385,6 +2405,28 @@
     { key: "client_id", label: "Application (client) ID", secret: false, placeholder: "00000000-0000-0000-0000-000000000000" },
     { key: "client_secret", label: "Client secret", secret: true, placeholder: "••••••••••••••••" },
     { key: "subscription_id", label: "Subscription ID", secret: false, placeholder: "00000000-0000-0000-0000-000000000000" }
+  ];
+
+  // Cloudflare's credential blob is a THREE-tuple and the router keeps exactly
+  // these three keys — `cloudflare_credential_blob/1` builds
+  // `%{"api_token" => …}` and then `maybe_put_field`s "account_id" and
+  // "zone_id", dropping either when blank. So api_token is REQUIRED (the
+  // Provider changeset refuses a blob without it) and the other two are
+  // genuinely optional; the form says so rather than demanding all three.
+  //
+  // `account_id` is the field this whole card exists for: it is the ONLY thing
+  // that can ever name which Cloudflare account a connection points at.
+  // Cloudflare.Client declares five callbacks — verify_token,
+  // upsert_dns_record, delete_dns_record, ensure_zone_proxied,
+  // create_origin_ca_cert — and none of them names an account, so a stored
+  // account_id is an ECHO of what was typed here and nothing more.
+  var CLOUDFLARE_FIELDS = [
+    { key: "api_token", label: "API token", secret: true, required: true,
+      placeholder: "••••••••••••••••" },
+    { key: "account_id", label: "Account ID", secret: false, required: false,
+      placeholder: "0123456789abcdef0123456789abcdef" },
+    { key: "zone_id", label: "Zone ID", secret: false, required: false,
+      placeholder: "0123456789abcdef0123456789abcdef" }
   ];
 
   // ---- provider/launch pure helpers (S7) — every one is exported through the
@@ -3287,10 +3329,41 @@
     return true;
   }
 
-  // The POST /v1/providers body, per kind (router.ex:5572-5583): hetzner sends
-  // {kind, token}; azure sends {kind, credentials:{tenant_id,…}}. label is added
-  // only when the operator typed one. Trims each value so trailing paste
-  // whitespace never reaches the vault.
+  // Cloudflare validator: only `api_token` is required. The router's
+  // `cloudflare_credential_blob/1` drops a blank account_id/zone_id, so demanding
+  // them here would be the console inventing a rule the server does not have.
+  function cloudflareFieldsValid(fields) {
+    if (!fields || typeof fields !== "object") return false;
+    var t = fields.api_token;
+    return typeof t === "string" && t.trim() !== "";
+  }
+
+  // The shape gate for whichever subform is on screen, and the sentence that
+  // names what is missing. ONE three-way branch, read by both submit paths (the
+  // launch dialog and the providers-page card) — they used to carry the same
+  // two-way ternary twice, so a third kind meant two edits and a silent
+  // "An API key is required." for a form with no `token` field at all.
+  function credentialFieldsValid(p, fields) {
+    if (p && p.fields === "azure") return azureFieldsValid(fields);
+    if (p && p.fields === "cloudflare") return cloudflareFieldsValid(fields);
+    return !!((fields && fields.token) || "").trim();
+  }
+
+  function credentialFieldsInvalidTitle(p) {
+    if (p && p.fields === "azure") return "All four fields are required.";
+    if (p && p.fields === "cloudflare") return "An API token is required.";
+    return "An API key is required.";
+  }
+
+  // The POST /v1/providers body, per kind (router.ex `provider_credential/2`):
+  // hetzner sends {kind, token}; azure sends {kind, credentials:{tenant_id,…}};
+  // cloudflare sends {kind, credentials:{api_token, account_id?, zone_id?}} — the
+  // BLOB form, never the bare-token form, because the bare token names no
+  // account and this card's whole point is that it can. label is added only when
+  // the operator typed one. Trims each value so trailing paste whitespace never
+  // reaches the vault, and OMITS a blank optional entirely (the server's
+  // maybe_put_field would drop it anyway; sending "" would only make the wire
+  // shape disagree with the stored one).
   function providerCredBody(kind, fields, label) {
     var body = { kind: kind };
     if (kind === "azure") {
@@ -3300,6 +3373,14 @@
         creds[k] = ((fields && fields[k]) || "").trim();
       }
       body.credentials = creds;
+    } else if (kind === "cloudflare") {
+      var cf = {};
+      for (var j = 0; j < CLOUDFLARE_FIELDS.length; j++) {
+        var f = CLOUDFLARE_FIELDS[j];
+        var v = ((fields && fields[f.key]) || "").trim();
+        if (f.required || v) cf[f.key] = v;
+      }
+      body.credentials = cf;
     } else {
       body.token = ((fields && fields.token) || "").trim();
     }
@@ -3470,6 +3551,31 @@
             '<input class="form-input" id="' + id + '" type="text" autocomplete="off" spellcheck="false" placeholder="' + esc(f.placeholder) + '" /></div>';
         }).join("");
     }
+    if (p.fields === "cloudflare") {
+      return '<p class="field-hint dim" style="margin:0 0 10px">Create an API token in the ' +
+        '<a href="' + esc(p.console || "#") + '" target="_blank" rel="noopener">Cloudflare dashboard</a> ' +
+        "(My Profile → API Tokens). Encrypted at rest, never shown again.</p>" +
+        CLOUDFLARE_FIELDS.map(function (f) {
+          var id = "cred-cf-" + f.key;
+          var optional = f.required ? "" : ' <span class="dim">(optional)</span>';
+          // The Account ID hint is the ONE place the person learns why this
+          // field matters: without it nothing can ever name the account, because
+          // no Cloudflare call this tree makes returns one.
+          var hint = f.key === "account_id"
+            ? '<p class="field-hint dim" style="margin:0 0 6px">Shown on your Cloudflare dashboard overview. ' +
+              "We store it so we can show you which account this connection points at — we never look it up.</p>"
+            : "";
+          if (f.secret) {
+            return '<div class="field"><label class="label" for="' + id + '">' + esc(f.label) + optional + "</label>" + hint +
+              '<div class="input-affix">' +
+                '<input class="form-input" id="' + id + '" type="password" autocomplete="off" placeholder="' + esc(f.placeholder) + '" />' +
+                '<button class="affix-btn" id="cred-cf-eye" type="button" tabindex="-1" aria-label="Show token">' + EYE_SVG + "</button>" +
+              "</div></div>";
+          }
+          return '<div class="field"><label class="label" for="' + id + '">' + esc(f.label) + optional + "</label>" + hint +
+            '<input class="form-input" id="' + id + '" type="text" autocomplete="off" spellcheck="false" placeholder="' + esc(f.placeholder) + '" /></div>';
+        }).join("");
+    }
     return '<div class="field"><label class="label" for="cred-token">API key</label>' +
       '<p class="field-hint dim" style="margin:0 0 6px">Create a key in the ' +
         '<a href="' + esc(p.console || "#") + '" target="_blank" rel="noopener">' + esc(p.name) + " console</a>. " +
@@ -3521,9 +3627,12 @@
     var azEye = body.querySelector("#cred-az-eye");
     var azSecret = body.querySelector("#cred-az-client_secret");
     if (azEye) azEye.addEventListener("click", function () { toggleEye(azSecret, azEye); });
+    var cfEye = body.querySelector("#cred-cf-eye");
+    var cfSecret = body.querySelector("#cred-cf-api_token");
+    if (cfEye) cfEye.addEventListener("click", function () { toggleEye(cfSecret, cfEye); });
     var submit = body.querySelector("#cred-submit");
     if (submit) submit.addEventListener("click", function () { submitProviderCred(kind); });
-    var first = token || body.querySelector("#cred-az-tenant_id");
+    var first = token || body.querySelector("#cred-az-tenant_id") || body.querySelector("#cred-cf-api_token");
     if (first) first.focus();
   }
 
@@ -3536,6 +3645,14 @@
         f[af.key] = el ? el.value : "";
       });
       return f;
+    }
+    if (p.fields === "cloudflare") {
+      var cf = {};
+      CLOUDFLARE_FIELDS.forEach(function (ff) {
+        var el = credQ("#cred-cf-" + ff.key);
+        cf[ff.key] = el ? el.value : "";
+      });
+      return cf;
     }
     var t = credQ("#cred-token");
     return { token: t ? t.value : "" };
@@ -3631,9 +3748,8 @@
     var labelEl = credQ("#cred-label");
     var label = ((labelEl && labelEl.value) || "").trim();
 
-    var valid = p.fields === "azure" ? azureFieldsValid(fields) : !!(fields.token || "").trim();
-    if (!valid) {
-      toast({ kind: "error", title: p.fields === "azure" ? "All four fields are required." : "An API key is required." });
+    if (!credentialFieldsValid(p, fields)) {
+      toast({ kind: "error", title: credentialFieldsInvalidTitle(p) });
       return;
     }
 
@@ -3802,7 +3918,10 @@
   function providerConnectModel(list) {
     var connected = {};
     (Array.isArray(list) ? list : []).forEach(function (p) { if (p && p.kind) connected[p.kind] = true; });
-    var options = PROVIDERS.filter(function (p) { return p.available; }).map(function (p) {
+    // CONNECTABLE, not available (console-w28): this picker offers credentials,
+    // not hosting. Cloudflare is connectable and NOT provisionable, so reading
+    // `available` here kept it off the only page that can store its token.
+    var options = PROVIDERS.filter(function (p) { return p.connectable; }).map(function (p) {
       return { kind: p.kind, name: p.name, connected: !!connected[p.kind] };
     });
     var firstOpen = options.filter(function (o) { return !o.connected; })[0] || null;
@@ -3881,10 +4000,33 @@
   //                                 own reason when it sent one (Hetzner reports
   //                                 no project identity at all, so that is the
   //                                 permanent shape of its row).
+  // The `unavailable` state's sentences, keyed by the server's own error word.
+  // `fetch_failed` is the console's own fallback for a request that produced no
+  // answer at all (a transport failure, or a status with no error word).
+  var IDENTITY_UNREADABLE_REASONS = {
+    fetch_failed: "We couldn’t read which account this connection points at just now.",
+    credential_unreadable: "We couldn’t read this connection’s stored credential, so we can’t say which account it points at."
+  };
+
   function providerIdentityModel(payload) {
     if (payload === undefined) return { state: "loading" };
     if (!payload || typeof payload !== "object") {
-      return { state: "unavailable", reason: "We couldn’t read which account this connection points at just now." };
+      return { state: "unavailable", reason: IDENTITY_UNREADABLE_REASONS.fetch_failed };
+    }
+    // AN ERROR ENVELOPE IS UNREADABLE, NEVER ABSENT (console-w28). The route
+    // answers 502 {error:"credential_unreadable"} when it cannot DECRYPT the
+    // stored credential, and that is a different sentence from "your credential
+    // does not name an account" — the router says so in its own comment above
+    // `stored_provider_identity/2` and refuses to collapse them server-side.
+    // Without this arm the collapse happens HERE instead: an error body is a
+    // plain object with no `provider` key, so it would fall through to the
+    // legacy-control-plane branch below and paint "Account: not known", telling
+    // the person their credential names no account when in fact we never read
+    // it. Same four states — this is the `unavailable` one, with the reason the
+    // server's code actually names.
+    if (typeof payload.error === "string" && payload.error) {
+      return { state: "unavailable",
+        reason: IDENTITY_UNREADABLE_REASONS[payload.error] || IDENTITY_UNREADABLE_REASONS.fetch_failed };
     }
     var prov = payload.provider && typeof payload.provider === "object" ? payload.provider : null;
     var id = prov && prov.identity && typeof prov.identity === "object" ? prov.identity : null;
@@ -4093,20 +4235,35 @@
     if (slot) loadProviderIdentity(slot, slot.getAttribute("data-prov-identity-kind"));
   }
 
-  // Fill the identity slot from GET /v1/providers/:kind/overview — the same
-  // already-decrypted credential the catalog is built from, no extra decrypt and
-  // no new route. Auth.require_user only: a plain member reads it too. A failed
-  // or degraded read paints the honest "we couldn’t read it" state, never a
-  // blank and never a guess.
+  // Fill the identity slot from GET /v1/providers/:kind/identity — the
+  // purpose-built route (D899), which reads @connectable_kinds and makes ZERO
+  // upstream calls: decrypt, read a field, answer. Auth.require_user only: a
+  // plain member reads it too.
+  //
+  // IT USED TO READ /overview, AND THAT WAS WRONG IN TWO DIRECTIONS
+  // (console-w28). /overview is a CATALOG route: its kind gate is
+  // @neutral_kinds, so `cloudflare` — connectable, with a stored account_id
+  // the server already serves — could only ever get 404 unknown_kind from it;
+  // and its failure mode is 502 catalog_unavailable, so an upstream hiccup
+  // blanked an identity that was sitting in the stored blob needing no network
+  // at all. Both routes emit the same `provider.identity` shape off the same
+  // `provider_identity/2`, so this is the same fact read from the door built
+  // for it.
+  //
+  // A failed or degraded read paints the honest "we couldn’t read it" state,
+  // never a blank and never a guess — and an ERROR BODY is handed to the model
+  // rather than flattened to null, so a 502 credential_unreadable keeps its own
+  // sentence instead of being rounded off to the generic one.
   function loadProviderIdentity(slot, kind) {
     if (!slot || !kind) return;
     slot.innerHTML = providerIdentityHtml(providerIdentityModel(undefined));
-    api("GET", "/v1/providers/" + encodeURIComponent(kind) + "/overview").then(function (r) {
+    api("GET", "/v1/providers/" + encodeURIComponent(kind) + "/identity").then(function (r) {
       // The operator may have armed another kind (repainting the card) while
       // this was in flight — only paint into a slot still mounted and still
       // asking for THIS kind.
       if (slot.isConnected === false || slot.getAttribute("data-prov-identity-kind") !== kind) return;
-      slot.innerHTML = providerIdentityHtml(providerIdentityModel(r.ok && r.data ? r.data : null));
+      var d = r.data && typeof r.data === "object" ? r.data : null;
+      slot.innerHTML = providerIdentityHtml(providerIdentityModel(r.ok ? d : (d && d.error ? d : null)));
     });
   }
 
@@ -4125,7 +4282,9 @@
         // The card's OWN field, not the document's: the credential dialog
         // renders #cred-token too, and a singular lookup here would focus the
         // dialog's copy (or, with none open, be right only by source order).
-        var f = connect.querySelector("#cred-token") || connect.querySelector("#cred-az-tenant_id");
+        var f = connect.querySelector("#cred-token") ||
+          connect.querySelector("#cred-az-tenant_id") ||
+          connect.querySelector("#cred-cf-api_token");
         if (f && f.focus) f.focus();
       });
     });
@@ -4135,6 +4294,9 @@
     var azEye = connect.querySelector("#cred-az-eye");
     var azSecret = connect.querySelector("#cred-az-client_secret");
     if (azEye) azEye.addEventListener("click", function () { toggleEye(azSecret, azEye); });
+    var cfEye = connect.querySelector("#cred-cf-eye");
+    var cfSecret = connect.querySelector("#cred-cf-api_token");
+    if (cfEye) cfEye.addEventListener("click", function () { toggleEye(cfSecret, cfEye); });
     var submit = connect.querySelector("[data-connect-submit]");
     if (submit) submit.addEventListener("click", function () { submitInlineProviderCred(armed, list); });
   }
@@ -4153,9 +4315,8 @@
     var verb = rotating ? "Verify & replace" : "Verify & connect";
     var fields = readCredentialFields(p);
     var label = ((credQ("#cred-label") || {}).value || "").trim();
-    var valid = p.fields === "azure" ? azureFieldsValid(fields) : !!(fields.token || "").trim();
-    if (!valid) {
-      toast({ kind: "error", title: p.fields === "azure" ? "All four fields are required." : "An API key is required." });
+    if (!credentialFieldsValid(p, fields)) {
+      toast({ kind: "error", title: credentialFieldsInvalidTitle(p) });
       return;
     }
     var rem = credRemediationBox(); // the same box the paint below targets
@@ -30451,6 +30612,17 @@
       // pure function; the DOM mount (mountLaunchCatalog) is browser-verified.
       providerChipHtml: providerChipHtml, instanceLifecycleClass: instanceLifecycleClass,
       azureFieldsValid: azureFieldsValid, providerCredBody: providerCredBody,
+      // console-w28 — the cloudflare connect subform. The field KEYS are the
+      // assertion surface (they must equal what cloudflare_credential_blob/1
+      // keeps), the validator is the only kind-specific rule, and
+      // credentialFieldsHtml is exported so the rendered form can be read
+      // without a DOM.
+      cloudflareFieldKeys: CLOUDFLARE_FIELDS.map(function (f) { return f.key; }),
+      cloudflareFieldsValid: cloudflareFieldsValid,
+      credentialFieldsValid: credentialFieldsValid,
+      credentialFieldsInvalidTitle: credentialFieldsInvalidTitle,
+      credentialFieldsHtml: credentialFieldsHtml, providerMeta: providerMeta,
+      connectableProviderKinds: PROVIDERS.filter(function (p) { return p.connectable; }).map(function (p) { return p.kind; }),
       // friendly is exported so the harness can PROVE it drops .remediation (the
       // connect sheet must never route the server copy through it).
       remediationCopy: remediationCopy, friendly: friendly, formatMonthlyPrice: formatMonthlyPrice,
@@ -30507,6 +30679,7 @@
       // cch wave 13 — WHICH cloud account a connection points at, shown before a
       // rotation is committed. Pure; loadProviderIdentity's fetch is the mount.
       providerIdentityModel: providerIdentityModel, providerIdentityHtml: providerIdentityHtml,
+      loadProviderIdentity: loadProviderIdentity,
       capabilityMatrixModel: capabilityMatrixModel, capabilityMatrixHtml: capabilityMatrixHtml,
       capabilityVerbs: CAPABILITY_VERBS.map(function (v) { return v.key; }),
       // S11b (azure-hetzner hosting): the console lifecycle action-row pure

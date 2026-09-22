@@ -1567,9 +1567,24 @@ select.form-input {
 /* brand tiles — provider colours, not shipped logos. Hetzner + Azure read from
    the shared --provider-* identity tokens (S4) so the picker tile, the fleet
    provider chip, and the CLI glyph all tint from ONE source; the not-yet-wired
-   providers keep their raw brand hues until they graduate. */
+   providers keep their raw brand hues until they graduate.
+
+   CLOUDFLARE IS A RAW HUE ON PURPOSE (console-w28), on the same shelf as the
+   three below rather than in the tokened family above, and this is the second
+   answer to the question — the first was a --provider-cloudflare token, which
+   design/emit-fence.test.mjs refused and was right to. design/tokens.json's
+   `color.provider` family says "a third provider is a new row here", and it
+   emits into TWO artifacts: the --provider-<kind> custom properties in this
+   file's GENERATED block AND `GenProviderMark` AdaptiveColors in the Go CLI
+   chrome sibling (internal/semrole/chrome_gen.go). That family exists so the
+   picker tile, the FLEET PROVIDER CHIP and the CLI GLYPH tint from one source.
+   Cloudflare has exactly one of those three: nothing is ever HOSTED on
+   Cloudflare, so `providerChipHtml` returns "" for it and no CLI glyph marks
+   it. A row there would emit a zero-consumer Go token — the precise hygiene
+   defect that family's own note records retiring eleven of (GR29/GR37). */
 .brand-hetzner { background: var(--provider-hetzner); }
 .brand-azure { background: var(--provider-azure); }
+.brand-cloudflare { background: #f6821f; }
 .brand-do { background: #0080ff; }
 .brand-aws { background: #232f3e; }
 .brand-vultr { background: #007bfc; }
@@ -2540,7 +2555,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    kind's credential subform → the .set-save-row. An already-connected kind is
    fully selectable (its seg-btn carries a "connected" note, never `disabled`):
    re-arming it rotates the credential in place, per GR44. */
-.prov-connect-picker { margin: var(--space-2) 0 var(--space-4); }
+/* console-w28 — THIS picker wraps; the launch one does not. `.seg` is a bare
+   inline-flex with no wrap, which was fine while the connect picker held the
+   same two kinds as the hosting picker. Cloudflare made it THREE, and three
+   segments ("Hetzner Cloud connected" / "Microsoft Azure connected" /
+   "Cloudflare") measured 329px against a 320px viewport — 9px of the whole
+   #settings/providers page off-screen sideways, in both themes, caught by
+   overflow-guard.mjs's W21-cruel-content-text-bounded page tripwire. The wrap is
+   scoped to `.prov-connect-picker` and NOT to `.seg`, because the launch hosting
+   picker reads @neutral_kinds and its geometry is not this wave's to move. It
+   also grows with the connectable set rather than only fixing today's three. */
+.prov-connect-picker { margin: var(--space-2) 0 var(--space-4); flex-wrap: wrap; }
 .prov-connect-form { display: flex; flex-direction: column; gap: var(--space-3); }
 .prov-seg-note { font-size: var(--text-xs); color: var(--dim); margin-left: 4px; }
 

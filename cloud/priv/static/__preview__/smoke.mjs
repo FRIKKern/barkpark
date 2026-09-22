@@ -4487,12 +4487,13 @@ const EXPECTATIONS = {
   // connect card + the 9-verb capability matrix (dev-tier filtered, server-owned
   // gap reasons, bare dash where the server owns no reason).
   "providers-connected": {
-    what: "the roster (2 kinds, Disconnect…), the ROTATION state, the honest matrix — AND a real Disconnect click that arms the typed gate and shrinks the SERVER roster 2→1",
+    what: "the roster (3 kinds, Disconnect…), the ROTATION state, the honest matrix, the Cloudflare identity slot — AND a real Disconnect click that arms the typed gate and shrinks the SERVER roster 3→2",
     async check(reg, hooks, ctx) {
       const roster = (reg.get("provider-roster") || {}).innerHTML || "";
       assert.ok(roster.includes("set-section"), "the roster rides the .set-* anatomy");
       assert.ok(roster.includes("prov-roster") && roster.includes("prov-row"), "roster rows render");
-      assert.ok(roster.includes("Hetzner") && roster.includes("Azure"), "both connected kinds render");
+      assert.ok(roster.includes("Hetzner") && roster.includes("Azure") && roster.includes("Cloudflare"),
+        "all three connected kinds render");
       assert.ok(roster.includes("connected "), "each row shows a connected-at (never a validity badge)");
       assert.ok(!/\bConnected<\/span>/.test(roster), "the roster never implies live validity");
       assert.ok(roster.includes("data-prov-disconnect"), "an admin roster carries the typed-confirm Disconnect");
@@ -4509,6 +4510,67 @@ const EXPECTATIONS = {
       assert.ok(connect.includes("Verify &amp; replace"), "the verb reads replace, not connect");
       assert.ok(!connect.includes("Disconnect one above"), "the destroy-first instruction is gone");
       assert.ok(!/data-connect-kind="[a-z]+"[^>]*disabled/.test(connect), "no connected kind is a disabled ghost");
+      assert.ok(connect.includes('data-connect-kind="cloudflare"'),
+        "console-w28: the connect picker offers cloudflare — it is CONNECTABLE (@connectable_kinds), even though it is not a place to launch");
+
+      // ── console-w28: THE CLOUDFLARE CONNECT CARD, ARMED FOR REAL ──────────
+      // Arm the cloudflare segment with a real click and read what the card
+      // paints. The three fields must be the three the router keeps, and the
+      // identity slot must be MOUNTED and honest.
+      //
+      // WHAT THIS LEG CANNOT SEE, SAID OUT LOUD. `loadProviderIdentity` finds
+      // its slot with `connect.querySelector("[data-prov-identity-kind]")`, and
+      // that slot is a DIV. This shim parses only PARSED_TAGS (button|a) leaves
+      // plus the class-allowlisted card groups, under a committed prohibition
+      // against widening PARSED_TAGS to containers (the mountUsageTab
+      // detached-stub hazard, stated at the top of this file). So the lookup
+      // answers null here, the fetch never goes on the wire, and the slot stays
+      // in its LOADING paint — for hetzner exactly as for cloudflare; this leg
+      // has never reached that fetch for any kind. Asserting a KNOWN paint here
+      // would therefore be asserting something this instrument cannot produce.
+      // The driven proof lives in cloud/priv/static/__app.test.mjs
+      // ("console-w28: the identity slot reads /v1/providers/:kind/identity —
+      // the route built for it, DRIVEN not grepped" and its 502 sibling), which
+      // calls loadProviderIdentity with a recording fetch and reads the URL, the
+      // known paint, the unreadable paint and the transport paint off it.
+      const cfSeg = reg.get("provider-connect")
+        .querySelectorAll('[data-connect-kind="cloudflare"]')[0];
+      assert.ok(cfSeg, "the cloudflare segment must be in the picker");
+      assert.equal(cfSeg.click(), 1, "the cloudflare segment is DEAD — nothing handled its click");
+      await ctx.settle();
+      const cfCard = (reg.get("provider-connect") || {}).innerHTML || "";
+      // The three fields the router's cloudflare_credential_blob/1 keeps, and no fourth.
+      for (const f of ["api_token", "account_id", "zone_id"]) {
+        assert.ok(cfCard.includes('id="cred-cf-' + f + '"'), "the cloudflare form renders " + f);
+      }
+      assert.ok(!cfCard.includes('id="cred-token"'),
+        "cloudflare must NOT fall back to the bare-token form — a bare token names no account");
+      // The slot is mounted, armed on cloudflare, and never a blank box.
+      assert.ok(cfCard.includes('data-prov-identity-kind="cloudflare"'),
+        "the identity slot must be mounted and armed on the kind the card is showing");
+      assert.ok(cfCard.includes('data-prov-identity="loading"'),
+        "an unfilled slot states that it is checking — never an empty box that looks known");
+      // NOTHING IN THE IDENTITY SLOT may claim the account was verified.
+      // Cloudflare.Client declares five callbacks — verify_token,
+      // upsert_dns_record, delete_dns_record, ensure_zone_proxied,
+      // create_origin_ca_cert — and not one of them names an account, so a
+      // verification claim about the ACCOUNT is unsupportable by the code.
+      //
+      // SCOPED TO THE SLOT, and the scope is the point: the card's own purpose
+      // line ("We verify the credential before saving it") is a TRUE claim about
+      // a different thing — preflight_provider authenticates the credential
+      // before the row is written. The lie this criterion forbids is about WHOSE
+      // ACCOUNT it is, so the assertion is read over the slot's bytes, not the
+      // card's, or it would red on an honest sentence.
+      const cfSlotAt = cfCard.indexOf('class="prov-identity-slot"');
+      assert.ok(cfSlotAt >= 0, "the identity slot must be findable in the card bytes");
+      const cfSlot = cfCard.slice(cfSlotAt, cfCard.indexOf("</div>", cfSlotAt) + 6);
+      assert.ok(cfSlot.includes("prov-identity"), "the slot slice must contain the identity line");
+      assert.ok(!/verified/i.test(cfSlot) && !/\bconfirmed\b/i.test(cfSlot) && !/\bchecked\b/i.test(cfSlot),
+        "the identity slot must never claim a verified/checked account; got: " + cfSlot);
+      // Re-arm hetzner so the Disconnect leg below runs on the card shape it always has.
+      reg.get("provider-connect").querySelectorAll('[data-connect-kind="hetzner"]')[0].click();
+      await ctx.settle();
 
       const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
       assert.ok(matrix.includes("cap-matrix"), "the capability matrix renders");
@@ -4535,8 +4597,8 @@ const EXPECTATIONS = {
       // loop ran over nothing, and a loop over nothing passes.
       const rosterEl = reg.get("provider-roster");
       const disconnects = rosterEl.querySelectorAll("[data-prov-disconnect]");
-      assert.equal(disconnects.length, 2,
-        "both roster rows must carry a wired Disconnect; got " + disconnects.length +
+      assert.equal(disconnects.length, 3,
+        "every roster row must carry a wired Disconnect; got " + disconnects.length +
         " — if this is 0 the shim's attribute selector regressed and nothing below proves anything");
       const kind = disconnects[0].getAttribute("data-prov-kind");
       assert.equal(kind, "hetzner", "the first row is the Hetzner credential");
@@ -4565,14 +4627,14 @@ const EXPECTATIONS = {
       // THE SHRINK, read off the SERVER's own list — the assertion a stateless
       // fixture cannot pass, because it answers a byte-identical roster whether
       // or not the DELETE ever arrived (D39).
-      assert.equal(ctx.state.providers.length, 1,
-        "the server roster must shrink by exactly one (2 → 1); got " + ctx.state.providers.length);
+      assert.equal(ctx.state.providers.length, 2,
+        "the server roster must shrink by exactly one (3 → 2); got " + ctx.state.providers.length);
       assert.ok(!ctx.state.providers.some((x) => x.kind === kind), "and the disconnected kind is the one gone");
       // …and the UI refetched, so the operator sees the truth rather than a
       // stale row they could click again.
       const repainted = reg.get("provider-roster").innerHTML || "";
-      assert.ok(repainted.includes("Azure") && !repainted.includes("Hetzner"),
-        "the roster must repaint from the refetch (Azure alone survives); got: " + repainted.slice(0, 200));
+      assert.ok(repainted.includes("Azure") && repainted.includes("Cloudflare") && !repainted.includes("Hetzner"),
+        "the roster must repaint from the refetch (Azure + Cloudflare survive); got: " + repainted.slice(0, 200));
       const provToast = (reg.get("toast-stack") || {}).innerHTML || "";
       assert.ok(provToast.includes("Hetzner Cloud disconnected"),
         "a successful disconnect must say so; toast stack: " + provToast.slice(0, 200));

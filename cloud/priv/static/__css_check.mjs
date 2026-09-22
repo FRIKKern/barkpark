@@ -859,6 +859,12 @@ const ALLOW_RAW_COLORS = [
   { line: ".modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }", why: "scrim — theme-invariant by design (GR63: fixed, so it stays over the viewport while a tall modal scrolls)" },
   { line: "color: #fff; font-weight: 700; font-size: 13px;", why: "white initials on the fixed provider brand tiles" },
   // .brand-hetzner + .brand-azure now tint from --provider-* tokens (S7) — no raw literal to allow.
+  // console-w28: the same shelf as the three below, NOT the --provider-* family.
+  // That family emits into the Go CLI chrome sibling too, and Cloudflare has no
+  // fleet chip and no CLI glyph (nothing is ever hosted on it) — a row there
+  // would be a zero-consumer Go token. See the .brand-cloudflare comment in
+  // app.css for the full reasoning and for the emit-fence refusal that produced it.
+  { line: ".brand-cloudflare { background: #f6821f; }", why: "Cloudflare brand colour — picker tile + roster row only; no fleet chip, no CLI glyph, so no --provider-* token" },
   { line: ".brand-do { background: #0080ff; }", why: "DigitalOcean brand colour" },
   { line: ".brand-aws { background: #232f3e; }", why: "AWS brand colour" },
   { line: ".brand-vultr { background: #007bfc; }", why: "Vultr brand colour" },

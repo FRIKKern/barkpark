@@ -13076,16 +13076,18 @@ test("cch-w48-s3: the disconnect refusal renders friendly()'s sentence, never th
 test("gr-p4/GR44: a connected kind stays SELECTABLE — a second connect is a rotation, never a duplicate", () => {
   const empty = hooks.providerConnectModel([]);
   assert.equal(empty.allConnected, false);
-  assert.equal(empty.selectable, "hetzner"); // first available kind armed
-  assert.deepEqual(plain(empty.options.map((o) => o.kind)), ["hetzner", "azure"]);
+  assert.equal(empty.selectable, "hetzner"); // first connectable kind armed
+  // console-w28: THREE connectable kinds — the picker mirrors the server's
+  // @connectable_kinds (hetzner azure cloudflare), not its @neutral_kinds.
+  assert.deepEqual(plain(empty.options.map((o) => o.kind)), ["hetzner", "azure", "cloudflare"]);
   assert.ok(empty.options.every((o) => !o.connected));
   const partial = hooks.providerConnectModel([{ kind: "hetzner" }]);
   assert.equal(partial.selectable, "azure"); // an OPEN kind is still preferred by default
   assert.equal(partial.options.find((o) => o.kind === "hetzner").connected, true);
   // …but a connected kind is never dropped from the picker.
-  assert.deepEqual(plain(partial.options.map((o) => o.kind)), ["hetzner", "azure"]);
+  assert.deepEqual(plain(partial.options.map((o) => o.kind)), ["hetzner", "azure", "cloudflare"]);
   // All connected is a ROTATION state, not a dead end: a kind is still armed.
-  const full = hooks.providerConnectModel([{ kind: "hetzner" }, { kind: "azure" }]);
+  const full = hooks.providerConnectModel([{ kind: "hetzner" }, { kind: "azure" }, { kind: "cloudflare" }]);
   assert.equal(full.allConnected, true);
   assert.equal(full.selectable, "hetzner");
   assert.ok(full.options.every((o) => o.connected));
@@ -13101,7 +13103,8 @@ test("gr-p4/GR44: connect card is the GR33 hybrid, and an armed connected kind r
   assert.match(card, /data-connect-kind="hetzner"/);
   assert.ok(!/data-connect-kind="hetzner"[^>]*disabled/.test(card), "a connected kind is never a disabled ghost");
   assert.match(card, /data-connect-kind="azure"/);
-  assert.match(card, /aria-pressed="true"/); // azure armed (the open kind is the default)
+  assert.match(card, /data-connect-kind="cloudflare"/); // console-w28
+  assert.match(card, /data-connect-kind="azure"[^>]*aria-pressed="true"/); // the FIRST open kind is the default
   assert.match(card, /set-save-row/); // verify+save in a save-row
   assert.match(card, /data-connect-submit/);
   assert.match(card, /cred-remediation/); // the in-card remediation slot
@@ -13118,7 +13121,8 @@ test("gr-p4/GR44: connect card is the GR33 hybrid, and an armed connected kind r
   assert.match(armedConnected, /Verify &amp; replace/);
 
   // All connected → still a working form, and NEVER the destroy-first copy.
-  const replace = hooks.providerConnectCardHtml([{ kind: "hetzner" }, { kind: "azure" }], null);
+  const replace = hooks.providerConnectCardHtml(
+    [{ kind: "hetzner" }, { kind: "azure" }, { kind: "cloudflare" }], null);
   assert.match(replace, /data-connect-submit/);
   assert.match(replace, /Verify &amp; replace/);
   assert.match(replace, /data-connect-rotating/);
@@ -13219,6 +13223,250 @@ test("cch-w13: the identity slot rides the ROTATION card only, and names the arm
   // A first connect has no stored credential to name — no slot, no empty box.
   const fresh = hooks.providerConnectCardHtml([], "hetzner");
   assert.ok(fresh.indexOf("data-prov-identity-kind") === -1);
+});
+
+// ── console-w28 · THE CLOUDFLARE CONNECTION, AND WHO IT POINTS AT ───────────
+// The server half shipped as D899: GET /v1/providers/:kind/identity reads
+// @connectable_kinds (hetzner azure cloudflare), makes zero upstream calls, and
+// emits cloudflare's stored account_id with source:"stored". NOTHING on this
+// client read it — `grep -n Cloudflare cloud/priv/static/app.js` at
+// origin/main c9e5a9a5f returned ONE hit, an activity-feed string, and the
+// PROVIDERS list had no cloudflare entry at all, so the providers page could
+// not draw a Cloudflare row and the echo was served to no one.
+
+// The three keys router.ex's `cloudflare_credential_blob/1` keeps, in its own
+// order: it builds %{"api_token" => …} and then maybe_put_fields "account_id"
+// and "zone_id". Restated here as the EXPECTATION so a drift on either side
+// reds rather than passing by agreeing with itself.
+const CF_BLOB_KEYS = ["api_token", "account_id", "zone_id"];
+
+test("console-w28: cloudflare is CONNECTABLE and not provisionable — the two axes the server keeps separate", () => {
+  // @connectable_kinds ~w(hetzner azure cloudflare)
+  assert.deepEqual(plain(hooks.connectableProviderKinds), ["hetzner", "azure", "cloudflare"]);
+  // @neutral_kinds ~w(hetzner azure) — cloudflare has no build_provider_catalog
+  // clause, so offering it as a place to LAUNCH would be a dead menu.
+  assert.deepEqual(plain(hooks.availableProviderKinds), ["hetzner", "azure"]);
+  // …and the launch picker is byte-unchanged by this wave.
+  const tabs = hooks.launchProviderTabsHtml("hetzner");
+  assert.ok(tabs.indexOf("cloudflare") === -1, "cloudflare must never appear in the hosting picker");
+
+  // The connect card DOES offer it.
+  const card = hooks.providerConnectCardHtml([], "cloudflare");
+  assert.match(card, /data-connect-kind="cloudflare"/);
+  const model = hooks.providerConnectModel([]);
+  assert.deepEqual(plain(model.options.map((o) => o.kind)), ["hetzner", "azure", "cloudflare"]);
+});
+
+test("console-w28: the cloudflare connect fields are EXACTLY the three the router keeps — api_token required, account_id and zone_id optional", () => {
+  assert.deepEqual(plain(hooks.cloudflareFieldKeys), CF_BLOB_KEYS);
+
+  const p = hooks.providerMeta("cloudflare");
+  assert.equal(p.fields, "cloudflare");
+  const form = hooks.credentialFieldsHtml(p);
+  for (const k of CF_BLOB_KEYS) assert.match(form, new RegExp('id="cred-cf-' + k + '"'));
+  // No fourth input smuggled in: every cred-cf-* id in the form is one of the three.
+  const ids = (form.match(/id="cred-cf-[a-z_]+"/g) || [])
+    .map((m) => m.slice('id="cred-cf-'.length, -1))
+    .filter((k) => k !== "eye");
+  assert.deepEqual(ids.slice().sort(), CF_BLOB_KEYS.slice().sort());
+  // The optional two SAY they are optional; the required one does not.
+  assert.ok(/Account ID <span class="dim">\(optional\)<\/span>/.test(form));
+  assert.ok(/Zone ID <span class="dim">\(optional\)<\/span>/.test(form));
+  assert.ok(!/API token <span class="dim">\(optional\)/.test(form));
+
+  // The VALIDATOR agrees with the changeset: only api_token is demanded.
+  assert.equal(hooks.cloudflareFieldsValid({ api_token: "t" }), true);
+  assert.equal(hooks.cloudflareFieldsValid({ api_token: "t", account_id: "", zone_id: "" }), true);
+  assert.equal(hooks.cloudflareFieldsValid({ api_token: "   ", account_id: "a" }), false);
+  assert.equal(hooks.cloudflareFieldsValid({ account_id: "a", zone_id: "z" }), false);
+  assert.equal(hooks.credentialFieldsValid(p, { api_token: "t" }), true);
+  assert.equal(hooks.credentialFieldsInvalidTitle(p), "An API token is required.");
+  // …and the other two kinds keep their own sentences (the shared gate did not
+  // flatten them).
+  assert.equal(hooks.credentialFieldsInvalidTitle(hooks.providerMeta("azure")), "All four fields are required.");
+  assert.equal(hooks.credentialFieldsInvalidTitle(hooks.providerMeta("hetzner")), "An API key is required.");
+
+  // The POST body is the BLOB form (never the bare token, which names no
+  // account), trimmed, with a blank optional OMITTED rather than sent as "".
+  const full = hooks.providerCredBody("cloudflare", { api_token: " t ", account_id: " a ", zone_id: " z " }, " main ");
+  assert.deepEqual(plain(full), { kind: "cloudflare", credentials: { api_token: "t", account_id: "a", zone_id: "z" }, label: "main" });
+  const bare = hooks.providerCredBody("cloudflare", { api_token: "t", account_id: "", zone_id: "  " }, "");
+  assert.deepEqual(plain(bare), { kind: "cloudflare", credentials: { api_token: "t" } });
+  assert.ok(!("token" in plain(bare)), "cloudflare must not also send the bare-token shape");
+});
+
+// The four payloads the identity slot can be handed, one per client state.
+const CF_IDENTITY_KNOWN = { provider: { kind: "cloudflare", label: "edge",
+  identity: { label: "Account", value: "abc123", source: "stored", reason: null } } };
+const CF_IDENTITY_ABSENT = { provider: { kind: "cloudflare", label: "edge",
+  identity: { label: "Account", value: null, source: "unavailable",
+    reason: "This connection didn't store an account ID." } } };
+const CF_UNREADABLE = { error: "credential_unreadable" };
+
+test("console-w28: the cloudflare identity slot reuses the wave-13 four states — loading, known, absent, unavailable", () => {
+  // The slot rides the ROTATION card, exactly as hetzner's does — same one rule,
+  // no second vocabulary.
+  const rotating = hooks.providerConnectCardHtml([{ kind: "cloudflare" }], "cloudflare");
+  assert.match(rotating, /data-prov-identity-kind="cloudflare"/);
+  assert.match(rotating, /id="prov-identity"/);
+  assert.match(rotating, /data-prov-identity="loading"/);
+  assert.ok(rotating.indexOf("prov-identity") < rotating.indexOf("data-connect-submit"));
+
+  const states = {
+    loading: hooks.providerIdentityModel(undefined),
+    known: hooks.providerIdentityModel(CF_IDENTITY_KNOWN),
+    absent: hooks.providerIdentityModel(CF_IDENTITY_ABSENT),
+    unavailable: hooks.providerIdentityModel(CF_UNREADABLE),
+  };
+  // The state NAMES are the wave-13 four and nothing else.
+  assert.deepEqual(Object.keys(states).map((k) => states[k].state).slice().sort(),
+    ["absent", "known", "loading", "unavailable"]);
+  for (const name of Object.keys(states)) {
+    assert.equal(states[name].state, name, name + " must be its own state");
+    const out = hooks.providerIdentityHtml(states[name]);
+    assert.match(out, new RegExp('data-prov-identity="' + name + '"'));
+    assert.ok(out.replace(/<[^>]*>/g, "").trim().length > 0, name + " must never render empty markup");
+  }
+  assert.equal(states.known.label, "Account");
+  assert.equal(states.known.value, "abc123");
+  assert.equal(states.known.stored, true);
+  assert.match(hooks.providerIdentityHtml(states.known), /abc123/);
+});
+
+test("console-w28: 502 credential_unreadable is NOT an identity whose value is nil — two sentences, and a control that reds if they are collapsed", () => {
+  const unreadable = hooks.providerIdentityHtml(hooks.providerIdentityModel(CF_UNREADABLE));
+  const nilValue = hooks.providerIdentityHtml(hooks.providerIdentityModel(CF_IDENTITY_ABSENT));
+
+  // THE TWO STRINGS, PINNED. "we could not read your credential" and "your
+  // credential does not name an account" — the router refuses to collapse them
+  // server-side (stored_provider_identity/2 returns {:error, :unreadable} for
+  // one and an identity with value: nil for the other), and this is the reading
+  // half of that refusal.
+  assert.match(unreadable, /We couldn’t read this connection’s stored credential, so we can’t say which account it points at\./);
+  assert.match(nilValue, /This connection didn&#39;t store an account ID\./);
+  assert.match(nilValue, /not known/);
+  assert.notEqual(unreadable, nilValue);
+  // And they are not even the same STATE: an error envelope must never be read
+  // as "we asked and the answer was: no account".
+  assert.equal(hooks.providerIdentityModel(CF_UNREADABLE).state, "unavailable");
+  assert.equal(hooks.providerIdentityModel(CF_IDENTITY_ABSENT).state, "absent");
+  assert.ok(unreadable.indexOf("not known") === -1,
+    "an unreadable credential must not borrow the absent state's words");
+  // A 502 with no error word at all still lands in `unavailable`, never absent.
+  assert.equal(hooks.providerIdentityModel({}).state, "absent"); // a BODY-SHAPED payload is the legacy arm…
+  assert.equal(hooks.providerIdentityModel({ error: "catalog_unavailable" }).state, "unavailable"); // …an ERROR one is not
+
+  // CONTROL, INSIDE THE MEASUREMENT. Delete the error-envelope arm from the
+  // shipped source — the exact edit that COLLAPSES the two — and watch this
+  // suite's own distinction die. Through replaceUnique (the file's own import),
+  // never a bare `.replace`: a bare needle takes the first match anywhere and
+  // is SILENT when it drifts, so a control that mutated nothing would look
+  // exactly like one that passed.
+  const ARM = '    if (typeof payload.error === "string" && payload.error) {\n' +
+    '      return { state: "unavailable",\n' +
+    '        reason: IDENTITY_UNREADABLE_REASONS[payload.error] || IDENTITY_UNREADABLE_REASONS.fetch_failed };\n' +
+    '    }\n';
+  const collapsed = replaceUnique(APP_SRC_FOR_MUTATION, ARM, "",
+    { what: "console-w28 CONTROL: collapse credential_unreadable into the absent arm" });
+  assert.notEqual(collapsed, APP_SRC_FOR_MUTATION, "the control must actually mutate the source");
+  const mutant = evalApp(collapsed).hooks;
+  // The mutant proves the defect is REAL and this test is what catches it: the
+  // 502 now reads as "Account: not known", telling the person their credential
+  // names no account when in truth it was never read.
+  assert.equal(mutant.providerIdentityModel(CF_UNREADABLE).state, "absent");
+  assert.match(mutant.providerIdentityHtml(mutant.providerIdentityModel(CF_UNREADABLE)), /not known/);
+  // BYTE-IDENTICAL to a payload that genuinely carries no identity: without the
+  // arm, "we could not read your credential" and "this control plane reports no
+  // account" are the SAME markup. That is the collapse this test forbids.
+  assert.equal(
+    mutant.providerIdentityHtml(mutant.providerIdentityModel(CF_UNREADABLE)),
+    mutant.providerIdentityHtml(mutant.providerIdentityModel({ provider: { kind: "cloudflare" } })),
+    "CONTROL: without the arm a 502 renders identically to a no-identity payload");
+  // …and the shipped code does NOT do that — the same pair, on the real hooks.
+  assert.notEqual(
+    hooks.providerIdentityHtml(hooks.providerIdentityModel(CF_UNREADABLE)),
+    hooks.providerIdentityHtml(hooks.providerIdentityModel({ provider: { kind: "cloudflare" } })));
+});
+
+test("console-w28: the echo is labelled as the account you CONNECTED — never verified, never checked", () => {
+  const known = hooks.providerIdentityHtml(hooks.providerIdentityModel(CF_IDENTITY_KNOWN));
+  // The provenance sentence, in the person's words.
+  assert.match(known, /the account you connected/);
+  assert.match(known, /we don’t re-check it with the provider/);
+  // NOTHING on this line may claim a check. Cloudflare.Client declares exactly
+  // five callbacks — verify_token, upsert_dns_record, delete_dns_record,
+  // ensure_zone_proxied, create_origin_ca_cert — and verify_token/1 answers
+  // GET /user/tokens/verify with %{status: …}, a token-LIVENESS answer that
+  // names no account. So no account this console shows can ever have been
+  // verified, and saying otherwise would be an assertion the code cannot make.
+  for (const word of [/verified/i, /\bchecked\b/i, /confirmed/i, /validated/i]) {
+    assert.ok(!word.test(known.replace(/we don’t re-check it with the provider/, "")),
+      "the stored echo must never read as a verification: " + word);
+  }
+  // The same rule over EVERY state, not just the happy one.
+  for (const payload of [undefined, null, CF_IDENTITY_KNOWN, CF_IDENTITY_ABSENT, CF_UNREADABLE]) {
+    const out = hooks.providerIdentityHtml(hooks.providerIdentityModel(payload));
+    assert.ok(!/verified/i.test(out) && !/\bconfirmed\b/i.test(out),
+      "no identity state may claim verification");
+  }
+});
+
+test("console-w28: the identity slot reads /v1/providers/:kind/identity — the route built for it, DRIVEN not grepped", () => {
+  // /overview was the wrong door in two directions: its kind gate is
+  // @neutral_kinds, so cloudflare could only ever get 404 unknown_kind from it,
+  // and its failure mode is 502 catalog_unavailable, so an upstream hiccup
+  // blanked an identity sitting in the stored blob needing no network at all.
+  const seen = [];
+  const { hooks: h, sandbox: sb } = evalApp();
+  sb.fetch = (path) => {
+    seen.push(path);
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(CF_IDENTITY_KNOWN),
+      text: () => Promise.resolve(""),
+    });
+  };
+  const slot = { innerHTML: "", isConnected: true, getAttribute: () => "cloudflare" };
+  h.loadProviderIdentity(slot, "cloudflare");
+  // The loading paint is synchronous — the slot is never blank, not even for a tick.
+  assert.match(slot.innerHTML, /data-prov-identity="loading"/);
+  assert.deepEqual(plain(seen), ["/v1/providers/cloudflare/identity"]);
+  return new Promise((resolve) => setTimeout(resolve, 0)).then(() => {
+    assert.match(slot.innerHTML, /data-prov-identity="known"/);
+    assert.match(slot.innerHTML, /abc123/);
+  });
+});
+
+test("console-w28: a 502 credential_unreadable body reaches the model — the loader does not flatten it to null", () => {
+  const { hooks: h, sandbox: sb } = evalApp();
+  sb.fetch = () => Promise.resolve({
+    ok: false, status: 502,
+    headers: { get: () => "application/json" },
+    json: () => Promise.resolve(CF_UNREADABLE),
+    text: () => Promise.resolve(""),
+  });
+  const slot = { innerHTML: "", isConnected: true, getAttribute: () => "cloudflare" };
+  h.loadProviderIdentity(slot, "cloudflare");
+  return new Promise((resolve) => setTimeout(resolve, 0)).then(() => {
+    assert.match(slot.innerHTML, /data-prov-identity="unavailable"/);
+    // The 502's OWN sentence, not the generic "just now" one a null would give.
+    assert.match(slot.innerHTML, /stored credential, so we can’t say which account/);
+    assert.ok(slot.innerHTML.indexOf("just now") === -1);
+  });
+});
+
+test("console-w28: a transport failure still paints the generic unavailable sentence", () => {
+  const { hooks: h, sandbox: sb } = evalApp();
+  sb.fetch = () => Promise.reject(new TypeError("Failed to fetch"));
+  const slot = { innerHTML: "", isConnected: true, getAttribute: () => "cloudflare" };
+  h.loadProviderIdentity(slot, "cloudflare");
+  return new Promise((resolve) => setTimeout(resolve, 0)).then(() => {
+    // api() turns a rejection into {status:0, data:{error:"network_error"}} —
+    // an error word with no entry in the table, so the fallback fires.
+    assert.match(slot.innerHTML, /data-prov-identity="unavailable"/);
+    assert.match(slot.innerHTML, /We couldn’t read which account this connection points at just now\./);
+  });
 });
 
 test("gr-p4: capability matrix — 9 verbs, prod columns only, server-owned gaps, NO invented reason, NO padded cell", () => {
