@@ -26,6 +26,11 @@ func TestMain(m *testing.M) {
 		return "", errors.New("no hcloud in tests")
 	}
 	cloud.ResetWarmImageCache()
+	// The support chain resolves origin/main's sha for the fleet runtime pin;
+	// tests never touch GitHub (tests that care install their own stub).
+	supportResolveMainSHA = func(context.Context) (string, error) {
+		return "", errors.New("no github in tests")
+	}
 	os.Exit(m.Run())
 }
 
