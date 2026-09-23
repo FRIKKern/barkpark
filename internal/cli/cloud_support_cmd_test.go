@@ -77,7 +77,12 @@ func supportSaveSeams(t *testing.T) {
 	origBudget := supportRosterPollBudget
 	origClock := supportClock
 	origDNS := supportDNSFor
+	origSHA := supportResolveMainSHA
+	// Never reach GitHub from a test: every run resolves a fixed fake sha
+	// unless the test overrides it.
+	supportResolveMainSHA = func() (string, error) { return supportTestSHA, nil }
 	t.Cleanup(func() {
+		supportResolveMainSHA = origSHA
 		supportCreateServer = origCreate
 		supportProviderFor = origProvider
 		supportRunnerFor = origRunner

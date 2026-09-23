@@ -200,6 +200,52 @@ else
   ok "no bp task stamp/close line redirects to /dev/null (output is captured)"
 fi
 
+hr "AC6 — the runner reports its version on the beat it already sends (pdf-bl-fleet-run-refresh)"
+SHA=2b97ded4fb4cd1043f59fe88c00b3d6a95fe2651
+printf '%s\n' "$SHA" > "$TMP/fleet-run.version"
+CAP=$(FLEET_RUN_VERSION_FILE="$TMP/fleet-run.version" capacity_json 1)
+python3 -c 'import json,sys; c=json.loads(sys.argv[1]); sys.exit(0 if c.get("runner_sha")==sys.argv[2] and c.get("size_class") else 1)' "$CAP" "$SHA" \
+  && ok "a sha in fleet-run.version rides the capacity JSON as runner_sha" \
+  || bad "capacity JSON lacks runner_sha=$SHA: $CAP"
+CAP=$(FLEET_RUN_VERSION_FILE="$TMP/absent.version" capacity_json 1)
+python3 -c 'import json,sys; c=json.loads(sys.argv[1]); sys.exit(0 if "runner_sha" not in c else 1)' "$CAP" \
+  && ok "no version file → runner_sha absent (unreported, never invented)" \
+  || bad "runner_sha present without a version file: $CAP"
+printf '%s\n' 'x"},"size_class":"xl' > "$TMP/evil.version"
+CAP=$(FLEET_RUN_VERSION_FILE="$TMP/evil.version" capacity_json 1)
+python3 -c 'import json,sys; c=json.loads(sys.argv[1]); sys.exit(0 if "runner_sha" not in c and c["size_class"] != "xl" else 1)' "$CAP" 2>/dev/null \
+  && ok "a non-hex version line is refused — the capacity JSON stays well-formed" \
+  || bad "a non-hex version line reached the capacity JSON: $CAP"
+
+# The support-box layout: the runner alone in a directory, no repo around it. With bp-read.sh
+# BESIDE it (what add/refresh now write) bp_json is defined; without it, listen REFUSES instead
+# of idling forever. The second arm is only meaningful where the box-checkout fallback
+# (/opt/barkpark/scripts/lib/bp-read.sh) is absent — i.e. anywhere but a support box.
+mkdir -p "$TMP/box-with" "$TMP/box-without"
+cp "$HERE/fleet-run.sh" "$TMP/box-with/"; cp "$HERE/../../scripts/lib/bp-read.sh" "$TMP/box-with/"
+cp "$HERE/fleet-run.sh" "$TMP/box-without/"
+bash -c '. "$1" >/dev/null 2>&1; command -v bp_json >/dev/null' _ "$TMP/box-with/fleet-run.sh" \
+  && ok "box layout: bp-read.sh beside the runner is sourced (bp_json defined)" \
+  || bad "box layout: bp-read.sh beside the runner was NOT sourced"
+if [ -f /opt/barkpark/scripts/lib/bp-read.sh ]; then
+  ok "box layout without bp-read.sh: skipped — this host has the /opt/barkpark checkout fallback"
+else
+  ( bash "$TMP/box-without/fleet-run.sh" listen probe-worker > "$TMP/refuse.out" 2>&1 ) &
+  RPID=$!; W8=0
+  while kill -0 "$RPID" 2>/dev/null && [ "$W8" -lt 10 ]; do sleep 1; W8=$((W8 + 1)); done
+  if kill -0 "$RPID" 2>/dev/null; then
+    pkill -P "$RPID" 2>/dev/null; kill "$RPID" 2>/dev/null
+    bad "box layout without bp-read.sh: listen kept running (the idle-forever defect)"
+  else
+    wait "$RPID"; RRC=$?
+    if [ "$RRC" -ne 0 ] && grep -q 'bp-read.sh not found' "$TMP/refuse.out"; then
+      ok "box layout without bp-read.sh: listen refuses (exit $RRC) and names the missing file"
+    else
+      bad "box layout without bp-read.sh: exit $RRC, output: $(head -c 300 "$TMP/refuse.out")"
+    fi
+  fi
+fi
+
 printf '\n%d passed, %d failed\n' "$N_PASS" "$N_FAIL"
 [ "$N_FAIL" -eq 0 ] || exit 1
 exit 0
