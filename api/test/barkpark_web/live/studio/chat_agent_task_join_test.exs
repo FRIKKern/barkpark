@@ -16,10 +16,13 @@ defmodule BarkparkWeb.Studio.ChatAgentTaskJoinTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
   alias Barkpark.Content
+  alias Barkpark.Content.{Document, SchemaDefinition}
+  alias Barkpark.Repo
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.AgentTaskJoin
   alias Barkpark.Tasks
@@ -44,6 +47,7 @@ defmodule BarkparkWeb.Studio.ChatAgentTaskJoinTest do
 
   setup %{conn: conn} do
     Barkpark.ChatSessionResidue.purge!()
+    hide_datasets_sorting_before!(@dataset)
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
 
@@ -89,7 +93,30 @@ defmodule BarkparkWeb.Studio.ChatAgentTaskJoinTest do
       Application.delete_env(:barkpark, :studio_chat_title_cli)
     end)
 
+    # PRECONDITION, asserted rather than assumed: the dataset ChatLive will
+    # subscribe the strip to is the one every fixture below writes to.
+    assert hd(Content.list_datasets()) == @dataset,
+           "the Doing strip would subscribe to #{inspect(hd(Content.list_datasets()))}, " <>
+             "not #{inspect(@dataset)} — its live frames could never arrive"
+
     {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token}), scope: scope}
+  end
+
+  # HERMETIC against COMMITTED residue in the shared test database. ChatLive
+  # mounts `dataset: default_dataset()` — the FIRST of `Content.list_datasets/0`,
+  # which is SORTED — and subscribes the Doing strip's document stream to THAT
+  # dataset, while every fixture here writes to @dataset. An unboxed test
+  # (`Sandbox.checkout(Repo, sandbox: false)`, e.g. DedupPublishToctouTest)
+  # commits a `schema_definitions` row in "dedup_toctou_race" and its on_exit
+  # purge deletes only documents, so when it runs FIRST the view subscribes to
+  # `documents:dedup_toctou_race` and the two LIVE-path arms never see a frame
+  # (the HYDRATE arms read the ledger directly and stay green). That is the
+  # order-dependent main red of #20007. The delete runs inside this test's
+  # sandbox transaction, so it is rolled back at exit and no other test sees it.
+  defp hide_datasets_sorting_before!(dataset) do
+    Repo.delete_all(from(s in SchemaDefinition, where: s.dataset < ^dataset))
+    Repo.delete_all(from(d in Document, where: d.dataset < ^dataset))
+    :ok
   end
 
   # ── ledger through the real writers ─────────────────────────────────────────
