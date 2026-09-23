@@ -39,10 +39,11 @@ literal JSON already wrapped in text nodes is not heuristically decoded.
 
 ## Current boundary
 
-Nested lists, multiple paragraphs per item and hard breaks remain rejected
-before a transaction enters history or emits a save. Enabling them requires an
-explicit cross-reader representation and separate round-trip/browser proof.
-The carrier repair is a prerequisite, not completion of nested authoring.
+[Nested lists](portable-doc-nested-lists.md) use item maps with child list blocks.
+Native inline breaks serialize as LF text, with exact source carriers retained
+on Undo. Multiple paragraphs per item, arbitrary child blocks and custom
+numbering starts remain rejected before entering history or emitting a save.
+Mounted coverage does not establish complete native-browser inventory proof.
 
 ## Verification
 
