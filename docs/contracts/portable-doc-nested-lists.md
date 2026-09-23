@@ -1,8 +1,7 @@
 <!-- doc-tier: agent | canonical-for: portable-doc-nested-lists | budget: 900tok -->
 # Nested-list reader and authoring contract
 
-A list item remains its
-existing inline array, scalar or `{content, text, ...metadata}` map. A map may
+Items retain their inline array, scalar or `{content, text, ...metadata}` map. A map may
 add `children`, an array of nested list blocks. Its own inline body is read
 first, followed by child lists in order. Nonempty `content` wins over `text`.
 
@@ -14,8 +13,7 @@ first, followed by child lists in order. Nonempty `content` wins over `text`.
 
 Child blocks accept `list` and the existing list aliases: `bulletList`,
 `bullet_list`, `bulleted-list`, `bulleted_list`, `ordered-list`, `numbered_list`.
-Ordered aliases force numbering as they do at the root. Each child must have an
-`items` array. Other `children` shapes are opaque, not coerced into prose. This
+Ordered aliases force numbering as they do at the root. Children require `items` arrays. Other `children` shapes are opaque, not coerced into prose. This
 field does not enable arbitrary blocks or multiple paragraphs inside an item.
 
 Readers preserve parent/child order, nesting and mixed ordered/unordered markers.
@@ -49,9 +47,8 @@ dependency or core-package growth.
 
 The editor projects one paragraph per item followed by nested lists. Tab and
 Shift-Tab indent/outdent; Enter splits; Backspace at the next item's start joins
-adjacent inline bodies when the preceding item has no child list. The join uses
-one transaction, avoiding a two-paragraph intermediate shape. Other edits
-still pass the lossless-shape guard.
+adjacent inline bodies when the preceding item has no child list. One transaction avoids an invalid two-paragraph intermediate shape; other edits
+still pass the shape guard.
 
 Private item and frame attributes preserve original carriers, IDs and metadata
 through moves and history; HTML cannot supply them. A copied frame keeps its
@@ -60,7 +57,7 @@ scalar/inline-array parents become maps; untouched carriers remain exact.
 Opaque child entries survive in their existing slots. Empty nested lists retain
 their empty stored items rather than persisting the editor placeholder.
 
-Inline breaks serialize as LF text and Undo retains exact source carriers.
+Breaks serialize as LF text; Undo retains exact carriers.
 Multiple paragraphs, arbitrary child blocks and custom numbering starts remain
 explicitly rejected. Mounted tests alone are not native-browser or
 whole-inventory sign-off.
