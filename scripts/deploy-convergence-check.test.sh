@@ -321,7 +321,7 @@ run_d "D6 lock budget 900s -> bound 30 min -> 59 min is STALLED" 1 "$TMP/sibling
 # D7 the withheld-conclusion arm expires on the same bound.
 run_d "D7a lookup failed, 59 min -> withheld (GREEN-BECAUSE-WAITING)" 0 "$TMP/none" "GREEN-BECAUSE-WAITING" -- \
   --stranded true --in-flight-source unknown "${AT59[@]}"
-run_d "D7b lookup failed, 61 min -> STALLED" 1 "$TMP/none" "VERDICT: STALLED" -- \
+run_d "D7b lookup failed, 61 min -> STALLED, and the headline names the failed lookup" 1 "$TMP/none" "STALLED: in-flight lookup failed, stranded 61 min" -- \
   --stranded true --in-flight-source unknown "${AT61[@]}"
 
 # D8 nothing in flight needs no age: the red it always was.

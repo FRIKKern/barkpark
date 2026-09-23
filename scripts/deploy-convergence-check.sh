@@ -981,6 +981,9 @@ mode_adjudicate() {
     mins=$(( age / 60 ))
     if [ "$age" -gt "$bound" ]; then
       say ""
+      # The lookup-fails arm names itself on the headline (main ruling
+      # 2026-09-23T19:21Z), so a reader tells it from the queued-sibling case.
+      [ "$source" = "unknown" ] && say "STALLED: in-flight lookup failed, stranded ${mins} min"
       say "VERDICT: STALLED — production has served ${strand_served:-<unread>} for ${mins} min behind the"
       say "newest deploy-relevant main commit ${strand_newest:-<unread>} (strand began ${strand_since})."
       say "  served:                  ${strand_served:-<unread>}"
