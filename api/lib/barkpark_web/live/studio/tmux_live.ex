@@ -33,7 +33,6 @@ defmodule BarkparkWeb.Studio.TmuxLive do
        socket
        |> assign(
          page_title: "tmux",
-         nav_section: :tmux,
          dataset: default_dataset(),
          # current_path is owned by StudioChrome's :handle_params hook.
          # Truthful return path (charter D5): a scoped surface links here with

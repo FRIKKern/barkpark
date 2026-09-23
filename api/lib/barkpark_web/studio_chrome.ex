@@ -39,7 +39,7 @@ defmodule BarkparkWeb.StudioChrome do
       security boundary).
     * `instance_admin?` — HOST-LEVEL, deliberately NOT workspace-scoped.
       The self-update banner's oracle (see below).
-    * `nav_section` / `current_path` / `create_open` / `api_token` —
+    * `current_path` / `create_open` / `api_token` —
       nil-safe defaults so the layout never KeyErrors on a surface that
       doesn't care.
 
@@ -164,7 +164,6 @@ defmodule BarkparkWeb.StudioChrome do
           instance_admin?(s.assigns[:api_token], s.assigns[:current_user])
         )
       end)
-      |> assign_new(:nav_section, fn -> nil end)
       |> assign_new(:current_path, fn -> nil end)
       |> assign_new(:create_open, fn -> nil end)
       |> assign_new(:scope_menu, fn -> nil end)

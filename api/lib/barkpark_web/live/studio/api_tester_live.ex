@@ -38,7 +38,6 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     # category name into the set hides its items in the nav.
     {:ok,
      assign(socket,
-       nav_section: :api_tester,
        dataset: dataset,
        endpoints: endpoints,
        categories: endpoints |> Enum.map(& &1.category) |> Enum.uniq(),
@@ -123,7 +122,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   # NOT orphaned: the top-bar Token field in layouts/studio.html.heex (the
-  # `<form phx-change="token-change">` shown while nav_section == :api_tester)
+  # `<form phx-change="token-change">` shown while current_path is the
+  # api-tester surface, per BarkparkWeb.Studio.Section.from_path/2)
   # dispatches this so an operator can override the run token inline.
   def handle_event("token-change", %{"token" => token}, socket) do
     {:noreply, assign(socket, token: token)}

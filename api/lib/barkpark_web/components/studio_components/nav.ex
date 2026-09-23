@@ -372,17 +372,12 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   specs ride this same UI under a "Plugins" sidebar category seeded by
   `Barkpark.ApiTester.Endpoints.all/1`.
 
-  The `:nav_section` assign is preserved for backwards compatibility
-  but no longer drives active-state — `default_top_menu_entries/4`'s
-  `:active_when` rules cover the same routes.
-
   Caller wraps with `:if={assigns[:dataset]}` — the component itself
   does NOT guard, so an empty `<div class="studio-bar-tabs">` does not
   leak into the topbar when no dataset is set.
   """
   attr :dataset, :string, required: true
   attr :scope_prefix, :string, default: ""
-  attr :nav_section, :atom, default: nil
   attr :current_path, :string, default: nil
   attr :admin?, :boolean, default: false
   attr :workspace_id, :string, default: nil
