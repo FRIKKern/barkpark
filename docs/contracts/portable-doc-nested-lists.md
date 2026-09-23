@@ -60,6 +60,7 @@ scalar/inline-array parents become maps; untouched carriers remain exact.
 Opaque child entries survive in their existing slots. Empty nested lists retain
 their empty stored items rather than persisting the editor placeholder.
 
-Hard breaks, multiple paragraphs, arbitrary child blocks and custom numbering
-starts are explicitly rejected. Mounted tests alone are not native-browser or
+Inline breaks serialize as LF text and Undo retains exact source carriers.
+Multiple paragraphs, arbitrary child blocks and custom numbering starts remain
+explicitly rejected. Mounted tests alone are not native-browser or
 whole-inventory sign-off.

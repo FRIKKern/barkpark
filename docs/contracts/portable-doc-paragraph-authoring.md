@@ -21,7 +21,9 @@ on every surface, and BPML spells it as `<p align="center">`.
 `bpParagraphSource` is editor-only history state, never rendered into HTML or
 imported from pasted HTML. Native splits may retain the text carrier while the
 canvas assigns the new block its own identity. This introduces no document
-migration, new dependency, nested-list support or hard-break support.
+migration or new dependency. Inline breaks serialize as LF text; DOM normalization
+and Undo retain original carriers. `src/canvas/__inline_breaks.test.mjs` covers
+paragraphs, headings and list bodies in canvas and per-block editors.
 
 Tests: `src/__paragraph_carriers.test.mjs` and
 `src/canvas/__paragraph_carriers.test.mjs` under `api/assets/paper-editor`, run

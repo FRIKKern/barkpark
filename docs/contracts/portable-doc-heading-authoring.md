@@ -18,7 +18,8 @@ renders an inline `text-align`, BPML spells `<h2 align="right">`.
 The editor's `bpHeadingSource` attribute carries source fields through history.
 It is not rendered into HTML or accepted from pasted HTML. Native splits may
 retain the text carrier; block IDs and unrelated metadata remain outside it.
-The existing heading-level policy and hard-break guard are unchanged.
+The heading-level policy is unchanged. Native breaks serialize as LF text;
+source comparison treats DOM breaks and literal newlines as equivalent.
 
 Tests: `src/__heading_carriers.test.mjs` and
 `src/canvas/__heading_carriers.test.mjs` under `api/assets/paper-editor`, included
