@@ -504,6 +504,7 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_brief_engagement(content)
     |> put_brief_disposition(content)
     |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
+    |> put_brief_claim_residue(content)
     |> prune_nils()
   end
 
@@ -570,6 +571,59 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   defp brief_claim(_), do: nil
+
+  # ── WHAT THE SUPPRESSION ABOVE COSTS, AND THE SUPPORTED WAY TO ASK ───────
+  #
+  # THE TRAP (task-4fe00055375680bb). `brief_claim/1` returning nil for a
+  # worker-less claim is right for the CARD and stays — but this view is what
+  # `bp task ready` serves, so the suppression also blinds every BOARD-WIDE
+  # SWEEP built on it. A full ready walk filtered for a claim object with a
+  # null worker cannot return anything but ZERO, on any board, forever, and
+  # the sweep cannot tell that zero from a clean board. Measured on the live
+  # board 2026-09-23 over a complete two-page walk of 724 ready rows: the
+  # lapsed filter returned 0 while its positive control (`claim.worker` NOT
+  # null) returned 19, and a per-row `bp task get` over the same 724 ids found
+  # 183 rows carrying a claim map with a null worker.
+  #
+  # DO NOT FIX THAT BY PUTTING THE BLOCK BACK. Ask on `claim_residue` instead
+  # — `put_brief_claim_residue/2` below, an additive key that says only WHAT
+  # KIND of residue is there ("expired" | "released" | "unheld") and never
+  # names a holder, because a residue row has none. The sweep is then one list
+  # read:
+  #
+  #     bp task ready --limit 400 --offset N -o json \
+  #       | jq '[.docs[] | select(.claim_residue == "expired")] | length'
+  #
+  # `claim.worker` is still the ONE ownership signal on this card, and
+  # `claim_residue` is never emitted for a row that has one.
+  defp put_brief_claim_residue(map, content) do
+    case Map.get(content, "claim") do
+      %{} = claim ->
+        case Map.get(claim, "worker") do
+          nil -> Map.put(map, :claim_residue, residue_kind(claim))
+          _worker -> map
+        end
+
+      _ ->
+        map
+    end
+  end
+
+  # EXPIRED vs RELEASED is not cosmetic and a boolean would destroy it. On the
+  # 2026-09-23 census the 183 residues split 53 swept / 130 released: a
+  # release is ordinary, correct lane behaviour, while a TTL reap is the
+  # silent return-to-ready the pulse loop exists to catch. A sweep that cannot
+  # separate them gets a 183-row haystack for a 53-row question. `expired_at`
+  # wins a tie because a row that was released and LATER reaped is, now, a
+  # reap. "unheld" is the honest third answer: a claim map with no holder and
+  # no marker — hand-written, or pre-dating both fields.
+  defp residue_kind(claim) do
+    cond do
+      is_binary(Map.get(claim, "expired_at")) -> "expired"
+      is_binary(Map.get(claim, "released_at")) -> "released"
+      true -> "unheld"
+    end
+  end
 
   # The now-line rides the card with its text capped (cut d) and its timestamp
   # trimmed to seconds (cut f); `criterion` (a small int) survives untouched.
