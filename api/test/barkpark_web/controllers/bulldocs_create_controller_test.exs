@@ -52,9 +52,12 @@ defmodule BarkparkWeb.BulldocsCreateControllerTest do
         "production"
       )
 
+    # The writer stamps current_revision_id after constructing its return
+    # struct. Compare two database reads, not that earlier return snapshot.
+    {:ok, before} = Content.get_document(draft.doc_id, "paper", "production")
     assert json_response(create(conn, payload), 409)["error"]["code"] == "paper_exists"
     refute Content.get_paper(payload["slug"])
-    assert {:ok, ^draft} = Content.get_document(draft.doc_id, "paper", "production")
+    assert {:ok, ^before} = Content.get_document(draft.doc_id, "paper", "production")
   end
 
   test "cannot address the draft namespace or silently accept a revision fence", %{conn: conn} do

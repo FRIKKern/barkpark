@@ -132,7 +132,7 @@ Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the gl
 
 ## 8a. Plugin HTTP surfaces — Tickets `/v1/tickets`, Sheets `POST /v1/plugins/sheets/:slug/ops`, Bulldocs paper ops
 
-Contract: [contracts/plugin-http-api.md](contracts/plugin-http-api.md) (`bptk_` submitter keys, operator/admin routes, attachment and write limits; Sheets ops apply individually, `sort_range`, no filter wire endpoint). `POST /v1/plugins/bulldocs/papers/:slug/ops` is an EDIT door: the AuthoringWall does NOT run there — its whole contract is `ratchet_hollow/2` + `reject_new_field_loss/2`, and the five publish-time floors are re-applied at the next publish.
+Contract: [plugin HTTP](contracts/plugin-http-api.md) covers ticket keys/limits, Sheets individual ops and Paper create-only `/papers/:slug/create` (native blocks, 201; existing published/draft targets 409). Paper `/papers/:slug/ops` edits with `ratchet_hollow/2` + `reject_new_field_loss/2`, without AuthoringWall; its five publish-time floors reapply at publish. Ordinary `/papers` remains upsert.
 
 ## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
 
