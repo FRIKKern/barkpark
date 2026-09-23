@@ -118,7 +118,8 @@ defmodule Barkpark.Sites.PrebuiltArtifactStreamFaultTest do
 
   # ── the injector ──────────────────────────────────────────────────────────
 
-  defp inject(ctx, error, fire_at) do
+  defp inject(ctx, error, fire_at, dest \\ nil) do
+    dest = dest || Path.join(ctx.base, "site-#{System.unique_integer([:positive])}")
     tar = site_tar()
     gz = :zlib.gzip(tar)
     sha = :crypto.hash(:sha256, gz) |> Base.encode16(case: :lower)
@@ -135,7 +136,7 @@ defmodule Barkpark.Sites.PrebuiltArtifactStreamFaultTest do
         error: error,
         artifact_b64: Base.encode64(gz),
         sha256: sha,
-        dest: Path.join(ctx.base, "site-#{System.unique_integer([:positive])}"),
+        dest: dest,
         opts: []
       })
     )
@@ -147,7 +148,20 @@ defmodule Barkpark.Sites.PrebuiltArtifactStreamFaultTest do
     assert File.exists?(reply), "the probe VM wrote no reply:\n#{out}"
 
     result = reply |> File.read!() |> :erlang.binary_to_term()
-    Map.put(result, :tar_bytes, byte_size(tar))
+    result |> Map.put(:tar_bytes, byte_size(tar)) |> Map.put(:dest, dest)
+  end
+
+  # Every `<dest>.staging-*` sibling on disk — the tree a refusal (or a crash)
+  # must not leave behind. Listed from the PARENT, not globbed from a guessed
+  # name, so a staging dir named any other way is still seen.
+  defp staging_residue(dest) do
+    prefix = Path.basename(dest) <> ".staging-"
+
+    dest
+    |> Path.dirname()
+    |> File.ls!()
+    |> Enum.filter(&String.starts_with?(&1, prefix))
+    |> Enum.sort()
   end
 
   defp drain_frame(stacktrace) do
@@ -232,5 +246,103 @@ defmodule Barkpark.Sites.PrebuiltArtifactStreamFaultTest do
     assert {:returned, {:error, "E_MALFORMED", message}} = result.outcome
     assert message =~ "corrupt"
     assert "E_MALFORMED" in PrebuiltArtifact.caller_fault_codes()
+  end
+
+  # ── a crash must not leave its staging tree behind ────────────────────────
+  #
+  # The crash arms above prove the raise is LOUD. These prove it is also CLEAN:
+  # the `rm_rf` that makes "a refusal leaves NO partial tree" true used to run
+  # only on `run_stream/3`'s RETURN path, so a process that died inside the
+  # stream left the whole `<dest>.staging-<n>` tree — with 19 blocks of real tar
+  # already written into it — on disk.
+
+  for error <- [:badarg, :not_initialized, :not_on_controlling_process] do
+    test "#{error} inside the stream crashes AND leaves no staging tree", ctx do
+      result = inject(ctx, unquote(error), @fire_at)
+
+      # The precondition, asserted: the fault fired mid-stream, after the parser
+      # had already WRITTEN entries — a staging tree existed to leak.
+      assert result.calls == @fire_at
+      assert result.delivered == @delivered_before_fault
+
+      outcome = result.outcome
+
+      assert match?({:raised, :error, unquote(error), _}, outcome),
+             "the cleanup must not swallow the crash. Got: #{inspect(outcome)}"
+
+      {:raised, :error, _kind, stacktrace} = outcome
+
+      assert drain_frame(stacktrace),
+             "the re-raised crash must still name drain/3 as its origin — a cleanup that " <>
+               "re-raises with a fresh stacktrace hides where the bug is. " <>
+               "Stack: #{inspect(Enum.take(stacktrace, 4))}"
+
+      residue = staging_residue(result.dest)
+
+      assert residue == [],
+             "a crash inside run_stream/3 leaked its staging tree: #{inspect(residue)} " <>
+               "under #{Path.dirname(result.dest)}"
+
+      refute File.exists?(result.dest), "a crash must not produce the destination either"
+    end
+  end
+
+  # ── residue must not change a LATER verdict ───────────────────────────────
+  #
+  # How the leak was actually found: a probe VM reused a staging directory a
+  # crashed predecessor had left, and answered `E_UNSAFE_PARENT — names
+  # index.html more than once` about an archive that names it once. Two
+  # independent holes had to line up for that: the crash leaked the tree, AND
+  # the next run's staging NAME collided with it and was silently re-entered
+  # (`System.unique_integer/1` restarts in every VM; `File.mkdir_p/1` accepts an
+  # existing directory). Each arm below closes on one of them.
+
+  test "a run after a CRASHED predecessor answers what a clean box answers", ctx do
+    clean = inject(ctx, :enomem, 0)
+    assert {:returned, {:ok, clean_summary}} = clean.outcome
+
+    dest = Path.join(ctx.base, "site-after-crash")
+    crashed = inject(ctx, :badarg, @fire_at, dest)
+    crashed_outcome = crashed.outcome
+    assert match?({:raised, :error, :badarg, _}, crashed_outcome), inspect(crashed_outcome)
+
+    after_crash = inject(ctx, :enomem, 0, dest)
+    after_outcome = after_crash.outcome
+
+    assert match?({:returned, {:ok, _}}, after_outcome),
+           "the predecessor's crash changed this run's verdict: #{inspect(after_outcome)}"
+
+    {:returned, {:ok, after_summary}} = after_outcome
+    assert after_summary.entries == clean_summary.entries
+    assert after_summary.bytes == clean_summary.bytes
+    assert staging_residue(dest) == []
+  end
+
+  test "residue a crash could NOT clean (a killed VM) is never re-entered by a later run",
+       ctx do
+    # `try/after` cannot run in a VM that was SIGKILLed, so the naming has to be
+    # safe on its own. Plant what such a predecessor leaves — a half-written
+    # tree holding `index.html` — under every name a fresh VM's
+    # `unique_integer([:positive])` hands out early, then stage in a fresh VM.
+    dest = Path.join(ctx.base, "site-after-kill")
+
+    planted =
+      for n <- 1..4096 do
+        dir = "#{dest}.staging-#{n}"
+        File.mkdir_p!(dir)
+        File.write!(Path.join(dir, "index.html"), "<html>a dead run's page</html>")
+        Path.basename(dir)
+      end
+
+    result = inject(ctx, :enomem, 0, dest)
+    outcome = result.outcome
+
+    assert match?({:returned, {:ok, %{entries: 41}}}, outcome),
+           "a killed predecessor's residue changed this run's verdict: #{inspect(outcome)}"
+
+    # The new run removed only what it created; the dead run's litter is left
+    # for an operator, never adopted.
+    assert staging_residue(dest) == Enum.sort(planted)
+    assert File.read!(Path.join(dest, "index.html")) == "<html>root</html>"
   end
 end
