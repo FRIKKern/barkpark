@@ -1905,6 +1905,20 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         border-radius: 3px; padding: 0 4px; opacity: 0.85;
       }
       .bp-phone-title .bp-draft { vertical-align: middle; margin-right: 6px; }
+      /* task-9d0c7adbbe1a5af1 c2 — the UNPUBLISHED-PAIR marker. The card's
+         logical id collapsed from 2+ rows and NONE is published, so the row
+         shown was picked between two unpublished twins by
+         `TwinCollapse.canonical/1`'s tie-break, not because it is the row of
+         record. Same chip shape as DRAFT, danger-coloured: this one wants
+         an operator to reconcile the pair. */
+      .bp-twin-pair {
+        flex: 0 0 auto; align-self: flex-start;
+        font-size: 9px; font-weight: 700; letter-spacing: 0.09em;
+        line-height: 1.6; text-transform: uppercase;
+        color: var(--danger); border: 1px solid var(--danger);
+        border-radius: 3px; padding: 0 4px; opacity: 0.85;
+      }
+      .bp-phone-title .bp-twin-pair { vertical-align: middle; margin-right: 6px; }
       /* Freshness stamp — every card dates itself (relative, tabular) so
          relevance is readable at a glance without opening anything. */
       .bp-age {
@@ -2863,6 +2877,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             >
               DRAFT
             </span>
+            <span
+              :if={card[:twin_unpublished_pair]}
+              class="bp-twin-pair"
+              data-role="twin-unpublished-pair"
+              title="Twinned pair with NO published side — this id has 2+ unpublished rows; the one shown was picked by tie-break"
+            >
+              UNPUBLISHED PAIR
+            </span>
             <span :if={card.updated_at} class="bp-age" data-role="age">
               <%= age_label(card.updated_at) %>
             </span>
@@ -3378,6 +3400,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             title="Unpublished draft row — its stored id still carries the drafts. prefix"
           >
             DRAFT
+          </span>
+          <span
+            :if={card[:twin_unpublished_pair]}
+            class="bp-twin-pair"
+            data-role="twin-unpublished-pair"
+            title="Twinned pair with NO published side — this id has 2+ unpublished rows; the one shown was picked by tie-break"
+          >
+            UNPUBLISHED PAIR
           </span>
           <%= card.title %>
         </h3>

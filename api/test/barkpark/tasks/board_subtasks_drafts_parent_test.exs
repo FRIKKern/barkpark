@@ -4,7 +4,7 @@ defmodule Barkpark.Tasks.BoardSubtasksDraftsParentTest do
   (task-56bc2039bae5010f).
 
   `Board.attach_subtasks/1` buckets children by `parent_id` and looks the bucket
-  up by `card.doc_id`. `to_card/4` already normalises the LOOKUP side —
+  up by `card.doc_id`. `to_card/5` already normalises the LOOKUP side —
   `doc_id: Content.published_id(doc.doc_id)` — but `parent_id` is the RAW stored
   value, and every write through `/v1/data/mutate` lands in the draft shadow, so
   a child filed against a drafts-shaped epic stores
@@ -82,7 +82,7 @@ defmodule Barkpark.Tasks.BoardSubtasksDraftsParentTest do
 
   test "the live shape: a DRAFT-ONLY epic with a drafts.-parented child counts it" do
     # This is what the five live epics look like: the epic exists only as a
-    # `drafts.` document, so `to_card/4` renders it under the published id while
+    # `drafts.` document, so `to_card/5` renders it under the published id while
     # the child still stores the drafts-shaped parent.
     task!("drafts.epic-two", "Epic two", %{}, "draft")
     task!("drafts.child-b", "Child B", %{"parent_id" => "drafts.epic-two"}, "draft")
