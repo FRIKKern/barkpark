@@ -1219,6 +1219,35 @@ jobs:
           # appears twice per step — the self-test arm and the comparison — plus
           # the step name and the two messages.
           #
+          # PIN 139 — RE-DERIVED 2026-09-23 (task-3e2226c69000587d), which adds FOUR arms:
+          #   `w37: a guard whose DECLARED Node major does not exist here reads UNREADABLE, never measured`,
+          #   `w37: THE OTHER DIRECTION — a guard that declares NO runtime and reds is still a measured defect`,
+          #   `w37: and a guard that declares the runtime it GOT and reds is a measured defect too`, and
+          #   `w37: the live ladder states the runtime it resolved for every guard it spawned`.
+          #
+          #   THE LOCAL FLOOR THE 2026-09-23 ENTRY BELOW DESCRIBES IS GONE, AND IT WAS THIS
+          #   DEFECT. That entry records `135 registered, 130 pass, 5 fail` on a developer box
+          #   at origin/main and tells you to derive the pin from the ANCHORED count instead.
+          #   Those five reds were clause-(b) guard/ladder arms failing because seal-predicate
+          #   spawned CCH-D1's guard as `node` OFF PATH — node 22 on that box — and the guard's
+          #   own cchi-w61-bl runtime self-check redded. CI never saw it because this job pins
+          #   node-version: 20. This PR spawns each guard on the major it DECLARES, so the two
+          #   derivations now AGREE: `grep -c '^test(' cloud/priv/static/__preview__/seal-predicate.test.mjs`
+          #   -> 139, and `node --test cloud/priv/static/__preview__/seal-predicate.test.mjs`
+          #   on a node-22 host printed `# tests 139 / # pass 139 / # fail 0`. The pin is the
+          #   number that run PRINTED, not 135 plus a delta.
+          #
+          #   READ THE BEHIND-COUNT BEFORE AND AFTER, not just before. That 139/139/0 run was
+          #   taken start-to-finish at base 8b7219e90 with `git rev-list --count HEAD..origin/main`
+          #   = 0. Two later re-runs on this branch each STARTED at 0 behind and FINISHED at 1,
+          #   because main merged mid-run, and each printed 39-40 reds — the exact floor this
+          #   file's own precondition text names ("1 behind -> 39 reds"). A tally taken across a
+          #   merge measures the merge, not the suite, so the control is the count at BOTH ends.
+          #
+          #   The history BELOW is left exactly as it was — those numerals quote dated runs and
+          #   earlier PRs, and rewriting one would fabricate a CI line nobody ever printed. Only
+          #   the LIVE numerals (the self-test arm, the comparison, the error message, the echo)
+          #   move.
           # PIN 135 — RE-DERIVED 2026-09-23 (task-3c620a8d3b603128), which adds THREE arms:
           #   `wave 36: a legally re-homed row REACHES the forwarded bucket (and could not before)`,
           #   `wave 36: a PACED roster reads re-homed and vanished in different letters`, and
@@ -1296,14 +1325,14 @@ jobs:
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 135 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 135 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 139 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 139 — this pin can no longer lose"; exit 1; }
           PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
-          if [ "${tally:-0}" -ne 135 ]; then
-            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 135 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 135 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 139 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 139 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 139 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "seal predicate tests: ${tally} tests, exact pin 135 — the pin re-earned"
+          echo "seal predicate tests: ${tally} tests, exact pin 139 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"
