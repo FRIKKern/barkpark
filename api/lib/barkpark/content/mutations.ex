@@ -1044,7 +1044,7 @@ defmodule Barkpark.Content.Mutations do
   # calls none of them — that is unchanged and correct, because a birth has no
   # prior revision and no prior term for a CHANGE guard to compare against.
   # What changed is that the create-family doors all funnel into
-  # `Content.create_document/4`, and `Writer.ensure_task_born_adjudicated/5` now
+  # `Content.create_document/4`, and `Tasks.BirthGuards.born_adjudicated/6` now
   # sits in that chain where `prev_doc == nil` IS expressible: a birth carrying
   # an off-vocabulary term, or a park with no reopen trigger, is refused there.
   # It is a fence and not a ban — a COMPLETE adjudication is born, so the
@@ -1127,7 +1127,7 @@ defmodule Barkpark.Content.Mutations do
   #
   # A birth-scoped fence is STRUCTURALLY BLIND to adoption. A task filed outside
   # an epic carries no `parent_id`; giving it one later is an UPDATE with
-  # `prev_doc` non-nil, so `Writer.ensure_task_born_adjudicated/5` — and every
+  # `prev_doc` non-nil, so `Tasks.BirthGuards.born_adjudicated/6` — and every
   # other birth-scoped gate — never sees it. Without this guard the closure has
   # a side door: file bare, then reparent in, and the row is inside the epic's
   # denominator having never been adjudicated by anything.
