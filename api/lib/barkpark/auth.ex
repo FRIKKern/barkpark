@@ -6,6 +6,7 @@ defmodule Barkpark.Auth do
   alias Barkpark.Repo
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Auth.LoginTicket
+  alias Barkpark.Auth.TokenExpiry
   alias Barkpark.Sharing
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -21,9 +22,10 @@ defmodule Barkpark.Auth do
 
   # P5 share-edit token TTL policy (owner decision 2026-06-09): default 7 days,
   # hard cap 1 year. Write access is higher-risk than the anonymous read share,
-  # so an edit token always expires.
+  # so an edit token always expires. The cap is `Barkpark.Auth.TokenExpiry`'s
+  # share max (365 days); above it a ttl is REFUSED, no longer clamped
+  # (task-a0f8cfd7f4800236).
   @share_token_default_ttl 7 * 24 * 3600
-  @share_token_max_ttl 365 * 24 * 3600
 
   # The ONLY surfaces an edit token may cover. Papers-edit is out of scope (it
   # rides the Bulldocs shared-secret ingest API, a different auth model).
@@ -735,25 +737,83 @@ defmodule Barkpark.Auth do
   happens to hold the default seat. A caller that WANTS the instance default
   must now resolve it itself and pass it — `Barkpark.Auth.PublicRead`, the one
   caller that meant it, does exactly that. There is no default to fall into.
+
+  ## `opts` — mint-time expiry (task-a0f8cfd7f4800236)
+
+    * `:expires_at` — `nil` (default), a `DateTime`, or `:no_expiry`. Resolved
+      by `Barkpark.Auth.TokenExpiry.resolve/3`: over the class max →
+      `{:error, {:expiry_exceeds_max, class, days}}` (never clamped); `nil` →
+      the configured class default, which SHIPS nil, so an opts-less call mints
+      exactly what it minted before this option existed.
+    * `:class` — `:api` / `:share` / `:app`; inferred from `permissions` when
+      absent (`public-read` → `:share`). The app-token mint passes `:app`.
+    * `:actor` — the minting principal. `:no_expiry` is admitted only when it
+      is an `%ApiToken{}` holding the flat `"admin"` permission, and the mint +
+      its `token/token_no_expiry_opt_out` audit row commit together.
   """
-  def create_token(raw_token, label, dataset, permissions, workspace_id \\ nil) do
+  def create_token(raw_token, label, dataset, permissions, workspace_id \\ nil, opts \\ []) do
     ws_id = workspace_id
 
-    token_attrs = %{
-      token_hash: ApiToken.hash_token(raw_token),
-      label: label,
-      dataset: dataset,
-      permissions: permissions,
-      workspace_id: ws_id
-    }
+    class =
+      Keyword.get_lazy(opts, :class, fn -> TokenExpiry.class_for_permissions(permissions) end)
 
-    if is_nil(ws_id) do
-      %ApiToken{}
-      |> ApiToken.changeset(token_attrs)
-      |> Repo.insert()
-    else
-      insert_token_with_membership(token_attrs, ws_id, permissions)
+    request = Keyword.get(opts, :expires_at)
+    actor = Keyword.get(opts, :actor)
+
+    with {:ok, expires_at} <-
+           TokenExpiry.resolve(class, request, admin?: no_expiry_admin?(actor)) do
+      token_attrs = %{
+        token_hash: ApiToken.hash_token(raw_token),
+        label: label,
+        dataset: dataset,
+        permissions: permissions,
+        workspace_id: ws_id,
+        expires_at: expires_at
+      }
+
+      insert = fn ->
+        if is_nil(ws_id) do
+          %ApiToken{}
+          |> ApiToken.changeset(token_attrs)
+          |> Repo.insert()
+        else
+          insert_token_with_membership(token_attrs, ws_id, permissions)
+        end
+      end
+
+      if request == :no_expiry,
+        do: insert_with_no_expiry_audit(insert, class, actor),
+        else: insert.()
     end
+  end
+
+  # The opt-out is the INSTANCE admin bit — the flat permission
+  # `BarkparkWeb.Plugs.RequireAdmin` reads — not a workspace role: a
+  # never-expiring credential is an exception to instance policy, so a
+  # workspace owner holding a read/write PAT may not grant it to themselves.
+  defp no_expiry_admin?(%ApiToken{} = actor), do: has_permission?(actor, "admin")
+  defp no_expiry_admin?(_), do: false
+
+  # Mint + audit row in ONE transaction: an opt-out that cannot be audited is
+  # not minted (Audit.emit's rollback takes the insert down with it).
+  defp insert_with_no_expiry_audit(insert, class, %ApiToken{} = actor) do
+    Repo.transaction(fn ->
+      with {:ok, token} <- insert.(),
+           {:ok, _event} <-
+             Audit.emit(%{
+               category: "token",
+               action: "token_no_expiry_opt_out",
+               subject: token.id,
+               actor_type: "api_token",
+               actor_id: actor.id,
+               workspace_id: token.workspace_id,
+               metadata: %{"kind" => to_string(class), "label" => token.label}
+             }) do
+        token
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
 
   # ── Connectors: the per-install chat token (D36/D48) ───────────────────────
@@ -938,11 +998,11 @@ defmodule Barkpark.Auth do
 
   # ── PAT fast-follow: self-service Personal Access Tokens ───────────────
 
-  # PAT TTL policy: default 30 days, hard-capped at 1 year. A PAT is a
+  # PAT TTL policy: default 30 days; above the api max age (365 days,
+  # `Barkpark.Auth.TokenExpiry`) a ttl is refused, not clamped. A PAT is a
   # longer-lived self-service credential than the dev token, so it always
   # carries a finite horizon (mirrors cloud/'s bounded expiry).
   @pat_default_ttl 30 * 24 * 3600
-  @pat_max_ttl 365 * 24 * 3600
   @pat_token_prefix "bppat_"
 
   # Roles that may mint an ELEVATED (write-tier) token. A `member` may only
@@ -995,7 +1055,7 @@ defmodule Barkpark.Auth do
 
   `opts`: `:role` (default `"member"`), `:workspace_id`, `:dataset`
   (default `"production"`), `:created_by`, `:ttl` (seconds; `nil` = never;
-  default 30 days; capped at 1 year), `:owner_user_id` (bind the token to a
+  default 30 days; over 365 days is refused, never clamped), `:owner_user_id` (bind the token to a
   USER identity — set ONLY by the session-gated self-mint, hard-bound to the
   authenticated caller; never a client-supplied value).
 
@@ -1013,25 +1073,16 @@ defmodule Barkpark.Auth do
   `create_personal_access_token` before relying on this.)
   """
   @spec create_personal_access_token(binary(), [binary()], keyword()) ::
-          {:ok, {binary(), ApiToken.t()}} | {:error, :forbidden | Ecto.Changeset.t()}
+          {:ok, {binary(), ApiToken.t()}}
+          | {:error, :forbidden | TokenExpiry.reason() | Ecto.Changeset.t()}
   def create_personal_access_token(name, permissions, opts \\ [])
       when is_binary(name) and is_list(permissions) do
     role = Keyword.get(opts, :role, "member")
 
-    with :ok <- authorize_pat_permissions(role, permissions) do
+    with :ok <- authorize_pat_permissions(role, permissions),
+         {:ok, expires_at} <- pat_expires_at(Keyword.get(opts, :ttl, @pat_default_ttl)) do
       raw = @pat_token_prefix <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
       ws_id = Keyword.get(opts, :workspace_id)
-
-      expires_at =
-        case Keyword.get(opts, :ttl, @pat_default_ttl) do
-          nil ->
-            nil
-
-          ttl ->
-            DateTime.utc_now()
-            |> DateTime.add(clamp_pat_ttl(ttl))
-            |> DateTime.truncate(:second)
-        end
 
       token_attrs = %{
         token_hash: ApiToken.hash_token(raw),
@@ -1135,8 +1186,16 @@ defmodule Barkpark.Auth do
     end
   end
 
-  defp clamp_pat_ttl(ttl) when is_integer(ttl) and ttl > 0, do: min(ttl, @pat_max_ttl)
-  defp clamp_pat_ttl(_), do: @pat_default_ttl
+  # `:ttl nil` stays "never" (an in-process, trusted-caller choice — no HTTP
+  # route reaches it). A positive ttl over the api max age is REFUSED naming
+  # the max (task-a0f8cfd7f4800236) — it used to be silently clamped to 1 year.
+  # A non-positive/non-integer ttl still falls back to the 30-day default.
+  defp pat_expires_at(nil), do: {:ok, nil}
+
+  defp pat_expires_at(ttl) do
+    ttl = if is_integer(ttl) and ttl > 0, do: ttl, else: @pat_default_ttl
+    TokenExpiry.resolve(:api, DateTime.add(DateTime.utc_now(), ttl, :second))
+  end
 
   # ── P5: scoped-share EDIT tokens ───────────────────────────────────────
 
@@ -1155,8 +1214,8 @@ defmodule Barkpark.Auth do
     * `share_scope` byte-binds it to one `"ws/proj/dataset"`.
 
   Defense-in-depth: refuses to mint unless the scope is live-`:edit`-shared for
-  every requested surface RIGHT NOW. `opts`: `:ttl` (seconds, default 7 days,
-  capped at 1 year), `:label`. Returns `{:ok, {raw_token, %ApiToken{}}}` — the
+  every requested surface RIGHT NOW. `opts`: `:ttl` (seconds, default 7 days;
+  over 365 days is refused, never clamped), `:label`. Returns `{:ok, {raw_token, %ApiToken{}}}` — the
   raw token is shown ONCE and never recoverable after.
   """
   @spec create_share_token(binary(), binary(), binary(), [binary() | atom()], keyword()) ::
@@ -1172,9 +1231,9 @@ defmodule Barkpark.Auth do
          %Tenancy.Workspace{} = ws <-
            Tenancy.get_workspace_by_slug(ws_slug) || {:error, :unknown_scope},
          %Tenancy.Project{} <-
-           Tenancy.get_project(ws_slug, proj_slug) || {:error, :unknown_scope} do
+           Tenancy.get_project(ws_slug, proj_slug) || {:error, :unknown_scope},
+         {:ok, expires_at} <- share_expires_at(opts[:ttl]) do
       raw = "bpshare_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
 
       attrs = %{
         token_hash: ApiToken.hash_token(raw),
@@ -1185,7 +1244,7 @@ defmodule Barkpark.Auth do
         permissions: Enum.map(surfaces, &"share-edit-#{&1}"),
         workspace_id: ws.id,
         share_scope: "#{ws_slug}/#{proj_slug}/#{dataset}",
-        expires_at: DateTime.add(now, clamp_ttl(opts[:ttl]))
+        expires_at: expires_at
       }
 
       case %ApiToken{} |> ApiToken.changeset(attrs) |> Repo.insert() do
@@ -1265,9 +1324,13 @@ defmodule Barkpark.Auth do
     end
   end
 
-  defp clamp_ttl(nil), do: @share_token_default_ttl
-  defp clamp_ttl(ttl) when is_integer(ttl) and ttl > 0, do: min(ttl, @share_token_max_ttl)
-  defp clamp_ttl(_), do: @share_token_default_ttl
+  # A share-edit token ALWAYS expires. A missing/non-positive ttl is the 7-day
+  # default; a positive ttl over the share max age (365 days) is REFUSED naming
+  # the max (task-a0f8cfd7f4800236) — it used to be silently clamped to it.
+  defp share_expires_at(ttl) do
+    ttl = if is_integer(ttl) and ttl > 0, do: ttl, else: @share_token_default_ttl
+    TokenExpiry.resolve(:share, DateTime.add(DateTime.utc_now(), ttl, :second))
+  end
 
   # ── scc-w12: Claude-chat loopback session tokens (charter D63) ──────────
 

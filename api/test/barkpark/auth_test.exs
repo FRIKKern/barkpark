@@ -279,15 +279,23 @@ defmodule Barkpark.AuthTest do
       assert is_nil(never_tok.expires_at)
     end
 
-    test "ttl is capped at one year" do
+    # task-a0f8cfd7f4800236: the 1-year CLAMP became a REFUSAL naming the api
+    # max age — a ttl over it mints nothing.
+    test "a ttl over the 365-day api max age is refused, never clamped" do
+      assert {:error, {:expiry_exceeds_max, :api, 365}} =
+               Auth.create_personal_access_token("huge-ttl", ["read"],
+                 role: "member",
+                 ttl: 10 * 365 * 24 * 3600
+               )
+
       {:ok, {_raw, tok}} =
-        Auth.create_personal_access_token("huge-ttl", ["read"],
+        Auth.create_personal_access_token("max-ttl", ["read"],
           role: "member",
-          ttl: 10 * 365 * 24 * 3600
+          ttl: 365 * 24 * 3600
         )
 
       days = DateTime.diff(tok.expires_at, DateTime.utc_now(), :second) / 86_400
-      assert days <= 366
+      assert days <= 365
     end
   end
 

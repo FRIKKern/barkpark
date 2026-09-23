@@ -76,7 +76,7 @@ defmodule Barkpark.Sharing.Links do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
-  # Cap the TTL at one year — mirrors Barkpark.Auth @share_token_max_ttl / the
+  # Cap the TTL at one year — mirrors the 1-year cap Barkpark.Auth once clamped share-edit ttls to / the
   # share_controller "cap 1y" contract. A JSON-decoded bignum ttl would otherwise
   # drive DateTime.add into a runaway bignum date computation (request hang) or
   # mint an effectively never-expiring link, defeating expiry/revocation.

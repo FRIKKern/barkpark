@@ -375,7 +375,7 @@ defmodule BarkparkWeb.ShareController do
   `POST /v1/shares/tokens` — mint a scoped-share EDIT token (P5).
 
   Body/params: `scope` (required), `surfaces` (required, comma list of
-  `docs,media`), `ttl` (optional seconds; default 7d, cap 1y), `label`
+  `docs,media`), `ttl` (optional seconds; default 7d; over 365d → 422 naming the max, never clamped), `label`
   (optional). 201 with the RAW token shown ONCE; 422 if the scope is not
   `:edit`-shared for the surfaces; 403 when the caller is not a workspace
   admin of the SCOPE's workspace (see the tenancy-confinement note above).
@@ -648,6 +648,12 @@ defmodule BarkparkWeb.ShareController do
   defp describe_token_error(:no_surfaces), do: "no valid surfaces"
   defp describe_token_error(:unknown_scope), do: "the workspace/project does not exist"
   defp describe_token_error(%Ecto.Changeset{}), do: "validation failed"
+
+  # ttl over the share max age: REFUSED naming the max, never clamped
+  # (task-a0f8cfd7f4800236).
+  defp describe_token_error({:expiry_exceeds_max, _, _} = reason),
+    do: Barkpark.Auth.TokenExpiry.message(reason)
+
   defp describe_token_error(other), do: inspect(other)
 
   defp share_json(%Sharing.Share{} = s, source) do
