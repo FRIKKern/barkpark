@@ -535,6 +535,23 @@ defmodule Barkpark.Accounts do
   def confirm_user(_), do: :error
 
   @doc """
+  Confirm a user that an identity provider has ALREADY vouched for, with no
+  email-confirmation token.
+
+  `confirm_user/1` needs the plaintext token from the confirmation email.
+  IdP-driven provisioning (SSO JIT, OIDC, social login, SCIM) never has one:
+  the provider verified the address, so the account is born confirmed. This
+  is the one public door for that, so those callers stop reaching past this
+  context with a raw `Repo.update!/1` on `User.confirm_changeset/2`.
+
+  Call it ONLY on a user the caller just provisioned from a verified IdP
+  assertion. It is not a way to skip email confirmation for a sign-up.
+  """
+  @spec confirm_provisioned_user(User.t()) :: User.t()
+  def confirm_provisioned_user(%User{} = user),
+    do: Repo.update!(User.confirm_changeset(user))
+
+  @doc """
   Reset a password from a `"reset"` token plaintext, then revoke all sessions.
 
   Drops the revoked-session count — use `reset_user_password_counting/2` on any
