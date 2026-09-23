@@ -801,6 +801,54 @@ defmodule Barkpark.Plugin do
               ctx :: map()
             ) :: [api_test_spec()]
 
+  # ── Pre-write fences (Barkspark phase 1, task-e5baaaa14ddf2e1c) ───────
+
+  @typedoc """
+  When a pre-write fence runs relative to the core writer's own task birth
+  guards (`ensure_task_born_adjudicated/5`, `ensure_task_surface_declared/5`
+  in `Barkpark.Content.Writer`):
+
+    * `:early` — after the transition gate, BEFORE those birth guards.
+    * `:late`  — AFTER them; the last refusal before the write.
+
+  Two phases exist because the fences the Tasks plugin owns did not sit
+  contiguously in the writer's `with` chain: `Dedup.check_new_task/5` ran after
+  the two core birth guards, the other four before them. One phase would have
+  moved one side past the other and changed which refusal wins on a write that
+  trips both.
+  """
+  @type pre_write_fence_phase :: :early | :late
+
+  @typedoc """
+  One pre-write fence: `{phase, module, function}`. The writer calls
+  `apply(module, function, [type, attrs, dataset, doc_id, prev_doc, opts])`
+  and expects `:ok` to pass. ANY other return halts the write and is returned
+  to the writer's caller VERBATIM (the `with :ok <- …` contract) — so a fence
+  returns `{:error, reason}` in exactly the shape its callers match on.
+  """
+  @type pre_write_fence ::
+          {pre_write_fence_phase(), module(), atom()}
+
+  @doc """
+  Declare the ORDERED list of fences the core writer runs before a document
+  write, inside the write path, with the resolved `prev_doc` (nil on a birth)
+  and the caller's `opts`.
+
+  Published by `Barkpark.Plugins.Registry` to `Barkpark.Content.PreWriteFences`
+  and read there in plugin load order (this list's order kept within a
+  plugin). The writer runs each
+  phase's fences in that order and stops at the first non-`:ok`.
+
+  Unlike `lifecycle_hooks/0` `:before_*`, a fence sees `prev_doc` and `opts`
+  and its error is returned verbatim, not wrapped as `{:halted, _}`. NOT
+  filtered by per-workspace enablement: an installed plugin's data-integrity
+  gates always run. A raising declaration is NOT swallowed — silently
+  dropping an integrity fence would be fail-open.
+
+  Default (supplied by `use Barkpark.Plugin`) returns `[]`.
+  """
+  @callback pre_write_fences() :: [pre_write_fence()]
+
   # ── Lifecycle hooks callback (Goal barkpark-9lq) ─────────────────────
 
   @doc """
@@ -1004,6 +1052,7 @@ defmodule Barkpark.Plugin do
                       extract_edges: 2,
                       resolve_extract_edges: 2,
                       lifecycle_hooks: 0,
+                      pre_write_fences: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
                       cli_commands: 0,
@@ -1205,6 +1254,9 @@ defmodule Barkpark.Plugin do
       def lifecycle_hooks, do: %{}
 
       @impl Barkpark.Plugin
+      def pre_write_fences, do: []
+
+      @impl Barkpark.Plugin
       def api_tests, do: []
 
       @impl Barkpark.Plugin
@@ -1270,6 +1322,7 @@ defmodule Barkpark.Plugin do
                      extract_edges: 2,
                      resolve_extract_edges: 2,
                      lifecycle_hooks: 0,
+                     pre_write_fences: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,
                      cli_commands: 0,
