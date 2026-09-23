@@ -2750,7 +2750,13 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # these three lines to paste.
         --expect-unrendered "prod-microblock-read"
         --expect-unrendered "prod-microblock-report-scheduled-failure"
-        --expect-unrendered "prod-microblock-selftest")
+        --expect-unrendered "prod-microblock-selftest"
+        # ── 2026-09-23 (task-ef8dd830312c56a9): the console-harness pin leg. Its
+        # .exclusions row lands in the same diff. The NAME is not new — it arrived
+        # with #19567 (7da416496) under slug `console-harness-pin` — but it first
+        # RENDERED on a drift-examined sha when #19951 touched console-harness.yml,
+        # so the gap sat latent until a push-to-main made the dispatcher emit it.
+        --expect-unrendered "console-harness.sh reads CI's pin (it must be able to LOSE)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
