@@ -2144,7 +2144,7 @@ defmodule BarkparkWeb.TasksController.Params do
   def criteria_hint(:observed_rev_required, :stamp),
     do:
       ~s|this row carries no live claim (it is closed, cancelled or released), so there is no epoch to fence | <>
-        ~s|a withdrawal or a post-close --miss against. Pin the rev you read instead: re-read with | <>
+        ~s|a withdrawal, an amendment or a post-close --miss against. Pin the rev you read instead: re-read with | <>
         ~s|`bp task get <id> -o json`, take .doc.rev, and re-run with --observed-rev <rev>. Nothing was | <>
         ~s|written. Neither verb touches the seal, the close_reason or the original evidence: a withdrawal | <>
         ~s|lowers the met flag and appends a signed record naming who withdrew it and why, and a --miss | <>
@@ -2185,6 +2185,25 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|leaves the claim map behind), which is why presence of your worker id here proves nothing. | <>
         ~s|Re-claim it — `bp task claim <id> <worker>` — and use the epoch THAT returns for the next | <>
         ~s|stamp/close. If your loop treated the earlier pulses as proof the claim was held, they were not.|
+
+  # THE AMENDMENT HINTS (task-a1df012e89b1e289). Both are reachable by a
+  # reviewer doing the right thing, so each names the next command.
+  def criteria_hint(:amended_criterion_required, :stamp),
+    do:
+      ~s|--amend needs REPLACEMENT wording with words in it. Nothing was written. Emptying a | <>
+        ~s|criterion is a DELETION, not a correction: the row would keep its index and its met flag | <>
+        ~s|and stop saying what was proven. Write the corrected sentence to a file and pass | <>
+        ~s|--amended-criterion-file <path> (or `-` for stdin) — never inline, because criterion | <>
+        ~s|wording is MARKDOWN and a backticked code span inside a double-quoted shell argument is | <>
+        ~s|COMMAND SUBSTITUTION.|
+
+  def criteria_hint(:criterion_unchanged, :stamp),
+    do:
+      ~s|the replacement wording is byte-identical to the stored criterion, so there is nothing to | <>
+        ~s|correct and nothing was written — an amendments record asserting a correction that never | <>
+        ~s|happened would only mislead the next reader. If you meant a DIFFERENT criterion, check the | <>
+        ~s|index: --criterion N is 0-BASED, so the first criterion is 0. If you meant to lower a met | <>
+        ~s|flag rather than fix the sentence, that is --withdraw --note "…".|
 
   def criteria_hint(:criterion_not_met, :stamp),
     do:
@@ -2784,12 +2803,15 @@ defmodule BarkparkWeb.TasksController.Params do
     met = stamp_flag?(Map.get(params, "met"))
     miss = stamp_flag?(Map.get(params, "miss"))
     withdraw = stamp_flag?(Map.get(params, "withdraw"))
+    amend = stamp_flag?(Map.get(params, "amend"))
     criterion_text = stamp_criterion_text(params)
+    amended_criterion = stamp_amended_criterion(params)
 
     with {:ok, index} <- parse_stamp_index(Map.get(params, "criterion")) do
       cond do
-        Enum.count([met, miss, withdraw], & &1) > 1 ->
-          {:error, :invalid_stamp, "pass exactly one of --met / --miss / --withdraw, not two"}
+        Enum.count([met, miss, withdraw, amend], & &1) > 1 ->
+          {:error, :invalid_stamp,
+           "pass exactly one of --met / --miss / --withdraw / --amend, not two"}
 
         met ->
           case Map.get(params, "evidence") do
@@ -2813,14 +2835,46 @@ defmodule BarkparkWeb.TasksController.Params do
                "--withdraw requires non-empty --note (why it was withdrawn)"}
           end
 
+        # THE AMENDMENT (task-a1df012e89b1e289). Two mandatory halves, two
+        # SEPARATE refusals: "you forgot the replacement wording" and "you
+        # forgot to say why" are different mistakes, and one message covering
+        # both sends half the callers to the wrong fix. Both are SHAPE checks —
+        # whether the wording differs from the stored row, and whether the
+        # caller may write this row at all, are state questions the stamp
+        # transaction answers under its lock.
+        amend ->
+          note = Map.get(params, "note")
+
+          cond do
+            not (is_binary(amended_criterion) and String.trim(amended_criterion) != "") ->
+              {:error, :invalid_stamp,
+               "--amend requires the REPLACEMENT wording. Pass it from a FILE — " <>
+                 "--amended-criterion-file <path> (or `-` for stdin) — never as an inline " <>
+                 "shell argument: criterion wording is MARKDOWN, and a backticked code span " <>
+                 "inside a double-quoted argument is COMMAND SUBSTITUTION. Blank wording is " <>
+                 "refused because emptying a criterion is a DELETION, not a correction."}
+
+            not (is_binary(note) and note != "") ->
+              {:error, :invalid_stamp,
+               "--amend requires non-empty --note (why the stored wording is being corrected). " <>
+                 "It is persisted on the amendments record beside the superseded sentence and " <>
+                 "is the only place the why survives."}
+
+            true ->
+              {:ok, index, {:amend, {amended_criterion, note}}, criterion_text}
+          end
+
         # A body that carries `met=false` and nothing else names no verb at
         # all. Say so with the withdrawal in the sentence, because "met: false"
         # is precisely what a caller reaches for when they mean to withdraw.
         true ->
           {:error, :invalid_stamp,
-           "pass one of --met (with --evidence), --miss (with --note) or --withdraw (with --note). " <>
+           "pass one of --met (with --evidence), --miss (with --note), --withdraw (with --note) " <>
+             "or --amend (with --amended-criterion-file and --note). " <>
              "A met:true -> met:false patch is NOT accepted here: --withdraw is the verb that lowers " <>
-             "a met flag, and it signs the correction instead of erasing the proof."}
+             "a met flag, and it signs the correction instead of erasing the proof. A criterion-TEXT " <>
+             "patch is not accepted here either: --amend is the verb that corrects wording, and it " <>
+             "preserves the sentence it replaces."}
       end
     end
   end
@@ -3103,6 +3157,17 @@ defmodule BarkparkWeb.TasksController.Params do
   # blank value is treated as absent (nil) — the permissive index-only path.
   defp stamp_criterion_text(params) do
     case Map.get(params, "criterion_text") || Map.get(params, "criterion-text") do
+      s when is_binary(s) and s != "" -> s
+      _ -> nil
+    end
+  end
+
+  # The amendment's REPLACEMENT wording, from either wire shape
+  # (task-a1df012e89b1e289). Blank / non-string reads as absent, and
+  # `parse_stamp/1` then refuses with the file recipe rather than letting an
+  # empty string reach the store and blank a criterion.
+  defp stamp_amended_criterion(params) do
+    case Map.get(params, "amended_criterion") || Map.get(params, "amended-criterion") do
       s when is_binary(s) and s != "" -> s
       _ -> nil
     end

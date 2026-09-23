@@ -1949,6 +1949,19 @@ defmodule BarkparkWeb.TasksController do
   #                                          withdrawals[] record appended. On a
   #                                          row with no claim it also needs
   #                                          observed_rev=<the rev you read>.
+  #   amend=true    + amended_criterion=<non-empty> + note=<non-empty>
+  #                                        → CORRECT THE WORDING
+  #                                          (task-a1df012e89b1e289): the
+  #                                          criterion text is replaced, the
+  #                                          superseded sentence is preserved on
+  #                                          a signed amendments[] record, and
+  #                                          met/evidence are PINNED. The brief's
+  #                                          criteria-list mirror is re-derived in
+  #                                          the SAME rev-fenced write, so both
+  #                                          surfaces move or neither does. Same
+  #                                          fence as withdraw: holder+epoch on an
+  #                                          in_progress row, observed_rev on any
+  #                                          other.
   # doc_id resolves via find_task_by_doc_id (close's pattern) and the
   # primitive locks task:<uuid> — the close family, serialized with close over
   # the same criteria. Progress is advisory: the response is the fresh doc

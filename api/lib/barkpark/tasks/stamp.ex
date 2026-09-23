@@ -22,6 +22,11 @@ defmodule Barkpark.Tasks.Stamp do
   #     proof false: lower `met` to false, leave the original `evidence`
   #     untouched, and append a `withdrawals` record naming who/why/when plus
   #     the evidence it supersedes. See THE WITHDRAWAL below.
+  #   * `{:amend, {new_criterion, note}}` — THE AMENDMENT
+  #     (task-a1df012e89b1e289). Review found the criterion SENTENCE false:
+  #     replace the wording, PRESERVE the sentence it replaces on an
+  #     `amendments` record naming who/why/when, and touch neither `met` nor
+  #     `evidence`. See THE AMENDMENT below.
   #
   # Stamp joins the CLOSE lock family (D6): the controller resolves doc_id →
   # `documents.id` and this module locks `task:<uuid>` — it must serialize
@@ -133,6 +138,53 @@ defmodule Barkpark.Tasks.Stamp do
   # row was terminal at stamp time, so a board can select post-close annotation
   # out of live progress on a boolean instead of joining against lifecycle.
 
+  # THE AMENDMENT (task-a1df012e89b1e289). `--withdraw` corrects a false
+  # ANSWER. Nothing corrected a false QUESTION. A criterion's TEXT was
+  # immutable once its row sealed: `close --set criteria` is close-only,
+  # `--withdraw` lowers `met` and cannot edit wording, `/v1/data/mutate` refuses
+  # the key and names the task verbs, `stage` reaches only row-level slots, and
+  # `Tasks.TerminalCriteriaFence` refuses the document door outright. So a
+  # criterion sentence proven FALSE could not be corrected anywhere a reader
+  # reaches.
+  #
+  # That is not hypothetical. Two rows on main today assert an absence the tree
+  # refutes while reading met=true: `jf-w1-engine-narrow-dark-fixes` c4 ("the
+  # code they describe is NOT on origin/main") against paper-surface.css:2061
+  # and :1997, and `jf-w1-media-cors-upstream` c3 ("No PR was ever opened")
+  # against router.ex:2828 (PR #15408, merged). Both close with "This criterion
+  # remains NOT MET" beside met=true. An audit reading criteria text rather than
+  # the tree concludes the opposite of the truth, in both directions.
+  #
+  # IT IS `--withdraw`'s SHAPE, deliberately, rather than a second one:
+  #
+  #   * NEVER A SILENT REWRITE. The superseded wording is snapshotted onto an
+  #     unbounded `amendments` list with who / why / when, so the sentence a
+  #     reader was once shown stays readable.
+  #   * THE SAME AUTHORITY SPLIT. Liveness, not presence, picks the fence — an
+  #     `in_progress` row is holder + epoch, any other row pins `--observed-rev`
+  #     — because a sealed row keeps its claim only as a RECEIPT and a presence
+  #     test would make a corrector impersonate the departed holder.
+  #   * THE SAME CRITERION-TEXT CAS, mandatory. Re-wording the wrong neighbour
+  #     is as much a lie as flipping it.
+  #   * IT MOVES NO LOCK. `met` is pinned to its stored value and `evidence` is
+  #     untouched, so it can neither fabricate a done nor erase a proof — which
+  #     is also why a MERGE GATE is amendable with no `--merge-gated`.
+  #
+  # BOTH SURFACES IN ONE CAS, and this is the half-fix the gap was FOUND by. A
+  # task carries its criteria twice: `acceptance_criteria[N].criterion` and
+  # `brief.blocks[criteria-list].items[N]`, and the brief is what `bp task get`
+  # prints FIRST. The second surface is not patched here — it is re-derived by
+  # `Internal.fenced_content_write/4`, whose `resync_brief_on_mirrored_change/2`
+  # runs inside the same rev-fenced `Repo.update_all`. One statement, one rev,
+  # both surfaces or neither. Writing the brief separately would be two CAS
+  # writes with a window between them, which is the defect wearing a fix's
+  # clothes.
+  #
+  # THE REJECTED ALTERNATIVE, recorded so it is not re-proposed: a deliberate
+  # reopen -> `close --set criteria` cycle. It puts a finished row back in
+  # `bp task ready`, disturbs close attribution, and is precisely the
+  # resurrection the done->done adjudication edge exists to avoid.
+
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
@@ -182,7 +234,7 @@ defmodule Barkpark.Tasks.Stamp do
       * `:criterion` (required integer ≥ 0) — index into
         `content.acceptance_criteria`.
       * `:outcome` (required) — `{:met, evidence}` | `{:miss, note}` |
-        `{:withdraw, note}`.
+        `{:withdraw, note}` | `{:amend, {new_criterion, note}}`.
       * `:criterion_text` — the criterion's EXPECTED stored text, threaded into
         the merge as the `"criterion"` CAS key. **REQUIRED for `{:met, _}`**
         (D56): without it the merge fails closed with
@@ -191,7 +243,8 @@ defmodule Barkpark.Tasks.Stamp do
         fabricated a done in Wave 4). With it, a mis-based index whose text does
         not match the row is REJECTED (`:criteria_mismatch`) instead of flipping
         the neighbour. OPTIONAL for `{:miss, _}` — a miss flips nothing.
-      * `:observed_rev` (optional string) — REQUIRED for `{:withdraw, _}` on a
+      * `:observed_rev` (optional string) — REQUIRED for `{:withdraw, _}` and
+        `{:amend, _}` on a
         row that carries no claim (a sealed / released row) AND for
         `{:miss, _}` on a TERMINAL row (`done` / `cancelled`): the `rev` the
         caller read. It is CAS'd against the stored rev inside the lock. Unused
@@ -233,7 +286,8 @@ defmodule Barkpark.Tasks.Stamp do
   `:criteria_mismatch`, `:criterion_text_required`, `:evidence_required`,
   `:note_required`, `:invalid_criteria`, `:merge_gated_criterion`,
   `:branch_only_evidence`,
-  `:observed_rev_required`, `:criterion_not_met`.
+  `:observed_rev_required`, `:criterion_not_met`,
+  `:amended_criterion_required`, `:criterion_unchanged`.
   """
   def stamp(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
@@ -328,6 +382,45 @@ defmodule Barkpark.Tasks.Stamp do
   end
 
   defp build_update(_index, {:withdraw, _no_note}, _worker, _text), do: {:error, :note_required}
+
+  # The amendment update. Both halves are mandatory and each has its OWN
+  # refusal, because "pass a note" and "pass the replacement wording" are two
+  # different mistakes and a single error would send half the callers to the
+  # wrong fix. The blank-text refusal lives here AND in `merge_criteria` — here
+  # so it costs the caller one line before any DB work, there so every write
+  # path fails closed from one definition.
+  #
+  # `merge_criteria` snapshots the superseded wording onto the record, because
+  # only it can see the stored row.
+  defp build_update(index, {:amend, {new_criterion, note}}, worker, text)
+       when is_binary(new_criterion) and is_binary(note) do
+    cond do
+      String.trim(note) == "" ->
+        {:error, :note_required}
+
+      String.trim(new_criterion) == "" ->
+        {:error, :amended_criterion_required}
+
+      true ->
+        record = %{
+          "note" => note,
+          "ts" => DateTime.utc_now() |> DateTime.to_iso8601(),
+          "worker" => worker
+        }
+
+        update = %{
+          "index" => index,
+          "amendment" => record,
+          "amended_criterion" => new_criterion
+        }
+
+        {:ok, put_guard(update, text), "amended"}
+    end
+  end
+
+  defp build_update(_index, {:amend, _malformed}, _worker, _text),
+    do: {:error, :invalid_criteria}
+
   defp build_update(_index, _outcome, _worker, _text), do: {:error, :invalid_criteria}
 
   # THE BACKFILL DOOR (task-66cc8ad999fa5a24). `--ack-gate` rides a `--miss`
@@ -412,6 +505,14 @@ defmodule Barkpark.Tasks.Stamp do
                         |> then(fn p ->
                           if result_tag == "withdrawn",
                             do: Map.put(p, "withdrawn", true),
+                            else: p
+                        end)
+                        |> then(fn p ->
+                          # Same shape as the withdrawal marker: a feed consumer
+                          # selects text corrections on a BOOLEAN rather than by
+                          # string-matching the result tag.
+                          if result_tag == "amended",
+                            do: Map.put(p, "amended", true),
                             else: p
                         end)
                         |> then(fn p ->
@@ -564,6 +665,28 @@ defmodule Barkpark.Tasks.Stamp do
     check_observed_rev(doc, observed_rev)
   end
 
+  # THE AMENDMENT inherits the withdrawal's authority split verbatim
+  # (task-a1df012e89b1e289), and for the same measured reason: both live
+  # specimens of the false-criterion class are SEALED rows, so an
+  # in_progress-only amendment could not correct a single instance of the defect
+  # it was built for. A row still in flight has a holder who answers for it;
+  # every other row answers to the rev the caller READ.
+  defp authorize(
+         %Document{content: %{"lifecycle_status" => "in_progress"}} = doc,
+         worker_id,
+         observed_epoch,
+         _observed_rev,
+         "amended"
+       ) do
+    with :ok <- check_holder(doc, worker_id) do
+      check_fencing(doc, observed_epoch)
+    end
+  end
+
+  defp authorize(%Document{} = doc, _worker_id, _observed_epoch, observed_rev, "amended") do
+    check_observed_rev(doc, observed_rev)
+  end
+
   # THE READ-BEFORE-WRITE FENCE, shared by the sealed-row withdrawal (D745) and
   # the post-close attempt (task-d68754135a6a9f66): you cannot annotate a row
   # you did not read. Same CAS close already spells `--set observed_rev=...`.
@@ -651,6 +774,13 @@ defmodule Barkpark.Tasks.Stamp do
   # refutes a merge gate's proof must be able to say so without a lead-only
   # override, so this is never refused — and there is nothing to confess.
   defp check_merge_gate(_doc, _update, "withdrawn", _merge_gated, _worker_id, _opts),
+    do: {:ok, nil}
+
+  # An amendment moves NO lock — `met` is pinned to its stored value — so it
+  # cannot fabricate a done before the PR exists either. A gate whose WORDING is
+  # wrong must be correctable by the reviewer who found it wrong, without a
+  # lead-only override, and there is nothing to confess.
+  defp check_merge_gate(_doc, _update, "amended", _merge_gated, _worker_id, _opts),
     do: {:ok, nil}
 
   defp check_merge_gate(%Document{content: content}, update, _tag, merge_gated, worker_id, opts) do
