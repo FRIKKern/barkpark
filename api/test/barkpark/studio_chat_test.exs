@@ -3700,4 +3700,258 @@ defmodule Barkpark.StudioChatTest do
       assert length(StudioChat.list_messages(s.id, 1)) == 1
     end
   end
+
+  # ── cross-workspace tenancy of the epic-goal fold (task-2f412e40a9d39794) ──
+  #
+  # The second hop of `epic_goal/2` is keyed on the `claim.worker` STRING. Three
+  # properties, three fixtures, three mutations — each mutation reds exactly one
+  # test, so they measure three things and not one:
+  #
+  #   * `held_task_parent_id/1` must not pick up a FOREIGN workspace's held slice
+  #   * `published_task_doc/1`  must not hop to a FOREIGN workspace's epic
+  #   * `epic_slice_counts/1`   must not count a FOREIGN workspace's siblings
+  #
+  # THE FIXTURES ARE DELIBERATELY UN-EXCLUDED ON EVERY OTHER AXIS: each foreign
+  # row is `type: "task"`, published, non-draft, `in_progress`, carries the right
+  # `parent_id`, and its `claim.worker` is BYTE-EQUAL to the session's. The only
+  # thing that can exclude it is the workspace predicate under test. The positive
+  # control in each describe is the CLEAR: it proves the rig can still resolve an
+  # epic at all, so a rig that resolves NOTHING is distinguishable from a rig
+  # that correctly resolves only the OWN-workspace one.
+  describe "epic_goal/2 — workspace tenancy of the ledger hops" do
+    setup do
+      {:ok, ws_a} = Barkpark.Tenancy.create_workspace(%{slug: "r22-ws-a-#{uniq()}", name: "A"})
+      {:ok, ws_b} = Barkpark.Tenancy.create_workspace(%{slug: "r22-ws-b-#{uniq()}", name: "B"})
+
+      {:ok, session} =
+        StudioChat.create_session(
+          %{id: Ecto.UUID.generate(), provider: "claude"},
+          {:workspace, ws_b.id}
+        )
+
+      %{
+        ws_a: ws_a,
+        ws_b: ws_b,
+        session: session,
+        worker: BarkparkWeb.Studio.ClaudeChat.worker_id(session.id)
+      }
+    end
+
+    test "CLEAR — an OWN-workspace epic still resolves end to end", ctx do
+      insert_task!(
+        "task-r22-own-epic",
+        "Own epic",
+        %{
+          "lifecycle_status" => "in_progress",
+          "wave_status" => "wave: own"
+        },
+        ctx.ws_b.id
+      )
+
+      insert_task!(
+        "task-r22-own-held",
+        "Own slice",
+        %{
+          "lifecycle_status" => "in_progress",
+          "parent_id" => "task-r22-own-epic",
+          "claim" => %{"worker" => ctx.worker}
+        },
+        ctx.ws_b.id
+      )
+
+      goal = StudioChat.epic_goal("claude", ctx.session.id)
+
+      assert goal.id == "task-r22-own-epic"
+      assert goal.title == "Own epic"
+      assert goal.wave_status == "wave: own"
+      assert goal.slices_total == 1
+    end
+
+    # M1 ISOLATOR. The composite test below reds if EITHER the claim hop or the
+    # parent hop is scoped, so it cannot tell them apart. Here the decoy epic is
+    # in the viewer's OWN workspace, so `published_task_doc/1`'s predicate is
+    # satisfied either way and ONLY `held_task_parent_id/1`'s can decide: without
+    # it the newer FOREIGN claim wins the `order_by: [desc: :updated_at], limit: 1`
+    # and the card renders the decoy epic instead of the viewer's own.
+    test "a FOREIGN workspace's claim never STEERS the fold, even to an own epic", ctx do
+      insert_task!(
+        "task-r22-m1-own-epic",
+        "Own epic",
+        %{
+          "lifecycle_status" => "in_progress"
+        },
+        ctx.ws_b.id,
+        ~U[2026-01-01 00:00:00.000000Z]
+      )
+
+      insert_task!(
+        "task-r22-m1-decoy-epic",
+        "Decoy epic",
+        %{
+          "lifecycle_status" => "in_progress"
+        },
+        ctx.ws_b.id,
+        ~U[2026-01-01 00:00:00.000000Z]
+      )
+
+      insert_task!(
+        "task-r22-m1-own-held",
+        "Own slice",
+        %{
+          "lifecycle_status" => "in_progress",
+          "parent_id" => "task-r22-m1-own-epic",
+          "claim" => %{"worker" => ctx.worker}
+        },
+        ctx.ws_b.id,
+        ~U[2026-01-01 00:00:00.000000Z]
+      )
+
+      insert_task!(
+        "task-r22-m1-foreign-held",
+        "Foreign slice, NEWER",
+        %{
+          "lifecycle_status" => "in_progress",
+          "parent_id" => "task-r22-m1-decoy-epic",
+          "claim" => %{"worker" => ctx.worker}
+        },
+        ctx.ws_a.id,
+        ~U[2026-06-01 00:00:00.000000Z]
+      )
+
+      assert StudioChat.epic_goal("claude", ctx.session.id).id == "task-r22-m1-own-epic"
+    end
+
+    # COMPOSITE, not an isolator: it reds if EITHER the claim hop or the parent
+    # hop carries the scope, so on its own it measures the pair. It is kept
+    # because it is the verbatim reproduction of the reported read.
+    test "a FOREIGN workspace's held slice never carries the fold across", ctx do
+      insert_task!(
+        "task-r22-foreign-epic",
+        "Foreign epic",
+        %{
+          "lifecycle_status" => "in_progress",
+          "wave_status" => "wave: foreign"
+        },
+        ctx.ws_a.id
+      )
+
+      insert_task!(
+        "task-r22-foreign-held",
+        "Foreign slice",
+        %{
+          "lifecycle_status" => "in_progress",
+          "parent_id" => "task-r22-foreign-epic",
+          "claim" => %{"worker" => ctx.worker}
+        },
+        ctx.ws_a.id
+      )
+
+      assert StudioChat.epic_goal("claude", ctx.session.id) == nil
+    end
+
+    test "an OWN held slice never hops to a FOREIGN epic of the same doc_id lineage", ctx do
+      # The held slice is OWN — only the PARENT is foreign, so this isolates
+      # `published_task_doc/1` from `held_task_parent_id/1`.
+      insert_task!(
+        "task-r22-split-epic",
+        "Foreign epic",
+        %{
+          "lifecycle_status" => "in_progress",
+          "wave_status" => "wave: foreign"
+        },
+        ctx.ws_a.id
+      )
+
+      insert_task!(
+        "task-r22-split-held",
+        "Own slice",
+        %{
+          "lifecycle_status" => "in_progress",
+          "parent_id" => "task-r22-split-epic",
+          "claim" => %{"worker" => ctx.worker}
+        },
+        ctx.ws_b.id
+      )
+
+      assert StudioChat.epic_goal("claude", ctx.session.id) == nil
+    end
+
+    test "a FOREIGN sibling never inflates the slice denominator", ctx do
+      insert_task!(
+        "task-r22-cnt-epic",
+        "Own epic",
+        %{"lifecycle_status" => "in_progress"},
+        ctx.ws_b.id
+      )
+
+      insert_task!(
+        "task-r22-cnt-held",
+        "Own slice",
+        %{
+          "lifecycle_status" => "in_progress",
+          "parent_id" => "task-r22-cnt-epic",
+          "claim" => %{"worker" => ctx.worker}
+        },
+        ctx.ws_b.id
+      )
+
+      insert_task!(
+        "task-r22-cnt-foreign",
+        "Foreign sibling",
+        %{
+          "lifecycle_status" => "done",
+          "parent_id" => "task-r22-cnt-epic"
+        },
+        ctx.ws_a.id
+      )
+
+      goal = StudioChat.epic_goal("claude", ctx.session.id)
+
+      assert goal.id == "task-r22-cnt-epic"
+      assert goal.slices_total == 1
+      assert goal.slices_done == 0
+    end
+
+    test "a NULL-owned (admin/global) session keeps its unscoped fold", ctx do
+      {:ok, global} =
+        StudioChat.create_session(%{id: Ecto.UUID.generate(), provider: "claude"}, :global)
+
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(global.id)
+
+      insert_task!(
+        "task-r22-glob-epic",
+        "Global epic",
+        %{"lifecycle_status" => "in_progress"},
+        ctx.ws_a.id
+      )
+
+      insert_task!(
+        "task-r22-glob-held",
+        "Global slice",
+        %{
+          "lifecycle_status" => "in_progress",
+          "parent_id" => "task-r22-glob-epic",
+          "claim" => %{"worker" => worker}
+        },
+        ctx.ws_a.id
+      )
+
+      assert %{id: "task-r22-glob-epic"} = StudioChat.epic_goal("claude", global.id)
+    end
+  end
+
+  defp uniq, do: System.unique_integer([:positive])
+
+  defp insert_task!(doc_id, title, content, workspace_id, updated_at \\ nil) do
+    Barkpark.Repo.insert!(%Barkpark.Content.Document{
+      doc_id: doc_id,
+      type: "task",
+      title: title,
+      status: "published",
+      content: content,
+      workspace_id: workspace_id,
+      updated_at: updated_at,
+      rev: Ecto.UUID.generate()
+    })
+  end
 end

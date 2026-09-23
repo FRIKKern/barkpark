@@ -1939,13 +1939,54 @@ defmodule Barkpark.StudioChat do
   `slices_done` counts terminal children (`done` + `cancelled` — the
   compactor's terminal set): a cancelled slice no longer blocks the wave, so
   the line converges to n/n instead of sticking forever short.
+
+  ## The three hops are WORKSPACE-SCOPED (task-2f412e40a9d39794)
+
+  The scope key is the SESSION's `owner_workspace_id`, read here from the
+  session id every caller already passes; see `scope_tasks_to_workspace/2`
+  below for why it is resolved at the read and not per caller, what a NULL
+  owner means, and why `dataset` is still deliberately absent.
+
+  ### Two corrections to the parent row's description
+
+  A reader arriving from the parent row meets two sentences about this file
+  that are measurably false, so they are corrected HERE, where the code is:
+
+    1. It calls these "the same unscoped raw dataset-STRING reads" as
+       `Barkpark.Tasks.Board.load_task_docs/1`. They were NOT the same, and
+       the difference runs the BROADER way: `load_task_docs/1` has always
+       carried `where: d.type == "task" and d.dataset == ^dataset`, while
+       these three hops carried NO dataset predicate AND no workspace
+       predicate — strictly wider than the read it was compared to, never
+       equivalent to it.
+
+    2. It cites a line range near the middle of this file (given there as a
+       tilde-prefixed span in the eighteen-hundreds) as holding a
+       `d.dataset == ^dataset` read. No such read ever existed in this file.
+       The range is deliberately NOT repeated here as a file-and-line token:
+       quoting a citation in order to refute it would plant a fresh one, and
+       the citation guard cannot tell a quotation from a claim. The whole
+       history of the file contains exactly ONE commit that touches the
+       string `dataset` at all:
+
+           $ git log -S'dataset' --oneline -- api/lib/barkpark/studio_chat.ex
+           c8d952a6c feat(connectors): chat_sessions tenant seam —
+                     owner_workspace_id + fail-closed store seal (#2957)
+
+       That commit is 2026-07-13 — a MONTH before the parent row was filed —
+       and the only `dataset` it left behind is the word inside the scope
+       comment at the top of this module (line 87). The cited region never
+       held a dataset read; that half of the parent's description was wrong
+       on the day it was written.
   """
   @spec epic_goal(String.t() | nil, String.t()) :: map() | nil
   def epic_goal(provider, session_id) do
+    ws = epic_read_workspace_id(session_id)
+
     with worker when is_binary(worker) <- Runtime.worker_id(provider, session_id),
-         parent_id when is_binary(parent_id) <- held_task_parent_id(worker),
-         %Document{} = epic <- published_task_doc(parent_id) do
-      {done, total} = epic_slice_counts(parent_id)
+         parent_id when is_binary(parent_id) <- held_task_parent_id(worker, ws),
+         %Document{} = epic <- published_task_doc(parent_id, ws) do
+      {done, total} = epic_slice_counts(parent_id, ws)
       content = epic.content || %{}
 
       %{
@@ -1960,9 +2001,67 @@ defmodule Barkpark.StudioChat do
     end
   end
 
+  # ── the tenant seal on the epic-goal fold (task-2f412e40a9d39794) ─────────
+  #
+  # The THREE hops below used to carry no workspace predicate and no dataset
+  # predicate at all, while `held_task_parent_id/1` keyed the whole fold on the
+  # `claim.worker` STRING. A workspace-B-only admin mounting the scoped ChatLive
+  # (`live_session :scoped_admin_studio`, a TARGET-workspace gate — not the
+  # instance-global `:ops` gate BoardLive sits behind) therefore rendered
+  # workspace A's `%{id, title, slices_done, slices_total, wave_status}` whenever
+  # a workspace-A task's `claim.worker` was byte-equal to a session that viewer
+  # already owned. `clamp_list_to_tenancy/1` in ChatLive fences which SESSIONS a
+  # viewer folds over; it says nothing about what the fold then READS, because
+  # the second hop is keyed on a string.
+  #
+  # The scope is resolved HERE, at the read, from the session id the caller
+  # already passes — NOT per caller. All four callers of `epic_goal/2` resolve
+  # to the same thing, the SESSION's `owner_workspace_id`: three in
+  # `chat_live.ex` (the workflow-ping one-shot in `handle_info/2`, and the two
+  # session-list folds in `refresh_epic_goals/1` and its sibling) and
+  # `put_epic/2` in `chat_controller.ex`. Grep them with
+  # `git grep -n "StudioChat.epic_goal("` rather than by line — an enumeration
+  # by line number is a snapshot, and the audit that found this bug listed
+  # three of the four. Deriving the scope from the primary key they all hand in
+  # makes it impossible for a fifth caller to get it wrong or to forget it.
+  #
+  # A NULL `owner_workspace_id` is the ADMIN/GLOBAL session by construction (see
+  # `owner_ws_from_scope/1`), so it keeps the unscoped fold — narrowing it would
+  # be a behaviour change to a different question. The residual that leaves —
+  # ChatLive's `owner_in_tenancy?/2` admits a NULL-owned session into a SCOPED
+  # viewer's sidebar (`is_nil(owner) or owner == ws_id`) — lives in that clamp,
+  # not in this read, and is recorded on task-2f412e40a9d39794 rather than fixed
+  # by widening this function's remit.
+  #
+  # DATASET is deliberately still absent. No caller of `epic_goal/2` carries a
+  # dataset, the session row has no dataset column, and `workspace_id` IS the
+  # tenancy boundary (a dataset belongs to a project belongs to a workspace), so
+  # a cross-dataset hop within one workspace is a correctness wobble and never a
+  # cross-tenant read. Pinning a literal `"production"` here would silently blank
+  # the line for every non-production dataset, which is why it is not done.
+  defp scope_tasks_to_workspace(query, nil), do: query
+
+  defp scope_tasks_to_workspace(query, ws) when is_binary(ws),
+    do: where(query, [d], d.workspace_id == ^ws)
+
+  # The session's own workspace, read from the primary key every caller passes.
+  # A session id with no row reads NULL, which takes the unscoped arm above —
+  # the fold then fails at its own `worker` hop as it always did.
+  defp epic_read_workspace_id(session_id) when is_binary(session_id) do
+    case Ecto.UUID.cast(session_id) do
+      {:ok, id} ->
+        from(s in Session, where: s.id == ^id, select: s.owner_workspace_id) |> Repo.one()
+
+      :error ->
+        nil
+    end
+  end
+
+  defp epic_read_workspace_id(_), do: nil
+
   # The newest published in_progress claim this worker holds that carries a
   # parent hop. Draft twins never count (the claim lives on the published row).
-  defp held_task_parent_id(worker) do
+  defp held_task_parent_id(worker, ws) do
     from(d in Document,
       where: d.type == "task",
       where: not like(d.doc_id, "drafts.%"),
@@ -1973,18 +2072,20 @@ defmodule Barkpark.StudioChat do
       limit: 1,
       select: fragment("?->>'parent_id'", d.content)
     )
+    |> scope_tasks_to_workspace(ws)
     |> Repo.one()
   end
 
-  defp published_task_doc(doc_id) do
+  defp published_task_doc(doc_id, ws) do
     from(d in Document,
       where: d.type == "task" and d.doc_id == ^doc_id,
       limit: 1
     )
+    |> scope_tasks_to_workspace(ws)
     |> Repo.one()
   end
 
-  defp epic_slice_counts(parent_id) do
+  defp epic_slice_counts(parent_id, ws) do
     rows =
       from(d in Document,
         where: d.type == "task",
@@ -1993,6 +2094,7 @@ defmodule Barkpark.StudioChat do
         group_by: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content),
         select: {fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content), count(d.id)}
       )
+      |> scope_tasks_to_workspace(ws)
       |> Repo.all()
 
     total = rows |> Enum.map(&elem(&1, 1)) |> Enum.sum()
