@@ -312,3 +312,13 @@ config :barkpark, dedup_raise_on_code_errors: true
 # exercise the cache turn it on for their own duration
 # (test/barkpark_web/capabilities_no_db_test.exs).
 config :barkpark, tenancy_default_scope_cache_ttl_ms: 0
+
+# Dedup candidate-fetch EXIT SEAM (Barkpark.Dedup.ScanSeam). Compiles a
+# one-verb (`exit/1`) fault injector into the candidate fetch of BOTH dedup
+# surfaces so the `catch :exit` arm — pool-checkout death, which arrives as an
+# exit and not an exception — is falsifiable from a test. Read via
+# `Application.compile_env/3`, so this key is the ONLY thing that can put that
+# code in a build: nothing at runtime can turn it on, and no other config file
+# sets it. See the module's moduledoc and
+# test/barkpark/dedup/scan_seam_inertness_test.exs.
+config :barkpark, dedup_scan_seam: true
