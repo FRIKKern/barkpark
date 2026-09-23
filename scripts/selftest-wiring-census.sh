@@ -4,9 +4,29 @@
 # either EXECUTED by CI or carries a machine-readable exemption naming why.
 # A harness added tomorrow with neither is a RED here, not a silent omission.
 #
-# THE CORPUS IS `*.test.sh`, `*.test.mjs`, `*_test.sh` and `*-selftest.sh`.
-# A self-test named anything else is not examined at all — see the comment on
-# the `find` below, which carries the measured case that added the fourth.
+# THE CORPUS HAS TWO HALVES, and the second exists because the first is
+# NAME-KEYED and a name cannot see a property of a file's CONTENTS.
+#
+#   N  STANDALONE  — `*.test.sh`, `*.test.mjs`, `*_test.sh`, `*-selftest.sh`.
+#                    The FILE is the suite, so executing it runs the arms.
+#   C  IN-FILE     — any script under scripts/ or
+#                    .claude/skills/orchestrate-tasks/helpers/ that HANDLES a
+#                    `--selftest` argument of its own. The suite is a function
+#                    inside a tool with a plain name, so executing the file is
+#                    NOT running the arms: only `<script> … --selftest` is.
+#
+# WHY THE SECOND HALF WAS ADDED (task-13bfa649df851d5f, 2026-09-23). With the
+# corpus keyed on names alone this census printed `OK — 119 run, 4 exempt, 0
+# orphaned` on origin/main c9c481959 while scripts/pr-required.sh — 766 lines,
+# 33 arms, mirrored into .claude/skills/orchestrate-tasks/helpers/, the
+# instrument every lane in the campaign runs before merging — was named by ZERO
+# files under .github/workflows/. So was scripts/stranded-worktree-report.sh
+# and its 49 arms. That 0 was not a measurement of the codebase; it was a
+# measurement of the naming convention. MEASURED on the same commit, over the
+# corrected corpus: 155 in-file self-tests, 107 dispatchable, 48 orphaned.
+#
+# `grep` searches CONTENT, `find` searches NAMES, and a census that probes only
+# one index is blind to whatever the other one holds.
 #
 # WHY IT EXISTS (task-8780f3b465edea5b, 2026-09-06). shell-harnesses.yml names
 # its tenants ONE BY ONE, so adding scripts/foo.test.sh does not add it to CI.
@@ -50,7 +70,22 @@
 # that PR. The push-to-main arm catches it. R2 and R3 are resolved from the
 # tree, not from a cached list, so neither can go stale.
 #
-# EXIT: 0 every file is RUN or exempt · 1 at least one is neither · 2 cannot measure.
+# THE GRANDFATHER LEDGER. Landing the C half found 48 orphans where the name
+# half saw 0. Wiring 48 harnesses in one PR is not reviewable, so the 45 this
+# PR does not wire are enumerated BY PATH below, under `backlog_rows`. That
+# list is a DEBT REGISTER, not a budget: it is a ratchet with two failure
+# directions, and BOTH of them are reds here —
+#
+#   a C-mode orphan that is NOT a listed row        -> ORPHAN        (rc=1)
+#   a listed row that is no longer an orphan, or
+#   whose file is gone, or which lost its --selftest -> STALE-BACKLOG (rc=1)
+#
+# so the only way to make a red go away is to WIRE the harness and DELETE its
+# row in the same commit. There is no number to raise. A row added to this list
+# is an edit to this file and is visible in review as exactly what it is.
+#
+# EXIT: 0 every file is RUN, exempt or an honest backlog row · 1 at least one
+#       is neither, or a backlog row went stale · 2 cannot measure.
 #
 # bash 3.2 compatible (macOS system bash): no associative arrays, no mapfile.
 
@@ -59,7 +94,8 @@ set -uo pipefail
 ROOT="${CENSUS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 census() {
-  local root="$1" files wf_nc wf_exec invocations doors globs rc=0 n_run=0 n_exempt=0 n_red=0
+  local root="$1" files wf_nc wf_exec invocations selfdispatch doors globs rc=0 n_run=0 n_exempt=0 n_red=0
+  local name_keyed content_keyed c_only backlog seen_backlog n_backlog=0 n_stale=0
   [ -d "$root/scripts" ] || { echo "selftest-wiring-census: REFUSING — no scripts/ under $root" >&2; return 2; }
   [ -d "$root/.github/workflows" ] || { echo "selftest-wiring-census: REFUSING — no .github/workflows/ under $root" >&2; return 2; }
 
@@ -143,13 +179,59 @@ LEGS
   # anchoring on `sh` without a following space matched the `.sh` extension in
   # every one of those bare lines, which is how that draft passed at all.
   invocations="$(mktemp "${TMPDIR:-/tmp}/inv.XXXXXX")"
+  # C-MODE'S OWN PARENT INDEX, and it exists because of a MEASURED false red.
+  # scripts/landed-mark.test.sh — itself wired — runs the subject's arms on its
+  # line 44: `ARMED_OUT="$(bash "$SUBJECT" --selftest …)"`, where line 31 reads
+  # `SUBJECT="$ROOT/scripts/landed-mark.sh"`. The basename and the flag are on
+  # DIFFERENT LINES, so the line-level R3 test cannot see the pairing and
+  # scripts/landed-mark.sh read ORPHAN on a tree that genuinely runs its arms on
+  # every PR. In a REQUIRED venue a false red is worse than a missed one: it
+  # teaches the fleet to route around the gate.
+  #
+  # THE RULE IS THE VARIABLE, not the file. A first draft asked only "does a
+  # wired parent name this harness on a bind-shaped line, and does that parent
+  # mention --selftest anywhere" — two independent facts about one file, which
+  # is not a dispatch. MEASURED, on this tree, that draft resolved
+  # scripts/pr-required.sh itself as RUN (parent merge-sweep.sh) and
+  # scripts/roster-drift-check.sh as RUN (parent docs-anchors-check.sh, which
+  # merely lists it), and let scripts/registration-sample.sh resolve through
+  # ITSELF. A census that greens its own headline subject is worse than the one
+  # it replaced. So the two halves must be JOINED BY A NAME:
+  #
+  #   VAR=<anything>/<harness-basename>      the bind
+  #   … "$VAR" --selftest …                  an invocation OF THAT VAR
+  #
+  # and the parent must be named on a workflow EXECUTION line (wf_exec), not
+  # merely appear somewhere in the workflow text.
+  selfdispatch="$(mktemp "${TMPDIR:-/tmp}/selfd.XXXXXX")"
   local p pbase
-  for p in $(find "$root/scripts" -type f \( -name '*.sh' -o -name '*.mjs' \) 2>/dev/null); do
+  for p in $(find -H "$root/scripts" "$root/.claude/skills/orchestrate-tasks/helpers" -type f \( -name '*.sh' -o -name '*.mjs' \) 2>/dev/null); do
     pbase="$(basename "$p")"
     grep -qF "$pbase" "$wf_nc" || continue
     grep -v '^[[:space:]]*#' "$p" 2>/dev/null \
       | grep -E '(^|[[:space:]]|[(;&|])(exec|bash|sh|node|source)[[:space:]]' \
       | sed "s|^|$pbase |" >> "$invocations"
+
+    # The C half of the index: only for a parent a workflow actually EXECUTES.
+    grep -qF "$pbase" "$wf_exec" || continue
+    grep -v '^[[:space:]]*#' "$p" 2>/dev/null | awk -v pb="$pbase" -v me="$pbase" '
+        # pass 1 is impossible on a stream, so collect then decide at END.
+        { line[NR] = $0 }
+        match($0, /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=/) {
+          v = $0; sub(/^[[:space:]]*/, "", v); sub(/=.*$/, "", v)
+          rest = $0
+          if (match(rest, /[A-Za-z0-9_][A-Za-z0-9_.-]*\.(sh|mjs)/)) {
+            b = substr(rest, RSTART, RLENGTH)
+            if (b != me) bind[v] = b
+          }
+        }
+        END {
+          for (v in bind) {
+            pat = "[$]\\{?" v "\\}?\"?[[:space:]]+--self-?test"
+            for (i = 1; i <= NR; i++) if (line[i] ~ pat) { print pb " " bind[v]; break }
+          }
+        }
+      ' >> "$selfdispatch"
   done
 
   # R4's INDEX, same shape: every line of every api/test/**.exs that both
@@ -190,18 +272,134 @@ LEGS
   # `*-selftest.sh` is now in the corpus for that reason. A shape added later
   # has the same fault, which is why the number in the OK line is a count of
   # what was examined and not a claim about scripts/.
-  files="$(find "$root/scripts" -type f \( -name '*.test.sh' -o -name '*.test.mjs' -o -name '*_test.sh' -o -name '*-selftest.sh' \) 2>/dev/null | LC_ALL=C sort)"
-  [ -n "$files" ] || { echo "selftest-wiring-census: REFUSING — found ZERO self-tests under $root/scripts. Reporting a clean census over an empty corpus is the failure this gate exists to prevent." >&2; rm -f "$wf_nc" "$wf_exec" "$invocations" "$doors"; return 2; }
+  name_keyed="$(find "$root/scripts" -type f \( -name '*.test.sh' -o -name '*.test.mjs' -o -name '*_test.sh' -o -name '*-selftest.sh' \) 2>/dev/null | LC_ALL=C sort)"
+  [ -n "$name_keyed" ] || { echo "selftest-wiring-census: REFUSING — found ZERO self-tests under $root/scripts. Reporting a clean census over an empty corpus is the failure this gate exists to prevent." >&2; rm -f "$wf_nc" "$wf_exec" "$invocations" "$selfdispatch" "$doors"; return 2; }
 
-  local f base rel route
-  while IFS= read -r f; do
+  # THE C HALF: a file that HANDLES `--selftest` as its own argument. The shape
+  # is matched on NON-COMMENT lines only — every third script in this tree
+  # documents the flag in its header, and a usage line is a description of an
+  # entry point, never one. Three real shapes, measured over this tree:
+  #     --selftest)                 a case arm
+  #     [ "${1:-}" = "--selftest" ] a test against $1
+  #     == "--selftest"             the [[ ]] form
+  # A fourth shape written tomorrow reads as "not in the corpus", which is the
+  # same fault the N half has; it is bounded the same way — loudly, by adding
+  # the shape — and never by a silent green, because the C half can only WIDEN
+  # what is examined.
+  local ck_roots ckr cf
+  ck_roots="$root/scripts"
+  [ -d "$root/.claude/skills/orchestrate-tasks/helpers" ] && ck_roots="$ck_roots $root/.claude/skills/orchestrate-tasks/helpers"
+  # Two-stage, for cost: ONE recursive grep narrows ~450 files to the ~160 that
+  # carry the token anywhere (comments included), then each candidate is
+  # re-read with whole-line comments stripped. The pre-filter can only ever be
+  # a SUPERSET of the answer — a file with no `--selftest` byte in it cannot
+  # have a `--selftest` entry point — so it costs nothing in coverage.
+  content_keyed=""
+  for ckr in $ck_roots; do
+    # ENUMERATION THROUGH `find -H`, NOT `grep -R`. The selftest's fixture tree
+    # reaches the helpers root through a SYMLINK, and neither `grep -r` nor
+    # `grep -R` descended it here: MEASURED, `grep -RlE` returned 196 candidates
+    # under the fixture's scripts/ and ZERO under its symlinked helpers/, so six
+    # ledger rows read "the --selftest entry point is gone" against files that
+    # still carry it. `find -H` follows a symlink given on the command line and
+    # is what every other index in this file already uses.
+    for cf in $(find -H "$ckr" -type f \( -name '*.sh' -o -name '*.mjs' -o -name '*.exs' \) -print0 2>/dev/null \
+                | xargs -0 grep -lE -- '--self-?test' 2>/dev/null); do
+      # NO `cmd | grep -q`: under pipefail the early-exiting grep SIGPIPEs its
+      # producer and a TRUE membership reads FALSE (see R3's note). Counted.
+      [ "$(grep -v '^[[:space:]]*#' "$cf" 2>/dev/null | grep -cE -- '(^|[[:space:]|(])--self-?test\)|(=|==)[[:space:]]*"?'"'"'?--self-?test|case[[:space:]]+["'"'"']--self-?test["'"'"']')" -gt 0 ] \
+        && content_keyed="$content_keyed
+$cf"
+    done
+  done
+  content_keyed="$(printf '%s\n' "$content_keyed" | grep -v '^$' | LC_ALL=C sort -u)"
+
+  # The ledger. Paths are repo-relative and are matched against `rel`.
+  backlog="$(mktemp "${TMPDIR:-/tmp}/backlog.XXXXXX")"
+  seen_backlog="$(mktemp "${TMPDIR:-/tmp}/seenbl.XXXXXX")"
+  cat > "$backlog" <<'BACKLOG'
+.claude/skills/orchestrate-tasks/helpers/ci-advisory-sweep.sh
+.claude/skills/orchestrate-tasks/helpers/held-liveness.sh
+.claude/skills/orchestrate-tasks/helpers/lane-open-prs.sh
+.claude/skills/orchestrate-tasks/helpers/pr-watch.sh
+.claude/skills/orchestrate-tasks/helpers/pulse-loop.sh
+.claude/skills/orchestrate-tasks/helpers/session-files.sh
+scripts/ancestry-guard.sh
+scripts/charter-citation-check.sh
+scripts/ci-log-gap-census.sh
+scripts/ci-measure.sh
+scripts/closed-row-tree-disagreement-sweep.mjs
+scripts/cloud-format-check.sh
+scripts/cmux-smoke.sh
+scripts/console-export-tree.sh
+scripts/console-harness.sh
+scripts/dependabot-task-trailer.sh
+scripts/dispatch-blobless-proof.sh
+scripts/docblock-enumeration-check.sh
+scripts/elixir-main-red-attribution.sh
+scripts/false-open-sweep.mjs
+scripts/file-line-citation-check.mjs
+scripts/merge-gates-elixir-anchor-check.sh
+scripts/pds-blind-spot-check.sh
+scripts/pds-charter-ledger-sweep.sh
+scripts/pds-climb-preflight.sh
+scripts/pds-control-char-census.sh
+scripts/pds-door-census.sh
+scripts/pds-draft-only-task-census.sh
+scripts/pds-draft-twin-sweep.sh
+scripts/pds-export-drift-watch.sh
+scripts/pds-live-bp-write-receipt.sh
+scripts/pds-pre-gate-papers-check.sh
+scripts/pds-published-artifact-door.sh
+scripts/pds-stranded-draft-cause.sh
+scripts/pds-task-anchor-report.sh
+scripts/reap-test-databases.sh
+scripts/registration-sample.sh
+scripts/registry-impact-check.sh
+scripts/required4.sh
+scripts/rerun-transition-collect.sh
+scripts/roster-drift-check.sh
+scripts/stranded-branch-report.sh
+scripts/test-partition-cleanup.sh
+scripts/workflow-portability-check.sh
+BACKLOG
+
+  # MODE-TAGGED corpus. A file in BOTH halves is judged as C: the stricter
+  # question ("is the --selftest dispatched?") subsumes the looser one.
+  # A file in BOTH halves is judged as N, and the direction matters. For a
+  # `*.test.sh` the FILE is the suite: CI executing it runs the arms whether or
+  # not it also accepts a `--selftest` flag. Judging such a file as C would ask
+  # the wrong question of it — MEASURED: scripts/main-red-breaker.test.sh, wired
+  # and running today, read ORPHAN under C-first precedence, which is a census
+  # reddening a harness CI already runs.
+  c_only="$(printf '%s\n' "$content_keyed" | grep -v '^$' | LC_ALL=C sort \
+            | LC_ALL=C comm -23 - <(printf '%s\n' "$name_keyed" | grep -v '^$' | LC_ALL=C sort))"
+  files="$( { printf '%s\n' "$c_only"     | grep -v '^$' | sed 's|^|C |'
+              printf '%s\n' "$name_keyed" | grep -v '^$' | sed 's|^|N |'; } \
+            | LC_ALL=C sort -k2,2)"
+
+  # C-MODE ROUTES. For an in-file self-test the question is NOT "does CI run
+  # this file" — CI runs scripts/docs-anchors-check.sh on every doc PR and runs
+  # none of its arms. The question is "does CI run it WITH --selftest", so each
+  # route below is re-asked against lines that carry the flag. Getting this
+  # wrong would be the worst outcome available here: 107 of 155 in-file
+  # self-tests would resolve RUN off their tool's ordinary invocation, and the
+  # census would print a bigger, more confident version of the same zero.
+  local mode f base rel route selfline
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    mode="${line%% *}"
+    f="${line#* }"
     [ -n "$f" ] || continue
     base="$(basename "$f")"
     rel="${f#"$root"/}"
     route=""
 
     # R1 DIRECT — an EXECUTION line names it (never a paths:/roster mention).
-    if grep -qF "$base" "$wf_exec"; then route="R1-direct"; fi
+    if [ "$mode" = "C" ]; then
+      selfline="$(grep -F "$base" "$wf_exec" | grep -- '--self-\{0,1\}test' | sed -n '1p')"
+      [ -n "$selfline" ] && route="R1-direct"
+    elif grep -qF "$base" "$wf_exec"; then route="R1-direct"; fi
 
     # R2 GLOB — every scripts/…*…test.{sh,mjs} glob any workflow names.
     # `set -f` is load-bearing: without it the unquoted expansion of the
@@ -209,7 +407,7 @@ LEGS
     # files that happen to exist instead of over patterns, and R2 silently
     # degenerates into "the file exists" — green for the wrong reason, and
     # blind to a glob whose first member has not been written yet.
-    if [ -z "$route" ]; then
+    if [ -z "$route" ] && [ "$mode" = "N" ]; then
       local pat
       set -f
       for pat in $globs; do
@@ -227,23 +425,50 @@ LEGS
     # Every membership question here is asked through a command substitution.
     if [ -z "$route" ]; then
       local hit
-      hit="$(grep -F "$base" "$invocations" | sed -n '1s/ .*//p')"
+      if [ "$mode" = "C" ]; then
+        # NEVER ITSELF, and the exclusion is anchored on FIELD 1 — the parent —
+        # never on the row. scripts/registration-sample.sh carries `bash
+        # …/registration-sample.sh --selftest` in its own usage path and resolved
+        # R3-parent:registration-sample.sh: a harness certifying its own wiring.
+        # A first fix used `grep -vF "$base "`, which also drops rows whose
+        # parent is a DIFFERENT file that merely names this one mid-line —
+        # MEASURED: it manufactured four false orphans (breaker-measure-
+        # precondition.sh, go-path-escape-check.sh, lib/task-trailers.sh,
+        # main-red-breaker.test.sh) whose genuine parents were being filtered out.
+        hit="$(grep -F "$base" "$invocations" | awk -v b="$base" '$1 != b' | grep -- '--self-\{0,1\}test' | sed -n '1s/ .*//p')"
+        [ -n "$hit" ] || hit="$(grep -E "^[^ ]+ ${base}\$" "$selfdispatch" | awk -v b="$base" '$1 != b' | sed -n '1s/ .*//p')"
+      else
+        hit="$(grep -F "$base" "$invocations" | sed -n '1s/ .*//p')"
+      fi
       [ -n "$hit" ] && route="R3-parent:$hit"
     fi
 
     # R4 DOOR — an ExUnit test shells out to it (the required Elixir gate).
     if [ -z "$route" ] && [ -s "$doors" ]; then
       local hit
-      hit="$(grep -F "$base" "$doors" | sed -n '1s/ .*//p')"
+      if [ "$mode" = "C" ]; then
+        hit="$(grep -F "$base" "$doors" | grep -- '--self-\{0,1\}test' | sed -n '1s/ .*//p')"
+      else
+        hit="$(grep -F "$base" "$doors" | sed -n '1s/ .*//p')"
+      fi
       [ -n "$hit" ] && route="R4-door:$hit"
     fi
 
     if [ -n "$route" ]; then
       n_run=$((n_run + 1))
       [ -n "${CENSUS_VERBOSE:-}" ] && echo "  RUN     $rel  ($route)"
+      # A row that is now WIRED is a row that must be DELETED. Recorded here so
+      # the stale sweep below can red on it — a ratchet that only refuses new
+      # debt lets a cleared row sit forever and quietly overstate the debt.
+      [ "$(grep -cxF "$rel" "$backlog")" -gt 0 ] && echo "WIRED $rel" >> "$seen_backlog"
     elif [ "$(head -60 "$f" | grep -c 'MANUAL PROOF .* not wired:')" -gt 0 ]; then
       n_exempt=$((n_exempt + 1))
       echo "  EXEMPT  $rel  — $(head -60 "$f" | grep 'MANUAL PROOF .* not wired:' | sed -n '1s/^.*not wired: *//p' | cut -c1-90)"
+      [ "$(grep -cxF "$rel" "$backlog")" -gt 0 ] && echo "WIRED $rel" >> "$seen_backlog"
+    elif [ "$mode" = "C" ] && [ "$(grep -cxF "$rel" "$backlog")" -gt 0 ]; then
+      n_backlog=$((n_backlog + 1))
+      echo "  BACKLOG $rel  — in-file self-test, dispatched by no workflow (grandfathered, task-13bfa649df851d5f)."
+      echo "OK $rel" >> "$seen_backlog"
     else
       n_red=$((n_red + 1)); rc=1
       echo "  ORPHAN  $rel  — no workflow runs it and it declares no exemption."
@@ -252,14 +477,37 @@ LEGS
 $files
 EOF
 
-  rm -f "$wf_nc" "$wf_exec" "$invocations" "$doors"
+  # THE OTHER DIRECTION. A listed row whose file is gone, whose --selftest was
+  # removed, or which a workflow now dispatches is a row that no longer
+  # describes anything, and leaving it in would let the ledger outlive its
+  # subject. Each is named individually — the count alone would not tell a
+  # reviewer which line to delete.
+  local bl
+  while IFS= read -r bl; do
+    [ -n "$bl" ] || continue
+    if [ ! -e "$root/$bl" ]; then
+      n_stale=$((n_stale + 1)); rc=1
+      echo "  STALE-BACKLOG $bl  — the file is GONE; delete this row from the ledger in scripts/selftest-wiring-census.sh."
+    elif [ "$(grep -c "^WIRED $bl\$" "$seen_backlog" 2>/dev/null)" -gt 0 ]; then
+      n_stale=$((n_stale + 1)); rc=1
+      echo "  STALE-BACKLOG $bl  — a workflow now dispatches its --selftest; delete this row from the ledger."
+    elif [ "$(grep -c "^OK $bl\$" "$seen_backlog" 2>/dev/null)" -eq 0 ]; then
+      n_stale=$((n_stale + 1)); rc=1
+      echo "  STALE-BACKLOG $bl  — it is no longer in the in-file self-test corpus (the --selftest entry point is gone); delete this row."
+    fi
+  done < "$backlog"
+
+  rm -f "$wf_nc" "$wf_exec" "$invocations" "$selfdispatch" "$doors" "$backlog" "$seen_backlog"
   if [ "$rc" -ne 0 ]; then
-    echo "selftest-wiring-census: FAILED — ${n_red} self-test(s) are neither executed by CI nor exempt."
+    echo "selftest-wiring-census: FAILED — ${n_red} self-test(s) are neither executed by CI nor exempt; ${n_stale} grandfathered row(s) went stale."
     echo "  Fix one of two ways: wire it (a tenant of .github/workflows/shell-harnesses.yml, or a"
     echo "  --selftest step on its parent in the workflow that already runs the subject), or add a"
     echo "  header line in its first 60 lines reading:  MANUAL PROOF — not wired: <reason>"
+    echo "  An in-file self-test (a --selftest arm inside a plainly-named tool) is only RUN when a"
+    echo "  workflow line carries BOTH its basename AND --selftest. Running the tool is not running"
+    echo "  its arms. A STALE-BACKLOG row is cleared by DELETING the row, never by editing a number."
   else
-    echo "selftest-wiring-census: OK — ${n_run} run, ${n_exempt} exempt, 0 orphaned ($((n_run + n_exempt)) self-tests under scripts/)."
+    echo "selftest-wiring-census: OK — ${n_run} run, ${n_exempt} exempt, ${n_backlog} grandfathered backlog, 0 orphaned ($((n_run + n_exempt + n_backlog)) self-tests examined)."
   fi
   return $rc
 }
@@ -284,6 +532,14 @@ selftest() {
   # disagreement between suite and subject this census exists to catch.
   [ -f "$ROOT/.github/shell-harness-legs.json" ] && cp "$ROOT/.github/shell-harness-legs.json" "$tmp/.github/shell-harness-legs.json"
   [ -d "$ROOT/api/test" ] && { mkdir -p "$tmp/api"; ln -s "$ROOT/api/test" "$tmp/api/test"; }
+  # The C half's second root. Without it every `.claude/skills/...` row in the
+  # grandfather ledger resolves "the file is GONE" and the POSITIVE CONTROL
+  # below reds on the fixture's shape rather than on the tree's — the suite
+  # disagreeing with its subject for a reason that has nothing to do with either.
+  if [ -d "$ROOT/.claude/skills/orchestrate-tasks/helpers" ]; then
+    mkdir -p "$tmp/.claude/skills/orchestrate-tasks"
+    ln -s "$ROOT/.claude/skills/orchestrate-tasks/helpers" "$tmp/.claude/skills/orchestrate-tasks/helpers"
+  fi
 
   echo "== POSITIVE CONTROL: the census must find the WIRED ones, by all four routes =="
   out="$(CENSUS_ROOT="$tmp" CENSUS_VERBOSE=1 census "$tmp" 2>&1)"; rc=$?
@@ -357,6 +613,83 @@ FIXTURE
   [ "$rc" -eq 0 ] && ok "the executed fixture is green (rc=0)" \
                   || bad "the executed fixture did not go green (rc=$rc)"
   rm -f "$tmp/scripts/$tfix" "$tmp/.github/workflows/__census-fixture.yml"
+
+  echo "== THE C HALF: an IN-FILE --selftest under a plain name =="
+  # The whole point of the content-keyed corpus. Every literal below is built
+  # through a variable and printf, never typed beside an invoking verb on one
+  # line: this file's own basename IS in the workflow text, so a line here
+  # holding a verb, the fixture's name and --selftest would land in R3's
+  # invocation index and wire the fixture through this suite's own source. The
+  # existing trigger-only arm records that exact self-wiring going green for
+  # the wrong reason; the C routes are strictly easier to fool, not harder.
+  local cfix=__census-inline-canary.sh
+  printf '%s\n' '#!/usr/bin/env bash' '# a plainly-named tool whose suite lives INSIDE it' \
+    'case "${1:-}" in' '  --selftest) echo ok; exit 0 ;;' '  *) exit 0 ;;' 'esac' \
+    > "$tmp/scripts/$cfix"
+  out="$(CENSUS_ROOT="$tmp" CENSUS_VERBOSE=1 census "$tmp" 2>&1)"; rc=$?
+  has "ORPHAN .*$cfix" \
+    && ok "a --selftest inside a plainly-named script IS in the corpus and reads ORPHAN" \
+    || bad "the content-keyed half did not examine $cfix at all — this is the 0-orphaned fault the N half had"
+  [ "$rc" -eq 1 ] && ok "the in-file canary reds the census (rc=1)" \
+                  || bad "the in-file canary did not red the census (rc=$rc)"
+
+  echo "== RUNNING THE TOOL IS NOT RUNNING ITS ARMS =="
+  # THE LOAD-BEARING ARM. CI runs scripts/docs-anchors-check.sh on every doc PR
+  # and runs none of its arms. If a bare invocation satisfied a C-mode file,
+  # 107 of the 155 in-file self-tests measured on origin/main c9c481959 would
+  # have resolved RUN off their tool's ordinary invocation, and this census
+  # would print a larger, more confident version of the zero it used to print.
+  {
+    printf 'name: Census C fixture\non:\n  pull_request:\njobs:\n'
+    printf '  bare:\n    runs-on: ubuntu-latest\n    steps:\n'
+    printf '      - run: %s scripts/%s --check\n' bash "$cfix"
+  } > "$tmp/.github/workflows/__census-c-fixture.yml"
+  out="$(CENSUS_ROOT="$tmp" CENSUS_VERBOSE=1 census "$tmp" 2>&1)"; rc=$?
+  has "ORPHAN .*$cfix" \
+    && ok "a workflow that EXECUTES the tool without --selftest leaves it ORPHAN" \
+    || bad "a bare invocation resolved the in-file self-test as RUN — the C routes are not asking for the flag"
+
+  echo "== CONTROL: the same line WITH --selftest flips it to RUN =="
+  {
+    printf 'name: Census C fixture\non:\n  pull_request:\njobs:\n'
+    printf '  armed:\n    runs-on: ubuntu-latest\n    steps:\n'
+    printf '      - run: %s scripts/%s %s\n' bash "$cfix" --selftest
+  } > "$tmp/.github/workflows/__census-c-fixture.yml"
+  out="$(CENSUS_ROOT="$tmp" CENSUS_VERBOSE=1 census "$tmp" 2>&1)"; rc=$?
+  has "RUN .*$cfix  (R1-direct)" \
+    && ok "adding the flag to the SAME line flips it to RUN (R1-direct)" \
+    || bad "a genuine --selftest dispatch did NOT resolve — the C route is too narrow, which is a FALSE RED in a required venue"
+  [ "$rc" -eq 0 ] && ok "the armed C fixture is green (rc=0)" \
+                  || bad "the armed C fixture did not go green (rc=$rc)"
+  rm -f "$tmp/scripts/$cfix" "$tmp/.github/workflows/__census-c-fixture.yml"
+
+  echo "== THE RATCHET'S OTHER DIRECTION: a cleared backlog row must RED =="
+  # A ledger that only refuses NEW debt lets a row outlive its subject and
+  # quietly overstate what is unwired. This arm takes a REAL row — the first
+  # one under scripts/, read out of the ledger rather than typed here, so it
+  # cannot drift from the list it checks — and dispatches its --selftest in a
+  # fixture workflow. The census must then demand the row's DELETION, which is
+  # the only way a row ever leaves: never by editing a number, because there is
+  # no number.
+  local bl_row bl_base
+  bl_row="$(CENSUS_ROOT="$tmp" census "$tmp" 2>&1 | sed -n 's/^  BACKLOG \(scripts\/[^ ]*\) .*/\1/p' | sed -n '1p')"
+  if [ -z "$bl_row" ]; then
+    bad "no BACKLOG row to exercise — the grandfather ledger is empty, so this arm proved nothing"
+  else
+    bl_base="$(basename "$bl_row")"
+    {
+      printf 'name: Census stale fixture\non:\n  pull_request:\njobs:\n'
+      printf '  cleared:\n    runs-on: ubuntu-latest\n    steps:\n'
+      printf '      - run: %s scripts/%s %s\n' bash "$bl_base" --selftest
+    } > "$tmp/.github/workflows/__census-stale-fixture.yml"
+    out="$(CENSUS_ROOT="$tmp" census "$tmp" 2>&1)"; rc=$?
+    has "STALE-BACKLOG $bl_row" \
+      && ok "wiring a listed row makes the census demand its DELETION ($bl_row)" \
+      || bad "a listed row that is now wired did NOT read STALE-BACKLOG — the ledger can only grow"
+    [ "$rc" -eq 1 ] && ok "a stale ledger row reds the census (rc=1)" \
+                    || bad "a stale ledger row did not red the census (rc=$rc)"
+    rm -f "$tmp/.github/workflows/__census-stale-fixture.yml"
+  fi
 
   echo "== CAN-LOSE: an unlisted, unexempted harness must RED =="
   cat > "$tmp/scripts/__census-canary.test.sh" <<'CANARY'
