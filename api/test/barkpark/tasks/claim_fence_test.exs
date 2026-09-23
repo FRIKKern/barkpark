@@ -192,4 +192,94 @@ defmodule Barkpark.Tasks.ClaimFenceTest do
       assert {:error, :task_dataset_mismatch} = ClaimFence.verify(doc.id, expected)
     end
   end
+
+  # ─── lease refusals: exactly ONE field off ───────────────────────────────
+  #
+  # console-w31 / task-c9361be669b85c74. Reachability was DERIVED by mutation,
+  # not by grepping for atom names: with each cond arm deleted in turn, this
+  # file alone stayed at "8 tests, 0 failures" for :task_not_claimed,
+  # :foreign_claim and :work_digest_mismatch. Those three arms had no subject
+  # HERE — the module's own suite — and were reached only indirectly, from
+  # studio_chat/runtime_usage_test.exs via CycleFleet/RuntimeUsage. A distant
+  # integration test is not coverage of this module: refactor either caller and
+  # these arms lose their only witness silently.
+  #
+  # The cond in verify_task/2 is SEQUENTIAL:
+  #   task_not_claimed -> doc_id -> workspace -> project -> dataset ->
+  #   foreign_claim (worker) -> stale_claim (epoch) -> work_digest_mismatch
+  # so each test below starts from a fully-matching expectation (asserted {:ok,_}
+  # in setup) and perturbs exactly ONE thing. A fixture off by two fields would
+  # land on the earlier arm and pass for the wrong reason.
+
+  describe "lease refusals" do
+    setup %{scope: scope} do
+      task = mk_task!(uniq("cf-lease"), scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "worker-lease", scope)
+
+      doc = Repo.get!(Document, claimed.id)
+      claim = doc.content["claim"]
+
+      matching = %{
+        doc_id: doc.doc_id,
+        worker_id: claim["worker"],
+        epoch: claim["epoch"],
+        work_digest: claim["work_digest"],
+        workspace_id: doc.workspace_id,
+        project_id: doc.project_id,
+        dataset_id: doc.dataset_id
+      }
+
+      # Control: the un-perturbed expectation verifies, so every red below is
+      # caused by the ONE perturbation and not by the fixture.
+      assert {:ok, _} = ClaimFence.verify(doc.id, matching)
+
+      %{doc: doc, matching: matching}
+    end
+
+    test "a worker that is not the claim holder returns {:error, :foreign_claim}",
+         %{doc: doc, matching: matching} do
+      expected = %{matching | worker_id: matching.worker_id <> "-other"}
+
+      refute expected.worker_id == matching.worker_id
+      assert {:error, :foreign_claim} = ClaimFence.verify(doc.id, expected)
+    end
+
+    test "a work_digest that is not the claim's returns {:error, :work_digest_mismatch}",
+         %{doc: doc, matching: matching} do
+      # epoch and worker still match, so the cond cannot stop at :foreign_claim
+      # or :stale_claim — this fixture can only land on the digest arm.
+      expected = %{matching | work_digest: "0000000000000000"}
+
+      refute expected.work_digest == matching.work_digest
+      assert {:error, :work_digest_mismatch} = ClaimFence.verify(doc.id, expected)
+    end
+
+    test "a task whose lease is gone returns {:error, :task_not_claimed}",
+         %{doc: doc, matching: matching} do
+      # Disjunct A — lifecycle_status leaves "in_progress". The expectation is
+      # untouched: the TASK changed, not the caller's claim.
+      {:ok, released} = Tasks.release(doc.id, matching.worker_id, observed_epoch: matching.epoch)
+      refute released.content["lifecycle_status"] == "in_progress"
+
+      assert {:error, :task_not_claimed} = ClaimFence.verify(doc.id, matching)
+
+      # Disjunct B — lifecycle_status says "in_progress" but claim.worker is not
+      # a binary. Without the `is_binary` half of the arm this row reaches
+      # Map.fetch!(claim, "worker") in the {:ok,_} arm on a claim that has none.
+      widowed =
+        doc
+        |> Repo.reload!()
+        |> Ecto.Changeset.change(
+          content:
+            doc.content
+            |> Map.put("lifecycle_status", "in_progress")
+            |> Map.put("claim", Map.put(doc.content["claim"] || %{}, "worker", nil))
+        )
+        |> Repo.update!()
+
+      assert widowed.content["lifecycle_status"] == "in_progress"
+      refute is_binary(widowed.content["claim"]["worker"])
+      assert {:error, :task_not_claimed} = ClaimFence.verify(doc.id, matching)
+    end
+  end
 end
