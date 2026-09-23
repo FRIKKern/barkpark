@@ -12,6 +12,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   alias BarkparkWeb.Studio.ScopeResolver
   alias BarkparkWeb.Studio.StudioLive.Shared
 
+  # `switch_workspace/2`'s single answer to not-found AND refused — see the
+  # note above that function (no existence oracle).
+  @switch_workspace_refusal "Could not open that workspace — it does not exist, or you do not have access to it"
+
   def select(%{"pane" => pane_str, "id" => id}, socket) do
     case Integer.parse(pane_str) do
       {pane_idx, ""} when pane_idx >= 0 ->
@@ -145,21 +149,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
      )}
   end
 
+  # ONE REFUSAL SENTENCE FOR NOT-FOUND AND REFUSED, ON PURPOSE
+  # (task-1829c2e22b31b2d6). `slug` is a client-supplied phx-value, so any
+  # signed-in principal can forge this event with guessed slugs. When the
+  # missing slug answered with nothing and the unreachable one with "You do
+  # not have access to that workspace", the difference told the principal
+  # which guessed slugs EXIST in other tenants — the existence oracle
+  # `Handlers.Shares.target_workspace_admits?/2` refuses and
+  # `StudioChrome.open_scope/2` closed (task-e6e0fd116d810b69). Both arms now
+  # answer `@switch_workspace_refusal`, which names both possibilities and
+  # never says which one it was.
+  #
+  # Why SPEAK rather than make both silent: #19933 took the outcome word away
+  # from the press-answer hook (an evidence-free press now clears the region)
+  # and gave it to the server, so a mute refusal leaves the person guessing —
+  # that is the defect #19933 fixed. The refusal keeps speaking; it just no
+  # longer speaks differently from not-found.
+  #
+  # NOT closed here: timing. The not-found arm runs one query, the refused arm
+  # two (the membership lookup). That difference sits under a websocket round
+  # trip and a LiveView render; equalising it is a separate decision, not part
+  # of this user-visible fix.
+  #
+  # The "no projects yet" arm below keeps its own words: it is reachable only
+  # AFTER the reachability gate, by a principal the menu already shows that
+  # workspace to, so it reveals nothing about other tenants.
+  #
+  # Pinned by studio_live_switch_workspace_oracle_test.exs.
   def switch_workspace(%{"workspace" => slug}, socket) do
     case Tenancy.get_workspace_by_slug(slug) do
       nil ->
-        {:noreply, socket}
+        {:noreply, refuse_workspace_switch(socket)}
 
       workspace ->
         cond do
-          # THE REFUSAL SPEAKS. This arm used to answer an authorization
-          # refusal with an unchanged socket, i.e. with nothing: the press
-          # region could only report that the round trip happened, and the
-          # person was left to guess. Its sibling arm four lines below has
-          # always put a flash, so inside one function one refusal spoke and
-          # the other was mute. A refusal a user can reach must name itself.
           not Shared.can_reach_workspace?(socket, workspace) ->
-            {:noreply, put_flash(socket, :error, "You do not have access to that workspace")}
+            {:noreply, refuse_workspace_switch(socket)}
 
           is_nil(Shared.initial_project(workspace)) ->
             {:noreply,
@@ -176,6 +201,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
         end
     end
   end
+
+  defp refuse_workspace_switch(socket),
+    do: put_flash(socket, :error, @switch_workspace_refusal)
 
   def switch_project(%{"project" => slug}, socket) do
     ws = socket.assigns[:current_workspace]
