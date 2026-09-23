@@ -26,6 +26,9 @@ defmodule Barkpark.Plugins.Github.WebhookDedupOutageResponseTest do
   | rename the catch-all's `code: "intake_failed"` | 25 tests, **1 failure** — the generic mapping was already pinned |
   | add a `{:error, {:dedup_unavailable, _}}` → 202 arm ABOVE the catch-all | 609 tests, **0 failures** — the shape's routing was not |
 
+  With this file, that 202 mutation reds: 518 tests, 1 failure, on
+  "`{:error, {:dedup_unavailable, reason}}` → 500, never a 2xx".
+
   This file closes the second row, and its DISCRIMINATOR test stops the first
   one from being closed by the cheap wrong fix ("make every Intake outcome a
   500"): the deterministic lifecycle veto, the outage's look-alike neighbour in

@@ -31,11 +31,18 @@ defmodule Barkpark.Plugins.Github.IntakeDedupOutageTest do
   | rename the catch-all's `code: "intake_failed"` | **25 tests, 1 failure** — the generic mapping was already pinned |
 
   So the row's premise needs one correction worth keeping: deleting the Intake
-  clause does NOT by itself restore the silent drop (the catch-all covers it).
-  The live hazard is the SEMANTIC one — an edit that files the outage next to
-  its look-alike neighbour, the deterministic `{:error, {:halted, _}}` veto,
-  which is correctly a 2xx. The two arms sit adjacent in `birth/2` and read
-  almost identically. This file reds on that edit.
+  clause does NOT by itself restore the silent drop — the `{:error, reason}`
+  catch-all returns the identical tuple, so the clause's only UNIQUE effect is
+  its log line. The live hazard is the SEMANTIC one: an edit that files the
+  outage next to its look-alike neighbour, the deterministic
+  `{:error, {:halted, _}}` veto, which is correctly a 2xx. The two arms sit
+  adjacent in `birth/2` and read almost identically.
+
+  With this file, re-measured over `test/barkpark/plugins/github/` plus the
+  controller test (518 tests): the plain deletion reds **on the log
+  assertion** — the clause's only unique effect, and the operator's only notice
+  that a delivery needs re-sending — and the `{:refused, :vetoed, doc_id}`
+  mutation reds **on the returned shape**. 518 tests, 1 failure each.
 
   ## How the outage is staged
 
