@@ -2816,6 +2816,232 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  # ── the NO-AFFORDANCE path over REAL rail wire (wsc-bl-agent-detail-fixture-gaps) ──
+  #
+  # The Go half landed in #19036 (internal/chat/workflow_no_affordance_test.go).
+  # This is the Elixir half, and it deliberately holds NO COPY of any of the three
+  # rail shapes — a copy under test/support/fixtures/ would be an UNLOCKED MIRROR:
+  # two byte-identical files, a green suite on each side, and nothing coupling
+  # them, so an edit to one leaves both suites green while the two surfaces answer
+  # differently. Instead:
+  #
+  #   * rail_codex_origin.json / rail_background_no_workflow.json are read straight
+  #     out of internal/chat/testdata/ via @go_rail_fixtures_dir — the same
+  #     ONE-FILE-TWO-READERS layout the "Go rail fixture producer freshness"
+  #     describe above already uses for the three positive rails.
+  #   * the thin-codex rail has no committed sibling ON PURPOSE, and cannot have
+  #     one: the "attempt==1 across every committed fixture" test below globs
+  #     internal/chat/testdata/*.json and demands every workflow_agent node carry
+  #     attempt == 1 — and `attempt` is one of @agent_detail_signal_keys, so a
+  #     committed mirror can NEVER hold a detail-less agent node. Do not
+  #     "helpfully" add that file: it reds the attempt==1 test on arrival.
+  #     Go therefore holds the shape INLINE as `const thinCodexRail`, and
+  #     @thin_codex_rail below is a SECOND COPY of those same bytes.
+  #
+  #     That copy is deliberate, and it is NOT the unlocked-mirror hazard the two
+  #     committed rails avoid, for two reasons:
+  #
+  #       1. It is an INPUT SPECIMEN, not produced output. workflow_summary.json
+  #          and workflow_agent_detail.json are byte-locked across surfaces
+  #          because a byte difference there means the two surfaces SHOW
+  #          different cards. Nothing renders this rail — it is a stimulus chosen
+  #          to exhibit one property (every agent node detail-less), and two
+  #          specimens exhibiting the same property are not in conflict.
+  #       2. Neither side can silently LOSE that property. The Go copy is guarded
+  #          by its own precondition (workflow_no_affordance_test.go: `if
+  #          agentHasDetail(a) { t.Fatalf("... it is not a negative") }`), and
+  #          this copy by the PRECONDITION test below. A drift that matters reds
+  #          on the side that drifted; a byte drift that does not change the
+  #          property is harmless.
+  #
+  #     An earlier revision read the Go literal out of the Go source to couple
+  #     them. That was withdrawn for two reasons, the first decisive:
+  #       * It made the Elixir suite read internal/chat/workflow_no_affordance_test.go,
+  #         a path elixir.yml does not dispatch on — so a PR editing that file
+  #         would SKIP this suite and report a GREEN Elixir gate. The path-escape
+  #         ratchet caught it. A coupling that manufactures a false green is worse
+  #         than the drift it prevents.
+  #       * It coupled to an IDENTIFIER NAME, not to the shape. `thinCodexRail` is
+  #         referenced twice more in that Go file, so a rename that does not
+  #         update them is a compile error — meaning any rename that actually
+  #         lands is a clean refactor, which the Go read would have reddened
+  #         spuriously.
+  #
+  # An absence is never caught by inspection, so every empty-list arm below is
+  # paired with (a) a PRECONDITION that the rail really decoded non-empty and
+  # would paint, and (b) a CONTROL built from the SAME bytes that DOES produce a
+  # non-empty detail list. Without both, `assert x == []` is indistinguishable
+  # from a broken loader.
+  @no_affordance_rails ~w(rail_codex_origin.json rail_background_no_workflow.json)
+  # The five wire fields @agent_detail_signal_keys gates on, restated here so a
+  # silent widening of the lib-side list shows up as a failing negative rather
+  # than as a quietly weaker test.
+  @detail_signal_names ~w(promptPreview lastToolName lastToolSummary resultPreview attempt)
+
+  defp go_rail(name),
+    do: @go_rail_fixtures_dir |> Path.join(name) |> File.read!() |> Jason.decode!()
+
+  defp agent_nodes(entry),
+    do:
+      entry
+      |> Map.get("workflow")
+      |> List.wrap()
+      |> Enum.filter(&(&1["type"] == "workflow_agent"))
+
+  # A byte copy of `const thinCodexRail` in internal/chat/workflow_no_affordance_test.go.
+  # See the note above for why this is a copy and why that is safe here. Keep the
+  # two in step BY HAND when either moves; the PRECONDITION test below is what
+  # stops this copy from quietly ceasing to be a negative.
+  @thin_codex_rail ~s({
+ "01JQ8TH3CODEXTHREADCCCC": {
+  "status": "running",
+  "seq": 3,
+  "row": {"task_type": "collab_agent_tool_call", "description": "Codex fleet - thin persist frame"},
+  "origin": "codex",
+  "usage": null,
+  "workflow": [
+   {"type": "workflow_phase", "index": 1, "title": "Survey"},
+   {"type": "workflow_agent", "index": 1, "label": "survey:rail", "phaseIndex": 1,
+    "phaseTitle": "Survey", "agentId": "cdx1a2b3c4d5e6f70", "agentType": "Explore",
+    "model": "gpt-5-codex", "state": "start", "startedAt": 1782767557221},
+   {"type": "workflow_agent", "index": 2, "label": "survey:keys", "phaseIndex": 1,
+    "phaseTitle": "Survey", "agentId": "cdx1a2b3c4d5e6f71", "agentType": "Explore",
+    "model": "gpt-5-codex", "state": "start", "startedAt": 1782767557231}
+  ]
+ }
+})
+
+  defp thin_codex_rail, do: Jason.decode!(@thin_codex_rail)
+
+  describe "workflow_agent_detail/1 over the real no-affordance rails (wsc-bl, Go #19036 sibling)" do
+    test "PRECONDITION: both committed negative rails decode into non-empty rails that would paint" do
+      for name <- @no_affordance_rails do
+        rail = go_rail(name)
+
+        assert map_size(rail) > 0,
+               "#{name}: decoded ZERO rail entries — every negative assertion over it is vacuous"
+
+        for {tid, entry} <- rail do
+          assert is_binary(entry["row"]["description"]) and entry["row"]["description"] != "",
+                 "#{name}[#{tid}]: no row.description — not a rail row that would paint"
+
+          assert is_binary(entry["status"]) and entry["status"] != "",
+                 "#{name}[#{tid}]: no status — the entry never went through a real fold"
+        end
+      end
+    end
+
+    test "the codex-origin and workflow-less background rails project NO agent detail" do
+      for name <- @no_affordance_rails do
+        rail = go_rail(name)
+        assert map_size(rail) > 0, "#{name}: vacuous — the fixture did not load"
+
+        assert StudioChat.workflow_agent_detail(rail) == [],
+               "#{name}: a rail with no workflow nodes must yield no per-agent detail, " <>
+                 "hence no expand affordance"
+      end
+    end
+
+    test "CONTROL: the SAME two rails DO project detail once real workflow nodes are spliced in" do
+      nodes =
+        "rail_workflow_live.json"
+        |> go_rail()
+        |> Map.values()
+        |> Enum.find_value(& &1["workflow"])
+
+      assert is_list(nodes) and nodes != [],
+             "the control source carries no workflow nodes — the control would prove nothing"
+
+      for name <- @no_affordance_rails do
+        rail = go_rail(name)
+        target = rail |> Map.keys() |> Enum.max()
+        spliced = put_in(rail[target]["workflow"], nodes)
+
+        detail = StudioChat.workflow_agent_detail(spliced)
+
+        assert detail != [],
+               "#{name} + real nodes: the CONTROL must project a non-empty detail list — " <>
+                 "otherwise the empty arm above is indistinguishable from a broken loader"
+
+        assert Enum.all?(detail, &is_binary(&1["agentId"]))
+      end
+    end
+
+    test "PRECONDITION: the thin-codex rail decodes to ONE workflow-BEARING entry with 2 agents" do
+      rail = thin_codex_rail()
+      assert map_size(rail) == 1
+
+      [entry] = Map.values(rail)
+
+      assert List.wrap(entry["workflow"]) != [],
+             "the thin rail must be workflow-BEARING — otherwise its empty detail list is the " <>
+               "SELECTOR's verdict, not the detail-signal gate's, and proves nothing"
+
+      assert Enum.any?(entry["workflow"], &(&1["type"] == "workflow_phase")),
+             "the thin rail must carry a phase — the strip paints and the phase level opens"
+
+      agents = agent_nodes(entry)
+      assert length(agents) == 2
+
+      # This copy is now the ONLY drift detector for the thin shape, so assert it
+      # is still a REALISTIC codex frame and not a degraded stub: a hand-edit that
+      # strips it down to a bare type/label pair would still be detail-less, and
+      # the negative below would then pass over a shape no codex run ever emits.
+      for node <- agents do
+        assert String.starts_with?(node["agentId"], "cdx"), "not a codex agent id"
+        assert node["model"] == "gpt-5-codex"
+        assert node["state"] == "start"
+        assert node["phaseTitle"] == "Survey"
+        assert is_integer(node["startedAt"])
+      end
+    end
+
+    test "every thin-codex agent node fails the detail-signal gate" do
+      rail = thin_codex_rail()
+      [entry] = Map.values(rail)
+      agents = agent_nodes(entry)
+      assert agents != [], "no agent nodes — the gate is never consulted"
+
+      for node <- agents do
+        assert Map.take(node, @detail_signal_names) == %{},
+               "#{node["label"]} carries a detail signal — it is not a negative"
+
+        assert StudioChat.workflow_agent_node_detail(node) == %{},
+               "#{node["label"]}: a node with none of #{inspect(@detail_signal_names)} must " <>
+                 "yield the empty map — that IS the no-affordance gate"
+      end
+
+      assert StudioChat.workflow_agent_detail(rail) == [],
+             "a workflow-bearing rail whose every agent is detail-less must project []"
+    end
+
+    test "CONTROL: ONE promptPreview on the SAME thin rail yields exactly one detail map" do
+      [{tid, entry}] = thin_codex_rail() |> Map.to_list()
+
+      {patched, count} =
+        Enum.map_reduce(entry["workflow"], 0, fn
+          %{"type" => "workflow_agent"} = node, 0 ->
+            {Map.put(node, "promptPreview", "sweep internal/chat for rail decode forks"), 1}
+
+          node, seen ->
+            {node, seen}
+        end)
+
+      assert count == 1, "the control patched #{count} agent nodes, want exactly 1"
+
+      detail =
+        StudioChat.workflow_agent_detail(%{tid => Map.put(entry, "workflow", patched)})
+
+      assert length(detail) == 1,
+             "the control must project exactly the ONE patched agent — without this, the " <>
+               "thin-rail negative above proves nothing"
+
+      assert hd(detail)["promptPreview"] == "sweep internal/chat for rail decode forks"
+      assert hd(detail)["label"] == "survey:rail"
+      assert hd(detail)["agentId"] == "cdx1a2b3c4d5e6f70"
+    end
+  end
+
   # ── Shared parity fixture (Mechanism A) — workflow_agent_detail ──────────────
   #
   # workflow_agent_detail/1 output for both committed fixtures, byte-identical to an

@@ -907,8 +907,10 @@ defmodule Barkpark.Content.Papers do
       simply does not resolve.
     * RENDER-THEN-READ: each resolved doc is passed through
       `Envelope.render(doc, schema, caller_context)` and the field is read off
-      the REDACTED envelope — never `field_readable?` alone (a caller-less call
-      returns true by design; that would be an active bypass). A redacted /
+      the REDACTED envelope — never `field_readable?` alone. Since ctx-s3 a
+      caller-less call fails CLOSED, so the hazard is no longer a bypass, but
+      `field_readable?` gates the field NAME for filter/order and does not read
+      the VALUE: render-then-read is still the rule here. A redacted /
       undeclared-invisible field is simply absent → fallback.
     * `:caller_context` DEFAULTS to the anonymous principal `%CallerContext{}`
       (fail closed). Any palette feeding body_html or broadcast delta frames

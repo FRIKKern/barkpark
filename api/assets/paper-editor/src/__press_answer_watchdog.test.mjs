@@ -102,6 +102,14 @@ const chromeAnchor = new Function("ev", "t", chromeAnchorHelper[1]);
 const settleHelper = layout.match(/_paSettleWord\(p\) \{([\s\S]*?)\n      \},/);
 assert.ok(settleHelper, "the watchdog settle classifier must remain present");
 const settleWord = new Function("p", settleHelper[1]);
+
+// THE SETTLE ITSELF, extracted rather than mirrored (task-ce909110bce2fddf).
+// A hand-written copy of this branch in the transition fixture below is how
+// `"Done."` outlived the source: the fixture said it whether or not the hook
+// did. Everything that settles a press now runs the SHIPPED body.
+const settleHookHelper = layout.match(/\n      _paSettle\(p\) \{([\s\S]*?)\n      \},/);
+assert.ok(settleHookHelper, "the press watchdog must have a settle path");
+const settle = new Function("p", settleHookHelper[1]);
 const hook = {
   el: document.getElementById("panes"),
   _paCurrentSig: () => "same-current",
@@ -270,8 +278,9 @@ const transitionHook = {
     }
     const word = this._paSettleWord(p);
     if (word) this._paRelease(word);
-    else if (p.sawRef) this._paRelease("Done.");
+    else if (p.sawRef) this._paSettle(p);
   },
+  _paSettle: settle,
 };
 const priorWindow = globalThis.window;
 const priorDocument = globalThis.document;
@@ -381,9 +390,18 @@ try {
     "a tab-strip press must say a named state, not the nothing the shipped build says");
 
   // THE HONESTY RULE. The active tab's href IS this page: it answers and
-  // changes nothing, so it gets the neutral clear and never an "Opening".
-  assert.deepEqual(press("tab-here"), ["Done."],
-    "the active tab answers and changes nothing — naming it Opening would be a new lie");
+  // changes nothing, so it CLEARS the region and never says "Opening" — and,
+  // since task-ce909110bce2fddf, never says "Done." either. "Done." was
+  // defended as neutral; it is the word an interface uses for a COMPLETED
+  // action, so it read as a success on a press that moved nothing.
+  assert.deepEqual(press("tab-here"), [""],
+    "the active tab answers and changes nothing — naming it Opening, or Done., announces a move that did not happen");
+
+  // A CLEAR IS NOT THE SAME AS NEVER SPEAKING, and the difference is
+  // load-bearing: this branch must wipe whatever the previous press left on
+  // screen, where `tab-blank` below must not touch the region at all.
+  assert.notDeepEqual(press("tab-here"), [],
+    "the active tab must RELEASE (clearing any in-flight word), not silently return");
 
   // CONTROL — a check that cannot say no is not a check.
   assert.notDeepEqual(press("tab-here"), press("tab-away"),
@@ -556,8 +574,8 @@ test("a teardown with NO navigation in flight still clears the region", () => {
   const f = teardownFixture(4000);
   const leave = f.enter();
   try {
-    f.hook._paRelease("Done.");
-    assert.equal(f.region(), "Done.", "the fixture must start from a word actually on screen");
+    f.hook._paRelease("Selected “Row”.");
+    assert.equal(f.region(), "Selected “Row”.", "the fixture must start from a word actually on screen");
     assert.ok(!f.hook._paNavAway, "no anchor press happened, so nothing is navigating");
     f.destroyed.call(f.hook);
     assert.equal(
@@ -592,3 +610,89 @@ test("the surviving fade clears the kept word, so nothing is stranded", async ()
   }
 });
 
+
+// ── THE SETTLE WORD FOR A PRESS THE SERVER REFUSED (task-ce909110bce2fddf) ──
+// `_paSettle` runs when the round trip finished and NEITHER witness moved: no
+// URL patch, no `aria-current` move, no `aria-pressed` move. Every Studio
+// handler that answers a `phx-click` with an unchanged socket lands here —
+// `Scope.switch_workspace/2` on a workspace the principal cannot reach, a
+// `publish` with no document open — and it used to be told "Done.".
+//
+// That is not neutral to the person hearing it. A user who saw nothing presses
+// again; a user told "Done." walks away from a press that never ran. The word
+// belongs to the server, which knows the reason and flashes it.
+//
+// This runs the SHIPPED `_paSettle` body, so it reds on a revert rather than
+// on a comment.
+function settleFixture(currentSig, pressedMoved) {
+  const sdom = new JSDOM("<p id=\"bp-press-answer\"></p>", {
+    url: "http://localhost/w/default/p/blog/d/production/studio",
+  });
+  const words = [];
+  const hook = {
+    _PA_FADE: 500,
+    _paPending: null,
+    _paFadeT: 0,
+    _paSettleWord: settleWord,
+    _paSettle: settle,
+    _paCurrentSig() { return currentSig; },
+    _paPressedChanged() { return pressedMoved; },
+    _paSay(t) { words.push(t); },
+    _paRelease(t) { this._paPending = null; this._paSay(t || ""); },
+  };
+  const prior = { w: globalThis.window, d: globalThis.document, l: globalThis.location };
+  globalThis.window = sdom.window;
+  globalThis.document = sdom.window.document;
+  globalThis.location = sdom.window.location;
+  const press = {
+    el: sdom.window.document.getElementById("bp-press-answer"),
+    root: sdom.window.document.getElementById("bp-press-answer"),
+    name: "Publish",
+    url: sdom.window.location.href,
+    sig: "sig-at-press",
+    pressed: null,
+  };
+  return {
+    words,
+    run() { hook._paSettle(press); return words.slice(); },
+    done() {
+      globalThis.window = prior.w;
+      globalThis.document = prior.d;
+      if (prior.l === undefined) delete globalThis.location; else globalThis.location = prior.l;
+      sdom.window.close();
+    },
+  };
+}
+
+test("a settled press with NO witness says nothing, rather than claiming it is Done", () => {
+  // The refusal shape: the URL is the press's own URL and the aria-current
+  // signature is the one taken at press time, so `_paSettleWord` is null and
+  // the fallback is the whole answer.
+  const f = settleFixture("sig-at-press", false);
+  try {
+    const said = f.run();
+
+    assert.deepEqual(said, [""],
+      "the region answers a REFUSED press with a word the hook has no evidence for");
+
+    for (const w of ["Done", "Saved", "Complete", "Finished", "Success", "Published"]) {
+      assert.ok(!said.join(" ").includes(w),
+        `the region announced the completion word "${w}" for a press that changed nothing`);
+    }
+  } finally {
+    f.done();
+  }
+});
+
+test("CONTROL — a settled press WITH a witness still gets its word", () => {
+  // Same body, same fixture, one thing different: the aria-current signature
+  // moved. If this arm did not speak, the assertion above would be passing on
+  // a settle path that says nothing to anybody.
+  const f = settleFixture("sig-after-the-press", false);
+  try {
+    assert.deepEqual(f.run(), ["Selected “Publish”."],
+      "the settle path went silent for a press that DID move a witness — the fix was over-corrected");
+  } finally {
+    f.done();
+  }
+});

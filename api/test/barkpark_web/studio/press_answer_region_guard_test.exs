@@ -120,8 +120,14 @@ defmodule BarkparkWeb.Studio.PressAnswerRegionGuardTest do
       # covered before, so the property is unchanged and only its spelling moved.
       {"the aria-current witness", ~S|if (this._paCurrentSig(p.root) !== p.sig) return p.name|,
        "an aria-current move is the only evidence that licenses \"Selected\""},
-      {"the neutral word", "this._paRelease(word || \"Done.\")",
-       "with neither witness the answer must be NEUTRAL — #item-rest answers the server and changes nothing, so a ref-drop clear saying \"Opened.\" would announce a success for a dead row"}
+      # WAS `word || "Done."` (task-ce909110bce2fddf). "Done." read as a
+      # completed action on every refusal that answers with an unchanged
+      # socket, so the evidence-free branch now CLEARS and the outcome word is
+      # left to the server's own announced flash. The property this entry
+      # guards is unchanged — the clear stays bound to `_paSettleWord`'s
+      # verdict — only the word it falls back to moved, from a false one to none.
+      {"the evidence-free clear", "this._paRelease(word || \"\")",
+       "with neither witness the hook has no outcome to name — #item-rest answers the server and changes nothing, so a ref-drop clear saying \"Opened.\" or \"Done.\" would announce a success for a dead row"}
     ]
 
     for {label, literal, why} <- @honesty_seam do
@@ -181,9 +187,9 @@ defmodule BarkparkWeb.Studio.PressAnswerRegionGuardTest do
        "`.studio-bar` is a SIBLING of `#studio-panes`, so a container listener can never see a chrome press"},
       {"the anchor branch", "_paOnChromeAnchor(ev, t) {",
        "every `.studio-tab` is a plain `<a href>` with no phx-click, so without an anchor shape the tab strip is still unanswered"},
-      {"the anchor's neutral clear",
-       ~S|if (to.href === location.href) { this._paRelease("Done."); return; }|,
-       "the ACTIVE tab answers and changes nothing; naming it \"Opening\" would trade the old silence for a new lie"},
+      {"the anchor's evidence-free clear",
+       ~S|if (to.href === location.href) { this._paRelease(""); return; }|,
+       "the ACTIVE tab answers and changes nothing; naming it \"Opening\" would trade the old silence for a new lie, and \"Done.\" traded it for a false completion"},
       {"the in-flight guard follows the same scope",
        ~S|blocked.closest("#studio-panes, .studio-bar")|,
        "the guard runs BEFORE the hook and stops the event; scoped to the pane row it would re-silence every swallowed chrome press"},

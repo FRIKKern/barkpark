@@ -41,6 +41,25 @@ on:
         description: "Why this manual deploy is needed (recorded in the run log)"
         required: true
         type: string
+      # ── THE DELIBERATE LOCK BREAK (task-e0e4fa0b709c093e) ─────────────────
+      #
+      # OFF BY DEFAULT, and it is the documented path for a human who knows the
+      # holder is gone. On 2026-09-22 fifteen `instance` jobs exited 15 after
+      # ~30 min each behind one holder (run 35698504994, 07:14:06Z-12:33:49Z),
+      # and the only repair anyone had was to wait. HOW THAT LOCK ACTUALLY
+      # CLEARED WAS NEVER ESTABLISHED — whether the owner cleared it or the
+      # holder exited on its own is unknown, and this input is not a remedy for
+      # a diagnosed cause. It is a repair for having had no repair.
+      #
+      # It does NOT consult the age or liveness tests that instance-deploy.sh's
+      # automatic stale-holder policy uses; a human asserting "the holder is
+      # gone" is the whole input. The two paths log DIFFERENT wording
+      # ("MANUAL" vs "AUTOMATIC") precisely so an operator reading the run
+      # afterwards can tell which one fired.
+      break_deploy_lock:
+        description: "Break a stuck deploy lock on the content instance before deploying. Only when you KNOW the holder is gone."
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -732,6 +751,10 @@ jobs:
           # bucket. Secret unset ⇒ empty ⇒ the script writes a commented
           # placeholder and logs the gap; the deploy is never blocked on it.
           CP_HOST: ${{ secrets.CP_HOST }}
+          # Read as a SHELL VARIABLE, same law as DISPATCH_TARGETS above: a
+          # `${{ }}` expansion lands as raw text in the generated shell. Empty on
+          # a push event, which the normalisation below reads as off.
+          DISPATCH_BREAK_LOCK: ${{ inputs.break_deploy_lock }}
         run: |
           install -m 600 /dev/null /tmp/deploy_key
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
@@ -739,11 +762,22 @@ jobs:
           SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known -o ServerAliveInterval=30 -o ServerAliveCountMax=90"
           # PER-RUN path — same clobber class as the control-plane leg above.
           R="${GITHUB_RUN_ID}"
+          # NORMALISED TO A LITERAL 0 OR 1 BEFORE it reaches the remote command
+          # line. The input is typed boolean so GitHub only ever sends
+          # true/false, but the remote side is a string-concatenated shell
+          # command and this variable is the only thing that decides whether a
+          # production lock gets broken — so nothing but the two characters this
+          # branch can produce is allowed to travel.
+          BREAK_LOCK=0
+          if [ "${DISPATCH_BREAK_LOCK:-false}" = "true" ]; then
+            BREAK_LOCK=1
+            echo "::warning::break_deploy_lock=true — if the content instance's deploy lock is held, this run will END its holder. This is the MANUAL path; it does not consult the stale-holder age or liveness tests."
+          fi
           $SCP deploy/instance-deploy.sh "root@${GUERRILLA_HOST}:/tmp/instance-deploy.$R.sh"
           # The remote env assignment is quoted on the REMOTE side too, so a
           # malformed secret can only ever land in the script's validated variable
           # — never split into extra words of the remote command line.
-          $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' bash /tmp/instance-deploy.$R.sh; rc=\$?; rm -f /tmp/instance-deploy.$R.sh; exit \$rc"
+          $SSH "root@${GUERRILLA_HOST}" "BARKPARK_CLOUD_EGRESS_IPS='${CP_HOST}' BARKPARK_DEPLOY_LOCK_BREAK='${BREAK_LOCK}' bash /tmp/instance-deploy.$R.sh; rc=\$?; rm -f /tmp/instance-deploy.$R.sh; exit \$rc"
       - name: Smoke test
         # THREE assertions, because the single `test "$code" = "200"` this step
         # used to be covers the dead-pool class and NOTHING else (charter D369,
@@ -2015,6 +2049,17 @@ jobs:
     # remediation, not the outage: it is what drags the missing commit onto the
     # box. It is self-limiting too — the first run that converges the box is
     # green again and the anchor moves forward with it.
+    # THIS CHECK STILL READS GREEN THROUGH A LOCK STALL, AND
+    # task-e0e4fa0b709c093e DID NOT CHANGE THAT. On 2026-09-22 all fifteen
+    # `instance` jobs that exited 15 behind the held deploy lock
+    # (35699709131 ... 35724457145) carried this check as SUCCESS, because it
+    # answers about a different leg and its adjudicator's middle row is
+    # "stranded AND a deploy in flight -> 0". A queue of runs waiting on a lock
+    # IS a deploy in flight, permanently, so the delay-not-cancel design that
+    # keeps this gate from being waived also keeps it green for as long as the
+    # queue lasts. Naming it here so the next reader does not mistake the lock
+    # work for a fix to this: the lock holder is now logged and breakable, and
+    # this check's reading trap is untouched.
     name: Production serves the newest deploy-relevant main commit
     needs: [changes, control-plane, instance]
     # THE PRECONDITION IS A RULE NOW, NOT AN ENUMERATION (task-c5955c660c7b9e55).
