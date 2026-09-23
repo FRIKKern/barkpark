@@ -24,6 +24,7 @@ defmodule BarkparkWeb.TokenController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Auth
+  alias Barkpark.Auth.TokenExpiry
   alias BarkparkWeb.ErrorResponse
 
   # The ONLY permissions this endpoint will mint. Read-only by construction —
@@ -39,6 +40,14 @@ defmodule BarkparkWeb.TokenController do
     * `permissions` defaults to `["public-read"]`; every entry must be in
       `#{inspect(@allowed_permissions)}` or the request 422s.
     * `dataset` defaults to `"production"`.
+    * `expires_at` (optional, ISO-8601) — must be in the future and within the
+      kind's max age (`public-read` → share, 30 days; `read` → api, 365 days),
+      else 422 naming the max. Never clamped.
+    * `no_expiry: true` (optional) — the audited opt-out from any configured
+      default expiry. Instance-admin only (the caller's token must hold the
+      flat `admin` permission), else 403.
+    * Neither → the configured per-kind default (`:token_default_expiry_days`,
+      shipped nil = no expiry, i.e. exactly the pre-policy mint).
 
   201 → `{"token": raw, "label": ..., "permissions": [...], "dataset": ...,
   "workspace": <workspace_slug>}`.
@@ -49,10 +58,12 @@ defmodule BarkparkWeb.TokenController do
     with {:ok, label} <- fetch_label(params),
          {:ok, perms} <- fetch_permissions(params),
          dataset when is_binary(dataset) <- fetch_dataset(params),
+         {:ok, expiry} <- fetch_expiry(params),
          %{id: ws_id, slug: ws_slug} <- workspace do
       raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+      mint_opts = [expires_at: expiry, actor: conn.assigns[:api_token]]
 
-      case Auth.create_token(raw, label, dataset, perms, ws_id) do
+      case Auth.create_token(raw, label, dataset, perms, ws_id, mint_opts) do
         {:ok, token} ->
           # RECEIPT LAW (pds w40): BOTH branches of `Auth.create_token/5`
           # (auth.ex:302-320 → `Repo.insert/1`, or `insert_token_with_membership/3`
@@ -72,13 +83,34 @@ defmodule BarkparkWeb.TokenController do
             label: label,
             permissions: perms,
             dataset: dataset,
-            workspace: ws_slug
+            workspace: ws_slug,
+            expires_at: token.expires_at
           })
+
+        {:error, :no_expiry_requires_admin} ->
+          ErrorResponse.emit(
+            conn,
+            {:error, :forbidden},
+            TokenExpiry.message(:no_expiry_requires_admin)
+          )
+
+        {:error, {:expiry_exceeds_max, _, _} = reason} ->
+          expiry_refused(conn, reason)
+
+        {:error, :expiry_not_in_future = reason} ->
+          expiry_refused(conn, reason)
 
         {:error, _reason} ->
           unprocessable(conn, "could not mint token")
       end
     else
+      {:error, :invalid_expiry} ->
+        unprocessable(
+          conn,
+          "expires_at must be an ISO-8601 datetime and no_expiry must be true; " <>
+            "send at most one of them"
+        )
+
       {:error, :missing_label} ->
         unprocessable(conn, "label is required and must be a non-empty string")
 
@@ -140,6 +172,35 @@ defmodule BarkparkWeb.TokenController do
   end
 
   defp fetch_dataset(_), do: "production"
+
+  # `expires_at` (ISO-8601) XOR `no_expiry: true`; neither → nil (the configured
+  # default decides). Anything else is a 422 before a token exists.
+  defp fetch_expiry(params) do
+    case {Map.get(params, "expires_at"), Map.get(params, "no_expiry")} do
+      {nil, nil} ->
+        {:ok, nil}
+
+      {nil, true} ->
+        {:ok, :no_expiry}
+
+      {at, nil} when is_binary(at) ->
+        case DateTime.from_iso8601(at) do
+          {:ok, dt, _offset} -> {:ok, dt}
+          _ -> {:error, :invalid_expiry}
+        end
+
+      _ ->
+        {:error, :invalid_expiry}
+    end
+  end
+
+  defp expiry_refused(conn, reason) do
+    ErrorResponse.emit_fields(conn, :unprocessable_entity, %{
+      code: "unprocessable",
+      message: TokenExpiry.message(reason),
+      details: TokenExpiry.details(reason)
+    })
+  end
 
   defp unprocessable(conn, message) do
     conn
