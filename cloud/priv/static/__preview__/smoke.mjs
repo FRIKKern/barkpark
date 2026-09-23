@@ -5377,7 +5377,10 @@ const EXPECTATIONS = {
       // body.includes(email) is satisfiable by markup a person cannot read —
       // measured: truncating the name render to 40 chars left that weaker
       // needle GREEN. The needle below pins the text node a person sees.
-      assert.ok(body.includes('set-row-name">' + cruel.email + "<"),
+      // (cch-rtl-script-neutral-borrowing: the email text node now sits inside
+      // the row's <bdi>, so the needle names the isolate — still the visible
+      // text node, still the WHOLE address up to the closing tag.)
+      assert.ok(body.includes('set-row-name"><bdi>' + cruel.email + "</bdi>"),
         "the 160-char email must render WHOLE as the row's visible name — CSS may clip it, the DOM must carry it");
       const rows = SCENARIOS["members-cruel-content"].data.members.length;
       assert.equal(rows, 4, "the roster is teamMembers.concat(one cruel member) — the three committed rows stay byte-for-byte unmoved");
@@ -5515,9 +5518,12 @@ const EXPECTATIONS = {
       // moved with the id — a corpus that shipped ada's email under lin's id
       // would tag the wrong row "(you)" and every predicate below would be a
       // coincidence.
-      assert.ok(body.includes("lin@acme.com <span class=\"dim\">(you)</span>"),
+      // (cch-rtl-script-neutral-borrowing: the email closes its <bdi> before the
+      // system's "(you)". The NEGATIVE needle below moves with it — left on the
+      // old markup it could never match again and would pass vacuously.)
+      assert.ok(body.includes("lin@acme.com</bdi> <span class=\"dim\">(you)</span>"),
         "lin's row must be the self row — the actor identity, not just the actor rank; got: " + body.slice(0, 400));
-      assert.ok(!body.includes("ada@acme.com <span class=\"dim\">(you)</span>"),
+      assert.ok(!body.includes("ada@acme.com</bdi> <span class=\"dim\">(you)</span>"),
         "ada must NOT be self-tagged when the acting principal is lin");
       const emailsFor = (attr) =>
         panel.querySelectorAll("[" + attr + "]").map((b) => b.getAttribute("data-email")).sort();
@@ -5549,7 +5555,7 @@ const EXPECTATIONS = {
       const panel = reg.get("members-body");
       const body = panel.innerHTML || "";
       assert.ok(body.includes("ozz@acme.com"), "the peer owner renders on the roster");
-      assert.ok(body.includes("ada@acme.com <span class=\"dim\">(you)</span>"),
+      assert.ok(body.includes("ada@acme.com</bdi> <span class=\"dim\">(you)</span>"),
         "the acting owner is still ada — this scenario moves the ROSTER, never the default actor");
       const emailsFor = (attr) =>
         panel.querySelectorAll("[" + attr + "]").map((b) => b.getAttribute("data-email")).sort();
