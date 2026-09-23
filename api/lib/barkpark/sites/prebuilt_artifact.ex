@@ -83,6 +83,12 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       not the rule set — ABSOLUTE and TRAVERSAL live in `safe_path/2`, on the
       cleaned joined path.
 
+      An applied `size` is run through the per-entry and total caps, and it must
+      not DISAGREE with a non-zero ustar size field (`E_MALFORMED`): an
+      over-declared record swallows the next entry in GNU tar and bsdtar too, and
+      no real writer emits the pair — Go and GNU tar zero the field, bsdtar
+      writes the same value (see `pax_size_agrees/2`).
+
       Why a `path`+`size` allowlist cannot re-open the override path this module
       refuses extension headers for: `type/1` reads **byte 156 of the FILE
       header**, and no standard pax keyword overrides a typeflag — there is no
@@ -1005,8 +1011,36 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
   defp effective_size(header, :regular, state) do
     case pax_override(state, :size) do
-      nil -> size(header, :regular, state)
-      declared -> check_size(declared, state)
+      nil ->
+        size(header, :regular, state)
+
+      declared ->
+        with :ok <- pax_size_agrees(header, declared), do: check_size(declared, state)
+    end
+  end
+
+  # A pax `size` and a NON-ZERO ustar size field that disagree are two framings of
+  # one body, and whichever is applied, the entries after it are mis-framed: an
+  # over-declared record swallows the next header+body, which GNU tar 1.35 and
+  # bsdtar 3.7.4 also do, silently and exit 0 — so this is a refusal of what the
+  # reference readers accept, taken on purpose. Measured on raw bytes, no real
+  # writer emits the pair: Go archive/tar and GNU tar --format=posix write the
+  # ustar field as ZERO when they emit a pax size, bsdtar writes the SAME value
+  # (as 12 un-terminated octal digits, which `octal/1` reads), and none of the
+  # three can be made to write a disagreeing one. A zero field is the Go/GNU
+  # convention and passes; an unparseable field keeps the pre-existing behaviour
+  # (the record is applied). Pinned by prebuilt_artifact_test.exs "a pax size
+  # that disagrees with a non-zero ustar size".
+  defp pax_size_agrees(<<_::binary-size(124), field::binary-size(12), _::binary>>, declared) do
+    case octal(field) do
+      {:ok, ustar} when ustar != 0 and ustar != declared ->
+        {:error, "E_MALFORMED",
+         "a pax size record (#{declared}) disagrees with the entry's non-zero ustar size " <>
+           "field (#{ustar}) — one of the two framings is a lie, and applying either would " <>
+           "silently swallow or split the entries after it"}
+
+      _ ->
+        :ok
     end
   end
 

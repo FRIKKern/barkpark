@@ -1179,7 +1179,29 @@ defmodule PDS.Census do
   # THE REPAIR WHEN A ROW GOES STALE IS TO RE-DERIVE, NEVER TO RE-TYPE:
   #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
   # and amend the moved rows in the SAME commit as the change that moved them, with the
-  # exclusion prose re-read against the def it now names.
+  # exclusion prose re-read against the def it now names. The three values come out of
+  # THAT COMMAND'S STDOUT. A number transcribed from a FAIL line or a CI log is a typed
+  # number wearing a receipt's clothes.
+  #
+  # THE CROSS-FENCE RULING, SETTLED IN WRITING (docs/ops/exclusion-anchor-rederive.md).
+  # A NARROW row's def_fp moves on ANY edit to the excluded action's own body — so a
+  # lane working only inside api/lib/barkpark_web/controllers/** can be made unable to
+  # finish inside its own fence by a register that lives here, in scripts/. That is
+  # settled ONE way and not left open: THE LANE WHOSE CHANGE MOVED THE FINGERPRINT
+  # EDITS THIS MAP ITSELF, IN THE SAME COMMIT. No owner lane, no routing, no turnaround.
+  # The arm demands a same-commit repair, which an owner-lane route cannot deliver
+  # without authoring the causing lane's commit; and the edit carries no judgement —
+  # three values READ from --exclusion-keys, checked by the very arm that demanded them
+  # on the same PR. THE WAIVER STOPS AT THE THREE VALUES OF AN EXISTING ROW: adding or
+  # removing a row, changing a class, editing @routed_excluded or touching the arm is a
+  # census change and stays with the census. If the re-read shows the DISPOSITION no
+  # longer holds — the action spells a literal `ok: true` again, or has left
+  # status_only_receipt — that is not a mechanical re-anchor. Stop and file it.
+  #
+  # DECLARED AT THE DEFINITION SITE TOO, because a lane discovers a coupling where it
+  # is working and not where it is documented: every anchored delete/revoke action
+  # carries this warning in a comment directly above its own `def`. Find them with
+  #   grep -rn 'ANCHORED DELETE/REVOKE ROW' api/lib/barkpark_web/controllers
   @exclusion_anchors %{
     {:post, "/w/:workspace_slug/p/:project_slug/v1/members", "BarkparkWeb.MemberController", :create} => {"BarkparkWeb.MemberController.create/2", 1, "92306071"},
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update} => {"BarkparkWeb.MemberController.update/2", 1, "98799982"},
@@ -1921,8 +1943,14 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark/plugins/sheets/web/ops_controller.ex",
             "Barkpark.Plugins.Sheets.Web.OpsController.apply_ops/2", "36006285", "87176703"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/app_token_controller.ex:215 — the admin revoke-by-id
-    # receipt (jf-backlog-apptoken-revoke-upstream). PROVEN/end_to_end is earned, not
+    # BarkparkWeb.AppTokenController.delete_by_id/2 — the admin revoke-by-id
+    # receipt (jf-backlog-apptoken-revoke-upstream). A LINE-NUMBER CITATION INTO
+    # app_token_controller.ex STOOD HERE AND IS RETRACTED: the line it named held
+    # `def index`, and it was already wrong before the def-site exclusion-anchor
+    # warnings shifted that file further. The number is deliberately not reproduced —
+    # scripts/new-lineref-check.sh reds on a comment that spells one, including a
+    # comment that spells one only to retract it. The symbol below is the anchor.
+    # PROVEN/end_to_end is earned, not
     # asserted: app_token_admin_revoke_test.exs drives DELETE /v1/auth/app-tokens/:id
     # AND reads the store back through Auth.verify_token/1, which enforces revocation in
     # its WHERE clause. Mutation-exercised — making revoke_app_token_by_id/1 a no-op reds
@@ -7933,7 +7961,7 @@ defmodule PDS.Census do
 
       {nil, _} ->
         {:unanchored,
-         ["resolves to #{r.clause_count} clause(s) and carries NO committed anchor — re-derive with --exclusion-keys"]}
+         ["resolves to #{r.clause_count} clause(s) and carries NO committed anchor — re-derive by READING the row out of `elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys` (docs/ops/exclusion-anchor-rederive.md)"]}
 
       {{mfa, _cc, _fp}, 0} ->
         {:vanished, ["the anchored def #{mfa} resolves to NO clause in this corpus"]}
@@ -8071,7 +8099,7 @@ defmodule PDS.Census do
               do: " || (+#{length(bad) - 4} more, all listed in the block above)",
               else: ""
             ) <>
-            " — a repair landing UNDER a stale exclusion row is the defect this arm exists to catch: RE-READ the class prose against the def it now names and re-derive with `--exclusion-keys` in the SAME commit"
+            " — a repair landing UNDER a stale exclusion row is the defect this arm exists to catch. THE REPAIR, IN THE SAME COMMIT AS THE CHANGE THAT MOVED IT: run `elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys`, find the TSV line whose first four fields are the quad named above, and COPY anchor_mfa, clause_count and def_fp OUT OF THAT COMMAND'S STDOUT into @exclusion_anchors — the numbers in this message and in any CI log are for RECOGNISING the row, NEVER for typing into the table. Then RE-READ the class prose against the def it now names. Editing @exclusion_anchors is a DECLARED allowed cross-fence edit for the lane whose change moved the fingerprint; the ruling, its limits and the step-by-step are in docs/ops/exclusion-anchor-rederive.md"
 
         true ->
           "#{fresh} delete/revoke exclusion row(s) still name the def they were committed against — anchor_mfa, clause_count AND the order-sensitive clause fold all re-derived this run, never transcribed. BLIND SHAPE, STATED: the fold is SAME-DEF, so a repair confined to a CALLEE of the excluded action moves no byte inside the action's own clauses and this arm prints PASS through it — and the WIDE set is printed, never gated, so a stale row outside the delete/revoke stems demotes in the block above without reddening anything"

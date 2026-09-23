@@ -41,6 +41,11 @@ package cli
 // holder of the token id) — then RE-READ every surface (delete responses prove
 // nothing, D33) and exit non-zero naming every survivor. Idempotent: a double
 // remove reports already-gone; partial state converges.
+//
+// `refresh` (cloud_support_refresh.go, pdf-bl-fleet-run-refresh) re-runs ONLY
+// the runtime leg's file write (supportFleetFilesStep, the SAME builder add
+// uses) against an existing, identity-fenced box at a pinned origin/main sha,
+// restarts the listener, and reads the runner sha back off the main's roster.
 
 import (
 	"bytes"
@@ -121,7 +126,13 @@ const supportProvisioningTTL = 1800
 // runtime + unit) — the freshened on-box checkout is the fallback. PDF-D62:
 // the runtime files are written from origin/main content, never from whatever
 // stale copy an operator machine carries.
-const supportRawBase = "https://raw.githubusercontent.com/FRIKKern/barkpark/main"
+const supportRawBase = supportRawRoot + "/main"
+
+// supportRawRoot is the repo's raw-content root WITHOUT a ref, so the fleet
+// runtime can be fetched at a PINNED commit sha (<root>/<sha>/<path>) — a sha
+// URL is immutable, which is what lets the runner report the exact version it
+// was written from (pdf-bl-fleet-run-refresh).
+const supportRawRoot = "https://raw.githubusercontent.com/FRIKKern/barkpark"
 
 // ── validation fences ────────────────────────────────────────────────────────
 
@@ -171,6 +182,8 @@ func runCloudSupport(out *writer, g globals, args []string) int {
 		return runCloudSupportAdd(out, g, rest)
 	case "remove", "rm", "delete":
 		return runCloudSupportRemove(out, g, rest)
+	case "refresh":
+		return runCloudSupportRefresh(out, g, rest)
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown support command %q (run `bp cloud support -h` for usage)", verb), exitUsage)
 	}
@@ -296,7 +309,7 @@ func runCloudSupportAdd(out *writer, g globals, args []string) int {
 		out.progressf("  4. configure     freshen → secrets → migrate → admin-token → LOCAL health probe")
 		out.progressf("  5. bind          mint POST /v1/fleet/support-tokens on the MAIN + register POST /v1/fleet/supports on the CONTROL PLANE (PDF-D69)")
 		out.progressf("  6. dataset       dev-profile export of %s/%s → tar over SSH → merge-import into the box", r.ws, r.dataset)
-		out.progressf("  7. runtime       fleet-run.sh + protocol (origin/main content), %s CLI fail-open, unit + env 0600", r.agent)
+		out.progressf("  7. runtime       fleet-run.sh + protocol + bp-read.sh at the resolved origin/main sha (version file beside the runner), %s CLI fail-open, unit + env 0600", r.agent)
 		out.progressf("  8. online        enable barkpark-fleet-listener, poll the roster to online-with-capacity (budget %s)", supportRosterPollBudget)
 		return exitOK
 	}
@@ -822,8 +835,20 @@ func (r *supportAddRun) stepDataset() (int, bool) {
 // (exact var names — bp's env context reads them; BARKPARK_TOKEN is a
 // documented shadow hazard). Agent provider keys are NEVER copied.
 func (r *supportAddRun) stepRuntime() (int, bool) {
-	r.state("runtime", "writing fleet-run.sh + fleet-protocol.md (origin/main content)")
-	if err := r.runner.Run(supportCtx(), supportFleetFilesStep()); err != nil {
+	// Pin the runtime to ONE origin/main commit so the box can report which
+	// runner it runs (fleet-run.version → capacity.runner_sha on every beat).
+	// Best-effort on add: an unresolvable sha falls back to the freshened
+	// on-box checkout, and the version file then records THAT checkout's HEAD.
+	sha, serr := supportResolveMainSHA()
+	if serr == nil && !supportSHARe.MatchString(sha) {
+		serr = fmt.Errorf("unexpected sha shape %q", sha)
+	}
+	if serr != nil {
+		r.out.errf("⚠ runtime: could not resolve origin/main's sha (%v) — writing the runtime from the box's freshened checkout; its HEAD becomes the reported runner version", serr)
+		sha = ""
+	}
+	r.state("runtime", "writing fleet-run.sh + fleet-protocol.md + bp-read.sh at origin/main "+supportOr(sha, "(checkout fallback)"))
+	if err := r.runner.Run(supportCtx(), supportFleetFilesStep(sha, true)); err != nil {
 		return r.fail("runtime", "fleet runtime files failed: "+err.Error(),
 			fmt.Sprintf("box %s bound + data loaded at %s; listener runtime absent", r.host.Name, r.host.IP),
 			fmt.Sprintf("inspect `ssh root@%s`, then re-run `bp cloud support add %s`", r.host.IP, r.name),
@@ -1176,23 +1201,8 @@ func (r *supportRemoveRun) stepLocate() (int, bool) {
 	// Identity fence: refuse LOUDLY on any foreign identity in the result —
 	// deleting on a mismatched label is exactly the wrong-box deletion the
 	// DeprovisionByIP lineage exists to prevent.
-	for _, box := range boxes {
-		if got := box.Labels[cloud.FleetSupportLabelKey]; got != r.name {
-			return r.fail("locate",
-				fmt.Sprintf("box %s (ip %s) is labeled %s=%q, not %q — REFUSING to touch a foreign identity; investigate manually",
-					box.Name, box.IP, cloud.FleetSupportLabelKey, got, r.name),
-				"nothing torn down yet", exitGeneric)
-		}
-	}
-	if len(boxes) > 1 {
-		var names []string
-		for _, box := range boxes {
-			names = append(names, fmt.Sprintf("%s (ip %s)", box.Name, box.IP))
-		}
-		return r.fail("locate",
-			fmt.Sprintf("%d boxes carry %s=%s — an anomaly this command never picks-one from: %s; investigate manually",
-				len(boxes), cloud.FleetSupportLabelKey, r.name, strings.Join(names, ", ")),
-			"nothing torn down yet", exitGeneric)
+	if refusal := supportIdentityFence(boxes, r.name); refusal != "" {
+		return r.fail("locate", refusal, "nothing torn down yet", exitGeneric)
 	}
 	r.boxes = boxes
 	if len(boxes) == 0 {
@@ -1218,6 +1228,29 @@ func (r *supportRemoveRun) stepLocate() (int, bool) {
 		r.state("locate", "probe secret unavailable (box env unreadable) — the census token leg falls back to the revoke receipt")
 	}
 	return exitOK, false
+}
+
+// supportIdentityFence is the DeprovisionByIP fence, shared by remove and
+// refresh: "" when the label-matched boxes are safe to act on, else the
+// refusal. A box whose barkpark-fleet-support label names a different identity
+// is refused loudly, and several matches are an anomaly neither verb ever
+// picks one from.
+func supportIdentityFence(boxes []cloud.Server, name string) string {
+	for _, box := range boxes {
+		if got := box.Labels[cloud.FleetSupportLabelKey]; got != name {
+			return fmt.Sprintf("box %s (ip %s) is labeled %s=%q, not %q — REFUSING to touch a foreign identity; investigate manually",
+				box.Name, box.IP, cloud.FleetSupportLabelKey, got, name)
+		}
+	}
+	if len(boxes) > 1 {
+		var names []string
+		for _, box := range boxes {
+			names = append(names, fmt.Sprintf("%s (ip %s)", box.Name, box.IP))
+		}
+		return fmt.Sprintf("%d boxes carry %s=%s — an anomaly this command never picks-one from: %s; investigate manually",
+			len(boxes), cloud.FleetSupportLabelKey, name, strings.Join(names, ", "))
+	}
+	return ""
 }
 
 // stepToken revokes each recorded token id on the MAIN — idempotent (404 =
@@ -1784,18 +1817,56 @@ func supportImportStep(ws, adminToken string) cloud.CaddyStep {
 	return cloud.SupportMergeImportStep(ws, adminToken)
 }
 
-// supportFleetFilesStep writes the fleet runtime from origin/main CONTENT:
-// raw.githubusercontent origin/main first, the freshened on-box checkout as
-// the fallback (PDF-D62/D64 — never an operator machine's stale copy).
-func supportFleetFilesStep() cloud.CaddyStep {
+// supportFleetFilesStep writes the fleet runtime from origin/main CONTENT
+// (PDF-D62/D64 — never an operator machine's stale copy). It is the ONE
+// builder both `support add` (stepRuntime) and `support refresh` run — the
+// refresh verb re-runs this leg and nothing else (pdf-bl-fleet-run-refresh).
+//
+//   - sha != "": every file is fetched from raw.githubusercontent AT THAT
+//     COMMIT (immutable), and fleet-run.version records the sha.
+//   - checkoutFallback: when the pinned fetch fails (or sha == ""), copy the
+//     files from the freshened on-box checkout instead, and record ITS HEAD.
+//     add allows this (a GitHub outage must not kill a bring-up); refresh
+//     does NOT — a refresh that cannot write the sha it printed fails.
+//
+// All files land as *.bpnew and are mv'd into place (a new inode), never
+// written in place: bash reads a running script by offset, so truncating
+// fleet-run.sh under a live listener would feed it a spliced file. The files
+// are all-or-nothing per source — a mix of pinned and checkout content would
+// make the version file lie.
+//
+// bp-read.sh rides along BESIDE the runner: since #16050 fleet-run.sh sources
+// scripts/lib/bp-read.sh, and from /opt/barkpark-fleet its repo-relative path
+// (../../scripts/lib) does not exist — without it bp_json is undefined and the
+// listener idles forever while still beating online.
+//
+// The sha is fenced by supportSHARe by every caller before it reaches here.
+func supportFleetFilesStep(sha string, checkoutFallback bool) cloud.CaddyStep {
+	fb := "0"
+	if checkoutFallback {
+		fb = "1"
+	}
 	script := `set -e
-mkdir -p /opt/barkpark-fleet
-fetch(){ curl -fsSL "` + supportRawBase + `/$1" -o "$2" 2>/dev/null || cp "/opt/barkpark/$1" "$2"; }
-fetch tooling/fleet/fleet-run.sh /opt/barkpark-fleet/fleet-run.sh
-fetch tooling/fleet/fleet-protocol.md /opt/barkpark-fleet/fleet-protocol.md
-chmod 0755 /opt/barkpark-fleet/fleet-run.sh`
+d=/opt/barkpark-fleet
+mkdir -p "$d"
+sha='` + sha + `'
+files='tooling/fleet/fleet-run.sh:fleet-run.sh tooling/fleet/fleet-protocol.md:fleet-protocol.md scripts/lib/bp-read.sh:bp-read.sh'
+pull(){ for f in $files; do curl -fsSL "` + supportRawRoot + `/$sha/${f%%:*}" -o "$d/${f#*:}.bpnew" 2>/dev/null || return 1; done; }
+copy(){ for f in $files; do cp "/opt/barkpark/${f%%:*}" "$d/${f#*:}.bpnew" || return 1; done; }
+if [ -n "$sha" ] && pull; then ver="$sha"
+elif [ ` + fb + ` = 1 ] && copy; then ver="$(git -C /opt/barkpark rev-parse HEAD 2>/dev/null)" || ver=unknown
+else rm -f "$d"/*.bpnew; echo "fleet runtime: cannot fetch the runner at ${sha:-the checkout}" >&2; exit 1
+fi
+chmod 0755 "$d/fleet-run.sh.bpnew"
+for f in $files; do mv -f "$d/${f#*:}.bpnew" "$d/${f#*:}"; done
+printf '%s\n' "$ver" > "$d/fleet-run.version.bpnew"
+mv -f "$d/fleet-run.version.bpnew" "$d/fleet-run.version"`
+	title := "write fleet-run.sh + fleet-protocol.md + bp-read.sh from origin/main content"
+	if sha != "" {
+		title += " at " + sha
+	}
 	return cloud.CaddyStep{
-		Title: "write fleet-run.sh + fleet-protocol.md from origin/main content",
+		Title: title,
 		Argv:  []string{"bash", "-lc", script},
 	}
 }
@@ -2045,6 +2116,7 @@ USAGE
                                  [--dataset <slug>] [--parent <cp-row-id>]
                                  [--dry-run] [-o json|yaml]
   bp cloud support remove <name> [--dataset <slug>] [--dry-run] [-o json|yaml]
+  bp cloud support refresh <name> [--dataset <slug>] [--force] [--dry-run] [-o json|yaml]
 
 WHAT IT DOES (eight named states, in order)
   create      provision an x86 warm-image box on hetzner, labeled
@@ -2062,9 +2134,10 @@ WHAT IT DOES (eight named states, in order)
               by matching its URL host (never the raw-IP host column).
   dataset     dev-profile (SCRUBBED) export of the main's dataset, streamed
               over SSH, merge-imported into the box's own Barkpark.
-  runtime     fleet-run.sh + fleet-protocol.md (origin/main content), the agent
-              CLI (fail-open), and the systemd unit + 0600 env carrying
-              BARKPARK_API_URL / BARKPARK_API_TOKEN.
+  runtime     fleet-run.sh + fleet-protocol.md + bp-read.sh at the resolved
+              origin/main sha (recorded in fleet-run.version beside the
+              runner), the agent CLI (fail-open), and the systemd unit + 0600
+              env carrying BARKPARK_API_URL / BARKPARK_API_TOKEN.
   online      enable barkpark-fleet-listener and poll the main's roster until
               the row truthfully reads online WITH measured capacity, or report
               an honest timeout (the row then ages to offline — never faked).
@@ -2095,6 +2168,21 @@ REMOVE (the mirror verb — PDF-D68, five surfaces since PDF-D101)
   surface — delete responses prove nothing — and any survivor is named
   with a non-zero exit. Idempotent: run it again and it reports
   already-gone; partial state converges.
+
+REFRESH (bring an existing box to the current runner — no hand-curl over SSH)
+  Resolves origin/main's commit sha and PRINTS it, locates the box by its
+  barkpark-fleet-support label (same identity fence as remove), refuses a
+  box whose roster row reads working (a restart kills the in-flight order;
+  --force overrides), re-runs ONLY the runtime file write at that sha (no
+  checkout fallback — the sha printed is the sha written), restarts
+  barkpark-fleet-listener, then polls the MAIN's roster until the row's
+  capacity.runner_sha reads back. It prints pushed vs reported; a mismatch
+  or no read-back is a non-zero exit, never a warning.
+  Trust: the box never pulls its own runner and gains no new capability.
+  The refresh is commanded over the operator's own SSH + provider
+  credentials (the same ones add uses); the box fetches an immutable
+  commit URL that bp chose. The running version is visible without SSH as
+  capacity.runner_sha on the roster (bp fleet roster).
 
 RELATED
   bp fleet roster        the fleet's presence table (who is online, with what)`

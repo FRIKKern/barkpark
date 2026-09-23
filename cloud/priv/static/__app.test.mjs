@@ -23348,7 +23348,9 @@ test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no lo
   });
   assert.ok(!row.includes(RLO), "no bidi control survives into the markup");
   // The verb the RECORD carries is the verb the row now spells, uninterrupted.
-  assert.match(row, /class="fleet-name">ops@acme\.com\u00A0etis\u00A0a\u00A0detaerc deleted a site/);
+  // (cch-rtl-script-neutral-borrowing: the email now rides in its own <bdi>, so
+  // the markup gains the tag — the verb after it is unchanged.)
+  assert.match(row, /class="fleet-name"><bdi>ops@acme\.com\u00A0etis\u00A0a\u00A0detaerc<\/bdi> deleted a site/);
   // The pre-reversed decoy text is still THERE (nothing is censored) — it just
   // cannot reorder the system's words around it any more.
   assert.ok(row.includes("etis" + NB + "a" + NB + "detaerc"), "the attacker's own letters are not laundered away");
@@ -23360,7 +23362,7 @@ test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no lo
     { role: "admin", userId: "u1" },
   );
   assert.ok(!self.includes(RLO), "the roster row carries no override either");
-  assert.match(self, /class="set-row-name">mallory@evil\.com <span class="dim">\(you\)<\/span>/);
+  assert.match(self, /class="set-row-name"><bdi>mallory@evil\.com<\/bdi> <span class="dim">\(you\)<\/span>/);
 
   // All TWELVE UAX#9 bidi formatting characters are neutralised, not just the
   // RLO: the nine explicit ones (LRE/RLE/LRO/RLO/PDF, LRI/RLI/FSI/PDI) and the
@@ -23379,6 +23381,44 @@ test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no lo
   // The strip runs BEFORE the escape, so an entity's letters can never be
   // re-read as text (the ssw8 esc-then-strip lesson, above).
   assert.equal(hooks.esc("a&" + RLO + "b"), "a&amp;b");
+});
+
+// ── cch-rtl-script-neutral-borrowing: user text rides in its own <bdi> ─────
+// esc() drops the explicit bidi controls; it cannot change IMPLICIT direction.
+// An email in Arabic or Hebrew letters is strong-RTL by script, and a neutral at
+// its edge ("." "-" "!") was resolved against the LTR paragraph around it, so it
+// painted on the far side of the RTL run. The geometry is measured in headless
+// Chrome by __preview__/bidi-isolation.mjs; this pins the markup that measurement
+// depends on — EACH user-authored span in its own <bdi>, and nothing system-
+// authored inside one.
+test("cch-rtl-script-neutral-borrowing: both hosts isolate every user-authored span, and only those", () => {
+  const email = "\u0645\u062F\u064A\u0631@\u0634\u0631\u0643\u0629.\u0645\u0635\u0631."; // Arabic IDN + trailing "."
+  const name = "\u05D0\u05EA\u05E8!"; // Hebrew + trailing "!"
+  const act = hooks.activityRow({
+    actor: { email }, action: "site.deleted", inserted_at: "2026-08-02T00:00:00Z", metadata: { name },
+  });
+  const fleetName = /<div class="fleet-name">(.*?)<\/div>/.exec(act)[1];
+  assert.equal(fleetName, "<bdi>" + email + "</bdi> deleted a site &middot; <bdi>" + name + "</bdi>");
+  // no metadata name → no second isolate, and no dangling separator
+  const bare = hooks.activityRow({ actor: { email }, action: "site.deleted" });
+  assert.equal(/<div class="fleet-name">(.*?)<\/div>/.exec(bare)[1], "<bdi>" + email + "</bdi> deleted a site");
+
+  const self = hooks.memberRowHtml(
+    { user_id: "u1", email, role: "member", joined_at: "2026-01-01T00:00:00Z" },
+    { role: "admin", userId: "u1" },
+  );
+  assert.equal(/<div class="set-row-name">(.*?)<\/div>/.exec(self)[1],
+    "<bdi>" + email + '</bdi> <span class="dim">(you)</span>');
+  const peer = hooks.memberRowHtml(
+    { user_id: "u9", email, role: "member", joined_at: "2026-01-01T00:00:00Z" },
+    { role: "admin", userId: "u1" },
+  );
+  assert.equal(/<div class="set-row-name">(.*?)<\/div>/.exec(peer)[1], "<bdi>" + email + "</bdi>");
+  // The isolate does not replace the escape: markup inside the email is still inert.
+  const hostile = hooks.memberRowHtml(
+    { user_id: "u9", email: "<b>x</b>@y.io", role: "member" }, { role: "admin", userId: "u1" },
+  );
+  assert.ok(hostile.includes("<bdi>&lt;b&gt;x&lt;/b&gt;@y.io</bdi>"));
 });
 
 test("cch-w22-s5 (B): relTime — a future timestamp is never 'just now', and the past is byte-identical", () => {

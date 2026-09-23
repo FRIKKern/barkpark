@@ -564,6 +564,46 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   @doc """
+  Plugin-contributed supervision children: one start-only boot check.
+
+  Resolves `Barkpark.Tasks.Judge.endpoint/0` once at boot
+  (task-6325dacb0e233d75), the plugin-side half of the gh-9531 FAIL-CLOSED
+  contract: a configured-but-malformed `ANTHROPIC_API_URL` refuses the node
+  instead of surfacing as a dedup judge that quietly never runs (the judge
+  fails OPEN by design, so nothing else would ever report it).
+
+  It lives HERE, not in `application.ex`, for the reason
+  `Barkpark.Plugins.OnixEdit.register_workers/1` gives: the host must not name
+  a removable plugin on a path that runs while it is disabled (`Barkpark.Plugin`
+  §Fresh-install invariant). With Tasks disabled this callback never runs.
+  The child starts under `Barkpark.Plugins.Supervisor`, which precedes
+  `BarkparkWeb.Endpoint`, so a malformed value still refuses the node before
+  it listens.
+  """
+  @impl Barkpark.Plugin
+  def register_workers(_ctx) do
+    [
+      %{
+        id: :tasks_judge_endpoint_boot_check,
+        start: {__MODULE__, :start_judge_endpoint_check, []},
+        restart: :temporary
+      }
+    ]
+  end
+
+  @doc """
+  Boot-time resolution of the judge endpoint — the child started by
+  `register_workers/1`. Returns `:ignore` on success so no process lingers;
+  `Judge.endpoint/0` RAISES on a malformed value, and a raising child start
+  takes the supervisor, and with it `Barkpark.Application.start/2`, down.
+  """
+  @spec start_judge_endpoint_check() :: :ignore
+  def start_judge_endpoint_check do
+    _ = Barkpark.Tasks.Judge.endpoint()
+    :ignore
+  end
+
+  @doc """
   Contributes the two task Oban cron entries, moved verbatim from
   `config/config.exs`:
 

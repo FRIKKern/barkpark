@@ -34,6 +34,9 @@
       }
       var stored = localStorage.getItem(KEY);
       document.documentElement.dataset.theme = stored || osTheme();
+      // spd-b1 — remembered inspector collapse (written only at `wide`, by the
+      // phx:inspector-pref listener at the bottom of <body>).
+      if (localStorage.getItem("barkpark_inspector") === "closed") document.documentElement.dataset.inspectorPref = "closed";
       // Follow OS live ONLY while the user has made no explicit choice.
       window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (e) {
         if (localStorage.getItem(KEY)) return;
@@ -2317,8 +2320,20 @@
        SCOPE IS LOAD-BEARING (D92): `html:not([data-width-bucket="wide"])`.
        At viewport 1280 and 1440 the inspector docks and costs nothing, epic
        criterion 2 is measured there, and the round-2 floor slice takes its
-       676px input from those rows. This rule may not move one pixel there. */
-    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) {
+       676px input from those rows. This rule may not move one pixel there.
+
+       THE ONE WIDE EXCEPTION IS OPT-IN (spd-b1-pane-state-persistence):
+       `html[data-inspector-pref="closed"]` — stamped by the pre-paint head
+       script ONLY when the user collapsed the inspector at `wide` on an
+       earlier visit (localStorage `barkpark_inspector`). The default wide
+       desk never carries it, so D92's band is untouched. It exists for the
+       static render alone: connect_params is nil there, so the server still
+       paints `.is-open`, and this alternative paints it as the strip the user
+       left. The connected render then seeds `sidebar_open: false`
+       (`.is-collapsed`, the same geometry), after which this alternative can
+       no longer match. It never paints anything OPEN, at any bucket. */
+    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]),
+    html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) {
       position: static;
       flex: 0 0 auto;
       width: auto;
@@ -2334,7 +2349,9 @@
       z-index: auto;
     }
     html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title,
-    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
+    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body,
+    html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title,
+    html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
       display: none;
     }
 
@@ -5151,6 +5168,23 @@
     let userName = localStorage.getItem("barkpark_user_name") || "";
     let userColor = localStorage.getItem("barkpark_user_color") || "";
 
+    // spd-b1-pane-state-persistence — the remembered inspector collapse. The
+    // server pushes `inspector-pref` only from a toggle at `wide`
+    // (Handlers.Paper.remember_inspector_pref/3); this writes the key the
+    // head pre-paint reads and keeps the <html> stamp in step with it, so a
+    // later reload's first paint agrees with the socket. Read back into the
+    // socket via the `inspector_closed` connect param below — connected mount
+    // only; the static render never sees it.
+    window.addEventListener("phx:inspector-pref", (e) => {
+      const closed = !!(e.detail && e.detail.closed);
+      try {
+        if (closed) localStorage.setItem("barkpark_inspector", "closed");
+        else localStorage.removeItem("barkpark_inspector");
+      } catch (_) {}
+      if (closed) document.documentElement.dataset.inspectorPref = "closed";
+      else delete document.documentElement.dataset.inspectorPref;
+    });
+
     let Hooks = {};
 
     // SheetGrid — the Studio sheet grid editor's thin client half
@@ -5522,6 +5556,7 @@
         // arm `row_press_state_guard_test.exs` mutates for.
         var prev = this._paPending;
         if (prev && prev.el) prev.el.removeAttribute("aria-busy");
+        if (prev && prev.refWatch) { prev.refWatch.disconnect(); prev.refWatch = null; }
         this._paPending = null;
       },
 
@@ -5715,6 +5750,22 @@
         // page-level region. Set after the release above, so the previous
         // press's row is cleared before this one is marked.
         p.el.setAttribute("aria-busy", "true");
+        // A REF THAT CAME AND WENT IS AN ANSWER, NOT A LOST PRESS
+        // (task-bd7f6c26b182d9c0). LiveView stamps `data-phx-ref-src` on this
+        // control synchronously in the same click dispatch, and removes it when
+        // the reply lands. On a fast link the reply lands BEFORE the 16ms probe
+        // below looks — measured on a local server: ref set at 0.4ms, cleared by
+        // the ok reply at 10.4ms, and the shipped probe then announced "That
+        // press did not reach the server" at 16.5ms over a section toggle whose
+        // aria-expanded had already flipped. Sampling the attribute cannot tell
+        // "never stamped" from "stamped and already dropped"; watching it can.
+        // The attribute is absent at this point (a present ref took the discard
+        // branch above), so ANY mutation of it means LiveView stamped a ref,
+        // i.e. the press was put on the wire.
+        if (window.MutationObserver) {
+          p.refWatch = new window.MutationObserver(function () { p.sawRef = true; });
+          p.refWatch.observe(el, { attributes: true, attributeFilter: ["data-phx-ref-src"] });
+        }
         // Within this same task, so the words are on screen at the next paint —
         // this is TIME-TO-FEEDBACK, not speed. Nothing here makes the server
         // faster (the root-cause slice is filed separately).
@@ -5724,12 +5775,16 @@
           this._paProbe = 0;
           if (this._paPending !== p) return;
           if (p.el.hasAttribute("data-phx-ref-src")) { p.sawRef = true; return; }
-          // NO REF 16ms AFTER THE CLICK — and that is not ambiguous. LiveView
-          // generates the ref SYNCHRONOUSLY inside the click dispatch, and only
-          // AFTER the connection check — `pushWithReply` returns
-          // `Promise.reject(new Error("no connection"))` when `isConnected()` is
-          // false, BEFORE any ref exists — so a press that was pushed always has
-          // its ref by now, and a press with no ref
+          // The ref was stamped and is already gone: the server ANSWERED inside
+          // the probe window. Settle it exactly as the poll would have.
+          if (p.sawRef) { this._paTick(p); return; }
+          // NO REF WAS EVER STAMPED 16ms AFTER THE CLICK — and that is not
+          // ambiguous. LiveView generates the ref SYNCHRONOUSLY inside the click
+          // dispatch, and only AFTER the connection check — `pushWithReply`
+          // returns `Promise.reject(new Error("no connection"))` when
+          // `isConnected()` is false, BEFORE any ref exists — so a press that was
+          // pushed has HAD its ref by now (`refWatch` above saw it even if the
+          // reply already removed it), and a press that never had one
           // was never put on the wire (independently confirmed: a discarded
           // press puts ZERO "type":"click" frames on /live/websocket, D265).
           // This is the owner's actual complaint, so it gets WORDS rather than
@@ -6550,6 +6605,7 @@
         user_id: userId,
         user_name: userName,
         user_color: userColor,
+        inspector_closed: document.documentElement.dataset.inspectorPref === "closed",
         ...(window.BarkparkPaperEditorConnectParams?.() || {})
       }),
       hooks: Hooks,

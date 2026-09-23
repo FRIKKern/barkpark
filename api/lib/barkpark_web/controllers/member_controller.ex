@@ -112,6 +112,16 @@ defmodule BarkparkWeb.MemberController do
   Removing a token seat does not revoke the token; it only ends its membership
   in this workspace (`DELETE /v1/tokens/:id` kills the credential itself).
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"principal_ref" => ref} = params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          {:ok, principal} <- Members.resolve_principal(ref, principal_type(params)) do
@@ -158,6 +168,16 @@ defmodule BarkparkWeb.MemberController do
   Revocation is idempotent; the audit trail is emitted by
   `Barkpark.Auth.revoke_token/1`.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def revoke_token(conn, %{"id" => token_id}) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          true <- Members.token_member?(ws_id, token_id),

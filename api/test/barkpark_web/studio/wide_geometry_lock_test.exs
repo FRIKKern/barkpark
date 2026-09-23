@@ -250,9 +250,19 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
     # and the narrow/phone pair never matches there. That scoping is the whole
     # reason these rules were allowed to move geometry at all (charter D92):
     # epic criterion 2 is measured at 1280/1440 and they may not reach it.
-    {~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened])|,
+    #
+    # spd-b1-pane-state-persistence widened BOTH painted-closed rules by one
+    # alternative each: `html[data-inspector-pref="closed"]`. That half DOES
+    # match at `wide` — but only on a client that collapsed the inspector at
+    # `wide` on an earlier visit (the pre-paint head script stamps it from
+    # localStorage). The default wide desk never carries the attribute, so
+    # epic criterion 2's 1280/1440 rows are untouched; and what it paints is
+    # the user's own `.is-collapsed` strip, which the connected render then
+    # takes over at identical geometry. Opt-in exactly like
+    # `html[data-editor-focus="beta"]` below, and admitted on that ground.
+    {~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]), html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened])|,
      ~w(flex width)},
-    {~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title, html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body|,
+    {~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title, html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body, html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title, html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body|,
      ~w(display)},
     {~S|html[data-width-bucket="narrow"] .bp-doc-sidebar.is-open[data-user-opened], html[data-width-bucket="phone"] .bp-doc-sidebar.is-open[data-user-opened]|,
      ~w(width)},
@@ -743,11 +753,15 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
         # equality on the literal value `standard` cannot match a desk
         # stamped `wide`, so a rule behind it is structurally absent from
         # epic criterion 2's band rather than merely believed to be.
+        # `html[data-inspector-pref="closed"]` (spd-b1) is the remembered wide
+        # collapse: opt-in per client like the beta editor-focus attribute,
+        # absent from the default desk, and it only ever paints the strip.
         scoped? =
           String.starts_with?(selector, ~S|html[data-width-bucket="phone"] |) or
             String.starts_with?(selector, ~S|html[data-width-bucket="narrow"] |) or
             String.starts_with?(selector, ~S|html[data-width-bucket="standard"] |) or
             String.starts_with?(selector, ~S|html[data-editor-focus="beta"] |) or
+            String.starts_with?(selector, ~S|html[data-inspector-pref="closed"] |) or
             String.starts_with?(selector, ~S|html:not([data-width-bucket="wide"]) |) or
             selector in [
               # Inspector variants and children. `.is-collapsed` is a state the

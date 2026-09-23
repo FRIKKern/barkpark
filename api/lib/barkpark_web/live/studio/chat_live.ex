@@ -38,6 +38,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.AgentTaskJoin
   alias Barkpark.StudioChat.Attachments
   alias Barkpark.StudioChat.ContextIdentity
   alias Barkpark.StudioChat.PlanPapers
@@ -345,6 +346,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # broadcasts and hydrated from the ledger on session open. Renders as
          # the Doing strip above the composer.
          hand_tasks: %{},
+         # The EPIC half of the same fold (task-ba42f986bb0d4594): every
+         # published sibling under an epic this session's claims point at, in
+         # any lifecycle, keyed by doc id. Epic subagents claim under their own
+         # `epic-builder-<slug>` workers, so the exact-worker fold above can
+         # never see them; the Doing strip joins the rail's agent labels
+         # against these rows (StudioChat.AgentTaskJoin).
+         hand_epic: empty_hand_epic(),
          # Live task transitions (tlv-bl-chat-live-transition-stream). The
          # STICKY set of published task ids this session has touched — grown
          # from the session worker's claims (see StudioChat.TaskTransition's
@@ -2138,6 +2146,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       {:noreply,
        socket
        |> assign(hand_tasks: hand_tasks)
+       |> fold_hand_epic(id, msg.doc.title, content)
        |> fold_task_transition(msg, worker)}
     end
   end
@@ -3579,6 +3588,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           +{map_size(@hand_tasks) - 3} more claims
         </div>
       </div>
+      <.hand_agent_tasks rail={@rail} hand_epic={@hand_epic} hand_tasks={@hand_tasks} />
 
       <%!-- Ready-task picker (hand-task surface): the queue head, loaded fresh
             on every open. Hand to Claude rides the normal send path with the
@@ -4332,6 +4342,46 @@ defmodule BarkparkWeb.Studio.ChatLive do
           entry={@entry}
           agent_detail_expanded={@agent_detail_expanded}
         />
+      </div>
+    </div>
+    """
+  end
+
+  # The Doing strip's agent↔task lines (task-ba42f986bb0d4594): one per rail
+  # agent whose label joins to exactly one in_progress epic sibling. The text is
+  # `StudioChat.AgentTaskJoin.summary_parts/2` — segment for segment the TUI's
+  # `taskboard.AgentTaskSummary` (doc_id · met/total criteria · ▸ now-line (age)
+  # · deep link) — with the last segment made a real link to the row.
+  attr :rail, :map, required: true
+  attr :hand_epic, :map, required: true
+  attr :hand_tasks, :map, required: true
+
+  defp hand_agent_tasks(assigns) do
+    now = DateTime.utc_now()
+
+    lines =
+      for j <- hand_agent_lines(assigns.rail, assigns.hand_epic, assigns.hand_tasks) do
+        parts = AgentTaskJoin.summary_parts(j, now)
+        %{label: j.label, id: j.row.doc_id, text: Enum.drop(parts, -1), link: j.deep_link}
+      end
+
+    assigns = assign(assigns, lines: lines)
+
+    ~H"""
+    <div :if={@lines != []} style="flex: none; padding: 0 16px;">
+      <div
+        :for={l <- @lines}
+        class="text-xs text-dim"
+        data-role="chat-agent-task"
+        data-task-id={l.id}
+        style="font-family: var(--font-mono); display: flex; align-items: center; gap: 8px; padding: 2px 0; min-width: 0;"
+      >
+        <span aria-hidden="true" style="color: var(--primary);">⚒</span>
+        <span style="flex: none; opacity: 0.7;">{l.label}</span>
+        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          {Enum.join(l.text, " · ")}
+        </span>
+        <a href={l.link} data-role="chat-agent-task-link" style="flex: none;">{l.link}</a>
       </div>
     </div>
     """
@@ -5144,6 +5194,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       session_id: nil,
       # No session → no worker → no held claims; the picker is per-view UI.
       hand_tasks: %{},
+      hand_epic: empty_hand_epic(),
       # A new chat is a new conversation: it has touched no task and rendered
       # no transition, so BOTH the scope set and the idempotency set reset.
       touched_tasks: MapSet.new(),
@@ -6405,17 +6456,121 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # claim.worker to match on — still renders as a transition.
     socket
     |> assign(hand_tasks: rows)
+    |> hydrate_hand_epic()
     |> update(:touched_tasks, fn set ->
       Enum.reduce(Map.keys(rows), set, &MapSet.put(&2, &1))
     end)
   end
+
+  # ── the epic-scoped half of the hand-task fold (task-ba42f986bb0d4594) ────
+  #
+  # The fold above is exact-worker: a row is ours while THIS session's worker
+  # holds its claim. An epic cycle's builders claim under their own
+  # `epic-builder-<slug>` workers, so that fold surfaced nothing for them. The
+  # key they share with the session is the epic PARENT: the epic ids are the
+  # parent_ids of the claims this session holds (it runs a slice) plus the
+  # held ids themselves (it holds the epic). Every published sibling under
+  # those ids — ANY lifecycle, so a colliding done/open sibling still makes a
+  # label ambiguous — is the candidate set the Doing strip joins the rail's
+  # agent labels against. Both feeding paths below mirror the exact-worker
+  # fold's: `hydrate_hand_epic/1` reads the ledger once on open (beside the
+  # prime read), `fold_hand_epic/4` rides the SAME `{:document_changed, …}`
+  # frame on the SAME dataset subscription — no new PubSub topic.
+  defp empty_hand_epic, do: %{ids: MapSet.new(), rows: %{}}
+
+  defp hand_epic_ids(hand_tasks) do
+    Enum.reduce(hand_tasks, MapSet.new(), fn {id, row}, acc ->
+      acc = MapSet.put(acc, id)
+      if is_binary(row.parent_id), do: MapSet.put(acc, row.parent_id), else: acc
+    end)
+  end
+
+  defp hydrate_hand_epic(socket) do
+    ids = hand_epic_ids(socket.assigns.hand_tasks)
+
+    rows =
+      ids
+      |> MapSet.to_list()
+      |> StudioChat.epic_children(Keyword.get(hand_task_scope(), :workspace_id))
+      |> Map.new(fn d -> {d.doc_id, hand_epic_row(d.doc_id, d.title, d.content)} end)
+
+    assign(socket, hand_epic: %{ids: ids, rows: rows})
+  end
+
+  # One task frame into the epic index. A change to the EPIC SET (a new claim
+  # under a new parent, the last claim under one dropped) re-reads the whole
+  # set once; otherwise a row under a tracked epic is upserted in place and a
+  # row that left one (re-parented) is dropped.
+  defp fold_hand_epic(socket, id, title, content) do
+    ids = hand_epic_ids(socket.assigns.hand_tasks)
+    %{ids: held, rows: rows} = socket.assigns.hand_epic
+
+    cond do
+      ids != held ->
+        hydrate_hand_epic(socket)
+
+      MapSet.member?(ids, content["parent_id"]) ->
+        assign(socket,
+          hand_epic: %{ids: ids, rows: Map.put(rows, id, hand_epic_row(id, title, content))}
+        )
+
+      Map.has_key?(rows, id) ->
+        assign(socket, hand_epic: %{ids: ids, rows: Map.delete(rows, id)})
+
+      true ->
+        socket
+    end
+  end
+
+  # A candidate row in the shape `StudioChat.AgentTaskJoin` indexes and
+  # summarises: the pulse is decoded (content.claim.now is a
+  # `{"text","ts"}` MAP, never a string) and the criteria meter is the
+  # server's own `criteria_progress` (nil when the row carries none).
+  defp hand_epic_row(doc_id, title, content) when is_map(content) do
+    %{
+      doc_id: doc_id,
+      title: title || content["title"],
+      lifecycle_status: content["lifecycle_status"],
+      criteria: Tasks.criteria_progress(content),
+      pulse: AgentTaskJoin.decode_pulse(get_in(content, ["claim", "now"]))
+    }
+  end
+
+  defp hand_epic_row(doc_id, title, _content),
+    do: %{doc_id: doc_id, title: title, lifecycle_status: nil, criteria: nil, pulse: nil}
+
+  # The Doing strip's agent lines: every rail agent label that resolves to
+  # EXACTLY ONE epic sibling which is in_progress and not already one of this
+  # session's own strip rows. An ambiguous, absent or non-slug label yields no
+  # line at all (AgentTaskJoin.join/2 returns :none) — never a best guess.
+  defp hand_agent_lines(rail, %{rows: rows}, hand_tasks) when map_size(rows) > 0 do
+    index = rows |> Map.values() |> AgentTaskJoin.index()
+
+    rail
+    |> AgentTaskJoin.rail_agent_labels()
+    |> Enum.flat_map(fn label ->
+      case AgentTaskJoin.join(index, label) do
+        {:ok, %{row: %{lifecycle_status: "in_progress", doc_id: id}} = j} ->
+          if Map.has_key?(hand_tasks, id), do: [], else: [Map.put(j, :label, label)]
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.uniq_by(& &1.row.doc_id)
+  end
+
+  defp hand_agent_lines(_rail, _hand_epic, _hand_tasks), do: []
 
   defp hand_task_row(title, content) when is_map(content) do
     criteria = List.wrap(content["acceptance_criteria"])
 
     %{
       title: title || content["title"] || "untitled task",
-      now: get_in(content, ["claim", "now"]),
+      # content.claim.now is the `{"text","ts","criterion"?}` MAP
+      # `Tasks.Pulse` writes — interpolating it raw crashed the render on the
+      # first real pulse (Phoenix.HTML.Safe has no Map impl). Render its text.
+      now: hand_task_now(get_in(content, ["claim", "now"])),
       met: Enum.count(criteria, fn c -> is_map(c) and c["met"] == true end),
       total: length(criteria),
       # The one-hop epic pointer (wsc charter D9): both feeding paths (ledger
@@ -6427,6 +6582,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp hand_task_row(title, _content),
     do: %{title: title || "untitled task", now: nil, met: 0, total: 0, parent_id: nil}
+
+  defp hand_task_now(now) when is_binary(now), do: now
+
+  defp hand_task_now(now) do
+    case AgentTaskJoin.decode_pulse(now) do
+      %{text: text} -> text
+      nil -> nil
+    end
+  end
 
   # A ready-queue Document as a lean picker row.
   defp hand_ready_row(doc) do

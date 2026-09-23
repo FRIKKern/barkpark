@@ -359,7 +359,7 @@ defmodule Barkpark.Scim do
         random = Base.encode16(:crypto.strong_rand_bytes(32))
 
         case Accounts.register_user(%{email: email, password: random}) do
-          {:ok, user} -> {:ok, Repo.update!(User.confirm_changeset(user))}
+          {:ok, user} -> {:ok, Accounts.confirm_provisioned_user(user)}
           err -> err
         end
     end

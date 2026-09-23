@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  144 scenarios, 25 rendered, 119 in a COMMITTED residue literal.
+//   SCENARIO  146 scenarios, 25 rendered, 121 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -567,8 +567,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 144 scenarios · 26 cells over 25 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 119 · 14 families.
+// THE CENSUS THIS RECONCILES AGAINST: 146 scenarios · 26 cells over 25 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 121 · 14 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -767,6 +767,17 @@ export const RESIDUE_FAMILY_REASONS = {
 // (`144 scenarios · 25 distinct covered by 26 cells · 119 residue over 14
 // families`), never by adding one.
 //
+// task-679663d0bee42b15 moved it by TWO, both residue: `new-launch-limit-reached`
+// and `new-launch-forbidden` (family path:/new) are the 145th and 146th
+// scenarios and the 120th and 121st residue entries — the /new launch step's
+// own fixture with only POST /v1/launch's 403 answer changed, so their subject
+// is a toast smoke.mjs asserts, not geometry. Cells (26), distinct (25) and
+// families (14) are DELIBERATELY UNMOVED. The sweep refused at exit 2
+// (`UNLISTED scenario "new-launch-limit-reached" (family path:/new)`) until
+// both entries were written; every integer was RE-DERIVED by RUNNING
+// `node breakpoint-sweep.mjs` and reading the line it PRINTED (`146 scenarios ·
+// 25 distinct covered by 26 cells · 121 residue over 14 families`).
+//
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527; recut by
 // cch-w48-bl-the-scenario-census-five-numerals-cannot-lose). The old header here
 // read "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed
@@ -783,7 +794,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
 // below is now recounted, either from `scenarioReport` or from these same
 // committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
-//   * 144 / 26 / 25 / 119 / 14 — "the census five in breakpoint-sweep.mjs's
+//   * 146 / 26 / 25 / 121 / 14 — "the census five in breakpoint-sweep.mjs's
 //     prose are recounted from the derived report", which reads BOTH typed
 //     copies out of the committed bytes (this bullet and "THE CENSUS THIS
 //     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
@@ -1018,7 +1029,7 @@ export const SCENARIO_RESIDUE = {
   "activate-gone": "path:/activate",
   "activate-rate-limited": "path:/activate",
   "activate-logged-out": "path:/activate",
-  // path:/new — 8
+  // path:/new — 10
   "new-launch": "path:/new",
   "theater-midflight": "path:/new",
   "theater-failed": "path:/new",
@@ -1027,6 +1038,13 @@ export const SCENARIO_RESIDUE = {
   "theater-ready-github": "path:/new",
   "theater-ready-github-member": "path:/new",
   "theater-failed-member": "path:/new",
+  // task-679663d0bee42b15 — the Launch press's two 403s. Residue for the same
+  // reason as new-launch-me-unreadable: the subject is a TOAST after a driven
+  // submit, which smoke.mjs asserts byte for byte; the /new step's geometry at
+  // each width is already a cell of `new-launch`, and these are its fixture
+  // with only the POST /v1/launch answer changed.
+  "new-launch-limit-reached": "path:/new",
+  "new-launch-forbidden": "path:/new",
   // hash:#billing — 9
   "billing-forever": "hash:#billing",
   "billing-portal-return": "hash:#billing",

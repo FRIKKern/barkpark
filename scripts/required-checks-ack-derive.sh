@@ -263,9 +263,32 @@ fi
 # The derivation above is expensive (two generator passes), so the selftest
 # REUSES it and mutates only the cheap half: delete one real ACK_EX line from a
 # scratch copy of the harness and the same comparison must red BY NAME; restore
-# and it must green. Both directions, one derive.
+# and it must reproduce the BASELINE. Both directions, one derive.
+#
+# THE BASELINE IS THE REFERENCE, NOT "GREEN". The restored arm used to demand a
+# green, which is only right on a tree whose real comparison above is green. On
+# a tree that is already red (MEASURED: Elixir run 35889983944, PR 19973 head
+# 8b63ac40e, real gap `console-harness.sh reads CI's pin (it must be able to
+# LOSE)`) the untouched harness IS the red baseline, so re-parsing it reds again
+# and the selftest printed "the mutation was not the only variable" — a false
+# diagnosis stacked on a correct red. So each arm is compared, as a SET, to the
+# baseline's own MISSING set:
+#   mutated   MISSING == baseline MISSING + exactly the victim
+#   restored  MISSING == baseline MISSING (empty on a green tree, identical on a red one)
+# On a red baseline "RED with it deleted" is trivially true; the set equality is
+# what still discriminates. The real verdict ($RC) is untouched and is the exit.
 if [ "$SELFTEST" -eq 1 ]; then
   printf '\n-- selftest: the ACK_EX side, mutated --\n'
+  # missing_set <acked-file> <out-file> — the comparison's MISSING set, as a file.
+  missing_set() { comm -23 "$DERIVED" "$1" > "$2"; }
+  BASEMISS="$TMP/missing-baseline.txt"
+  missing_set "$ACKED" "$BASEMISS"
+  BASEN="$(wc -l < "$BASEMISS" | tr -d ' ')"
+  if [ "$BASEN" -eq 0 ]; then
+    printf '  baseline: GREEN (0 MISSING) — the arms below are measured against an empty MISSING set\n'
+  else
+    printf '  baseline: RED (%s MISSING) — the arms below are measured against that set, not against green\n' "$BASEN"
+  fi
   # The victim is drawn from DERIVED ∩ ACKED so the mutation always has a real
   # line to delete, even on a tree this check is currently RED on.
   # NO PIPE ON THIS LINE, and the reason is the bug it used to carry. The shape
@@ -332,8 +355,18 @@ if [ "$SELFTEST" -eq 1 ]; then
     cat "$MUTOUT" >&2
     exit 1
   fi
-  printf '  RED with it deleted, and it NAMES the context: %s\n' \
-    "$(grep -F 'MISSING ACK_EX' "$MUTOUT")"
+  MUTMISS="$TMP/missing-mutated.txt"
+  missing_set "$MUT" "$MUTMISS"
+  WANTMUT="$TMP/missing-mutated-want.txt"
+  { cat "$BASEMISS"; printf '%s\n' "$VICTIM"; } | sort -u > "$WANTMUT"
+  if ! cmp -s "$MUTMISS" "$WANTMUT"; then
+    printf 'SELFTEST FAILED: the mutated MISSING set is not the baseline MISSING set plus exactly %s. diff (want vs got):\n' "$VICTIM" >&2
+    diff "$WANTMUT" "$MUTMISS" >&2 || true
+    exit 1
+  fi
+  printf '  RED with it deleted, and it NAMES the context: MISSING ACK_EX  %s\n' "$VICTIM"
+  printf '  mutated MISSING set = baseline (%s) + exactly the victim (%s names)\n' \
+    "$BASEN" "$(wc -l < "$MUTMISS" | tr -d ' ')"
   # RESTORED: the untouched harness is re-parsed through the same extractor,
   # so the green arm travels the whole path the red arm did, minus the deletion.
   RESTORED="$TMP/acked-restored.txt"
@@ -343,13 +376,23 @@ if [ "$SELFTEST" -eq 1 ]; then
       "$(wc -l < "$RESTORED" | tr -d ' ')" "$ACKN" >&2
     exit 1
   fi
-  if compare "$RESTORED" "SELFTEST restored" 2>/dev/null; then
-    printf '  GREEN again with it restored — single-variable, both directions\n'
-  else
-    printf 'SELFTEST FAILED: the restored ACK_EX set did not green — the mutation was not the only variable\n' >&2
+  RESTMISS="$TMP/missing-restored.txt"
+  missing_set "$RESTORED" "$RESTMISS"
+  if ! cmp -s "$RESTMISS" "$BASEMISS"; then
+    printf 'SELFTEST FAILED: the restored MISSING set differs from the baseline MISSING set — the mutation was not the only variable. diff (baseline vs restored):\n' >&2
+    diff "$BASEMISS" "$RESTMISS" >&2 || true
     exit 1
   fi
-  printf '  selftest OK\n'
+  if [ "$BASEN" -eq 0 ]; then
+    printf '  GREEN again with it restored — single-variable, both directions\n'
+  else
+    printf '  RED again with it restored, reproducing the baseline red exactly (same %s MISSING name(s)) — single-variable, both directions\n' "$BASEN"
+  fi
+  if [ "$RC" -eq 0 ]; then
+    printf '  selftest OK\n'
+  else
+    printf '  selftest OK — the instrument is sound; the exit is the tree'"'"'s own verdict (%s), RED above\n' "$RC"
+  fi
 fi
 
 exit "$RC"
