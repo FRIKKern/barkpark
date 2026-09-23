@@ -143,6 +143,13 @@ defmodule Barkpark.Tasks.LeaseExtensionTest do
       assert {:error, :not_claimed} = Tasks.renew_lease_by_id(row.id, pr: 15_234)
       assert is_nil(extension_of(reload(row)))
     end
+
+    # task-888cded6b75503ee: Renew's `nil -> {:error, :not_found}` arm had no
+    # witness anywhere — delete it and a renew on a missing row crashed with a
+    # CaseClauseError that no test observed. This is its home witness.
+    test "a renew on a task id that names no row is :not_found, not a crash" do
+      assert {:error, :not_found} = Tasks.renew_lease_by_id(Ecto.UUID.generate(), pr: 15_234)
+    end
   end
 
   # ─── Criterion 2 — a closed/merged PR stops extending ─────────────────────
