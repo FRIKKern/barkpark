@@ -8,10 +8,15 @@
 # failure-reporting step and no watcher". Measured on origin/main 2026-09-23,
 # ALL FOUR NAMED WORKFLOWS ALREADY HAVE A READER:
 #
-#   search-starter-smoke.yml  push: branches [main]  AND  bash scripts/file-ci-failure-issue.sh:390
+#   search-starter-smoke.yml  push: branches [main]  AND its step
+#                             `Escalate a failing beat to a human`, which runs
+#                             `bash scripts/file-ci-failure-issue.sh`
 #   studio-journey-smoke.yml  push: branches [main]
-#   paper-readers.yml         bash scripts/file-ci-failure-issue.sh:152
-#   codebase-intel.yml        bash scripts/file-ci-failure-issue.sh:205
+#   paper-readers.yml         its step `Report failure to a human`
+#   codebase-intel.yml        its step `Report failure to a human`
+#
+# Re-derive that table at any time, by the invocation rather than by a line
+# number:  grep -rln 'bash .*file-ci-failure-issue\.sh' .github/workflows/
 #
 # The filing is not stale by half; it is 0-for-4. And the two questions it asked
 # for — did the cron DISPATCH, did it CONCLUDE green — are BOTH already answered
@@ -31,9 +36,10 @@
 # scheduled-arm-health.yml — the very instrument that answers both questions —
 # declares NO push arm and NO pull_request arm by design, and invokes no
 # notifier. Its red renders on no pull request and is invisible to
-# main-red-owner.yml, whose population filter is
-# `grep -qE '^[[:space:]]*push:'` over the workflow tree
-# (scripts/main-red-predicate.sh:338) — so a schedule-only workflow is
+# main-red-owner.yml, whose population filter is the enumeration loop in
+# scripts/main-red-predicate.sh under the banner comment
+# `--- enumerate workflows carrying a push: arm ---`, whose body is
+# `grep -qE '^[[:space:]]*push:' "$f" || continue` — so a schedule-only workflow is
 # STRUCTURALLY OUTSIDE the one mechanism that gives a red on main an owner.
 # It was measured red 5 of its 5 most recent runs. Nobody was told, and by
 # construction nobody could have been.
@@ -52,7 +58,9 @@
 #       push arm, but the READ is `actions/workflows/<f>/runs?branch=main`
 #       with NO event filter — so a SCHEDULED red is owned too, provided the
 #       file happens to also carry a push arm. Tags-only push arms do not
-#       count: they cannot produce a main run (main-red-predicate.sh:339).
+#       count: they cannot produce a main run. Same partition
+#       main-red-predicate.sh draws under its `TAGS-ONLY PUSH ARMS ARE NOT
+#       BRANCH-DRIVEN` comment.
 #
 #   R3  AN INVOCATION OF scripts/file-ci-failure-issue.sh. Files (or appends
 #       to) one deduped issue per CI_FAILURE_KEY, and escalates once after
@@ -86,13 +94,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # The filing counted `if: failure()`. That string is a CONDITION, not a
 # destination: a step can carry it and merely echo into a run log nobody opens.
-# Conversely search-starter-smoke.yml:390 invokes the notifier from a step with
-# NO `if: failure()` at all — the step reads the journey report and decides for
-# itself — and it is a genuine reader. So the detector keys on the INVOCATION.
+# Conversely search-starter-smoke.yml's step `Escalate a failing beat to a
+# human` invokes the notifier with NO `if: failure()` on it at all — the step
+# reads the journey report and decides for itself — and it is a genuine reader.
+# So the detector keys on the INVOCATION.
 #
-# AND IT KEYS ON AN INVOCATION, NOT A MENTION. required-checks-drift.yml:156
-# contains the line `- "scripts/file-ci-failure-issue.sh"` — a PATHS-FILTER
-# entry naming the notifier as a file to watch, not a call to it. A `grep -F`
+# AND IT KEYS ON AN INVOCATION, NOT A MENTION. required-checks-drift.yml carries
+# `- "scripts/file-ci-failure-issue.sh"` as an entry in its `paths:`
+# trigger-filter list — the notifier named as a file to WATCH, not a call to
+# it. A `grep -F`
 # for the basename scores that file R3 and is WRONG; it happens to reach the
 # right VERDICT because that workflow also carries R2, which is precisely the
 # shape that hides a broken detector behind a correct answer. R3 therefore
@@ -230,7 +240,7 @@ PYEOF
 }
 
 # R3 — an INVOCATION of the notifier, never a mention of its path. See the
-# required-checks-drift.yml:156 specimen in the header.
+# required-checks-drift.yml `paths:`-list specimen in the header.
 has_r3() { grep -qE 'bash[[:space:]]+[^[:space:]]*file-ci-failure-issue\.sh' "$1"; }
 
 # ── THE CENSUS ───────────────────────────────────────────────────────────────

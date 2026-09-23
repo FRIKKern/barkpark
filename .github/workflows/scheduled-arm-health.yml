@@ -111,7 +111,10 @@ jobs:
       # (see the header). That is not merely "no check run on a PR": it puts
       # this file OUTSIDE the population of scripts/main-red-predicate.sh,
       # which enumerates workflows by `grep -qE '^[[:space:]]*push:'` over the
-      # tree (main-red-predicate.sh:338) and is the input to main-red-owner.yml
+      # tree — its enumeration loop, under the banner comment
+      # `--- enumerate workflows carrying a push: arm ---`, is
+      # `grep -qE '^[[:space:]]*push:' "$f" || continue` — and is the input to
+      # main-red-owner.yml
       # — the one mechanism in this repo that gives a red on main's tip an
       # owner. A schedule-only workflow is structurally invisible to it.
       #
