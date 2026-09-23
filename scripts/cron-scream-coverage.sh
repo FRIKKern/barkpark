@@ -119,7 +119,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #  THE LEDGER, AND WHY THIS GUARD IS NOT BORN SCREAMING
 # ─────────────────────────────────────────────────────────────────────────────
-# Eight workflows are UNREAD today. A guard that reds on eight things the day
+# Seven workflows are UNREAD today -- this header shipped saying "eight" while
+# the ledger below shipped with seven rows, and a live
+# `bash scripts/cron-scream-coverage.sh --list` on origin/main dd09ba571 read
+# `READ 24, UNREAD 7`. Corrected here rather than left as prose nobody
+# re-derived. A guard that reds on seven things the day
 # it lands is a guard whose readers learn to dismiss it — the exact failure
 # task-e6fe244ece2b5d27 exists to prevent, reached from a new side. So the
 # eight are LEDGERED below, each with a dated disposition, and this guard is a
@@ -190,11 +194,14 @@ LEDGER_FILE=""
 MODE=report
 
 # ── THE LEDGER ───────────────────────────────────────────────────────────────
-# file|dated disposition. Eight rows, measured on origin/main d4e2557b0,
-# 2026-09-23, task-e6fe244ece2b5d27.
+# file|dated disposition. SIX rows, measured on origin/main dd09ba571,
+# 2026-09-23, task-ff710b2548a34849. Shipped as seven by PR #19966 (whose prose
+# above said eight). elixir-nightly.yml LEFT BY THE FRONT DOOR: it was wired to
+# R3 in the same change that removed its row, and the ratchet's STALE ROW arm
+# fired on the real tree in between. That is the only reason the arm is trusted
+# for THIS file rather than only for the fixture #19966 shipped.
 DEFAULT_LEDGER='absent-context-census.yml|2026-09-23: schedule-only BY A COMMITTED TEST — absent-context-census.test.sh §7 asserts this workflow is schedule-only, so R2 is forbidden here, not merely absent. Its own hermetic mutation suite runs as step one of every run, so an instrument that has lost the ability to report says so before its verdict is believed. R3 is the open remedy and is a one-step change.
 chronicle-paper.yml|2026-09-23: nightly narrative digest, report class. Carries a pull_request arm, which is NOT a reader of a scheduled red (see the predicate above) — this row exists so that fact is recorded rather than mistaken for coverage. A late or failed chronicle costs one night of prose and gates nothing.
-elixir-nightly.yml|2026-09-23: the long Elixir suite, nightly, report class. The HIGHEST-VALUE row in this ledger: its red means the Elixir test suite is broken in a way the per-PR matrix does not run, and today that reaches nobody at all. R3 is the remedy. Not taken in this change because this lane fences .github/workflows/** + scripts/** and the disposition deserves its own PR against a measured run history.
 landed-open-report.yml|2026-09-23: daily ledger digest. Its own header states a red here means THE READ FAILED and that findings exit 0 into the step summary, and it deliberately carries no push arm so it renders no check run anywhere. Accepted UNREAD: the digest is a convenience, and the ledger it reports on is queryable directly with bp.
 pds-scratch-round-trip.yml|2026-09-23: daily boot/verify/teardown of the PDS scratch target. Schedule + workflow_dispatch ONLY and its header measures the run at >10 min (two full compiles), calling a per-PR venue a WRONG build. So R2 is deliberately absent; R3 would be the right reader and is not yet wired.
 release-curator-draft.yml|2026-09-23: daily scan that opens or refreshes ONE draft GitHub Release for a human to bless. Schedule + workflow_dispatch by design (its header rules out a push arm as noise that would make the draft chase main). The draft is a standing invitation, not a safety net; a failed refresh costs a day.
