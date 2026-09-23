@@ -13,10 +13,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/fleetruntime"
 )
 
 const supportTestSHA = "2b97ded4fb4cd1043f59fe88c00b3d6a95fe2651"
@@ -332,5 +334,19 @@ func TestSupportRefreshNarrationReadsTheRow(t *testing.T) {
 	c, okC := supportRefreshNarration("hex", supportTestSHA, nil)
 	if !okA || okB || okC || a == b || b == c {
 		t.Fatalf("narration ignores the row: %q/%v %q/%v %q/%v", a, okA, b, okB, c, okC)
+	}
+}
+
+// TestSupportFleetFilesStepIsTheSharedDefinition (task-837f1013efdf100f): the
+// CLI's runtime step IS fleetruntime.FilesStep — the definition the
+// provisioner chain runs too — so the two chains cannot drift apart again.
+func TestSupportFleetFilesStepIsTheSharedDefinition(t *testing.T) {
+	for _, sha := range []string{supportTestSHA, ""} {
+		for _, fb := range []bool{true, false} {
+			got, want := supportFleetFilesStep(sha, fb), fleetruntime.FilesStep(sha, fb)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("sha=%q fallback=%v: the CLI step diverged from fleetruntime.FilesStep\n got: %#v\nwant: %#v", sha, fb, got, want)
+			}
+		}
 	}
 }

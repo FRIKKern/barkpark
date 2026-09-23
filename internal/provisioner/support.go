@@ -65,6 +65,7 @@ import (
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
+	"github.com/FRIKKern/barkpark/internal/fleetruntime"
 )
 
 // DefaultSupportProvisionTimeout bounds one whole provision_support chain. It is
@@ -822,13 +823,27 @@ func (r *supportRun) exportDatasetTar(ctx context.Context) (*os.File, error) {
 
 // ── verify sub-steps ─────────────────────────────────────────────────────────
 
-// verifyRuntime installs the listener runtime: fleet-run.sh + protocol
-// (origin/main content), the agent CLI FAIL-OPEN, the measured capacity
+// verifyRuntime installs the listener runtime: fleet-run.sh + protocol +
+// bp-read.sh + fleet-run.version at the resolved origin/main sha (the shared
+// fleetruntime.FilesStep), the agent CLI FAIL-OPEN, the measured capacity
 // ceiling, the systemd unit + 0600 env carrying the LEDGER token — and enables
 // it. PROVIDER KEYS ARE NEVER WRITTEN (PDF-D62/D88): the developer hands the
 // box its model key themselves; the exact one-liner is narrated (no secrets).
 func (r *supportRun) verifyRuntime(ctx context.Context) error {
-	if err := r.runner.Run(ctx, supportFleetFilesStep()); err != nil {
+	// Pin the runtime to ONE origin/main commit so the box reports which runner
+	// it runs (fleet-run.version → capacity.runner_sha on every beat) — the same
+	// step `bp cloud support add` runs (fleetruntime.FilesStep). Best-effort,
+	// like add: an unresolvable sha falls back to the freshened on-box checkout,
+	// and the version file then records THAT checkout's HEAD.
+	sha, serr := supportResolveMainSHA(ctx)
+	if serr == nil && !fleetruntime.SHARe.MatchString(sha) {
+		serr = fmt.Errorf("unexpected sha shape %q", sha)
+	}
+	if serr != nil {
+		r.console.logf("verify: could not resolve origin/main's sha (%v) — writing the runtime from the box's freshened checkout; its HEAD becomes the reported runner version", serr)
+		sha = ""
+	}
+	if err := r.runner.Run(ctx, supportFleetFilesStep(sha)); err != nil {
 		return fmt.Errorf("fleet runtime files: %w", err)
 	}
 
@@ -1145,19 +1160,18 @@ func supportImportStep(ws, boxAdminToken string) cloud.CaddyStep {
 	return cloud.SupportMergeImportStep(ws, boxAdminToken)
 }
 
-// supportFleetFilesStep writes the fleet runtime from origin/main CONTENT
-// (raw.githubusercontent first, the freshened on-box checkout as fallback).
-func supportFleetFilesStep() cloud.CaddyStep {
-	script := `set -e
-mkdir -p /opt/barkpark-fleet
-fetch(){ curl -fsSL "` + supportRawBase + `/$1" -o "$2" 2>/dev/null || cp "/opt/barkpark/$1" "$2"; }
-fetch tooling/fleet/fleet-run.sh /opt/barkpark-fleet/fleet-run.sh
-fetch tooling/fleet/fleet-protocol.md /opt/barkpark-fleet/fleet-protocol.md
-chmod 0755 /opt/barkpark-fleet/fleet-run.sh`
-	return cloud.CaddyStep{
-		Title: "write fleet-run.sh + fleet-protocol.md from origin/main content",
-		Argv:  []string{"bash", "-lc", script},
-	}
+// supportResolveMainSHA resolves origin/main to a commit sha from the worker.
+// A seam so tests never touch GitHub (TestMain stubs it).
+var supportResolveMainSHA = fleetruntime.ResolveMainSHA
+
+// supportFleetFilesStep writes the fleet runtime: fleet-run.sh, the protocol,
+// bp-read.sh beside the runner and fleet-run.version, at the pinned sha, with
+// the on-box checkout as fallback. It is NOT a copy — fleetruntime.FilesStep is
+// the one definition `bp cloud support add` runs too (task-837f1013efdf100f:
+// the old copy here fetched only the runner + protocol, so boxes from this
+// chain never reported capacity.runner_sha).
+func supportFleetFilesStep(sha string) cloud.CaddyStep {
+	return fleetruntime.FilesStep(sha, true)
 }
 
 // supportAgentInstallStep installs node + the agent CLI. The CALLER treats a
