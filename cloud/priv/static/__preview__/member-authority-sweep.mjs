@@ -323,7 +323,10 @@ const HOOKS = [
   { key: "select#site-theme-select", route: "PATCH /v1/sites/:*", what: "pin the deploy theme", source: "census PIN: loadSite, ruling (a)" },
   { key: "button.btn.btn-primary.btn-sm[data-vf-run]", route: "POST /v1/barkparks/:*/verify", what: "run verification now", source: "census PIN: runVerifyNow — team-scoped member action" },
   { key: "button.btn.btn-ghost.btn-sm.token-revoke[data-id][data-name]", route: "DELETE /v1/tokens/:*", what: "revoke your own token", source: "census PIN: confirmRevokeToken — self-scope" },
-  { key: "button.btn.btn-ghost.btn-sm[data-life-retry]", route: null, what: "retry the lifecycle read that failed", source: "markup: re-issues the same GET the view already made" },
+  // task-cf8ef8a2da25e3aa: this row was `route: null` and exempted in
+  // ROUTE_NULL_DECLARED while __route_fence.mjs lacked the route; the fence now
+  // carries it (Auth.require_user, member), so the row names the read it issues.
+  { key: "button.btn.btn-ghost.btn-sm[data-life-retry]", route: "GET /v1/providers/capabilities", what: "retry the lifecycle read that failed", source: "handler: the Retry re-enters wireLifecycleActions -> api GET /v1/providers/capabilities, the read the view already made; require_user at the router, member-readable" },
   // ── cch-r16-w11: the /new LAUNCH WIZARD's own controls, which entered this
   // sweep's view with `theater-ready-github-member` and `theater-failed-member`
   // — the first member actors ever to reach either theater screen. Every row
@@ -474,16 +477,14 @@ const APP_JS = path.join(HERE, "..", "app.js");
 // null on purpose, each with the reason. SYMMETRIC like KNOWN and CONCEALED: an
 // entry whose handler stops reaching api()/fetch() reds, so an exemption cannot
 // outlive the call it excused.
-const ROUTE_NULL_DECLARED = [
-  {
-    key: "button.btn.btn-ghost.btn-sm[data-life-retry]",
-    why: "the Retry re-enters wireLifecycleActions, which re-issues GET /v1/providers/capabilities — the read the " +
-      "view already made, as the row's own source says. It stays null because __route_fence.mjs carries no entry " +
-      "for that route, so naming it here would answer `unknown` and red UNFENCED; recording the read in the shared " +
-      "table is the fix, and it is outside this file. NOT a write, and the capabilities read gates nothing a " +
-      "member can do.",
-  },
-];
+// EMPTY SINCE task-cf8ef8a2da25e3aa, and KEPT: its one entry
+// ([data-life-retry], held null because __route_fence.mjs lacked GET
+// /v1/providers/capabilities) was retired by adding that route to the fence and
+// naming it on the row. The list and both of its guard arms stay — an
+// undeclared route:null row that reaches api()/fetch() still reds by name, and
+// the next legitimate exemption needs a place to be written with its reason.
+// An empty exemption list under a working guard is the healthy state.
+const ROUTE_NULL_DECLARED = [];
 
 // Comments -> spaces; string / template / regex CONTENTS -> "x" (delimiters
 // kept). Same length and same newlines as the input, so every offset into the
