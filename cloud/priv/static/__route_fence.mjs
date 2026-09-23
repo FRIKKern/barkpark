@@ -189,6 +189,19 @@ export const ROUTE_TIERS = [
   { key: "GET /v1/audit", auth_fn: A_PTADMIN, pin: null,
     why_no_pin: "a READ. The census PIN covers WRITE call sites only; no read has a row there",
     why: "the team's append-only trail is team-admin-only — a plain member is REFUSED, not narrowed" },
+  // task-cf8ef8a2da25e3aa: the provider capability matrix, which entered this
+  // table because the sweep's [data-life-retry] HOOKS row had to stay
+  // `route: null` (exempted in its ROUTE_NULL_DECLARED list) while this route
+  // was missing here — naming it would have answered `unknown` and red UNFENCED.
+  // The tier is READ OFF THE ROUTER, not off its index table: the clause
+  // `get "/v1/providers/capabilities"` in cloud/lib/barkpark_cloud/web/router.ex
+  // opens with `conn = Auth.require_user(conn, [])` and, if not halted, answers
+  // `json(conn, 200, providers_capabilities_payload())` — no cond, no
+  // team_admin? check, no with_team_* helper. The comment above that clause
+  // says why: "a static cross-surface contract, not team-scoped estate data".
+  { key: "GET /v1/providers/capabilities", auth_fn: A_USER, pin: null,
+    why_no_pin: "a READ. The census PIN covers WRITE call sites only; no read has a row there",
+    why: "any signed-in user may read the static provider capability matrix — not team-scoped, never refused to a member" },
 
   // ── site writes — ruling (a): require_ability is a no-op for a session ──
   { key: "POST /v1/sites", auth_fn: A_USER, pin: "POST /v1/sites", why: "any member may create a site" },
