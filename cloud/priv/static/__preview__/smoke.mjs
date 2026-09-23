@@ -1512,7 +1512,9 @@ const EXPECTATIONS = {
       // actually painted. FIXTURE_SHAPE_PINS pins the same fact one layer up and
       // refuses BEFORE any scenario boots; this line is the second, independent
       // witness, and it is the one that would still red if the pin were deleted.
-      const amName = ((reg.get("modal-body").innerHTML || "").match(/class="am-name">([^<]*)</) || [])[1];
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      const amName = ((reg.get("modal-body").innerHTML || "").match(/class="am-name"><bdi>([^<]*)<\/bdi></) || [])[1];
       assert.ok(amName !== undefined,
         "no `.am-name` in the account modal openAccountModal just painted — the identity of the person " +
         "signing devices out is absent, and every assertion below is about a modal with no owner");
@@ -1814,7 +1816,9 @@ const EXPECTATIONS = {
         "rule and not by a name rule (User has no :name field at all)");
       hooks.openModal(hooks.accountModalHtml(model));
       const html = reg.get("modal-body").innerHTML || "";
-      const painted = (html.match(/class="am-name">([^<]*)</) || [])[1];
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      const painted = (html.match(/class="am-name"><bdi>([^<]*)<\/bdi></) || [])[1];
       assert.equal(painted, local,
         "the 158-character local part did not reach `.am-name` whole; got " + JSON.stringify(String(painted).slice(0, 32)) +
         "… (" + String(painted).length + " characters). A truncation on the way to the element hides the overflow " +
@@ -3241,7 +3245,9 @@ const EXPECTATIONS = {
     check(reg) {
       const body = reg.get("new-body").innerHTML || "";
       assert.ok(body.includes("new-ready"), "the shared ready hero must render");
-      assert.ok(body.includes("Hugin is ready"), "the hero names the live instance");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("<bdi>Hugin</bdi> is ready"), "the hero names the live instance");
       assert.ok(body.includes('id="new-open-studio"'), "Open Studio is the primary action");
       assert.ok(body.includes("hugin-5b2c1e.barkpark.cloud"), "the live URL renders");
       assert.ok(body.includes(">View instance<"), "the secondary View-instance affordance renders");
@@ -3321,7 +3327,9 @@ const EXPECTATIONS = {
     what: "the /new ready hero with GitHub connected, as the OWNER — #new-gh-create is LIVE (the grant arm keeps its shipped btn-primary bytes)",
     check(reg) {
       const body = reg.get("new-body").innerHTML || "";
-      assert.ok(body.includes("Hugin is ready"), "the hero names the live instance");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("<bdi>Hugin</bdi> is ready"), "the hero names the live instance");
       assert.ok(body.includes('<button class="btn btn-primary" type="button" id="new-gh-create">Create GitHub repo</button>'),
         "the owner gets the live create button, byte for byte the class list it shipped with");
       assert.ok(body.includes('id="new-gh-name" type="text"'), "the repo-name field is live beside it");
@@ -3332,7 +3340,9 @@ const EXPECTATIONS = {
     what: "the same screen as a plain MEMBER — no live #new-gh-create anywhere in the bytes, the disabled-and-explained arm and a disabled name field instead",
     check(reg) {
       const body = reg.get("new-body").innerHTML || "";
-      assert.ok(body.includes("Hugin is ready"), "the member still reaches the ready screen — only the elevated write is withheld");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("<bdi>Hugin</bdi> is ready"), "the member still reaches the ready screen — only the elevated write is withheld");
       assert.ok(!body.includes('id="new-gh-create"'),
         "adminWriteControlHtml's refusal arm DROPS liveAttrs: there must be no mount hook at all");
       assert.ok(body.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Create GitHub repo</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
@@ -3375,7 +3385,9 @@ const EXPECTATIONS = {
       const body = (reg.get("overview-body") || {}).innerHTML || "";
       assert.ok(body.includes("Needs attention"), "the attention section heading renders");
       assert.ok(body.includes("attention-row"), "an attention row renders");
-      assert.ok(body.includes(">Reporting</a>"), "the degraded box is named + linked");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("><bdi>Reporting</bdi></a>"), "the degraded box is named + linked");
       // cch-w18-bl: the EXACT sentence, not an OR over two halves. The old
       // disjunction was satisfied by "Agent offline" ALONE, so it held this
       // fixture to nothing at all about its health word — and the word it
@@ -3412,7 +3424,9 @@ const EXPECTATIONS = {
       const NAME = "Reporting — EU customer analytics, billing reconciliation and retention";
       assert.equal(NAME.length, 71, "the fixture name is the 71 characters this expectation is written about");
       assert.ok(body.includes("attention-row"), "an attention row renders");
-      assert.ok(body.includes(">" + NAME + "</a>"), "the whole name is the link's text — never truncated in the markup");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("><bdi>" + NAME + "</bdi></a>"), "the whole name is the link's text — never truncated in the markup");
       assert.ok(!body.includes("…"), "no ellipsis CHARACTER is written into the markup; the ellipsis is CSS");
       assert.ok(
         body.includes("Health unknown · Agent offline"),

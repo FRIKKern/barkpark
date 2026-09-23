@@ -1,10 +1,15 @@
 #!/usr/bin/env node
-// bidi-isolation.mjs — measured glyph geometry for the two console hosts where
-// a USER-authored string and SYSTEM-authored words share one inline run
-// (cch-rtl-script-neutral-borrowing).
+// bidi-isolation.mjs — measured glyph geometry for every console host that
+// renders a USER-authored string (a name or an email) and can be mounted from
+// __bpTestHook. Born on two hosts (cch-rtl-script-neutral-borrowing, #20054):
 //
 //   activityRow   → .fleet-name     esc(actor email) + " " + verb [+ " · " + esc(name)]
 //   memberRowHtml → .set-row-name   esc(email) + " (you)"
+//
+// and widened to the host set DERIVED from app.js by task-1614ac4ba29eec9b
+// (instance / group / support / site / team / token / webhook names, emails):
+// see HOOKED and NAMED/EMAILED below. Hosts that open a modal or write the DOM
+// themselves cannot be mounted here; __app.test.mjs pins their <bdi> by source.
 //
 // cch-w22-s5 dropped the twelve bidi FORMATTING characters inside esc(), which
 // killed the override forgery. It could not touch IMPLICIT bidi: an email in
@@ -48,9 +53,18 @@
 //               paragraph paints on the other side of the RTL run — this is
 //               the borrowing.
 //
-// Exit 0 = every HOST row holds both verdicts (PROBE rows are printed only).
+// CONTROL rows render an RTL string WITHOUT an isolate, on purpose. They must
+// read BORROWED; if one reads ISOLATED the instrument cannot see the defect and
+// the run exits 3 instead of calling the hosts clean.
+//
+// Exit 0 = every HOST row holds both verdicts and every CONTROL row borrowed.
 // Exit 1 = at least one host row does not (the per-row table says which).
-// Exit 2 = environment refusal (no Chrome). Exit 3 = the harness itself broke.
+// Exit 2 = environment refusal (no Chrome). Exit 3 = the harness itself broke,
+// or a CONTROL row did not borrow (the instrument is blind).
+//
+// CI: the `modal-oracle` job in .github/workflows/console-harness.yml runs this
+// file as a step (task-1614ac4ba29eec9b); that job feeds the required
+// `Console gate`, so a red here blocks the merge.
 //
 // Run: node cloud/priv/static/__preview__/bidi-isolation.mjs [--json]
 //      CHROME=/path/to/chrome overrides discovery.
@@ -71,6 +85,17 @@ const STATIC = path.join(HERE, "..");
 const JSON_OUT = process.argv.includes("--json");
 
 // ── 1. the shipped hosts ─────────────────────────────────────────────────────
+// Every host this file mounts, by its __bpTestHook name. A host that is NOT
+// hooked (it opens a modal or writes the DOM itself) cannot be mounted here;
+// its <bdi> is pinned by markup in __app.test.mjs instead (task-1614ac4ba29eec9b).
+const HOOKED = [
+  "activityRow", "memberRowHtml", "invitationRowHtml",
+  "fleetRow", "attentionRowHtml", "instanceCardHtml", "instanceHeaderHtml", "supportRowHtml",
+  "groupSupportRowHtml", "instanceGroupPanelHtml", "readyHeroHtml", "operatorCanaryCardHtml",
+  "siteRow", "globalSiteRow", "envModalBodyHtml", "webhookCardHtml",
+  "tokenRow", "tokenRevealHtml", "accountModalHtml", "confirmModalHtml", "inviteStateHtml",
+];
+
 function loadHooks() {
   const noop = () => {};
   const el = () => ({
@@ -102,7 +127,7 @@ function loadHooks() {
   sb.globalThis = sb;
   vm.createContext(sb);
   vm.runInContext(fs.readFileSync(path.join(STATIC, "app.js"), "utf8"), sb);
-  for (const k of ["activityRow", "memberRowHtml", "invitationRowHtml"]) {
+  for (const k of HOOKED) {
     if (typeof hooks[k] !== "function") throw new Error(`__bpTestHook does not export ${k}`);
   }
   return hooks;
@@ -118,29 +143,67 @@ const HE = "שלום";            // Hebrew
 const HE_DOM = "דוגמה.קום";
 
 const ACT = (email, name) => ({
-  host: "activity", sel: ".fleet-name",
-  row: { actor: { email }, action: "site.deleted", inserted_at: "2026-08-02T00:00:00Z",
-    ...(name != null ? { metadata: { name } } : {}) },
+  host: "activity", sel: ".fleet-name", wrap: "fleet-list",
+  render: (h) => h.activityRow({ actor: { email }, action: "site.deleted", inserted_at: "2026-08-02T00:00:00Z",
+    ...(name != null ? { metadata: { name } } : {}) }),
   user: name != null ? [email, name] : [email],
 });
 const MEM = (email) => ({
-  host: "member", sel: ".set-row-name",
-  row: { user_id: "u1", email, role: "member", joined_at: "2026-01-01T00:00:00Z" },
-  ctx: { role: "admin", userId: "u1" },
+  host: "member", sel: ".set-row-name", wrap: "set-list",
+  render: (h) => h.memberRowHtml({ user_id: "u1", email, role: "member", joined_at: "2026-01-01T00:00:00Z" },
+    { role: "admin", userId: "u1" }),
+  user: [email],
+});
+const INV = (email) => ({
+  host: "invite", sel: ".set-row-name", wrap: "set-list",
+  render: (h) => h.invitationRowHtml({ id: "i1", email, role: "member", expires_at: "2026-12-01T00:00:00Z" }, { role: "admin" }),
   user: [email],
 });
 
-// PROBE rows are printed, never gated. invitationRowHtml paints an email in
-// the SAME .set-row-name class with NO system words beside it — the control
-// that separates "borrows from the system's words" from "borrows from the
-// paragraph's own LTR base direction". It is not one of the two hosts this
-// file guards, so it cannot red the run.
-const INV = (email) => ({
-  host: "invite", sel: ".set-row-name", probe: true,
-  row: { id: "i1", email, role: "member", expires_at: "2026-12-01T00:00:00Z" },
-  ctx: { role: "admin" },
-  user: [email],
-});
+// task-1614ac4ba29eec9b — the hosts derived from app.js beyond #20054's two.
+// Each renders ONE user-authored name (instance, site, team, token, webhook)
+// or email through its shipped, hooked function. `name` is the user string.
+const BP = (name) => ({ id: "b1", name, slug: "b1", host: "b1.example.com", url: "b1.example.com",
+  provision_status: "succeeded", health_status: "up", agent_status: "online", last_seen_at: "2026-08-02T00:00:00Z" });
+const SITE = (name) => ({ id: "s1", name, slug: "s1", framework: "astro", domains: [], updated_at: "2026-08-02T00:00:00Z" });
+const HOST = (host, sel, render, user, wrap = "") => ({ host, sel, render, user, wrap });
+const NAMED = (name) => [
+  HOST("fleetRow", ".fleet-name", (h) => h.fleetRow(BP(name)), [name], "fleet-list"),
+  HOST("attention", ".attention-name", (h) => h.attentionRowHtml(BP(name)), [name]),
+  HOST("instCard", ".instance-card-name", (h) => h.instanceCardHtml(BP(name)), [name]),
+  HOST("instHead", ".detail-title-row h1", (h) => h.instanceHeaderHtml(BP(name), "grant"), [name]),
+  HOST("support", ".fleet-support-name", (h) => h.supportRowHtml(BP(name)), [name]),
+  HOST("groupRow", ".group-cell--name", (h) => h.groupSupportRowHtml({ id: "b2", name }), [name]),
+  HOST("groupHead", ".group-title", (h) => h.instanceGroupPanelHtml({ id: "b1", name }), [name]),
+  HOST("ready", ".new-title", (h) => h.readyHeroHtml(BP(name), { studioBtnId: "x", demoteHeading: true }), [name]),
+  HOST("operator", ".set-row-name", (h) => h.operatorCanaryCardHtml({ barkparks: [BP(name)] }, Date.parse("2026-08-02T00:00:00Z")), [name]),
+  HOST("siteGlobal", ".site-name", (h) => h.globalSiteRow(SITE(name), null), [name]),
+  HOST("siteOnInst", ".site-inst-link", (h) => h.globalSiteRow(SITE("s1"), BP(name)), [name]),
+  HOST("envModal", ".modal-sub", (h) => h.envModalBodyHtml(SITE(name)), [name]),
+  HOST("webhook", ".wh-name", (h) => h.webhookCardHtml({ id: "w1", name, url: "https://example.com/h", events: [] }, BP("x"), "production", "grant"), [name]),
+  HOST("token", ".fleet-name", (h) => h.tokenRow({ id: "t1", name, abilities: [] }), [name]),
+  HOST("tokenReveal", "#token-reveal-label", (h) => h.tokenRevealHtml("bp_x", { name }), [name]),
+  HOST("confirm", ".cm-name", (h) => h.confirmModalHtml({ title: "Remove it?", tier: "destroy", resourceName: name, confirmLabel: "Remove", consequences: ["It goes."] }), [name]),
+  HOST("inviteJoin", ".invite-copy", (h) => h.inviteStateHtml("confirm", { team: name }), [name]),
+];
+const EMAILED = (email) => [
+  HOST("account", ".am-name", (h) => h.accountModalHtml({ name: email.split("@")[0], email }), [email.split("@")[0]]),
+  HOST("inviteWrong", ".invite-copy", (h) => h.inviteStateHtml("wrong_account", { email, meEmail: email }), [email, email]),
+];
+
+// CONTROL rows render the SAME user string WITHOUT an isolate, straight into the
+// same class. They MUST read BORROWED on the RTL-edge strings: that is the proof
+// this instrument can see the defect at all. A control that reads ISOLATED means
+// the measurement went blind (fonts, layout, a Chrome that stopped resolving
+// neutrals) and the run exits 3 rather than hand out a green it did not earn.
+const esc0 = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const CONTROL = (label, str) => ({ label, host: "control", sel: ".set-row-name", wrap: "set-list", control: true,
+  render: () => '<div class="set-row"><div class="set-row-main"><div class="set-row-name">' + esc0(str) + "</div></div></div>",
+  user: [str] });
+
+const AR_IDN_DOT = AR + "@" + AR_DOM + ".";
+const HE_NAME_BANG = "אתר ראשי!";   // Hebrew "main site!"
+const AR_NAME_DASH = "خادم-";                       // Arabic "server-"
 
 const CASES = [
   // control — no RTL script at all; must hold before and after
@@ -154,8 +217,8 @@ const CASES = [
   { label: "hebrew idn", ...ACT(HE + "@" + HE_DOM) },
   { label: "hebrew idn", ...MEM(HE + "@" + HE_DOM) },
   // a trailing neutral inside an all-RTL email — the edge the borrowing is about
-  { label: "arabic idn + trailing '.'", ...ACT(AR + "@" + AR_DOM + ".") },
-  { label: "arabic idn + trailing '.'", ...MEM(AR + "@" + AR_DOM + ".") },
+  { label: "arabic idn + trailing '.'", ...ACT(AR_IDN_DOT) },
+  { label: "arabic idn + trailing '.'", ...MEM(AR_IDN_DOT) },
   { label: "hebrew idn + trailing '-'", ...ACT(HE + "@" + HE_DOM + "-") },
   { label: "hebrew idn + trailing '-'", ...MEM(HE + "@" + HE_DOM + "-") },
   // trailing digits inside an all-RTL email
@@ -165,9 +228,21 @@ const CASES = [
   { label: "rtl email + rtl name", ...ACT(AR + "@" + AR_DOM, "موقع") },
   { label: "rtl email + rtl name ending '!'", ...ACT(HE + "@" + HE_DOM, "אתר!") },
   { label: "latin email + name opening '!'", ...ACT("ops@acme.com", "!אתר") },
-  // probes — no system words in the run at all
-  { label: "PROBE email alone, arabic idn + trailing '.'", ...INV(AR + "@" + AR_DOM + ".") },
-  { label: "PROBE email alone, arabic local, latin domain", ...INV(AR + "@acme.com") },
+  // the invitation row — #20054's PROBE (the email alone, no system words), now
+  // an isolated host in its own right
+  { label: "arabic idn + trailing '.'", ...INV(AR_IDN_DOT) },
+  { label: "arabic local, latin domain", ...INV(AR + "@acme.com") },
+  // task-1614ac4ba29eec9b hosts: every name host at an LTR control and at two
+  // RTL strings whose edge is a neutral; every email host at the sharp email
+  ...NAMED("Production").map((c) => ({ label: "ltr control", ...c })),
+  ...NAMED(HE_NAME_BANG).map((c) => ({ label: "hebrew name + trailing '!'", ...c })),
+  ...NAMED(AR_NAME_DASH).map((c) => ({ label: "arabic name + trailing '-'", ...c })),
+  ...EMAILED("ops@acme.com").map((c) => ({ label: "ltr control", ...c })),
+  ...EMAILED(AR_IDN_DOT).map((c) => ({ label: "arabic idn + trailing '.'", ...c })),
+  ...EMAILED("!" + HE + "@" + HE_DOM).map((c) => ({ label: "hebrew idn + leading '!'", ...c })),
+  // controls — the defect, rendered on purpose; each MUST borrow
+  CONTROL("CONTROL unisolated arabic idn + trailing '.'", AR_IDN_DOT),
+  CONTROL("CONTROL unisolated hebrew name + trailing '!'", HE_NAME_BANG),
 ];
 
 // ── 3. chrome over a pipe ────────────────────────────────────────────────────
@@ -312,17 +387,14 @@ async function main() {
   const hooks = loadHooks();
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const sections = CASES.map((c, i) => {
-    const markup = c.host === "activity" ? hooks.activityRow(c.row)
-      : c.host === "member" ? hooks.memberRowHtml(c.row, c.ctx)
-      : hooks.invitationRowHtml(c.row, c.ctx);
-    const list = c.host === "activity" ? "fleet-list" : "set-list";
+    const markup = c.render(hooks);
     // The reference: each user string alone, isolated, in its own paragraph.
     const refs = c.user.map((u) => `<div class="bidi-ref-line"><bdi class="bidi-ref">${esc(u)}</bdi></div>`).join("");
-    return `<section data-case="${i}" data-sel="${c.sel}"><div class="${list}">${markup}</div>${refs}</section>`;
+    return `<section data-case="${i}" data-sel="${c.sel}"><div class="${c.wrap || ""}">${markup}</div>${refs}</section>`;
   }).join("");
   const css = fs.readFileSync(path.join(STATIC, "app.css"), "utf8");
   const html = `<!doctype html><html lang="en" data-theme="light" data-bp-theme="evergreen"><head><meta charset="utf-8">` +
-    `<style>${css}</style><style>body{width:1800px} section{margin:8px 0}</style></head><body>${sections}</body></html>`;
+    `<style>${css}</style><style>body{width:1800px} section{margin:8px 0} /* the invite card is a narrow centred card; its copy wraps at the card width, and a wrapped host cannot be read as one line. Width only — nothing bidi. */ .invite-wrap,.invite-card{max-width:none;width:1700px}</style></head><body>${sections}</body></html>`;
 
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "bidi-iso-"));
   const page = path.join(profile, "page.html");
@@ -349,7 +421,7 @@ async function main() {
     const r = await send("Runtime.evaluate", { expression: MEASURE, returnByValue: true }, sessionId);
     if (r.exceptionDetails) throw new Error("measure threw: " + JSON.stringify(r.exceptionDetails));
     const ua = await send("Browser.getVersion");
-    results = { browser: ua.product, rows: CASES.map((c, i) => ({ host: c.host, label: c.label, probe: !!c.probe, ...judge(c, r.result.value[i]) })) };
+    results = { browser: ua.product, rows: CASES.map((c, i) => ({ host: c.host, label: c.label, control: !!c.control, ...judge(c, r.result.value[i]) })) };
   } finally {
     cleanup();
   }
@@ -363,7 +435,8 @@ async function main() {
     process.stdout.write(">> browser axis  Blink — 1 of 3 engine families (Blink · Gecko · WebKit). A green here is NOT a cross-browser green.\n");
     for (const row of results.rows) {
       const ok = !row.error && row.spanOrder && row.isolated;
-      process.stdout.write(`\n${row.probe ? "info" : ok ? "ok  " : "FAIL"} ${row.host.padEnd(8)} ${row.label}\n`);
+      const tag = row.control ? (!row.error && !row.isolated ? "ctl " : "BLND") : ok ? "ok  " : "FAIL";
+      process.stdout.write(`\n${tag} ${row.host.padEnd(11)} ${row.label}\n`);
       if (row.error) { process.stdout.write(`     error   : ${row.error}\n`); continue; }
       process.stdout.write(`     DOM     : ${row.text}\n     painted : ${row.painted}\n`);
       process.stdout.write(`     span order ${row.spanOrder ? "HOLDS" : "BROKEN"}; user text ${row.isolated ? "ISOLATED" : "BORROWED"}\n`);
@@ -371,11 +444,21 @@ async function main() {
       for (const x of row.isolation) if (!x.same) process.stdout.write(`       - ${JSON.stringify(x.user)} paints ${JSON.stringify(x.inHost)} in the row but ${JSON.stringify(x.alone)} alone\n`);
     }
   }
-  const gated = results.rows.filter((r) => !r.probe);
+  // The controls first: an instrument that cannot see the defect it was
+  // rendered on purpose has no standing to call the hosts clean.
+  const controls = results.rows.filter((r) => r.control);
+  const blind = controls.filter((r) => r.error || r.isolated);
+  if (!controls.length || blind.length) {
+    process.stdout.write(`\nbidi-isolation: INSTRUMENT BLIND (exit 3) — ${blind.length}/${controls.length} control row(s) that render ` +
+      "an RTL string WITHOUT an isolate did not read BORROWED, so this run cannot tell an isolated host from a broken one\n");
+    process.exit(3);
+  }
+  const gated = results.rows.filter((r) => !r.control);
   const bad = gated.filter((r) => r.error || !r.spanOrder || !r.isolated).length;
   const brokenOrder = gated.filter((r) => !r.error && !r.spanOrder).length;
-  process.stdout.write(`\nbidi-isolation: ${gated.length - bad}/${gated.length} host rows hold both verdicts ` +
-    `(span order broken on ${brokenOrder}; ${results.rows.length - gated.length} probe rows not gated)\n`);
+  const hosts = new Set(gated.map((r) => r.host)).size;
+  process.stdout.write(`\nbidi-isolation: ${gated.length - bad}/${gated.length} host rows hold both verdicts across ${hosts} hosts ` +
+    `(span order broken on ${brokenOrder}; ${controls.length}/${controls.length} unisolated control rows read BORROWED, as they must)\n`);
   process.exit(bad ? 1 : 0);
 }
 
