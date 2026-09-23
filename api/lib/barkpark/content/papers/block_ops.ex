@@ -305,7 +305,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
           stamped_scope_attrs(dataset, [])
       end
 
-    with {:ok, scope_attrs} <- scope_attrs_result do
+    with {:ok, scope_attrs} <- scope_attrs_result,
+         :ok <- require_new_paper(type, slug, dataset, attrs, opts) do
       upsert_blocks_doc_stamped(type, attrs, opts, dataset, slug, existing, scope_attrs)
     end
   end
@@ -681,8 +682,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # (the non-paper leg's per-slug lock) it runs the function as is.
     written =
       Broadcast.write_atomically(fn ->
-        with :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts) do
-          write_blocks_doc_row(type, content, existing, dataset, slug, scope_attrs, title)
+        with :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts),
+             :ok <- require_new_paper(type, slug, dataset, attrs, opts) do
+          row = if Keyword.get(opts, :create_only, false), do: nil, else: existing
+          write_blocks_doc_row(type, content, row, dataset, slug, scope_attrs, title)
         end
       end)
 
@@ -697,6 +700,27 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
       other ->
         other
+    end
+  end
+
+  # Create-only callers never enter the update branch. Recheck after the
+  # publish-scope lock as well as before content preparation; the unique row
+  # constraint remains the final guard against writers outside that lock.
+  defp require_new_paper(type, slug, dataset, attrs, opts) do
+    if Keyword.get(opts, :create_only, false) do
+      cond do
+        not is_binary(slug) or slug == "" or DraftId.draft?(slug) ->
+          {:error, :invalid_create_slug}
+
+        get_existing_blocks_doc_for_write(type, slug, dataset, attrs) ||
+            get_existing_blocks_doc_for_write(type, DraftId.draft_id(slug), dataset, attrs) ->
+          {:error, :paper_exists}
+
+        true ->
+          :ok
+      end
+    else
+      :ok
     end
   end
 

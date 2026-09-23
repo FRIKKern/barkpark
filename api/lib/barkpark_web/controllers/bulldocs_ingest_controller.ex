@@ -712,7 +712,26 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # byte-unchanged AND makes `put_scope/3`'s strict match a real precondition
   # rather than a hope. Halts on refusal; otherwise the conn passes through and
   # `put_scope/3` re-resolves the same (pure) decision.
-  plug(:require_resolvable_scope when action in [:ingest, :ingest_session])
+  plug(:require_resolvable_scope when action in [:ingest, :ingest_session, :create])
+
+  def create(conn, %{"ifRev" => _}), do: refuse_unfenced_if_rev(conn, "ifRev")
+  def create(conn, %{"if_rev" => _}), do: refuse_unfenced_if_rev(conn, "if_rev")
+
+  def create(conn, %{"slug" => slug, "blocks" => blocks} = params)
+      when is_binary(slug) and slug != "" and is_list(blocks) do
+    if valid_ingest_text?(params) do
+      ingest_blocks(conn, slug, blocks, params, create_only: true)
+    else
+      invalid_text(conn)
+    end
+  end
+
+  def create(conn, _params) do
+    ErrorResponse.emit_fields(conn, :bad_request, %{
+      code: "malformed",
+      message: "create requires a published slug and native blocks (list)"
+    })
+  end
 
   def ingest(conn, %{"ifRev" => _}), do: refuse_unfenced_if_rev(conn, "ifRev")
   def ingest(conn, %{"if_rev" => _}), do: refuse_unfenced_if_rev(conn, "if_rev")
@@ -798,7 +817,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  defp ingest_blocks(conn, slug, blocks, params) do
+  defp ingest_blocks(conn, slug, blocks, params, opts \\ []) do
     attrs =
       %{
         "slug" => slug,
@@ -843,7 +862,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     # reused test process can never leak advisories in.
     Warnings.reset()
 
-    case Content.upsert_paper(attrs) do
+    case Content.upsert_paper(attrs, opts) do
       {:ok, paper} ->
         body = %{
           ok: true,
@@ -863,8 +882,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
         }
 
         conn
-        |> put_status(:ok)
+        |> put_status(if(Keyword.get(opts, :create_only, false), do: :created, else: :ok))
         |> json(with_warnings(body))
+
+      {:error, :paper_exists} ->
+        paper_exists(conn)
+
+      {:error, :invalid_create_slug} ->
+        ErrorResponse.emit_fields(conn, :bad_request, %{
+          code: "malformed",
+          message: "create requires a published slug, not a drafts. identifier"
+        })
 
       # A server veto from BlockOps.upsert_paper arrives as {:halted, reason} —
       # the M1 template halt (locked-block / structure) and the hollow-body
@@ -921,7 +949,14 @@ defmodule BarkparkWeb.BulldocsIngestController do
         dedup_unavailable_error(conn, reason)
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        invalid_paper_error(conn, changeset)
+        if Keyword.get(opts, :create_only, false) and
+             Enum.any?(changeset.errors, fn {_field, {_message, info}} ->
+               info[:constraint] == :unique
+             end) do
+          paper_exists(conn)
+        else
+          invalid_paper_error(conn, changeset)
+        end
 
       # Any OTHER non-changeset reason goes through the shared envelope rather
       # than the changeset renderer. The 500 this head cured WAS a non-changeset
@@ -933,6 +968,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
   end
 
   # Raw HTML path (legacy fallback). Stored verbatim — no article projection.
+  defp paper_exists(conn) do
+    ErrorResponse.emit_fields(conn, :conflict, %{
+      code: "paper_exists",
+      message: "a published paper or draft already owns this slug; create did not replace it"
+    })
+  end
+
   defp ingest_html(conn, slug, body_html, params) do
     attrs =
       %{

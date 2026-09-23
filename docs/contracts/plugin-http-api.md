@@ -28,3 +28,5 @@ Body `{"ops":[…]}` (`?dataset=`, default `production`); `BARKPARK_INGEST_TOKEN
 ## Bulldocs — `POST /v1/plugins/bulldocs/papers/:slug/ops`
 
 An **edit** door: `AuthoringWall.enforce/5` does NOT run here (ruled). Its whole contract is two ratchets in `BlockOps` — `ratchet_hollow/2` and `reject_new_field_loss/2`. The five gates are publish-time FLOORS. Reasons + caveat: `bulldocs_ops_door_edit_contract_test.exs`.
+
+**Create-only:** `POST /v1/plugins/bulldocs/papers/:slug/create` [ingest] accepts native `blocks` plus ingest metadata; returns 201 and the usual slug/rev receipt. Same scope and publish wall. Existing published/draft targets refuse with 409 `paper_exists`; persistence only inserts. No HTML/BPML or revision-fence input. Lost responses require scoped readback and content comparison before proceeding. It does not reserve the draft namespace against concurrent generic writers. Ordinary `/papers` remains upsert.
