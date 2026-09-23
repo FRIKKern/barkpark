@@ -55,6 +55,20 @@ defmodule Barkpark.Content.Document do
     # there. Read enforcement lives in `Barkpark.Content.Scope.scope_to_owner/2`.
     field :owner_id, :binary_id
 
+    # SCOPE-RESOLUTION PROVENANCE (task-b389fe352e013dce). Which arm of
+    # `Content.WriteScope.resolve_write_scope_with_source/1` produced the
+    # `workspace_id` on this row — "explicit" | "inferred" | "instance_wide" |
+    # "default_fallback" | "inherited". Stamped on every write by
+    # `WriteScope.put_scope_attrs/2`, from SERVER-resolved opts; it is in that
+    # module's `@client_scope_keys` drop list, so a caller can never assert its
+    # own provenance.
+    #
+    # It describes the workspace_id BESIDE it, not the row's birth: both are
+    # re-stamped by the same write, so the pair is always coherent. NULL means
+    # the row predates migration 20260923120000 and is permanently UNMEASURED —
+    # never fold those rows into either side of a count.
+    field :scope_source, :string
+
     field :search_vector, :any, virtual: true
 
     # Carries a task doc's hydrated `task_edges` rows (resolved PK→doc_id) so
@@ -88,6 +102,13 @@ defmodule Barkpark.Content.Document do
 
   def statuses, do: @statuses
 
+  # The closed vocabulary for `scope_source`. Exposed as a function because the
+  # provenance test and any future counting query need the SAME list — a
+  # duplicated literal would drift the moment a sixth arm is added.
+  @scope_sources ~w(explicit inferred instance_wide default_fallback inherited)
+
+  def scope_sources, do: @scope_sources
+
   def changeset(document, attrs) do
     document
     |> cast(attrs, [
@@ -101,7 +122,8 @@ defmodule Barkpark.Content.Document do
       :workspace_id,
       :project_id,
       :dataset_id,
-      :owner_id
+      :owner_id,
+      :scope_source
     ])
     |> validate_required([:doc_id, :type])
     # varchar(255) COLUMNS NEED A CHANGESET LENGTH GATE, OR POSTGRES ANSWERS 500.
@@ -128,6 +150,12 @@ defmodule Barkpark.Content.Document do
     |> validate_length(:dataset, max: 255)
     |> validate_length(:title, max: 255)
     |> validate_inclusion(:status, @statuses)
+    # `scope_source` is a CLOSED vocabulary (task-b389fe352e013dce). The write
+    # path only ever produces these five literals, and the column exists to be
+    # GROUPed BY — a sixth value arriving from anywhere would silently split a
+    # bucket. nil is allowed (and is what every pre-migration row carries);
+    # validate_inclusion only runs on a present change.
+    |> validate_inclusion(:scope_source, @scope_sources)
     # W2 uniqueness flip: the row's identity leaf is now (doc_id, type,
     # dataset_id). The `dataset` STRING constraint is dropped at the DB level
     # (see migration 20260527134000); naming the flipped index here keeps the

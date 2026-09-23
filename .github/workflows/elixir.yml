@@ -817,9 +817,66 @@ jobs:
       # 2026-09-12 on this tree: `bash scripts/selftest-wiring-census.sh` is
       # 6.6 s wall (92 run, 4 exempt, 0 orphaned over 96 self-tests) on a loaded
       # laptop, against this job's 2m35s average — off the critical path.
+      # RE-PRICED 2026-09-23 (task-13bfa649df851d5f) after the corpus stopped
+      # being name-keyed: 12 s wall, over 278 self-tests rather than 96 — 230
+      # run, 4 exempt, 44 grandfathered backlog, 0 orphaned. Still off the
+      # critical path. The census's own `--selftest`, which is NOT here (it
+      # rides shell-harnesses.yml), went from ~35 s to ~2 min: it runs the whole
+      # census eight times, and four of those arms are new.
       - name: Every self-test under scripts/ is executed by CI or declares an exemption
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh selftest-wiring-census -- bash scripts/selftest-wiring-census.sh
+
+      # ── the two harnesses the census could not see, riding the same job ───
+      # task-13bfa649df851d5f. `scripts/pr-required.sh` is the instrument every
+      # lane in this campaign runs before merging anything — 766 lines, 33 arms,
+      # mirrored into .claude/skills/orchestrate-tasks/helpers/ with a
+      # `mirror in sync` arm that cmp's the two copies. `grep -rl pr-required
+      # .github/workflows/` returned NOTHING on origin/main c9c481959: its arms
+      # ran in no job, on no PR, ever. Same for
+      # scripts/stranded-worktree-report.sh (49 arms, merged 52a537957).
+      #
+      # They were invisible to the census next door because that census was
+      # NAME-KEYED — `*.test.sh` and three siblings — while these two carry
+      # their suite INSIDE a plainly-named tool behind `--selftest`. The census
+      # is content-keyed as of this commit, which is what makes THESE THREE
+      # STEPS the thing that clears its red rather than a number that hides it.
+      #
+      # HERE, and for the same reason the census step above is here: this job
+      # carries no `if:`, no continue-on-error and no `needs`, and elixir-gate
+      # judges it with the gate value NEVER — so a red is a red on `Elixir
+      # gate`, one of the four REQUIRED contexts, and it stops the merge. The
+      # obvious alternative — a tenant job in shell-harnesses.yml — is the trap:
+      # that workflow carries a workflow-level `on: pull_request: paths:` key,
+      # so on a PR that misses its paths the check is ABSENT, and absent is
+      # never-ran, not green (#17772: an advisory census red rode main for ~4
+      # hours and held five PRs).
+      #
+      # NO PATHS FILTER AND NO SCOPE STEP, which is also the answer to "which
+      # copy of pr-required.sh is covered". A paths list naming one mirror lets
+      # a change to the other ship unchecked; this job has no list, so BOTH
+      # copies are checked on every head. Both are run explicitly anyway, so the
+      # coverage is a fact about the step and not an inference about a filter.
+      #
+      # PRICED, measured on this tree with `time`: pr-required.sh --selftest is
+      # 2.3 s wall for 33/33 arms and stranded-worktree-report.sh --selftest is
+      # 1.0 s for 49, against this job's 2m35s average. Both are hermetic —
+      # fixture trees and a fake `gh` on PATH, no network, no token.
+      - name: pr-required.sh self-test (33 arms) — scripts/ copy
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh pr-required-selftest -- bash scripts/pr-required.sh --selftest
+
+      # The mirror, by its own path. Its `mirror in sync` arm cmp's the two
+      # copies, so running EITHER already reds on divergence — but a reader of
+      # this file should not have to derive that, and a future edit that drops
+      # the arm would silently un-cover this path.
+      - name: pr-required.sh self-test (33 arms) — .claude/skills mirror
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh pr-required-mirror-selftest -- bash .claude/skills/orchestrate-tasks/helpers/pr-required.sh --selftest
+
+      - name: stranded-worktree-report.sh self-test (49 arms)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh stranded-worktree-report-selftest -- bash scripts/stranded-worktree-report.sh --selftest
 
       # ── the doc-budget HEADER-DISCOVERY arm, blockingly ──────────────────
       #
