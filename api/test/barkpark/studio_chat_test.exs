@@ -2833,11 +2833,39 @@ defmodule Barkpark.StudioChatTest do
   #     one: the "attempt==1 across every committed fixture" test below globs
   #     internal/chat/testdata/*.json and demands every workflow_agent node carry
   #     attempt == 1 — and `attempt` is one of @agent_detail_signal_keys, so a
-  #     committed mirror can NEVER hold a detail-less agent node. Go therefore
-  #     holds that shape INLINE as `const thinCodexRail`. Rather than inline a
-  #     SECOND, uncoupled copy here, this file reads that Go literal out of the Go
-  #     source: one shape, one place. A rename or an edit on the Go side surfaces
-  #     here as a loud failure instead of drifting silently.
+  #     committed mirror can NEVER hold a detail-less agent node. Do not
+  #     "helpfully" add that file: it reds the attempt==1 test on arrival.
+  #     Go therefore holds the shape INLINE as `const thinCodexRail`, and
+  #     @thin_codex_rail below is a SECOND COPY of those same bytes.
+  #
+  #     That copy is deliberate, and it is NOT the unlocked-mirror hazard the two
+  #     committed rails avoid, for two reasons:
+  #
+  #       1. It is an INPUT SPECIMEN, not produced output. workflow_summary.json
+  #          and workflow_agent_detail.json are byte-locked across surfaces
+  #          because a byte difference there means the two surfaces SHOW
+  #          different cards. Nothing renders this rail — it is a stimulus chosen
+  #          to exhibit one property (every agent node detail-less), and two
+  #          specimens exhibiting the same property are not in conflict.
+  #       2. Neither side can silently LOSE that property. The Go copy is guarded
+  #          by its own precondition (workflow_no_affordance_test.go: `if
+  #          agentHasDetail(a) { t.Fatalf("... it is not a negative") }`), and
+  #          this copy by the PRECONDITION test below. A drift that matters reds
+  #          on the side that drifted; a byte drift that does not change the
+  #          property is harmless.
+  #
+  #     An earlier revision read the Go literal out of the Go source to couple
+  #     them. That was withdrawn for two reasons, the first decisive:
+  #       * It made the Elixir suite read internal/chat/workflow_no_affordance_test.go,
+  #         a path elixir.yml does not dispatch on — so a PR editing that file
+  #         would SKIP this suite and report a GREEN Elixir gate. The path-escape
+  #         ratchet caught it. A coupling that manufactures a false green is worse
+  #         than the drift it prevents.
+  #       * It coupled to an IDENTIFIER NAME, not to the shape. `thinCodexRail` is
+  #         referenced twice more in that Go file, so a rename that does not
+  #         update them is a compile error — meaning any rename that actually
+  #         lands is a clean refactor, which the Go read would have reddened
+  #         spuriously.
   #
   # An absence is never caught by inspection, so every empty-list arm below is
   # paired with (a) a PRECONDITION that the rail really decoded non-empty and
@@ -2845,10 +2873,6 @@ defmodule Barkpark.StudioChatTest do
   # non-empty detail list. Without both, `assert x == []` is indistinguishable
   # from a broken loader.
   @no_affordance_rails ~w(rail_codex_origin.json rail_background_no_workflow.json)
-  @go_no_affordance_test Path.expand(
-                           "../../../internal/chat/workflow_no_affordance_test.go",
-                           __DIR__
-                         )
   # The five wire fields @agent_detail_signal_keys gates on, restated here so a
   # silent widening of the lib-side list shows up as a failing negative rather
   # than as a quietly weaker test.
@@ -2864,29 +2888,30 @@ defmodule Barkpark.StudioChatTest do
       |> List.wrap()
       |> Enum.filter(&(&1["type"] == "workflow_agent"))
 
-  # The thin-codex rail, read from the Go source literal (see the note above).
-  # REFUSES on an empty/absent read so it can never rot into a vacuous pass.
-  defp thin_codex_rail do
-    src = File.read!(@go_no_affordance_test)
+  # A byte copy of `const thinCodexRail` in internal/chat/workflow_no_affordance_test.go.
+  # See the note above for why this is a copy and why that is safe here. Keep the
+  # two in step BY HAND when either moves; the PRECONDITION test below is what
+  # stops this copy from quietly ceasing to be a negative.
+  @thin_codex_rail ~s({
+ "01JQ8TH3CODEXTHREADCCCC": {
+  "status": "running",
+  "seq": 3,
+  "row": {"task_type": "collab_agent_tool_call", "description": "Codex fleet - thin persist frame"},
+  "origin": "codex",
+  "usage": null,
+  "workflow": [
+   {"type": "workflow_phase", "index": 1, "title": "Survey"},
+   {"type": "workflow_agent", "index": 1, "label": "survey:rail", "phaseIndex": 1,
+    "phaseTitle": "Survey", "agentId": "cdx1a2b3c4d5e6f70", "agentType": "Explore",
+    "model": "gpt-5-codex", "state": "start", "startedAt": 1782767557221},
+   {"type": "workflow_agent", "index": 2, "label": "survey:keys", "phaseIndex": 1,
+    "phaseTitle": "Survey", "agentId": "cdx1a2b3c4d5e6f71", "agentType": "Explore",
+    "model": "gpt-5-codex", "state": "start", "startedAt": 1782767557231}
+  ]
+ }
+})
 
-    json =
-      case Regex.run(~r/const thinCodexRail = `(.*?)`/s, src, capture: :all_but_first) do
-        [json] ->
-          json
-
-        other ->
-          flunk(
-            "could not read `const thinCodexRail` out of #{@go_no_affordance_test} " <>
-              "(got #{inspect(other)}) — the Go literal was renamed or removed; this test " <>
-              "must FAIL rather than silently fall back to a local copy"
-          )
-      end
-
-    refute String.trim(json) == "",
-           "the thinCodexRail literal read EMPTY — every assertion over it would be vacuous"
-
-    Jason.decode!(json)
-  end
+  defp thin_codex_rail, do: Jason.decode!(@thin_codex_rail)
 
   describe "workflow_agent_detail/1 over the real no-affordance rails (wsc-bl, Go #19036 sibling)" do
     test "PRECONDITION: both committed negative rails decode into non-empty rails that would paint" do
@@ -2955,7 +2980,20 @@ defmodule Barkpark.StudioChatTest do
       assert Enum.any?(entry["workflow"], &(&1["type"] == "workflow_phase")),
              "the thin rail must carry a phase — the strip paints and the phase level opens"
 
-      assert length(agent_nodes(entry)) == 2
+      agents = agent_nodes(entry)
+      assert length(agents) == 2
+
+      # This copy is now the ONLY drift detector for the thin shape, so assert it
+      # is still a REALISTIC codex frame and not a degraded stub: a hand-edit that
+      # strips it down to a bare type/label pair would still be detail-less, and
+      # the negative below would then pass over a shape no codex run ever emits.
+      for node <- agents do
+        assert String.starts_with?(node["agentId"], "cdx"), "not a codex agent id"
+        assert node["model"] == "gpt-5-codex"
+        assert node["state"] == "start"
+        assert node["phaseTitle"] == "Survey"
+        assert is_integer(node["startedAt"])
+      end
     end
 
     test "every thin-codex agent node fails the detail-signal gate" do
