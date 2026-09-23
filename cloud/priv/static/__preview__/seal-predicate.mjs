@@ -280,7 +280,8 @@
 // manufacturing a successor to force a verdict is what charter D83 forbids.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
@@ -304,6 +305,132 @@ const LADDER_ONLY = argv.includes('--ladder-only');
 // re-labelling and never an exemption.
 const GUARD_ENV = { ...process.env };
 for (const k of ['NODE_TEST_CONTEXT', 'NODE_OPTIONS', 'NODE_V8_COVERAGE']) delete GUARD_ENV[k];
+
+// ---------------------------------------------------------------------------
+// A GUARD RUNS ON THE RUNTIME IT DECLARES, OR IT IS NOT MEASURED
+// (task-3e2226c69000587d — the runtime-pin half of the exit-2 rule above.)
+//
+// WHAT THE EARLIER FIX COVERED AND WHERE THIS ONE STARTS. The block headed
+// "WHY A GUARD'S EXIT 2 IS AN INFRA FAULT AND NOT A DEFECT CLAIM" bought one
+// distinction and one only: a guard that exits **2** is REFUSING to measure, so
+// its non-zero becomes an Infra fault instead of "the defect is still measurable
+// at origin/main". That distinction is keyed on the guard's EXIT CODE, and the
+// vocabulary is the guard's to speak. A clause-(b) guard that is a `node --test`
+// file cannot speak it: node exits **1** for any failing test, and a refusal it
+// raises as a failing assertion is exit 1 like every other red. So the one class
+// of refusal the epic actually ships — `cloud/priv/static/__app.test.mjs`'s
+// cchi-w61-bl runtime self-check, which reds BY NAME when the running major is
+// not the one `cloud/priv/static/__node-version` declares — walked straight
+// through the exit-2 door and out the `r.status !== 0` one.
+//
+// MEASURED AT 8b7219e90, and it is worse than the filing said: the spawn site
+// called `spawnSync('node', …)`, i.e. **`node` off PATH**, so the guard's runtime
+// was never the predicate's runtime. Driving the predicate with an absolute
+// `…/v20.20.2/bin/node` still spawned the PATH node (22.22.0) and still read
+// `b-clean=5/6`; only putting node 20 FIRST ON PATH produced 6/6. The runtime
+// the guard ran on was an ambient property of the caller's shell.
+//
+// THE INVARIANT, and it is the whole design: the UNREADABLE outcome is reachable
+// ONLY from a fact THIS PROGRAM measured — that no binary of the major the guard
+// DECLARES could be found, or that the declaration itself cannot be read. It is
+// never reachable from the guard's exit code and never from its output text. A
+// guard that ran on the runtime it declares and exited non-zero is ALWAYS "the
+// defect is still measurable at origin/main", declaration or no declaration.
+// Nothing a guard can print moves it into the refusal bucket, so no real defect
+// can dress itself as an environment fault to escape.
+//
+// The candidate set and the override vocabulary are deliberately the SAME as
+// `scripts/console-harness.sh`'s, because they answer the same question. Two
+// resolvers with different search paths would disagree, and the disagreement
+// would be invisible until one of them reported a defect the other could not see.
+const GUARD_RUNTIME_DECL = '__node-version';
+
+// The major a binary actually REPORTS. Never the one a path or a declaration
+// suggests — the prototype of console-harness.sh printed a declared major beside
+// an unchecked path and that is the defect this epic is named for.
+function nodeMajorOf(bin) {
+  const r = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 20000, env: GUARD_ENV });
+  if (r.error || r.status !== 0) return null;
+  const m = /^v(\d+)\.\d+/.exec(String(r.stdout || '').trim());
+  return m ? { major: m[1], version: String(r.stdout).trim() } : null;
+}
+
+// Version-manager roots hold `v20.20.2` / `20.20.2` directories. Listed, never
+// globbed: a glob that matched nothing would be indistinguishable from a root
+// that does not exist, and this program has to be able to say which it saw.
+function versionedInstalls(base, want, tail) {
+  let entries;
+  try { entries = readdirSync(base); } catch { return []; }
+  const re = new RegExp(`^v?${want}\\.`);
+  return entries.filter((e) => re.test(e)).map((e) => `${base}/${e}/${tail}`).filter((p) => existsSync(p));
+}
+
+function guardRuntimeCandidates(want) {
+  const E = (k, d) => GUARD_ENV[k] || d;
+  const home = GUARD_ENV.HOME || '';
+  const nvm = E('CONSOLE_HARNESS_NVM_DIR', E('NVM_DIR', `${home}/.nvm`));
+  const fnm = E('CONSOLE_HARNESS_FNM_DIR', E('FNM_DIR', `${home}/.local/share/fnm`));
+  const volta = E('CONSOLE_HARNESS_VOLTA_HOME', E('VOLTA_HOME', `${home}/.volta`));
+  const asdf = E('CONSOLE_HARNESS_ASDF_DIR', E('ASDF_DATA_DIR', `${home}/.asdf`));
+  const onPath = [];
+  for (const dir of String(GUARD_ENV.PATH || '').split(':')) {
+    if (!dir) continue;
+    for (const n of ['node', `node${want}`]) if (existsSync(`${dir}/${n}`)) onPath.push(`${dir}/${n}`);
+  }
+  return [
+    // 0. THIS process first. When the predicate is already running the declared
+    //    major there is nothing to resolve, and preferring execPath makes the
+    //    common case free and immune to a hostile PATH.
+    process.execPath,
+    ...onPath,
+    ...versionedInstalls(`${nvm}/versions/node`, want, 'bin/node'),
+    ...versionedInstalls(`${fnm}/node-versions`, want, 'installation/bin/node'),
+    ...versionedInstalls(`${volta}/tools/image/node`, want, 'bin/node'),
+    ...versionedInstalls(`${asdf}/installs/nodejs`, want, 'bin/node'),
+    `/opt/homebrew/opt/node@${want}/bin/node`,
+    `/usr/local/opt/node@${want}/bin/node`,
+  ];
+}
+
+const GUARD_RUNTIME_LOOKED_IN = (want) =>
+  `PATH node and node${want}, $NVM_DIR/versions/node/v${want}.*, $FNM_DIR/node-versions/v${want}.*, ` +
+  `$VOLTA_HOME/tools/image/node/${want}.*, $ASDF_DATA_DIR/installs/nodejs/${want}.*, ` +
+  `/opt/homebrew/opt/node@${want}, /usr/local/opt/node@${want}`;
+
+// Returns one of:
+//   { status: 'undeclared' }  the guard names no runtime — it runs on THIS process's
+//                             Node, which is stated in the note so the reading is
+//                             never silent about what produced it.
+//   { status: 'resolved'   }  a binary of the declared major was found and measured.
+//   { status: 'unresolved' }  the guard declares a major nothing here can provide.
+//   { status: 'undeclarable'} the declaration exists and is not a bare major.
+// The last two are the ONLY doors to UNREADABLE, and neither one has read a single
+// byte of the guard's output to get there.
+function resolveGuardRuntime(guardPath) {
+  const declPath = `${dirname(guardPath)}/${GUARD_RUNTIME_DECL}`;
+  const running = nodeMajorOf(process.execPath) || {
+    major: String(process.versions.node).split('.')[0], version: `v${process.versions.node}`,
+  };
+  if (!existsSync(declPath)) {
+    return { status: 'undeclared', node: process.execPath, ...running, declPath };
+  }
+  let raw;
+  try { raw = readFileSync(declPath, 'utf8'); }
+  catch (e) { return { status: 'undeclarable', declPath, why: `it could not be read (${String(e.message).slice(0, 80)})` }; }
+  const declared = raw.trim();
+  if (!/^\d+$/.test(declared))
+    return { status: 'undeclarable', declPath, why: `it holds ${JSON.stringify(raw.length > 40 ? `${raw.slice(0, 40)}…` : raw)}, which is not a bare Node major` };
+  if (running.major === declared)
+    return { status: 'resolved', node: process.execPath, ...running, declared, declPath };
+  const seen = new Set();
+  for (const c of guardRuntimeCandidates(declared)) {
+    if (!c || seen.has(c) || !existsSync(c)) continue;
+    seen.add(c);
+    const got = nodeMajorOf(c);
+    if (got && got.major === declared) return { status: 'resolved', node: c, ...got, declared, declPath };
+  }
+  return { status: 'unresolved', declared, declPath, running: running.version, lookedIn: GUARD_RUNTIME_LOOKED_IN(declared) };
+}
 
 const LIVE_STATUSES = ['open', 'in_progress'];
 const PENDING_STATUSES = ['considering'];
@@ -1685,7 +1812,30 @@ function evaluateLadder(fixture, guardOverride, waivers) {
         // default 1MB buffer. The guard PASSED and the predicate reported
         // "NEVER RAN (ENOBUFS)": a claim about a defect from a read that failed.
         // Hence both the sanitised env and the buffer wide enough for a chatty guard.
-        r = spawnSync('node', [guardPath, '--defect', d.id], { encoding: 'utf8', timeout: 300000, env: GUARD_ENV, maxBuffer: 16 * 1024 * 1024 });
+        //
+        // …and NOT on whatever `node` PATH happens to offer. This line used to read
+        // `spawnSync('node', …)`, which made the guard's runtime an ambient property
+        // of the caller's shell: at 8b7219e90, driving this file with an absolute
+        // v20.20.2 binary STILL spawned the PATH node 22 and STILL read b-clean=5/6.
+        // The runtime is resolved from what the guard DECLARES, and a declaration
+        // this host cannot satisfy is UNREADABLE — never a defect claim. See the
+        // invariant at `resolveGuardRuntime`.
+        const rt = resolveGuardRuntime(guardPath);
+        if (rt.status === 'unresolved') {
+          unavailable.push(`RUNTIME-UNAVAILABLE: guard ${d.guard} declares Node major ${rt.declared} in ${GUARD_RUNTIME_DECL} beside it, and no binary of that major exists on THIS HOST (this process is ${rt.running}). Looked in — ${rt.lookedIn}. The guard was NOT RUN, so nothing whatsoever is asserted about ${d.id}: this is a fact about this checkout's toolchain, not about the product. Install it (e.g. \`nvm install ${rt.declared}\`) and re-read.`);
+          r = null;
+        } else if (rt.status === 'undeclarable') {
+          unavailable.push(`RUNTIME-UNAVAILABLE: guard ${d.guard} has a ${GUARD_RUNTIME_DECL} beside it, but ${rt.why}. A runtime declaration this program cannot parse is indistinguishable from one it cannot satisfy, so the guard was NOT RUN and nothing is asserted about ${d.id}. Fix ${rt.declPath} deliberately.`);
+          r = null;
+        } else {
+          r = spawnSync(rt.node, [guardPath, '--defect', d.id], { encoding: 'utf8', timeout: 300000, env: GUARD_ENV, maxBuffer: 16 * 1024 * 1024 });
+          // Printed on EVERY spawned guard, pass or fail. A reading that names the
+          // runtime only when it went wrong is a reading nobody can compare across
+          // two hosts — which is the entire question this row was filed to answer.
+          notes.push(rt.status === 'resolved'
+            ? `RUNTIME RESOLVED: ${d.guard} declares Node ${rt.declared} (${GUARD_RUNTIME_DECL} beside it); ran ${rt.version} from ${rt.node}`
+            : `RUNTIME: ${d.guard} declares none (no ${GUARD_RUNTIME_DECL} beside it); ran this process's own ${rt.version} from ${rt.node}`);
+        }
       }
       if (r) {
         const out = `${r.stdout || ''}${r.stderr || ''}`;
