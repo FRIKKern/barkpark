@@ -1219,6 +1219,29 @@ jobs:
           # appears twice per step — the self-test arm and the comparison — plus
           # the step name and the two messages.
           #
+          # PIN 140 — RE-EARNED 2026-09-23 (task-3e2226c69000587d), same row, one arm later:
+          #   `w37: THE RUNNER'S SHAPE — the ambient `node` IS the declaration, and nothing is
+          #   located`, added after the Console gate redded three of the FIRST cut's arms.
+          #
+          #   WHY THIS ONE IS DERIVED FROM THE ANCHORED COUNT AND CONFIRMED BY CI, not from a
+          #   local tally. `grep -c '^test(' cloud/priv/static/__preview__/seal-predicate.test.mjs`
+          #   -> 140. The precedent that makes that trustworthy is one run old: at anchored 139
+          #   CI's own run of this step printed `# tests 139` exactly (with `# pass 136 / # fail 3`,
+          #   the three arms this row then fixed). CI tallies the anchored count, because CI is
+          #   never BEHIND — it reads the merge commit.
+          #
+          #   A LOCAL TALLY COULD NOT BE TAKEN, and saying so is the honest thing. This suite
+          #   needs ~15 minutes and main merged mid-run on THREE consecutive attempts
+          #   (0 behind at the start, 1 / 1 / 3 behind at the end). The predicate refuses a
+          #   BEHIND tree with INFRA `REPO-BEHIND-ORIGIN-MAIN`, so every live-path arm still
+          #   pending when the merge lands fails on that refusal, not on its subject. The last
+          #   attempt read 140 registered / 135 pass / 5 fail, and the five were arms 136-140 —
+          #   the ones that happened to run last. Read the behind-count at BOTH ends of a run
+          #   before believing its pass count.
+          #
+          #   What WAS measured, in both environments that matter:
+          #     whole-history tree, `--test-name-pattern w37`      -> 5 pass, 0 fail
+          #     depth-1 clone built to the runner's shape, same    -> 5 pass, 0 fail
           # PIN 139 — RE-DERIVED 2026-09-23 (task-3e2226c69000587d), which adds FOUR arms:
           #   `w37: a guard whose DECLARED Node major does not exist here reads UNREADABLE, never measured`,
           #   `w37: THE OTHER DIRECTION — a guard that declares NO runtime and reds is still a measured defect`,
@@ -1325,14 +1348,14 @@ jobs:
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 139 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 139 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 140 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 140 — this pin can no longer lose"; exit 1; }
           PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
-          if [ "${tally:-0}" -ne 139 ]; then
-            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 139 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 139 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 140 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 140 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 140 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "seal predicate tests: ${tally} tests, exact pin 139 — the pin re-earned"
+          echo "seal predicate tests: ${tally} tests, exact pin 140 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"
