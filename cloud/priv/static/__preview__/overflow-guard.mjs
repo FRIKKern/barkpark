@@ -7969,8 +7969,9 @@ async function main() {
       ];
 
       // ── THE CAP DERIVATION (cchi-w27-bl-w22s7, criteria 1-2) ──────────────
-      // A cap was a PROSE STRING on the row: `"barkpark.name <= 255
-      // (registry/barkpark.ex:466)"`. Three things are wrong with a sentence.
+      // A cap was a PROSE STRING on the row: `"barkpark.name <= 255"` followed
+      // by a bare line number into registry/barkpark.ex — a number that had
+      // already moved. Three things are wrong with a sentence.
       // It cannot be COMPARED (nothing could assert `cruelMin === the cap`), it
       // cannot be WRONG OUT LOUD (a moved line number reads identically to a
       // moved cap), and it cannot express the one fact this ledger keeps
