@@ -29,4 +29,4 @@ Filtering is per-viewer Studio/reader state; sorting edits data. No filter wire 
 
 Editing runs `BlockOps.ratchet_hollow/2` + `reject_new_field_loss/2`, not `AuthoringWall.enforce/5`; its five gates are publish-time floors. Rationale: `bulldocs_ops_door_edit_contract_test.exs`.
 
-**Create-only:** `POST /v1/plugins/bulldocs/papers/:slug/create` [ingest] accepts native `blocks` plus ingest metadata; returns 201 and the usual slug/rev receipt. Same scope and publish wall. Existing published/draft targets refuse with 409 `paper_exists`; persistence only inserts. No HTML/BPML or revision-fence input. Lost responses require scoped readback and content comparison before proceeding. It does not reserve the draft namespace against concurrent generic writers. Ordinary `/papers` remains upsert.
+**Create:** `POST /v1/plugins/bulldocs/papers/:slug/create` [ingest]: native `blocks` + metadata → 201 slug/rev. Same scope/wall; existing published/draft → 409 `paper_exists`. Insert-only; no HTML/BPML/revision-fence input. Lost replies require scoped content readback. Concurrent generic draft writers are not namespace-reserved. `/papers` remains upsert.
