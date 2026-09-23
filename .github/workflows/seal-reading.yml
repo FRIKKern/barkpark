@@ -150,6 +150,19 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      # THE GUARDS' DECLARED RUNTIME (task-88edd0348e6f703d). Clause (b) runs
+      # each guard on the Node major declared in the __node-version file beside
+      # it; cloud/priv/static/__node-version says 20. The ubuntu-24.04 image
+      # ships Node 22 on PATH and caches NO Node 20 (setup-node elsewhere in this
+      # repo logs "Attempting to download 20..." on these images, a cache miss),
+      # so without this step the predicate honestly reports that guard
+      # RUNTIME-UNAVAILABLE, b-unavailable=1/6, and seal-run.sh refuses (exit 6).
+      # The version is READ from that declaration file, not retyped here, so the
+      # guard's pin and this job cannot drift apart.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: cloud/priv/static/__node-version
+
       - name: node is present (the predicate is a node program)
         run: |
           set -uo pipefail
