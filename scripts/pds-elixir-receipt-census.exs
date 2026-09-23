@@ -662,8 +662,31 @@ defmodule PDS.Census do
     # counts, route depth 6, @write_verbs without `transaction`, corpus api/lib/**/*.ex).
     # Engine printed live by that run:
     #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
-    write: 57,
-    read: 29,
+    #
+    # RE-DERIVED AGAIN 2026-09-23 at task-bc34e83515bbd91f (session auto-log, the
+    # `x-barkpark-session-doc` header): 57 -> 59 and 29 -> 27. THE SAME TWO receipts
+    # PR #17321 moved out of the write class move BACK in — named from `--sites` diffed
+    # against origin/main (6e7145dea), not from reading the patch:
+    #   barkpark_web/controllers/bulldocs_ingest_controller.ex:851
+    #       BulldocsIngestController.ingest_blocks/4         [READ] -> [WRITE d4]
+    #   barkpark_web/controllers/bulldocs_ingest_controller.ex:994
+    #       BulldocsIngestController.ingest_html_write/2     [READ] -> [WRITE d4]
+    # `emitted` (100), `phantom` (9), `consumer` (4) and `unrouted` (14) read `==` in the
+    # same run: a reclassification, not an arrival.
+    #
+    # THE WRITE THE LENS NOW SEES IS NOT THE ONE THE RECEIPT CLAIMS. Both defs gained a
+    # best-effort `autolog_publish/3` -> `SessionAutolog.record/4` ->
+    # `Content.Sessions.append_event/5` call, whose `Repo.update_all` sits at depth 4;
+    # the paper write the `ok: true` actually reports is still past the depth-6 budget
+    # (PR #17321's hop). So the two sites also land in CAS-CONFIRMED-ECHO ("the claim dies
+    # if 0 rows moved") — FALSE for these two: `SessionAutolog` swallows every append
+    # failure and the receipt never reads its result. A lens that cannot tell a side
+    # effect from the claim's own write is the known blind spot (WRONG-ROW: "this lens
+    # cannot see it"); recorded here rather than dodged. NOT DONE, same ruling as above:
+    # hiding the call behind another hop to keep 57/29 would be flattering the lens.
+    # Derived by run on this commit's tree, engine as above, `CENSUS OK` rc 0.
+    write: 59,
+    read: 27,
     unrouted: 14
   }
 
