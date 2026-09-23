@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ type ledgerRow struct {
 	DocID     string
 	Title     string
 	Lifecycle string
+	Rev       string
 	UpdatedAt time.Time
 }
 
@@ -46,8 +48,12 @@ type fakeLedger struct {
 	rows []ledgerRow // kept sorted desc by UpdatedAt
 	// pageLimitSeen records every ?limit= the corpus walk asked for, so a test
 	// can tell an incremental head walk from a full-corpus walk.
-	bytes  map[string]int64
-	calls  map[string]int
+	bytes map[string]int64
+	calls map[string]int
+	// viewsSeen records every ?view= the corpus GET spelled, "" for the default
+	// shape. It is what lets a test assert WHICH projection the board asked for
+	// rather than infer it from a byte count.
+	viewsSeen []string
 	events []TaskEvent
 	cursor int64
 	srv    *httptest.Server
@@ -75,6 +81,7 @@ func newFakeLedger(t *testing.T, n int, padBytes int) *fakeLedger {
 			DocID:     fmt.Sprintf("t-%04d", i),
 			Title:     fmt.Sprintf("Row %04d", i),
 			Lifecycle: "open",
+			Rev:       "r0",
 			// Newest first: row 0 is the freshest.
 			UpdatedAt: base.Add(time.Duration(n-i) * time.Minute),
 		})
@@ -82,6 +89,9 @@ func newFakeLedger(t *testing.T, n int, padBytes int) *fakeLedger {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/tasks/events", l.serveEvents)
 	mux.HandleFunc("/v1/tasks/prime", l.servePrime)
+	// The single-row route, which is ALWAYS full (`?view=` is a list param). It
+	// is what a `?view=board` board hydrates an opened pane from.
+	mux.HandleFunc("/v1/tasks/", l.serveTaskRow)
 	mux.HandleFunc("/v1/tasks", l.serveTasks)
 	l.srv = httptest.NewServer(mux)
 	t.Cleanup(l.srv.Close)
@@ -118,6 +128,7 @@ func (l *fakeLedger) mutate(docID, title string, at time.Time) {
 		row := l.rows[i]
 		row.Title = title
 		row.UpdatedAt = at
+		row.Rev = fmt.Sprintf("r%d", l.cursor+1)
 		l.rows = append(l.rows[:i], l.rows[i+1:]...)
 		l.rows = append([]ledgerRow{row}, l.rows...)
 		l.cursor++
@@ -162,8 +173,10 @@ func (l *fakeLedger) servePrime(w http.ResponseWriter, r *http.Request) {
 func (l *fakeLedger) serveTasks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	route := "tasks"
+	view := q.Get("view")
 	l.mu.Lock()
 	rows := append([]ledgerRow(nil), l.rows...)
+	l.viewsSeen = append(l.viewsSeen, view)
 	l.mu.Unlock()
 	if q.Get("lifecycle_status") == "in_progress" {
 		route = "tasks_in_progress"
@@ -184,15 +197,30 @@ func (l *fakeLedger) serveTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	docs := make([]map[string]any, 0, end-start)
 	for _, row := range rows[start:end] {
-		docs = append(docs, map[string]any{
+		doc := map[string]any{
 			"doc_id":           row.DocID,
-			"rev":              "r",
+			"rev":              row.Rev,
 			"title":            row.Title,
 			"lifecycle_status": row.Lifecycle,
 			"kind":             "task",
 			"updated_at":       row.UpdatedAt.Format(time.RFC3339Nano),
-			"content":          map[string]any{"description": l.padding},
-		})
+		}
+		// The REAL projection, not a stub of it: `?view=board` ships the full
+		// card with `content` DELETED and `content_digest` in its place
+		// (api .../tasks_controller/params.ex render_doc(doc, :board)). Serving
+		// `content` anyway would make every assertion below vacuous — the board
+		// would pass on a shape the live server never sends.
+		if view == "board" {
+			doc["content_digest"] = map[string]any{
+				"criteria_marks":   "mao",
+				"has_description":  true,
+				"has_dependencies": false,
+				"has_paper":        false,
+			}
+		} else {
+			doc["content"] = map[string]any{"description": l.padding}
+		}
+		docs = append(docs, doc)
 	}
 	page := map[string]any{}
 	if _, spelled := q["cursor"]; spelled {
@@ -204,6 +232,39 @@ func (l *fakeLedger) serveTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	body, _ := json.Marshal(map[string]any{"ok": true, "docs": docs, "page": page})
 	l.record(route, len(body))
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
+}
+
+// serveTaskRow is GET /v1/tasks/:doc_id — the always-full row route. It counts
+// its calls under "task_row" so a test can assert how MANY rows a board paid
+// prose for, which is the whole trade `?view=board` makes.
+func (l *fakeLedger) serveTaskRow(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
+	l.mu.Lock()
+	var found *ledgerRow
+	for i := range l.rows {
+		if l.rows[i].DocID == id {
+			row := l.rows[i]
+			found = &row
+			break
+		}
+	}
+	l.mu.Unlock()
+	if found == nil {
+		http.NotFound(w, r)
+		return
+	}
+	body, _ := json.Marshal(map[string]any{"ok": true, "doc": map[string]any{
+		"doc_id":           found.DocID,
+		"rev":              found.Rev,
+		"title":            found.Title,
+		"lifecycle_status": found.Lifecycle,
+		"kind":             "task",
+		"updated_at":       found.UpdatedAt.Format(time.RFC3339Nano),
+		"content":          map[string]any{"description": "PROSE for " + found.DocID},
+	}})
+	l.record("task_row", len(body))
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(body)
 }

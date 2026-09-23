@@ -169,6 +169,28 @@ func (cc *corpusCache) primeView() string {
 	return primeViewBrief
 }
 
+// listView reports the `?view=` fragment the CORPUS GET should carry through
+// THIS cache — `boardViewParam` for a live board, "" (the default shape) for a
+// one-shot verb.
+//
+// The discriminator is deliberately the SAME one primeView uses, for the same
+// reason and with a sharper edge. `?view=board` deletes `content`, and the
+// DetailIndex the list body hydrates is where `bp task enrichment` reads
+// `Disposition`/`CloseReason` and where `bp task frontier` reads `design_doc`.
+// Those verbs reach the fetch through FetchSnapshotFull with a BARE cache, get
+// exactly one corpus read, and have nowhere to hydrate the prose from — so
+// they keep the full view and stay byte-identical. The LIVE board is the one
+// caller the criterion is about ("the bp tasks board's LIST/POLL path"), and it
+// is also the only one that CAN pay the difference: it re-reads the corpus
+// every few seconds, and it opens prose one row at a time, which the always-
+// full row route answers (FetchTaskDetailByID).
+func (cc *corpusCache) listView() string {
+	if cc == nil || !cc.live {
+		return ""
+	}
+	return boardViewParam
+}
+
 // mergeEventTail folds one prime's `recent_events` into the cache's rolling tail
 // and returns the merged tail, newest first, capped at primeEventTailDepth.
 //
@@ -399,7 +421,7 @@ func copyDetails(in DetailIndex) DetailIndex {
 func fetchTaskCorpusWalk(ctx context.Context, c *apiclient.Client, cc *corpusCache, now time.Time) ([]Task, DetailIndex, bool, error) {
 	base := cc.baseForWalk()
 	if incrementalUsable(base, now) {
-		tasks, details, ok, err := fetchTaskHead(ctx, c, base)
+		tasks, details, ok, err := fetchTaskHead(ctx, c, base, cc.listView())
 		if err != nil {
 			return nil, nil, false, err
 		}
@@ -416,7 +438,7 @@ func fetchTaskCorpusWalk(ctx context.Context, c *apiclient.Client, cc *corpusCac
 		// ok=false is never an error — it is "the incremental walk cannot
 		// honestly answer this one". Fall through to the full walk.
 	}
-	tasks, details, exhaustive, err := fetchTaskPages(ctx, c, listFetchPath)
+	tasks, details, exhaustive, err := fetchTaskPages(ctx, c, listFetchPath+cc.listView())
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -473,14 +495,14 @@ func incrementalUsable(base corpusBase, now time.Time) bool {
 // do the full walk (a pre-cursor server, a changed set past maxHeadPages, a row
 // with no updated_at at the boundary). An error is reserved for a genuinely
 // failed read, which the caller propagates exactly as before.
-func fetchTaskHead(ctx context.Context, c *apiclient.Client, base corpusBase) ([]Task, DetailIndex, bool, error) {
+func fetchTaskHead(ctx context.Context, c *apiclient.Client, base corpusBase, view string) ([]Task, DetailIndex, bool, error) {
 	var (
 		fresh        []Task
 		freshDetails = DetailIndex{}
 		cursor       string
 	)
 	for page := 0; page < maxHeadPages; page++ {
-		body, err := getJSONCtx(ctx, c, headFetchPath+"&cursor="+url.QueryEscape(cursor))
+		body, err := getJSONCtx(ctx, c, headFetchPath+view+"&cursor="+url.QueryEscape(cursor))
 		if err != nil {
 			return nil, nil, false, err
 		}
