@@ -345,4 +345,36 @@ defmodule Barkpark.Sites.PrebuiltArtifactStreamFaultTest do
     assert staging_residue(dest) == Enum.sort(planted)
     assert File.read!(Path.join(dest, "index.html")) == "<html>root</html>"
   end
+
+  test "the staging name is fresh per run AND still one the orphan sweep can recognise", ctx do
+    # The one place the name is observable: E_STAGING_FAILED quotes it. A FILE
+    # where the destination's parent should be makes the staging mkdir fail.
+    blocker = Path.join(ctx.base, "not-a-dir")
+    File.write!(blocker, "")
+    dest = Path.join(blocker, "site")
+
+    gz = :zlib.gzip(site_tar())
+    sha = :crypto.hash(:sha256, gz) |> Base.encode16(case: :lower)
+
+    names =
+      for _ <- 1..2 do
+        result = PrebuiltArtifact.stage(Base.encode64(gz), sha, dest)
+        assert {:error, "E_STAGING_FAILED", message} = result
+        [_, name] = Regex.run(~r/staging dir (\S+):/, message)
+        Path.basename(name)
+      end
+
+    # DeployRunner's `@orphan_staging_rx`, copied: a name it cannot match is
+    # residue that nothing ever removes after a killed VM.
+    for name <- names, do: assert(name =~ ~r/\Asite\.staging-\d+\z/, name)
+
+    [a, b] = names
+    refute a == b, "two runs on one dest got the same staging name: #{a}"
+
+    # And not a small per-VM counter: 128 random bits is ~39 decimal digits.
+    for name <- names do
+      [_, digits] = Regex.run(~r/staging-(\d+)\z/, name)
+      assert String.to_integer(digits) > 1_000_000_000_000, name
+    end
+  end
 end

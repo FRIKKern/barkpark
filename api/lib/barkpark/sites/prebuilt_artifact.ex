@@ -165,9 +165,27 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
     * **Extract aside, then swap.** Everything lands in a sibling
       `<dest>.staging-<n>` directory; only a fully-accepted archive is renamed
-      into place, so a refusal leaves NO partial tree. That is the idiom
-      `scripts/fetch-prebuilt.sh` uses (verify → extract aside → swap), this
-      repo's one working precedent.
+      into place. That is the idiom `scripts/fetch-prebuilt.sh` uses (verify →
+      extract aside → swap), this repo's one working precedent.
+
+      **Where "a refusal leaves NO partial tree" holds, and where it does not.**
+      The staging tree is removed in an `after`, so it holds on every exit that
+      UNWINDS the calling process: every typed refusal, `E_SWAP_FAILED`, and a
+      genuine CRASH out of the stream (`:badarg`, `:not_initialized`,
+      `:not_on_controlling_process`, a parser `FunctionClauseError`, anything
+      else). The crash is not caught to get there — it propagates unchanged,
+      kind, reason and stacktrace. It does NOT hold where no code runs at all:
+      the VM is SIGKILLed or halted, the box loses power, or the calling process
+      receives an untrappable `:kill` exit mid-stream (DeployRunner traps exits,
+      so a supervisor `:shutdown` waits for the call — but one that outlasts the
+      shutdown timeout becomes `:kill`). Those leave `<dest>.staging-<n>` on
+      disk BY DESIGN, until DeployRunner's orphan sweep (`prune_orphan_run_files/1`,
+      after `orphan_grace_ms`) removes it. What makes that residue inert in the
+      meantime is the name: `<n>` is 128 random bits (decimal, so the sweep's
+      `.staging-<digits>` pattern still matches it) and `mkdir` is EXCLUSIVE, so no later
+      run can re-enter a dead run's tree and have its files change a verdict —
+      the way a VM-local `unique_integer` name once produced `E_UNSAFE_PARENT`
+      about an archive that named `index.html` once.
 
     * **Two NAMED zlib error classes are typed; everything else CRASHES, on
       purpose.** `run_stream/3` runs the whole pass inside one `try`, and its
@@ -203,9 +221,10 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       9 728 bytes of tar already parsed — left `stage/4` with no return value at
       all and killed the caller (`drain/3` → `feed_all/3` → `run_stream/3`,
       exactly the shape a memory-pressured CI run was seen to produce). It also
-      leaked the whole `<dest>.staging-<n>` tree, because the `rm_rf` that makes
-      "a refusal leaves NO partial tree" true only runs on the RETURN path.
-      `prebuilt_artifact_stream_fault_test.exs` holds both arms.
+      leaked the whole staging tree, because the `rm_rf` then ran only on the
+      RETURN path — as it still did for the three crash classes until that
+      `rm_rf` moved into an `after` (see "Extract aside, then swap").
+      `prebuilt_artifact_stream_fault_test.exs` holds every arm.
 
   Every refusal is a typed code (`E_*`) with a human message, and the code says
   WHOSE fault it is: `caller_fault_codes/0` renders 400, `internal_failure_codes/0`
@@ -419,28 +438,22 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # ── extract aside, then swap ──────────────────────────────────────────────
 
   defp extract_aside_and_swap(raw, sha256, dest, opts) do
-    staging = "#{dest}.staging-#{System.unique_integer([:positive])}"
+    staging = staging_path(dest)
 
     case mkdir(staging) do
       :ok ->
-        case run_stream(raw, staging, opts) do
-          {:ok, summary} ->
-            case swap(staging, dest) do
-              :ok ->
-                {:ok, Map.merge(summary, %{dir: dest, sha256: sha256})}
-
-              {:error, reason} ->
-                _ = rm_rf(staging)
-
-                {:error, "E_SWAP_FAILED",
-                 "the artifact validated but could not be swapped into place: #{inspect(reason)}"}
-            end
-
-          {:error, _code, _message} = refusal ->
-            # A refusal leaves NO partial tree — staging aside is what makes
-            # this single rm_rf the whole of the cleanup story.
-            _ = rm_rf(staging)
-            refusal
+        # `after`, not `catch`: the cleanup runs on EVERY exit from the block —
+        # a returned refusal, a swap failure, and a genuine crash — and adds no
+        # clause that could answer for one. An exception raised inside
+        # `run_stream/3` unwinds through here with its ORIGINAL kind, reason and
+        # stacktrace (still naming `drain/3`), so the allowlist in
+        # `run_stream/3` stays the only place a raise becomes a verdict. On
+        # success the tree has already been RENAMED to `dest`, so the `rm_rf`
+        # finds nothing at `staging` and removes nothing.
+        try do
+          stage_into(raw, sha256, staging, dest, opts)
+        after
+          _ = rm_rf(staging)
         end
 
       {:error, reason} ->
@@ -449,12 +462,50 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     end
   end
 
-  # Reachability: `path` is `<dest>.staging-<unique_integer>`, where `dest` is
+  defp stage_into(raw, sha256, staging, dest, opts) do
+    case run_stream(raw, staging, opts) do
+      {:ok, summary} ->
+        case swap(staging, dest) do
+          :ok ->
+            {:ok, Map.merge(summary, %{dir: dest, sha256: sha256})}
+
+          {:error, reason} ->
+            {:error, "E_SWAP_FAILED",
+             "the artifact validated but could not be swapped into place: #{inspect(reason)}"}
+        end
+
+      {:error, _code, _message} = refusal ->
+        refusal
+    end
+  end
+
+  # A name no predecessor can hold. `System.unique_integer/1` is unique only
+  # within ONE VM and restarts in the next, so `<dest>.staging-1762` from a VM
+  # that died mid-stream was handed out AGAIN to the next VM's first stage — and
+  # re-entered, because the tree it found already held that dead run's
+  # `index.html`: a later verdict (`E_UNSAFE_PARENT`) produced by residue, not
+  # by the archive. 128 random bits make a collision a non-event, and `mkdir/1`
+  # is EXCLUSIVE so even that non-event is a refusal rather than an adoption.
+  #
+  # DECIMAL, not hex, on purpose: DeployRunner's orphan sweep recognises a
+  # stranded staging tree by `~r/\.staging-\d+\z/` (`@orphan_staging_rx`), and
+  # a name it cannot match is residue nothing ever removes.
+  defp staging_path(dest) do
+    "#{dest}.staging-#{:crypto.strong_rand_bytes(16) |> :binary.decode_unsigned()}"
+  end
+
+  # Reachability: `path` is `<dest>.staging-<random decimal>`, where `dest` is
   # named by DeployRunner from `run_state_dir()` + a slug already validated
   # against ^[a-z0-9][a-z0-9-]{0,62}$ — no request-supplied path component ever
-  # reaches this argument.
+  # reaches this argument. The PARENT is created as needed; the staging dir
+  # itself must be NEW (`File.mkdir/1` answers `:eexist` for an existing one),
+  # so a leftover tree is never adopted as this run's staging root.
   # sobelow_skip ["Traversal.FileModule"]
-  defp mkdir(path), do: File.mkdir_p(path)
+  defp mkdir(path) do
+    with :ok <- File.mkdir_p(Path.dirname(path)) do
+      File.mkdir(path)
+    end
+  end
 
   # Reachability: the same two module-named paths as `mkdir/1` — the staging dir
   # this module just created and the DeployRunner-named destination. NEVER an
