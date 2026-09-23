@@ -152,8 +152,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
       workspace ->
         cond do
+          # THE REFUSAL SPEAKS. This arm used to answer an authorization
+          # refusal with an unchanged socket, i.e. with nothing: the press
+          # region could only report that the round trip happened, and the
+          # person was left to guess. Its sibling arm four lines below has
+          # always put a flash, so inside one function one refusal spoke and
+          # the other was mute. A refusal a user can reach must name itself.
           not Shared.can_reach_workspace?(socket, workspace) ->
-            {:noreply, socket}
+            {:noreply, put_flash(socket, :error, "You do not have access to that workspace")}
 
           is_nil(Shared.initial_project(workspace)) ->
             {:noreply,
