@@ -3342,14 +3342,29 @@ test('wave 26: a subtree the walk could not descend REFUSES and names the nodes'
   assert.match(token(read.out), /\bsubtree-unread=0\b/);
 });
 
+// task-8532dae7b075f4b3 CHANGED WHERE THIS IS CAUGHT, and the arm says so rather than
+// hiding it. The cycle below lists `cyc-a` under the epic AND under `cyc-b` — two parents,
+// which `parent_id` cannot emit — so the committed predicate now refuses the FIXTURE first
+// (FIXTURE-TWO-PARENTS) and never walks it. With the assertions below unchanged that arm
+// RED. The walk's own guard is still the defence for a LIVE store whose rosters disagree
+// with each other (the same class as the wave-64..67 paging arms), and this is still the
+// only arm that reaches it, so it is driven with the fixture refusal switched off.
 test('wave 26: a parent CYCLE is named where it happens, not blamed on the depth cap', () => {
-  const { status, out } = adHocRun({
+  const cycle = {
     successor: SEALABLE.successor, tasks: SEALABLE.tasks, gates: SEALABLE.gates,
     landed: SEALABLE.landed, unmeasuredWaivers: SEALABLE.unmeasuredWaivers, defectCommits: {},
     children: [{ _id: 'cyc-a', lifecycle_status: 'done' }],
     forwarded: [],
     subtrees: { 'cyc-a': [{ _id: 'cyc-b', lifecycle_status: 'done' }], 'cyc-b': [{ _id: 'cyc-a', lifecycle_status: 'done' }] },
-  });
+  };
+  const refused = adHocRun(cycle);
+  assert.equal(refused.status, INFRA);
+  assert.match(token(refused.out), /INFRA-FAULT .*code=FIXTURE-TWO-PARENTS/,
+    'the committed program refuses the unproducible fixture before any walk');
+  assert.match(refused.out, /cyc-a <- \{cloud-console-hardening-epic, cyc-b\}/);
+
+  const { status, out } = mutatedRun((src) => replaceUnique(src, '    if (twoParents.length)\n', '    if (false)\n'),
+    ['--ledger', adHocLedger(cycle), '--repo', REPO, '--guard-cmd', 'true']);
   assert.equal(status, INFRA);
   assert.match(out, /is NOT A TREE: cyc-a was reached twice, the second time under cyc-b at depth 3/);
   assert.match(token(out), /INFRA-FAULT .*code=ROSTER-CYCLE/);
