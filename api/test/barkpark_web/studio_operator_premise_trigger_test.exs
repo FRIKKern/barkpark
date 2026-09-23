@@ -12,6 +12,17 @@ defmodule BarkparkWeb.StudioOperatorPremiseTriggerTest do
       (`held_task_parent_id/1`, `published_task_doc/1`, `epic_slice_counts/1`)
       — `where d.type == "task"` and NOT EVEN a dataset predicate.
 
+  THE SECOND BULLET IS NOW HISTORY, AND THIS FILE'S ASSERTIONS DID NOT CHANGE
+  (task-2f412e40a9d39794). Those three hops now carry
+  `where: d.workspace_id == ^ws`, keyed on the SESSION's `owner_workspace_id`.
+  What this file asserts is the GATE, not the query — "ChatLive sits behind a
+  target-workspace gate" is still true, still the right thing to watch, and
+  test 4 below is untouched, so the sentence it prints has been re-worded and
+  nothing has been deleted to make anything green. The board half is
+  unaffected: `load_task_docs/1` is separately adjudicated NO-CHANGE
+  (task-93fb6a1a8a33c93d, 2026-09-06) and still carries only its dataset
+  predicate, so tests 1-3 remain a LIVE trigger.
+
   Both are declared safe by their DOOR, never by their query: the only
   principal who can reach them is the instance operator. "Re-audit if Studio
   becomes multi-tenant" is not a predicate anyone can evaluate, so this file
@@ -54,11 +65,17 @@ defmodule BarkparkWeb.StudioOperatorPremiseTriggerTest do
       `live_session :scoped_admin_studio` at `/w/:ws/p/:proj/studio/chat`,
       whose gate is `{LiveAuth, :scoped_admin}` — the target-workspace grade.
       A workspace-B-only admin therefore already reaches a LiveView that calls
-      `StudioChat.epic_goal/2`, whose ledger hops read `type:task` globally.
+      `StudioChat.epic_goal/2`. Those hops USED TO read `type:task` globally
+      and a ws-B admin rendered workspace A's epic through them; since
+      task-2f412e40a9d39794 they are scoped to the session's
+      `owner_workspace_id`. The mount grade below is recorded regardless,
+      because it is the property that decides whether a FUTURE unscoped read
+      added there would be reachable.
 
   So the `board.ex` half is a LIVE TRIGGER (test 1, 2, 3) and the
-  `studio_chat.ex` half is an ARRIVED one (test 4), recorded here rather than
-  left to a human remembering.
+  `studio_chat.ex` half is an ARRIVED one (test 4) that has since been
+  REMEDIATED at the query, recorded here rather than left to a human
+  remembering.
 
   ## MUTATION PROOF
 
