@@ -1813,6 +1813,41 @@ wf_want "landing step is -e-safe"                'bash scripts/pr-task-gate.sh -
 wf_want "landing step fails closed on a bad sha" "could not read what this PR will land"
 
 
+# -- The concurrency group is PER HEAD (task-60c3164ece5ab5eb) -----------------
+# A per-REF group let an `edited` run carrying the pre-push head evict the new
+# head's PENDING run (PR #16709), so the newest head never rendered this
+# required context. The group must name the head sha, and cancel-in-progress
+# must stay the literal false. The mutation below puts the old key back and
+# must red, so this arm cannot pass vacuously.
+conc_verdict() { # conc_verdict <workflow file> -> prints PER-HEAD, PER-REF or NO-GROUP
+  python3 - "$1" <<'PY'
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+c = d.get("concurrency") or {}
+g = c.get("group") if isinstance(c, dict) else None
+if not isinstance(g, str):
+    print("NO-GROUP")
+elif "pull_request.head.sha" in g and c.get("cancel-in-progress") is False:
+    print("PER-HEAD")
+else:
+    print("PER-REF")
+PY
+}
+cv="$(conc_verdict "$WORKFLOW")"
+if [ "$cv" = "PER-HEAD" ]; then
+  pass=$((pass+1)); printf 'ok   %-46s\n' "concurrency group is per head sha"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s got %s\n' "concurrency group is per head sha" "$cv"
+fi
+conc_mut="$(mktemp)"
+sed 's/pr-task-gate-${{ github.event.pull_request.head.sha || github.ref }}/pr-task-gate-${{ github.ref }}/' "$WORKFLOW" > "$conc_mut"
+cm="$(conc_verdict "$conc_mut")"; rm -f "$conc_mut"
+if [ "$cm" = "PER-REF" ]; then
+  pass=$((pass+1)); printf 'ok   %-46s\n' "mutation: a per-ref group reds this arm"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s got %s\n' "mutation: a per-ref group reds this arm" "$cm"
+fi
+
 echo "---"
 echo "passed: $pass  failed: $fail"
 [ "$fail" = 0 ]
