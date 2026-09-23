@@ -54,9 +54,9 @@ type fakeLedger struct {
 	// shape. It is what lets a test assert WHICH projection the board asked for
 	// rather than infer it from a byte count.
 	viewsSeen []string
-	events []TaskEvent
-	cursor int64
-	srv    *httptest.Server
+	events    []TaskEvent
+	cursor    int64
+	srv       *httptest.Server
 	// padding inflates each row's content so a page is expensive, the way a
 	// live task row (~10 KB of criteria + evidence) is.
 	padding string

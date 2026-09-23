@@ -213,21 +213,44 @@ func TestOnlyOneHydrationIsInFlight(t *testing.T) {
 	}
 }
 
-// TestAFailedHydrationIsNotCached: a transient failure must not be remembered
-// as "this row has no prose", and must not blank what is already in hand.
-func TestAFailedHydrationIsNotCached(t *testing.T) {
+// TestAFailedHydrationIsAskedOnceNotOncePerKeystroke is the request-storm
+// guard, and it is the one this seam failed in CI before it was written.
+//
+// The preview target changes on every cursor move, so "retry on the next
+// navigation" is not a retry policy — against a server that cannot answer the
+// row route (a pre-route server, the tmux drive's hermetic fixture, an outage)
+// it is one HTTP round-trip PER KEYSTROKE, racing the keystrokes. The overlay
+// therefore records the ATTEMPT, keyed by rev: asked once per row-version.
+//
+// A failure still stores nothing in the overlay — the pane keeps rendering its
+// honest board-row-only shape rather than a cached lie.
+func TestAFailedHydrationIsAskedOnceNotOncePerKeystroke(t *testing.T) {
 	l := newFakeLedger(t, 5, 16)
 	var armed []time.Duration
 	m := ledgerModel(l, &armed)
 	m = driveSnapshot(t, m, m.refetchCmd(false))
 
-	m.hydrating = "t-0001"
+	cmd := (&m).ensureTaskDetail("t-0001")
+	if cmd == nil {
+		t.Fatal("the first ensure queued nothing")
+	}
 	m, _ = m.handleTaskDetailLoaded(taskDetailLoadedMsg{ref: "t-0001", err: errFake})
 	if _, ok := m.hydrated["t-0001"]; ok {
-		t.Fatal("a FAILED hydration was cached: the row would render prose-less forever and never ask again")
+		t.Fatal("a FAILED hydration was stored in the overlay: the pane would render a cached lie instead of its honest thin shape")
 	}
-	if cmd := (&m).ensureTaskDetail("t-0001"); cmd == nil {
-		t.Fatal("after a failed hydration the row cannot be retried: the in-flight guard was never cleared")
+	if m.hydrating != "" {
+		t.Fatal("the in-flight guard was not cleared by a failure: no row will ever hydrate again")
+	}
+	// The keystroke storm: twenty more asks for the same unchanged row.
+	for i := 0; i < 20; i++ {
+		if again := (&m).ensureTaskDetail("t-0001"); again != nil {
+			t.Fatalf("ask #%d re-queued a hydration for an unchanged row that already failed once: on a server that cannot answer the row route this is one round-trip per keystroke", i+2)
+		}
+	}
+	// An EXPLICIT descent is the one gesture that earns a fresh attempt.
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: "t-0001"})
+	if again := (&m).ensureTaskDetail("t-0001"); again == nil {
+		t.Fatal("descending into the row did not earn a fresh hydration attempt: a transient failure would be permanent")
 	}
 }
 

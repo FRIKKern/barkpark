@@ -132,6 +132,10 @@ type Model struct {
 	// being a second map.
 	hydrated  map[string]TaskDetail
 	hydrating string
+	// attempted records which REV of which row has already been asked for, so a
+	// server that cannot answer is asked once per row-version rather than once
+	// per keystroke. Cleared for a row by an explicit frame open.
+	attempted map[string]string
 
 	width  int
 	height int
@@ -1693,6 +1697,12 @@ func (m *Model) pushFrame(f Frame) tea.Cmd {
 	m.stack = append(m.stack, f)
 	if f.Kind == FramePaper {
 		return m.ensurePaper(f.Ref)
+	}
+	if f.Kind == FrameTask {
+		// An explicit descent is the one gesture that earns a fresh hydration
+		// attempt after a failed one (detail_hydrate.go). The fetch itself is
+		// queued by Update's hook, which runs right after this.
+		m.forgetHydrationAttempt(f.Ref)
 	}
 	return nil
 }

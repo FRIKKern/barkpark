@@ -37,10 +37,19 @@ import (
 //     a fast scroll cost ONE request, not one per row: intermediate targets are
 //     skipped and the settled target is fetched when the flight lands.
 //
-// A failed hydration is not cached and not retried on the spot — the pane keeps
-// rendering its honest board-row-only shape, and the next navigation asks
-// again. A hot retry loop off the render path is the one thing worse than a
-// short pane.
+// A failed hydration does not blank anything — the pane keeps rendering its
+// honest board-row-only shape, the same shape every row not in the index has
+// always rendered. What it DOES do is record the ATTEMPT, not the verdict:
+// m.attempted remembers which rev of which row was already asked for, so a
+// server that cannot answer (a pre-route server, the hermetic fixture, an
+// outage) is asked ONCE per row-version and not once per keystroke. Without
+// that, `cursor_home`'s 60-key burst in the tmux drive harness turns into 60
+// round-trips racing the keystrokes — which is a request storm dressed as a
+// retry policy, and it is how this seam first broke a green harness.
+//
+// An explicit OPEN is the one gesture that clears the attempt (pushFrame), so
+// a reader who descends into a row after a transient failure gets a fresh try
+// while a cursor sweeping the board does not.
 
 // taskDetailLoadedMsg delivers one FetchTaskDetailByID result back to the
 // update loop. err is carried rather than dropped so the handler can tell "this
@@ -101,7 +110,8 @@ func (m Model) detailSubject() string {
 
 // ensureTaskDetail returns the hydration command for ref, or nil when one is
 // not needed or not allowed: no ref, no client, a current hydration already in
-// hand, or another request already in flight (property 3 above).
+// hand, another request already in flight (property 3 above), or this exact
+// row-version already asked for once.
 func (m *Model) ensureTaskDetail(ref string) tea.Cmd {
 	if ref == "" || m.client == nil || m.hydrating != "" {
 		return nil
@@ -110,6 +120,14 @@ func (m *Model) ensureTaskDetail(ref string) tea.Cmd {
 	if d, ok := m.hydrated[ref]; ok && (!haveRow || d.Rev == row.Rev) {
 		return nil
 	}
+	if at, ok := m.attempted[ref]; ok && (!haveRow || at == row.Rev) {
+		// Asked once for this row-version already. Bounded by construction.
+		return nil
+	}
+	if m.attempted == nil {
+		m.attempted = map[string]string{}
+	}
+	m.attempted[ref] = row.Rev
 	m.hydrating = ref
 	client := m.client
 	return func() tea.Msg {
@@ -118,8 +136,15 @@ func (m *Model) ensureTaskDetail(ref string) tea.Cmd {
 	}
 }
 
+// forgetHydrationAttempt clears the once-per-row-version attempt record, so the
+// next ensure will ask again. The ONE caller is an explicit frame open — see
+// the file header for why a cursor sweep is not allowed to do this.
+func (m *Model) forgetHydrationAttempt(ref string) {
+	delete(m.attempted, ref)
+}
+
 // handleTaskDetailLoaded stores a landed hydration and clears the in-flight
-// guard. A failure stores NOTHING — see the file header.
+// guard. A failure stores NOTHING in the overlay — see the file header.
 func (m Model) handleTaskDetailLoaded(msg taskDetailLoadedMsg) (Model, tea.Cmd) {
 	if m.hydrating == msg.ref {
 		m.hydrating = ""
