@@ -92,7 +92,7 @@ defmodule Barkpark.Sso do
 
     case Accounts.register_user(%{email: email, password: random}) do
       {:ok, user} ->
-        Repo.update!(User.confirm_changeset(user))
+        Accounts.confirm_provisioned_user(user)
 
       {:error, %Ecto.Changeset{}} ->
         # Conflict-safe insert leg: the registration changeset declares
