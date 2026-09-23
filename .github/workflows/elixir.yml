@@ -827,6 +827,43 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh selftest-wiring-census -- bash scripts/selftest-wiring-census.sh
 
+      # ── cron scream coverage, riding this job (task-e6fe244ece2b5d27) ──────
+      # VENUE, for the same reason the census above it is here. The subject is
+      # a workflow that fails into a void, and every instrument that already
+      # watches one — cron-overdue-probe.yml, scheduled-arm-health.yml — is
+      # ITSELF schedule-armed and advisory. Putting this verdict in another
+      # cron would reproduce the disease: an advisory red on main's tip has no
+      # owner, which this repo measured at eleven hours across eight
+      # consecutive runs (main-red-owner.yml's own header) and at 5-of-5 on
+      # scheduled-arm-health.yml with nobody told.
+      #
+      # THIS JOB CAN REFUSE. `path-escape` carries no `if:`, no
+      # continue-on-error and no `needs`, and it is in `Elixir gate`'s needs
+      # list — so a red here reds one of the four REQUIRED contexts and the
+      # merge stops. That is the whole reason the step is here and not in a
+      # workflow of its own.
+      #
+      # A STEP, NOT A JOB, for the reasons written above the census: a new job
+      # here reds the sibling path-escape harnesses via `blocking_not_in_needs`
+      # and would add a rendered check name, widening the required set's
+      # roster. A step does neither.
+      #
+      # `--selftest` AND NOT A BARE RUN, for the ack-ex reason four steps up:
+      # the selftest performs the real-tree verdict FIRST (so this step is the
+      # verdict, not a proof-of-proof) and then runs ten mutation arms over a
+      # scratch copy of the real workflow tree — including both directions of
+      # the ratchet and a control proving the guard reds on the ABSENCE of a
+      # reader rather than on novelty. It is also what
+      # scripts/selftest-wiring-census.sh requires of any scripts/ file
+      # carrying an in-file `--selftest`: dispatched WITH the flag, or ORPHAN.
+      #
+      # PRICED: 1.4 s wall on a loaded laptop (10 arms, 31 cron'd workflows),
+      # against this job's 2m35s average. Off the critical path. It touches no
+      # network — it is a question about the tree, not about GitHub.
+      - name: Every cron'd workflow's red reaches a declared reader
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh cron-scream-coverage -- bash scripts/cron-scream-coverage.sh --selftest
+
       # ── the two harnesses the census could not see, riding the same job ───
       # task-13bfa649df851d5f. `scripts/pr-required.sh` is the instrument every
       # lane in this campaign runs before merging anything — 766 lines, 33 arms,
