@@ -56,6 +56,30 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
       It re-uses the existing claimed row (CAS update + terminal update, both by
       primary key), so the dedup constraint is untouched.
 
+  ## Why this site does NOT need `Webhooks.advance_fence/1` (task-790e468acada213c)
+
+  An `updated_at` equality CAS needs NON-REPETITION: the value written must
+  differ from the value compared, or a second writer holding the same token CASes
+  on a token that is still there and BOTH "win". `Webhooks.schedule_retry/3` and
+  `RetryWorker.claim_fence/2` buy that property explicitly, by deriving the fence
+  from the token (`advance_fence/1`), because at those sites nothing relates the
+  written value to the compared one.
+
+  Here the QUERY supplies it. `stuck_candidates/1` filters `updated_at < cutoff`,
+  where `cutoff = utc_now() - stuck_after`; the CAS in `redispatch_one/1` then
+  writes a LATER reading of the same clock. So for every token this site can
+  observe: `token < cutoff <= now_select <= now_cas = written`. The site cannot
+  observe a token it then re-writes — not because the clock is well-behaved, but
+  because the candidate set excludes every row whose `updated_at` is at or after
+  a reading taken before the one it writes. A backward `os_time` step does not
+  reach it either: the step would have to exceed the SELECT→CAS gap *plus*
+  `stuck_after` (300s in production) to land the write back on the token.
+
+  That argument is load-bearing, so it is PINNED rather than asserted:
+  `test/barkpark/webhooks/sibling_fence_nonrepetition_test.exs` reds both if the
+  CAS stops advancing past its token and if the cutoff filter that guarantees it
+  is dropped from `stuck_candidates/1`.
+
   Configuration: `Application.get_env(:barkpark, :webhook_stuck_delivery_after_seconds, 300)`
   and `Application.get_env(:barkpark, :webhook_stuck_delivery_batch_limit, 500)`.
   Tests override the threshold (e.g. to 0) to make the sweep deterministic.
@@ -143,6 +167,13 @@ defmodule Barkpark.Webhooks.StuckDeliverySweeper do
     # Claim-the-sweep CAS: only the writer that still sees the row `pending` with
     # the SAME updated_at we observed wins. Bumping updated_at both fences other
     # sweepers and lifts the row above the cutoff for the rest of this pass.
+    #
+    # `now` is a BARE clock read here, deliberately — see "Why this site does NOT
+    # need advance_fence/1" above. `stuck_candidates/1`'s `updated_at < cutoff`
+    # filter already puts every observable token strictly below a clock reading
+    # taken EARLIER in this pass, so `now > delivery.updated_at` is supplied by
+    # the query rather than assumed of the clock. If that filter is ever relaxed,
+    # this write must become `Webhooks.advance_fence(delivery.updated_at)`.
     now = DateTime.utc_now()
 
     {claimed, _} =
