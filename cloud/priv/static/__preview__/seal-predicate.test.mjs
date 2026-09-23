@@ -3727,13 +3727,23 @@ const GUARD_DECL = "__node-version";
 // A guard planted outside the repo and pointed at by a mutated register entry.
 // `exitWith` is the guard's OWN exit code, so each arm states what kind of
 // non-zero it is driving. `declares` writes a sibling __node-version, or null.
+// `ran` is a SENTINEL FILE, not a line of the guard's stdout: the predicate
+// captures a guard's output and never echoes it, so asserting on "the guard
+// printed X" would pass vacuously in the arm that expects no spawn — a control
+// that cannot fire. A file on disk is a fact about whether the process started.
 function plantGuard({ exitWith, declares }) {
   const dir = tmp("seal-pred-rt-");
   const g = join(dir, "planted-guard.mjs");
-  writeFileSync(g, "console.log('planted guard speaking'); process.exit(" + exitWith + ");\n");
+  const ran = join(dir, "ran");
+  // ESM, because the plant is a `.mjs` — `require` is not defined there, and a
+  // guard that crashes on load would make every arm below measure the crash.
+  writeFileSync(g, "import { writeFileSync } from 'node:fs';\n" +
+    "writeFileSync(" + JSON.stringify(ran) + ", 'yes');\n" +
+    "process.exit(" + exitWith + ");\n");
   if (declares !== null) writeFileSync(join(dir, GUARD_DECL), declares + "\n");
-  return relative(REPO, g);
+  return { rel: relative(REPO, g), ran };
 }
+const guardRan = (ran) => { try { statSync(ran); return true; } catch { return false; } };
 
 // Swap CCH-D1's guard path for the planted one and read the ladder. Everything
 // else about the entry — its commit, its diff proof — is left alone, so the only
@@ -3753,7 +3763,8 @@ test("w37: a guard whose DECLARED Node major does not exist here reads UNREADABL
   // of the declaration, not of which runtimes this particular machine happens to
   // carry. The guard exits 1: if the exit code could reach the verdict this arm
   // would see the laundered sentence.
-  const { status, out } = ladderWithPlantedGuard(plantGuard({ exitWith: 1, declares: "999" }));
+  const planted = plantGuard({ exitWith: 1, declares: "999" });
+  const { status, out } = ladderWithPlantedGuard(planted.rel);
   assert.equal(status, 0, "a reading exits 0; an unreadable entry is not a failure of the run:\n" + out);
   assert.match(out, /RUNTIME-UNAVAILABLE: guard .*planted-guard\.mjs declares Node major 999/,
     "the refusal must name the guard and the major it could not obtain:\n" + out);
@@ -3764,11 +3775,14 @@ test("w37: a guard whose DECLARED Node major does not exist here reads UNREADABL
   assert.match(token(out), /b-unavailable=1\/6/, "…and it is counted as unread, not as unclean:\n" + token(out));
   // The guard must not have RUN at all — an unreadable entry that still executed
   // the guard would be asserting nothing while paying for a measurement.
-  assert.doesNotMatch(out, /planted guard speaking/, "the guard must not be spawned at all:\n" + out);
+  assert.equal(guardRan(planted.ran), false,
+    "the guard must not be spawned at all — an unreadable entry that still ran the guard " +
+    "would pay for a measurement and assert nothing:\n" + out);
 });
 
 test("w37: THE OTHER DIRECTION — a guard that declares NO runtime and reds is still a measured defect", () => {
-  const { status, out } = ladderWithPlantedGuard(plantGuard({ exitWith: 1, declares: null }));
+  const planted = plantGuard({ exitWith: 1, declares: null });
+  const { status, out } = ladderWithPlantedGuard(planted.rel);
   assert.equal(status, 0);
   assert.match(out, LAUNDERED,
     "a genuine guard red must STILL read as measurable — the refusal door may not become an escape hatch:\n" + out);
@@ -3777,6 +3791,7 @@ test("w37: THE OTHER DIRECTION — a guard that declares NO runtime and reds is 
     "…and the reading still names the runtime it ran on:\n" + out);
   assert.doesNotMatch(out, /RUNTIME-UNAVAILABLE/, "nothing here is unreadable:\n" + out);
   assert.match(token(out), /b-unavailable=0\/6/);
+  assert.equal(guardRan(planted.ran), true, "and the guard really ran:\n" + out);
 });
 
 test("w37: and a guard that declares the runtime it GOT and reds is a measured defect too", () => {
@@ -3786,13 +3801,14 @@ test("w37: and a guard that declares the runtime it GOT and reds is a measured d
   // escaping behind an environment word. The declared major is read from the
   // running process, so this arm is correct on any host.
   const running = String(process.versions.node).split(".")[0];
-  const { status, out } = ladderWithPlantedGuard(plantGuard({ exitWith: 1, declares: running }));
+  const planted = plantGuard({ exitWith: 1, declares: running });
+  const { status, out } = ladderWithPlantedGuard(planted.rel);
   assert.equal(status, 0);
   assert.match(out, LAUNDERED, "a satisfied declaration buys a red guard no amnesty:\n" + out);
   assert.match(out, new RegExp("RUNTIME RESOLVED: .*planted-guard\\.mjs declares Node " + running),
     "…and the resolved runtime is stated on the passing-resolution path too:\n" + out);
   assert.doesNotMatch(out, /RUNTIME-UNAVAILABLE/);
-  assert.match(out, /planted guard speaking/, "the guard really ran — this arm measured something:\n" + out);
+  assert.equal(guardRan(planted.ran), true, "the guard really ran — this arm measured something:\n" + out);
 });
 
 test("w37: the live ladder states the runtime it resolved for every guard it spawned", () => {
