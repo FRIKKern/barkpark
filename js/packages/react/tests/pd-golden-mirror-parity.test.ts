@@ -28,14 +28,23 @@
 // loudly, before any comparison runs — a missing upstream dir FAILS here rather
 // than quietly reading as all-clear.
 //
-// ── KNOWN LIMIT, stated so nobody reads more into the green than is there ────
-// turbo's `test` task inputs (js/turbo.json) are rooted at `js/` and CANNOT
-// name a path under `api/`. A PR that changes ONLY the Elixir mirror leaves
-// every react `test` input byte-identical, so turbo replays a cached green and
-// this guard does not execute. It fires on every run that is not a cache hit —
-// which is every PR that touches js/ at all, and every cold CI run. Closing the
-// cache hole needs an UNCACHED step in .github/workflows/js-tests.yml, which is
-// the gates lane's fence; filed separately rather than smuggled in here.
+// ── THE CACHE HOLE IS CLOSED (task-0fb4f5e1ef4a1237) ─────────────────────────
+// This file used to carry a KNOWN LIMIT here, and the limit was real: turbo's
+// `test` task inputs (js/turbo.json) are rooted at `js/` and CANNOT name a path
+// under `api/`, so a PR changing ONLY the Elixir mirror left every react `test`
+// input byte-identical, turbo replayed a cached green, and this guard did not
+// execute on the one change it exists to catch.
+//
+// .github/workflows/js-tests.yml now runs this file in an UNCACHED step of its
+// own ("pd-golden mirror freshness"), ahead of every turbo step, in addition to
+// the cached `test` task. The workflow already triggered on
+// `api/test/support/fixtures/pd-parity/**`; what was missing was a RUN, not a
+// trigger. MEASURED with an api-only control commit (one file added under the
+// Elixir mirror, nothing under js/): js-tests was SUCCESS before that step and
+// FAILURE after it. So this guard now fires on an Elixir-only mirror change,
+// and the caveat that said it could not has been removed rather than left to
+// mislead. The cached `test` task still replays on such a PR — that is fine and
+// expected; the uncached step is what carries the verdict.
 
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
