@@ -88,8 +88,8 @@ defmodule BarkparkWeb.StudioOperatorPremiseTriggerTest do
   @target_workspace_gates [:scoped_admin]
 
   # The board reader the row parks. Named as a module, never as a line number:
-  # the row's own `board.ex:227` citation had already rotted to an unrelated
-  # doc block by the time this file was written.
+  # the line number the row cited into `board.ex` had already rotted to an
+  # unrelated doc block by the time this file was written.
   @board_reader Barkpark.Plugins.Tasks.Web.BoardLive
 
   # The studio-chat reader the row parks — it calls `StudioChat.epic_goal/2`.
