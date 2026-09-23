@@ -45,19 +45,19 @@ dependency or core-package growth.
 
 ## Inline authoring boundary
 
-The editor projects one paragraph per item followed by nested lists. Tab and
+The canvas preserves checklist states and carriers in mixed nesting. Tab and
 Shift-Tab indent/outdent; Enter splits; Backspace at the next item's start joins
 adjacent inline bodies when the preceding item has no child list. One transaction avoids an invalid two-paragraph intermediate shape; other edits
 still pass the shape guard.
 
 Private item and frame attributes preserve original carriers, IDs and metadata
-through moves and history; HTML cannot supply them. A copied frame keeps its
-original identity only once, with further frames canonicalized. Newly nested
+through moves and history; HTML cannot supply them. Copied frames keep their
+identity once; further frames are canonicalized. Newly nested
 scalar/inline-array parents become maps; untouched carriers remain exact.
-Opaque child entries survive in their existing slots. Empty nested lists retain
-their empty stored items rather than persisting the editor placeholder.
+Opaque children keep their slots. Empty nested lists retain
+their empty stored items rather than persisting a placeholder.
 
-Breaks serialize as LF text; Undo retains exact carriers.
+Items have one paragraph plus child lists; breaks serialize as LF. Undo retains carriers.
 Multiple paragraphs, arbitrary child blocks and custom numbering starts remain
 explicitly rejected. Mounted tests alone are not native-browser or
 whole-inventory sign-off.

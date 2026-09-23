@@ -24,10 +24,10 @@ export function portableTextBoundary(host, singleBlockType = () => null) {
             message = "Line breaks are not supported in this field yet. This edit was not applied.";
           } else if (node.type.name === "orderedList" && node.attrs.start !== 1) {
             message = "Custom list starting numbers are not supported yet. Start numbering at 1. This edit was not applied.";
-          } else if (node.type.name === "listItem") {
+          } else if (["listItem", "taskItem"].includes(node.type.name)) {
             let valid = node.firstChild?.type.name === "paragraph";
             node.forEach((child, _offset, index) => {
-              if (index > 0 && !["bulletList", "orderedList"].includes(child.type.name)) valid = false;
+              if (index > 0 && !["bulletList", "orderedList", "taskList"].includes(child.type.name)) valid = false;
             });
             if (!valid) message = "Multiple paragraphs per list item are not supported yet. Use one paragraph followed by nested lists. This edit was not applied.";
           }
