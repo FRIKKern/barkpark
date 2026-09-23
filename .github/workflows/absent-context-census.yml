@@ -317,7 +317,17 @@ jobs:
           # The filer reads GITHUB_TOKEN, never GH_TOKEN (crown-reconcile's
           # first production scream died on exactly that slip).
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # THE FALLBACK KEY ONLY. A census FINDING is filed under a key that
+          # names it (absence: the sorted set of absent heads; queue: its own
+          # stable key), emitted by the census step — see notify_keys() in
+          # scripts/absent-context-census.sh. Under one fixed key the filer's
+          # escalate-after-3 silenced this census within an hour of one stuck
+          # head, and every NEW absent head after it reached nobody
+          # (task-a0abaae6f64c0a9c). This key carries only a red with no
+          # finding: harness red, UNKNOWN, CONFIGURATION FAULT, cancelled.
           CI_FAILURE_KEY: absent-context-census
+          ABSENT_KEY: ${{ steps.census.outputs.absent_key }}
+          QUEUE_KEY: ${{ steps.census.outputs.queue_key }}
           CI_FAILURE_DETAIL: |
             **A required context renders nowhere on an open pull request, and/or
             a workflow run has sat queued past the threshold.** Neither shows up
@@ -341,4 +351,17 @@ jobs:
             Idempotent per key: a standing condition appends a comment rather
             than opening a new issue. CLOSE IT once a run concludes success;
             the next red opens a fresh one.
-        run: bash scripts/file-ci-failure-issue.sh
+        run: |
+          set -uo pipefail
+          rc=0; filed=0
+          # One issue per FINDING key; a key the census left empty files nothing.
+          for k in "$ABSENT_KEY" "$QUEUE_KEY"; do
+            [ -n "$k" ] || continue
+            filed=1
+            CI_FAILURE_KEY="$k" bash scripts/file-ci-failure-issue.sh || rc=1
+          done
+          # A red with no finding still reaches a human, under the fallback key.
+          if [ "$filed" = 0 ]; then
+            bash scripts/file-ci-failure-issue.sh || rc=1
+          fi
+          exit "$rc"

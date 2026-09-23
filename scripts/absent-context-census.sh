@@ -231,6 +231,11 @@ PENDING_ROWS=0
 # is a level trigger built out of the only thing that knows the condition
 # exists. It is never a finding and never moves the exit code.
 UNDISPATCHED_YOUNG_ROWS=0
+# THE NOTIFY KEY'S INPUT (task-a0abaae6f64c0a9c). One token per head carrying an
+# ABSENT row: `pr<N>` for an open pull request, `sha<9 hex>` under --sha. The
+# workflow files the absence limb under a key built from this SET, not under the
+# workflow's name — see notify_keys() below for why.
+ABSENT_HEAD_TOKENS=""
 # ORPHANED runs are stale-queued rows that are UNDISPATCHABLE and unattached:
 # jobs.total_count 0, and a head that is no longer the current head of any open
 # PR or of main. GitHub has no state transition for them — `gh run cancel` says
@@ -807,6 +812,12 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
         say "         age     $(age_hours "$anchor")h  (anchor: $anchor_label $anchor)"
         say "         run     $rid  producer $wf"
         ABSENT_ROWS=$((ABSENT_ROWS + 1))
+        case "$label" in
+          "PR #"*) ABSENT_HEAD_TOKENS="$ABSENT_HEAD_TOKENS
+pr${label#PR #}" ;;
+          *)       ABSENT_HEAD_TOKENS="$ABSENT_HEAD_TOKENS
+sha$(printf '%s' "$sha" | cut -c1-9)" ;;
+        esac
         ;;
     esac
   done <<EOF
@@ -1057,10 +1068,56 @@ say ""
 say "SUMMARY  absent=$ABSENT_ROWS  stale-queued=$STALE_ROWS  unknown=$UNKNOWN_ROWS  in-flight=$PENDING_ROWS  orphaned=$ORPHAN_ROWS  phantom-queued=$PHANTOM_ROWS"
 # Its own line, not a seventh SUMMARY field: readers already parse SUMMARY.
 say "CADENCE  undispatched-young=$UNDISPATCHED_YOUNG_ROWS  (non-zero = re-arm: a producer run exists that can end without emitting any event)"
-# The workflow reads the count as a step output. Opt-in, so a hermetic harness
-# run inside a CI step never writes into that step's outputs by accident.
+
+# ── the notify keys ──────────────────────────────────────────────────────────
+# THE KEY IDENTIFIES THE FINDING, NOT THE WORKFLOW. scripts/file-ci-failure-issue.sh
+# keeps ONE open issue per key and, after escalate_after=3 appends on it,
+# escalates once and goes SILENT. Under one fixed key, a single stuck head (PR
+# #16709 sat NAME_NOT_IN_RUN for hours) spends those three appends within an hour
+# of census runs, and every NEW absence on ANOTHER head then lands on the same
+# silenced issue and reaches nobody. Keyed by the SET of absent heads instead: a
+# set that persists escalates once and goes quiet, which is right; a set that
+# gains a head is a different key and opens a fresh issue.
+#   absence limb  absent-context-census-absent-<sorted tokens joined by ->,
+#                 e.g. absent-context-census-absent-pr16709. Past 8 heads the
+#                 list becomes <N>heads-<12 hex of sha256 over the sorted list>,
+#                 so the issue title stays far under GitHub's 256-char limit
+#                 and the key stays a pure function of the set.
+#   queue limb    absent-context-census-queue — STABLE on purpose: stale-queued
+#                 rows are one standing condition, not per-head news.
+#   neither       empty. The workflow then files only on a red with no finding
+#                 (harness red, UNKNOWN, CONFIGURATION FAULT, cancelled) under
+#                 the bare fallback key absent-context-census.
+sha256_hex() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
+  else shasum -a 256 | cut -c1-64; fi
+}
+notify_keys() {
+  local toks n
+  toks="$(printf '%s\n' "$ABSENT_HEAD_TOKENS" | grep . | sort -u)"
+  n="$(printf '%s\n' "$toks" | grep -c .)"
+  if [ "$n" -eq 0 ]; then
+    ABSENT_KEY=""
+  elif [ "$n" -le 8 ]; then
+    ABSENT_KEY="absent-context-census-absent-$(printf '%s\n' "$toks" | paste -sd- -)"
+  else
+    ABSENT_KEY="absent-context-census-absent-${n}heads-$(printf '%s\n' "$toks" | sha256_hex | cut -c1-12)"
+  fi
+  if [ "$STALE_ROWS" -gt 0 ]; then QUEUE_KEY="absent-context-census-queue"; else QUEUE_KEY=""; fi
+}
+notify_keys
+say "NOTIFY   absence-key=${ABSENT_KEY:-none}  queue-key=${QUEUE_KEY:-none}"
+
+# The workflow reads these as step outputs. Opt-in, so a hermetic harness run
+# inside a CI step never writes into that step's outputs by accident. ALL THREE
+# are written on every run, empty included, so a retried census overwrites the
+# first attempt's values rather than inheriting them.
 if [ "${ABSENT_CENSUS_EMIT_OUTPUT:-}" = "1" ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
-  echo "undispatched_young=$UNDISPATCHED_YOUNG_ROWS" >> "$GITHUB_OUTPUT"
+  {
+    echo "undispatched_young=$UNDISPATCHED_YOUNG_ROWS"
+    echo "absent_key=$ABSENT_KEY"
+    echo "queue_key=$QUEUE_KEY"
+  } >> "$GITHUB_OUTPUT"
 fi
 
 [ "$CONFIG_FAULT" = "1" ] && {

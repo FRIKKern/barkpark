@@ -1442,7 +1442,7 @@ env GITHUB_OUTPUT="$GO" ABSENT_CENSUS_EMIT_OUTPUT=1 PATH="$NOGH:/usr/bin:/bin:/u
 GO2="$TMP/gh-output-off"; : > "$GO2"
 env GITHUB_OUTPUT="$GO2" PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
   bash "$CENSUS" --fixtures "$D9A" --now "$NOW" --spec "$SPEC" --workflows "$WORKFLOWS" --repo FRIKKern/barkpark >/dev/null 2>&1
-if [ "$(cat "$GO")" = "undispatched_young=$LOST_N" ] && [ ! -s "$GO2" ]; then
+if grep -qx "undispatched_young=$LOST_N" "$GO" && [ ! -s "$GO2" ]; then
   ok "9.6 opted in, the census writes 'undispatched_young=$LOST_N' to GITHUB_OUTPUT; not opted in, it writes nothing (a harness run inside a CI step cannot leak into that step's outputs)"
 else
   bad "9.6 GITHUB_OUTPUT: opted-in='$(cat "$GO")' not-opted-in='$(cat "$GO2")'"
@@ -1462,6 +1462,104 @@ else
   [ "$Y" = "0" ] \
     && ok "9.7 …and with the counter disarmed the #18045 event moment reads undispatched-young=0 — the re-arm would NOT fire, so 9.1 is a check that can lose" \
     || bad "9.7 the disarmed census still reported young='$Y' — 9.1 cannot tell a working re-arm from a dead one"
+fi
+
+# ═══ 9b. THE NOTIFY KEY NAMES THE FINDING, NOT THE WORKFLOW ═══════════════════
+section "9b. the notify key is a function of the absent-head SET: new set, new issue; same set, same issue; no set, no filing"
+
+# WHY (task-a0abaae6f64c0a9c). scripts/file-ci-failure-issue.sh keeps one open
+# issue per key and goes SILENT on it after escalate_after=3 appends. Under the
+# old fixed key `absent-context-census`, at up to 3 census runs an hour, one
+# stuck head (PR #16709) silenced the key within an hour — and any NEW absence
+# on another head then appended to nothing a human would see. The census now
+# emits the key; these arms pin its shape and, by a fixed-key disarm, that the
+# arms can lose.
+key_of() { grep -o 'NOTIFY   absence-key=[^ ]*' <<<"$1" | sed 's/.*absence-key=//'; }
+qkey_of() { grep -o 'queue-key=[^ ]*' <<<"$1" | sed 's/.*queue-key=//'; }
+# A fixture whose open-PR list is the given numbers, every one on the §1-shaped
+# head (victim context dropped) — so each listed PR is an ABSENT head.
+absent_set_fixture() { # <name> <pr numbers…>
+  local name="$1"; shift
+  local d; d="$(derive "$name")"
+  drop_victim_checkrun "$d"
+  jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .status = "completed" else . end]}' \
+    "$d/runs-$SHA.json" > "$d/.tmp" && mv "$d/.tmp" "$d/runs-$SHA.json"
+  printf '%s\n' "$@" | jq -R 'tonumber' | jq -sc --arg sha "$SHA" \
+    '[.[] | {number: ., headRefOid: $sha, updatedAt: "2026-08-06T12:00:00Z"}]' > "$d/prs.json"
+  echo "$d"
+}
+KA="$(key_of "$(run_census "$(absent_set_fixture key-a 16709)")")"
+KA2="$(key_of "$(run_census "$(absent_set_fixture key-a-again 16709)")")"
+KB="$(key_of "$(run_census "$(absent_set_fixture key-b 16709 20050)")")"
+KB_REV="$(key_of "$(run_census "$(absent_set_fixture key-b-rev 20050 16709)")")"
+OUT="$(run_census "$BASE")"; K0="$(key_of "$OUT")"; Q0="$(qkey_of "$OUT")"
+
+[ "$KA" = "absent-context-census-absent-pr16709" ] \
+  && ok "9b.1 one absent head (#16709) keys as: $KA" \
+  || bad "9b.1 expected absent-context-census-absent-pr16709, got '$KA'"
+[ -n "$KA" ] && [ -n "$KB" ] && [ "$KA" != "$KB" ] \
+  && ok "9b.2 two DIFFERENT absent sets give two DIFFERENT keys: $KA vs $KB — a new head opens a fresh issue" \
+  || bad "9b.2 different sets collided: '$KA' vs '$KB'"
+[ "$KA" = "$KA2" ] && [ "$KB" = "$KB_REV" ] \
+  && ok "9b.3 the SAME set gives the SAME key, whatever order the PR list arrives in ($KB) — a standing set escalates once and goes quiet" \
+  || bad "9b.3 the same set keyed differently: '$KA'/'$KA2', '$KB'/'$KB_REV'"
+[ "$K0" = "none" ] && [ "$Q0" = "none" ] \
+  && ok "9b.4 an EMPTY set emits no key (absence-key=none, queue-key=none) — the notifier files nothing for a finding that does not exist" \
+  || bad "9b.4 the healthy base emitted keys: absence='$K0' queue='$Q0'"
+
+# Past 8 heads the list becomes a count + digest, still a pure function of the set.
+BIG="$(key_of "$(run_census "$(absent_set_fixture key-big 101 102 103 104 105 106 107 108 109 110)")")"
+BIG2="$(key_of "$(run_census "$(absent_set_fixture key-big-rev 110 109 108 107 106 105 104 103 102 101)")")"
+if grep -qE '^absent-context-census-absent-10heads-[0-9a-f]{12}$' <<<"$BIG" && [ "$BIG" = "$BIG2" ] && [ "${#BIG}" -lt 100 ]; then
+  ok "9b.5 ten absent heads key as $BIG (${#BIG} chars, order-independent) — the issue title stays far under GitHub's 256"
+else
+  bad "9b.5 the >8 shape is wrong or unstable: '$BIG' vs '$BIG2'"
+fi
+
+# The queue limb keeps ONE stable key of its own, apart from the absence limb.
+OUT="$(run_census "$BASE" --stale-queue-hours 1)"
+if grep -qE 'stale-queued=[1-9]' <<<"$OUT"; then
+  [ "$(qkey_of "$OUT")" = "absent-context-census-queue" ] && [ "$(key_of "$OUT")" = "none" ] \
+    && ok "9b.6 a queue-only SCREAM keys as absent-context-census-queue, with absence-key=none — the two limbs never share an issue" \
+    || bad "9b.6 queue-only keys wrong: absence='$(key_of "$OUT")' queue='$(qkey_of "$OUT")'"
+else
+  bad "9b.6 precondition: --stale-queue-hours 1 did not make the base queue stale"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# The step outputs the notifier reads — all three written, empty included.
+GO3="$TMP/gh-output-keys"; : > "$GO3"
+env GITHUB_OUTPUT="$GO3" ABSENT_CENSUS_EMIT_OUTPUT=1 PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
+  bash "$CENSUS" --fixtures "$(absent_set_fixture key-out 16709)" --now "$NOW" --spec "$SPEC" --workflows "$WORKFLOWS" --repo FRIKKern/barkpark >/dev/null 2>&1
+grep -qx 'absent_key=absent-context-census-absent-pr16709' "$GO3" && grep -qx 'queue_key=' "$GO3" \
+  && ok "9b.7 GITHUB_OUTPUT carries absent_key=absent-context-census-absent-pr16709 and an EMPTY queue_key= (so a retried census overwrites, never inherits)" \
+  || bad "9b.7 GITHUB_OUTPUT keys: $(tr '\n' ' ' < "$GO3")"
+
+# The notifier step files per finding key, and falls back only when there is none.
+NOTIFY_RUN="$(awk '/- name: File the census red to a human/ {f=1} f' "$WF")"
+if grep -qF 'ABSENT_KEY: ${{ steps.census.outputs.absent_key }}' <<<"$NOTIFY_RUN" \
+   && grep -qF 'QUEUE_KEY: ${{ steps.census.outputs.queue_key }}' <<<"$NOTIFY_RUN" \
+   && grep -qF 'CI_FAILURE_KEY="$k" bash scripts/file-ci-failure-issue.sh' <<<"$NOTIFY_RUN" \
+   && grep -qF 'if [ "$filed" = 0 ]; then' <<<"$NOTIFY_RUN"; then
+  ok "9b.8 [static] the notifier files once per non-empty finding key and uses the fixed key only when the census named no finding"
+else
+  bad "9b.8 the notifier step is not wired to the census keys"
+fi
+
+# DISARM: a census that keys by the workflow again — every set collapses to one.
+MUT9B="$TMP/mut9b"; mkdir -p "$MUT9B/scripts"
+sed 's|ABSENT_KEY="absent-context-census-absent-$(printf|ABSENT_KEY="absent-context-census" #|' "$CENSUS" > "$MUT9B/scripts/absent-context-census.sh"
+run_mut9b() {
+  env BARKPARK_CHECK_RUNS_LIB="$REPO_ROOT/scripts/lib/check-runs.sh" PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
+    bash "$MUT9B/scripts/absent-context-census.sh" --fixtures "$1" --now "$NOW" --spec "$SPEC" --workflows "$WORKFLOWS" \
+    --repo FRIKKern/barkpark 2>&1
+}
+if cmp -s "$CENSUS" "$MUT9B/scripts/absent-context-census.sh"; then
+  bad "9b.9 the fixed-key disarm did not change the census (the key line moved?)"
+else
+  MA="$(key_of "$(run_mut9b "$TMP/key-a")")"; MB="$(key_of "$(run_mut9b "$TMP/key-b")")"
+  [ "$MA" = "$MB" ] \
+    && ok "9b.9 …and with the key fixed back to the workflow name the two sets COLLIDE ($MA = $MB) — the silence 9b.2 exists to catch, reproduced on demand" \
+    || bad "9b.9 the fixed-key disarm still separated the sets ('$MA' vs '$MB') — 9b.2 cannot tell"
 fi
 
 echo
