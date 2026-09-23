@@ -1155,6 +1155,40 @@ const subtreeOf = (fixture, id, seedId, seedRows) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// A FIXTURE IS REFUSED WHEN ITS SHAPE IS ONE `parent_id` CANNOT EMIT (task-8532dae7b075f4b3).
+//
+// `parent_id` is ONE field, so on the live ledger every row sits under exactly one parent.
+// A ledger fixture is hand-written and nothing made it obey that: `forward-to-grandchild.json`
+// and `considering-forwarded.json` listed one `_id` in the epic's `children` AND under the
+// successor, and that two-parent row was the ONLY way any fixture reached the in-roster
+// `forwarded` bucket — a bucket R4/R6 make unreachable on every legal invocation. The arm
+// over it passed from the bucket's introduction to wave 36 while the bucket was dead: a
+// green whose subject cannot exist. `walkSubtree` already refuses a row reached twice INSIDE
+// one walk (ROSTER-CYCLE); the epic and the successor are two separate walks, so an `_id`
+// shared between them crossed no check at all.
+//
+// THE PARENT OF A LISTED ROW, read exactly as the walks read it: `children` is the epic's
+// direct roster (parent = the epic), `forwarded` the successor's (parent = the successor),
+// `subtrees[<id>]` the rows under `<id>`. An `_id` with more than one distinct parent is a
+// world the ledger cannot produce, and the run is an INFRA FAULT naming the id and every
+// parent — nothing is scored over it. FIXTURE-ONLY: a live roster is read from the store,
+// where this shape cannot arise, and the check reads nothing but the fixture's own JSON.
+function fixtureParentConflicts(fixture, epic, successor) {
+  const parents = new Map();
+  const add = (row, parent) => {
+    const id = typeof row === 'string' ? row : (row && row._id);
+    if (typeof id !== 'string' || id === '') return;   // the walk refuses an id-less row by name
+    if (!parents.has(id)) parents.set(id, new Set());
+    parents.get(id).add(parent);
+  };
+  for (const r of Array.isArray(fixture.children) ? fixture.children : []) add(r, epic);
+  for (const r of Array.isArray(fixture.forwarded) ? fixture.forwarded : []) add(r, successor);
+  for (const [parent, rows] of Object.entries(fixture.subtrees || {}))
+    for (const r of Array.isArray(rows) ? rows : []) add(r, parent);
+  return [...parents].filter(([, s]) => s.size > 1).map(([id, s]) => [id, [...s]]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // THE ANTI-FILING ARM — A PRIOR CENSUS, KEYED BY `_id`.
 //
 // RECURSION ALONE DOES NOT REPLACE THIS, and that is the whole reason the arm exists.
@@ -2182,6 +2216,17 @@ function main() {
 
   L.push(`=== SEAL PREDICATE — epic ${EPIC} ===`);
   L.push(`read at ${STAMP}${fixture ? '  (LEDGER FIXTURE — not live)' : '  (live ledger)'}  (repo ${REPO}${HEAD ? ` @ ${HEAD}` : ''})`);
+
+  // A FIXTURE WHOSE SHAPE `parent_id` CANNOT EMIT IS NOT A WORLD — see
+  // `fixtureParentConflicts` above. Before any refusal and any clause, so it is never scored.
+  if (fixture) {
+    const successorOfFixture = (arg('--successor') || fixture.successor || '(no successor)').toString().trim();
+    const twoParents = fixtureParentConflicts(fixture, EPIC, successorOfFixture);
+    if (twoParents.length)
+      throw new Infra(
+        `the ledger fixture ${ledgerPath} lists ${twoParents.length} _id(s) under MORE THAN ONE PARENT: ${twoParents.map(([id, ps]) => `${id} <- {${ps.join(', ')}}`).join('; ')}. \`parent_id\` is a single field, so the live ledger cannot produce this shape, and a verdict over it asserts something true about a world that does not exist. Nothing is asserted about any clause. Place the row under ONE parent — a re-parented row is absent from \`children\` and present under the successor, with the epic's claim on it carried by \`priorCensus\`.`,
+        'FIXTURE-TWO-PARENTS');
+  }
 
   // ── REFUSALS. Evaluated BEFORE the roster is read, so nothing downstream can
   // print an unresolvable id as a forwarding address. ────────────────────────
