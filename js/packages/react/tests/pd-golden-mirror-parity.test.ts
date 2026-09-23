@@ -28,14 +28,33 @@
 // loudly, before any comparison runs — a missing upstream dir FAILS here rather
 // than quietly reading as all-clear.
 //
-// ── KNOWN LIMIT, stated so nobody reads more into the green than is there ────
-// turbo's `test` task inputs (js/turbo.json) are rooted at `js/` and CANNOT
-// name a path under `api/`. A PR that changes ONLY the Elixir mirror leaves
-// every react `test` input byte-identical, so turbo replays a cached green and
-// this guard does not execute. It fires on every run that is not a cache hit —
-// which is every PR that touches js/ at all, and every cold CI run. Closing the
-// cache hole needs an UNCACHED step in .github/workflows/js-tests.yml, which is
-// the gates lane's fence; filed separately rather than smuggled in here.
+// ── THE CACHE HOLE IS CLOSED (task-0fb4f5e1ef4a1237) ─────────────────────────
+// This file used to carry a KNOWN LIMIT here saying this guard COULD NOT fire
+// on an Elixir-only mirror change. The premise under it is real and was
+// re-verified: turbo's `test` task inputs (js/turbo.json) are rooted at `js/`
+// and cannot name a path under `api/`, so such a change does not enter the task
+// hash at all. MEASURED locally with a warm cache — adding one file under
+// api/test/support/fixtures/pd-parity/ left @barkpark/react:test at the SAME
+// hash (26dbb9de8e5296ec), "cache hit, replaying logs", "40 passed", exit 0,
+// having executed nothing.
+//
+// The caveat's CONCLUSION was too strong, though. A replay needs a cache entry
+// to exist, and whether CI restores one carrying that hash is not decided by
+// the change. MEASURED on CI with the same api-only control commit: the runner
+// computed the identical hash 26dbb9de8e5296ec, did NOT have it in the restored
+// cache, executed the task, and js-tests went FAILURE. So before this workflow
+// step the real state was WORSE than "cannot fire": whether this guard judged
+// an Elixir-only change was decided by CI cache weather. A gate defeatable by a
+// cache hit is not a gate.
+//
+// .github/workflows/js-tests.yml now runs this file in an UNCACHED step of its
+// own ("pd-golden mirror freshness"), ahead of every turbo step, in addition to
+// the cached `test` task. The workflow already triggered on
+// `api/test/support/fixtures/pd-parity/**`; what was missing was a RUN, not a
+// trigger. MEASURED: with that step in place the same control commit reds
+// js-tests AT THAT STEP (step 12), before Build or Test execute at all. The
+// cached `test` task may still replay on such a PR — that is fine; the uncached
+// step is what carries the verdict now.
 
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
