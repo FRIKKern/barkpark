@@ -41,7 +41,7 @@ defmodule BarkparkWeb.TokenController do
       `#{inspect(@allowed_permissions)}` or the request 422s.
     * `dataset` defaults to `"production"`.
     * `expires_at` (optional, ISO-8601) — must be in the future and within the
-      kind's max age (`public-read` → share, 30 days; `read` → api, 365 days),
+      kind's max age (365 days for both `public-read` (share) and `read` (api)),
       else 422 naming the max. Never clamped.
     * `no_expiry: true` (optional) — the audited opt-out from any configured
       default expiry. Instance-admin only (the caller's token must hold the

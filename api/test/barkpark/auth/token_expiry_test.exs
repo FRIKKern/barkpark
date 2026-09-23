@@ -34,9 +34,9 @@ defmodule Barkpark.Auth.TokenExpiryTest do
   defp now, do: ~U[2026-09-24 12:00:00Z]
 
   describe "the policy table" do
-    test "max ages: api 365, share 30, app none" do
+    test "max ages: api 365, share 365, app none" do
       assert TokenExpiry.max_age_days(:api) == 365
-      assert TokenExpiry.max_age_days(:share) == 30
+      assert TokenExpiry.max_age_days(:share) == 365
       assert TokenExpiry.max_age_days(:app) == nil
     end
 
@@ -79,13 +79,13 @@ defmodule Barkpark.Auth.TokenExpiryTest do
     end
 
     test "a requested expiry AT the max is admitted unchanged" do
-      at = DateTime.add(now(), 30 * @day)
+      at = DateTime.add(now(), 365 * @day)
       assert {:ok, ^at} = TokenExpiry.resolve(:share, at, now: now())
     end
 
     test "a requested expiry ONE SECOND past the max is refused naming the max" do
-      assert {:error, {:expiry_exceeds_max, :share, 30}} =
-               TokenExpiry.resolve(:share, DateTime.add(now(), 30 * @day + 1), now: now())
+      assert {:error, {:expiry_exceeds_max, :share, 365}} =
+               TokenExpiry.resolve(:share, DateTime.add(now(), 365 * @day + 1), now: now())
 
       assert {:error, {:expiry_exceeds_max, :api, 365}} =
                TokenExpiry.resolve(:api, DateTime.add(now(), 365 * @day + 1), now: now())
@@ -108,9 +108,9 @@ defmodule Barkpark.Auth.TokenExpiryTest do
     end
 
     test "a configured default over the kind's max raises (misconfiguration)" do
-      configure_default(%{api: nil, share: 31})
+      configure_default(%{api: nil, share: 366})
 
-      assert_raise ArgumentError, ~r/above the share max age of 30 days/, fn ->
+      assert_raise ArgumentError, ~r/above the share max age of 365 days/, fn ->
         TokenExpiry.resolve(:share, nil, [])
       end
     end
@@ -137,9 +137,9 @@ defmodule Barkpark.Auth.TokenExpiryTest do
 
     test "an over-max request writes no row" do
       before = Repo.aggregate(ApiToken, :count)
-      at = DateTime.add(DateTime.utc_now(), 31 * @day)
+      at = DateTime.add(DateTime.utc_now(), 366 * @day)
 
-      assert {:error, {:expiry_exceeds_max, :share, 30}} =
+      assert {:error, {:expiry_exceeds_max, :share, 365}} =
                Auth.create_token(raw(), "x", "production", ["public-read"], nil, expires_at: at)
 
       assert Repo.aggregate(ApiToken, :count) == before

@@ -6,8 +6,9 @@ defmodule Barkpark.Auth.TokenExpiry do
 
   Three rules, one per class (`:api`, `:share`, `:app`):
 
-    * MAX AGE — `:api` 365 days, `:share` (share-edit and `public-read`) 30
-      days, `:app` none (unchanged until the App shape exists). A requested
+    * MAX AGE — `:api` 365 days, `:share` (share-edit and `public-read`) 365
+      days (the owner's 2026-06-09 share cap — a mechanism max never overrides a
+      recorded owner cap), `:app` none (unchanged until the App shape exists). A requested
       expiry beyond the max is REFUSED with the max named, never clamped.
     * DEFAULT — read from `config :barkpark, :token_default_expiry_days`
       (`%{api: days | nil, share: days | nil}`), SHIPPED AS nil. The default only
@@ -31,7 +32,7 @@ defmodule Barkpark.Auth.TokenExpiry do
   """
 
   @day 86_400
-  @max_age_days %{api: 365, share: 30}
+  @max_age_days %{api: 365, share: 365}
 
   @type class :: :api | :share | :app
   @type request :: nil | :no_expiry | DateTime.t()

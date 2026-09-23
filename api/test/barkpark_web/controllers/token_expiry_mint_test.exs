@@ -243,16 +243,16 @@ defmodule BarkparkWeb.TokenExpiryMintTest do
   # ── criterion 2: max age refused, never clamped ──────────────────────────
 
   describe "a requested expiry over the kind's max age" do
-    test "public-read (share, 30 days): 422 naming the max, no row written",
+    test "public-read (share, 365 days): 422 naming the max, no row written",
          %{ws: ws, admin_raw: raw} do
-      at = DateTime.utc_now() |> DateTime.add(31 * @day) |> DateTime.to_iso8601()
+      at = DateTime.utc_now() |> DateTime.add(366 * @day) |> DateTime.to_iso8601()
       count = token_count()
 
       conn = mint_read_token(ws, raw, %{"label" => uniq("x"), "expires_at" => at})
       body = json_response(conn, 422)
 
-      assert body["error"]["message"] =~ "max age of 30 days"
-      assert body["error"]["details"] == %{"kind" => "share", "max_age_days" => 30}
+      assert body["error"]["message"] =~ "max age of 365 days"
+      assert body["error"]["details"] == %{"kind" => "share", "max_age_days" => 365}
       assert token_count() == count
     end
 
@@ -299,11 +299,21 @@ defmodule BarkparkWeb.TokenExpiryMintTest do
       assert token_count() == count
     end
 
-    test "share-edit ttl over 30 days: 422 naming the max, no row written", %{root_raw: raw} do
+    test "share-edit ttl over 365 days: 422 naming the max, no row written", %{root_raw: raw} do
       count = token_count()
-      conn = mint_share(raw, %{ttl: 31 * @day})
-      assert json_response(conn, 422)["error"]["message"] =~ "max age of 30 days"
+      conn = mint_share(raw, %{ttl: 366 * @day})
+      assert json_response(conn, 422)["error"]["message"] =~ "max age of 365 days"
       assert token_count() == count
+    end
+
+    test "share-edit ttl of 364 days: accepted as today", %{root_raw: raw} do
+      tok = row!(raw_of(mint_share(raw, %{ttl: 364 * @day}), 201))
+      assert_in_delta days_from_now(tok.expires_at), 364, 0.01
+    end
+
+    test "share-edit ttl of exactly 365 days: accepted as today", %{root_raw: raw} do
+      tok = row!(raw_of(mint_share(raw, %{ttl: 365 * @day}), 201))
+      assert_in_delta days_from_now(tok.expires_at), 365, 0.01
     end
   end
 

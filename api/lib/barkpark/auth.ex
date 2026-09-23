@@ -20,10 +20,11 @@ defmodule Barkpark.Auth do
   # a cold first pass over a never-swept table is not one giant transaction.
   @default_sweep_batch_limit 5_000
 
-  # P5 share-edit token TTL policy (owner decision 2026-06-09): default 7 days.
-  # Write access is higher-risk than the anonymous read share, so an edit token
-  # always expires. The max age is `Barkpark.Auth.TokenExpiry`'s share max (30
-  # days, refused above — task-a0f8cfd7f4800236 replaced the 1-year clamp).
+  # P5 share-edit token TTL policy (owner decision 2026-06-09): default 7 days,
+  # hard cap 1 year. Write access is higher-risk than the anonymous read share,
+  # so an edit token always expires. The cap is `Barkpark.Auth.TokenExpiry`'s
+  # share max (365 days); above it a ttl is REFUSED, no longer clamped
+  # (task-a0f8cfd7f4800236).
   @share_token_default_ttl 7 * 24 * 3600
 
   # The ONLY surfaces an edit token may cover. Papers-edit is out of scope (it
@@ -1214,7 +1215,7 @@ defmodule Barkpark.Auth do
 
   Defense-in-depth: refuses to mint unless the scope is live-`:edit`-shared for
   every requested surface RIGHT NOW. `opts`: `:ttl` (seconds, default 7 days;
-  over 30 days is refused, never clamped), `:label`. Returns `{:ok, {raw_token, %ApiToken{}}}` — the
+  over 365 days is refused, never clamped), `:label`. Returns `{:ok, {raw_token, %ApiToken{}}}` — the
   raw token is shown ONCE and never recoverable after.
   """
   @spec create_share_token(binary(), binary(), binary(), [binary() | atom()], keyword()) ::
@@ -1324,8 +1325,8 @@ defmodule Barkpark.Auth do
   end
 
   # A share-edit token ALWAYS expires. A missing/non-positive ttl is the 7-day
-  # default; a positive ttl over the share max age (30 days) is REFUSED naming
-  # the max (task-a0f8cfd7f4800236) — it used to be silently clamped to 1 year.
+  # default; a positive ttl over the share max age (365 days) is REFUSED naming
+  # the max (task-a0f8cfd7f4800236) — it used to be silently clamped to it.
   defp share_expires_at(ttl) do
     ttl = if is_integer(ttl) and ttl > 0, do: ttl, else: @share_token_default_ttl
     TokenExpiry.resolve(:share, DateTime.add(DateTime.utc_now(), ttl, :second))

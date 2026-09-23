@@ -413,7 +413,7 @@ end
 # Per-kind default token expiry (task-a0f8cfd7f4800236). Unset = the shipped nil
 # (config.exs): no default, no behaviour change. A value must be a positive
 # integer number of days; `Barkpark.Auth.TokenExpiry` refuses one above the
-# kind's max age (api 365, share 30) at mint.
+# kind's max age (api 365, share 365) at mint.
 token_default_expiry_days =
   for {kind, env_name} <- [
         api: "BARKPARK_TOKEN_DEFAULT_EXPIRY_DAYS_API",
