@@ -49,6 +49,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.StreamTail
   alias Barkpark.StudioChat.TaskTransition
+  alias Barkpark.StudioChat.TaskLedgerScope
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -6357,8 +6358,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # One-substrate law (chat-task-hands D1): the surface only PROMPTS — every
   # ledger write still goes through the agent's own bp/MCP hands.
 
-  # The dataset's document stream — the Doing strip folds task mutations out of
-  # it. Same topics the SSE listener serves; cheap to filter.
+  # The task LEDGER's document stream — the Doing strip folds task mutations
+  # out of it. Same topics the SSE listener serves; cheap to filter.
+  #
+  # The DATASET is the ledger's, never `socket.assigns.dataset`
+  # (task-ff3ed7ae0a242160). That assign is `default_dataset/0` — the FIRST of
+  # the SORTED `Content.list_datasets/0` — so on any install holding a dataset
+  # that sorts before "production" ("archive", "blog", a leaked test dataset)
+  # the strip joined a stream no task write lands on and never saw a claim,
+  # pulse or release frame. Task rows broadcast on the dataset they live in;
+  # `TaskLedgerScope.resolve/0` is the one place that names it.
   defp subscribe_hand_tasks(socket) do
     # The document-list stream, tenant-fenced (task-5d0615ee60143cc8). The bare
     # `documents:<dataset>` topic fans every tenant's frame out to every
@@ -6368,27 +6377,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # this surface's own workspace on the keyed one — so every document arrives
     # exactly once, WITH its payload, and no foreign tenant's body ever does.
     #
-    # The workspace is `hand_task_scope/0`'s — the SAME scope the picker and
-    # the agent's own bp hands write in, so the strip folds the rows it can act
-    # on.
+    # The workspace AND dataset are `TaskLedgerScope.resolve/0`'s — the SAME
+    # scope the picker and the agent's own bp hands write in, so the strip folds
+    # the rows it can act on.
     if connected?(socket) do
-      Broadcast.subscribe_documents(
-        socket.assigns.dataset,
-        Keyword.get(hand_task_scope(), :workspace_id)
-      )
+      %{dataset: dataset, workspace_id: workspace_id} = TaskLedgerScope.resolve()
+      Broadcast.subscribe_documents(dataset, workspace_id)
     end
 
     socket
   end
 
-  # The scope the agent's own task hands work in: the flat /v1/tasks routes
-  # resolve to the seeded defaults via AssignDefaultScope, so the surface reads
-  # the SAME board the agent writes. (Tasks.ready is fail-closed on a nil
-  # workspace — passing no scope would render the picker permanently empty.)
+  # The scope the agent's own task hands work in, as `Tasks` read opts: the
+  # workspace/project half of `TaskLedgerScope.resolve/0`, so the picker, the
+  # hydrate and the live subscription cannot name different scopes. (Tasks.ready
+  # is fail-closed on a nil workspace — passing no scope would render the picker
+  # permanently empty.) No `:dataset` here on purpose: `Tasks.ready/1` and
+  # `Tasks.prime/1` span every dataset of the scope when none is named, which is
+  # what they did before the resolver existed.
   defp hand_task_scope do
-    ws = Barkpark.Tenancy.get_default_workspace()
-    proj = Barkpark.Tenancy.get_default_project()
-    [workspace_id: ws && ws.id, project_id: proj && proj.id]
+    %{workspace_id: workspace_id, project_id: project_id} = TaskLedgerScope.resolve()
+    [workspace_id: workspace_id, project_id: project_id]
   end
 
   # ── live task transitions in the transcript (tlv) ─────────────────────────

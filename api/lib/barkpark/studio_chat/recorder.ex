@@ -28,14 +28,10 @@ defmodule Barkpark.StudioChat.Recorder do
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
   alias Barkpark.StudioChat.StreamSegments
+  alias Barkpark.StudioChat.TaskLedgerScope
   alias Barkpark.StudioChat.TaskTransition
 
   @registry Barkpark.StudioChat.RecorderRegistry
-  # The dataset the task ledger lives in — PINNED, mirroring the Tasks board
-  # LiveView's own `@dataset "production"`. The Recorder has no dataset of its
-  # own (a chat session is not scoped to one), and resolving it would cost a
-  # query on every turn spawn; the ledger's home is the board's, by definition.
-  @task_dataset "production"
   @supervisor Barkpark.StudioChat.RuntimeSupervisor
   @idle_after_ms 30 * 60 * 1000
 
@@ -273,7 +269,12 @@ defmodule Barkpark.StudioChat.Recorder do
     # `subscribe_documents/2` joins BOTH — the shared layer on the global topic,
     # this surface's own workspace on the keyed one — so every document arrives
     # exactly once, WITH its payload, and no foreign tenant's body ever does.
-    Broadcast.subscribe_documents(@task_dataset, ledger_workspace_id())
+    #
+    # The dataset and workspace come from `TaskLedgerScope.resolve/0` — the ONE
+    # resolver `ChatLive`'s Doing strip subscribes through too, so the two chat
+    # surfaces cannot ride different ledger streams (task-ff3ed7ae0a242160).
+    %{dataset: task_dataset, workspace_id: ledger_workspace_id} = TaskLedgerScope.resolve()
+    Broadcast.subscribe_documents(task_dataset, ledger_workspace_id)
 
     # A Task holder authorized this managed attempt but is not the Studio
     # process's principal. Never mint or forward Task hands for that process.
@@ -2451,17 +2452,5 @@ defmodule Barkpark.StudioChat.Recorder do
       _ ->
         nil
     end
-  end
-
-  # The workspace the ledger this Recorder projects lives in — the default
-  # workspace `bp`'s `/v1/tasks` writes resolve to (AssignDefaultScope), which
-  # is the scope Studio's own Doing strip uses (`hand_task_scope/0`).
-  defp ledger_workspace_id do
-    case Barkpark.Tenancy.get_default_workspace() do
-      %{id: id} when is_binary(id) -> id
-      _ -> nil
-    end
-  rescue
-    _ -> nil
   end
 end
