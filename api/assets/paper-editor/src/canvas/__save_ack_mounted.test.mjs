@@ -966,6 +966,75 @@ try {
     pendingReconnect.close();
   }
 
+  // Commit-before-disconnect (task-01c9d733c4251457). The server COMMITTED a
+  // structural insertion, then the browser lost both the reply and the echo.
+  // The author keeps typing offline; reconnect retries the exact request, the
+  // server replays the original receipt, the offline typing follows as its own
+  // batch on the replayed revision (never a second insertion), and View opens
+  // without a refresh. Run with the replay's echo lost too, and delivered.
+  for (const replayEcho of [false, true]) {
+    const label = replayEcho ? "replay echo delivered" : "every echo lost";
+    const lost = await mount({ revision: 5 });
+    insert(lost.canvas, "Committed insertion");
+    lost.canvas.flushPendingChanges();
+    assert.equal(lost.requests.length, 1, `${label}: the insertion is one request`);
+    const committed = lost.requests[0];
+    const committedPayload = JSON.stringify(committed.payload);
+    const committedBlock = inserted(committed);
+    assert.equal(committed.payload.if_rev, 5, `${label}: the insertion is fenced on rev 5`);
+    // The server has committed rev 6; the socket drops before reply or echo.
+    committed.reject(new Error("socket closed after commit"));
+    await tick();
+
+    append(lost.canvas, " typed after disconnect");
+    await new Promise(resolve => setTimeout(resolve, DEBOUNCE_MS + 50));
+    assert.equal(lost.requests.length, 1,
+      `${label}: offline typing waits behind the unacknowledged insertion`);
+    assert.match(textOf(lost.canvas), /Committed insertion typed after disconnect/,
+      `${label}: local editing continues after the disconnect`);
+
+    lost.hook.reconnected();
+    await waitFor(() => lost.requests.length === 2,
+      `${label}: reconnect should retry the committed insertion`);
+    const retry = lost.requests[1];
+    assert.equal(JSON.stringify(retry.payload), committedPayload,
+      `${label}: the retry carries the original request id, revision, and ops`);
+    retry.resolve({saved:true, replayed:true, rev:6, request_id:retry.payload.request_id});
+    if (replayEcho) {
+      lost.echo([paragraph("original", "Original"), committedBlock], {
+        rev: 6,
+        request_id: retry.payload.request_id,
+      });
+    }
+    await waitFor(() => lost.requests.length === 3,
+      `${label}: the offline typing should send after the replayed receipt`);
+    const continued = lost.requests[2];
+    assert.notEqual(continued.payload.request_id, committed.payload.request_id,
+      `${label}: the newer typing is a new request`);
+    assert.equal(continued.payload.if_rev, 6,
+      `${label}: the newer typing is fenced on the replayed revision`);
+    assert.equal(
+      continued.payload.ops.some(op => ["insert-after", "insert-before", "append-block"].includes(op.op)),
+      false,
+      `${label}: the committed insertion is never sent a second time`,
+    );
+    assert.ok(
+      continued.payload.ops.some(op => op.op === "patch-block" && op.id === committedBlock.id),
+      `${label}: the newer typing patches the committed block in place`,
+    );
+    continued.resolve({saved:true, rev:7, request_id:continued.payload.request_id});
+    await tick();
+
+    lost.click();
+    await tick();
+    assert.equal(lost.toggles(), 1, `${label}: View opens without a refresh`);
+    assert.equal(lost.requests.length, 3, `${label}: View sends no further save`);
+    assert.match(textOf(lost.canvas), /Committed insertion typed after disconnect/,
+      `${label}: the mounted text survives the round trip`);
+    assert.equal(beforeUnloadPrevented(), false, `${label}: nothing is left unsaved`);
+    lost.close();
+  }
+
   const studioFocus = await mount({ revision: 7 });
   const originalStudioMain = studioFocus.main;
   originalStudioMain.id = "paper-editor-studio-focus";

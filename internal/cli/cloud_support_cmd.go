@@ -62,6 +62,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/fleetruntime"
 )
 
 // supportCtx is the context every support bring-up call runs under. A package
@@ -132,7 +133,7 @@ const supportRawBase = supportRawRoot + "/main"
 // runtime can be fetched at a PINNED commit sha (<root>/<sha>/<path>) — a sha
 // URL is immutable, which is what lets the runner report the exact version it
 // was written from (pdf-bl-fleet-run-refresh).
-const supportRawRoot = "https://raw.githubusercontent.com/FRIKKern/barkpark"
+const supportRawRoot = fleetruntime.RawRoot
 
 // ── validation fences ────────────────────────────────────────────────────────
 
@@ -1818,57 +1819,14 @@ func supportImportStep(ws, adminToken string) cloud.CaddyStep {
 }
 
 // supportFleetFilesStep writes the fleet runtime from origin/main CONTENT
-// (PDF-D62/D64 — never an operator machine's stale copy). It is the ONE
-// builder both `support add` (stepRuntime) and `support refresh` run — the
-// refresh verb re-runs this leg and nothing else (pdf-bl-fleet-run-refresh).
-//
-//   - sha != "": every file is fetched from raw.githubusercontent AT THAT
-//     COMMIT (immutable), and fleet-run.version records the sha.
-//   - checkoutFallback: when the pinned fetch fails (or sha == ""), copy the
-//     files from the freshened on-box checkout instead, and record ITS HEAD.
-//     add allows this (a GitHub outage must not kill a bring-up); refresh
-//     does NOT — a refresh that cannot write the sha it printed fails.
-//
-// All files land as *.bpnew and are mv'd into place (a new inode), never
-// written in place: bash reads a running script by offset, so truncating
-// fleet-run.sh under a live listener would feed it a spliced file. The files
-// are all-or-nothing per source — a mix of pinned and checkout content would
-// make the version file lie.
-//
-// bp-read.sh rides along BESIDE the runner: since #16050 fleet-run.sh sources
-// scripts/lib/bp-read.sh, and from /opt/barkpark-fleet its repo-relative path
-// (../../scripts/lib) does not exist — without it bp_json is undefined and the
-// listener idles forever while still beating online.
-//
-// The sha is fenced by supportSHARe by every caller before it reaches here.
+// (PDF-D62/D64). It is the ONE builder both `support add` (stepRuntime,
+// checkoutFallback=true) and `support refresh` (checkoutFallback=false) run —
+// and the provisioner's server-side chain runs the same definition:
+// fleetruntime.FilesStep owns the file set, the pinned fetch, the version file
+// and the temp-file-then-rename (task-837f1013efdf100f). The sha is fenced by
+// supportSHARe by every caller before it reaches here.
 func supportFleetFilesStep(sha string, checkoutFallback bool) cloud.CaddyStep {
-	fb := "0"
-	if checkoutFallback {
-		fb = "1"
-	}
-	script := `set -e
-d=/opt/barkpark-fleet
-mkdir -p "$d"
-sha='` + sha + `'
-files='tooling/fleet/fleet-run.sh:fleet-run.sh tooling/fleet/fleet-protocol.md:fleet-protocol.md scripts/lib/bp-read.sh:bp-read.sh'
-pull(){ for f in $files; do curl -fsSL "` + supportRawRoot + `/$sha/${f%%:*}" -o "$d/${f#*:}.bpnew" 2>/dev/null || return 1; done; }
-copy(){ for f in $files; do cp "/opt/barkpark/${f%%:*}" "$d/${f#*:}.bpnew" || return 1; done; }
-if [ -n "$sha" ] && pull; then ver="$sha"
-elif [ ` + fb + ` = 1 ] && copy; then ver="$(git -C /opt/barkpark rev-parse HEAD 2>/dev/null)" || ver=unknown
-else rm -f "$d"/*.bpnew; echo "fleet runtime: cannot fetch the runner at ${sha:-the checkout}" >&2; exit 1
-fi
-chmod 0755 "$d/fleet-run.sh.bpnew"
-for f in $files; do mv -f "$d/${f#*:}.bpnew" "$d/${f#*:}"; done
-printf '%s\n' "$ver" > "$d/fleet-run.version.bpnew"
-mv -f "$d/fleet-run.version.bpnew" "$d/fleet-run.version"`
-	title := "write fleet-run.sh + fleet-protocol.md + bp-read.sh from origin/main content"
-	if sha != "" {
-		title += " at " + sha
-	}
-	return cloud.CaddyStep{
-		Title: title,
-		Argv:  []string{"bash", "-lc", script},
-	}
+	return fleetruntime.FilesStep(sha, checkoutFallback)
 }
 
 // supportAgentInstallStep installs node + the agent CLI. The CALLER treats a

@@ -323,7 +323,10 @@ const HOOKS = [
   { key: "select#site-theme-select", route: "PATCH /v1/sites/:*", what: "pin the deploy theme", source: "census PIN: loadSite, ruling (a)" },
   { key: "button.btn.btn-primary.btn-sm[data-vf-run]", route: "POST /v1/barkparks/:*/verify", what: "run verification now", source: "census PIN: runVerifyNow — team-scoped member action" },
   { key: "button.btn.btn-ghost.btn-sm.token-revoke[data-id][data-name]", route: "DELETE /v1/tokens/:*", what: "revoke your own token", source: "census PIN: confirmRevokeToken — self-scope" },
-  { key: "button.btn.btn-ghost.btn-sm[data-life-retry]", route: null, what: "retry the lifecycle read that failed", source: "markup: re-issues the same GET the view already made" },
+  // task-cf8ef8a2da25e3aa: this row was `route: null` and exempted in
+  // ROUTE_NULL_DECLARED while __route_fence.mjs lacked the route; the fence now
+  // carries it (Auth.require_user, member), so the row names the read it issues.
+  { key: "button.btn.btn-ghost.btn-sm[data-life-retry]", route: "GET /v1/providers/capabilities", what: "retry the lifecycle read that failed", source: "handler: the Retry re-enters wireLifecycleActions -> api GET /v1/providers/capabilities, the read the view already made; require_user at the router, member-readable" },
   // ── cch-r16-w11: the /new LAUNCH WIZARD's own controls, which entered this
   // sweep's view with `theater-ready-github-member` and `theater-failed-member`
   // — the first member actors ever to reach either theater screen. Every row
@@ -474,16 +477,14 @@ const APP_JS = path.join(HERE, "..", "app.js");
 // null on purpose, each with the reason. SYMMETRIC like KNOWN and CONCEALED: an
 // entry whose handler stops reaching api()/fetch() reds, so an exemption cannot
 // outlive the call it excused.
-const ROUTE_NULL_DECLARED = [
-  {
-    key: "button.btn.btn-ghost.btn-sm[data-life-retry]",
-    why: "the Retry re-enters wireLifecycleActions, which re-issues GET /v1/providers/capabilities — the read the " +
-      "view already made, as the row's own source says. It stays null because __route_fence.mjs carries no entry " +
-      "for that route, so naming it here would answer `unknown` and red UNFENCED; recording the read in the shared " +
-      "table is the fix, and it is outside this file. NOT a write, and the capabilities read gates nothing a " +
-      "member can do.",
-  },
-];
+// EMPTY SINCE task-cf8ef8a2da25e3aa, and KEPT: its one entry
+// ([data-life-retry], held null because __route_fence.mjs lacked GET
+// /v1/providers/capabilities) was retired by adding that route to the fence and
+// naming it on the row. The list and both of its guard arms stay — an
+// undeclared route:null row that reaches api()/fetch() still reds by name, and
+// the next legitimate exemption needs a place to be written with its reason.
+// An empty exemption list under a working guard is the healthy state.
+const ROUTE_NULL_DECLARED = [];
 
 // Comments -> spaces; string / template / regex CONTENTS -> "x" (delimiters
 // kept). Same length and same newlines as the input, so every offset into the
@@ -775,21 +776,20 @@ const WATCHED = [
   // way `#id` does. Defaulting `sel` to `"#" + id` keeps #site-github and
   // #github-disconnect byte-identical to what they asserted before.
   //
-  // THE FENCE STRING IS `unknown` FOR TWO OF THE THREE, AND THAT IS RECORDED,
-  // NOT HIDDEN: __route_fence.mjs (cloud/priv/static/, outside this slice's
-  // fence) carries `DELETE /v1/barkparks/:*` but NOT
-  // `POST /v1/barkparks/:*/self-update` or `POST /v1/barkparks/:*/retry`, even
-  // though __binding_census.mjs reads both as Auth.require_team_admin. The
-  // WATCHED arm does not gate on the fence string — its verdict is the
-  // member-zero/twin-nonzero comparison — so an unknown here weakens the
-  // failure MESSAGE and nothing else. Adding the two routes to the shared table
-  // is filed as its own row; see `fenceNote` below, which is printed verbatim.
+  // THE FENCE STRING WAS `unknown` FOR TWO OF THE THREE (and for #new-gh-create
+  // and #new-retry below), and the WATCHED arm printed it without failing.
+  // task-56a094e7a4c17250 recorded POST /v1/barkparks/:*/self-update, POST
+  // /v1/barkparks/:*/retry and POST /v1/github/repos in __route_fence.mjs, each
+  // tier read off its router clause and bound to the census PIN rows that
+  // already carried it, and section 6 now reds a WATCHED row whose fence is
+  // `unknown` (or member-reachable) by name. The `fenceNote` column those rows
+  // carried ("__route_fence.mjs carries no row for this route") is gone with
+  // the gap it described.
   {
     id: "inst-update", sel: "#inst-update", mount: "instance-body",
     scenario: "instance-behind-member", twin: "instance-behind",
     route: "POST /v1/barkparks/:*/self-update", assert: true,
     minted: "cch-w38-s1 (#12996) — instanceOverviewHtml routes the behind-box Update CTA through adminWriteControlHtml(authority, …, \"primary\"), whose refusal arm drops the id",
-    fenceNote: "__route_fence.mjs carries no row for this route; __binding_census.mjs reads updateInstance as Auth.require_team_admin",
   },
   {
     id: "inst-remove-retry", sel: "#inst-remove-retry", mount: "instance-body",
@@ -802,7 +802,6 @@ const WATCHED = [
     scenario: "instance-failed-member", twin: "failed",
     route: "POST /v1/barkparks/:*/retry", assert: true,
     minted: "cch-w38-s1 (#12996) — instanceTimelineHtml takes an `authority` argument and draws Retry setup through adminWriteControlHtml(…, \"dock\"), whose refusal arm drops both the data attribute and the .bp-tl-retry dock",
-    fenceNote: "__route_fence.mjs carries no row for this route; __binding_census.mjs reads retryInstance/newRenderFailed as Auth.require_team_admin",
   },
   // ── cch-r16-w11: THE LAUNCH WIZARD'S TWO MEASURABLE ELEVATED WRITES ────────
   // Both mount into #new-body, the /new document's one body registry entry, and
@@ -824,14 +823,12 @@ const WATCHED = [
     scenario: "theater-ready-github-member", twin: "theater-ready-github",
     route: "POST /v1/github/repos", assert: true,
     minted: "cch-r16-w11 — newGithubHtml takes an `authority` argument and draws Create GitHub repo through adminWriteControlHtml(…, \"wizard\"), whose refusal arm drops the id (and disables the name field beside it)",
-    fenceNote: "__route_fence.mjs carries no row for this route; __binding_census.mjs reads newCreateRepo as Auth.require_team_admin",
   },
   {
     id: "new-retry", sel: "#new-retry", mount: "new-body",
     scenario: "theater-failed-member", twin: "theater-failed",
     route: "POST /v1/barkparks/:*/retry", assert: true,
     minted: "cch-r16-w11 — newRenderFailed reads newWriteAuthority() and draws Retry setup through adminWriteControlHtml(…, \"wizard-block\"), whose refusal arm drops the id; this is the THIRD offer site of the verb #12996 fenced twice",
-    fenceNote: "__route_fence.mjs carries no row for this route; __binding_census.mjs reads retryInstance/newRenderFailed as Auth.require_team_admin",
   },
   // ── cch-w36-bl: THE ACTIVITY FILTER ROW, and the first WATCHED row whose
   // route is a READ ─────────────────────────────────────────────────────────
@@ -1128,7 +1125,16 @@ const PIN_MEMBER_SCENARIOS = 16;
 // was RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the
 // committed corpus grew to 144 scenario(s), pinned at 143") and the actor-set
 // line, which still says 16 — never by adding one.
-const PIN_TOTAL_SCENARIOS = 144;
+// 144 -> 146 (task-679663d0bee42b15): `new-launch-limit-reached` and
+// `new-launch-forbidden`, the Launch press driven into each of go_live's two
+// 403 slugs. The member slice STAYS at 16: both actors are `new-launch`'s OWNER
+// `me("Ada's Lab")` — the forbidden one is the owner whose role the SERVER no
+// longer honours, which is the only actor the post-hoc toast can reach, since a
+// member's /new step withholds the form. 146 was RE-DERIVED by RUNNING this
+// sweep and reading what it PRINTED ("the committed corpus grew to 146
+// scenario(s), pinned at 144") and the actor-set line, which still says 16 —
+// never by adding two.
+const PIN_TOTAL_SCENARIOS = 146;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).
@@ -1606,6 +1612,23 @@ async function main() {
 
   // 6 — the WATCHED JS-emitted controls, read ONLY through their mount.
   for (const w of WATCHED) {
+    // THE FENCE STRING IS A VERDICT, NOT A LABEL (task-56a094e7a4c17250). A
+    // WATCHED row claims the server REFUSES a member this route, so the shared
+    // table must say so: `unknown` means no tier was derived for the route at
+    // all, and a member-reachable fence means the row watches for the absence
+    // of a control the server would honour. Either is a guard failure by name,
+    // on every row, asserted or not. Before this, four rows printed `[unknown]`
+    // and passed on the member-zero/twin-nonzero comparison alone.
+    if (w.fence === F_UNKNOWN) {
+      broken.push("UNFENCED WATCHED " + w.sel + " → " + w.route + ": the row's fence is `unknown` — " +
+        "__route_fence.mjs carries no entry for this route, so nothing derived the refusal this row watches " +
+        "for. Record the route in the shared table from its router clause (and bind it to its census PIN row), " +
+        "or fix the route this row names. Unknown is never a pass.");
+    } else if (!ELEVATED.has(w.fence)) {
+      broken.push("WATCHED " + w.sel + " → " + w.route + " is fenced `" + w.fence + "` by __route_fence.mjs, " +
+        "which is member-reachable. A WATCHED row asserts the server refuses a member this write; the table " +
+        "says it does not. One of them is wrong — read the router clause and fix that one.");
+    }
     const memberSurvey = await surveyScenario(w.scenario);
     const mountEl = memberSurvey.registry.has(w.mount) ? memberSurvey.registry.get(w.mount) : null;
     // NEVER getElementById / $(): both AUTO-CREATE the element, which makes
@@ -1620,9 +1643,8 @@ async function main() {
     const twinSurvey = await surveyScenario(w.twin);
     const twinMount = twinSurvey.registry.has(w.mount) ? twinSurvey.registry.get(w.mount) : null;
     const twinN = twinMount ? twinMount.querySelectorAll(w.sel).length : -1;
-    const ok = hereN === 0 && twinN >= 1;
-    out("  " + (ok ? "ok  " : "FAIL") + " " + w.sel.padEnd(16) + " — " + w.route + " [" + w.fence + "]" +
-      (w.fenceNote ? " (" + w.fenceNote + ")" : "") + " · scoped through registry.get(\"" +
+    const ok = hereN === 0 && twinN >= 1 && ELEVATED.has(w.fence);
+    out("  " + (ok ? "ok  " : "FAIL") + " " + w.sel.padEnd(16) + " — " + w.route + " [" + w.fence + "] · scoped through registry.get(\"" +
       w.mount + "\").querySelectorAll(\"" + w.sel + "\"): member " + w.scenario + " → " + hereN + ", privileged " +
       w.twin + " → " + twinN + "\n");
     if (twinMount === null) {
@@ -1633,7 +1655,7 @@ async function main() {
         "absence proves nothing. The fence (" + w.minted + ") may have been reverted into an omit-for-everyone.");
     } else if (hereN !== 0) {
       broken.push(w.sel + " IS OFFERED TO A MEMBER on " + w.scenario + " — the write behind it is " + w.route +
-        " (" + w.fence + (w.fenceNote ? "; " + w.fenceNote : "") + "). " +
+        " (" + w.fence + "). " +
         "The fence that withheld it — " + w.minted + " — is gone: the privileged arm " + w.twin + " renders " +
         twinN + " and the member arm now renders " + hereN + ". The server refuses this write; the console must " +
         "not offer it.");

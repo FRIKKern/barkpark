@@ -42,51 +42,23 @@ package cli
 // never a warning.
 
 import (
-	"context"
 	"fmt"
-	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/fleetruntime"
 )
 
 // supportSHARe fences the resolved commit before it is single-quoted into the
-// on-box script and printed as the version: exactly 40 lowercase hex.
-var supportSHARe = regexp.MustCompile(`^[0-9a-f]{40}$`)
-
-// supportMainSHAURL answers origin/main's commit sha as plain text under the
-// vnd.github.sha media type.
-const supportMainSHAURL = "https://api.github.com/repos/FRIKKern/barkpark/commits/main"
+// on-box script and printed as the version: exactly 40 lowercase hex. One
+// definition, shared with the provisioner chain (fleetruntime.SHARe).
+var supportSHARe = fleetruntime.SHARe
 
 // supportResolveMainSHA resolves origin/main to a commit sha on the OPERATOR's
-// machine. A seam so tests never touch GitHub.
+// machine (fleetruntime.ResolveMainSHA). A seam so tests never touch GitHub.
 var supportResolveMainSHA = func() (string, error) {
-	ctx, cancel := context.WithTimeout(supportCtx(), 15*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, supportMainSHAURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/vnd.github.sha")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, err := readCapped(resp.Body, 4096)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s answered %d: %s", supportMainSHAURL, resp.StatusCode, supportTrim(body))
-	}
-	sha := strings.TrimSpace(string(body))
-	if !supportSHARe.MatchString(sha) {
-		return "", fmt.Errorf("%s answered an unexpected sha shape %q", supportMainSHAURL, supportTrim(body))
-	}
-	return sha, nil
+	return fleetruntime.ResolveMainSHA(supportCtx())
 }
 
 // supportRestartListenerStep restarts the listener so the new runner is the

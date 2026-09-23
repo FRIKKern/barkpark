@@ -307,13 +307,16 @@ defmodule BarkparkWeb.MediaController do
       # answered 200 with the first one's bytes. The `%MediaFile{}` head resolves
       # THIS row's `object_key` (`Media.Storage.ObjectKey`). `file.path` remains
       # the published reference and is still what the JSON and URL builders emit.
+      visibility = Access.visibility(doc)
+
       case Blobstore.serve_strategy(file,
              response_content_type: MediaFile.serve_content_type(mime),
-             response_content_disposition: disposition(mime)
+             response_content_disposition: disposition(mime),
+             response_cache_control: Delivery.file_cache_control(visibility)
            ) do
         {:file, full_path} ->
           conn
-          |> Delivery.put_file_cache_headers(full_path, Access.visibility(doc))
+          |> Delivery.put_file_cache_headers(full_path, visibility)
           |> maybe_send_file(full_path, mime)
 
         {:redirect, url} ->
@@ -514,8 +517,12 @@ defmodule BarkparkWeb.MediaController do
 
   # 302 to a presigned object-storage URL. `cache-control: private` — the
   # redirect embeds a time-limited signature and may be access-gated, so a
-  # shared cache must never serve it to another principal; the blob response
-  # itself carries the bucket/CDN cache policy.
+  # shared cache must never serve it to another principal.
+  #
+  # The BYTES the bucket then serves are inside D12 (decision: bake it in,
+  # not scope it out): `serve_file/2` signs `Delivery.file_cache_control/1`
+  # for the asset's visibility into the URL as `response-cache-control`, so
+  # the bucket answers with the same policy the local-file arm sends.
   defp redirect_to_blob(conn, url) do
     conn
     |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")

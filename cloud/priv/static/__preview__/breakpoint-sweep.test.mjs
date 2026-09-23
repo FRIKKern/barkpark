@@ -30,6 +30,7 @@ import {
   RENDER_HEIGHTS_DEFAULT, heightDriveReport, cueAxisOfMask, cueStuckVerdict,
   selectNames, ascendingViolation, nonAscendingRefusal,
   SCENARIO_RESIDUE, RESIDUE_FAMILY_REASONS,
+  RESIDUE_VERDICTS, residueFamily, residueVerdictProblem, residueVerdictReport,
 } from "./breakpoint-sweep.mjs";
 import { SCENARIOS, SCENARIO_NAMES } from "./scenarios.mjs";
 
@@ -1278,13 +1279,20 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // UNMOVED: a cell is not residue, and a cell creates no family. Every integer
   // was RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` and reading the
   // `>> scenarios` line it PRINTED, never by adding one.
-  assert.equal(r.total, 144);
+  // task-679663d0bee42b15 moves it by TWO, both residue (family path:/new):
+  // `new-launch-limit-reached` and `new-launch-forbidden`, the Launch press's
+  // two 403 refusals. Total 144 -> 146, residue 119 -> 121; cells (26),
+  // distinctCovered (25) and families (14) are DELIBERATELY UNMOVED — path:/new
+  // already had eight members. RE-DERIVED by RUNNING `node breakpoint-sweep.mjs`
+  // and reading what it PRINTED (`146 scenarios · 25 distinct covered by 26
+  // cells · 121 residue over 14 families`), never by adding two.
+  assert.equal(r.total, 146);
   assert.equal(r.cells, 26);
   assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
-  assert.equal(r.residue, 119, "119 is the RESIDUE, not the census");
+  assert.equal(r.residue, 121, "121 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 119, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 121, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
@@ -1293,16 +1301,105 @@ test("familyOf reads the artifact: pathname, else the deepLink head, else no-dee
   assert.equal(familyOf({ deepLink: "#/invitations/accept?token=x" }), "hash:#");
   assert.equal(familyOf({}), "no-deeplink");
   // and every committed entry still agrees with the artifact it describes
-  for (const [name, family] of Object.entries(SCENARIO_RESIDUE)) {
+  // task-1ac954ba0db927cb: an entry is { family, verdict, why, … } now; the
+  // family is read through residueFamily, the one reader of either shape.
+  for (const [name, entry] of Object.entries(SCENARIO_RESIDUE)) {
+    const family = residueFamily(entry);
     assert.equal(familyOf(SCENARIOS[name]), family, `residue entry ${name} records ${family}`);
   }
 });
 
 test("every residue family has a written reason, and no reason outlives its family", () => {
-  const used = new Set(Object.values(SCENARIO_RESIDUE));
+  const used = new Set(Object.values(SCENARIO_RESIDUE).map(residueFamily));
   assert.equal(used.size, 14);
   for (const f of used) assert.ok(RESIDUE_FAMILY_REASONS[f] && RESIDUE_FAMILY_REASONS[f].length > 60, `family ${f} needs a written reason`);
   assert.deepEqual(Object.keys(RESIDUE_FAMILY_REASONS).filter((f) => !used.has(f)), []);
+});
+
+// ── RESIDUE VERDICTS (task-1ac954ba0db927cb) ─────────────────────────────────
+// Every SCENARIO_RESIDUE entry carries a CONTENT verdict (adjudicated /
+// superseded / genuinely-uncovered) with its reason at its own line. No count
+// is typed below: the population is Object.keys(SCENARIO_RESIDUE) read at run
+// time, and every title that shows a number builds it from the report.
+
+const RV = residueVerdictReport();
+
+test(`every residue entry carries a content verdict: ${RV.verdicted} verdicts over a derived population of ${RV.population}`, () => {
+  assert.equal(RV.population, Object.keys(SCENARIO_RESIDUE).length, "the population is the literal's own keys");
+  assert.deepEqual(RV.unverdicted, [], "every entry is a verdict, not a bare family");
+  assert.equal(RV.verdicted, RV.population, "the verdicted count EQUALS the derived population");
+  assert.equal(RESIDUE_VERDICTS.reduce((a, v) => a + RV.counts[v], 0), RV.population, "the distribution sums to the population");
+  assert.equal(RV.ok, true);
+  // and the sweep's own report carries it, so the bare run refuses on it
+  const r = scenarioReport({ scenarios: SCENARIOS });
+  assert.deepEqual(r.verdicts, RV);
+});
+
+test("a residue entry added WITHOUT a verdict reds by name — in the verdict report and in scenarioReport", () => {
+  // MUTATION: the pre-verdict shape, a bare family string, on a scenario that
+  // exists (so no other refusal fires first).
+  const probe = "probe-unverdicted";
+  const scenarios = { ...SCENARIOS, [probe]: { ...SCENARIOS.empty } };
+  const residue = { ...SCENARIO_RESIDUE, [probe]: "hash:#overview" };
+  const v = residueVerdictReport({ residue });
+  assert.equal(v.ok, false);
+  assert.equal(v.population, Object.keys(residue).length);
+  assert.equal(v.verdicted, v.population - 1);
+  assert.deepEqual(v.unverdicted.map((u) => u.name), [probe]);
+  const r = scenarioReport({ scenarios, residue });
+  assert.deepEqual(r.unlisted, [], "the entry is LISTED — only the verdict refusal may fire");
+  assert.deepEqual(r.drift, [], "the bare string's family is still read correctly while it is refused");
+  assert.equal(r.ok, false, "an unverdicted entry must red the sweep's scenario report");
+  assert.deepEqual(r.verdicts.unverdicted.map((u) => u.name), [probe]);
+});
+
+test("a verdict is a judgment with a reason: each missing part is refused, by name, with what is missing", () => {
+  const base = { family: "hash:#overview" };
+  const cases = [
+    [{ ...base, why: "x".repeat(60) }, /not one of/],
+    [{ ...base, verdict: "adjudicated" }, /no written `why`/],
+    [{ ...base, verdict: "adjudicated", why: "short" }, /no written `why`/],
+    [{ ...base, verdict: "superseded", why: "x".repeat(60) }, /`by` names nothing/],
+    [{ ...base, verdict: "superseded", by: "no-such-cell", why: "x".repeat(60) }, /neither a cell nor a genuinely-uncovered/],
+    [{ ...base, verdict: "genuinely-uncovered", why: "x".repeat(60) }, /`cover` does not name/],
+  ];
+  for (const [entry, re] of cases) {
+    const got = residueVerdictProblem("probe", entry, { residue: SCENARIO_RESIDUE });
+    assert.match(String(got), re, `${JSON.stringify(entry)} should be refused with ${re}`);
+  }
+  // `by` may not chain through a SUPERSEDED entry — only a cell, or the
+  // genuinely-uncovered entry whose gap it shares, so each gap is counted once.
+  const chained = Object.keys(SCENARIO_RESIDUE).find((n) => SCENARIO_RESIDUE[n].verdict === "superseded");
+  assert.ok(chained, "no superseded entry to chain through — this arm went vacuous");
+  assert.match(String(residueVerdictProblem("probe", { ...base, verdict: "superseded", by: chained, why: "x".repeat(60) }, { residue: SCENARIO_RESIDUE })),
+    /neither a cell nor a genuinely-uncovered/);
+  assert.match(String(residueVerdictProblem("probe", { ...base, verdict: "superseded", by: "probe", why: "x".repeat(60) }, { residue: { probe: {} } })),
+    /superseded by itself/);
+});
+
+test("every superseded entry resolves its `by`, and every genuinely-uncovered entry names its cover", () => {
+  const cellNames = new Set(CELLS.map((c) => c.name));
+  const sup = Object.entries(SCENARIO_RESIDUE).filter(([, e]) => e.verdict === "superseded");
+  const unc = Object.entries(SCENARIO_RESIDUE).filter(([, e]) => e.verdict === "genuinely-uncovered");
+  assert.ok(sup.length > 0 && unc.length > 0, "a verdict class went empty — re-read, do not keep this green");
+  for (const [name, e] of sup) {
+    assert.ok(cellNames.has(e.by) || (SCENARIO_RESIDUE[e.by] && SCENARIO_RESIDUE[e.by].verdict === "genuinely-uncovered"),
+      `${name} is superseded by "${e.by}", which is neither a cell nor a genuinely-uncovered entry`);
+  }
+  for (const [name, e] of unc) assert.ok(typeof e.cover === "string" && e.cover.length >= 10, `${name} names no cover`);
+  assert.deepEqual(RV.uncovered, unc.map(([n]) => n), "the report's uncovered list is the literal's, in literal order");
+});
+
+test("one verdict stamped on every entry is refused as a label, not a judgment", () => {
+  const stamped = Object.fromEntries(Object.entries(SCENARIO_RESIDUE).map(([n, e]) =>
+    [n, { family: e.family, verdict: "adjudicated", why: e.why }]));
+  const v = residueVerdictReport({ residue: stamped });
+  assert.deepEqual(v.unverdicted, [], "each stamped entry is individually well-formed");
+  assert.equal(v.uniform, true);
+  assert.equal(v.ok, false);
+  // and the committed literal is NOT uniform
+  assert.equal(RV.uniform, false);
+  assert.ok(RESIDUE_VERDICTS.filter((k) => RV.counts[k] > 0).length > 1);
 });
 
 // ── the residue's TYPED numerals: 21 of them, none of which could lose ───────
@@ -1353,7 +1450,7 @@ function residueGroupHeaders(src = SWEEP_SRC) {
 
 function derivedFamilyCounts(residue = SCENARIO_RESIDUE) {
   const counts = new Map();
-  for (const family of Object.values(residue)) counts.set(family, (counts.get(family) || 0) + 1);
+  for (const family of Object.values(residue).map(residueFamily)) counts.set(family, (counts.get(family) || 0) + 1);
   return counts;
 }
 

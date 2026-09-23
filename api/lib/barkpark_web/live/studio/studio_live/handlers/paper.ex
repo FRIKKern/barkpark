@@ -203,8 +203,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     painted_closed? = open? and not asked? and not wide?
     next_open? = if painted_closed?, do: true, else: not open?
 
-    {:noreply, assign(socket, sidebar_open: next_open?, sidebar_user_opened: next_open?)}
+    socket
+    |> assign(sidebar_open: next_open?, sidebar_user_opened: next_open?)
+    |> remember_inspector_pref(wide?, next_open?)
+    |> then(&{:noreply, &1})
   end
+
+  # spd-b1-pane-state-persistence — the one place the inspector preference is
+  # WRITTEN. Only a press at `wide` records it: there the inspector is a docked
+  # peer of the document, so open/closed is a standing layout choice. Below
+  # `wide` the default is already painted-closed and an open is a per-visit
+  # summon (D91; the Tier-3 destination at narrow/phone), so those presses
+  # change nothing remembered — which is what keeps a narrow/phone reload from
+  # painting a destination the user did not summon on this visit.
+  #
+  # The `inspector-pref` push reaches the body script's `phx:inspector-pref`
+  # window listener (root.html.heex), which writes localStorage and keeps the
+  # `data-inspector-pref` stamp on <html> in step, so the next reload's
+  # pre-paint agrees with what the socket now holds.
+  defp remember_inspector_pref(socket, true = _wide?, next_open?) do
+    socket
+    |> assign(inspector_pref_closed: not next_open?)
+    |> push_event("inspector-pref", %{closed: not next_open?})
+  end
+
+  defp remember_inspector_pref(socket, _not_wide, _next_open?), do: socket
 
   @doc """
   Collapse / expand ONE sidebar section, toggling its key in the

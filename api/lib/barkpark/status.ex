@@ -25,10 +25,15 @@ defmodule Barkpark.Status do
   """
   @spec health() :: map()
   def health do
+    # Each probe runs ONCE per request and feeds both the component verdict
+    # and the inventory published beside it, so the two can never disagree.
+    migrations = migration_state()
+    plugins = safe(fn -> Barkpark.Plugins.Registry.all() end, :probe_failed)
+
     components = [
       check(:database, &database_ok?/0),
-      check(:migrations, &migrations_current?/0),
-      check(:plugins, &plugins_ok?/0),
+      component(:migrations, if(migrations.pending == 0, do: :operational, else: :degraded), nil),
+      component(:plugins, if(is_list(plugins), do: :operational, else: :degraded), nil),
       check(:mail, &mail_deliverable?/0),
       codelists_component(),
       kek_previous_component()
@@ -43,6 +48,8 @@ defmodule Barkpark.Status do
       open_incidents: length(incidents),
       version: safe(fn -> Barkpark.BuildInfo.version() end, "unknown"),
       commit: commit(),
+      migrations: migrations,
+      plugins_enabled: if(is_list(plugins), do: length(plugins)),
       uptime_seconds: node_uptime_seconds(),
       checked_at: DateTime.utc_now()
     }
@@ -190,13 +197,42 @@ defmodule Barkpark.Status do
     match?({:ok, _}, Repo.query("SELECT 1"))
   end
 
-  defp migrations_current? do
-    Ecto.Migrator.migrations(Repo)
-    |> Enum.all?(fn {status, _v, _n} -> status == :up end)
+  @doc """
+  Migration state of this node: the highest APPLIED migration version and how
+  many on-disk migrations are still PENDING (`:down`).
+
+  One `Ecto.Migrator.migrations/2` read — the same read the `:migrations`
+  component's verdict comes from (`pending == 0` is operational), so the
+  published numbers and the colour cannot drift apart.
+
+  A probe that fails reports `%{latest_applied: nil, pending: nil}`: UNKNOWN,
+  never a `0` that would read as "nothing pending". `latest_applied` is also
+  `nil` on a database with no applied migration at all.
+
+  `directories` defaults to the repo's own migrations path; a caller (a test)
+  may point it at another directory to stage a pending migration.
+  """
+  @spec migration_state([String.t()] | nil) :: %{
+          latest_applied: non_neg_integer() | nil,
+          pending: non_neg_integer() | nil
+        }
+  def migration_state(directories \\ nil) do
+    case safe(fn -> read_migrations(directories) end, :probe_failed) do
+      list when is_list(list) -> summarize_migrations(list)
+      _ -> %{latest_applied: nil, pending: nil}
+    end
   end
 
-  defp plugins_ok? do
-    is_list(Barkpark.Plugins.Registry.all())
+  defp read_migrations(nil), do: Ecto.Migrator.migrations(Repo)
+  defp read_migrations(dirs), do: Ecto.Migrator.migrations(Repo, dirs)
+
+  defp summarize_migrations(list) do
+    applied = for {:up, version, _name} <- list, do: version
+
+    %{
+      latest_applied: if(applied == [], do: nil, else: Enum.max(applied)),
+      pending: Enum.count(list, &match?({:down, _, _}, &1))
+    }
   end
 
   # A node whose mailer discards every message is NOT operational: password

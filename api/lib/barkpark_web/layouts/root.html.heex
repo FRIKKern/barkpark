@@ -34,6 +34,9 @@
       }
       var stored = localStorage.getItem(KEY);
       document.documentElement.dataset.theme = stored || osTheme();
+      // spd-b1 — remembered inspector collapse (written only at `wide`, by the
+      // phx:inspector-pref listener at the bottom of <body>).
+      if (localStorage.getItem("barkpark_inspector") === "closed") document.documentElement.dataset.inspectorPref = "closed";
       // Follow OS live ONLY while the user has made no explicit choice.
       window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (e) {
         if (localStorage.getItem(KEY)) return;
@@ -2330,8 +2333,20 @@
        SCOPE IS LOAD-BEARING (D92): `html:not([data-width-bucket="wide"])`.
        At viewport 1280 and 1440 the inspector docks and costs nothing, epic
        criterion 2 is measured there, and the round-2 floor slice takes its
-       676px input from those rows. This rule may not move one pixel there. */
-    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) {
+       676px input from those rows. This rule may not move one pixel there.
+
+       THE ONE WIDE EXCEPTION IS OPT-IN (spd-b1-pane-state-persistence):
+       `html[data-inspector-pref="closed"]` — stamped by the pre-paint head
+       script ONLY when the user collapsed the inspector at `wide` on an
+       earlier visit (localStorage `barkpark_inspector`). The default wide
+       desk never carries it, so D92's band is untouched. It exists for the
+       static render alone: connect_params is nil there, so the server still
+       paints `.is-open`, and this alternative paints it as the strip the user
+       left. The connected render then seeds `sidebar_open: false`
+       (`.is-collapsed`, the same geometry), after which this alternative can
+       no longer match. It never paints anything OPEN, at any bucket. */
+    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]),
+    html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) {
       position: static;
       flex: 0 0 auto;
       width: auto;
@@ -2347,7 +2362,9 @@
       z-index: auto;
     }
     html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title,
-    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
+    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body,
+    html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title,
+    html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
       display: none;
     }
 
@@ -5181,6 +5198,23 @@
     let userName = localStorage.getItem("barkpark_user_name") || "";
     let userColor = localStorage.getItem("barkpark_user_color") || "";
 
+    // spd-b1-pane-state-persistence — the remembered inspector collapse. The
+    // server pushes `inspector-pref` only from a toggle at `wide`
+    // (Handlers.Paper.remember_inspector_pref/3); this writes the key the
+    // head pre-paint reads and keeps the <html> stamp in step with it, so a
+    // later reload's first paint agrees with the socket. Read back into the
+    // socket via the `inspector_closed` connect param below — connected mount
+    // only; the static render never sees it.
+    window.addEventListener("phx:inspector-pref", (e) => {
+      const closed = !!(e.detail && e.detail.closed);
+      try {
+        if (closed) localStorage.setItem("barkpark_inspector", "closed");
+        else localStorage.removeItem("barkpark_inspector");
+      } catch (_) {}
+      if (closed) document.documentElement.dataset.inspectorPref = "closed";
+      else delete document.documentElement.dataset.inspectorPref;
+    });
+
     let Hooks = {};
 
     // SheetGrid — the Studio sheet grid editor's thin client half
@@ -6601,6 +6635,7 @@
         user_id: userId,
         user_name: userName,
         user_color: userColor,
+        inspector_closed: document.documentElement.dataset.inspectorPref === "closed",
         ...(window.BarkparkPaperEditorConnectParams?.() || {})
       }),
       hooks: Hooks,

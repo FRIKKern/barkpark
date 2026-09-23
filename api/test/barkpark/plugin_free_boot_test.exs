@@ -488,6 +488,13 @@ defmodule Barkpark.PluginFreeBootTest do
              "supervision tree contains plugin children: #{inspect(offenders)}"
     end
 
+    test "no pre-write fence resolves: the writer runs no plugin fence under :plugins []" do
+      # task-e5baaaa14ddf2e1c — the Tasks write fences moved behind
+      # `pre_write_fences/0`; with nothing registered the list the writer
+      # runs is empty, not a Tasks-shaped residue.
+      assert Barkpark.Plugins.Registry.collect_pre_write_fences() == []
+    end
+
     test "GET /studio/production renders 200 with Structure marker (following the scoped-shell redirect)" do
       conn = get_following_redirects("/studio/production")
       body = html_response(conn, 200)
