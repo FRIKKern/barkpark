@@ -457,6 +457,28 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
     end
   end
 
+  # ── past the gzip member ──────────────────────────────────────────────────
+  #
+  # zlib at window bits 31 stops at the end of the FIRST gzip member. Whatever
+  # follows it — a second member, or junk — is never inflated, parsed or counted
+  # by `max_total_bytes`. The framing block above closed the tail INSIDE the
+  # member (after the tar marker); this is the layer outside it.
+  describe "bytes after the gzip member ends (PIN: current behaviour)" do
+    test "a two-member .tar.gz stages the FIRST member only", %{dest: dest} do
+      second = tarball([file_entry("second.html", "<!doctype html><title>2</title>")])
+      raw = gz(astro_dist()) <> gz(second)
+
+      assert {:ok, %{entries: 5, bytes: 94}} = stage_bytes(raw, dest)
+      refute File.exists?(Path.join(dest, "second.html"))
+    end
+
+    test "a member followed by 10 000 junk bytes stages", %{dest: dest} do
+      raw = gz(astro_dist()) <> :crypto.strong_rand_bytes(10_000)
+
+      assert {:ok, %{entries: 5, bytes: 94}} = stage_bytes(raw, dest)
+    end
+  end
+
   # ── the served shape ──────────────────────────────────────────────────────
 
   # The CLI already refuses to PACK a directory with no root `index.html`
