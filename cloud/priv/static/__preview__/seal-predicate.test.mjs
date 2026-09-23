@@ -2171,8 +2171,15 @@ const cannedLedger = (o) => 'function q(params) {\n'
   // `parent_id: "cloud-console-hardening-epic"`, so serving them under any OTHER parent
   // was always a stub answering a question it was not asked; it simply had no reader
   // until the walk could descend. Every canned row is therefore a LEAF.
-  + '  if (p.get("filter[parent_id]") !== "cloud-console-hardening-epic")\n'
-  + '    return { result: { documents: [], count: 0, offset: 0, limit: Number(p.get("limit") || 0), total: 0 } };\n'
+  // `grand: { "<row id>": n }` gives that canned row n LEAF children of its own, so the
+  // walk has a second level to prune into (task-0217190472c7aad7). Paged like the epic.
+  + '  if (p.get("filter[parent_id]") !== "cloud-console-hardening-epic") {\n'
+  + '    const G = ' + JSON.stringify(o.grand || {}) + ', par = p.get("filter[parent_id]"), gn = G[par] || 0;\n'
+  + '    const goff = Number(p.get("offset") || 0), glim = Number(p.get("limit") || 0), gd = [];\n'
+  + '    for (let i = goff; i < Math.min(goff + glim, gn); i += 1)\n'
+  + '      gd.push({ _id: par + "-" + i, _createdAt: "2026-02-01T00:00:00." + String(i).padStart(9, "0") + "Z", lifecycle_status: "done", parent_id: par });\n'
+  + '    return { result: { documents: gd, count: gd.length, offset: goff, limit: glim, total: gn } };\n'
+  + '  }\n'
   + '  const ROWS = ' + (o.rows === Infinity ? 'Infinity' : String(o.rows))
   + ', TOTAL = ' + (o.total === undefined || o.total === null ? 'null' : String(o.total))
   + ', DESC = ' + Boolean(o.descending)
@@ -2182,7 +2189,7 @@ const cannedLedger = (o) => 'function q(params) {\n'
   + '  const stamp = (i) => "2026-01-01T00:00:00." + String(DESC ? 999999999 - i : i).padStart(9, "0") + "Z";\n'
   + '  const docs = [];\n'
   + '  for (let i = off; i < Math.min(off + lim, ROWS); i += 1)\n'
-  + '    docs.push({ _id: "row-" + i, _createdAt: stamp(i), lifecycle_status: "done", parent_id: "cloud-console-hardening-epic" });\n'
+  + '    docs.push({ _id: "row-" + i, _createdAt: stamp(i), lifecycle_status: "done", parent_id: ' + JSON.stringify(o.rowParent || 'cloud-console-hardening-epic') + ' });\n'
   + '  const result = { documents: docs, count: docs.length, offset: off, limit: lim };\n'
   + '  if (TOTAL !== null) result.total = TOTAL;\n'
   + '  return { result };\n'
@@ -2209,10 +2216,38 @@ const cannedTasks = (o) => {
   // a gap — `ROSTER-DRAFT-BLIND` on a parent the test never meant to describe. The count
   // belongs to the one parent the canned roster actually serves.
   return 'function qTasks(id) {\n'
-    + '  return { doc: { child_count: id === "cloud-console-hardening-epic" ? ' + n + ' : 0 } };\n'
+    // `grand` parents answer their own count; with no `grand` the line is byte-for-byte
+    // the one the wave-66 arms anchor on.
+    + '  const G = ' + JSON.stringify(o.grand || {}) + ';\n'
+    + '  return { doc: { child_count: id === "cloud-console-hardening-epic" ? ' + n + ' : ' + (o.grand ? '(G[id] || 0)' : '0') + ' } };\n'
     + '}\n'
     + 'function _unused_real_qTasks(id) {';
 };
+
+// THE CHILD-COUNT LIST, CANNED (task-0217190472c7aad7). The pruned walk reads
+// `/v1/tasks?parent_id=<id>&view=brief` once per parent it descends, and this file is
+// hermetic, so that read is canned beside `q` and `qTasks` — `withLedger` stubs all three
+// or the must() anchor reds. It answers the same tree the canned `q` serves: the epic's
+// `row-N` rows, each with child_count `grand[id]` or 0, and each `grand` parent's own
+// leaves. `list:` makes it misbehave in ONE way at a time:
+//   honest      (default) the list the ledger would serve
+//   unfiltered  every row names a stranger as its parent — a dropped `parent_id`
+//   no-count    no row carries a child_count — nothing may be called a leaf
+//   stuck       the answered window is not the one asked for
+const cannedTaskList = (o) => 'function qTaskList(parentId, offset) {\n'
+  + '  const G = ' + JSON.stringify(o.grand || {}) + ', MODE = ' + JSON.stringify(o.list || 'honest') + ';\n'
+  + '  const N = ' + (o.rows === Infinity ? '0' : String(Number(o.rows || 0))) + ';\n'
+  + '  const ids = [];\n'
+  + '  if (parentId === "cloud-console-hardening-epic") for (let i = 0; i < N; i += 1) ids.push("row-" + i);\n'
+  + '  else for (let i = 0; i < (G[parentId] || 0); i += 1) ids.push(parentId + "-" + i);\n'
+  + '  const docs = ids.map((id) => {\n'
+  + '    const d = { doc_id: id, parent_id: MODE === "unfiltered" ? "cch-a-stranger-parent" : parentId, lifecycle_status: "done" };\n'
+  + '    if (MODE !== "no-count") d.child_count = G[id] || 0;\n'
+  + '    return d;\n'
+  + '  });\n'
+  + '  return { ok: true, docs, page: { offset: MODE === "stuck" ? offset + 1 : offset, limit: 1000, has_more: false, next_offset: null, returned: docs.length } };\n'
+  + '}\n'
+  + 'function _unused_real_qTaskList(parentId, offset) {';
 const must = (s, from, to) => { assert.ok(s.includes(from), `anchor drifted: ${from}`); return replaceUnique(s, from, to); };
 const chain = (...fns) => (s) => fns.reduce((acc, f) => f(acc), s);
 // A CANNED LEDGER HOLDS NO PRIOR CENSUS. The committed census for this epic
@@ -2224,8 +2259,10 @@ const cannedCensusDefault = 'function censusDefaultPath() {\n  return null;\n}\n
   + 'function _unused_real_censusDefaultPath() {';
 const withLedger = (o) => (s) => must(
   must(
-    must(s, 'function q(params) {', cannedLedger(o)),
-    'function qTasks(id) {', cannedTasks(o)),
+    must(
+      must(s, 'function q(params) {', cannedLedger(o)),
+      'function qTasks(id) {', cannedTasks(o)),
+    'function qTaskList(parentId, offset) {', cannedTaskList(o)),
   'function censusDefaultPath() {', cannedCensusDefault);
 const withPageLimit = (n) => (s) => must(s, 'const ROSTER_PAGE_LIMIT = 500;', `const ROSTER_PAGE_LIMIT = ${n};`);
 const withMaxPages = (n) => (s) => must(s, 'const ROSTER_MAX_PAGES = 40;', `const ROSTER_MAX_PAGES = ${n};`);
@@ -2437,6 +2474,122 @@ test('wave 29: a curl failure NAMES the HTTP status and the request_id it had al
   assert.match(token(out), /code=LEDGER-UNREADABLE/);
   assert.doesNotMatch(out, /unexpected TypeError/,
     'the pre-fix shape: a bare TypeError naming neither the status nor the request_id');
+});
+
+// ── task-0217190472c7aad7 — THE WALK PAYS FOR PARENTS, NOT FOR LEAVES ──────────────────
+// MEASURED 2026-09-20: clause (a) read cloud-console-hardening-epic with one roster read
+// and one draft cross-check PER NODE — ~950 nodes, 15-25 minutes, to find 7 rows below the
+// first level. The walk now reads each descended parent's child-count list ONCE and does
+// not read a child whose own count is exactly 0. These arms pin that the prune changes the
+// COST and nothing else, that absence is never a leaf, and that the new read refuses the
+// same shapes the old one did.
+const cost = (out) => (out.match(/^cost: walk read (\d+) node\(s\), pruned (\d+) leaf row\(s\)  ledger requests (\d+)/m) || []).slice(1).map(Number);
+const noPrune = (s) => must(s, '(rosterOf === fetchRoster ? ledgerLeavesOf : null)', 'null');
+
+test('task-0217 THE PRUNE CHANGES THE COST AND NOTHING ELSE: a depth-2 tree reads its 3 parents, not its 12 nodes', () => {
+  // 7 direct rows (page limit 3, so the epic itself pages 3+3+1), two of which carry
+  // children: row-2 has 3, row-5 has 1. Depth 2, 11 rows — the live epic's shape in
+  // miniature (948 leaves + 2 parents over 7 grandchildren).
+  const tree = chain(withLedger({ rows: 7, total: 7, grand: { 'row-2': 3, 'row-5': 1 } }), withPageLimit(3));
+  const pruned = rosterRun(tree);
+  assert.notEqual(pruned.status, INFRA, `a readable tree is not an infra fault: ${token(pruned.out)}`);
+  assert.match(token(pruned.out), /\broster=11\b.* direct=7 depth=2 subtree-unread=0\b/);
+  assert.match(pruned.out, /^depth: 2 level\(s\) walked \(cap 8\)  direct 7 \+ below 4 = 11  subtree-unread 0$/m);
+  assert.deepEqual(cost(pruned.out).slice(0, 2), [3, 9],
+    'the epic, row-2 and row-5 are READ; the 5 leaf rows of the epic and all 4 grandchildren are PRUNED');
+
+  // THE CONTROL — the unpruned walk (the pre-change behaviour, one read per node) over the
+  // SAME canned ledger. The verdict token must be byte-identical: same population, same
+  // depth, same letters. Only the cost line differs, and it differs in the direction the
+  // row was filed about.
+  const unpruned = rosterRun(chain(tree, noPrune));
+  assert.equal(token(unpruned.out), token(pruned.out), 'the prune may not change one byte of the verdict');
+  assert.deepEqual(cost(unpruned.out).slice(0, 2), [12, 0], 'unpruned, every one of the 11 rows is read, plus the epic');
+});
+
+test('task-0217 ABSENCE IS NEVER A LEAF: a list with no child_count prunes nothing, and a bad list REFUSES by name', () => {
+  const base = { rows: 7, total: 7, grand: { 'row-2': 3, 'row-5': 1 } };
+  const honest = rosterRun(chain(withLedger(base), withPageLimit(3)));
+
+  // No row carries a count: nothing may be called a leaf, so every node is read — the
+  // pre-change cost — and the verdict is still the same verdict.
+  const blind = rosterRun(chain(withLedger({ ...base, list: 'no-count' }), withPageLimit(3)));
+  assert.equal(token(blind.out), token(honest.out), 'an unreadable count costs reads, never rows');
+  assert.deepEqual(cost(blind.out).slice(0, 2), [12, 0]);
+
+  // A list whose rows name another parent is a DROPPED `parent_id`, and a leaf read off the
+  // whole task table is a guess.
+  const unfiltered = rosterRun(chain(withLedger({ ...base, list: 'unfiltered' }), withPageLimit(3)));
+  assert.equal(unfiltered.status, INFRA);
+  assert.match(token(unfiltered.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=SUBTREE-COUNTS-UNFILTERED/);
+  assert.match(unfiltered.out, /a filter this endpoint DROPPED and answered unfiltered/);
+  // THE CONTROL — without the identity arm the same list is trusted.
+  const trusting = rosterRun(chain(withLedger({ ...base, list: 'unfiltered' }), withPageLimit(3),
+    (s) => must(s, 'if (stripDrafts(d.parent_id) !== stripDrafts(parent))', 'if (false)')));
+  assert.notEqual(trusting.status, INFRA, 'the mutation must actually remove the refusal');
+  assert.doesNotMatch(token(trusting.out), /SUBTREE-COUNTS-UNFILTERED/);
+
+  // An answered window that is not the one asked for.
+  const stuck = rosterRun(chain(withLedger({ ...base, list: 'stuck' }), withPageLimit(3)));
+  assert.equal(stuck.status, INFRA);
+  assert.match(token(stuck.out), /code=SUBTREE-COUNTS-TRUNCATED/);
+  assert.match(stuck.out, /was asked for offset 0 and answered offset 1/);
+});
+
+test('task-0217 a roster row under ANOTHER parent is a dropped filter[] and REFUSES (ROSTER-UNFILTERED)', () => {
+  // The per-node walk caught an unfiltered roster only INCIDENTALLY, as ROSTER-CYCLE one
+  // level down, because it read every row's own roster and met the table again. The pruned
+  // walk does not read leaves, so the identity of every roster row is now checked by name.
+  const dropped = chain(withLedger({ rows: 4, total: 4, rowParent: 'cch-a-stranger-parent' }), withPageLimit(3));
+  const refused = rosterRun(dropped);
+  assert.equal(refused.status, INFRA);
+  assert.match(token(refused.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=ROSTER-UNFILTERED/);
+  assert.match(refused.out, /carries a row whose parent_id is "cch-a-stranger-parent" \(row-0\) at offset 0/);
+
+  // THE CONTROL — without the arm, four rows of somebody else's roster are certified as
+  // this epic's, clause (a) clean.
+  const blind = rosterRun(chain(dropped, (s) => must(s, 'if (d && d.parent_id !== parentId)', 'if (false)')));
+  assert.notEqual(blind.status, INFRA, 'the mutation must actually remove the refusal');
+  assert.match(token(blind.out), /\ba=PASS\b.*\broster=4\b/);
+});
+
+test('task-0217 A RUN THAT SPANS A MOVE OF origin/main REFUSES BY NAME; one that does not carries head AND head-end', () => {
+  // The heads are read through ONE function at the start and again at the end. A stub that
+  // answers the real heads first and a moved origin/main second is a merge fetched while the
+  // roster walk was descending — the 2026-09-20 shape, compressed from 19 minutes to one run.
+  const moved = (field) => (s) => must(s, 'function repoHeads() {',
+    'let _headReads = 0;\n'
+    + 'function repoHeads() {\n'
+    + '  _headReads += 1;\n'
+    + '  const real = _unused_real_repoHeads();\n'
+    + `  return _headReads === 1 ? real : { ...real, ${field}: "f".repeat(40) };\n`
+    + '}\n'
+    + 'function _unused_real_repoHeads() {');
+  const ledger = chain(withLedger({ rows: 3, total: 3 }), withPageLimit(3));
+
+  const still = rosterRun(ledger);
+  assert.notEqual(still.status, INFRA, `an unmoved tree is not an infra fault: ${token(still.out)}`);
+  const m = token(still.out).match(/ head=([0-9a-f]{7,}) head-end=([0-9a-f]{7,}) /);
+  assert.ok(m, `the token carries BOTH ends of the window: ${token(still.out)}`);
+  assert.equal(m[2], m[1], 'an unmoved run ends on the head it started on');
+
+  for (const field of ['originMain', 'head']) {
+    const outran = rosterRun(chain(ledger, moved(field)));
+    assert.equal(outran.status, INFRA, `${field} moved mid-run: a verdict now would certify a head the run outran`);
+    assert.match(token(outran.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=REPO-MOVED-DURING-RUN/);
+    // UNREADABLE at the start is the depth-1 runner's shape (no origin/main ref at all);
+    // a ref that APPEARS mid-run is a move too.
+    assert.match(outran.out, new RegExp(`MOVED DURING THIS RUN: ${field === 'head' ? 'HEAD' : 'origin/main'} (?:[0-9a-f]{12}|UNREADABLE) -> f{12}`));
+    assert.doesNotMatch(token(outran.out), /\ba=(PASS|FAIL)\b/, 'no clause letter over a tree that moved under the run');
+
+    // THE CONTROL — RED WITHOUT. Disarm the end fence and the same moved run prints a
+    // verdict carrying only the START head: the silent outrun this row was filed about.
+    const silent = rosterRun(chain(ledger, moved(field),
+      (s) => must(s, 'const HEAD_END = RUN_START ? assertRepoUnmovedSince(RUN_START) : null;', 'const HEAD_END = null;')));
+    assert.notEqual(silent.status, INFRA, 'the mutation must actually remove the fence');
+    assert.match(token(silent.out), /\ba=PASS\b/, 'without the fence, a verdict over a tree that moved');
+    assert.doesNotMatch(token(silent.out), /head-end=/, 'and nothing in it says the head moved');
+  }
 });
 
 test('wave 30: a ledger this program could not REACH is an INFRA FAULT that says so by name', () => {

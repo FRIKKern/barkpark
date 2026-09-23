@@ -687,7 +687,12 @@ function retryAfterSeconds(parsed) {
 
 // ONE curl, split into { status, body, parsed }. Every reader below shares it so the
 // trailing-whitespace handling and the status/body split have exactly one owner.
+// EVERY REQUEST ON THE WIRE IS COUNTED, retries included, so the cost of a run is a number
+// the run prints rather than a figure somebody estimates afterwards (task-0217190472c7aad7:
+// the per-node walk cost ~950 reads and 15-25 minutes, and nothing in its output said so).
+let LEDGER_REQUESTS = 0;
 function curlOnce(args, unreachable) {
+  LEDGER_REQUESTS += 1;
   let raw;
   try { raw = execFileSync('curl', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
   catch (e) { throw new Infra(unreachable(String(e.message).slice(0, 90)), 'LEDGER-UNREACHABLE'); }
@@ -798,6 +803,40 @@ function qTasks(id) {
     throw new Infra(`/v1/tasks/${id} response is not JSON (HTTP ${status}; ${body.slice(0, 60).replace(/\s+/g, ' ')})`, 'DRAFT-CROSSCHECK-UNREADABLE');
   return parsed;
 }
+// THE CHILD-COUNT READ, ONE PAGE PER PARENT, NOT ONE READ PER CHILD (task-0217190472c7aad7).
+//
+// `/v1/tasks?parent_id=<id>&view=brief` is the task layer's LIST, and every row it returns
+// carries that row's OWN `child_count` — computed by one grouped query over EVERY task row
+// (published and draft, every lifecycle status) keyed by the drafts-stripped `parent_id`,
+// the same producer `/v1/tasks/:id` reads for the cross-check above. Measured live
+// 2026-09-23 on cloud-console-hardening-epic: one page, 950 rows (4 of them `drafts.`),
+// child_count 0 on 948 of them, 1 and 6 on the other two. So the per-node walk was paying
+// two reads per child to learn, 948 times, a zero this one read already states.
+//
+// Same status discipline as `q()` and `qTasks()`: an unreadable count is a refusal, never
+// "no children".
+const TASK_LIST_PAGE_LIMIT = 1000;   // the endpoint's own clamp
+const TASK_LIST_MAX_PAGES = 20;
+function qTaskList(parentId, offset) {
+  const a = ['-sG', `${SERVER}/v1/tasks`, '-w', '\n%{http_code}'];
+  for (const [k, v] of [['parent_id', parentId], ['view', 'brief'], ['limit', String(TASK_LIST_PAGE_LIMIT)], ['offset', String(offset)]])
+    a.push('--data-urlencode', `${k}=${v}`);
+  a.push('-H', `Authorization: Bearer ${TOKEN}`);
+  const { status, body, parsed, ...bp } = curlWithBackpressure(
+    a, (m) => `curl failed reaching /v1/tasks?parent_id=${parentId}: ${m}`, `the child-count list of ${parentId}`);
+  if (!/^2\d\d$/.test(status)) {
+    if (bp.rateLimited) throw new Infra(throttledMessage({ parsed, ...bp }, `the child-count list of ${parentId}`), 'LEDGER-RATE-LIMITED');
+    const err = (parsed && (parsed.error || parsed)) || {};
+    throw new Infra(
+      `the ledger answered HTTP ${status} for /v1/tasks?parent_id=${parentId} — error.code=${err.code || '(none named)'} request_id=${(parsed && (parsed.request_id || err.request_id)) || '(none returned)'} message=${String(err.message || '').slice(0, 90) || '(none)'}. `
+      + 'This is the CHILD-COUNT read the subtree walk prunes leaves by. Without it no child can be called a leaf, so nothing is asserted about clause (a).',
+      'SUBTREE-COUNTS-UNREADABLE');
+  }
+  if (parsed === null)
+    throw new Infra(`/v1/tasks?parent_id=${parentId} response is not JSON (HTTP ${status}; ${body.slice(0, 60).replace(/\s+/g, ' ')})`, 'SUBTREE-COUNTS-UNREADABLE');
+  return parsed;
+}
+
 // NEVER bare ?parent_id= — proven at Decide to silently return 500 unfiltered rows.
 //
 // AND NEVER AN UNCHECKED PAGE. `result.count` is the PAGE SIZE, not a total. Waves 29–63
@@ -892,6 +931,14 @@ const fetchRoster = (parentId) => {
     // the walk is paging over a sequence that is not the one it asked for, and offset
     // paging over a re-sorting population skips rows.
     for (const d of docs) {
+      // THE FILTER MUST HAVE BEEN APPLIED. A dropped `filter[]` answers HTTP 200 with the
+      // whole task table (measured 2026-08-22 on the by-id read), and the per-node walk only
+      // caught that shape INCIDENTALLY, as ROSTER-CYCLE one level down. The pruned walk
+      // descends far fewer nodes, so the check is made here, on every row, by name.
+      if (d && d.parent_id !== parentId)
+        throw new Infra(
+          `the roster of ${parentId} carries a row whose parent_id is ${JSON.stringify(d.parent_id)} (${d._id || 'id absent'}) at offset ${offset}. \`filter[parent_id]=${parentId}\` was requested, so a row under another parent is a filter this endpoint DROPPED and answered unfiltered. A roster read that way is not this parent's roster. Nothing is asserted about clause (a).`,
+          'ROSTER-UNFILTERED');
       const at = d && d._createdAt;
       if (typeof at !== 'string' || at === '')
         throw new Infra(
@@ -1101,25 +1148,94 @@ const fetchRoster = (parentId) => {
 //     server-total cross-check, draft cross-check) and any one of them failing refuses
 //     the ENTIRE walk rather than one branch of it.
 //
-// COST, STATED: two requests per node visited — one `/v1/data/query` page plus one
-// `/v1/tasks/:id` draft cross-check. The filing's note that "the endpoint returns no
-// child_count" is true of `/v1/data/query` and FALSE of `/v1/tasks/:id`, which this file
-// already reads per node, so a childless-node prune IS available. It is deliberately not
-// taken here: it would add a live-only branch no fixture can exercise, and the honest
-// number to quote is the unpruned one.
+// COST, STATED — AND NOW PRUNED (task-0217190472c7aad7). The unpruned walk paid two
+// requests per node visited — one `/v1/data/query` page plus one `/v1/tasks/:id` draft
+// cross-check — including every LEAF, whose answer is always "nothing". Measured
+// 2026-09-20 on cloud-console-hardening-epic: ~950 nodes, ~1,900 reads, 15-25 minutes, to
+// find 7 rows below the first level. A 20-minute read on a merge-busy day outran the head
+// it certified against (see `assertRepoUnmovedSince`).
+//
+// THE PRUNE: after a parent's roster is read (in full, through every arm of
+// `fetchRoster`), ONE list read of that parent (`ledgerLeavesOf`) states each child's own
+// `child_count`. A child whose count is EXACTLY the number 0 is a leaf and is not read;
+// every other child — count > 0, count absent, count not a number, two pages disagreeing,
+// or the child missing from the list — is descended exactly as before. Absence is never
+// evidence of a leaf, so a list that is short, stale or re-sorted mid-read costs reads,
+// never rows. Every node that IS read still passes every refusal `fetchRoster` has.
+//
+// A STUBBED ROSTER SOURCE GETS NO PRUNE (see `leavesFor`): a mutation proof that stands a
+// canned roster in at the `rosterSource` seam must not reach the network through the
+// leaf read behind it.
 const ROSTER_MAX_DEPTH = 8;
-function walkSubtree(rootId, rosterOf) {
+const stripDrafts = (id) => (typeof id === 'string' && id.startsWith('drafts.') ? id.slice('drafts.'.length) : id);
+function ledgerLeavesOf(parent, kids) {
+  const counts = new Map();
+  let offset = 0;
+  for (let page = 1; ; page += 1) {
+    if (page > TASK_LIST_MAX_PAGES)
+      throw new Infra(
+        `the child-count list of ${parent} could not be paginated to the end — ${TASK_LIST_MAX_PAGES} pages of ${TASK_LIST_PAGE_LIMIT} were read (${counts.size} rows). A list that does not terminate is a broken endpoint, and no child can be called a leaf off it. Nothing is asserted about clause (a).`,
+        'SUBTREE-COUNTS-TRUNCATED');
+    const parsed = qTaskList(parent, offset);
+    const docs = parsed && parsed.docs;
+    const pg = parsed && parsed.page;
+    if (!Array.isArray(docs) || !pg || typeof pg !== 'object' || (pg.has_more !== true && pg.has_more !== false))
+      throw new Infra(`/v1/tasks?parent_id=${parent} answered no \`docs\` array or no \`page.has_more\`, so no child of it can be called a leaf. Nothing is asserted about clause (a).`, 'SUBTREE-COUNTS-UNREADABLE');
+    // THE WINDOW MUST BE THE ONE ASKED FOR — an `offset` the server ignored re-serves page 1.
+    if (pg.offset !== offset)
+      throw new Infra(`the child-count list of ${parent} was asked for offset ${offset} and answered offset ${JSON.stringify(pg.offset)} — \`offset\` did not move the window. Nothing is asserted about clause (a).`, 'SUBTREE-COUNTS-TRUNCATED');
+    for (const d of docs) {
+      if (!d || typeof d.doc_id !== 'string' || d.doc_id === '')
+        throw new Infra(`the child-count list of ${parent} carries a row with no doc_id. Nothing is asserted about clause (a).`, 'SUBTREE-COUNTS-UNREADABLE');
+      // THE FILTER MUST HAVE BEEN APPLIED. `parent_id` is matched drafts-stripped on the
+      // server, so it is compared drafts-stripped here. A row under another parent is a
+      // dropped filter, and a leaf read off the whole task table is a guess.
+      if (stripDrafts(d.parent_id) !== stripDrafts(parent))
+        throw new Infra(
+          `the child-count list of ${parent} carries ${d.doc_id} with parent_id ${JSON.stringify(d.parent_id)}. \`parent_id=${parent}\` was requested, so a row under another parent is a filter this endpoint DROPPED and answered unfiltered, and no child can be called a leaf off it. Nothing is asserted about clause (a).`,
+          'SUBTREE-COUNTS-UNFILTERED');
+      // A row served twice with two different counts is not a count: mark it unknown, and
+      // unknown is descended.
+      const prev = counts.get(d.doc_id);
+      counts.set(d.doc_id, prev === undefined || prev === d.child_count ? d.child_count : NaN);
+    }
+    if (pg.has_more === false) break;
+    if (typeof pg.next_offset !== 'number' || !(pg.next_offset > offset))
+      throw new Infra(`the child-count list of ${parent} says has_more at offset ${offset} and names no next_offset beyond it (${JSON.stringify(pg.next_offset)}). Nothing is asserted about clause (a).`, 'SUBTREE-COUNTS-TRUNCATED');
+    offset = pg.next_offset;
+  }
+  const leaves = new Set();
+  for (const k of kids) if (k && counts.get(k._id) === 0) leaves.add(k._id);
+  return leaves;
+}
+// A fixture's leaves are the rows it gives no `subtrees` entry of their own — exactly the
+// ids `subtreeOf` would answer `[]` for — so the fixture path walks the same prune.
+const fixtureLeavesOf = (fixture, seedId) => (parent, kids) => {
+  const tree = (fixture && fixture.subtrees) || {};
+  const leaves = new Set();
+  for (const k of kids)
+    if (k && typeof k._id === 'string' && k._id !== seedId && !Object.prototype.hasOwnProperty.call(tree, k._id)) leaves.add(k._id);
+  return leaves;
+};
+const leavesFor = (fixture, rosterOf, seedId) => (fixture
+  ? fixtureLeavesOf(fixture, seedId)
+  : (rosterOf === fetchRoster ? ledgerLeavesOf : null));
+function walkSubtree(rootId, rosterOf, leavesOf = null) {
   const rows = [];
   const seen = new Set([rootId]);
   let frontier = [rootId];
   let level = 0;
   let depth = 0;
+  let nodesRead = 0;
+  let pruned = 0;
   for (;;) {
     const next = [];
     for (const parent of frontier) {
       const kids = rosterOf(parent);
+      nodesRead += 1;
       if (!Array.isArray(kids))
         throw new Infra(`the roster of ${parent}, reached at depth ${level} under ${rootId}, is not an array of documents`, 'ROSTER-NOT-AN-ARRAY');
+      if (kids.length) depth = level + 1;
       for (const d of kids) {
         if (!d || typeof d._id !== 'string' || d._id === '')
           throw new Infra(
@@ -1131,13 +1247,18 @@ function walkSubtree(rootId, rosterOf) {
             'ROSTER-CYCLE');
         seen.add(d._id);
         rows.push({ ...d, _depth: level + 1, _parent: parent });
+      }
+      // AFTER every row of this parent passed the id and cycle arms above, so a malformed
+      // roster is named by those arms and never by the count read.
+      const leaves = leavesOf && kids.length ? leavesOf(parent, kids) : null;
+      for (const d of kids) {
+        if (leaves && leaves.has(d._id)) { pruned += 1; continue; }
         next.push(d._id);
       }
     }
-    if (next.length === 0) return { rows, depth, unread: [] };
-    depth = level + 1;
-    if (depth >= ROSTER_MAX_DEPTH) return { rows, depth, unread: next };
-    level = depth;
+    if (next.length === 0) return { rows, depth, unread: [], nodesRead, pruned };
+    if (level + 1 >= ROSTER_MAX_DEPTH) return { rows, depth, unread: next, nodesRead, pruned };
+    level += 1;
     frontier = next;
   }
 }
@@ -1985,10 +2106,12 @@ function pushLadder(L, ladder) {
 // and its token spells out which letters were never read. See the D83 boundary in
 // the header: manufacturing a successor to force a verdict is forbidden; reading the
 // ladder without claiming one is exactly how you avoid having to.
-function ladderOnly(fixture, guardOverride, stamp, head) {
+function ladderOnly(fixture, guardOverride, stamp, head, runStart = null) {
   const L = [];
   const waivers = new Set(fixture ? (fixture.unmeasuredWaivers || []) : []);
   const ladder = evaluateLadder(fixture, guardOverride, waivers);
+  // The same end fence as a verdict run: the ladder runs committed guards off this tree.
+  const headEnd = runStart ? assertRepoUnmovedSince(runStart) : null;
 
   L.push(`=== SEAL PREDICATE — LADDER-ONLY READING, NO VERDICT — epic ${EPIC} ===`);
   L.push(`registers: the ladder below is the ${REGISTER_KEY} register — ${KNOWN_DEFECTS.length} registered defect(s)`);
@@ -2051,7 +2174,7 @@ function ladderOnly(fixture, guardOverride, stamp, head) {
   // file's own tests) anchor on the token's HEAD (`^… LADDER-ONLY b-rungs=…`) and on its
   // TAIL (`mode=live repo=… head=…`), so a new field belongs between the two b-fields and
   // nowhere else.
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} b-unavailable=${unread.length}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} repo=${REPO} head=${head || 'NOT-READ'}`);
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} b-unavailable=${unread.length}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} repo=${REPO} head=${head || 'NOT-READ'}${headEnd ? ` head-end=${headEnd}` : ''}`);
   console.log(L.join('\n'));
   return 0;
 }
@@ -2162,6 +2285,52 @@ function assertRepoNotBehindOriginMain() {
     'REPO-BEHIND-ORIGIN-MAIN');
 }
 
+// THE SAME LEG, ASKED AGAIN AT THE END (task-0217190472c7aad7).
+//
+// The leg above fires once, at START. Measured 2026-09-20: a live run took ~19 minutes, and
+// on a merge-busy day `origin/main` moved while the roster walk was descending — so the
+// `head=` the token printed was the head at START, the verdict was certified against a tree
+// the checkout no longer matched, and nothing in the output said so. The next run then
+// refused at 0.2s with REPO-BEHIND-ORIGIN-MAIN, which was the first anyone heard of it.
+//
+// SO THE HEADS ARE READ TWICE. `repoHeads()` records HEAD and the local
+// `refs/remotes/origin/main` before any clause is read; `assertRepoUnmovedSince` reads them
+// again after every clause has been evaluated and before a verdict is printed. Either one
+// moving is REPO-MOVED-DURING-RUN, an INFRA FAULT naming both ends of the window: the
+// clause-(b) legs read guard files off a tree that changed under them, and a verdict over
+// it is a verdict against a head the run outran. The behind-count is NOT re-asked: it is a
+// function of exactly these two refs, so with both unmoved it is the start answer, and with
+// either moved the run has already refused. A verdict that survives prints `head-end=`, the
+// head at the END, beside `head=`, the head at the start.
+//
+// SAME CEILING AS THE START LEG, NAMED AGAIN: this reads LOCAL refs and does not fetch, so a
+// merge on the remote that nobody fetched during the run moves nothing here.
+function repoHeads() {
+  const head = gitProbe(['rev-parse', 'HEAD']);
+  const om = gitProbe(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main']);
+  return {
+    head: head.rc === 0 && head.out ? head.out : null,
+    originMain: om.rc === 0 && om.out ? om.out : null,
+    at: Date.now(),
+  };
+}
+function assertRepoUnmovedSince(start) {
+  const end = repoHeads();
+  const moved = [];
+  const sh = (x) => (x ? x.slice(0, 12) : 'UNREADABLE');
+  if (start.head !== end.head) moved.push(`HEAD ${sh(start.head)} -> ${sh(end.head)}`);
+  if (start.originMain !== end.originMain) moved.push(`origin/main ${sh(start.originMain)} -> ${sh(end.originMain)}`);
+  if (moved.length)
+    throw new Infra(
+      `--repo ${REPO} MOVED DURING THIS RUN: ${moved.join(', ')}, over ${((end.at - start.at) / 1000).toFixed(1)}s between the start of the run and the end of the last clause. `
+      + 'The freshness leg passed at START, and the clause-(b) legs then read guard files, the workflow file and '
+      + 'every `measured_by` path off a tree that changed underneath them, so a verdict now would be certified against '
+      + 'a head this run outran. Nothing is asserted about any clause. Re-run on the tree as it stands.',
+      'REPO-MOVED-DURING-RUN');
+  const short = gitProbe(['rev-parse', '--short', 'HEAD']);
+  return short.rc === 0 && short.out ? short.out : null;
+}
+
 function assertReadableRepoRoot(ledgerPath) {
   if (!existsSync(`${REPO}/.github/workflows/cloud.yml`))
     throw new Infra(
@@ -2213,6 +2382,9 @@ function main() {
   // BEFORE any clause, any refusal and any roster: is the tree under --repo one this
   // program can read at all? A wrong root is an infra fault, not a finding.
   const HEAD = assertReadableRepoRoot(ledgerPath);
+  // The heads at START, for the fence at the END. Live path only: the fixture path names no
+  // tree (`head=NOT-READ`) and has none to outrun.
+  const RUN_START = HEAD ? repoHeads() : null;
 
   L.push(`=== SEAL PREDICATE — epic ${EPIC} ===`);
   L.push(`read at ${STAMP}${fixture ? '  (LEDGER FIXTURE — not live)' : '  (live ledger)'}  (repo ${REPO}${HEAD ? ` @ ${HEAD}` : ''})`);
@@ -2269,7 +2441,7 @@ function main() {
   // certifies a stub), and BEFORE every successor refusal below. Those four refusals
   // exist to protect a VERDICT, and a reading claims none, so requiring a successor
   // to read the ladder is what made the ladder unreadable for four waves.
-  if (LADDER_ONLY) return ladderOnly(fixture, guardOverride, STAMP, HEAD);
+  if (LADDER_ONLY) return ladderOnly(fixture, guardOverride, STAMP, HEAD, RUN_START);
 
   // R7 — BUCKET (c) HAS NO CARDINALITY FLOOR EITHER. This is R1 and the EMPTY-ROSTER
   // floor pointed at the third population. With `PERMANENT_HUMAN_GATES = {}` the
@@ -2330,7 +2502,7 @@ function main() {
   // proofs assert it is PRESENT before replacing it, so a reword reds loudly here rather
   // than silently putting the suite back on the network.
   const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;
-  const rosterWalk = walkSubtree(EPIC, rosterSource);
+  const rosterWalk = walkSubtree(EPIC, rosterSource, leavesFor(fixture, rosterSource, EPIC));
   const children = rosterWalk.rows;
   const direct = children.filter((c) => c._depth === 1);
   if (rosterWalk.unread.length)
@@ -2385,10 +2557,10 @@ function main() {
     ? fixture.forwarded.map((f) => (typeof f === 'string' ? { _id: f } : f))
     : [];
   const forwardWalk = terminal
-    ? { rows: [], depth: 0, unread: [] }
+    ? { rows: [], depth: 0, unread: [], nodesRead: 0, pruned: 0 }
     : walkSubtree(SUCCESSOR, fixture
       ? (id) => subtreeOf(fixture, id, SUCCESSOR, forwardSeed)
-      : fetchRoster);
+      : fetchRoster, leavesFor(fixture, fetchRoster, SUCCESSOR));
   if (forwardWalk.unread.length)
     throw new Infra(
       `the subtree of the successor ${SUCCESSOR} could not be descended to the end — the walk reached its ${ROSTER_MAX_DEPTH}-level cap with ${forwardWalk.unread.length} node(s) whose children were NEVER READ [${forwardWalk.unread.slice(0, 6).join(', ')}${forwardWalk.unread.length > 6 ? ', …' : ''}]. A forwarding address this walk could not reach is indistinguishable from one that does not exist, and clause (a) would print a correctly-forwarded row as UNNAMED RESIDUE. Nothing is asserted about clause (a).`,
@@ -2533,6 +2705,10 @@ function main() {
   // c=UNKNOWN` and throw away two clause readings that were perfectly available.
   const defectUnread = ladder.filter((e) => e.unavailable.length);
 
+  // ── THE END FENCE. Every clause has now been read; nothing is printed until the tree is
+  // shown not to have moved since the start (see `assertRepoUnmovedSince`).
+  const HEAD_END = RUN_START ? assertRepoUnmovedSince(RUN_START) : null;
+
   // ── output ─────────────────────────────────────────────────────────────────
   L.push(`registers: clause (b) and bucket (c) are scored off the ${REGISTER_KEY} register — ${KNOWN_DEFECTS.length} registered defect(s), ${Object.keys(PERMANENT_HUMAN_GATES).length} permanent human gate(s)`);
   L.push(`epic ${EPIC}   successor: ${terminal ? `${TERMINAL} (no successor — post-condition roster read: live=0 considering=0)` : SUCCESSOR}`);
@@ -2543,6 +2719,10 @@ function main() {
   // THIS run, so a future reader re-derives the relation instead of quoting an integer.
   L.push(`depth: ${rosterWalk.depth} level(s) walked (cap ${ROSTER_MAX_DEPTH})  direct ${direct.length} + below ${children.length - direct.length} = ${children.length}  subtree-unread ${rosterWalk.unread.length}`);
   L.push(`forwarding: successor subtree ${forwardWalk.rows.length} row(s) over ${forwardWalk.depth} level(s)`);
+  // THE COST, PRINTED. `read` is nodes whose roster was fetched; `pruned` is rows the
+  // ledger's own child_count called leaves, never read; `requests` is every HTTP request
+  // this process put on the wire, retries included (0 on the fixture path).
+  L.push(`cost: walk read ${rosterWalk.nodesRead + forwardWalk.nodesRead} node(s), pruned ${rosterWalk.pruned + forwardWalk.pruned} leaf row(s)  ledger requests ${LEDGER_REQUESTS}${RUN_START ? `  wall ${((Date.now() - RUN_START.at) / 1000).toFixed(1)}s` : ''}`);
   L.push(`census: ${census ? `${censusKey} (captured ${census.capturedAt}) — ${Object.keys(census.rows).length} row(s) recorded` : 'NONE — the anti-filing arm was NOT RUN and nothing here claims it passed'}`);
   L.push('');
   L.push(`CLAUSE (a) forwarding — residue ${residue.length} (live ${live.length}, considering ${considering.length})`);
@@ -2667,7 +2847,7 @@ function main() {
   // out of the task layer. Zero is the overwhelming majority of parents, and on those the
   // token stays byte-identical to every one quoted before this field existed.
   const draftCount = children.filter((c) => c && c._draft).length;
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${aPass ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'} direct=${direct.length} depth=${rosterWalk.depth} subtree-unread=${rosterWalk.unread.length} census=${censusKey} filing-events=${filingEvents.length}${reHomed.length ? ` re-homed=${reHomed.length}` : ''}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}${draftCount ? ` drafts=${draftCount}` : ''}`);
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${aPass ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'}${HEAD_END ? ` head-end=${HEAD_END}` : ''} direct=${direct.length} depth=${rosterWalk.depth} subtree-unread=${rosterWalk.unread.length} census=${censusKey} filing-events=${filingEvents.length}${reHomed.length ? ` re-homed=${reHomed.length}` : ''}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}${draftCount ? ` drafts=${draftCount}` : ''}`);
   console.log(L.join('\n'));
   return ok ? 0 : 1;
 }
