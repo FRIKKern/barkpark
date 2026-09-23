@@ -3366,9 +3366,31 @@ const EXPECTATIONS = {
         "the suspended card names the day the plane stamped, and nothing else");
       assert.ok(!grid.includes("The server is stopped"), "the console never paints a stop it does not perform");
       assert.ok(!grid.includes("suspended — not deleted"), "trial-expiry copy never leaks onto the suspended card");
-      // The pill beside it moved with the copy: the WORD is Suspended, and the
-      // `bp-inst--stopped` S4 token (the hue) is deliberately unchanged.
-      assert.ok(!/inst-life-label">Stopped</.test(grid), "no pill paints the literal word Stopped");
+      // The pill beside it moved with the copy: the WORD is Suspended.
+      //
+      // task-b579afe77276b4f8 — this negative used to search a retired lifecycle
+      // label class for the word Stopped.
+      // PR #19569 retired that class; nothing in app.js emits it, so the
+      // negative could never red again. The pill on this card is statusOf()'s
+      // `suspended` arm rendered by statusMetaPill (THE ONE EMITTER), whose label
+      // bytes are `<span class="status-pill-label">WORD</span>`. The lifecycle
+      // ladder (lifecycleStatePillHtml) does not render on the overview grid, so
+      // it is not what this scenario pins.
+      //
+      // Anti-vacuity control FIRST, on the same span shape the negative reads:
+      // if the label bytes stop matching, the list is empty and the negative
+      // would be vacuous again — this reds instead. Then the negative, then the
+      // positive pin on the suspended card's own pill. Checked RED by painting
+      // "Stopped" in statusOf's suspended arm (the negative fires); the old
+      // regex stayed green under the same mutation.
+      const pillLabels = [...grid.matchAll(/<span class="status-pill-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+      assert.ok(pillLabels.length >= 2,
+        `the grid's pill labels are read at all (want the Healthy and suspended boxes' pills, got ${JSON.stringify(pillLabels)})`);
+      assert.ok(!pillLabels.some((l) => /\bStopped\b/i.test(l)),
+        `no pill paints the literal word Stopped (labels: ${JSON.stringify(pillLabels)})`);
+      assert.ok(
+        /suspended-card-banner[\s\S]*?<span class="status-pill status-pill--danger"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Suspended<\/span>/.test(grid),
+        "the suspended card's own pill is the danger pill labelled Suspended");
     },
   },
   // ── gr-p3 D-01: the v4 Fleet list + Archives (screens/01) ──────────────────
