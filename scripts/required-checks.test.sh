@@ -2395,8 +2395,10 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
 # The rule cuts both ways: a name the generator CAN re-derive leaves this list.
 # `PR task gate self-test` and `Re-land advisory (already-landed overlap)` did
 # (task-7ac46837d7b03e44): S8 PULL-REQUEST-ONLY now classifies both off the real
-# workflow tree (§30h/§30j below), and scripts/required-checks-ack-derive.sh
-# reported them as "did not need" on every run. §14b
+# workflow tree on this very pair (generator --explain: pr-task-gate.yml job
+# 'pr-task-gate-selftest', reland-check.yml job 'reland-check'; §30h/§30j below
+# pin the first), and scripts/required-checks-ack-derive.sh reported both as
+# "did not need" on every run. §14b
 # below asserts the refusal that makes this list necessary; every section that
 # wants a successful EMIT passes "$ACK".
 #
