@@ -13,8 +13,9 @@ defmodule BarkparkWeb.SessionAutologTest do
       anywhere grows; a row whose append RAISES → the close still answers 200
       and the task is still done.
 
-  MUTATION PROOF: delete the `autolog_close/2` call in `TasksController.close/2`
-  and `autolog_publish/3` in the ingest controller → the three positive arms
+  MUTATION PROOF: delete the `SessionAutolog.mark/3` calls in
+  `TasksController.close/2` and the ingest controller's two success arms (or
+  the `SessionAutolog.record/4` call in `arm/2`'s callback) → the three positive arms
   red, and so do the unknown-slug and raise arms (they assert the skip was
   LOGGED, which a deleted call never does); the header-absent and
   foreign-workspace arms stay green, as a pure absence must. Delete the

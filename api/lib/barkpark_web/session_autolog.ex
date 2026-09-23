@@ -51,7 +51,7 @@ defmodule BarkparkWeb.SessionAutolog do
   2xx. Calling the append from the receipt-bearing function would make the
   PDS receipt census (`scripts/pds-elixir-receipt-census.exs`, which walks a
   receipt's enclosing def's callees for a write verb) credit the session
-  `Repo.update_all` to the receipt — i.e. file the paper-publish `ok: true` as
+  `Repo.update_all` to the receipt — i.e. file the paper-publish success receipt as
   confirmed by a write it does not report. Keeping the write off the receipt's
   call graph keeps the instrument honest.
 
