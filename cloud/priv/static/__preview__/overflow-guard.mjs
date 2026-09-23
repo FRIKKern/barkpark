@@ -2504,6 +2504,22 @@ async function main() {
       // name element is itself blind to element-local scrollWidth (497/497), so
       // the rect comparison must cross the element boundary — child rect
       // against PARENT rect — to see anything at all.
+      // ── PER-ASSERTION SCORING (cchi-w27-bl-w22s7, criterion 3) ───────────
+      //    This half's clean claim used to be printed whenever the SELECTOR
+      //    still matched — `walked === 0 ? fail : okLine` — so a run in which
+      //    every card in the grid overhung its own edge printed its findings
+      //    AND, underneath them, a ✓ saying the readiness gate stood in front
+      //    of N cards. The ✓ was true about the gate and silent about the
+      //    measurement, which is the shape that reads as a pass.
+      //
+      //    It is now scored against ITS OWN findings, the way half (b) below
+      //    already scores each of its cells (`failures.length === before`): the
+      //    claim is EARNED or WITHHELD, never narrated. And scoring it per half
+      //    is what makes the halves INDEPENDENT — this half can red while (b)
+      //    keeps every ✓ it earned, and (b) can red without costing this half
+      //    the claim it paid for. The leg's exit code is still one number over
+      //    all of them; what changes is that the number is now attributable.
+      const beforeCards = failures.length;
       const CARD_SCENS = ["mixed-fleet", "fleet-cruel-content", "overview-attention", "overview-past-due"];
       // 320..496 is the defect band; 620 is CLEAN on pre-fix bytes (a 588px
       // track holds the 497px name), so a width list that stopped at the widest
@@ -2577,7 +2593,15 @@ async function main() {
       // A selector that stops matching must RED, not sail through zero
       // iterations printing a tick.
       if (walked === 0) fail(D, `#overview: .instances-grid .instance-card matched NOTHING across ${CARD_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes — the selector no longer reaches the population it certifies`);
-      else okLine(`READINESS STOOD IN FRONT OF ${readyPop.join(", ")} card(s) — the gate counts the population it waits for (D228), so a grid caught one card into its paint cannot pass for a painted grid. instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
+      else if (failures.length > beforeCards) {
+        // WITHHELD, not printed under its own findings. The count is this
+        // half's alone, so a reader can tell which half of this leg lost.
+        process.stdout.write(
+          `   ! THE .instances-grid CARD HALF SCORED ${failures.length - beforeCards} FINDING(S) — its clean claim is WITHHELD ` +
+          `(walked ${walked} cards = ${CARD_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs). ` +
+          `The findings above are THIS half's; every clean claim below belongs to the notifications-matrix half and is unaffected (the tick glyph is deliberately absent from this line so a grep -c over the run still counts only EARNED claims) — the two are scored separately on purpose\n`,
+        );
+      } else okLine(`READINESS STOOD IN FRONT OF ${readyPop.join(", ")} card(s) — the gate counts the population it waits for (D228), so a grid caught one card into its paint cannot pass for a painted grid. instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
 
       // (b) the notifications matrix must ADMIT it is clipped. Two independent
       //     cues, both measured: a label column that stays put while the
