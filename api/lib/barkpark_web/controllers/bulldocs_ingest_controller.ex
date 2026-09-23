@@ -845,6 +845,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
+        autolog_publish(conn, paper, params)
+
         body = %{
           ok: true,
           slug: paper.doc_id,
@@ -986,6 +988,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
+        autolog_publish(conn, paper, conn.params)
+
         body = %{
           ok: true,
           slug: paper.doc_id,
@@ -1256,6 +1260,19 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
         end
     end
+  end
+
+  # Session auto-log (task-bc34e83515bbd91f): the paper has COMMITTED; this is
+  # best-effort and never changes the receipt. Scoped by the SAME
+  # `session_scope_opts/2` the explicit `/sessions/:slug/events` door threads,
+  # so the header reaches exactly the sessions this caller could log by hand.
+  defp autolog_publish(conn, paper, params) do
+    BarkparkWeb.SessionAutolog.record(
+      conn,
+      "paper-published",
+      %{"ref" => paper.doc_id},
+      session_scope_opts(conn, params)
+    )
   end
 
   @doc """

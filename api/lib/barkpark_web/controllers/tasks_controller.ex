@@ -1498,6 +1498,10 @@ defmodule BarkparkWeb.TasksController do
           )
 
         {:ok, %Document{} = doc, :closed} ->
+          # Session auto-log (task-bc34e83515bbd91f): the close has COMMITTED;
+          # this is best-effort and never changes the response below.
+          autolog_close(conn, doc)
+
           # Graduated enforcement (living-values §12): unmet criteria are
           # SURFACED as a soft warning on the (already successful) close —
           # never a gate (close_response below, shipped with lvw-t6).
@@ -1573,6 +1577,20 @@ defmodule BarkparkWeb.TasksController do
       {:error, :not_found} ->
         not_found(conn, "task not found")
     end
+  end
+
+  # Scoped to the WORKSPACE the close itself resolved, not its project: a
+  # session is a workspace-level agent record (the ingest door that writes it
+  # infers `{workspace, nil}` for a scope-less token), and the flat /v1/tasks
+  # route pins the Default project, so a project-strict read would miss every
+  # such session. `:shared_only` (no tenant resolved) stays fail-narrow.
+  defp autolog_close(conn, %Document{} = doc) do
+    BarkparkWeb.SessionAutolog.record(
+      conn,
+      "task-closed",
+      %{"ref" => doc.doc_id, "note" => get_in(doc.content || %{}, ["lifecycle_status"])},
+      Keyword.take(scope_opts(conn), [:workspace_id])
+    )
   end
 
   # ─── POST /v1/tasks/:doc_id/release ─────────────────────────────────────
