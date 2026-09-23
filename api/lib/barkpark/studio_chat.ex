@@ -2102,6 +2102,38 @@ defmodule Barkpark.StudioChat do
     {done, total}
   end
 
+  @doc """
+  Every PUBLISHED task row whose `parent_id` is one of `parent_ids`, in any
+  lifecycle — the candidate set the Doing strip's agent↔task join resolves
+  against (task-ba42f986bb0d4594). Epic subagents claim under their OWN
+  `epic-builder-<slug>` workers, so the exact-worker fold can never see them;
+  the epic parent is the key they share with the session.
+
+  ALL lifecycles, not just `in_progress`, on purpose: the join must see every
+  sibling a label could name, or a done/open sibling whose 40-character emitter
+  slug collides with a claimed one would vanish from the index and turn an
+  AMBIGUOUS label into a confident wrong match.
+
+  Same shape as `epic_slice_counts/2` (a `parent_id` fragment read, draft twins
+  excluded — the claim lives on the published row); the workspace scope is the
+  fail-CLOSED `Scope.scope_to_workspace/3` the hand-task hydrate already uses
+  through `Tasks.prime/1`, so a nil workspace reads nothing.
+  """
+  @spec epic_children([String.t()], String.t() | nil) :: [Document.t()]
+  def epic_children([], _workspace_id), do: []
+
+  def epic_children(parent_ids, workspace_id) when is_list(parent_ids) do
+    from(d in Document,
+      where: d.type == "task",
+      where: not like(d.doc_id, "drafts.%"),
+      where: fragment("?->>'parent_id'", d.content) in ^parent_ids,
+      order_by: [asc: d.doc_id],
+      limit: 500
+    )
+    |> Barkpark.Content.Scope.scope_to_workspace(workspace_id, nil)
+    |> Repo.all()
+  end
+
   defp string_presence(s) when is_binary(s) and s != "", do: s
   defp string_presence(_), do: nil
 
