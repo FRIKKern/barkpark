@@ -49,6 +49,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.StreamTail
   alias Barkpark.StudioChat.TaskTransition
+  alias Barkpark.StudioChat.TaskLedgerScope
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -607,7 +608,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   def handle_event("toggle-task-picker", _params, socket) do
     case socket.assigns.task_picker do
       nil ->
-        rows = Tasks.ready([limit: 8] ++ hand_task_scope()) |> Enum.map(&hand_ready_row/1)
+        rows =
+          case hand_task_scope(socket) do
+            [workspace_id: nil, project_id: _] -> []
+            scope -> Tasks.ready([limit: 8] ++ scope) |> Enum.map(&hand_ready_row/1)
+          end
+
         {:noreply, assign(socket, task_picker: rows)}
 
       _open ->
@@ -6357,8 +6363,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # One-substrate law (chat-task-hands D1): the surface only PROMPTS — every
   # ledger write still goes through the agent's own bp/MCP hands.
 
-  # The dataset's document stream — the Doing strip folds task mutations out of
-  # it. Same topics the SSE listener serves; cheap to filter.
+  # The task LEDGER's document stream — the Doing strip folds task mutations
+  # out of it. Same topics the SSE listener serves; cheap to filter.
+  #
+  # The DATASET is the ledger's, never `socket.assigns.dataset`
+  # (task-ff3ed7ae0a242160). That assign is `default_dataset/0` — the FIRST of
+  # the SORTED `Content.list_datasets/0` — so on any install holding a dataset
+  # that sorts before "production" ("archive", "blog", a leaked test dataset)
+  # the strip joined a stream no task write lands on and never saw a claim,
+  # pulse or release frame. Task rows broadcast on the dataset they live in;
+  # `TaskLedgerScope.resolve/1` is the one place that names it.
   defp subscribe_hand_tasks(socket) do
     # The document-list stream, tenant-fenced (task-5d0615ee60143cc8). The bare
     # `documents:<dataset>` topic fans every tenant's frame out to every
@@ -6368,27 +6382,55 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # this surface's own workspace on the keyed one — so every document arrives
     # exactly once, WITH its payload, and no foreign tenant's body ever does.
     #
-    # The workspace is `hand_task_scope/0`'s — the SAME scope the picker and
-    # the agent's own bp hands write in, so the strip folds the rows it can act
-    # on.
-    if connected?(socket) do
-      Broadcast.subscribe_documents(
-        socket.assigns.dataset,
-        Keyword.get(hand_task_scope(), :workspace_id)
-      )
+    # The workspace AND dataset are `TaskLedgerScope.resolve/1`'s — the SAME
+    # scope the picker and the agent's own bp hands write in, so the strip folds
+    # the rows it can act on.
+    #
+    # No workspace -> no subscription at all, not the global topic alone: the
+    # strip of a viewer acting in no workspace is empty, live as on hydrate.
+    %{dataset: dataset, workspace_id: workspace_id} =
+      TaskLedgerScope.resolve(ledger_workspace_id(socket))
+
+    if connected?(socket) and is_binary(workspace_id) do
+      Broadcast.subscribe_documents(dataset, workspace_id)
     end
 
     socket
   end
 
-  # The scope the agent's own task hands work in: the flat /v1/tasks routes
-  # resolve to the seeded defaults via AssignDefaultScope, so the surface reads
-  # the SAME board the agent writes. (Tasks.ready is fail-closed on a nil
-  # workspace — passing no scope would render the picker permanently empty.)
-  defp hand_task_scope do
-    ws = Barkpark.Tenancy.get_default_workspace()
-    proj = Barkpark.Tenancy.get_default_project()
-    [workspace_id: ws && ws.id, project_id: proj && proj.id]
+  # The scope the agent's own task hands work in, as `Tasks` read opts: the
+  # workspace/project half of `TaskLedgerScope.resolve/1`, so the picker, the
+  # hydrate and the live subscription cannot name different scopes. (Tasks.ready
+  # is fail-closed on a nil workspace — passing no scope would render the picker
+  # permanently empty.) No `:dataset` here on purpose: `Tasks.ready/1` and
+  # `Tasks.prime/1` span every dataset of the scope when none is named, which is
+  # what they did before the resolver existed.
+  defp hand_task_scope(socket) do
+    %{workspace_id: workspace_id, project_id: project_id} =
+      TaskLedgerScope.resolve(ledger_workspace_id(socket))
+
+    [workspace_id: workspace_id, project_id: project_id]
+  end
+
+  # The workspace the VIEWER acts in, for the task ledger (task-180a07e9d178d6a8).
+  # `:current_workspace` on BOTH mounts: `LiveScope.:resolve` pins the
+  # authorized URL workspace on the scoped mount, and StudioChrome pins the
+  # principal's own workspace (else the Default, only when authorized there) on
+  # the flat one. It is the very assign `ensure_session/1` stamps a new
+  # session's `owner_workspace_id` from, and the agent's task token is minted
+  # into that workspace, so the strip reads the scope the agent WRITES in. It
+  # used to be the instance Default for every viewer, which on the scoped mount
+  # showed an admin of workspace A the Default workspace's queue and claims.
+  # No workspace resolved -> nil -> NO read and NO subscription, never a Default
+  # fallback and never a global read. The three consumers short-circuit on nil
+  # themselves rather than trusting each callee's nil semantics: `Tasks.Queue`'s
+  # own comment calls a nil workspace "the explicit-global read" even though its
+  # outer `scope_to_workspace/3` happens to close it today.
+  defp ledger_workspace_id(socket) do
+    case socket.assigns[:current_workspace] do
+      %{id: ws_id} when is_binary(ws_id) -> ws_id
+      _ -> nil
+    end
   end
 
   # ── live task transitions in the transcript (tlv) ─────────────────────────
@@ -6444,11 +6486,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
     worker = Runtime.worker_id(socket.assigns.provider, socket.assigns.store_session_id)
 
     rows =
-      Tasks.prime([worker: worker, limit: 10] ++ hand_task_scope())
-      |> Map.get(:in_progress, [])
-      |> Map.new(fn d ->
-        {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
-      end)
+      case hand_task_scope(socket) do
+        [workspace_id: nil, project_id: _] ->
+          %{}
+
+        scope ->
+          Tasks.prime([worker: worker, limit: 10] ++ scope)
+          |> Map.get(:in_progress, [])
+          |> Map.new(fn d ->
+            {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
+          end)
+      end
 
     # SEED the transition scope off the SAME read (tlv, no second query): every
     # claim this worker already holds is a task this session has touched, so a
@@ -6491,7 +6539,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     rows =
       ids
       |> MapSet.to_list()
-      |> StudioChat.epic_children(Keyword.get(hand_task_scope(), :workspace_id))
+      |> StudioChat.epic_children(Keyword.get(hand_task_scope(socket), :workspace_id))
       |> Map.new(fn d -> {d.doc_id, hand_epic_row(d.doc_id, d.title, d.content)} end)
 
     assign(socket, hand_epic: %{ids: ids, rows: rows})

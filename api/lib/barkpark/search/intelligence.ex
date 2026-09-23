@@ -648,7 +648,7 @@ defmodule Barkpark.Search.Intelligence do
   # Submit a search event WITHOUT stalling the caller's response. The record
   # write sat synchronously inside every keystroke's request; normally ~free,
   # but any DB contention (crystallizer roll-up, Oban, a checkpoint) stalled
-  # THE SEARCH RESPONSE by exactly that hiccup — the observed "sometimes 450ms"
+  # THE SEARCH RESPONSE by exactly that hiccup — the observed "sporadic ~450ms"
   # spikes on an otherwise ~100ms path. The event id is PRE-GENERATED so the
   # response's `searchEventId` contract (click attribution) is unchanged; the
   # INSERT rides Barkpark.TaskSupervisor (Task.* propagates `$callers`, so the

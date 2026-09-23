@@ -195,8 +195,22 @@ case System.get_env("BARKPARK_CLOUD_URL") do
     :ok
 end
 
+# REQUEST-LINE CEILING (pds-bl-bandit-request-line-ceiling). Bandit caps the
+# HTTP/1 request line at max_request_line_length bytes; 10_000 is Bandit's own
+# default, written out here so the limit is visible instead of implicit. The
+# request line is METHOD + space + TARGET + " HTTP/1.1" + CRLF, so for a POST the
+# request TARGET (path plus query string) may be at most 10_000 - 5 - 9 - 2 =
+# 9_984 bytes. Measured 2026-07-21: total URL 10_016 bytes OK, 10_017 refused,
+# the same byte through Caddy and direct to :4000, so it is this limit and not
+# the proxy. Past it the client gets 414 and the server logs a Bandit.HTTPError
+# "Request URI is too long" (grep journalctl for that, it is not a network blip).
+# Deliberately NOT raised: bp stamp evidence rides the query string, and the fix
+# for oversized evidence is to send it in the request body, not a longer URL.
 config :barkpark, BarkparkWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+  http: [
+    port: String.to_integer(System.get_env("PORT", "4000")),
+    http_1_options: [max_request_line_length: 10_000]
+  ]
 
 cloak_key =
   case System.get_env("BARKPARK_CLOAK_KEY") do

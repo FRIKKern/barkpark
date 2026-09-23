@@ -20,6 +20,8 @@ defmodule Barkpark.Media.Blobstore.S3 do
       see `MediaController.maybe_send_file/3`) are preserved by baking
       `response-content-type` / `response-content-disposition` INTO the signed
       query: the bucket echoes exactly the headers the local path would set.
+      The same holds for the D12 visibility cache policy: a caller-supplied
+      `:response_cache_control` is signed in as `response-cache-control`.
       With `:public_base_url` configured (a public bucket behind a CDN), the
       redirect is an unsigned, cache-friendly CDN URL instead — but ONLY for
       blobs a caller marked safe (`:public` opt); dangerous-mime and
@@ -289,7 +291,11 @@ defmodule Barkpark.Media.Blobstore.S3 do
         Enum.reject(
           [
             {"response-content-type", Keyword.get(opts, :response_content_type)},
-            {"response-content-disposition", Keyword.get(opts, :response_content_disposition)}
+            {"response-content-disposition", Keyword.get(opts, :response_content_disposition)},
+            # D12 on bucket-served bytes: the caller's visibility-derived
+            # policy (`Delivery.file_cache_control/1`) rides the signature, so
+            # the bucket answers with it instead of its own default.
+            {"response-cache-control", Keyword.get(opts, :response_cache_control)}
           ],
           fn {_k, v} -> is_nil(v) end
         )

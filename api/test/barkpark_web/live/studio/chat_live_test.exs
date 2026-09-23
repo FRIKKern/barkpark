@@ -3933,8 +3933,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # tell a live subscription from a dead one. This one broadcasts on the
       # SAME `documents:<dataset>` topic the ledger writes to, proving the
       # subscription chat_live already holds is what carries the transition.
+      # The ledger's dataset is "production" — NOT the first-sorted
+      # `Content.list_datasets/0` entry the view mounts on, which is the stream
+      # the strip wrongly rode before task-ff3ed7ae0a242160.
       worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
-      dataset = List.first(Barkpark.Content.list_datasets()) || "production"
+      dataset = "production"
 
       {:document_changed, msg} =
         task_changed(

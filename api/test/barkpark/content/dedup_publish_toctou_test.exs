@@ -342,6 +342,13 @@ defmodule Barkpark.Content.DedupPublishToctouTest do
     Repo.delete_all(from(d in Document, where: d.dataset == ^@dataset))
 
     Repo.query!("DELETE FROM oban_jobs WHERE args->>'dataset' = $1", [@dataset])
+
+    # setup's Content.upsert_schema COMMITS a schema_definitions row (unboxed
+    # connection). Left behind, it makes this dataset appear in
+    # Content.list_datasets/1, and because it sorts before "production" it
+    # became ChatLive's default_dataset for every later test in the database
+    # (chat_agent_task_join_test.exs reddened on main). Delete it with the rest.
+    Repo.query!("DELETE FROM schema_definitions WHERE dataset = $1", [@dataset])
     :ok
   end
 end

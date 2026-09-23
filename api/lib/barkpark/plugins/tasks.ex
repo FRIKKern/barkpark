@@ -120,6 +120,34 @@ defmodule Barkpark.Plugins.Tasks do
     %{before_save: [&quality_gate/1], before_publish: [&portable_brief_gate/1]}
   end
 
+  @doc """
+  The task write fences, in the order `Barkpark.Content.Writer` ran them when
+  it named them directly (task-e5baaaa14ddf2e1c). Each one head-matches on
+  `type == "task"` and passes every other write through as `:ok`; each one's
+  own moduledoc says what it refuses and why. The ORDER is the contract — it
+  decides which refusal a write that trips two fences receives — and
+  `pre_write_fences_test.exs` pins it.
+
+  `Dedup.check_new_task/5` is `:late`: it ran after the core's birth guards
+  (`ensure_task_born_adjudicated/5`, `ensure_task_surface_declared/5`), so the
+  pure refusals still come before its trigram scan. It takes no `doc_id`;
+  `dedup_check_new_task/6` adapts it to the uniform fence arity.
+  """
+  @impl Barkpark.Plugin
+  def pre_write_fences do
+    [
+      {:early, Barkpark.Tasks.DraftTerminalFence, :check},
+      {:early, Barkpark.Tasks.DatasetTwinFence, :check},
+      {:early, Barkpark.Tasks.TerminalCriteriaFence, :check},
+      {:early, Barkpark.Tasks.CriteriaRequiredFence, :check},
+      {:late, __MODULE__, :dedup_check_new_task}
+    ]
+  end
+
+  @doc false
+  def dedup_check_new_task(type, attrs, dataset, _doc_id, prev_doc, opts),
+    do: Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts)
+
   @tui_block_types ~w(
     heading paragraph list callout divider section code table figure action
     pullquote embed ingress eyebrow byline diagram asciicast image composite
