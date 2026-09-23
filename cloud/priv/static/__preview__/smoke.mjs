@@ -6522,7 +6522,7 @@ const EXPECTATIONS = {
       const before = (bodyEl || {}).innerHTML || "";
       assert.ok(before.length > 0, "#instance-body rendered empty");
       // task-6878caa08b065f78 — THE LIFECYCLE LADDER'S STOPPED-STATE WORD.
-      // This is the one committed scenario where lifecycleStatePillHtml renders
+      // This is a committed scenario where lifecycleStatePillHtml renders
       // in the `stopped` state: the suspended box's bp CLI card mounts in
       // #inst-lifecycle-actions and its head carries the ladder's chip. The
       // overview-past-due pin (#19998) covers statusOf's suspended arm on the
