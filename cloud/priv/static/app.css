@@ -1571,8 +1571,19 @@ select.form-input {
 
    CLOUDFLARE IS A RAW HUE ON PURPOSE (console-w28), on the same shelf as the
    three below rather than in the tokened family above, and this is the second
-   answer to the question — the first was a --provider-cloudflare token, which
-   design/emit-fence.test.mjs refused and was right to. design/tokens.json's
+   answer to the question — the first was a --provider-cloudflare token, and it
+   was the wrong answer. (CORRECTION, console-w30 2026-09-23: this comment used
+   to say design/emit-fence.test.mjs "refused and was right to". It cannot have:
+   `grep -ci provider design/emit-fence.test.mjs` prints 0 and `-ci cloudflare`
+   prints 0, against controls of 15 for `emit.mjs` and 12 for `tokens`, and that
+   suite is the ATTRIBUTION fence only — its own arm "fence does NOT over-fire: a
+   legitimate design/tokens.json edit regenerates, exit 0, no refusal" asserts the
+   opposite. What actually POLICES this family is design/check.mjs Part D
+   (check.mjs:521-527): it compares the CSS --provider-* kind set AND the Go
+   GenProviderMark kind set against `PROVIDERS` and fails on either mismatch, so
+   the dual emission is not optional once a kind is added. The instrument that
+   met the original attempt is not recorded; the reason below is, and it stands
+   on its own.) design/tokens.json's
    `color.provider` family says "a third provider is a new row here", and it
    emits into TWO artifacts: the --provider-<kind> custom properties in this
    file's GENERATED block AND `GenProviderMark` AdaptiveColors in the Go CLI
