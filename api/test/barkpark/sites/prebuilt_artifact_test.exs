@@ -457,6 +457,67 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
     end
   end
 
+  # ── past the gzip member ──────────────────────────────────────────────────
+  #
+  # zlib at window bits 31 stops at the end of the FIRST gzip member, and in its
+  # default mode silently discards whatever follows — a second member, or junk —
+  # so those bytes were never inflated, parsed or counted by `max_total_bytes`.
+  # Pinned first by run (both staged `{:ok, %{entries: 5, bytes: 94}}`, the
+  # second member's `second.html` dropped); now a typed refusal. The framing
+  # block above closed the tail INSIDE the member; this is the layer outside it.
+  describe "bytes after the gzip member ends" do
+    test "a two-member .tar.gz is refused — the second member would be dropped",
+         %{dest: dest} do
+      second = tarball([file_entry("second.html", "<!doctype html><title>2</title>")])
+      raw = gz(astro_dist()) <> gz(second)
+
+      assert {:error, "E_MALFORMED", message} = stage_bytes(raw, dest)
+      assert message =~ "after its gzip member ends"
+      refute File.exists?(dest)
+    end
+
+    test "a member followed by 10 000 junk bytes is refused", %{dest: dest} do
+      raw = gz(astro_dist()) <> :crypto.strong_rand_bytes(10_000)
+
+      assert {:error, "E_MALFORMED", message} = stage_bytes(raw, dest)
+      assert message =~ "after its gzip member ends"
+      refute File.exists?(dest)
+    end
+
+    test "ONE stray byte after a member spanning several 64 KiB input chunks is refused",
+         %{dest: dest} do
+      # The member carries > 64 KiB of INCOMPRESSIBLE body, so `feed_all/3`
+      # hands it to zlib in more than one chunk: the refusal must not depend on
+      # the whole artifact arriving in a single `safeInflate/2` call.
+      big = :crypto.strong_rand_bytes(96 * 1024)
+      member = gz(tarball([file_entry("index.html", "<!doctype html>"), file_entry("b", big)]))
+      assert byte_size(member) > 64 * 1024
+
+      assert {:error, "E_MALFORMED", message} = stage_bytes(member <> <<0>>, dest)
+      assert message =~ "after its gzip member ends"
+      refute File.exists?(dest)
+    end
+
+    test "CONTROL — a corrupt member is still named corrupt, not a trailing-bytes refusal",
+         %{dest: dest} do
+      gzipped = gz(astro_dist())
+      size = byte_size(gzipped)
+      <<head::binary-size(size - 8), crc::binary-size(4), isize::binary-size(4)>> = gzipped
+      <<first, rest::binary>> = crc
+      corrupt = head <> <<Bitwise.bxor(first, 0xFF)>> <> rest <> isize
+
+      assert {:error, "E_MALFORMED", message} = stage_bytes(corrupt <> "junk", dest)
+      assert message =~ "corrupt"
+      refute message =~ "after its gzip member ends"
+    end
+
+    test "CONTROL — the same single member, with nothing after it, still stages",
+         %{dest: dest} do
+      assert {:ok, %{entries: 5, bytes: 94}} = stage_bytes(gz(astro_dist()), dest)
+      assert File.read!(Path.join(dest, "index.html")) =~ "hello"
+    end
+  end
+
   # ── the served shape ──────────────────────────────────────────────────────
 
   # The CLI already refuses to PACK a directory with no root `index.html`
