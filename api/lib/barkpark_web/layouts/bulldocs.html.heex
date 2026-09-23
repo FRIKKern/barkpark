@@ -1681,8 +1681,24 @@
       font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px;
       font-weight: 600; letter-spacing: 0.02em;
       padding: 8px 13px; border-radius: 999px; cursor: pointer;
-      color: #2f6b4e; background: rgba(255,255,255,0.86);
-      border: 1px solid rgba(20,40,30,0.16);
+      /* THEME-DERIVED chrome, not a light literal. The pills float over the
+         article ground, so they must follow it — exactly like the other
+         floating chrome in this sheet (`.bp-paper-actions` stands on
+         `var(--paper-bg)`, the lightbox on `Canvas`/`CanvasText`). These used
+         to be `#2f6b4e` ink on `rgba(255,255,255,0.86)`: a white pill left
+         stranded on the dark article, and the Mode pill that ADVERTISES dark
+         mode was the worst offender. Reading the tokens covers every palette
+         at once — the base skin and all five `data-bp-theme` skins, the
+         `@media (prefers-color-scheme: dark)` no-JS path, the stamped
+         `html[data-theme]` path and the `@media print` re-stamp — because all
+         of them re-skin `--paper-*` on `body:has(.bp-paper-article)`, which
+         these pills inherit from. The `var(…, hex)` fallbacks are the sheet's
+         documented convention and keep the old light values as the floor.
+         `body.bp-tui` below stays LITERAL on purpose: the terminal view is a
+         fixed-dark ground that does not follow the paper theme. */
+      color: var(--paper-accent, #2f6b4e);
+      background: color-mix(in srgb, var(--paper-bg, #ffffff) 86%, transparent);
+      border: 1px solid var(--paper-rule, rgba(20,40,30,0.16));
       box-shadow: 0 2px 10px rgba(20,40,30,0.14); backdrop-filter: blur(6px);
       transition: background 0.15s, color 0.15s, transform 0.08s;
     }
@@ -1698,8 +1714,8 @@
        (always terminal-dark); the email-mode rule above already hides it
        there, and print + the no-article guard below cover the rest. */
     body.bp-tui .bp-mode-toggle { display: none; }
-    .bp-view-toggle:focus-visible { outline: 2px solid #2f7d5b; outline-offset: 2px; }
-    .bp-view-toggle .bp-vt-dot { width: 7px; height: 7px; border-radius: 50%; background: #2f7d5b; }
+    .bp-view-toggle:focus-visible { outline: 2px solid var(--paper-accent, #2f7d5b); outline-offset: 2px; }
+    .bp-view-toggle .bp-vt-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--paper-accent, #2f7d5b); }
     /* hide the toggle when there is no article paper on the page */
     body:not(:has(.bp-paper-article)) .bp-view-controls { display: none; }
 
@@ -1711,7 +1727,7 @@
     body.bp-tui .bp-view-toggle .bp-vt-dot { background: #5fcf9c; box-shadow: 0 0 6px #5fcf9c; }
 
     /* toggle look in Email mode — the pill sits below the inbox ground */
-    body.bp-email .bp-view-toggle--email .bp-vt-dot { box-shadow: 0 0 6px #2f7d5b; }
+    body.bp-email .bp-view-toggle--email .bp-vt-dot { box-shadow: 0 0 6px var(--paper-accent, #2f7d5b); }
 
     /* Comparison evidence stacks before the reading column gets cramped. */
     @media (max-width: 900px) {
