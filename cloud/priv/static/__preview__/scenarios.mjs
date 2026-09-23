@@ -6944,6 +6944,23 @@ function githubOf(d, state) {
   return state.github;
 }
 
+// cch-bl-preview-selector-residue — the account's two-factor FLAG, as a
+// per-boot value. Same contract as githubOf (opt-in on `state`, never written
+// back to the module-level fixture), for a resource that is one boolean. Until
+// DELETE /v1/account/two-factor writes `state.twoFactorEnabled` the fixture's
+// own `me.user.two_factor_enabled` is the answer, so every scenario that never
+// turns 2FA off is served its /v1/me byte-for-byte (the SAME object, not a copy).
+function twoFactorOf(d, state) {
+  if (state && typeof state.twoFactorEnabled === "boolean") return state.twoFactorEnabled;
+  return !!(d.me && d.me.user && d.me.user.two_factor_enabled);
+}
+function meWithTwoFactor(d, state) {
+  if (!(state && typeof state.twoFactorEnabled === "boolean") || !d.me || !d.me.user) return d.me;
+  return Object.assign({}, d.me, {
+    user: Object.assign({}, d.me.user, { two_factor_enabled: state.twoFactorEnabled }),
+  });
+}
+
 // route(name, method, path, state) → { status, body } | null.
 //   Returns null for a path this harness does not model, so a caller can decide
 //   whether to 404 or pass through. Query strings are ignored (the SPA never
@@ -7162,7 +7179,7 @@ export function route(name, method, path, state, body) {
   if (p === "/v1/me" && state && state.secondIdentity && d.secondIdentity) {
     return { status: 200, body: d.secondIdentity.me };
   }
-  if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
+  if (p === "/v1/me") return d.me ? { status: 200, body: meWithTwoFactor(d, state) } : { status: 401, body: { error: "unauthorized" } };
   // gr-p5-account-2fa: the account modal's session list. Defaults to [] rather
   // than 404 so every scenario answers HONESTLY ("No active sessions") instead
   // of the modal's couldn't-load state.
@@ -7246,11 +7263,23 @@ export function route(name, method, path, state, body) {
   if (p === "/v1/account/two-factor/recovery-codes" && method === "POST") {
     return d.twoFactorRegen || { status: 200, body: { recovery_codes: RECOVERY_CODES } };
   }
-  if (p === "/v1/account/two-factor" && method === "DELETE") return { status: 200, body: { ok: true } };
+  // cch-bl-preview-selector-residue — THE FLAG THE DISABLE FLIPS. This arm
+  // used to answer 200 {ok: true} and change nothing, so /v1/me kept serving
+  // `two_factor_enabled: true` after a successful turn-off and no oracle could
+  // tell the disable from a no-op. The router's clause is IDEMPOTENT (it nulls
+  // the columns whether or not 2FA was on, and answers 200 {ok: true} either
+  // way), so there is deliberately NO 404 arm here — that would be a refusal
+  // the server never sends. The flag lives on the per-boot state bag
+  // (`twoFactorEnabled`), and BOTH reads go through it: the GET below and the
+  // /v1/me envelope (twoFactorOf).
+  if (p === "/v1/account/two-factor" && method === "DELETE") {
+    if (state) state.twoFactorEnabled = false;
+    return { status: 200, body: { ok: true } };
+  }
   if (p === "/v1/account/two-factor" && method === "GET") {
     // Modelled for completeness; the SPA never calls it (two_factor_enabled
     // rides /v1/me, so the on-state costs zero extra fetches).
-    return { status: 200, body: { enabled: !!(d.me && d.me.user && d.me.user.two_factor_enabled) } };
+    return { status: 200, body: { enabled: twoFactorOf(d, state) } };
   }
   // gr-p2 HOME TRIAGE (C-02): the onboarding fold is member-readable on GET
   // (mirrors /v1/me's fold, so the runway self-heals on refetch); the mutating
@@ -7577,8 +7606,14 @@ export function route(name, method, path, state, body) {
     // 404 on a miss AND on an already-unlinked site — destroyFrom's rule: a
     // no-op must never be indistinguishable from real work.
     if (!s || !s.github_repo) return { status: 404, body: { error: "not_found" } };
-    if (state) { s.github_repo = null; s.github_branch = null; s.github_webhook_configured = false; }
-    return { status: 200, body: { ok: true } };
+    const unlinked = { github_repo: null, github_branch: null, github_webhook_configured: false };
+    if (state) Object.assign(s, unlinked);
+    // cch-bl-preview-selector-residue — THE SERVER'S BODY. The router's
+    // `delete "/v1/sites/:id/github"` clause answers
+    // `json(conn, 200, %{site: site_json(updated)})` — the UNLINKED row, not
+    // `{ok: true}` (that is the installation DELETE's shape, a different
+    // clause). Copied, so a stateless caller never sees its fixture mutate.
+    return { status: 200, body: { site: Object.assign({}, s, unlinked) } };
   }
   // The repo picker openSiteGithub reads before it can paint anything at all.
   // Gated on the fixture so every scenario without one keeps falling through to
@@ -7847,7 +7882,13 @@ export function route(name, method, path, state, body) {
       // be distinguishable from disconnecting something.
       if (!inst.connected) return { status: 404, body: { error: "not_found" } };
       if (state) { inst.connected = false; delete inst.account_login; }
-      return { status: 200, body: { connected: false } };
+      // cch-bl-preview-selector-residue — THE SERVER'S BODY, not a GET's. The
+      // router's `delete "/v1/github/installation"` clause answers
+      // `json(conn, 200, %{ok: true})`; this arm used to answer
+      // `{connected: false}`, the GET envelope's shape, which no DELETE in the
+      // control plane has ever sent. disconnectGithub reads only `r.ok`, so
+      // the flag the verb flips is read back off the GET below, never here.
+      return { status: 200, body: { ok: true } };
     }
     if (method === "GET") return { status: 200, body: inst };
   }

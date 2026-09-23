@@ -817,6 +817,19 @@ function bootScenario(name, opts) {
           teams: ((body && body.teams) || []).concat([opts.extraMembership]),
         });
       }
+      // cch-bl-preview-selector-residue — /v1/me IS SNAPSHOT, as mock.js
+      // snapshots every body and as a real fetch does (each response.json() is
+      // a fresh parse). This shim hands route()'s body over BY REFERENCE, and
+      // for /v1/me that body is the MODULE-LEVEL fixture: app.js's local 2FA
+      // echo writes `meCache.user.two_factor_enabled`, so one Turn-off click
+      // rewrote SCENARIOS["account-modal-2fa-on"] for every later reader in
+      // this process. Scoped to /v1/me on purpose: measured, a snapshot of
+      // EVERY body reds panel-overview, whose custom-host leg writes a field
+      // on the state-bag row the rail closed over — a documented by-reference
+      // seam this change must not silently remove.
+      if (res.status === 200 && body && p.split("?")[0].endsWith("/v1/me")) {
+        body = JSON.parse(JSON.stringify(body));
+      }
       return {
         ok: res.status >= 200 && res.status < 300,
         status: res.status,
@@ -1407,6 +1420,7 @@ const EXPECTATIONS = {
   //                                cloud/priv/static/app.js  → two hits.
   //   the webhook DELETE         → webhooks-panel
   //   /v1/sites/:id/github       → rollback
+  //   /v1/account/two-factor     → account-modal-2fa-on (cch-bl-preview-selector-residue)
   //
   // WHAT THIS LIST GOT WRONG WHEN IT WAS WRITTEN, recorded rather than quietly
   // fixed: it counted the two /v1/barkparks/:id hits as "six remaining" while
@@ -1838,8 +1852,8 @@ const EXPECTATIONS = {
     },
   },
   "account-modal-2fa-on": {
-    what: "2FA already ON — the on-row with regenerate + turn-off, derived from /v1/me alone (zero extra fetches)",
-    check(reg, hooks) {
+    what: "2FA already ON — the on-row with regenerate + turn-off, derived from /v1/me alone (zero extra fetches) — and Turn off is CLICKED: its danger confirm, one DELETE /v1/account/two-factor, the SERVER flag off, and the badge repaints Off with setup offered again",
+    async check(reg, hooks, ctx) {
       const model = hooks.accountModel({ team_id: "team_abc" }, SCENARIOS["account-modal-2fa-on"].data.me);
       assert.equal(model.twoFactorEnabled, true, "the on-state must come from /v1/me's two_factor_enabled");
       hooks.openModal(hooks.accountModalHtml(model));
@@ -1848,6 +1862,70 @@ const EXPECTATIONS = {
       assert.ok(html.includes('id="a2f-regen"'), "the on-row must offer regenerate");
       assert.ok(html.includes('id="a2f-disable"'), "the on-row must offer turn-off");
       assert.ok(!html.includes('id="a2f-start"'), "an enrolled account is never offered setup again");
+
+      // ── cch-bl-preview-selector-residue · TURN OFF — DELETE /v1/account/two-factor
+      // The fourth FLAG-SHAPED verb, and the only one with no click-driven
+      // oracle until this leg. Flag-shaped means there is no list to shrink:
+      // the verb flips ONE boolean (/v1/me's user.two_factor_enabled), so the
+      // oracle reads that boolean on BOTH sides of the wire — never a count of
+      // rows nobody fabricated. Re-derive the handler by symbol:
+      //   grep -n 'api("DELETE", "/v1/account/two-factor"' cloud/priv/static/app.js
+      // — one hit, the onConfirm of the #a2f-disable listener in a2fWire.
+      //
+      // Everything above rendered through hooks.openModal, which wires NOTHING
+      // (a2fWire runs only inside openAccountModal). So the modal is opened
+      // again here the way a user opens it, through #acct-btn.
+      const acct = reg.get("acct-btn");
+      assert.ok(acct, "#acct-btn was never touched — init() did not wire the shell");
+      assert.equal(acct.click(), 1, "#acct-btn must have exactly one click handler (it opens the account modal)");
+      await ctx.settle();
+      const opened = reg.get("modal-body").innerHTML || "";
+      // THE RENDER HALF: byId auto-creates a registry node for any id the app
+      // asks for, so the click below would pass on a phantom without this.
+      assert.ok(opened.includes('id="a2f-disable"') && opened.includes('id="a2f-badge"'),
+        "the REAL account modal must paint the on-row's Turn off control; got: " + opened.slice(0, 300));
+      assert.ok(/id="a2f-badge"[^>]*>On</.test(opened), "…and its badge must read On before the click");
+
+      // ─ the trigger only opens the sheet (danger tier: armed, no typed echo) ─
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/two-factor"), 0, "nothing turned off before the click");
+      assert.equal(reg.get("a2f-disable").click(), 1, "Turn off dispatched no click handler — it is DEAD");
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/two-factor"), 0,
+        "Turn off fired its DELETE on the FIRST click — the confirm gate is gone");
+      const sheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(sheet.includes('id="cm-confirm"') && sheet.includes("Turn off two-factor authentication?"),
+        "the confirm sheet did not mount, or does not name the act; got: " + sheet.slice(0, 200));
+      const parsed = parsedConfirmButton(reg);
+      assert.ok(parsed && parsed.disabled === false, "a DANGER-tier Confirm ships ARMED");
+      assert.equal(reg.get("cm-confirm").click(), 1, "the sheet's Confirm must be wired for \"click\"");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/two-factor"), 1,
+        "exactly one DELETE /v1/account/two-factor must reach the wire; got " +
+        ctx.countCalls("DELETE", "/v1/account/two-factor"));
+
+      // ─ THE SERVER FLAG. Until this row the DELETE arm answered 200 {ok:true}
+      // and flipped nothing, so /v1/me kept saying two_factor_enabled: true —
+      // a disable indistinguishable from a no-op on every read after it.
+      assert.equal(ctx.state.twoFactorEnabled, false,
+        "DELETE /v1/account/two-factor did not turn anything off that the fixture can observe");
+      const meAfter = route("account-modal-2fa-on", "GET", "/v1/me", ctx.state);
+      assert.equal(meAfter.status, 200, "the account is still signed in after turning 2FA off");
+      assert.equal(meAfter.body.user.two_factor_enabled, false,
+        "/v1/me still reports two_factor_enabled: true after a successful disable");
+      assert.equal(SCENARIOS["account-modal-2fa-on"].data.me.user.two_factor_enabled, true,
+        "the disable leaked into the MODULE fixture — the next boot of this scenario would start Off");
+
+      // ─ THE UI FLAG. The success arm echoes the flag locally and re-opens the
+      // account screen; the badge it repaints is the operator's only view of it.
+      const reborn = reg.get("modal-body").innerHTML || "";
+      assert.ok(reborn.includes(">Your account<") && reborn.includes('id="a2f-badge"'),
+        "the success arm must return to the WHOLE account screen; got: " + reborn.slice(0, 200));
+      assert.ok(/id="a2f-badge"[^>]*>Off</.test(reborn),
+        "the two-factor badge must repaint Off after a successful disable; got: " +
+        (reborn.match(/id="a2f-badge"[^>]*>[^<]*</) || ["<no badge>"])[0]);
+      assert.ok(!reborn.includes('id="a2f-disable"') && !reborn.includes('id="a2f-regen"'),
+        "the account screen still offers Turn off / regenerate for a factor that is already gone");
+      assert.ok(reborn.includes('id="a2f-start"'),
+        "a disabled account must be offered setup again — the way back in");
     },
   },
   // cch-w39-s2-fu — THE UNKNOWN ARM, at rest. The browser half of this state
