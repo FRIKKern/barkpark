@@ -95,7 +95,7 @@ ROOT="${CENSUS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 census() {
   local root="$1" files wf_nc wf_exec invocations selfdispatch doors globs rc=0 n_run=0 n_exempt=0 n_red=0
-  local name_keyed content_keyed c_only backlog seen_backlog n_backlog=0 n_stale=0
+  local name_keyed content_keyed c_only ck_sorted nk_sorted backlog seen_backlog n_backlog=0 n_stale=0
   [ -d "$root/scripts" ] || { echo "selftest-wiring-census: REFUSING — no scripts/ under $root" >&2; return 2; }
   [ -d "$root/.github/workflows" ] || { echo "selftest-wiring-census: REFUSING — no .github/workflows/ under $root" >&2; return 2; }
 
@@ -372,8 +372,17 @@ BACKLOG
   # the wrong question of it — MEASURED: scripts/main-red-breaker.test.sh, wired
   # and running today, read ORPHAN under C-first precedence, which is a census
   # reddening a harness CI already runs.
-  c_only="$(printf '%s\n' "$content_keyed" | grep -v '^$' | LC_ALL=C sort \
-            | LC_ALL=C comm -23 - <(printf '%s\n' "$name_keyed" | grep -v '^$' | LC_ALL=C sort))"
+  # TWO TEMP FILES, not `comm -23 - <(…)`. A process substitution here would put
+  # this script on posix-vacuous-green-census's RED list: it is a bashism, and
+  # under `sh` the construct is a parse error that a `sh -n`-style check answers
+  # 0 on while the script compares NOTHING. MEASURED on this branch — the census
+  # reddened this file by name until the substitution came out.
+  ck_sorted="$(mktemp "${TMPDIR:-/tmp}/cksort.XXXXXX")"
+  nk_sorted="$(mktemp "${TMPDIR:-/tmp}/nksort.XXXXXX")"
+  printf '%s\n' "$content_keyed" | grep -v '^$' | LC_ALL=C sort > "$ck_sorted"
+  printf '%s\n' "$name_keyed"    | grep -v '^$' | LC_ALL=C sort > "$nk_sorted"
+  c_only="$(LC_ALL=C comm -23 "$ck_sorted" "$nk_sorted")"
+  rm -f "$ck_sorted" "$nk_sorted"
   files="$( { printf '%s\n' "$c_only"     | grep -v '^$' | sed 's|^|C |'
               printf '%s\n' "$name_keyed" | grep -v '^$' | sed 's|^|N |'; } \
             | LC_ALL=C sort -k2,2)"
