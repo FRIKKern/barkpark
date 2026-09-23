@@ -131,6 +131,10 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
     |> json_response(200)
   end
 
+  # Rows are created as drafts, so the wire doc_id is `drafts.<id>`.
+  defp by_bare_id(%{"docs" => docs}),
+    do: Map.new(docs, &{String.replace_prefix(&1["doc_id"], "drafts.", ""), &1})
+
   # ── ARM 1: the key set ──────────────────────────────────────────────────
 
   describe "?view=board key set" do
@@ -316,7 +320,10 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
                "taskWire parse did not see #{expected}; got #{inspect(wire_tags)}"
       end
 
-      assert Enum.sort(digest_tags) ==
+      # `design_doc` is tolerated, not required: the server emits it
+      # (task-cf0395706361aa2e) before the Go consumer decodes it, and the
+      # consumer adopting it must not red the producer.
+      assert Enum.sort(digest_tags -- ["design_doc"]) ==
                ~w(criteria_marks has_dependencies has_description has_paper),
              "contentDigest parse = #{inspect(digest_tags)}"
 
@@ -407,7 +414,7 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
         "parent_id" => phase,
         "description" => "  a real description  ",
         "dependencies" => ["task-blocker"],
-        "design_doc" => "/papers/the-design",
+        "design_doc" => "the-design",
         "acceptance_criteria" => [
           %{"criterion" => "met", "met" => true, "evidence" => "PR #1"},
           %{"criterion" => "missed", "met" => false, "attempts" => [%{"note" => "not yet"}]},
@@ -417,8 +424,11 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
 
       assert %{"docs" => [card]} = docs_at(conn, phase, "&view=board")
 
+      # `design_doc` is the one digest key that is not a boolean or a mark: the
+      # paper SLUG itself (task-cf0395706361aa2e) — see the next test.
       assert card["content_digest"] == %{
                "criteria_marks" => "mao",
+               "design_doc" => "the-design",
                "has_description" => true,
                "has_dependencies" => true,
                "has_paper" => true
@@ -429,8 +439,68 @@ defmodule BarkparkWeb.Contract.TasksBoardViewTest do
         conn |> authed() |> get("/v1/tasks?parent=#{phase}&view=board") |> Map.get(:resp_body)
 
       refute body =~ "a real description"
-      refute body =~ "/papers/the-design"
       refute body =~ "not yet"
+    end
+
+    # task-cf0395706361aa2e. The Go board inverts paper -> tasks over the WHOLE
+    # corpus (`DrivenTasks` / `TaskDetail.PaperRefs`,
+    # internal/taskboard/detail_data.go), matching a paper against BOTH
+    # `design_doc` and `papers`. `papers` survives the projection at the top
+    # level; `design_doc` used to survive only as one bit OR'd into
+    # `has_paper`, so every task citing its paper through `design_doc` fell
+    # out of a live board's FramePaper. Per-row hydration cannot restore a
+    # corpus-wide input — it has to ride the card.
+    test "design_doc carries the paper SLUG, and is OMITTED when the row has none", %{
+      conn: conn,
+      scope: scope
+    } do
+      phase = uniq("board-digest-designdoc")
+      with_dd = uniq("board-dd-with")
+      papers_only = uniq("board-dd-papers-only")
+      bare = uniq("board-dd-bare")
+      prose = uniq("board-dd-prose")
+
+      mk_task!(with_dd, scope, %{
+        "parent_id" => phase,
+        "design_doc" => "board-dd-the-paper"
+      })
+
+      mk_task!(papers_only, scope, %{"parent_id" => phase, "papers" => ["board-dd-other"]})
+      mk_task!(bare, scope, %{"parent_id" => phase})
+
+      # `design_doc` is validated only as "a string"; a sentence is storable.
+      # A paper id never contains whitespace, so a value that does is not a
+      # slug and the card does not carry it — bounded to the slug, never prose.
+      mk_task!(prose, scope, %{
+        "parent_id" => phase,
+        "design_doc" => "see the design notes in the channel for the whole story"
+      })
+
+      cards = conn |> docs_at(phase, "&view=board") |> by_bare_id()
+
+      # Every lookup below must hit a card: a missed key reads nil, and a nil
+      # `design_doc` would pass the omission arms vacuously.
+      assert Enum.sort(Map.keys(cards)) == Enum.sort([with_dd, papers_only, bare, prose])
+
+      assert cards[with_dd]["content_digest"]["design_doc"] == "board-dd-the-paper"
+      assert cards[with_dd]["content_digest"]["has_paper"] == true
+
+      # Omission law (wire §4): absent, never "" or null. `has_paper` still
+      # answers the rubric's question on every row.
+      for id <- [papers_only, bare, prose] do
+        refute Map.has_key?(cards[id]["content_digest"], "design_doc"),
+               "#{id} carries no slug-shaped design_doc, so its card must carry no key"
+      end
+
+      assert cards[papers_only]["content_digest"]["has_paper"] == true
+      assert cards[papers_only]["papers"] == ["board-dd-other"]
+      assert cards[bare]["content_digest"]["has_paper"] == false
+      assert cards[prose]["content_digest"]["has_paper"] == true
+
+      # The full card's own echo is the source the slug was copied from: the
+      # two views must hand the consumer the SAME string for the same row.
+      full = conn |> docs_at(phase, "") |> by_bare_id()
+      assert full[with_dd]["content"]["design_doc"] == "board-dd-the-paper"
     end
 
     test "a blank description and a whitespace-only one are both FALSE", %{

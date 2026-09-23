@@ -424,6 +424,14 @@ defmodule BarkparkWeb.TasksController.Params do
   #   `has_description`   } the booleans `ScoreCompleteness`
   #   `has_dependencies`  } (`internal/taskboard/completeness.go`) consumes,
   #   `has_paper`         } NEVER the prose they are derived from.
+  #   `design_doc`        the paper SLUG itself, task-cf0395706361aa2e: the
+  #                       Go paper->tasks inversion (`DrivenTasks`,
+  #                       detail_data.go) runs corpus-wide and matches on it,
+  #                       so the bit in `has_paper` cannot stand in. Verbatim
+  #                       (the Go side applies `bareID` to the full view's
+  #                       copy; both views must hand it the same string).
+  #                       Omitted unless the value is slug-shaped: non-empty,
+  #                       no whitespace, <= 255 B (the doc_id cap).
   #
   # WHY THOSE THREE AND NOT SEVEN. The rubric takes seven inputs. `title`,
   # `placement` (`parent_id`) and `priority` are already top-level on this
@@ -437,7 +445,8 @@ defmodule BarkparkWeb.TasksController.Params do
   # not go blank, it would render a LOWER score that looks like a real one.
   #
   # OMISSION LAW (wire §4). `criteria_marks` follows `criteria_progress`
-  # exactly: omitted when the row has no criteria, never an empty string.
+  # exactly: omitted when the row has no criteria, never an empty string;
+  # `design_doc` likewise — absent, never "" or null.
   # `content_digest` ITSELF is emitted on every board card, including the
   # all-false one, and that is the same law read correctly rather than an
   # exception to it: the law forbids an AMBIGUOUS segment ("0/0" cannot be
@@ -752,7 +761,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # for and why the set is exactly this size.
   #
   # BOARD-ONLY ON PURPOSE. The full card still carries `content`, so a full
-  # reader derives all four of these from the source rather than from a
+  # reader derives every one of these from the source rather than from a
   # summary; adding the digest there would be a SECOND copy of the same facts
   # on the one card that does not need it, and two copies of a fact are two
   # things to drift.
@@ -766,9 +775,22 @@ defmodule BarkparkWeb.TasksController.Params do
             present_list?(Map.get(content, "papers"))
       }
       |> put_criteria_marks(content)
+      |> put_design_doc_slug(Map.get(content, "design_doc"))
 
     Map.put(map, :content_digest, digest)
   end
+
+  # Bounded to a SLUG: `design_doc` is validated only as "a string", so a
+  # sentence is storable. A paper id never contains whitespace and never
+  # exceeds the doc_id cap (Content.Document, max 255), so anything else is
+  # not an id and the card carries no key rather than prose.
+  @design_doc_slug_max_bytes 255
+  defp put_design_doc_slug(digest, slug)
+       when is_binary(slug) and slug != "" and byte_size(slug) <= @design_doc_slug_max_bytes do
+    if String.match?(slug, ~r/\s/u), do: digest, else: Map.put(digest, :design_doc, slug)
+  end
+
+  defp put_design_doc_slug(digest, _), do: digest
 
   # Same omission law as put_criteria_progress/2: no criteria, no key.
   defp put_criteria_marks(digest, content) do

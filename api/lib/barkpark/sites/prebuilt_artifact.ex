@@ -135,6 +135,21 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       writer pads there) but they are still BUDGETED — a bomb appended after
       the marker must not ride in free.
 
+    * **ONE gzip member, and NOTHING after it (`E_MALFORMED`).** zlib stops at
+      the end of the first member and, in its default mode, silently discards
+      the rest of the input — so a second member's site content would be
+      dropped without a word (a two-member artifact staged the first member's
+      5 entries and answered `{:ok, ...}`), and whatever follows the member is
+      never inflated, parsed or counted by `max_total_bytes`. The inflater runs
+      in zlib's `:error` end-of-stream mode instead, which raises `data_error`
+      on any byte past the member's CRC32/ISIZE trailer. Every first-party
+      producer writes one member (`archive/tar` behind Go's `gzip.Writer`,
+      `tar -czf`), so the refusal costs a legitimate bundle nothing. Because
+      that raise is the SAME atom a corrupt member raises, a `data_error` is
+      re-read once in `:cut` mode (output discarded, capped at the total
+      budget) to tell the two apart: a member that terminates cleanly there
+      was refused for what came AFTER it, and the message says so.
+
     * **A bundle with nothing to serve is refused (`E_NO_INDEX`).** An archive
       that stages no regular files at all, or stages files but no root
       `index.html`, deploys green and then 404s at the domain. This is the
@@ -161,7 +176,7 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
       | Raised inside the stream | Answer | Why |
       |---|---|---|
-      | `:data_error`, `:stream_error`, `:buf_error` | `E_MALFORMED` (400) | zlib's verdict ON THE BYTES: the member is corrupt or cut. The caller repacks. |
+      | `:data_error`, `:stream_error`, `:buf_error` | `E_MALFORMED` (400) | zlib's verdict ON THE BYTES: the member is corrupt, cut, or followed by bytes. The caller repacks. |
       | `:enomem`, `:system_limit` | `E_EXTRACT_EXHAUSTED` (500) | THE BOX could not get the memory to inflate. The bytes may be perfect. |
       | anything else | **crash** | not a fact about the archive — a fact about a bug. |
 
@@ -241,6 +256,12 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # zlib window bits 31 = 16 + 15 = "gzip only". NOT 47 (auto-detect
   # zlib-or-gzip): the contract says `.tar.gz` and that is what is accepted.
   @gzip_window_bits 31
+
+  # What zlib does with input past the end of the gzip member. `:error` makes it
+  # raise `data_error`; zlib's default (`:cut`) discards it silently — which is
+  # how a second member or appended junk used to stage `{:ok, ...}` unread and
+  # unbudgeted. `:cut` survives only in `member_terminates?/2`, the classifier.
+  @gzip_eos_behavior :error
 
   # The zlib errors `run_stream/3` TYPES, as two NAMED classes. Everything
   # absent from both still crashes — see the moduledoc's table for why that is
@@ -458,7 +479,7 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     z = :zlib.open()
 
     try do
-      :zlib.inflateInit(z, @gzip_window_bits)
+      :zlib.inflateInit(z, @gzip_window_bits, @gzip_eos_behavior)
 
       case feed_all(z, raw, initial_state(staging, opts)) do
         {:ok, state} ->
@@ -477,10 +498,10 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       # says which atoms are here and which are deliberately absent — read it
       # before adding one.
       :error, %ErlangError{original: original} when original in @zlib_corrupt_errors ->
-        corrupt_member(original)
+        corrupt_member(original, raw, opts)
 
       :error, original when original in @zlib_corrupt_errors ->
-        corrupt_member(original)
+        corrupt_member(original, raw, opts)
 
       # The allocator refused. NOT the caller's fault: the archive may be
       # perfectly well-formed and within every cap, and this box simply could
@@ -497,8 +518,57 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     end
   end
 
+  # `:error` end-of-stream mode raises the SAME `data_error` for "bytes follow the
+  # member" as for "the member is corrupt", and the caller's remedy differs. So a
+  # `data_error` is re-read ONCE in `:cut` mode, which stops at the member's end
+  # and ignores the rest: a member that terminates cleanly there was refused only
+  # for what came after it. Either way the answer is `E_MALFORMED` — the re-read
+  # chooses the MESSAGE, never the verdict.
+  defp corrupt_member(:data_error = original, raw, opts) do
+    if member_terminates?(raw, Keyword.get(opts, :max_total_bytes, @max_total_bytes)) do
+      {:error, "E_MALFORMED",
+       "the artifact carries bytes after its gzip member ends (a second member, or " <>
+         "trailing junk) — they would be neither staged nor budgeted; repack it as ONE " <>
+         "gzip member (#{original})"}
+    else
+      corrupt_member(original)
+    end
+  end
+
+  defp corrupt_member(original, _raw, _opts), do: corrupt_member(original)
+
   defp corrupt_member(original),
     do: {:error, "E_MALFORMED", "the gzip stream is corrupt (#{original})"}
+
+  # The classifier's re-read. Output is DISCARDED — never parsed, never written —
+  # and counted against `cap`, so even a member that inflates without end costs
+  # at most one total budget of CPU before this answers `false`. A zlib error of
+  # either named class also answers `false`: the refusal is already decided, and
+  # the classifier must never turn it into a crash or a 5xx.
+  defp member_terminates?(raw, cap) do
+    z = :zlib.open()
+
+    try do
+      :zlib.inflateInit(z, @gzip_window_bits, :cut)
+      discard(z, :zlib.safeInflate(z, raw), 0, cap) and :zlib.inflateEnd(z) == :ok
+    catch
+      :error, %ErlangError{original: o}
+      when o in @zlib_corrupt_errors or o in @zlib_exhausted_errors ->
+        false
+
+      :error, o when o in @zlib_corrupt_errors or o in @zlib_exhausted_errors ->
+        false
+    after
+      _ = :zlib.close(z)
+    end
+  end
+
+  defp discard(z, {:continue, out}, seen, cap) do
+    seen = seen + IO.iodata_length(out)
+    seen <= cap and discard(z, :zlib.safeInflate(z, []), seen, cap)
+  end
+
+  defp discard(_z, {:finished, out}, seen, cap), do: seen + IO.iodata_length(out) <= cap
 
   defp extraction_exhausted(original) do
     {:error, "E_EXTRACT_EXHAUSTED",

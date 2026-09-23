@@ -25,7 +25,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -941,19 +941,51 @@ test('MUTATION PROOF: dropping the considering bucket from clause (a) seals an u
   assert.match(token(out), /SEAL a=PASS/);
 });
 
-// AND THE OTHER SIDE OF THE ORDERING: a considering row that HAS a forwarding address
-// is what clause (a) asks for, so it seals — and its name is STILL printed, on the
-// re-disclosure line, because D90's "printed by name" is unconditional and does not
-// depend on which bucket the row happened to land in.
+// AND THE OTHER SIDE OF THE SPLIT: a considering row that HAS a forwarding address is
+// what clause (a) asks for, so it seals — and its name is STILL printed, because D90's
+// "printed by name" is unconditional and does not depend on which bucket the row landed in.
+//
+// RE-CUT LEGALLY by task-8532dae7b075f4b3, and what that changed is the finding, stated.
+// Until then this fixture listed the row in BOTH the epic's `children` and the
+// successor's `forwarded` — two parents, which `parent_id` cannot produce — and this arm
+// asserted `considering=1` in the token, the `(+1 considering row(s) counted on a line
+// above …)` re-disclosure line and a `1 + 0 + 0 + 0 = 1` partition. Run over the LEGAL
+// shape with those assertions unchanged, the arm RED on the first of them (the token read
+// `considering=0 … re-homed=1`). Those three letters describe the in-roster `forwarded`
+// bucket, which R4/R6 make EMPTY on every legal invocation: a considering row that has a
+// forwarding address has LEFT the epic's roster, so it is no longer residue, no longer in
+// the token's `considering=` count, and never reaches the re-disclosure line. It is named
+// instead where a legal forwarding is named — on the forwarding line and under RE-HOMED,
+// with the status it carried (`was=considering`). The split itself is still pinned: the
+// unforwarded half is `considering-residue.json` (a=FAIL, named); this is the forwarded half.
 test('a FORWARDED considering row seals — and is still disclosed by name', () => {
+  // THE PRECONDITION, off the JSON, exactly as the wave-36 arm asserts its own: the row
+  // is under the successor ONLY, and the census remembers it as `considering`.
+  const fx = JSON.parse(readFileSync(FIX('considering-forwarded.json'), 'utf8'));
+  const ROW = 'gr-fixture-considering-1';
+  assert.ok(!fx.children.some((c) => c._id === ROW), 'the precondition: a forwarded row is NOT in the epic\'s `children`');
+  assert.ok(fx.forwarded.includes(ROW), 'the precondition: and it IS on the successor\'s roster');
+  assert.equal(fx.priorCensus[ROW], 'considering', 'the precondition: the census remembers the epic owed it, AS considering');
+
   const { status, out } = fixtureRun('considering-forwarded.json');
   assert.equal(status, SEAL, `a considering row with a named forwarding address must not red: ${token(out)}`);
-  assert.match(token(out), /SEAL a=PASS .*\borphans=0 considering=1\b/);
-  assert.match(out, /forwarded under successor : 1/);
+  assert.match(token(out), /SEAL a=PASS .*\borphans=0 considering=0\b.*\bfiling-events=0 re-homed=1\b/);
+  assert.match(out, /^ {2}forwarded under successor : 1 {2}\(0 still in the epic's roster, 1 RE-HOMED out of it: gr-fixture-considering-1\)$/m);
   assert.match(out, /considering \(disclosed\)   : 0/);
-  assert.match(out, /\(\+1 considering row\(s\) counted on a line above.*gr-fixture-considering-1\)/,
+  // D90: printed BY NAME, with the status that makes it a considering row.
+  assert.match(out, /^ {6}→ gr-fixture-considering-1 {2}was=considering now=considering$/m,
     'no considering row is ever disclosed by count alone');
-  assert.match(out, /── buckets partition residue: 1 \+ 0 \+ 0 \+ 0 = 1/);
+  assert.doesNotMatch(out, /✗ gr-fixture-considering-1/, 'a forwarded row is never charged as a disappearance');
+
+  // THE SEAL IS BOUGHT BY THE FORWARDING ADDRESS, NOT BY THE ROW BEING IGNORED: drop the
+  // re-home arm and the same fixture reds, naming the row as a filing event.
+  const noAddress = mutatedRun(
+    (src) => replaceUnique(src,
+      "      if (forwarded.has(id)) { reHomed.push({ id, was, now: now || 'UNREADABLE' }); continue; }\n", ''),
+    ['--ledger', withRequired('considering-forwarded.json'), '--repo', REPO, '--guard-cmd', 'true'],
+  );
+  assert.equal(noAddress.status, NO_SEAL, `without the re-home arm the row has no address: ${token(noAddress.out)}`);
+  assert.match(noAddress.out, /^ {6}✗ gr-fixture-considering-1 {2}was=considering now=considering$/m);
 });
 
 test('MUTATION PROOF: with `considering` dropped from the residue set, the same fixture seals', () => {
@@ -3310,38 +3342,81 @@ test('wave 26: a subtree the walk could not descend REFUSES and names the nodes'
   assert.match(token(read.out), /\bsubtree-unread=0\b/);
 });
 
+// task-8532dae7b075f4b3 CHANGED WHERE THIS IS CAUGHT, and the arm says so rather than
+// hiding it. The cycle below lists `cyc-a` under the epic AND under `cyc-b` — two parents,
+// which `parent_id` cannot emit — so the committed predicate now refuses the FIXTURE first
+// (FIXTURE-TWO-PARENTS) and never walks it. With the assertions below unchanged that arm
+// RED. The walk's own guard is still the defence for a LIVE store whose rosters disagree
+// with each other (the same class as the wave-64..67 paging arms), and this is still the
+// only arm that reaches it, so it is driven with the fixture refusal switched off.
 test('wave 26: a parent CYCLE is named where it happens, not blamed on the depth cap', () => {
-  const { status, out } = adHocRun({
+  const cycle = {
     successor: SEALABLE.successor, tasks: SEALABLE.tasks, gates: SEALABLE.gates,
     landed: SEALABLE.landed, unmeasuredWaivers: SEALABLE.unmeasuredWaivers, defectCommits: {},
     children: [{ _id: 'cyc-a', lifecycle_status: 'done' }],
     forwarded: [],
     subtrees: { 'cyc-a': [{ _id: 'cyc-b', lifecycle_status: 'done' }], 'cyc-b': [{ _id: 'cyc-a', lifecycle_status: 'done' }] },
-  });
+  };
+  const refused = adHocRun(cycle);
+  assert.equal(refused.status, INFRA);
+  assert.match(token(refused.out), /INFRA-FAULT .*code=FIXTURE-TWO-PARENTS/,
+    'the committed program refuses the unproducible fixture before any walk');
+  assert.match(refused.out, /cyc-a <- \{cloud-console-hardening-epic, cyc-b\}/);
+
+  const { status, out } = mutatedRun((src) => replaceUnique(src, '    if (twoParents.length)\n', '    if (false)\n'),
+    ['--ledger', adHocLedger(cycle), '--repo', REPO, '--guard-cmd', 'true']);
   assert.equal(status, INFRA);
   assert.match(out, /is NOT A TREE: cyc-a was reached twice, the second time under cyc-b at depth 3/);
   assert.match(token(out), /INFRA-FAULT .*code=ROSTER-CYCLE/);
 });
 
 // c1 — FORWARDING RECURSES, AND THE FALSE FAIL IS DRIVEN IN BOTH DIRECTIONS.
+//
+// RE-CUT LEGALLY by task-8532dae7b075f4b3. The fixture used to list the deep row in the
+// epic's `children` AND under the successor's wave — two parents — and this arm asserted
+// the one-level reader's false FAIL as `a=FAIL orphans=1`. Over the LEGAL shape (the row
+// under the successor's wave ONLY, the epic's claim carried by `priorCensus`) that
+// assertion RED: the one-level reader still refuses to seal, but it reads `a=PASS
+// … filing-events=1` — a correctly forwarded row charged as a DISAPPEARANCE, not as an
+// orphan. A row with a forwarding address has left the epic's roster, so it cannot be an
+// orphan of it; the false FAIL wave 26 fixed only exists, legally, in the anti-filing arm.
+// And that arm consults the recursive walk only through wave 36's re-home line — so the
+// last block below pins the other finding: WITHOUT re-home, recursion buys nothing on a
+// legal ledger. Wave 26's recursion had no legal consumer until wave 36.
 test('wave 26: MUTATION — a row forwarded to a GRANDCHILD read as an orphan', () => {
+  // THE PRECONDITION, off the JSON: one parent, and it is the successor's wave.
+  const fx = JSON.parse(readFileSync(FIX('forward-to-grandchild.json'), 'utf8'));
+  const ROW = 'gr-fixture-forwarded-deep';
+  assert.ok(!fx.children.some((c) => c._id === ROW), 'the precondition: the row is NOT in the epic\'s `children`');
+  assert.ok(fx.subtrees['cch-fixture-successor-wave-1'].some((r) => r._id === ROW),
+    'the precondition: it IS under the successor\'s first wave — a GRANDCHILD of the successor');
+  assert.equal(fx.priorCensus[ROW], 'open', 'the precondition: the census remembers the epic owed it');
+
   const args = ['--ledger', withRequired('forward-to-grandchild.json'), '--repo', REPO, '--guard-cmd', 'true'];
   const pre = mutatedRun(oneLevel, args);
   assert.equal(pre.status, NO_SEAL, `the mutation must reproduce the false FAIL: ${pre.out}`);
-  assert.match(token(pre.out), /NO-SEAL a=FAIL /);
-  assert.match(token(pre.out), /\borphans=1\b/);
-  assert.match(pre.out, /✗ gr-fixture-forwarded-deep/,
-    'the pre-fix reader prints a row that HAS a forwarding address as UNNAMED RESIDUE');
+  assert.match(token(pre.out), /\bfiling-events=1\b/);
+  assert.match(pre.out, /^ {6}✗ gr-fixture-forwarded-deep {2}was=open now=open$/m,
+    'the one-level reader charges a row that HAS a forwarding address as a disappearance');
 
   const now = run(args);
   assert.equal(now.status, SEAL, 'a row forwarded one level deeper is still forwarded');
-  assert.match(token(now.out), /SEAL a=PASS /);
+  assert.match(token(now.out), /SEAL a=PASS .*\bfiling-events=0 re-homed=1\b/);
   assert.match(token(now.out), /\borphans=0\b/);
   assert.doesNotMatch(now.out, /✗ gr-fixture-forwarded-deep/);
   assert.match(now.out, /^forwarding: successor subtree 2 row\(s\) over 2 level\(s\)$/m,
     'and the successor subtree it consulted is printed, so the PASS names its own evidence');
   // The forwarded row is counted on the forwarding line, not exempted.
-  assert.match(now.out, /^ {2}forwarded under successor : 1$/m);
+  assert.match(now.out, /^ {2}forwarded under successor : 1 {2}\(0 still in the epic's roster, 1 RE-HOMED out of it: gr-fixture-forwarded-deep\)$/m);
+
+  // WITHOUT THE RE-HOME LINE the committed recursion reads the same NO SEAL as the
+  // one-level reader: on a legal ledger the recursive walk's only consumer is re-home.
+  const noReHomeRun = mutatedRun((src) => replaceUnique(src,
+    "      if (forwarded.has(id)) { reHomed.push({ id, was, now: now || 'UNREADABLE' }); continue; }\n", ''), args);
+  assert.equal(noReHomeRun.status, NO_SEAL);
+  assert.match(noReHomeRun.out, /^forwarding: successor subtree 2 row\(s\) over 2 level\(s\)$/m,
+    'the walk DID descend to the grandchild');
+  assert.match(token(noReHomeRun.out), /\bfiling-events=1\b/, 'and nothing but re-home ever reads what it found');
 });
 
 // c2 — THE ANTI-FILING ARM. Recursion does NOT subsume it: this compares against what
@@ -3695,6 +3770,103 @@ test('wave 36: the re-home arm cannot rescue unaddressed residue, and R4/R6 are 
   const self = fixtureRun('self-successor.json');
   assert.equal(self.status, REFUSED, 'R4 still refuses a successor that IS the epic');
   assert.match(token(self.out), /REFUSED reason=SELF-SUCCESSOR/);
+});
+
+
+// ── task-8532dae7b075f4b3 · A FIXTURE `parent_id` COULD NOT EMIT IS REFUSED, NEVER SCORED ──
+//
+// THE DEFECT. The wave-36 block above says the fixtures are LEGAL and asserts that
+// precondition for its own two. Nothing asserted it for the rest: `forward-to-grandchild.json`,
+// `considering-forwarded.json` and `orphan-residue.json` each listed one `_id` under TWO
+// parents (the epic's `children` AND the successor), and the first two were the only
+// fixtures that ever scored the in-roster `forwarded` bucket above zero — the bucket R4/R6
+// make empty on every legal invocation. Their arms were green over a world that cannot
+// exist, which is the one kind of green that could never have caught the bucket being dead.
+//
+// THE FIX IS IN THE PROGRAM, not only here: the predicate refuses such a fixture with
+// INFRA `FIXTURE-TWO-PARENTS` before any refusal or clause, so a future fixture cannot buy
+// a verdict by being unproducible, whichever arm loads it. The arms below drive that
+// refusal in both directions, prove it load-bearing by mutation, and derive the population
+// from the directory rather than from a list.
+const plantSecondParent = (name, row, status) => {
+  const fx = JSON.parse(readFileSync(FIX(name), 'utf8'));
+  assert.ok(!fx.children.some((c) => c._id === row), `the plant must ADD a parent: ${row} is already in ${name}'s children`);
+  fx.children = [...fx.children, { _id: row, lifecycle_status: status }];
+  fx.requiredContexts = [AGG];
+  const p = join(tmp('seal-pred-two-parents-'), name);
+  writeFileSync(p, JSON.stringify(fx));
+  return p;
+};
+
+test('task-8532: a fixture listing one _id under TWO parents is REFUSED by name — and its legal twin still seals', () => {
+  // GREEN: the wave-36 fixture exactly as committed — one parent per row.
+  const legal = fixtureRun(W36_REPARENT);
+  assert.equal(legal.status, SEAL, `the legal fixture must still seal: ${token(legal.out)}`);
+  assert.doesNotMatch(legal.out, /FIXTURE-TWO-PARENTS/);
+
+  // RED: the same fixture with ONE row added — the re-homed row ALSO in the epic's
+  // `children`, which is the shape `forward-to-grandchild.json` carried until this row.
+  const planted = run(['--ledger', plantSecondParent(W36_REPARENT, 'gr-fixture-reparented-to-successor', 'open'),
+    '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(planted.status, INFRA, `a world with a two-parent row is not a world: ${token(planted.out)}`);
+  assert.match(token(planted.out), /INFRA-FAULT .*code=FIXTURE-TWO-PARENTS/);
+  assert.match(planted.out,
+    /gr-fixture-reparented-to-successor <- \{cloud-console-hardening-epic, cch-fixture-successor-wave-1\}/,
+    'the refusal names the row AND both parents');
+  assert.doesNotMatch(planted.out, /^VERDICT: /m, 'nothing is scored over it');
+});
+
+test('task-8532: the `forwarded`-seed spelling of a second parent is refused too — and R4 is not mistaken for it', () => {
+  // The exact pre-fix shape of `considering-forwarded.json`: the row in the epic's
+  // `children` AND in the successor's direct roster.
+  const planted = run(['--ledger', plantSecondParent('considering-forwarded.json', 'gr-fixture-considering-1', 'considering'),
+    '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(planted.status, INFRA);
+  assert.match(token(planted.out), /INFRA-FAULT .*code=FIXTURE-TWO-PARENTS/);
+  assert.match(planted.out, /gr-fixture-considering-1 <- \{cloud-console-hardening-epic, cch-fixture-successor-epic\}/);
+
+  // A successor that IS the epic lists its rows under ONE id twice, not under two
+  // parents — so `self-successor.json` still reaches R4, whose refusal it exists to pin.
+  const self = fixtureRun('self-successor.json');
+  assert.equal(self.status, REFUSED);
+  assert.match(token(self.out), /REFUSED reason=SELF-SUCCESSOR/);
+});
+
+test('task-8532 MUTATION: with the refusal removed, the planted two-parent world SCORES a green', () => {
+  const planted = plantSecondParent('considering-forwarded.json', 'gr-fixture-considering-1', 'considering');
+  const r = mutatedRun((src) => replaceUnique(src, '    if (twoParents.length)\n', '    if (false)\n'),
+    ['--ledger', planted, '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(r.status, SEAL, `without the refusal the unproducible fixture buys a seal: ${token(r.out)}`);
+  assert.match(r.out, /^ {2}forwarded under successor : 1$/m,
+    'scored through the in-roster bucket — the one R4/R6 make unreachable on a legal ledger');
+});
+
+test('task-8532: EVERY committed fixture is producible — the population is read off the directory, not a list', () => {
+  // The check is lifted out of the PREDICATE's own source, so this arm and the program
+  // cannot disagree about what a second parent is.
+  const src = readFileSync(PREDICATE, 'utf8');
+  const fn = src.match(/^function fixtureParentConflicts\([\s\S]*?\n\}\n/m);
+  assert.ok(fn, 'fixtureParentConflicts must be a top-level function declaration in the predicate');
+  const conflicts = new Function(`${fn[0]}\nreturn fixtureParentConflicts;`)();
+  const successorOf = (fx) => String(fx.successor || '(no successor)').trim();
+
+  // CONTROL: the check can say YES — the pre-fix shape, planted in memory, is caught.
+  const plantedFx = JSON.parse(readFileSync(FIX('considering-forwarded.json'), 'utf8'));
+  plantedFx.children.push({ _id: 'gr-fixture-considering-1', lifecycle_status: 'considering' });
+  assert.deepEqual(conflicts(plantedFx, EPIC, successorOf(plantedFx)),
+    [['gr-fixture-considering-1', [EPIC, 'cch-fixture-successor-epic']]]);
+
+  // THE POPULATION: every `.json` directly under the fixture directory (`census/` holds
+  // the committed prior census, a register and not a fixture). Not vacuous: the three
+  // fixtures this row re-cut and the wave-36 pair must be in it.
+  const dir = dirname(FIX('sealable.json'));
+  const names = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+  for (const must of ['considering-forwarded.json', 'forward-to-grandchild.json', 'orphan-residue.json', W36_REPARENT, W36_PACED])
+    assert.ok(names.includes(must), `the population read off ${dir} is missing ${must}`);
+  const offenders = names
+    .map((n) => { const fx = JSON.parse(readFileSync(join(dir, n), 'utf8')); return [n, conflicts(fx, EPIC, successorOf(fx))]; })
+    .filter(([, c]) => c.length);
+  assert.deepEqual(offenders, [], `${offenders.length} of ${names.length} committed fixture(s) list an _id under two parents`);
 });
 
 

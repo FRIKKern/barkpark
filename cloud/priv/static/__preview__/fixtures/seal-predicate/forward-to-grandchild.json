@@ -1,5 +1,5 @@
 {
-  "_comment": "THE FALSE FAIL BESIDE THE FALSE PASS. One live row, correctly forwarded \u2014 it exists under the successor, in the successor's first wave, which is where a successor epic with waves actually puts a forwarded row. A predicate that reads the successor's DIRECT roster only cannot see it and prints it under UNNAMED RESIDUE: orphans=1, NO SEAL, over a row that HAS a forwarding address. The committed file walks the successor's subtree and seals.",
+  "_comment": "THE FALSE FAIL BESIDE THE FALSE PASS, LEGALLY PLACED (task-8532dae7b075f4b3). One row the prior census remembers as open has been re-parented out of the epic and onto the successor’s FIRST WAVE — a grandchild of the successor, which is where a successor epic with waves actually puts a forwarded row. `parent_id` is one field, so the row is under the successor ONLY and nowhere in `children`. A predicate that reads the successor’s DIRECT roster only cannot see it: the row is charged as a FILING EVENT, NO SEAL, over a row that HAS a forwarding address. The committed file walks the successor’s subtree, RE-HOMES it and seals. Until task-8532dae7b075f4b3 this fixture listed the same _id in BOTH `children` and the wave’s subtree — a row with two parents, which the ledger cannot produce and which the predicate now refuses as FIXTURE-TWO-PARENTS.",
   "successor": "cch-fixture-successor-epic",
   "tasks": {
     "cch-fixture-successor-epic": {
@@ -14,10 +14,6 @@
     {
       "_id": "gr-fixture-done-1",
       "lifecycle_status": "done"
-    },
-    {
-      "_id": "gr-fixture-forwarded-deep",
-      "lifecycle_status": "open"
     }
   ],
   "forwarded": [],
@@ -34,6 +30,17 @@
         "lifecycle_status": "open"
       }
     ]
+  },
+  "priorCensus": {
+    "gr-fixture-forwarded-deep": "open",
+    "gr-fixture-done-1": "done"
+  },
+  "departed": {
+    "gr-fixture-forwarded-deep": {
+      "_id": "gr-fixture-forwarded-deep",
+      "lifecycle_status": "open",
+      "parent_id": "cch-fixture-successor-wave-1"
+    }
   },
   "gates": {
     "gr-ops-platform-admin-emails": {
