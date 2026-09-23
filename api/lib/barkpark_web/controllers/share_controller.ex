@@ -336,6 +336,16 @@ defmodule BarkparkWeb.ShareController do
   tenant's share — a live tenant has a resolvable workspace and is therefore
   403-confined above. `:require_admin` still gates the verb.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, params) do
     scope = params["scope"]
 
@@ -460,6 +470,16 @@ defmodule BarkparkWeb.ShareController do
   existence oracle. `Barkpark.Auth.revoke_token/1` itself stays UNSCOPED — 9 of
   its 12 call sites have no HTTP actor.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def revoke_token(conn, %{"token_id" => token_id}) do
     if revocable_by?(conn, token_id) do
       do_revoke(conn, token_id)
