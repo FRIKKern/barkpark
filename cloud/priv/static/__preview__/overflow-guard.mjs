@@ -2504,6 +2504,22 @@ async function main() {
       // name element is itself blind to element-local scrollWidth (497/497), so
       // the rect comparison must cross the element boundary — child rect
       // against PARENT rect — to see anything at all.
+      // ── PER-ASSERTION SCORING (cchi-w27-bl-w22s7, criterion 3) ───────────
+      //    This half's clean claim used to be printed whenever the SELECTOR
+      //    still matched — `walked === 0 ? fail : okLine` — so a run in which
+      //    every card in the grid overhung its own edge printed its findings
+      //    AND, underneath them, a ✓ saying the readiness gate stood in front
+      //    of N cards. The ✓ was true about the gate and silent about the
+      //    measurement, which is the shape that reads as a pass.
+      //
+      //    It is now scored against ITS OWN findings, the way half (b) below
+      //    already scores each of its cells (`failures.length === before`): the
+      //    claim is EARNED or WITHHELD, never narrated. And scoring it per half
+      //    is what makes the halves INDEPENDENT — this half can red while (b)
+      //    keeps every ✓ it earned, and (b) can red without costing this half
+      //    the claim it paid for. The leg's exit code is still one number over
+      //    all of them; what changes is that the number is now attributable.
+      const beforeCards = failures.length;
       const CARD_SCENS = ["mixed-fleet", "fleet-cruel-content", "overview-attention", "overview-past-due"];
       // 320..496 is the defect band; 620 is CLEAN on pre-fix bytes (a 588px
       // track holds the 497px name), so a width list that stopped at the widest
@@ -2577,7 +2593,15 @@ async function main() {
       // A selector that stops matching must RED, not sail through zero
       // iterations printing a tick.
       if (walked === 0) fail(D, `#overview: .instances-grid .instance-card matched NOTHING across ${CARD_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes — the selector no longer reaches the population it certifies`);
-      else okLine(`READINESS STOOD IN FRONT OF ${readyPop.join(", ")} card(s) — the gate counts the population it waits for (D228), so a grid caught one card into its paint cannot pass for a painted grid. instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
+      else if (failures.length > beforeCards) {
+        // WITHHELD, not printed under its own findings. The count is this
+        // half's alone, so a reader can tell which half of this leg lost.
+        process.stdout.write(
+          `   ! THE .instances-grid CARD HALF SCORED ${failures.length - beforeCards} FINDING(S) — its clean claim is WITHHELD ` +
+          `(walked ${walked} cards = ${CARD_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs). ` +
+          `The findings above are THIS half's; every clean claim below belongs to the notifications-matrix half and is unaffected (the tick glyph is deliberately absent from this line so a grep -c over the run still counts only EARNED claims) — the two are scored separately on purpose\n`,
+        );
+      } else okLine(`READINESS STOOD IN FRONT OF ${readyPop.join(", ")} card(s) — the gate counts the population it waits for (D228), so a grid caught one card into its paint cannot pass for a painted grid. instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
 
       // (b) the notifications matrix must ADMIT it is clipped. Two independent
       //     cues, both measured: a label column that stays put while the
@@ -7943,6 +7967,166 @@ async function main() {
         "CRUEL", "INADMISSIBLE", "NONE-POSSIBLE", "GONE-KIND",
         "BREAKABLE", "ADMIN-ONLY-AT-MINT", "FORMAT-LEGAL", "UNCAPPED-DERIVED",
       ];
+
+      // ── THE CAP DERIVATION (cchi-w27-bl-w22s7, criteria 1-2) ──────────────
+      // A cap was a PROSE STRING on the row: `"barkpark.name <= 255"` followed
+      // by a bare line number into registry/barkpark.ex — a number that had
+      // already moved. Three things are wrong with a sentence.
+      // It cannot be COMPARED (nothing could assert `cruelMin === the cap`), it
+      // cannot be WRONG OUT LOUD (a moved line number reads identically to a
+      // moved cap), and it cannot express the one fact this ledger keeps
+      // getting bitten by — that the number a changeset DECLARES is not
+      // necessarily the number the server ENFORCES.
+      //
+      // So a cap is now `{ value, from, effective }`, and `effective` is
+      // DERIVED — the minimum over every layer that can refuse the write:
+      //   changeset   `validate_length(:col, max: N)` in the changeset that
+      //               casts the field. ABSENT is not zero and not 255; it is
+      //               "this layer does not bound the field".
+      //   column      the Postgres column. `add|modify :col, :string` is a BARE
+      //               varchar, which Ecto renders as varchar(255) — a bound
+      //               nobody typed and everybody forgets. `:text` is unbounded.
+      //   format      a `validate_change` + regex. A LENGTH-ONLY census is
+      //               structurally blind to this layer, and being blind to it
+      //               is how a family gets filed NONE-POSSIBLE when the server
+      //               refuses it at 254 (charter D269, D252).
+      //   downstream  a renderer that truncates (none in this console does) or
+      //               LENGTHENS (several do — recorded per row, never netted
+      //               into the cap, because a cap is what the SERVER accepts).
+      //
+      // `value` is what a reader would have typed into the prose: the declared
+      // length cap if the changeset declares one, else the column's own width.
+      // `effective` is what the server actually enforces. THEY DIFFER, and the
+      // ledger is only worth its bytes on the rows where they do.
+      //
+      // TWO KNOWN ANSWERS THE DERIVATION MUST REPRODUCE, asserted at load below
+      // (`CAP_DERIVATION_SPECIMENS`) so the rule is exercised on inputs whose
+      // answer was settled by other work, not only on the rows it feeds:
+      //   env_var.comment  effective 255, NOT the 1000 its changeset once
+      //                    declared. `add :comment, :string` is a bare varchar,
+      //                    and no migration ever widened it, so a 1000 cap
+      //                    ACCEPTED a 256-char comment the column then refused.
+      //                    RETIRED FAMILY, kept as a SPECIMEN: the env-var
+      //                    feature was deleted on 2026-09-02, and the specimen
+      //                    is still re-derivable from committed bytes — the
+      //                    drop migration's own `down/0` carries `add :comment,
+      //                    :string` verbatim (re-derive: grep -n 'add :comment'
+      //                    cloud/priv/repo/migrations/*drop_env_vars.exs). This
+      //                    is the COLUMN-BINDS branch, and the only input in
+      //                    this file on which the changeset is the loser.
+      //   site.domains     effective 253 BY FORMAT. The changeset declares NO
+      //                    validate_length on :domains at all, so a
+      //                    validate_length census over site.ex sees the 255-char
+      //                    NAME and nothing here; the bound comes from
+      //                    @domain_format capping every label at 63, whose
+      //                    admissible maximum is 63.63.63 + "." + 61 = 253.
+      //                    This is the FORMAT-BINDS branch.
+      const capLayers = (l) => [
+        ["changeset", l.changeset], ["column", l.column],
+        ["format", l.format], ["downstream", l.downstream],
+      ].filter(([, n]) => Number.isFinite(n));
+      const deriveCap = (l) => {
+        const bounded = capLayers(l);
+        if (bounded.length === 0) {
+          return { value: null, from: "NO LAYER BOUNDS THIS FIELD", effective: null, layers: l };
+        }
+        const effective = Math.min(...bounded.map(([, n]) => n));
+        const binds = bounded.filter(([, n]) => n === effective).map(([k]) => k);
+        // `value` is the number the prose would have cited: the declared length
+        // cap, or — when no changeset bounds the field — the column's own width.
+        const value = Number.isFinite(l.changeset) ? l.changeset
+          : (Number.isFinite(l.column) ? l.column : effective);
+        return { value, from: binds.join(" + "), effective, layers: l };
+      };
+      const capSentence = (c) => (c.effective === null
+        ? `UNCAPPED — ${c.from}`
+        : `effective ${c.effective} (bound by ${c.from}${c.value !== c.effective ? `; the declared ${c.value} is NOT what the server enforces` : ""})`);
+      // The specimens. A refusal, not a console.log: if the rule stops
+      // reproducing an answer someone else already paid for, every cap below is
+      // suspect and this leg has no business measuring anything.
+      const CAP_DERIVATION_SPECIMENS = [
+        { name: "env_var.comment (RETIRED 2026-09-02, kept as the column-binds specimen)",
+          layers: { changeset: 1000, column: 255 }, effective: 255, from: "column" },
+        { name: "site.domains (the format-binds specimen)",
+          layers: { column: 255, format: 253 }, effective: 253, from: "format" },
+      ];
+      for (const s of CAP_DERIVATION_SPECIMENS) {
+        const got = deriveCap(s.layers);
+        if (got.effective !== s.effective || got.from !== s.from) {
+          return die(`${D}: THE CAP DERIVATION NO LONGER REPRODUCES A SETTLED ANSWER — ${s.name} derives effective ${got.effective} bound by "${got.from}", and the answer this rule was built to reproduce is ${s.effective} bound by "${s.from}". Every \`effective\` in the ledger below comes out of the same function, so none of them can be trusted while this is false. This is a refusal to measure, not a finding`);
+        }
+      }
+      // ── THE LEDGER, NAME-KEYED (cchi-w27-bl-w22s7, criterion 1) ───────────
+      // Keyed by the FIELD the cap belongs to — `schema.column` — and not by
+      // the selector that happens to render it today. Two consequences, and
+      // both are the point:
+      //  * ONE cap, many hosts. A field rendered on two screens cannot carry
+      //    two different numbers, because there is only one entry to disagree
+      //    with itself.
+      //  * A CONSUMER NAMES WHAT IT MEASURES. A `CRUEL_ROUTES` row (and a
+      //    `CRUEL_REFUSALS` entry) declares `family:` and is RESOLVED against
+      //    this object. A name that is not a key here is UNLISTED and refuses
+      //    by name at exit 2 — see the resolution loop below the tables.
+      // Every `layers` value below is re-derivable by the grep beside it. The
+      // prose that used to be the cap survives on the row as `capCite`,
+      // demoted: it is a reading aid now, not the thing anything asserts.
+      const CRUEL_LEDGER = {
+        // validate_length(:custom_host, max: 253) — grep -n 'validate_length(:custom_host'
+        // registry/barkpark.ex; bare `add :custom_host, :string` —
+        // 20260706210000_add_custom_host_to_barkparks.exs; @external_host_format
+        // (grep -n '@external_host_format' registry/barkpark.ex) caps every
+        // label at 63, admissible maximum 63.63.63.61 = 253.
+        "barkpark.custom_host": { class: "CRUEL", cruelMin: 253,
+          layers: { changeset: 253, column: 255, format: 253 } },
+        // validate_length(:name, min: 1, max: 255) + bare `add :name, :string`
+        // (20260626193000_create_barkparks.exs). The 63-char SLUG is a
+        // reachability fact (INADMISSIBLE), NOT a cap on this column — nothing
+        // truncates the name itself, which is why this row is kept as an upper
+        // bound rather than dropped.
+        "barkpark.name": { class: "INADMISSIBLE", cruelMin: 255,
+          layers: { changeset: 255, column: 255 } },
+        // ZERO validate_length in ProvisionJob.changeset and a POSTGRES :text
+        // column (`modify :error, :text`,
+        // 20260702130000_provision_job_error_to_text.exs). No layer bounds it,
+        // so `effective` is null and `cruelMin` is the smallest MEASURED biting
+        // length rather than a legal maximum — which is exactly what
+        // UNCAPPED-DERIVED means and why MISCLASSED below keys on it.
+        "provision_jobs.error": { class: "UNCAPPED-DERIVED", cruelMin: 512,
+          layers: {} },
+        // NO validate_length on :domains at all — the bound is
+        // validate_domains/1's validate_change against @domain_format
+        // (grep -n 'defp validate_domains\|@domain_format' registry/site.ex).
+        // The column is `{:array, :string}`, i.e. varchar(255) per element.
+        "site.domains": { class: "FORMAT-LEGAL", cruelMin: 253,
+          layers: { column: 255, format: 253 } },
+        // validate_length(:name, min: 1, max: 255) in Site.changeset/2 + bare
+        // `add :name, :string` (20260627150000_create_sites.exs). The slug is a
+        // SEPARATE cast field with its own clause, so — unlike barkpark.name —
+        // a 255-char site name does not have to survive a 63-char derivation.
+        "site.name": { class: "CRUEL", cruelMin: 255,
+          layers: { changeset: 255, column: 255 } },
+        // validate_length(:account_login, max: 255) in Installation.changeset/2
+        // + bare `add :account_login, :string`
+        // (20260702160000_create_github_installations.exs). The downstream
+        // LENGTHENS (githubCardHtml renders "GitHub · " + login = 264 painted
+        // characters) and lengthening never enters the cap.
+        "installation.account_login": { class: "INADMISSIBLE", cruelMin: 255,
+          layers: { changeset: 255, column: 255 } },
+        // validate_length(:pinned_release, max: 255) in autoupdate_changeset/2
+        // + bare `add :pinned_release, :string`
+        // (20260707110000_add_autoupdate_to_barkparks.exs). The changeset's only
+        // other clause is an update_change TRIM — NO format regex, which is the
+        // difference between this family and site.domains directly above.
+        "barkpark.pinned_release": { class: "CRUEL", cruelMin: 255,
+          layers: { changeset: 255, column: 255 } },
+        // validate_length(:vercel_deploy_url, max: 255) in vercel_changeset/2 +
+        // bare `add :vercel_deploy_url, :string`
+        // (20260705200000_add_vercel_claim_to_barkparks.exs). Carried by
+        // CRUEL_REFUSALS, not by a row — nothing in the corpus reaches the host.
+        "barkpark.vercel_deploy_url": { class: "INADMISSIBLE", cruelMin: 255,
+          layers: { changeset: 255, column: 255 } },
+      };
+      for (const [name, e] of Object.entries(CRUEL_LEDGER)) e.cap = deriveCap(e.layers);
       // THE FAILED INSTANCE (cch-w24-s2). Its own detail screen is the ONLY
       // place a person can read WHY provisioning failed, and it is the screen
       // no row above reaches — `#overview` and `#fleet` are LIST routes.
@@ -7954,7 +8138,12 @@ async function main() {
       // corpus (32-char host / 10-char name)", a sentence with its own
       // refutation on the same screen.
       //   cruelMin  the shortest rendered length that still counts as cruel on
-      //             this host. A cruel cell below it has GONE KIND.
+      //             this host. A cruel cell below it has GONE KIND. NO LONGER
+      //             SPELLED ON THE ROW (cchi-w27-bl-w22s7): it is the FAMILY's,
+      //             read out of CRUEL_LEDGER by the resolution loop below the
+      //             table, and asserted there to equal the family's derived
+      //             effective cap. A floor typed on the row could drift from
+      //             the cap it claims to be without anything noticing.
       //   kindMax   the CEILING the kind control must stay under. There is no
       //             server floor to cite for this number, so it is chosen and
       //             justified per row: it sits comfortably above what the kind
@@ -7968,9 +8157,9 @@ async function main() {
           hash: "#fleet", view: "view-fleet", sel: ".fleet-url", ready: ".fleet-row",
           scopes: ".fleet-main, .fleet-status, .fleet-row",
           scens: ["fleet-cruel-content", "mixed-fleet"],
-          cap: "barkpark.custom_host <= 253 (registry/barkpark.ex:727) under @external_host_format (:109)",
+          family: "barkpark.custom_host",
+          capCite: "barkpark.custom_host <= 253 (registry/barkpark.ex:727) under @external_host_format (:109)",
           class: "CRUEL",
-          cruelMin: 253,
           // `mixed-fleet` renders a 32-char host; 64 is double it and a quarter
           // of the cap, so an ordinary hostname edit passes and a drift toward
           // the 253-char twin reds.
@@ -7981,9 +8170,9 @@ async function main() {
           hash: "#overview", view: "view-overview", sel: ".instance-card-name", ready: ".instance-card",
           scopes: ".instance-card-head, .instance-card",
           scens: ["fleet-cruel-content", "mixed-fleet"],
-          cap: "barkpark.name <= 255 (registry/barkpark.ex:466)",
+          family: "barkpark.name",
+          capCite: "barkpark.name <= 255 (registry/barkpark.ex:466)",
           class: "INADMISSIBLE",
-          cruelMin: 255,
           // `mixed-fleet`'s longest card name is 10 characters. 64 again: the
           // slug cap is 63 and every mint path derives the slug from the name
           // WITHOUT truncation (see INADMISSIBLE above), so a name a person can
@@ -8039,9 +8228,9 @@ async function main() {
             //    kind ceiling keeps it honest.
             { scen: "mixed-fleet", hash: "#instance/5b2c1e00-0000-4000-8000-0000000000a4" },
           ],
-          cap: "provision_jobs.error is UNBOUNDED at every layer — a POSTGRES :text column (the `modify :error, :text` migration under cloud/priv/repo/migrations) and ProvisionJob.changeset (registry/provision_job.ex) casts :error with ZERO validate_length. The row's cruelMin is therefore the smallest MEASURED biting length, not a legal maximum",
+          family: "provision_jobs.error",
+          capCite: "provision_jobs.error is UNBOUNDED at every layer — a POSTGRES :text column (the `modify :error, :text` migration under cloud/priv/repo/migrations) and ProvisionJob.changeset (registry/provision_job.ex) casts :error with ZERO validate_length. The row's cruelMin is therefore the smallest MEASURED biting length, not a legal maximum",
           class: "UNCAPPED-DERIVED",
-          cruelMin: 512,
           // The kind control is the live instance, whose detail reads "Online"
           // (6 characters). 64 keeps the ceiling identical across all three
           // rows rather than tuning one number per host: any status detail a
@@ -8160,7 +8349,8 @@ async function main() {
             { scen: "mixed-fleet", hash: "#sites" },
           ],
           // NOT a validate_length — which is the whole point of the row.
-          cap: "site.domains — every entry <= 253 AND matching @domain_format, enforced by validate_domains/1's validate_change (registry/site.ex; re-derive: grep -n 'defp validate_domains\\|@domain_format' cloud/lib/barkpark_cloud/registry/site.ex). A validate_length census over site.ex sees the 255-char NAME and NOTHING here (D252)",
+          family: "site.domains",
+          capCite: "site.domains — every entry <= 253 AND matching @domain_format, enforced by validate_domains/1's validate_change (registry/site.ex; re-derive: grep -n 'defp validate_domains\\|@domain_format' cloud/lib/barkpark_cloud/registry/site.ex). A validate_length census over site.ex sees the 255-char NAME and NOTHING here (D252)",
           // FORMAT-LEGAL, not plain CRUEL: the cruel value on this family is
           // constrained by a REGEX as well as a length, so the admissible
           // maximum is a CONSTRUCTION (63.63.63.61) rather than a repeat count.
@@ -8171,7 +8361,6 @@ async function main() {
           // 212-char trap are proven against the SERVER by
           // cloud/test/barkpark_cloud/web/router_site_domain_format_legal_cap_test.exs.
           class: "FORMAT-LEGAL",
-          cruelMin: 253,
           kindMax: 64,
           // MEMBER-REACHABLE, re-derived by symbol on this tree rather than
           // inherited from the filing: `post "/v1/sites/:id/domains"` calls the
@@ -8193,7 +8382,8 @@ async function main() {
             { scen: "fleet-cruel-content", hash: "#sites" },
             { scen: "mixed-fleet", hash: "#sites" },
           ],
-          cap: "site.name <= 255 (validate_length(:name, min: 1, max: 255) in Site.changeset/2, registry/site.ex)",
+          family: "site.name",
+          capCite: "site.name <= 255 (validate_length(:name, min: 1, max: 255) in Site.changeset/2, registry/site.ex)",
           // CRUEL, not INADMISSIBLE like `.instance-card-name` above: the site
           // name and the site SLUG are separate cast fields (`validate_length(:slug,
           // max: 63)` is its own clause), so a 255-char name does NOT have to
@@ -8202,7 +8392,6 @@ async function main() {
           // route — so this row IS a reachability claim, where the row above it
           // in this table deliberately is not.
           class: "CRUEL",
-          cruelMin: 255,
           kindMax: 64,
           predicate: "a person on the sites list can tell their sites apart by the name they typed — the whole name, not the leading fragment that happened to fit",
         },
@@ -8237,7 +8426,8 @@ async function main() {
             { scen: "fleet-cruel-content", hash: "#settings/providers" },
             { scen: "providers-connected", hash: "#settings/providers" },
           ],
-          cap: "installation.account_login <= 255 — validate_length(:account_login, max: 255) in Installation.changeset/2 (github/installation.ex:48) AND the varchar(255) column (`add :account_login, :string`, priv/repo/migrations/20260702160000_create_github_installations.exs:18). The EFFECTIVE cap is the min of those two and nothing downstream shortens it: githubCardHtml esc()s the value into `'GitHub · ' + login` with no truncation of its own, so the host renders 9 + 255 = 264 characters",
+          family: "installation.account_login",
+          capCite: "installation.account_login <= 255 — validate_length(:account_login, max: 255) in Installation.changeset/2 (github/installation.ex:48) AND the varchar(255) column (`add :account_login, :string`, priv/repo/migrations/20260702160000_create_github_installations.exs:18). The EFFECTIVE cap is the min of those two and nothing downstream shortens it: githubCardHtml esc()s the value into `'GitHub · ' + login` with no truncation of its own, so the host renders 9 + 255 = 264 characters",
           // INADMISSIBLE, and the derivation is a WRITE-PATH one rather than a
           // role one (L2, no write was run). NO Barkpark request field carries
           // this value: `POST /v1/github/installations` (router.ex:5753, team
@@ -8256,7 +8446,6 @@ async function main() {
           // 255 characters is what this card must survive, and no other
           // instrument would have found out.
           class: "INADMISSIBLE",
-          cruelMin: 255,
           // `providers-connected` renders "GitHub · acme-engineering" (25
           // characters). 64 is the ceiling every row in this table uses, and it
           // sits comfortably above a real GitHub login — github.com itself does
@@ -8269,7 +8458,8 @@ async function main() {
           hash: "#fleet", view: "view-fleet", sel: ".fleet-meta", ready: ".fleet-row",
           scopes: ".fleet-main, .fleet-row",
           scens: ["fleet-cruel-content", "mixed-fleet"],
-          cap: "barkpark.pinned_release <= 255 — validate_length(:pinned_release, max: 255) in autoupdate_changeset/2 (registry/barkpark.ex:981) AND the varchar(255) column (`add :pinned_release, :string`, priv/repo/migrations/20260707110000_add_autoupdate_to_barkparks.exs:20). The changeset's ONLY other clause is an update_change TRIM (barkpark.ex:977-980) — no format regex, so a length-only cruel string is server-legal here, unlike site.domains above. The downstream derivation LENGTHENS: fleetAutoupdateText renders `\"pinned \" + vRel(pinned_release)` and vRel prepends a \"v\" to anything that does not carry one, so the fixture starts with \"v\" and the segment paints exactly 262 characters",
+          family: "barkpark.pinned_release",
+          capCite: "barkpark.pinned_release <= 255 — validate_length(:pinned_release, max: 255) in autoupdate_changeset/2 (registry/barkpark.ex:981) AND the varchar(255) column (`add :pinned_release, :string`, priv/repo/migrations/20260707110000_add_autoupdate_to_barkparks.exs:20). The changeset's ONLY other clause is an update_change TRIM (barkpark.ex:977-980) — no format regex, so a length-only cruel string is server-legal here, unlike site.domains above. The downstream derivation LENGTHENS: fleetAutoupdateText renders `\"pinned \" + vRel(pinned_release)` and vRel prepends a \"v\" to anything that does not carry one, so the fixture starts with \"v\" and the segment paints exactly 262 characters",
           // CRUEL, and this one IS a reachability claim (L2 — a source
           // derivation, no write was run). `PATCH /v1/barkparks/:id/autoupdate`
           // (router.ex:4271, Auth.require_current_team_admin) casts the body's
@@ -8286,7 +8476,6 @@ async function main() {
           // about wrapping or overflow — which is why the fixture string is a
           // single unbroken token (scenarios.mjs refuses one that is not).
           class: "CRUEL",
-          cruelMin: 255,
           // `mixed-fleet`'s meta line is the ordinary region · size · version ·
           // channel · autoupdate sentence. 64 is this table's shared ceiling and
           // is the number to move — with its measurement quoted — if an
@@ -8308,6 +8497,7 @@ async function main() {
       const CRUEL_REFUSALS = [
         {
           field: "barkpark.vercel_deploy_url",
+          family: "barkpark.vercel_deploy_url",
           // THE KEY RENAME, RECORDED (the row's criterion 3). A name-keyed
           // census over app.js for `vercel_deploy_url` returns ZERO and
           // declares the field unrendered. It is rendered — under a DIFFERENT
@@ -8318,16 +8508,97 @@ async function main() {
           // :125. The FILE and the SYMBOL are what to re-derive against:
           // `grep -n 'deployment_url' cloud/lib/barkpark_cloud/vercel.ex`.
           host: ".new-fineprint .mono — href AND text on all THREE arms of the claim ladder: vercelClaimLinkHtml(), vercelClaimedHtml() and vercelClaimUnknownHtml() (re-derive: grep -n 'function vercelClaim' cloud/priv/static/app.js)",
-          cap: "barkpark.vercel_deploy_url <= 255 — validate_length(:vercel_deploy_url, max: 255) in vercel_changeset/2 (registry/barkpark.ex:1027) AND the varchar(255) column (`add :vercel_deploy_url, :string`, priv/repo/migrations/20260705200000_add_vercel_claim_to_barkparks.exs:10). No downstream derivation shortens it; the producer LENGTHENS by 8 (`\"https://\" <> url`, vercel/real.ex:61)",
+          capCite: "barkpark.vercel_deploy_url <= 255 — validate_length(:vercel_deploy_url, max: 255) in vercel_changeset/2 (registry/barkpark.ex:1027) AND the varchar(255) column (`add :vercel_deploy_url, :string`, priv/repo/migrations/20260705200000_add_vercel_claim_to_barkparks.exs:10). No downstream derivation shortens it; the producer LENGTHENS by 8 (`\"https://\" <> url`, vercel/real.ex:61)",
           reachability: "L2 (source derivation, no write run) — MACHINE-WRITTEN, never person-typed. The sole writer is Vercel.deploy_for/1 -> persist/2 (vercel.ex:76-88, :194-203), whose value is `deployed.deployment_url` from client().deploy_project/3; in prod that is Real.deploy_project/3 returning `\"https://\" <> deployment[\"url\"]` from api.vercel.com (vercel/real.ex:51-62). Its one caller is POST /v1/barkparks/:id/vercel-deploy (router.ex:5292)",
           why: "UNREACHABLE BY THE CORPUS, at two independent rungs, and neither is a fixture VALUE this slice could add. (1) `vercelClaimHtml` renders nothing unless `boot.vercel` is present, and `boot` is GET /v1/barkparks/:id/bootstrap — a path scenarios.mjs's route() does not model, so it falls to the terminal `/v1/` 200 {} and `boot.vercel` is undefined in EVERY scenario. (2) Even with that arm, the host lives on the /new READY screen, which `newRenderReady` reaches only from `newCheckStatus`'s poll (re-derive: grep -n 'function newRenderReady\\|function newCheckStatus' cloud/priv/static/app.js) — ZERO scenarios deep-link `#new`, so there is no hash that lands there. Covering it needs a bootstrap route arm carrying a `vercel` block AND a scenario that drives the create flow to `step === \"ready\"`, which is a corpus build, not a cruel string",
         },
       ];
+      // ── RESOLUTION, AND THE TWO REFUSALS THE NAME-KEYING BUYS ────────────
+      //    (cchi-w27-bl-w22s7, criterion 2.) The three refusals this leg's
+      //    comment above promises — GONE-KIND length, a format the server would
+      //    reject, and BREAKABLE self-wrapping — ALREADY EXIST UPSTREAM, in the
+      //    CRUEL-row fixture guards in scenarios.mjs (grep -n 'cruel fixture:'
+      //    scenarios.mjs), and they throw AT LOAD. They are cited here, not
+      //    rebuilt. What no layer refuses yet is the two faults a name-keyed
+      //    ledger makes expressible for the first time:
+      //
+      //    UNLISTED — a consumer measures a host whose FIELD has no ledger
+      //    entry. Before name-keying this was unsayable: the cap was a string
+      //    on the row, so every row was trivially "listed" in a table of one.
+      //    A new row copied from its neighbour inherits the neighbour's cap
+      //    prose and certifies a family nobody derived. That is exit 2, not a
+      //    finding: the run would be measuring against a number it invented.
+      //
+      //    MISCLASSED — the row's CLASS contradicts its own DERIVED cap. The
+      //    two classes that make an assertion ABOUT the cap are the two that
+      //    can be caught: NONE-POSSIBLE and UNCAPPED-DERIVED both claim no
+      //    layer bounds the field, so a finite `effective` refutes them on
+      //    their own evidence; every other class in the vocabulary claims a
+      //    cap the cruel string is cut to, so a null `effective` refutes those.
+      //    And a `cruelMin` that is not the effective cap is the GONE-KIND
+      //    fault one layer up — a row calling itself cruel at a length the
+      //    server does not enforce. UNCAPPED-DERIVED is exempt from that last
+      //    one BY DEFINITION: its cruelMin is a measured biting length, not a
+      //    legal maximum. Exit 2 for the same reason as UNLISTED — a verdict
+      //    that disagrees with its own derivation is not a finding about the
+      //    console, it is a broken instrument.
+      const UNCAPPED_CLASSES = ["NONE-POSSIBLE", "UNCAPPED-DERIVED"];
+      for (const consumer of [...CRUEL_ROUTES, ...CRUEL_REFUSALS]) {
+        const at = consumer.sel ? `${consumer.hash} \`${consumer.sel}\`` : `refusal \`${consumer.field}\``;
+        const entry = CRUEL_LEDGER[consumer.family];
+        if (!entry) {
+          return die(`${D}: UNLISTED FAMILY — ${at} declares \`family: "${consumer.family}"\`, which is not a key in CRUEL_LEDGER (${Object.keys(CRUEL_LEDGER).join(", ")}). The row would be certified against a cap nobody derived: its \`capCite\` prose is a sentence, and a sentence cannot be compared to anything. Add the field to the ledger with its changeset/column/format layers, or correct the name`);
+        }
+        consumer.cap = entry.cap;
+        // The row does not spell its own floor or verdict any more — it is
+        // HANDED them, by name, from the one place they are derived. A row that
+        // still carried its own copy could disagree with the ledger silently,
+        // which is the drift name-keying exists to end.
+        consumer.cruelMin = entry.cruelMin;
+        const uncapped = UNCAPPED_CLASSES.includes(entry.class);
+        const cls = entry.class;
+        if (uncapped && entry.cap.effective !== null) {
+          return die(`${D}: MISCLASSED — ${at} is filed ${cls}, which asserts that NO layer bounds this field, but the derivation finds ${capSentence(entry.cap)} for \`${consumer.family}\`. One of the two is wrong and the class is the cheaper thing to be wrong about: a family with a live cap filed as uncapped is a cruel string nobody is cutting to anything`);
+        }
+        if (!uncapped && entry.cap.effective === null) {
+          return die(`${D}: MISCLASSED — ${at} is filed ${cls}, a class that claims the cruel string is cut TO A CAP, but the derivation finds no layer bounding \`${consumer.family}\` at all (${entry.cap.from}). An uncapped family belongs to NONE-POSSIBLE or UNCAPPED-DERIVED, and the difference between those two is whether cruelty has anything to measure against`);
+        }
+        if (consumer.sel && !uncapped && entry.cruelMin !== entry.cap.effective) {
+          return die(`${D}: MISCLASSED — ${at} drives a cruelMin of ${entry.cruelMin} while \`${consumer.family}\` derives ${capSentence(entry.cap)}. A cruel string is cruel only while it still matches its cap; a floor above the cap can never be reached, and a floor below it measures a KIND value under a cruel name — which is the quietest green there is`);
+        }
+        if (!CRUEL_CLASSES.includes(entry.class)) {
+          return die(`${D}: MISCLASSED — the ledger files \`${consumer.family}\` as "${entry.class}", which is not in the class vocabulary (${CRUEL_CLASSES.join(", ")}). An unclassified family is a cap with no recorded verdict, and this table's whole job is that no family goes without one`);
+        }
+      }
       // Per-scenario hash, normalized once. A row may hand `scens` a bare
       // scenario name (the hash is the row's) or `{ scen, hash }` (its own).
       const cruelCells = (r) => r.scens.map((s) => (
         typeof s === "string" ? { scen: s, hash: r.hash } : { scen: s.scen, hash: s.hash || r.hash }
       ));
+      // ── THE SCENARIO CENSUS, INSIDE THIS LEG (cchi-w27-bl-w22s7, crit. 5) ─
+      //    This file imports SCENARIOS in five other legs and die()s when a
+      //    named fixture loses its shape. THIS leg — the one whose whole table
+      //    is a list of scenario names — did not import it AT ALL. So a
+      //    `route.scens` entry naming a scenario somebody deleted was not
+      //    refused by name: nav() drove `?scen=<gone>`, the preview served
+      //    whatever its unknown-scenario path serves, and the leg failed at
+      //    RUNTIME somewhere below — on a readiness timeout, or worse, on a
+      //    green over a screen nobody meant to measure. The census runs BEFORE
+      //    any navigation and names the row, the scenario and the corpus.
+      //
+      //    EXIT 2, NOT A FINDING, and the distinction is this file's own: a
+      //    finding is a claim about the CONSOLE, and a table pointing at a
+      //    fixture that does not exist is a claim about nothing. It is the same
+      //    verdict `SCENARIOS["site-states"] no longer carries a deepLink`
+      //    reaches four legs above, for the same reason.
+      const { SCENARIOS: CRUEL_SCENARIOS } = await import("./scenarios.mjs");
+      for (const route of CRUEL_ROUTES) {
+        for (const cell of cruelCells(route)) {
+          if (!CRUEL_SCENARIOS[cell.scen]) {
+            return die(`${D}: SCENARIOS no longer carries "${cell.scen}", named by the \`${route.sel}\` row (family \`${route.family}\`) at ${cell.hash}. The corpus holds ${Object.keys(CRUEL_SCENARIOS).length} scenarios and this is not one of them — so this row would drive a fixture that does not exist and every line printed under it would be about some other screen. Re-point the row at a live scenario, or drop it and its family's ledger entry together`);
+          }
+        }
+      }
       // ANTI-VACUITY 0 — the axes. A leg that lost the cruel scenario, or the
       // kind control, or the sub-899 band, or its whole route table, passes for
       // the wrong reason.
@@ -8358,7 +8629,7 @@ async function main() {
           fail(D, `axis check ${at}: kindMax ${route.kindMax} is not below cruelMin ${route.cruelMin} — the two ceilings overlap, so one string could satisfy BOTH sides of the axis and neither assertion could lose`);
         }
         if (cruel.length === 0) {
-          fail(D, `axis check ${at}: this row carries NO cruel fixture (scens: ${cruelCells(route).map((c) => c.scen).join(", ") || "none"}) — a row driven only on kind content measures the corpus every other leg already measures, and its green says nothing about the cap it cites (${route.cap})`);
+          fail(D, `axis check ${at}: this row carries NO cruel fixture (scens: ${cruelCells(route).map((c) => c.scen).join(", ") || "none"}) — a row driven only on kind content measures the corpus every other leg already measures, and its green says nothing about the cap it cites (${route.capCite})`);
         }
         if (kind.length === 0) {
           fail(D, `axis check ${at}: this row carries NO kind control (scens: ${cruelCells(route).map((c) => c.scen).join(", ") || "none"}) — without one, a bound that fixes the cruel value by shredding today's rendering scores a clean sweep on this host`);
@@ -8366,8 +8637,8 @@ async function main() {
         if (!CRUEL_CLASSES.includes(route.class)) {
           fail(D, `axis check ${at}: class "${route.class}" is not in the ledger vocabulary (${CRUEL_CLASSES.join(", ")}) — an unclassified row is a family with no recorded verdict`);
         }
-        if (!route.cap || !route.predicate) {
-          fail(D, `axis check ${at}: the row is missing its ${!route.cap ? "cap citation" : "person-facing predicate"} — a cruel row that cannot say which cap it is cut to, or which person it is for, is a fixture with no claim attached`);
+        if (!route.capCite || !route.predicate) {
+          fail(D, `axis check ${at}: the row is missing its ${!route.capCite ? "cap citation" : "person-facing predicate"} — a cruel row that cannot say which cap it is cut to, or which person it is for, is a fixture with no claim attached`);
         }
       }
       // THE REFUSAL TABLE'S OWN SHAPE CHECK. An entry that cannot say which
@@ -8376,7 +8647,7 @@ async function main() {
       // a note. The `from:` field is the one this table exists for: it is the
       // answer to a name-keyed grep that returned zero.
       for (const r of CRUEL_REFUSALS) {
-        for (const f of ["field", "from", "host", "cap", "reachability", "why"]) {
+        for (const f of ["field", "from", "host", "capCite", "reachability", "why"]) {
           if (!r[f]) {
             fail(D, `refusal check \`${r.field || "<unnamed>"}\`: the entry is missing its \`${f}\` — an uncoverable family with an incomplete record is indistinguishable from a family nobody looked at`);
           }
@@ -8593,7 +8864,7 @@ async function main() {
               // corpus" that the numbers on the same screen refuted.
               if (isCruel && m.longest < route.cruelMin) {
                 wentKind++;
-                fail(D, `${scen}/${theme}@${width}${cell.hash}: the longest \`${route.sel}\` renders ${m.longest} characters, below this row's cruel floor of ${route.cruelMin} (${route.cap}) — the CRUEL fixture has GONE KIND, so every clean line under it is a pass over ordinary content`);
+                fail(D, `${scen}/${theme}@${width}${cell.hash}: the longest \`${route.sel}\` renders ${m.longest} characters, below this row's cruel floor of ${route.cruelMin} (${capSentence(route.cap)}) — the CRUEL fixture has GONE KIND, so every clean line under it is a pass over ordinary content`);
               }
               if (!isCruel && m.longest > route.kindMax) {
                 wentCruel++;

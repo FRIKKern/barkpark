@@ -6824,7 +6824,10 @@ function assertCensus() {
 // own bytes a thousand lines away from the edit that caused it.
 //
 // WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT. It is NOT a port of
-// `SCENARIO_RESIDUE` (overflow-guard.mjs) and NOT a file-level census over
+// `SCENARIO_RESIDUE` (breakpoint-sweep.mjs — NOT overflow-guard.mjs, which is
+// where this sentence cited it from cch-w22 until cchi-w27-bl-w22s7; re-derive:
+// grep -ln 'export const SCENARIO_RESIDUE' cloud/priv/static/__preview__/*.mjs)
+// and NOT a file-level census over
 // readers — see the written refusal below. It is the shape that is ALREADY
 // SHIPPED and already working in this file: the three `assert.equal` calls that
 // pin a fixture's CONTENT and name the reader's assumption in the message
