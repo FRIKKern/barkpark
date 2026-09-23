@@ -6521,6 +6521,29 @@ const EXPECTATIONS = {
       const bodyEl = reg.get("instance-body");
       const before = (bodyEl || {}).innerHTML || "";
       assert.ok(before.length > 0, "#instance-body rendered empty");
+      // task-6878caa08b065f78 — THE LIFECYCLE LADDER'S STOPPED-STATE WORD.
+      // This is a committed scenario where lifecycleStatePillHtml renders
+      // in the `stopped` state: the suspended box's bp CLI card mounts in
+      // #inst-lifecycle-actions and its head carries the ladder's chip. The
+      // overview-past-due pin (#19998) covers statusOf's suspended arm on the
+      // grid, where the ladder does not render, so a "Stopped" painted into
+      // LIFECYCLE_PILL_LABEL.stopped left every scenario green. The word is
+      // Suspended for the same reason the suspended card's is: the console
+      // never paints a stop it does not perform.
+      //
+      // Anti-vacuity control FIRST, on the same span shape the negative reads:
+      // if the card stops rendering or the label bytes change shape, the list
+      // is empty and the negative would pass on nothing — this reds instead.
+      // Then the negative, then the exact bytes the ladder emits (class chain +
+      // label). Checked RED by painting "Stopped" in LIFECYCLE_PILL_LABEL.stopped.
+      const lifeCard = (reg.get("inst-lifecycle-actions") || {}).innerHTML || "";
+      const lifeLabels = [...lifeCard.matchAll(/<span class="status-pill-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+      assert.ok(lifeLabels.length >= 1,
+        `the lifecycle card's pill labels are read at all (want the ladder's stopped chip, got ${JSON.stringify(lifeLabels)} from ${JSON.stringify(lifeCard.slice(0, 300))})`);
+      assert.ok(!lifeLabels.some((l) => /\bStopped\b/i.test(l)),
+        `the lifecycle ladder paints the literal word Stopped (labels: ${JSON.stringify(lifeLabels)})`);
+      assert.ok(lifeCard.includes('<span class="status-pill status-pill--neutral status-pill--stopped bp-inst--stopped"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Suspended</span></span>'),
+        `the ladder's stopped chip is the neutral stopped-variant pill labelled Suspended (labels: ${JSON.stringify(lifeLabels)})`);
       // 1. The precondition: the unknown arm really is on screen.
       assert.ok(before.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-update-actions-reason">Roll back&hellip;</button></div>'),
         "the Roll back offer is not in the unknown arm — there is no still-checking state here to need an exit");
