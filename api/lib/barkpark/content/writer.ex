@@ -31,6 +31,7 @@ defmodule Barkpark.Content.Writer do
   }
 
   alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.Content.PreWriteFences
 
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
   alias Barkpark.Tasks.BriefMirror
@@ -447,7 +448,7 @@ defmodule Barkpark.Content.Writer do
     # dies returns {:error, {:dedup_unavailable, msg}} rather than filing the
     # task unchecked. content.dedup_bypass: true is the deliberate escape.
     # The dedup gate is the Tasks plugin's `:late` pre-write fence.
-    fences = Barkpark.Plugins.Registry.collect_pre_write_fences()
+    fences = PreWriteFences.list()
 
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <-
@@ -460,11 +461,11 @@ defmodule Barkpark.Content.Writer do
          # find-or-create dedup) keep the order they had when this chain named
          # them. With plugins off the list is empty and both steps are `:ok`.
          :ok <-
-           run_pre_write_fences(fences, :early, [type, attrs, dataset, doc_id, prev_doc, opts]),
+           PreWriteFences.run(fences, :early, [type, attrs, dataset, doc_id, prev_doc, opts]),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <-
-           run_pre_write_fences(fences, :late, [type, attrs, dataset, doc_id, prev_doc, opts]) do
+           PreWriteFences.run(fences, :late, [type, attrs, dataset, doc_id, prev_doc, opts]) do
       create_after_dedup(type, attrs, dataset, doc_id, ctx, prev_doc, opts)
     end
   end
@@ -974,7 +975,7 @@ defmodule Barkpark.Content.Writer do
     # `prev_doc == nil` exactly like the two birth guards above, so every
     # UPDATE arriving here (autosave, patch merges, block ops, forms) is
     # structurally untouched — parity with `do_create_document:175`.
-    fences = Barkpark.Plugins.Registry.collect_pre_write_fences()
+    fences = PreWriteFences.list()
 
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <-
@@ -987,11 +988,11 @@ defmodule Barkpark.Content.Writer do
          # find-or-create dedup) keep the order they had when this chain named
          # them. With plugins off the list is empty and both steps are `:ok`.
          :ok <-
-           run_pre_write_fences(fences, :early, [type, attrs, dataset, doc_id, prev_doc, opts]),
+           PreWriteFences.run(fences, :early, [type, attrs, dataset, doc_id, prev_doc, opts]),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <-
-           run_pre_write_fences(fences, :late, [type, attrs, dataset, doc_id, prev_doc, opts]) do
+           PreWriteFences.run(fences, :late, [type, attrs, dataset, doc_id, prev_doc, opts]) do
       upsert_after_gate(type, attrs, dataset, doc_id, ctx, prev_doc, opts)
     end
   end
@@ -1106,23 +1107,6 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp defer_after_save(result, _payload), do: result
-
-  # Runs one phase of the plugin pre-write fences (`Barkpark.Plugin.pre_write_fence/0`)
-  # in declared order and stops at the first non-`:ok`, returning it UNCHANGED —
-  # exactly what the `with :ok <- Fence.check(...)` steps it replaced did, so no
-  # caller or test that matches a fence's error shape sees a difference.
-  defp run_pre_write_fences(fences, phase, args) do
-    Enum.reduce_while(fences, :ok, fn
-      {^phase, mod, fun}, :ok ->
-        case apply(mod, fun, args) do
-          :ok -> {:cont, :ok}
-          refusal -> {:halt, refusal}
-        end
-
-      _other_phase, :ok ->
-        {:cont, :ok}
-    end)
-  end
 
   # ── The Writer-seam transition gate (task-lifecycle-visibility, D7b + D21) ─
   #

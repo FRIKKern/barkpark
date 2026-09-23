@@ -834,8 +834,9 @@ defmodule Barkpark.Plugin do
   write, inside the write path, with the resolved `prev_doc` (nil on a birth)
   and the caller's `opts`.
 
-  Collected by `Barkpark.Plugins.Registry.collect_pre_write_fences/0` in plugin
-  load order (this list's order kept within a plugin). The writer runs each
+  Published by `Barkpark.Plugins.Registry` to `Barkpark.Content.PreWriteFences`
+  and read there in plugin load order (this list's order kept within a
+  plugin). The writer runs each
   phase's fences in that order and stops at the first non-`:ok`.
 
   Unlike `lifecycle_hooks/0` `:before_*`, a fence sees `prev_doc` and `opts`
