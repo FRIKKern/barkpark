@@ -1664,6 +1664,19 @@
     html[data-width-bucket="phone"] .editor-panel .editor-body.editor-panel-main:not(.bp-paper-body) {
       min-inline-size: 0;
     }
+    /* No document open at phone: the list IS the surface. The nothing-selected
+       placeholder is `.editor-empty { flex: 1 }` (basis 0) and the lone list is
+       `.pane-column--last { flex: 1 1 auto }`, so the two shared the free
+       space: live at 375 the placeholder took a 61.8px strip, the list shrank
+       to 313.2px and the sentence wrapped one word per line (80px / 340px at
+       420). Its only content is "pick one from the list", and the list is the
+       thing it was squeezing, so at phone it yields entirely. Keyed on
+       `data-reason="nothing_selected"`: the not-found / no-schema notices are
+       real errors and are not touched. The `:has(> .pane-column--last)` guard
+       keeps the placeholder if a desk ever renders with no list column. */
+    html[data-width-bucket="phone"] .pane-layout:has(> .pane-column--last) > .editor-empty[data-reason="nothing_selected"] {
+      display: none;
+    }
 
     /* Secondary editor pane (D36) — the LAST unconditional crush. The E2
        read-only secondary card is a DIRECT flex child of .pane-layout styled
@@ -2534,6 +2547,23 @@
     html[data-width-bucket="phone"] .bp-doc-sidebar.is-open[data-user-opened] .bp-doc-sidebar__collapse {
       min-width: 44px;
       min-height: 44px;
+      justify-content: center;
+    }
+    /* The CLOSED strip's toggle at phone gets a 24px target (WCAG 2.2 SC
+       2.5.8). The rule above deliberately leaves the painted-closed strip's
+       button at its 16x16 icon box; at phone that box was measured live at
+       16x16 (x=347 at 375), under the 24px floor, and it is the only way to
+       summon the inspector there. `:not([data-user-opened])` keeps this
+       disjoint from the 44px Tier-3 exit above.
+
+       The negative margin is the point: the border box grows to 24x24, but
+       -4px on every side gives it back, so the flex footprint stays 16x16 and
+       the 41px strip, the 36px head and the 328px reader do not move. The 4px
+       overhang lands in the head's own `8px 12px` padding. */
+    html[data-width-bucket="phone"] .bp-doc-sidebar:not([data-user-opened]) .bp-doc-sidebar__collapse {
+      min-width: 24px;
+      min-height: 24px;
+      margin: -4px;
       justify-content: center;
     }
     /* The only affordance that closes the inspector once it overlays the
