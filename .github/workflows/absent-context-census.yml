@@ -75,6 +75,11 @@ permissions:
   checks: read
   actions: read
   pull-requests: read
+  # The ONLY write. The final step files this census's red as a GitHub issue
+  # through scripts/file-ci-failure-issue.sh, and that needs `issues: write`.
+  # Granted at workflow level because this file has exactly one job and the
+  # filer runs in it (scheduled-arm-health.yml is the same shape).
+  issues: write
 
 concurrency:
   group: absent-context-census
@@ -121,3 +126,59 @@ jobs:
             3) echo "::error::CONFIGURATION FAULT — this run's credential cannot read the Actions and check-run endpoints. A census with no authority is not a clean census."; exit 1 ;;
             *) echo "::error::absent-context-census.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
+
+      # ── THE CARRIER. A RED HERE MUST REACH A HUMAN ─────────────────────────
+      #
+      # dr-w33-bl-carrier-less-watches-get-a-carrier-or-go. Until this step the
+      # header above argued that "a failure that nobody is paged for is
+      # indistinguishable from health" and then paged nobody: this file invoked
+      # no notifier, carried no push arm (section 7 of the test FORBIDS one),
+      # and scripts/cron-scream-coverage.sh scored it UNREAD with a ledger row
+      # that read "R3 is the open remedy and is a one-step change". This is
+      # that step. Measured before it landed: run 35892264098 (2026-09-23
+      # 16:56Z) SCREAMED that PR #16709 had "PR references an active task"
+      # rendering nowhere (class NAME_NOT_IN_RUN), failed, and reached no one.
+      #
+      # THE GUARD IS `failure() || cancelled()` FROM THE START. `failure()` is
+      # FALSE on a cancelled run, so a census that was cancelled mid-read would
+      # otherwise look exactly like one that read clean — the one confusion this
+      # file exists to abolish (dr-w33-s4-alarm-reaches-a-human widened the five
+      # older alert steps for the same reason). The ref conjunct keeps a
+      # workflow_dispatch debug run on a topic branch from minting a public
+      # issue; the schedule arm only ever runs on the default branch.
+      #
+      # ITS OWN KEY. file-ci-failure-issue.sh dedupes on CI_FAILURE_KEY, so a
+      # standing absence appends to ONE issue (and escalates once after
+      # ESCALATE_AFTER repeats) instead of opening four a day. The filer exits 1
+      # when the alert was NOT delivered, so a failure to file is itself red.
+      - name: File the census red to a human
+        if: (failure() || cancelled()) && github.ref == 'refs/heads/main'
+        env:
+          # The filer reads GITHUB_TOKEN, never GH_TOKEN (crown-reconcile's
+          # first production scream died on exactly that slip).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: absent-context-census
+          CI_FAILURE_DETAIL: |
+            **A required context renders nowhere on an open pull request, and/or
+            a workflow run has sat queued past the threshold.** Neither shows up
+            as a red check anywhere else, which is why this census exists.
+
+            Read the run log: every ABSENT row names the PR, the context, its
+            CLASS and a remedy line; the queue limb names each stale run.
+
+            - `NAME_NOT_IN_RUN` — the producing run executed and carried no job
+              of that name (a head predating the context, a renamed job).
+              Rebase the PR, or fix the spec. Never re-dispatch.
+            - `NO_RUN` — no producing run exists for the head. Push, or close.
+            - `ZOMBIED` / stale-queued — a run was created and never
+              dispatched. Cancel it or re-run it.
+            - exit 2 — a feed could not be read twice in a row (UNKNOWN, not
+              clean). exit 3 — the token cannot read the Actions/check-run
+              endpoints (CONFIGURATION FAULT).
+            - a CANCELLED run files here too: a census that never finished is
+              not a clean census.
+
+            Idempotent per key: a standing condition appends a comment rather
+            than opening a new issue. CLOSE IT once a run concludes success;
+            the next red opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh

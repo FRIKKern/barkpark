@@ -94,8 +94,9 @@
 #
 # A naive sweep — "scheduled workflow with zero `if: failure()`" — returns 20+
 # and sweeps in breakglass-watch, main-red-owner, cron-overdue-probe and
-# stale-verdict-watch. This predicate returns 8. The difference is entirely the
-# two prongs above.
+# stale-verdict-watch. This predicate returned 8 when this file was written
+# (5 after dr-w33-bl; `--list` prints the live count, never trust this line
+# over it). The difference is entirely the two prongs above.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 #  WHY `if: failure()` IS NOT THE DETECTOR, THOUGH IT IS THE OBVIOUS ONE
@@ -119,14 +120,17 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #  THE LEDGER, AND WHY THIS GUARD IS NOT BORN SCREAMING
 # ─────────────────────────────────────────────────────────────────────────────
-# Seven workflows are UNREAD today -- this header shipped saying "eight" while
-# the ledger below shipped with seven rows, and a live
-# `bash scripts/cron-scream-coverage.sh --list` on origin/main dd09ba571 read
-# `READ 24, UNREAD 7`. Corrected here rather than left as prose nobody
-# re-derived. A guard that reds on seven things the day
+# FIVE workflows are UNREAD as of dr-w33-bl-carrier-less-watches-get-a-carrier-
+# or-go (`--list` read `READ 26, UNREAD 5` on its branch; RE-DERIVE, this line
+# is prose). The history, so the number is not re-inflated from memory: this
+# header shipped saying "eight" while the ledger below shipped with seven rows,
+# and a live `bash scripts/cron-scream-coverage.sh --list` on origin/main
+# dd09ba571 read `READ 24, UNREAD 7`; elixir-nightly.yml and then
+# absent-context-census.yml each left through R3. A guard that reds on seven
+# things the day
 # it lands is a guard whose readers learn to dismiss it — the exact failure
 # task-e6fe244ece2b5d27 exists to prevent, reached from a new side. So the
-# eight are LEDGERED below, each with a dated disposition, and this guard is a
+# UNREAD are LEDGERED below, each with a dated disposition, and this guard is a
 # RATCHET over that ledger:
 #
 #   NEW UNREAD    a cron'd workflow is UNREAD and carries no ledger row  -> RED
@@ -194,14 +198,16 @@ LEDGER_FILE=""
 MODE=report
 
 # ── THE LEDGER ───────────────────────────────────────────────────────────────
-# file|dated disposition. SIX rows, measured on origin/main dd09ba571,
+# file|dated disposition. FIVE rows (absent-context-census.yml left by the
+# front door in dr-w33-bl-carrier-less-watches-get-a-carrier-or-go: its R3
+# step landed in the same commit that deleted its row). Before that, SIX rows,
+# measured on origin/main dd09ba571,
 # 2026-09-23, task-ff710b2548a34849. Shipped as seven by PR #19966 (whose prose
 # above said eight). elixir-nightly.yml LEFT BY THE FRONT DOOR: it was wired to
 # R3 in the same change that removed its row, and the ratchet's STALE ROW arm
 # fired on the real tree in between. That is the only reason the arm is trusted
 # for THIS file rather than only for the fixture #19966 shipped.
-DEFAULT_LEDGER='absent-context-census.yml|2026-09-23: schedule-only BY A COMMITTED TEST — absent-context-census.test.sh §7 asserts this workflow is schedule-only, so R2 is forbidden here, not merely absent. Its own hermetic mutation suite runs as step one of every run, so an instrument that has lost the ability to report says so before its verdict is believed. R3 is the open remedy and is a one-step change.
-chronicle-paper.yml|2026-09-23: nightly narrative digest, report class. Carries a pull_request arm, which is NOT a reader of a scheduled red (see the predicate above) — this row exists so that fact is recorded rather than mistaken for coverage. A late or failed chronicle costs one night of prose and gates nothing.
+DEFAULT_LEDGER='chronicle-paper.yml|2026-09-23: nightly narrative digest, report class. Carries a pull_request arm, which is NOT a reader of a scheduled red (see the predicate above) — this row exists so that fact is recorded rather than mistaken for coverage. A late or failed chronicle costs one night of prose and gates nothing.
 landed-open-report.yml|2026-09-23: daily ledger digest. Its own header states a red here means THE READ FAILED and that findings exit 0 into the step summary, and it deliberately carries no push arm so it renders no check run anywhere. Accepted UNREAD: the digest is a convenience, and the ledger it reports on is queryable directly with bp.
 pds-scratch-round-trip.yml|2026-09-23: daily boot/verify/teardown of the PDS scratch target. Schedule + workflow_dispatch ONLY and its header measures the run at >10 min (two full compiles), calling a per-PR venue a WRONG build. So R2 is deliberately absent; R3 would be the right reader and is not yet wired.
 release-curator-draft.yml|2026-09-23: daily scan that opens or refreshes ONE draft GitHub Release for a human to bless. Schedule + workflow_dispatch by design (its header rules out a push arm as noise that would make the draft chase main). The draft is a standing invitation, not a safety net; a failed refresh costs a day.
@@ -452,7 +458,7 @@ PYEOF
 
   # ── c3 — A BRAND-NEW UNREAD CRON'D WORKFLOW REDS BY NAME ───────────────────
   # The arm that matters for the future: the guard's job is to refuse the NEXT
-  # one, not to describe today's eight.
+  # one, not to describe today's ledgered few.
   cat > "$tmp/wf/zz-mutant-probe.yml" <<'YEOF'
 name: zz-mutant-probe
 on:
