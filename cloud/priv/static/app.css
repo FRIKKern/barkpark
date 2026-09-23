@@ -1571,8 +1571,19 @@ select.form-input {
 
    CLOUDFLARE IS A RAW HUE ON PURPOSE (console-w28), on the same shelf as the
    three below rather than in the tokened family above, and this is the second
-   answer to the question — the first was a --provider-cloudflare token, which
-   design/emit-fence.test.mjs refused and was right to. design/tokens.json's
+   answer to the question — the first was a --provider-cloudflare token, and it
+   was the wrong answer. (CORRECTION, console-w30 2026-09-23: this comment used
+   to say design/emit-fence.test.mjs "refused and was right to". It cannot have:
+   `grep -ci provider design/emit-fence.test.mjs` prints 0 and `-ci cloudflare`
+   prints 0, against controls of 15 for `emit.mjs` and 12 for `tokens`, and that
+   suite is the ATTRIBUTION fence only — its own arm "fence does NOT over-fire: a
+   legitimate design/tokens.json edit regenerates, exit 0, no refusal" asserts the
+   opposite. What actually POLICES this family is design/check.mjs Part D
+   (check.mjs:521-527): it compares the CSS --provider-* kind set AND the Go
+   GenProviderMark kind set against `PROVIDERS` and fails on either mismatch, so
+   the dual emission is not optional once a kind is added. The instrument that
+   met the original attempt is not recorded; the reason below is, and it stands
+   on its own.) design/tokens.json's
    `color.provider` family says "a third provider is a new row here", and it
    emits into TWO artifacts: the --provider-<kind> custom properties in this
    file's GENERATED block AND `GenProviderMark` AdaptiveColors in the Go CLI
@@ -7763,13 +7774,27 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .group-view { display: flex; flex-direction: column; gap: 10px; }
 .group-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .group-title { margin: 0; }
-.group-detail { margin: 0; color: var(--muted-text); font-size: 13px; }
+.group-detail { margin: 0; color: var(--muted-text); font-size: var(--text-sm); }
+/* off-ladder: 12.5px and 13.5px are NOT rungs on the published scale
+   (--text-xs 12px / --text-sm 13px / --text-base 14px, declared in :root
+   above), and there is no rung to swap them to. They are also not an
+   accident of this surface: `grep -n '12\.5px' cloud/priv/static/app.css`
+   prints 17 declarations and `grep -n '13\.5px'` prints 5 — the 15 and 4
+   that predate the group view are already FROZEN into Part O's baseline,
+   so these half-steps are this stylesheet's established secondary-text
+   measures. Snapping only the three new ones to a rung would be a visual
+   change that puts them out of step with their frozen siblings
+   (`.support-key-sub`, `.runway-progress`, `.fleet-support-empty p`, …)
+   while leaving the drift itself unpaid; retiring the half-step measures
+   is a whole-file sweep and a ladder decision, not this row's call. Same
+   door as 6f13fc084 took for `max-width: 62ch`: keep the value, say why
+   at the declaration, count it in the Part O baseline. */
 .group-empty { margin: 0; color: var(--muted-text); font-size: 13.5px; }
 
 /* The group's ONE state badge. */
 .group-state {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 600; padding: 2px 8px;
+  font-size: var(--text-xs); font-weight: 600; padding: 2px 8px;
   border-radius: 999px; border: 1px solid var(--border);
 }
 .group-state--empty { color: var(--muted-text); }
@@ -7786,6 +7811,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* The unmatched-roster-row observation. Muted, under the table: it names
    listener sessions this server's supports do not account for, and it is
    deliberately NOT a state badge — nothing reads it as a verdict. */
+/* off-ladder, for the reason written at `.group-empty` above. */
 .group-others { margin: 0; color: var(--muted-text); font-size: 12.5px; }
 .group-table { display: flex; flex-direction: column; }
 .group-row {
@@ -7793,12 +7819,13 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
   border-top: 1px solid var(--border); padding: 8px 0;
 }
-.group-row--head { border-top: 0; color: var(--muted-text); font-size: 12px; font-weight: 600; }
-.group-cell { min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.group-row--head { border-top: 0; color: var(--muted-text); font-size: var(--text-xs); font-weight: 600; }
+.group-cell { min-width: 0; overflow-wrap: anywhere; font-size: var(--text-sm); }
 .group-cell--name { font-weight: 600; color: var(--text); text-decoration: none; }
 .group-cell--name:hover { text-decoration: underline; }
 .group-cell--status { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .group-cell--cap { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted-text); }
+/* off-ladder, for the reason written at `.group-empty` above. */
 .group-cell--beat { color: var(--muted-text); font-size: 12.5px; }
 .group-cell--task { color: var(--muted-text); }
 
