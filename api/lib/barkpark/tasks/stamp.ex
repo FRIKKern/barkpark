@@ -149,9 +149,11 @@ defmodule Barkpark.Tasks.Stamp do
   #
   # That is not hypothetical. Two rows on main today assert an absence the tree
   # refutes while reading met=true: `jf-w1-engine-narrow-dark-fixes` c4 ("the
-  # code they describe is NOT on origin/main") against paper-surface.css:2061
-  # and :1997, and `jf-w1-media-cors-upstream` c3 ("No PR was ever opened")
-  # against router.ex:2828 (PR #15408, merged). Both close with "This criterion
+  # code they describe is NOT on origin/main") against the `.bp-lineage__body`
+  # `overflow-wrap` and `.bp-duel__table` `overflow-x` rules in
+  # paper-surface.css, and `jf-w1-media-cors-upstream` c3 ("No PR was ever
+  # opened") against `pipeline :media_public_cors` in BarkparkWeb.Router
+  # (PR #15408, merged). Both close with "This criterion
   # remains NOT MET" beside met=true. An audit reading criteria text rather than
   # the tree concludes the opposite of the truth, in both directions.
   #
