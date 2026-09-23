@@ -291,7 +291,10 @@ defmodule BarkparkWeb.StudioOperatorPremiseTriggerTest do
       {user, conn} = user_session!(build_conn(), [{ws_b, "admin"}])
       refute TenancyAuth.workspace_admin?(user, default_ws.id)
 
-      assert {:ok, _view, _html} = live(conn, "/w/#{ws_b.slug}/p/default/studio/settings"),
+      mounted? =
+        match?({:ok, _view, _html}, live(conn, "/w/#{ws_b.slug}/p/default/studio/settings"))
+
+      assert mounted?,
              """
              The :scoped_admin gate refused a workspace-B-only admin. If the
              gate grade changed, the studio_chat half of the row changed with
