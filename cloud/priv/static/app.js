@@ -1113,7 +1113,7 @@
         state.consequences.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") +
         "</ul>" +
         '<div class="field cm-typed-field">' +
-          '<label class="label" for="cm-typed">Type <span class="cm-name">' + esc(state.resourceName) + "</span> to confirm</label>" +
+          '<label class="label" for="cm-typed">Type <span class="cm-name"><bdi>' + esc(state.resourceName) + "</bdi></span> to confirm</label>" +
           '<input class="form-input" id="cm-typed" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />' +
         "</div>";
     } else if (state.consequences.length) {
@@ -1353,7 +1353,7 @@
       '<div class="am-identity">' +
         '<span class="am-face" aria-hidden="true">' + esc(initial) + "</span>" +
         '<div class="am-who">' +
-          '<div class="am-name">' + esc(name) + "</div>" +
+          '<div class="am-name"><bdi>' + esc(name) + "</bdi></div>" +
           '<div class="am-line">' + esc(accountIdentityLine(model)) + "</div>" +
         "</div>" +
         '<button class="btn-link am-link" type="button" id="am-pw-toggle" ' +
@@ -6230,7 +6230,7 @@
 
     return '<div class="token-row' + (revoked ? " is-revoked" : "") + '">' +
       '<div class="fleet-main">' +
-        '<div class="fleet-name">' + esc(t.name) + "</div>" +
+        '<div class="fleet-name"><bdi>' + esc(t.name) + "</bdi></div>" +
         '<div class="token-meta dim">' + abilities +
           dot + esc(lastUsed) +
           dot + esc(expiry) +
@@ -6443,7 +6443,7 @@
   // <code> text node, one esc()d off-screen copy buffer, and the closure below.
   function tokenRevealHtml(plaintext, pat, opts) {
     opts = opts || {};
-    var label = (pat && pat.name) ? esc(pat.name) : "Your new token";
+    var label = (pat && pat.name) ? "<bdi>" + esc(pat.name) + "</bdi>" : "Your new token";
     var title = opts.title ? esc(opts.title) : "Token created";
     var notice = opts.notice
       ? esc(opts.notice)
@@ -6534,7 +6534,7 @@
   function confirmRevokeToken(id, name) {
     openModal(
       '<h2 class="modal-title" id="modal-title">Revoke token?</h2>' +
-      '<p class="modal-sub">Revoking <b>' + esc(name || "this token") + "</b> immediately stops it from authenticating. This cannot be undone.</p>" +
+      '<p class="modal-sub">Revoking <b><bdi>' + esc(name || "this token") + "</bdi></b> immediately stops it from authenticating. This cannot be undone.</p>" +
       '<div class="modal-actions">' +
         '<button class="btn" type="button" data-close>Cancel</button>' +
         '<button class="btn btn-danger" id="token-revoke-go" type="button">Revoke</button>' +
@@ -7249,9 +7249,9 @@
       var sep = '<span class="crumb-sep" aria-hidden="true">/</span>';
       if (i === crumbs.length - 1) {
         return sep + '<span class="crumb-cur"><span class="org-avatar" aria-hidden="true">' +
-          esc((String(cr.label)[0] || "B").toUpperCase()) + "</span><span>" + esc(cr.label) + "</span></span>";
+          esc((String(cr.label)[0] || "B").toUpperCase()) + "</span><span><bdi>" + esc(cr.label) + "</bdi></span></span>";
       }
-      return sep + (cr.href ? '<a href="' + esc(cr.href) + '">' + esc(cr.label) + "</a>" : "<span>" + esc(cr.label) + "</span>");
+      return sep + (cr.href ? '<a href="' + esc(cr.href) + '"><bdi>' + esc(cr.label) + "</bdi></a>" : "<span><bdi>" + esc(cr.label) + "</bdi></span>");
     }).join("");
   }
 
@@ -7579,7 +7579,7 @@
     var rows = (fleetCache || []).map(function (bp) {
       return '<a class="scope-item" href="#instance/' + esc(bp.id) + '">' +
         '<span class="scope-dot" style="background:' + ctxDotColor(classifyBp(bp)) + '"></span>' +
-        '<span class="scope-name">' + esc(bp.name || bp.slug || bp.id) + "</span></a>";
+        '<span class="scope-name"><bdi>' + esc(bp.name || bp.slug || bp.id) + "</bdi></span></a>";
     }).join("");
     // cch-w47-s1 — the THIRD launch door, and the one that is on every authed
     // screen: this footer row is emitted unconditionally, so it outlives the
@@ -7629,7 +7629,7 @@
         var on = t.id === activeId;
         return '<button type="button" class="team-item" role="menuitem" data-team="' + esc(t.id) + '">' +
           '<span class="team-avatar" aria-hidden="true">' + esc(String(t.name || "?").slice(0, 1).toUpperCase()) + "</span>" +
-          '<span class="team-name">' + esc(t.name || t.slug || t.id) + "</span>" +
+          '<span class="team-name"><bdi>' + esc(t.name || t.slug || t.id) + "</bdi></span>" +
           '<span class="team-role">' + esc(t.role || "") + "</span>" +
           (on ? '<span class="team-check" aria-label="Current team">\u2713</span>' : "") +
           "</button>";
@@ -8846,7 +8846,7 @@
       // the fixed lead column via the existing .status-pill rules (never edited).
       '<div class="fleet-status">' + pill + "</div>" +
       '<div class="fleet-main">' +
-        '<div class="fleet-name">' + esc(bp.name) +
+        '<div class="fleet-name"><bdi>' + esc(bp.name) + "</bdi>" +
           (asSupport ? '<span class="fleet-role-chip">support</span>' : "") + "</div>" +
         urlHtml +
         // The mono metadata line: region · size · version · channel · autoupdate,
@@ -9230,7 +9230,7 @@
     return '<div class="attention-row" data-id="' + esc(bp.id) + '">' +
       statusPill(bp) +
       '<div class="attention-main">' +
-        '<a class="attention-name" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" +
+        '<a class="attention-name" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>" +
         '<span class="attention-reason">' + esc(attentionReason(bp)) + "</span>" +
       "</div>" +
       '<div class="attention-acts">' +
@@ -9326,7 +9326,7 @@
     return '<div class="instance-card instance-card--' + esc(role) + '" data-id="' + esc(bp.id) + '">' +
       banner +
       '<div class="instance-card-head">' +
-        '<a class="instance-card-name" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" +
+        '<a class="instance-card-name" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>" +
         providerChipHtml(bp.provider) + statusPill(bp) +
       "</div>" +
       fleetInfraLine(bp) +
@@ -10453,7 +10453,7 @@
           : "";
 
     return '<div class="detail-head detail-head--inst"><div class="detail-head-main">' +
-      '<div class="detail-title-row"><h1>' + esc(bp.name) + "</h1>" + pill + "</div>" + url + "</div>" +
+      '<div class="detail-title-row"><h1><bdi>' + esc(bp.name) + "</bdi></h1>" + pill + "</div>" + url + "</div>" +
       // cch-w46-rv: the id is the REPAINT SEAM's target, not decoration —
       // repaintInstanceAuthority re-renders instanceHeaderActionsHtml into it.
       // Still conditional: the arms that emit "" carry no authority-decided
@@ -11033,7 +11033,7 @@
   function confirmUpdateInstance(bp) {
     var latest = vRel(bp.update_latest_release);
     openModal(
-      '<h2 class="modal-title" id="modal-title">Update ' + esc(bp.name) + "?</h2>" +
+      '<h2 class="modal-title" id="modal-title">Update <bdi>' + esc(bp.name) + "</bdi>?</h2>" +
       '<p class="modal-sub">Update this instance to ' + esc(latest) + "? It will rebuild and restart.</p>" +
       '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
         '<button class="btn btn-primary" type="button" id="update-go">Update</button></div>'
@@ -11167,7 +11167,7 @@
   // carries custom_host once it's persisted.
   function openAttachDomainModal(bp) {
     openModal(
-      '<h2 class="modal-title" id="modal-title">Attach a domain to ' + esc(bp.name) + "</h2>" +
+      '<h2 class="modal-title" id="modal-title">Attach a domain to <bdi>' + esc(bp.name) + "</bdi></h2>" +
       '<p class="modal-sub">Point a <b>barkpark.cloud</b> subdomain at this instance &mdash; DNS and TLS are set up for you.</p>' +
       '<form id="domain-form">' +
         '<label class="label" for="domain-input">Domain</label>' +
@@ -11641,7 +11641,7 @@
     var lc = instanceLifecycle(bp);
     var head =
       '<div class="fleet-support-row-head">' +
-        '<a class="fleet-support-name" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" +
+        '<a class="fleet-support-name" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>" +
         '<span class="fleet-support-slot" data-support-presence="' + esc(bp.id) + '">' +
           (lc.live
             ? '<span class="fleet-presence fleet-presence--unknown">Checking&hellip;</span>'
@@ -11976,7 +11976,7 @@
     var cap = c.capacityText ? esc(c.capacityText) : "&mdash;";
     var task = c.task ? esc(c.task) : "&mdash;";
     return '<div class="group-row" data-group-support="' + esc(c.id) + '">' +
-      '<a class="group-cell group-cell--name" href="#instance/' + esc(c.id) + '">' + esc(c.name) + "</a>" +
+      '<a class="group-cell group-cell--name" href="#instance/' + esc(c.id) + '"><bdi>' + esc(c.name) + "</bdi></a>" +
       '<span class="group-cell group-cell--status">' + presenceChipHtml(c.row) + "</span>" +
       '<span class="group-cell group-cell--cap">' + cap + "</span>" +
       '<span class="group-cell group-cell--beat">' + esc(c.stalenessText) + "</span>" +
@@ -12011,7 +12011,7 @@
     body += groupOtherListenersHtml(groupOtherListeners(cells, rosterDocs));
     return '<section class="card group-view" data-group-state="' + esc(state) + '">' +
       '<div class="group-head">' +
-        '<h2 class="group-title">' + esc(bp.name || "Group") + "</h2>" +
+        '<h2 class="group-title"><bdi>' + esc(bp.name || "Group") + "</bdi></h2>" +
         groupStateBadgeHtml(state) +
       "</div>" +
       '<p class="group-detail">' + esc(copy.detail) + "</p>" +
@@ -12038,7 +12038,7 @@
     var b = bp || {};
     return '<div id="instance-group-view" data-group-bp="' + esc(b.id) + '">' +
       '<section class="card group-view">' +
-        '<div class="group-head"><h2 class="group-title">' + esc(b.name || "Group") + "</h2></div>" +
+        '<div class="group-head"><h2 class="group-title"><bdi>' + esc(b.name || "Group") + "</bdi></h2></div>" +
         '<p class="group-detail">Reading the roster&hellip;</p>' +
       "</section>" +
     "</div>";
@@ -12091,7 +12091,7 @@
 
   function openAddSupportModal(bp) {
     openModal(
-      '<h2 class="modal-title" id="modal-title">Add a support server to ' + esc(bp.name) + "</h2>" +
+      '<h2 class="modal-title" id="modal-title">Add a support server to <bdi>' + esc(bp.name) + "</bdi></h2>" +
       '<p class="modal-sub">We create and configure the box for you &mdash; server-side, no Hetzner token needed. It joins this Barkpark’s fleet and listens for work.</p>' +
       '<form id="support-form">' +
         '<label class="label" for="support-name-input">Name</label>' +
@@ -12906,7 +12906,7 @@
   function openPinModal(bp) {
     var current = bp.update_running_release || bp.version || "";
     openModal(
-      '<h2 class="modal-title" id="modal-title">Pin ' + esc(bp.name) + " to a version</h2>" +
+      '<h2 class="modal-title" id="modal-title">Pin <bdi>' + esc(bp.name) + "</bdi> to a version</h2>" +
       '<p class="modal-sub">Freeze this instance so autoupdate holds it in place. ' +
         "Pinning holds an instance at or above its current version &mdash; it does not roll back.</p>" +
       '<form id="pin-form">' +
@@ -13340,7 +13340,7 @@
       var idTail = bp.id ? String(bp.id).slice(0, 8) : "—";
       return '<div class="set-row">' +
         '<div class="set-row-main">' +
-          '<div class="set-row-name">' + esc(bp.name || "Unnamed instance") + "</div>" +
+          '<div class="set-row-name"><bdi>' + esc(bp.name || "Unnamed instance") + "</bdi></div>" +
           '<div class="set-row-meta">' + esc(bp.channel || "prod") + " &middot; " + esc(idTail) + "</div>" +
           (st.note ? '<div class="set-row-note">' + esc(st.note) + "</div>" : "") +
           (armNote ? '<div class="set-row-note">' + esc(armNote) + "</div>" : "") +
@@ -14232,7 +14232,7 @@
     // deploy would 422 instance_not_live), with an honest caption saying why.
     var canDeploy = instanceCanDeploy(bp);
     openModal(
-      '<h2 class="modal-title" id="modal-title">New site on ' + esc(bp.name || bp.slug || "this instance") + "</h2>" +
+      '<h2 class="modal-title" id="modal-title">New site on <bdi>' + esc(bp.name || bp.slug || "this instance") + "</bdi></h2>" +
       '<p class="modal-sub">Spawned next to Phoenix on the box, built from a shipped starter through the six-stage engine (health-gated, instant rollback).</p>' +
       '<div class="field"><label class="label" for="site-nc-name">Name</label>' +
         '<input class="form-input" id="site-nc-name" type="text" autocomplete="off" spellcheck="false" placeholder="my-search" /></div>' +
@@ -14630,7 +14630,7 @@
     return '<div class="wh-card" data-wh="' + esc(wh.id) + '">' +
       '<div class="wh-card-head">' +
         '<div class="wh-card-id">' +
-          (wh.name ? '<div class="wh-name">' + esc(wh.name) + "</div>" : "") +
+          (wh.name ? '<div class="wh-name"><bdi>' + esc(wh.name) + "</bdi></div>" : "") +
           '<div class="wh-url">' + esc(wh.url) + "</div>" +
           webhookEventsHtml(wh) +
         "</div>" + pill +
@@ -16888,14 +16888,14 @@
     var m = freshnessModel(s);
     var updated = m ? m.when : relTime(s.updated_at);
     var instSeg = bp
-      ? 'on <a class="site-inst-link" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>"
+      ? 'on <a class="site-inst-link" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>"
       : fleetDown
         ? 'on <span class="dim" title="We couldn\'t load your instances just now, so this row can\'t name the instance it runs on.">(unavailable)</span>'
         : "on —";
     return '<div class="site-row site-row--global" data-id="' + esc(s.id) + '" role="button" tabindex="0">' +
       '<div class="site-status">' + siteStatusPill(s) + "</div>" +
       '<div class="site-main">' +
-        '<div class="site-name">' + esc(name) + "</div>" +
+        '<div class="site-name"><bdi>' + esc(name) + "</bdi></div>" +
         '<div class="site-host">' + esc(host) + "</div>" +
         // cch-w23-s3: the count of domains this row does NOT show, on the same
         // meta line and in the same grammar as the compact siteRow above.
@@ -17236,7 +17236,7 @@
       : "—";
     var sub = (site.framework ? esc(site.framework) : "site") +
       (bp
-        ? ' &middot; on <a href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>"
+        ? ' &middot; on <a href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>"
         : instFault
           ? ' &middot; <span class="dim" title="' +
             esc("We couldn't load your instances — " + faultCopy(instFault.status, instFault.data,
@@ -17466,7 +17466,7 @@
   function envModalBodyHtml(site) {
     var name = (site && (site.name || site.slug)) || "this site";
     return '<h2 class="modal-title" id="modal-title">Edit environment</h2>' +
-      '<p class="modal-sub">Environment variables for ' + esc(name) + ", applied on the next deploy.</p>" +
+      '<p class="modal-sub">Environment variables for <bdi>' + esc(name) + "</bdi>, applied on the next deploy.</p>" +
       '<div class="notice notice-warn env-warn" role="note">' +
         "Saving replaces the whole set — values are write-only, so anything you leave out is removed. " +
         "Current values can’t be read back." +
@@ -19752,7 +19752,7 @@
   function inviteStateHtml(state, ctx) {
     ctx = ctx || {};
     var team = ctx.team ? String(ctx.team) : "this team";
-    var teamB = "<b>" + esc(team) + "</b>";
+    var teamB = "<b><bdi>" + esc(team) + "</bdi></b>";
     function card(ico, title, copyHtml, actionsHtml) {
       return '<div class="invite-wrap"><div class="invite-card card">' + ico +
         '<h1 class="invite-title">' + esc(title) + "</h1>" +
@@ -19799,8 +19799,8 @@
     }
     if (state === "wrong_account") {
       return card(ICO_INFO, "This invitation is for a different email",
-        (ctx.email ? "It was sent to <b>" + esc(String(ctx.email)) + "</b>" : "It was sent to a different address") +
-          (ctx.meEmail ? ", but you're signed in as <b>" + esc(String(ctx.meEmail)) + "</b>." : ".") +
+        (ctx.email ? "It was sent to <b><bdi>" + esc(String(ctx.email)) + "</bdi></b>" : "It was sent to a different address") +
+          (ctx.meEmail ? ", but you're signed in as <b><bdi>" + esc(String(ctx.meEmail)) + "</bdi></b>." : ".") +
           " Sign in with the invited address to accept it.",
         act("switch", "Switch account"));
     }
@@ -19821,7 +19821,7 @@
       return card(ICO_MAIL, "Join " + team + "?",
         "You've been invited to join " + teamB +
           (ctx.role ? " as " + esc(String(ctx.role)) : "") + "." +
-          (ctx.email ? " This invitation was sent to <b>" + esc(String(ctx.email)) + "</b>." : ""),
+          (ctx.email ? " This invitation was sent to <b><bdi>" + esc(String(ctx.email)) + "</bdi></b>." : ""),
         act("join", "Join " + team) +
           '<a class="invite-skip" href="#overview">Not now</a>');
     }
@@ -19989,9 +19989,9 @@
     api("GET", "/v1/invitations/" + encodeURIComponent(token), null, { noAuth: true }).then(function (r) {
       if (!document.getElementById("auth-invite")) return;
       if (r.ok && r.data && r.data.team) {
-        slot.innerHTML = '<span class="auth-invite-title">You\'ve been invited to join ' +
-          esc(r.data.team.name) + ".</span> Log in — or create an account — with " +
-          '<span class="auth-invite-email">' + esc(r.data.email) + "</span> to accept.";
+        slot.innerHTML = '<span class="auth-invite-title">You\'ve been invited to join <bdi>' +
+          esc(r.data.team.name) + "</bdi>.</span> Log in — or create an account — with " +
+          '<span class="auth-invite-email"><bdi>' + esc(r.data.email) + "</bdi></span> to accept.";
       } else if (r.status === 404 || r.ok) {
         // The server's own determinate answer (404, or a 200 with no team —
         // the same claim by another route): the link is dead. Consuming the
@@ -20902,8 +20902,8 @@
       ? '<span class="new-eyebrow">One more step</span><h2 class="runway-title">' + esc(title) + "</h2>"
       : '<h2 class="modal-title" id="modal-title">' + esc(title) + "</h2>";
     var lead = authority === "blocked"
-      ? "Your free trial isn't available, so launching " + esc(name) + " needs a paid plan."
-      : "Your free trial isn't available — pick a plan to launch " + esc(name) + ". Cancel anytime.";
+      ? "Your free trial isn't available, so launching <bdi>" + esc(name) + "</bdi> needs a paid plan."
+      : "Your free trial isn't available — pick a plan to launch <bdi>" + esc(name) + "</bdi>. Cancel anytime.";
     var inner = hero +
       '<p class="dim launch-plan-lead">' + lead + "</p>" +
       launchPlanGridHtml(authority, { billing_capability: capCache }) +
@@ -26308,7 +26308,7 @@
         : "";
     return '<div class="new-ready">' +
       '<span class="new-eyebrow ok">Live</span>' +
-      "<" + tag + ' class="new-title">' + esc(bp.name) + " is ready</" + tag + ">" +
+      "<" + tag + ' class="new-title"><bdi>' + esc(bp.name) + "</bdi> is ready</" + tag + ">" +
       '<p class="new-desc">Your managed Barkpark is up' + (bp.url ? ' at <span class="mono">' + esc(bp.url) + "</span>" : "") + ".</p>" +
       '<div class="new-actions">' +
         studioBtn +
@@ -28165,7 +28165,7 @@
       : "";
     return '<div class="set-row">' +
       '<span class="set-ava" aria-hidden="true">' + esc(memberInitials(inv.email)) + "</span>" +
-      '<div class="set-row-main"><div class="set-row-name">' + esc(inv.email) + "</div>" +
+      '<div class="set-row-main"><div class="set-row-name"><bdi>' + esc(inv.email) + "</bdi></div>" +
         '<div class="set-row-meta">invited as ' + esc(ROLE_LABELS[inv.role] || inv.role) +
           " &middot; expires " + esc(fmtTokenDate(inv.expires_at)) + "</div></div>" +
       '<div class="set-row-side"><span class="set-chip">Pending</span>' + action + "</div></div>";
@@ -28480,7 +28480,7 @@
   function revealInvite(url, email) {
     openModal(
       '<h2 class="modal-title" id="modal-title">Invitation sent</h2>' +
-      '<p class="modal-sub">We emailed <b>' + esc(email) + "</b> an invitation. You can also share this link — it works <b>once</b> and expires in <b>7 days</b>:</p>" +
+      '<p class="modal-sub">We emailed <b><bdi>' + esc(email) + "</bdi></b> an invitation. You can also share this link — it works <b>once</b> and expires in <b>7 days</b>:</p>" +
       '<div class="field"><input class="form-input" id="invite-link" type="text" readonly value="' + esc(url || "") + '" /></div>' +
       '<p class="set-row-note">This is the only time we\'ll show the link here. If the email doesn\'t arrive, share it directly.</p>' +
       '<div class="modal-actions">' +
@@ -28580,7 +28580,7 @@
     var opts = roleModalOptionsHtml(auth.actorRole, auth.targetRole);
     openModal(
       '<h2 class="modal-title" id="modal-title">Change role</h2>' +
-      '<p class="modal-sub">Set the team role for <b>' + esc(email || "this member") + "</b>.</p>" +
+      '<p class="modal-sub">Set the team role for <b><bdi>' + esc(email || "this member") + "</bdi></b>.</p>" +
       '<div class="field"><label class="label" for="role-select">Role</label>' +
         '<select class="form-input" id="role-select">' + opts + "</select></div>" +
       '<div class="modal-actions">' +
@@ -28676,7 +28676,7 @@
   function confirmRevokeInvite(ctx, invId, email) {
     openModal(
       '<h2 class="modal-title" id="modal-title">Revoke invitation?</h2>' +
-      '<p class="modal-sub">The invitation for <b>' + esc(email || "this address") + "</b> will stop working.</p>" +
+      '<p class="modal-sub">The invitation for <b><bdi>' + esc(email || "this address") + "</bdi></b> will stop working.</p>" +
       '<div class="modal-actions">' +
         '<button class="btn" type="button" data-close>Cancel</button>' +
         '<button class="btn btn-danger" id="invite-revoke-go" type="button">Revoke</button>' +
@@ -29419,7 +29419,7 @@
       var active = i === index;
       return '<div class="cmdk-row' + (active ? " is-active" : "") + '" role="option"' +
         ' id="cmdk-row-' + i + '" data-i="' + i + '"' + (active ? ' aria-selected="true"' : "") + ">" +
-        '<span class="cmdk-row-label">' + esc(it.label) + "</span>" +
+        '<span class="cmdk-row-label"><bdi>' + esc(it.label) + "</bdi></span>" +
         '<span class="cmdk-row-meta">' +
           (it.hint ? '<span class="cmdk-row-hint">' + esc(it.hint) + "</span>" : "") +
           '<span class="cmdk-row-group">' + esc(it.group || "") + "</span>" +
@@ -30465,9 +30465,9 @@
 
   function openOffloadModal(mainBp, support, token) {
     openModal(
-      '<h2 class="modal-title" id="modal-title">Offload a task to ' + esc(support.name) + "</h2>" +
-      '<p class="modal-sub">File an order on this Barkpark. <b>' + esc(offloadWorkerName(support)) +
-        "</b> claims it, works it on the box, and you watch it here.</p>" +
+      '<h2 class="modal-title" id="modal-title">Offload a task to <bdi>' + esc(support.name) + "</bdi></h2>" +
+      '<p class="modal-sub">File an order on this Barkpark. <b><bdi>' + esc(offloadWorkerName(support)) +
+        "</bdi></b> claims it, works it on the box, and you watch it here.</p>" +
       '<form id="offload-form">' +
         '<label class="label" for="offload-title">Title</label>' +
         '<input class="form-input" id="offload-title" placeholder="Summarise the release notes" required autocomplete="off">' +

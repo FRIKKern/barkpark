@@ -653,6 +653,13 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1535 — bumped 2026-09-24 from 1534 on console/1614-bidi-hosts (task-1614ac4ba29eec9b):
+      # +1 test. Every user-text host derived from app.js rides its name/email in
+      # its own <bdi>; one __app.test.mjs test pins the hooked hosts by render and
+      # the unmountable ones by source. RE-MEASURED, not added: `node --test
+      # cloud/priv/static/__app.test.mjs` on node 20 over the untouched base
+      # e2c084e7e printed `# pass 1534 / # fail 0`, and on the branch
+      # `bash scripts/console-pins.sh --write` measured 1535 and rewrote the literal.
       # PIN 1534 — bumped 2026-09-23 from 1533 on console/rtl-isolate (cch-rtl-script-neutral-borrowing):
       # +1 test. activityRow's and memberRowHtml's user-authored spans ride in their
       # own <bdi>; one __app.test.mjs test pins the isolate at both hosts. RE-MEASURED,
@@ -964,7 +971,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1534-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1535-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -980,14 +987,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1534 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1534 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1535 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1535 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1534 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1534 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1534 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1535 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1535 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1535 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1534 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1535 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -3054,6 +3061,53 @@ jobs:
               ;;
             *)
               echo "::error title=Hashchange wiring UNINTERPRETABLE::hashchange-wiring.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+      # ── task-1614ac4ba29eec9b: bidi isolation of user-authored text ─────────
+      # A THIRD browser instrument on this job, for the same reason as the
+      # hashchange step above: node + an explicit CHROME are already here, and
+      # `Console gate` is fail-closed on `needs.modal-oracle.result`, so a red
+      # here BLOCKS the merge with no aggregator edit. Like that step it
+      # publishes no verdict; a failure shows up as result=failure with the
+      # oracle's verdict=OK, which the gate reads as red.
+      #
+      # WHAT IT ASSERTS: every console host that renders a user-authored name or
+      # email (and can be mounted from __bpTestHook) paints that string exactly
+      # as it paints alone in its own <bdi> — measured per code unit from glyph
+      # rects in headless Chrome, never innerText. Two CONTROL rows render an RTL
+      # string WITHOUT an isolate and must read BORROWED, or the run exits 3.
+      # Measured on a developer host (Chrome 153, 2026-09-24): 76/76 host rows
+      # across 22 hosts green; removing the <bdi> from fleetRow's .fleet-name
+      # alone reds 2 rows and exits 1. It launches Chrome over
+      # --remote-debugging-pipe, so it needs no WebSocket and runs on this job's
+      # node 22 as well as node 20.
+      - name: Bidi isolation — does every user-authored host paint its text as it paints alone?
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/bidi-isolation.mjs || rc=$?
+          case "$rc" in
+            0)
+              echo "Bidi isolation: every host row held both verdicts and every control row borrowed (the per-row table and the count are printed above)."
+              ;;
+            1)
+              echo "::error title=Bidi isolation DEFECT::A measured defect in a real browser (exit 1) — this IS about the console's own bytes. A host that renders a user-authored name or email painted it differently from the same string alone in a <bdi>: a neutral at the string's edge (a trailing '.' '-' '!') resolved against the LTR paragraph and painted on the wrong side of the RTL run, or a system span moved. The FAIL row above names the host and prints DOM vs painted order. The usual cause is a dropped <bdi> around an esc()'d user string in app.js."
+              exit 1
+              ;;
+            2)
+              echo "::error title=Bidi isolation REFUSED::The instrument refused to measure (exit 2) — no usable Chrome at CHROME. NO claim is being made about bidi isolation in either direction."
+              exit 1
+              ;;
+            3)
+              echo "::error title=Bidi isolation BROKEN/BLIND::The instrument broke or went blind (exit 3): it threw, or a CONTROL row that renders an RTL string WITHOUT an isolate did not read BORROWED — so this run cannot tell an isolated host from a broken one. Read the log above; nothing is being claimed about the hosts."
+              exit 1
+              ;;
+            *)
+              echo "::error title=Bidi isolation UNINTERPRETABLE::bidi-isolation.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal / 3 broken or blind). Cannot tell, therefore red."
               exit 1
               ;;
           esac
