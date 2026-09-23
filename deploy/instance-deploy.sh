@@ -522,8 +522,16 @@ deploy_lock_holder_pids() {
   #     is sound independently of what produced it; and
   #   * pids that are $$ or a DESCENDANT of $$ — the live substitution shell.
   #     A real holder is never a descendant of this script.
-  local mine
-  mine=" $$ $(proc_descendants "$$" | tr '\n' ' ') "
+  local mine own
+  # If the process table cannot be read we cannot tell OUR OWN substitution
+  # shell from the holder — and the manual break would then SIGKILL the shell it
+  # is running inside. Answer "no identifiable holder" instead, which every
+  # caller already treats as a refusal to break.
+  if ! own="$(proc_descendants "$$")"; then
+    log "lock holder: the process table could not be read, so this run cannot tell its own subshells from the holder — reporting NO identifiable holder rather than risk breaking itself"
+    return 0
+  fi
+  mine=" $$ $(printf '%s' "$own" | tr '\n' ' ') "
   for p in $raw; do
     # BSD fuser suffixes an access-mode letter to each pid ("1234c"); GNU fuser
     # does not. Strip a trailing non-digit run rather than dropping the entry,
@@ -583,8 +591,25 @@ proc_tree_cputime() {
 }
 
 # Direct + transitive children of a pid, one per line.
+#
+# RETURNS NON-ZERO WHEN IT CANNOT LOOK, and that distinction is load-bearing:
+# "this holder has no children" and "I could not read the process table" are
+# the same empty stdout, and the liveness test must treat only the FIRST as
+# evidence. An unreadable table that silently read as "childless" would be a
+# direct route to SIGKILLing a working deploy.
+#
+# VERIFIED ON BOTH PLATFORMS, because an empty answer with a benign explanation
+# is exactly where a blind enumerator hides. Ubuntu 24.04 / bash 5.2 / mawk
+# 1.3.4 / procps-ng 4.0.4: a direct child is found, and a GRANDCHILD is found
+# too (holder 468 -> 472 -> 473 all reported). macOS / bash 3.2 / BSD awk:
+# the same. See the fixture's own precondition check in
+# deploy/instance-deploy_test.sh, which now refuses to draw a conclusion from a
+# specimen that has no child.
 proc_descendants() {
-  ps -eo pid=,ppid= 2>/dev/null | awk -v root="$1" '
+  local table
+  table="$(ps -eo pid=,ppid= 2>/dev/null)"
+  [ -n "$table" ] || return 1
+  printf '%s\n' "$table" | awk -v root="$1" '
     { pid[$1]=$1; ppid[$1]=$2 }
     END {
       for (i = 0; i < 64; i++) { mark[root]=1
@@ -621,8 +646,13 @@ deploy_lock_holder_is_live() {
     log "lock liveness: the holder set could not be enumerated — treating the holder as LIVE (refusing to break what cannot be named)"
     return 0
   fi
+  log "lock liveness: sample 1 holder set = [$(printf '%s' "$pids1" | tr '\n' ' ')]"
   for p in $pids1; do
-    kids="$(proc_descendants "$p")"
+    if ! kids="$(proc_descendants "$p")"; then
+      log "lock liveness: the process table could not be read — treating the holder as LIVE (an unreadable table is not evidence of a dead holder)"
+      return 0
+    fi
+    log "lock liveness: sample 1 pid=$p descendants = [$(printf '%s' "$kids" | tr '\n' ' ')] cputree=$(proc_tree_cputime "$p")s"
     if [ -n "$kids" ]; then
       log "lock liveness: holder pid=$p has running child process(es) [$(printf '%s' "$kids" | tr '\n' ' ')] — LIVE, not breaking"
       return 0
@@ -640,8 +670,13 @@ deploy_lock_holder_is_live() {
     log "lock liveness: the holder set changed between samples ($(printf '%s' "$pids1" | tr '\n' ' ')-> $(printf '%s' "$pids2" | tr '\n' ' ')) — it is forking, LIVE, not breaking"
     return 0
   fi
+  log "lock liveness: sample 2 holder set = [$(printf '%s' "$pids2" | tr '\n' ' ')]"
   for p in $pids2; do
-    kids="$(proc_descendants "$p")"
+    if ! kids="$(proc_descendants "$p")"; then
+      log "lock liveness: the process table could not be read on the second sample — treating the holder as LIVE"
+      return 0
+    fi
+    log "lock liveness: sample 2 pid=$p descendants = [$(printf '%s' "$kids" | tr '\n' ' ')] cputree=$(proc_tree_cputime "$p")s"
     if [ -n "$kids" ]; then
       log "lock liveness: holder pid=$p has running child process(es) [$(printf '%s' "$kids" | tr '\n' ' ')] on the second sample — LIVE, not breaking"
       return 0

@@ -1867,10 +1867,28 @@ else
     rm -f "$ready"
     bash -c "exec 9>\"$TMP/lock\"; flock -n 9 || exit 1; echo \$\$ > \"$ready\"; $1" &
     LOCKPIDS="$LOCKPIDS $!"
+    # Off the job table: reaping a holder otherwise prints bash's own
+    # "Killed: 9" notice into the harness output, right beside the lock checks,
+    # where the next reader has every reason to misread it as a crash.
+    disown %% 2>/dev/null || true
     for _i in $(seq 1 200); do [ -s "$ready" ] && return 0; /bin/sleep 0.05; done
     return 1
   }
   holder_pid() { cat "$TMP/holder.ready" 2>/dev/null; }
+  # THE PRECONDITION, ASSERTED — this is the check whose absence let a Linux-only
+  # inversion look like a policy bug. `bash -c '...; sleep 120'` does NOT build a
+  # holder with a child on every platform: bash 5.2 (Ubuntu 24.04) EXEC-OPTIMISES
+  # the last simple command of a -c string, replacing the shell with `sleep`, so
+  # the "live" specimen was a CHILDLESS, zero-CPU process and the policy broke it
+  # — correctly. bash 3.2 (macOS) forks, so the same fixture built a real parent
+  # and the arm passed locally. MEASURED on both: Ubuntu 24.04 holder pid 385 is
+  # `sleep 120` with ppid 1 and zero children; macOS holder 70957 is the bash
+  # with child 70961.
+  # A trailing `; :` or `& wait` defeats the optimisation. The arms below use the
+  # `& wait` shape because that is what a real deploy blocked on mix/git looks
+  # like — but the SHAPE is not the fix. This assertion is: no arm may conclude
+  # anything about liveness from a specimen ps says has no child.
+  holder_child_count() { ps -eo pid=,ppid= 2>/dev/null | awk -v r="$1" '$2==r' | wc -l | tr -d ' '; }
   # The lock arms never reach the deploy body, so they want REAL tools: the
   # harness's $FAKE/sleep is instant and would collapse the liveness window into
   # a measurement of nothing.
@@ -1911,8 +1929,12 @@ else
   # arm that protects a real deploy: mix/git/curl/npm/systemctl/sleep are all
   # children, so "has a child" is the signature of work in progress.
   setup_case
-  start_holder 'sleep 120'          # NOT exec: bash stays, `sleep` is its CHILD
+  # `& wait`: the shape of a deploy blocked on a child, and immune to bash's
+  # last-command exec optimisation on every bash this runs under.
+  start_holder 'sleep 120 & wait'
   hp="$(holder_pid)"
+  check "stale/LIVE [PRECONDITION]: the specimen really HAS a child — without this the arm inverts silently" \
+    "[ \"\$(holder_child_count '$hp')\" != '0' ]"
   rc="$(STALE_SECS=0 LIVENESS_SECS=1 run_locked)"
   check "stale/LIVE: the policy declines — a working holder is never broken" \
     "grep -q 'stale-holder policy: NOT APPLIED — the holder is over the age threshold but is STILL WORKING' '$TMP/lock.log'"
@@ -1922,6 +1944,23 @@ else
     "kill -0 '$hp' 2>/dev/null"
   check "stale/LIVE: the run exits 15 rather than deploying unserialised" "[ '$rc' = '15' ]"
   check "stale/LIVE: no break was even attempted" "! grep -q 'lock break: ending holder' '$TMP/lock.log'"
+  reap_holders; rm -rf "$TMP"
+
+  # --- ARM 2b: the child may be a GRANDCHILD. A real deploy is bash -> mix ->
+  # beam, so an enumerator that only looks one level down would call the middle
+  # of a compile "childless". Proved transitively on Ubuntu 24.04/mawk while
+  # diagnosing this arm: holder 468 -> 472 -> 473, both reported.
+  setup_case
+  start_holder 'bash -c "sleep 120; :" & wait'
+  hp="$(holder_pid)"
+  check "stale/GRANDCHILD [PRECONDITION]: the specimen has a child, which has a child of its own" \
+    "[ \"\$(holder_child_count '$hp')\" != '0' ] && [ -n \"\$(ps -eo pid=,ppid= | awk -v r=\"\$(ps -eo pid=,ppid= | awk -v r='$hp' '\$2==r{print \$1; exit}')\" '\$2==r{print \$1}')\" ]"
+  rc="$(STALE_SECS=0 LIVENESS_SECS=1 run_locked)"
+  check "stale/GRANDCHILD: a holder whose work is two levels down is still LIVE" \
+    "grep -q 'stale-holder policy: NOT APPLIED — the holder is over the age threshold but is STILL WORKING' '$TMP/lock.log'"
+  check "stale/GRANDCHILD: the descendant set the sampler MEASURED is printed, so a CI log alone says which branch ran" \
+    "grep -qE 'lock liveness: sample 1 pid=[0-9]+ descendants = \\[[0-9]' '$TMP/lock.log'"
+  check "stale/GRANDCHILD: the holder survives"  "kill -0 '$hp' 2>/dev/null"
   reap_holders; rm -rf "$TMP"
 
   # --- ARM 3 (criterion 2, LIVE direction, the harder half): a CHILDLESS holder
@@ -1960,6 +1999,8 @@ else
   setup_case
   start_holder 'exec sleep 120'
   hp="$(holder_pid)"
+  check "stale/DEAD [PRECONDITION]: the specimen really has NO child — the opposite precondition, asserted for the same reason" \
+    "[ \"\$(holder_child_count '$hp')\" = '0' ]"
   rc="$(STALE_SECS=0 LIVENESS_SECS=2 run_locked)"
   check "stale/DEAD: the policy FIRES on a holder showing no work" \
     "grep -q 'stale-holder policy: APPLIED — AUTOMATIC' '$TMP/lock.log'"
@@ -1980,8 +2021,10 @@ else
   # broke anything), and when on it fires IMMEDIATELY — no 30-minute queue, no
   # age test, no liveness test — because a human asserted the holder is gone.
   setup_case
-  start_holder 'sleep 120'          # a LIVE-looking holder: the manual path does not care
+  start_holder 'sleep 120 & wait'   # a LIVE holder: the manual path does not care
   hp="$(holder_pid)"
+  check "manual [PRECONDITION]: the specimen really HAS a child, so this proves the manual path ignores liveness" \
+    "[ \"\$(holder_child_count '$hp')\" != '0' ]"
   rc="$(BREAK_LOCK=1 run_locked)"
   check "manual: the break fires and is labelled MANUAL" \
     "grep -q 'lock break: MANUAL — requested by the break_deploy_lock workflow_dispatch input' '$TMP/lock.log'"
