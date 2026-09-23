@@ -1560,18 +1560,145 @@ jobs:
         working-directory: .
         run: bash scripts/test-env-leak-gate.sh
 
-      - name: Cache deps
+      # ── THE DEPENDENCY CACHES HERE, AND THE ONE THAT USED TO LIE ────────
+      #
+      # This was ONE `actions/cache@v4` over `api/deps` PLUS `api/_build`,
+      # under a `restore-keys:` PREFIX. That is the un-guarded twin of the prod
+      # dependency build cache in `mix-prod-compile` below, which was hardened
+      # under #15659, and it carried that cache's failure mode with nothing
+      # watching: on a `mix.lock` bump the exact key MISSES, the PREFIX HITS,
+      # and the job begins on an `api/_build/test` produced from a DIFFERENT
+      # lock — stale first-party `Elixir.Barkpark*.beam` left by an earlier
+      # run's `mix compile`, plus a dependency tree under no obligation to
+      # match the lock this run is about to test. Past Mistake #2
+      # (`Plug.Exception` undefined out of a partial deps tree) is the shape
+      # that produces, and it needed only a lock bump to arrive.
+      #
+      # It is now the prod site's contract exactly. Dependency SOURCES keep the
+      # prefix — a source tree holds no compiled anything and `mix deps.get`
+      # reconciles it against mix.lock itself. Compiled ARTIFACTS are restored
+      # only on an EXACT key, only for `_build/test/lib`, and are AUDITED by
+      # the same tripwire before this job is allowed to trust them.
+      #
+      # THE KEY STRING CHANGED, and that is load-bearing rather than cosmetic:
+      # `actions/cache` restores THE ARCHIVE THAT WAS SAVED, not the paths the
+      # restoring step declares. Left on the old `${{ runner.os }}-mix-…` key
+      # this narrowed step would still unpack yesterday's entry — which holds
+      # `api/_build` — and put back the very thing it removes.
+      #
+      # THE PRICE, SAID OUT LOUD: our own application no longer arrives
+      # pre-compiled, so `Compile` below builds `barkpark` from nothing every
+      # run. That is the same trade `mix-prod-compile` already took, and it is
+      # the only version of this cache that can be trusted on a near miss.
+      - name: Cache deps (dependency SOURCES)
         uses: actions/cache@v4
         with:
-          path: |
-            api/deps
-            api/_build
-          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          path: api/deps
+          key: ${{ runner.os }}-mix-test-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-test-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      # NO `restore-keys:`, deliberately. A prefix match would hand this job
+      # dependency BEAM compiled from a DIFFERENT mix.lock; the completeness
+      # arm of the guard would still pass (every name is present) and
+      # `mix deps.compile` would trust the manifests. Exact key or nothing.
+      # `cache/restore` rather than `cache`, because `actions/cache`'s post-job
+      # auto-save would archive `_build/test/lib/barkpark` — OUR code, compiled
+      # by the steps below — and poison the next run's restore.
+      - name: Restore compiled dependency artifacts (test)
+        id: test_dep_build
+        uses: actions/cache/restore@v4
+        with:
+          path: api/_build/test/lib
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Fetch deps
         run: mix deps.get
+
+      # DISTRUST VACUOUS GREEN — 11 cases, ~0.2s, run BEFORE the verdict this
+      # job acts on. It plants an `Elixir.Barkpark.Stale.beam` inside an
+      # allowlisted dependency's ebin and requires a RED, deletes a dependency
+      # and requires a FALL BACK, and shrinks each input list to nothing and
+      # requires that neither shrink can produce a pass. A tripwire nobody has
+      # watched fail is not a tripwire.
+      - name: Prove the tripwire can fail (guard --selftest)
+        run: bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" test-build-cache-guard-selftest -- bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" --selftest
+        working-directory: .
+
+      # THE TRIPWIRE — the same script and the same three verdicts as the prod
+      # site below: 0 dep-only and complete, 3 unusable (rebuild from nothing),
+      # 1 CONTAMINATED (hard fail, naming what it found, never a silent
+      # clean-up). The script is env-agnostic: it judges a `<build>/lib`
+      # directory against two name lists, and `MIX_ENV=test mix deps` is what
+      # makes those lists the TEST set here. Both lists are re-derived every
+      # run and both carry a floor inside the guard, so a `mix deps` that
+      # errored into an empty pipe falls back instead of passing over nothing.
+      - name: Audit the restored dependency build tree
+        id: test_depbuild_audit
+        run: |
+          set -uo pipefail
+          sed -n 's/^  "\([a-z0-9_][a-z0-9_]*\)".*/\1/p' mix.lock | sort -u > "$RUNNER_TEMP/dep-allowlist.txt"
+          # `|| true`: a `mix deps` that fails leaves the required list EMPTY,
+          # which the guard's floor turns into a fallback — never into a
+          # completeness check that passes over nothing.
+          (MIX_ENV=test mix deps 2>/dev/null || true) \
+            | sed -n 's/^\* \([a-z0-9_][a-z0-9_]*\) .*/\1/p' | sort -u > "$RUNNER_TEMP/dep-required.txt"
+          echo "mix.lock names: $(wc -l < "$RUNNER_TEMP/dep-allowlist.txt")   test deps: $(wc -l < "$RUNNER_TEMP/dep-required.txt")"
+          # `set +e` is load-bearing: GitHub runs `run:` blocks under `bash -e`,
+          # so without it the guard's non-zero verdicts (3 = fall back,
+          # 1 = contaminated) would kill the step before it can tell them
+          # apart, and BOTH would surface as the same opaque red.
+          set +e
+          bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" \
+            _build/test/lib "$RUNNER_TEMP/dep-allowlist.txt" "$RUNNER_TEMP/dep-required.txt"
+          verdict=$?
+          set -e
+          case "$verdict" in
+            0)
+              echo "mode=cached" >> "$GITHUB_OUTPUT"
+              ;;
+            3)
+              echo "FALLBACK: no usable dependency build cache — taking the full 'rm -rf _build/test' + 'mix deps.compile --force' path (Past Mistake #2)."
+              rm -rf _build/test
+              echo "mode=rebuild" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::test dependency build cache is CONTAMINATED (guard exit $verdict) — see the CONTAMINANT lines above"
+              exit 1
+              ;;
+          esac
+
+      - name: Compile deps (test)
+        # Two paths, one step, so before/after step timings stay comparable.
+        # `--force` is what the fallback runs, and the fallback is what the
+        # audit selects whenever the restored tree is anything less than
+        # complete.
+        run: |
+          if [ "${{ steps.test_depbuild_audit.outputs.mode }}" = "cached" ]; then
+            echo "Dependency build tree restored and audited dependency-only + complete."
+            mix deps.compile
+          else
+            echo "No usable dependency build cache — full forced rebuild."
+            mix deps.compile --force
+          fi
+
+      # SAVED HERE, BEFORE `Compile`, ON PURPOSE: this is the one moment in the
+      # job at which the tree provably holds dependency artifacts and nothing
+      # else. A post-job auto-save would archive `barkpark` alongside them; the
+      # tripwire would catch it on the next run, but catching it every run is
+      # not a design.
+      - name: Drop our own application's build dir before saving
+        if: steps.test_depbuild_audit.outputs.mode == 'rebuild'
+        # `mix deps.compile` creates the app's own (empty) build dir as a side
+        # effect. It is not a dependency, so it must not enter the cache.
+        run: rm -rf _build/test/lib/barkpark
+
+      - name: Save compiled dependency artifacts (test)
+        if: steps.test_depbuild_audit.outputs.mode == 'rebuild'
+        uses: actions/cache/save@v4
+        with:
+          path: api/_build/test/lib
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
 
       # Format check now lives in the dedicated `format` job above (Task
       # #29). It used to run here but was non-blocking because mix-test
@@ -2250,15 +2377,40 @@ jobs:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
 
-      - name: Cache deps
+      # SAME HAZARD, SAME CONTRACT AS `mix-test` ABOVE — and this job is the
+      # one where a near-miss restore is worst. It was `api/deps` PLUS
+      # `api/_build` under a `restore-keys:` PREFIX, so a `mix.lock` bump
+      # missed the exact key, hit the prefix, and benchmarked a rule evaluator
+      # compiled from a DIFFERENT lock — a first-party
+      # `Elixir.Barkpark*.beam` this run never produced, timed and published as
+      # this run's perf verdict. Nothing checked it, and unlike a compile error
+      # a stale bench does not announce itself: it just reports a number about
+      # code that is not on the branch.
+      #
+      # Sources keep the prefix; compiled artifacts move to an EXACT key over
+      # `_build/test/lib` behind the tripwire. The depbuild key is spelt
+      # identically to `mix-test`'s on purpose — both jobs run `MIX_ENV=test`,
+      # so where the matrices ever agree the two produce the same dependency
+      # tree from the same lock and may share it; where they differ (they do
+      # today: 1.18.4 vs 1.18.1) the Elixir field already separates them.
+      - name: Cache deps (dependency SOURCES)
         uses: actions/cache@v4
         with:
-          path: |
-            api/deps
-            api/_build
-          key: ${{ runner.os }}-mix-perf-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          path: api/deps
+          key: ${{ runner.os }}-mix-perf-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-perf-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-perf-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      # NO `restore-keys:`. See the twin step in `mix-test`: a prefix match
+      # would hand this job dependency BEAM from another lock and the
+      # completeness arm would still pass. `cache/restore`, not `cache`, so no
+      # post-job auto-save can archive `_build/test/lib/barkpark`.
+      - name: Restore compiled dependency artifacts (test)
+        id: perf_dep_build
+        uses: actions/cache/restore@v4
+        with:
+          path: api/_build/test/lib
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Fetch deps
         # RETRIED, because a hex.pm blip is not a merge decision. Measured
@@ -2296,6 +2448,71 @@ jobs:
             echo "::error::mix deps.get failed on all 3 attempts. This is NOT being tolerated: the bench below would then measure an untrusted dependency tree, so the job reds here instead."
             exit 1
           fi
+
+      # DISTRUST VACUOUS GREEN — the tripwire's own 11-case mutation harness
+      # runs before this job acts on its verdict. Called bare, not through
+      # scripts/run-instrument.sh: this job publishes no `outputs.verdict` for
+      # a channelled refusal to travel along, and `elixir-gate` reads only
+      # `needs.validation-perf.result` — which a non-zero exit already carries.
+      - name: Prove the tripwire can fail (guard --selftest)
+        run: bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" --selftest
+        working-directory: .
+
+      # THE TRIPWIRE. Three verdicts: 0 dep-only and complete, 3 unusable
+      # (rebuild from nothing), 1 CONTAMINATED — hard fail, naming what it
+      # found. Both input lists re-derived here every run, both floored inside
+      # the guard so an empty `mix deps` falls back rather than passing over
+      # nothing.
+      - name: Audit the restored dependency build tree
+        id: perf_depbuild_audit
+        run: |
+          set -uo pipefail
+          sed -n 's/^  "\([a-z0-9_][a-z0-9_]*\)".*/\1/p' mix.lock | sort -u > "$RUNNER_TEMP/dep-allowlist.txt"
+          (MIX_ENV=test mix deps 2>/dev/null || true) \
+            | sed -n 's/^\* \([a-z0-9_][a-z0-9_]*\) .*/\1/p' | sort -u > "$RUNNER_TEMP/dep-required.txt"
+          echo "mix.lock names: $(wc -l < "$RUNNER_TEMP/dep-allowlist.txt")   test deps: $(wc -l < "$RUNNER_TEMP/dep-required.txt")"
+          # `set +e`: GitHub runs `run:` under `bash -e`, and 1 and 3 are two
+          # different readings this step must tell apart.
+          set +e
+          bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" \
+            _build/test/lib "$RUNNER_TEMP/dep-allowlist.txt" "$RUNNER_TEMP/dep-required.txt"
+          verdict=$?
+          set -e
+          case "$verdict" in
+            0)
+              echo "mode=cached" >> "$GITHUB_OUTPUT"
+              ;;
+            3)
+              echo "FALLBACK: no usable dependency build cache — taking the full 'rm -rf _build/test' + 'mix deps.compile --force' path (Past Mistake #2)."
+              rm -rf _build/test
+              echo "mode=rebuild" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::test dependency build cache is CONTAMINATED (guard exit $verdict) — see the CONTAMINANT lines above"
+              exit 1
+              ;;
+          esac
+
+      - name: Compile deps (test)
+        run: |
+          if [ "${{ steps.perf_depbuild_audit.outputs.mode }}" = "cached" ]; then
+            echo "Dependency build tree restored and audited dependency-only + complete."
+            mix deps.compile
+          else
+            echo "No usable dependency build cache — full forced rebuild."
+            mix deps.compile --force
+          fi
+
+      - name: Drop our own application's build dir before saving
+        if: steps.perf_depbuild_audit.outputs.mode == 'rebuild'
+        run: rm -rf _build/test/lib/barkpark
+
+      - name: Save compiled dependency artifacts (test)
+        if: steps.perf_depbuild_audit.outputs.mode == 'rebuild'
+        uses: actions/cache/save@v4
+        with:
+          path: api/_build/test/lib
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Compile
         # NO `--warnings-as-errors` HERE, ON PURPOSE. `mix-prod-compile` above
