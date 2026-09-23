@@ -3629,7 +3629,7 @@ test('wave 36: a legally re-homed row REACHES the forwarded bucket (and could no
   assert.doesNotMatch(now.out, new RegExp(`✗ ${ROW}`), 'and it is no longer charged as a departure');
   // c0, in its own words: forwarded, not an orphan, not only an anti-filing departure.
   assert.match(token(now.out), /\borphans=0\b/);
-  assert.match(now.out, /0 evidence-closed, 1 forwarded by name/,
+  assert.match(now.out, /Sealed 3 children of cloud-console-hardening-epic: 2 evidence-closed, 1 forwarded by name/,
     'and the SCOPE paragraph counts it too, so the green says what it certified');
 });
 
@@ -3643,7 +3643,12 @@ test('wave 36: a PACED roster reads re-homed and vanished in different letters',
   // correctly forwarded and the reader cannot tell which.
   const pre = mutatedRun(noReHome, args);
   assert.equal(pre.status, NO_SEAL);
-  assert.match(pre.out, /FILING EVENT\(S\) : 3 — left the population with NO transition to done\/cancelled$/m);
+  // The mutation changes the CLASSIFICATION, not the wording, so the assertion is on
+  // where the rows land: all three in the one blocking bucket, none re-homed.
+  assert.match(pre.out, /^ {2}FILING EVENT\(S\) : 3 —/m);
+  assert.doesNotMatch(pre.out, /RE-HOMED UNDER/, 'pre-fix there is no second class to land in');
+  assert.match(pre.out, /^ {2}forwarded under successor : 0$/m,
+    'and the bucket that should have held two of them prints 0');
   assert.match(pre.out, /✗ gr-fixture-paced-1/);
   assert.match(pre.out, /✗ gr-fixture-paced-2/);
   assert.match(pre.out, /✗ gr-fixture-vanished/);
