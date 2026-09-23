@@ -100,6 +100,12 @@
 //    DEAD ROW guard completeness in BOTH directions, but a row naming the WRONG
 //    ROUTE is caught by nothing here. Deriving hook -> handler -> api() is
 //    exactly D505's refuted problem and this file does not promise it.
+//    ONE SHAPE OF IT IS NOW CAUGHT (task-60c35a2da304c080): a row typed
+//    `route: null` whose bound handler reaches api()/fetch() reds in the
+//    route-null read (section 3c; the reader and its limits sit above
+//    maskSource). It is a source read, bounded by the binding shapes and hop
+//    depth it names, and it says nothing about a routed row naming the WRONG
+//    route — only that a routed row's handler reaches the network at all.
 //    THE FENCE IS NO LONGER TYPED THOUGH (cch-w50-bl). A row names a route and
 //    the fence is LOOKED UP in __route_fence.mjs, the one route -> fence table,
 //    which __binding_census.mjs imports too and re-reads against its own PIN.
@@ -271,7 +277,9 @@ export function hookKey(c) {
 // route the hook calls (null for client-only), `fence` is that route's tier,
 // `source` cites where the fence was read from — the __binding_census.mjs PIN
 // row, or the markup itself for client-only controls. See LIMIT L2: these are
-// TYPED, and a row naming the wrong route is caught by nothing here.
+// TYPED. A `route: null` row whose bound handler calls the server is caught by
+// the route-null read (section 3c); a routed row naming the wrong route is
+// still caught by nothing here.
 const HOOKS = [
   { key: "a", route: null, what: "breadcrumb / bare in-app link", source: "markup: hash navigation" },
   { key: "a.inst-tab", route: null, what: "instance detail tab", source: "markup: hash navigation" },
@@ -279,10 +287,24 @@ const HOOKS = [
   { key: "a.site-open", route: null, what: "open the live site URL", source: "markup: target=_blank anchor" },
   { key: "a.btn.btn-ghost.btn-sm.site-open", route: null, what: "Visit button in the site detail head", source: "markup: target=_blank anchor" },
   { key: "button.copy-btn[data-copy]", route: null, what: "copy a CLI command / id to the clipboard", source: "markup: data-copy delegate" },
-  { key: "button#inst-open-studio", route: null, what: "open Studio in a new tab", source: "markup: window.open" },
+  // task-60c35a2da304c080: this row used to read `route: null, source: "markup:
+  // window.open"`. The window.open is REAL but it is the first line of
+  // openStudio, which then POSTs the studio-link route — wireInstanceHeaderActions
+  // binds #inst-open-studio to openStudio(bp.id, openBtn), the SAME function the
+  // #new-open-studio and .fleet-open-studio rows below cite. The route-null read
+  // (section 3c) is what now reds a row shaped like the old one.
+  { key: "button#inst-open-studio", route: "POST /v1/barkparks/:*/studio-link", what: "open Studio from the instance detail header", source: "census PIN: openStudio — bound by wireInstanceHeaderActions; Auth.require_user at the router, pinned `member`; the SAME function #new-open-studio's and .fleet-open-studio's rows cite" },
   { key: "button#inst-cli-toggle", route: null, what: "disclose the bp CLI lifecycle rail", source: "markup: aria-controls disclosure" },
   { key: "button.deploy-console-toggle", route: null, what: "expand a deploy's build console", source: "markup: local disclosure" },
-  { key: "button.actfilter-chip[data-notif-del-axis][data-notif-del-value]", route: null, what: "deliveries filter chip", source: "markup: client-side filter" },
+  // task-60c35a2da304c080, found by the route-null read on its first run over
+  // the whole table: this chip and the event input below were typed `route:
+  // null, "client-side filter"`, but neither filters on the client. The chip's
+  // click is wireNotifDeliveryFilters' delegated listener and the input's
+  // change/Enter is its `commit`; both set notifDeliveryFilter and call
+  // loadNotifDeliveries, which RE-ISSUES the deliveries read with the filter in
+  // the query string. Same route #notif-del-load-more's row already names, so
+  // the fence answer is the shared table's self-scope read (not elevated).
+  { key: "button.actfilter-chip[data-notif-del-axis][data-notif-del-value]", route: "GET /v1/notifications/deliveries", what: "deliveries filter chip — re-queries the log with the chosen axis", source: "handler: wireNotifDeliveryFilters' delegated click -> loadNotifDeliveries -> api GET; the inline-cond overlay records the deliveries route as a self-scope NARROWING, never a refusal" },
   // cch-w36-bl: the ACTIVITY feed's filter chips are NOT a HOOKS row — they are
   // a WATCHED one (see WATCHED below, id `activity-filter-chip`). A HOOKS row
   // here would be a DEAD ROW every run, exactly as the /new wizard's fenced
@@ -290,7 +312,7 @@ const HOOKS = [
   // table would claim a control the member corpus never paints. The claim worth
   // making is an ABSENCE against a positive control, and that is the WATCHED
   // arm's shape.
-  { key: "input#notif-del-event", route: null, what: "deliveries event filter input", source: "markup: client-side filter" },
+  { key: "input#notif-del-event", route: "GET /v1/notifications/deliveries", what: "deliveries event filter input — re-queries the log on change / Enter", source: "handler: wireNotifDeliveryFilters' commit -> loadNotifDeliveries -> api GET; same self-scope read as the chip above" },
   { key: "button#notif-del-load-more", route: "GET /v1/notifications/deliveries", what: "paginate deliveries", source: "census: read path; the inline-cond overlay records the deliveries route as a self-scope NARROWING, never a refusal" },
   { key: "button#site-new-btn", route: "POST /v1/sites", what: "open the create-site modal", source: "census PIN: openCreateSiteModal — any member may create a site" },
   { key: "button#site-deploy", route: "POST /v1/sites/:*/deploy", what: "deploy the site", source: "census PIN: runDeploy / createAndDeploy, ruling (a)" },
@@ -397,6 +419,321 @@ const HOOKS = [
 // verdict) reading ONE value that was looked up ONCE.
 for (const h of HOOKS) h.fence = h.route ? fenceForRoute(h.route) : F_CLIENT;
 const HOOK_BY_KEY = new Map(HOOKS.map((h) => [h.key, h]));
+
+// ── THE ROUTE-NULL HANDLER READ (task-60c35a2da304c080) ─────────────────────
+// LIMIT L2 below this table used to be total: a row naming the WRONG route was
+// caught by nothing. One wrong-route shape IS cheap to catch, and it is the one
+// that shipped: `button#inst-open-studio` sat here as `route: null, source:
+// "markup: window.open"` while wireInstanceHeaderActions bound it to openStudio,
+// whose body POSTs /v1/barkparks/:*/studio-link — the route the #new-open-studio
+// and .fleet-open-studio rows already named for the same function. A route:null
+// row is a CLAIM that the control calls nothing of ours, and that claim can be
+// read against app.js's source.
+//
+// WHAT IT READS, AND HOW DEEP — stated because every word is a limit:
+//   1. LOOKUP. For each row, every string literal passed to $( / querySelector(
+//      / querySelectorAll( / closest( / getElementById( whose selector list
+//      holds a compound (the subject compound — the last one in a descendant
+//      chain) that is a SUBSET of the row's key: its tag, #id, .classes and
+//      [data-attrs] all present on the key. A compound that carries only
+//      utility classes (`btn`, `btn-*`) is ignored — `.btn` would bind every
+//      button in the tree to every row.
+//   2. BINDING. A lookup binds a handler only through one of these shapes:
+//      `closest(…)` (the handler is the innermost enclosing function — the
+//      delegated listener); `NAME = lookup; … NAME.addEventListener(evt, H)` or
+//      `NAME.on<evt> = H` inside the same enclosing function;
+//      `lookup.forEach(function (NAME) { … NAME.addEventListener(evt, H) })`;
+//      or `lookup.addEventListener(evt, H)` chained. H is a function literal or
+//      a name resolved to a `function NAME(` / `var NAME = function` body (of
+//      several definitions, the one in the innermost scope holding the use).
+//      A lookup that only READS the control (`$("#new-site-url").value` inside
+//      the submit handler of a DIFFERENT control) binds nothing, by design.
+//   3. REACH. The bound handler body is scanned for a bare `api(` or `fetch(`
+//      call; then every bare `name(` call in it that resolves to a function
+//      defined in app.js is followed, to ROUTE_NULL_DEPTH hops. Depth 1 is what
+//      the shipped defect needed (handler -> openStudio -> api); 3 is what the
+//      table's own ROUTED rows need to be seen (handler -> confirmX -> runX ->
+//      api is two hops), and they are this read's positive control. Measured
+//      when it landed: the flagged route:null set was the same four rows at
+//      every depth from 1 to 6, so 3 buys the control without buying a false
+//      positive. Bodies are read TEXTUALLY with comments and string contents
+//      masked, so a nested closure's api() counts as the enclosing function's.
+//   NOT READ: a binding through any other shape (a handler table, a
+//   dispatcher keyed on a data-attribute VALUE, an element passed to a helper
+//   that binds it); a call through a method (`obj.fn(`) or through a variable
+//   holding a function; anything past ROUTE_NULL_DEPTH; hash navigation (a
+//   `location.hash =` that makes the ROUTER issue a read is not a call in the
+//   body, and rows like `div.fleet-row[data-id]` rely on exactly that). A row
+//   whose control has no located binding is PRINTED as unread, never passed as
+//   clean. The reader's own precondition — the masker balances every brace and
+//   paren in app.js — is asserted before a verdict is taken.
+const ROUTE_NULL_DEPTH = 3;
+const APP_JS = path.join(HERE, "..", "app.js");
+
+// route:null rows whose bound handler DOES reach the network and that are kept
+// null on purpose, each with the reason. SYMMETRIC like KNOWN and CONCEALED: an
+// entry whose handler stops reaching api()/fetch() reds, so an exemption cannot
+// outlive the call it excused.
+const ROUTE_NULL_DECLARED = [
+  {
+    key: "button.btn.btn-ghost.btn-sm[data-life-retry]",
+    why: "the Retry re-enters wireLifecycleActions, which re-issues GET /v1/providers/capabilities — the read the " +
+      "view already made, as the row's own source says. It stays null because __route_fence.mjs carries no entry " +
+      "for that route, so naming it here would answer `unknown` and red UNFENCED; recording the read in the shared " +
+      "table is the fix, and it is outside this file. NOT a write, and the capabilities read gates nothing a " +
+      "member can do.",
+  },
+];
+
+// Comments -> spaces; string / template / regex CONTENTS -> "x" (delimiters
+// kept). Same length and same newlines as the input, so every offset into the
+// masked text is an offset into the source.
+export function maskSource(src) {
+  const out = src.split("");
+  const n = src.length;
+  let i = 0;
+  let prev = ""; // last significant character outside a comment
+  let prevWord = "";
+  const REGEX_AFTER = "(,=:[!&|?{};+-*%<>~^";
+  const REGEX_WORDS = new Set(["return", "typeof", "case", "in", "of", "delete", "void", "throw", "new", "else", "do"]);
+  const blank = (a, b) => { for (let k = a; k < b; k++) if (out[k] !== "\n") out[k] = " "; };
+  const fill = (a, b) => { for (let k = a; k < b; k++) if (out[k] !== "\n") out[k] = "x"; };
+  while (i < n) {
+    const c = src[i];
+    const d = src[i + 1];
+    if (c === "/" && d === "/") {
+      let j = src.indexOf("\n", i); if (j === -1) j = n;
+      blank(i, j); i = j; continue;
+    }
+    if (c === "/" && d === "*") {
+      let j = src.indexOf("*/", i + 2); j = j === -1 ? n : j + 2;
+      blank(i, j); i = j; continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < n && src[j] !== c) { if (src[j] === "\\") j++; j++; }
+      fill(i + 1, j); i = j + 1; prev = c; prevWord = ""; continue;
+    }
+    if (c === "/" && (prev === "" || REGEX_AFTER.indexOf(prev) !== -1 || REGEX_WORDS.has(prevWord))) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < n && src[j] !== "\n") {
+        if (src[j] === "\\") { j += 2; continue; }
+        if (src[j] === "[") inClass = true;
+        else if (src[j] === "]") inClass = false;
+        else if (src[j] === "/" && !inClass) break;
+        j++;
+      }
+      fill(i + 1, j); i = j + 1;
+      while (i < n && /[a-z]/.test(src[i])) i++;
+      prev = "/"; prevWord = ""; continue;
+    }
+    if (/[A-Za-z_$]/.test(c)) {
+      let j = i; while (j < n && /[\w$]/.test(src[j])) j++;
+      prevWord = src.slice(i, j); prev = src[j - 1]; i = j; continue;
+    }
+    if (!/\s/.test(c)) { prev = c; prevWord = ""; }
+    i++;
+  }
+  return out.join("");
+}
+
+function matchClose(masked, openAt) {
+  const open = masked[openAt];
+  const close = open === "{" ? "}" : open === "(" ? ")" : "]";
+  let depth = 0;
+  for (let k = openAt; k < masked.length; k++) {
+    if (masked[k] === open) depth++;
+    else if (masked[k] === close) { depth--; if (depth === 0) return k; }
+  }
+  return -1;
+}
+
+// Every function in the file: declarations, `var NAME = function`, `NAME =
+// function`, and anonymous literals. {name|null, bodyStart, bodyEnd, at}.
+function indexFunctions(masked) {
+  const fns = [];
+  const re = /\bfunction\b\s*([A-Za-z_$][\w$]*)?\s*\(/g;
+  let m;
+  while ((m = re.exec(masked)) !== null) {
+    const paren = m.index + m[0].length - 1;
+    const pe = matchClose(masked, paren);
+    if (pe === -1) continue;
+    const bs = masked.indexOf("{", pe);
+    const be = bs === -1 ? -1 : matchClose(masked, bs);
+    if (be === -1) continue;
+    let name = m[1] || null;
+    if (!name) {
+      const before = masked.slice(Math.max(0, m.index - 80), m.index);
+      const a = /([A-Za-z_$][\w$]*)\s*=\s*$/.exec(before);
+      if (a) name = a[1];
+    }
+    fns.push({ name, at: m.index, bodyStart: bs, bodyEnd: be });
+  }
+  return fns;
+}
+
+function innermostFn(fns, off) {
+  let best = null;
+  for (const f of fns) if (f.bodyStart < off && off < f.bodyEnd && (!best || f.bodyStart > best.bodyStart)) best = f;
+  return best;
+}
+
+// Lexical, not global: of the definitions of `name`, the ones whose own
+// enclosing scope CONTAINS the call site, innermost scope first (a `var go =
+// function` inside a forEach callback beats every other `go` in the file). A
+// name with no definition in scope of the call answers every definition —
+// over-reading, which can only make this guard red more, never pass more.
+function resolveNamed(fns, name, near) {
+  const defs = fns.filter((f) => f.name === name);
+  if (!defs.length || near === undefined) return defs;
+  const scopeOf = (f) => innermostFn(fns, f.at);
+  const inScope = defs.filter((f) => { const s = scopeOf(f); return !s || (s.bodyStart < near && near < s.bodyEnd); });
+  if (!inScope.length) return defs;
+  const depth = (f) => { const s = scopeOf(f); return s ? s.bodyStart : -1; };
+  const innermost = Math.max(...inScope.map(depth));
+  return inScope.filter((f) => depth(f) === innermost);
+}
+
+function parseCompound(sel) {
+  const s = sel.trim();
+  const m = /^([a-zA-Z][\w-]*)?/.exec(s);
+  const c = { tag: m[1] ? m[1].toLowerCase() : "", id: "", classes: [], attrs: [] };
+  const re = /#([\w-]+)|\.([\w-]+)|\[([\w-]+)[^\]]*\]/g;
+  let t;
+  while ((t = re.exec(s.slice(m[0].length))) !== null) {
+    if (t[1]) c.id = t[1]; else if (t[2]) c.classes.push(t[2]); else if (t[3]) c.attrs.push(t[3].toLowerCase());
+  }
+  return c;
+}
+
+const UTILITY_CLASS = (c) => c === "btn" || c.startsWith("btn-");
+function compoundFitsKey(comp, key) {
+  const k = parseCompound(key);
+  if (comp.tag && comp.tag !== k.tag) return false;
+  if (comp.id && comp.id !== k.id) return false;
+  if (comp.classes.some((c) => k.classes.indexOf(c) === -1)) return false;
+  if (comp.attrs.some((a) => k.attrs.indexOf(a) === -1)) return false;
+  // Something must IDENTIFY: an id, an attribute, or a non-utility class.
+  return !!(comp.id || comp.attrs.length || comp.classes.some((c) => !UTILITY_CLASS(c)));
+}
+
+function literalFitsKey(kind, lit, key) {
+  if (kind === "getElementById") return compoundFitsKey(parseCompound("#" + lit), key);
+  return lit.split(",").some((part) => {
+    const chain = part.trim().split(/\s*[\s>+~]\s*/).filter(Boolean);
+    return chain.length ? compoundFitsKey(parseCompound(chain[chain.length - 1]), key) : false;
+  });
+}
+
+// The handler expression starting at `at` (just after `addEventListener("x", `
+// or `onx =`): a function literal's body, or a name resolved to its body.
+function handlerAt(masked, fns, at) {
+  const rest = masked.slice(at, at + 200);
+  const lit = /^\s*function\b/.exec(rest);
+  if (lit) {
+    const f = fns.find((x) => x.at === at + rest.indexOf("function"));
+    return f ? [{ label: "an inline function", fn: f }] : [];
+  }
+  const nm = /^\s*([A-Za-z_$][\w$]*)\s*[),;]/.exec(rest);
+  if (nm) return resolveNamed(fns, nm[1], at).map((f) => ({ label: nm[1], fn: f }));
+  return [];
+}
+
+function bindingsFrom(masked, fns, name, from, to) {
+  const out = [];
+  const esc = name.replace(/\$/g, "\\$");
+  const re = new RegExp("\\b" + esc + "\\s*\\.\\s*(?:addEventListener\\(\\s*\"x+\"\\s*,|on[a-z]+\\s*=(?!=))", "g");
+  re.lastIndex = from;
+  let m;
+  while ((m = re.exec(masked)) !== null && m.index < to) out.push(...handlerAt(masked, fns, m.index + m[0].length));
+  return out;
+}
+
+// All handlers bound to a control whose hook key is `key`.
+function handlersForKey(src, masked, fns, key) {
+  const found = [];
+  const re = /(\$|\.querySelectorAll|\.querySelector|\.closest|\.getElementById)\(\s*(["'])/g;
+  let m;
+  while ((m = re.exec(masked)) !== null) {
+    const q = m.index + m[0].length - 1;
+    const qe = masked.indexOf(m[2], q + 1);
+    if (qe === -1) continue;
+    const lit = src.slice(q + 1, qe);
+    const kind = m[1].replace(/^\./, "");
+    if (!literalFitsKey(kind, lit, key)) continue;
+    const callOpen = m.index + m[1].length;
+    const callEnd = matchClose(masked, callOpen);
+    if (callEnd === -1) continue;
+    const scope = innermostFn(fns, m.index);
+    const scopeEnd = scope ? scope.bodyEnd : masked.length;
+    const where = kind + "(\"" + lit + "\")";
+    if (kind === "closest") {
+      if (scope) found.push({ where, label: "the delegated listener around it", fn: scope });
+      continue;
+    }
+    const after = masked.slice(callEnd + 1, callEnd + 200);
+    const chained = /^\s*\.\s*addEventListener\(\s*"x+"\s*,/.exec(after);
+    if (chained) {
+      for (const h of handlerAt(masked, fns, callEnd + 1 + chained[0].length)) found.push({ where, ...h });
+      continue;
+    }
+    const each = /^\s*\.\s*forEach\(\s*function\s*\(\s*([A-Za-z_$][\w$]*)/.exec(after);
+    if (each) {
+      const cb = fns.find((f) => f.at === callEnd + 1 + after.indexOf("function"));
+      if (cb) for (const h of bindingsFrom(masked, fns, each[1], cb.bodyStart, cb.bodyEnd)) found.push({ where, ...h });
+      continue;
+    }
+    const before = masked.slice(Math.max(0, m.index - 120), m.index);
+    const asg = /([A-Za-z_$][\w$]*)\s*=\s*(?:[A-Za-z_$][\w$.]*\s*)?$/.exec(before);
+    if (asg) for (const h of bindingsFrom(masked, fns, asg[1], callEnd, scopeEnd)) found.push({ where, ...h });
+  }
+  return found;
+}
+
+const CALL_RE = /(^|[^\w$.])([A-Za-z_$][\w$]*)\s*\(/g;
+const NOT_CALLS = new Set(["if", "for", "while", "switch", "catch", "function", "return", "typeof", "api", "fetch"]);
+// The first api()/fetch() the body reaches within `depth` hops, as a path, or null.
+function reachesNetwork(src, masked, fns, fn, depth, seen = new Set()) {
+  const body = masked.slice(fn.bodyStart, fn.bodyEnd);
+  const direct = /(^|[^\w$.])(api|fetch)\s*\(/.exec(body);
+  if (direct) {
+    const at = fn.bodyStart + direct.index + direct[1].length;
+    return [src.slice(at, Math.min(src.indexOf("\n", at), at + 90)).trim()];
+  }
+  if (depth <= 0) return null;
+  seen.add(fn);
+  CALL_RE.lastIndex = 0;
+  let m;
+  const names = new Map();
+  while ((m = CALL_RE.exec(body)) !== null) {
+    if (!NOT_CALLS.has(m[2]) && !names.has(m[2])) names.set(m[2], fn.bodyStart + m.index + m[1].length);
+  }
+  for (const [name, callAt] of names) {
+    for (const f of resolveNamed(fns, name, callAt)) {
+      if (seen.has(f) || f.name !== name) continue;
+      const sub = reachesNetwork(src, masked, fns, f, depth - 1, seen);
+      if (sub) return [name + "()", ...sub];
+    }
+  }
+  return null;
+}
+
+// Per row: the located handlers and, for each, the network path it reaches.
+export function readHookHandlers(src, rows, depth = ROUTE_NULL_DEPTH) {
+  const masked = maskSource(src);
+  const balance = (o, c) => masked.split(o).length - masked.split(c).length;
+  const precondition = { braces: balance("{", "}"), parens: balance("(", ")") };
+  const fns = indexFunctions(masked);
+  const report = rows.map((row) => {
+    const handlers = handlersForKey(src, masked, fns, row.key).map((h) => ({
+      where: h.where, label: h.label, fnName: h.fn.name,
+      path: reachesNetwork(src, masked, fns, h.fn, depth),
+    }));
+    return { row, handlers, reaching: handlers.filter((h) => h.path) };
+  });
+  return { precondition, fnCount: fns.length, report };
+}
 
 // ── watched JS-emitted controls, read ONLY through their mount (H4) ──────────
 // `assert: true` means the corpus contains a PRIVILEGED arm that renders it, so
@@ -958,6 +1295,62 @@ async function surveyScenarioUncached(name) {
   return { name, registry, mounts, controls, concealedContainers, openable };
 }
 
+function routeNullRead() {
+  const bad = [];
+  const { precondition, report } = readHookHandlers(fs.readFileSync(APP_JS, "utf8"), HOOKS);
+  if (precondition.braces !== 0 || precondition.parens !== 0) {
+    bad.push("ROUTE-NULL READ REFUSED: the masker leaves app.js unbalanced (braces " + precondition.braces +
+      ", parens " + precondition.parens + "), so every handler body it cut is suspect. A literal or comment shape " +
+      "the masker does not know entered app.js — teach maskSource, do not loosen this.");
+    out("  FAIL route-null     — precondition: masked app.js is unbalanced (braces " + precondition.braces +
+      ", parens " + precondition.parens + ")\n");
+    return bad;
+  }
+  const routed = report.filter((e) => e.row.route);
+  const nulls = report.filter((e) => !e.row.route);
+  const routedSeen = routed.filter((e) => e.handlers.length);
+  const blind = routedSeen.filter((e) => !e.reaching.length);
+  for (const e of blind) {
+    bad.push("ROUTE-NULL READ BLIND on routed row " + e.row.key + " (" + e.row.route + "): the reader located " +
+      e.handlers.length + " handler(s) (" + e.handlers.map((h) => h.where + " -> " + (h.fnName || h.label)).join("; ") +
+      ") and none reaches api()/fetch() within " + ROUTE_NULL_DEPTH + " hop(s). Either the reader went blind to a " +
+      "binding shape — then its verdict on the route:null rows means nothing — or this row names a route its " +
+      "handler never calls.");
+  }
+  if (!routedSeen.length) {
+    bad.push("ROUTE-NULL READ VACUOUS: it located a handler for NONE of the " + routed.length + " routed row(s), so " +
+      "\"no route:null row reaches the network\" would be a green over a reader that sees nothing.");
+  }
+  const flagged = nulls.filter((e) => e.reaching.length);
+  const declared = new Map(ROUTE_NULL_DECLARED.map((d) => [d.key, d]));
+  for (const e of flagged) {
+    const h = e.reaching[0];
+    const line = e.row.key + " — " + h.where + " -> " + (h.fnName || h.label) + " -> " + h.path.join(" -> ");
+    if (declared.has(e.row.key)) continue;
+    bad.push("ROUTE-NULL ROW CALLS THE SERVER " + line + ". The row says `route: null` (" + JSON.stringify(e.row.source) +
+      "), but the handler bound to this control reaches the network, so its fence was never looked up. Name the " +
+      "route the call issues, and the handler function it was read from, in the row's `source`.");
+  }
+  for (const d of ROUTE_NULL_DECLARED) {
+    const e = nulls.find((x) => x.row.key === d.key);
+    if (!e) bad.push("ROUTE_NULL_DECLARED names " + d.key + ", which is no longer a route:null row. Delete the entry.");
+    else if (!e.reaching.length) {
+      bad.push("ROUTE_NULL_DECLARED NO LONGER REPRODUCES " + d.key + ": its handler no longer reaches api()/fetch() " +
+        "within " + ROUTE_NULL_DEPTH + " hop(s). Delete the entry rather than leaving a stale exemption standing.");
+    }
+  }
+  const unread = nulls.filter((e) => !e.handlers.length).map((e) => e.row.key);
+  const ok = !bad.length;
+  out("  " + (ok ? "ok  " : "FAIL") + " route-null      — " + nulls.length + " route:null row(s): " +
+    (nulls.length - unread.length) + " with a located handler, " + flagged.length + " reaching api()/fetch() within " +
+    ROUTE_NULL_DEPTH + " hop(s) (" + (flagged.length - flagged.filter((e) => declared.has(e.row.key)).length) +
+    " undeclared); positive control: " + (routedSeen.length - blind.length) + " of " + routedSeen.length +
+    " located routed row(s) reach the network\n" +
+    "                    unread (no listener located — markup-only or read by another control's handler): " +
+    (unread.join(", ") || "none") + "\n");
+  return bad;
+}
+
 // ── the host boundary, guarded in a CHILD process ────────────────────────────
 // This sweep can only exist because smoke.mjs became importable. That boundary
 // has two halves and BOTH are load-bearing: `node smoke.mjs` must still run the
@@ -1166,6 +1559,17 @@ async function main() {
     " PIN-less route(s) in the shared table, all reads" +
     (hatch.reads.length ? " (" + hatch.reads.map((r) => r.key).join(", ") + ")" : "") + "\n");
   for (const b of hatch.bad) broken.push("SHARED FENCE TABLE: " + b);
+
+  // 3c — THE ROUTE-NULL READ (task-60c35a2da304c080). See the block above
+  // maskSource for what it reads and how deep. Three verdicts:
+  //   · precondition — the masker balances app.js's braces and parens, or no
+  //     body boundary it drew means anything;
+  //   · positive control — every ROUTED row whose handler the reader locates
+  //     must reach api()/fetch(); a routed row it cannot see through means the
+  //     reader went blind (or that row names a route its handler never calls);
+  //   · the claim — a route:null row whose located handler reaches the network
+  //     reds, unless ROUTE_NULL_DECLARED says why.
+  broken.push(...routeNullRead());
 
   // 4 — the floor. The only remaining defence against a corpus that renders
   // nothing and passes.
