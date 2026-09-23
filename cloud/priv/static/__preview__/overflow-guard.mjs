@@ -8113,7 +8113,12 @@ async function main() {
       // corpus (32-char host / 10-char name)", a sentence with its own
       // refutation on the same screen.
       //   cruelMin  the shortest rendered length that still counts as cruel on
-      //             this host. A cruel cell below it has GONE KIND.
+      //             this host. A cruel cell below it has GONE KIND. NO LONGER
+      //             SPELLED ON THE ROW (cchi-w27-bl-w22s7): it is the FAMILY's,
+      //             read out of CRUEL_LEDGER by the resolution loop below the
+      //             table, and asserted there to equal the family's derived
+      //             effective cap. A floor typed on the row could drift from
+      //             the cap it claims to be without anything noticing.
       //   kindMax   the CEILING the kind control must stay under. There is no
       //             server floor to cite for this number, so it is chosen and
       //             justified per row: it sits comfortably above what the kind
@@ -8130,7 +8135,6 @@ async function main() {
           family: "barkpark.custom_host",
           capCite: "barkpark.custom_host <= 253 (registry/barkpark.ex:727) under @external_host_format (:109)",
           class: "CRUEL",
-          cruelMin: 253,
           // `mixed-fleet` renders a 32-char host; 64 is double it and a quarter
           // of the cap, so an ordinary hostname edit passes and a drift toward
           // the 253-char twin reds.
@@ -8144,7 +8148,6 @@ async function main() {
           family: "barkpark.name",
           capCite: "barkpark.name <= 255 (registry/barkpark.ex:466)",
           class: "INADMISSIBLE",
-          cruelMin: 255,
           // `mixed-fleet`'s longest card name is 10 characters. 64 again: the
           // slug cap is 63 and every mint path derives the slug from the name
           // WITHOUT truncation (see INADMISSIBLE above), so a name a person can
@@ -8203,7 +8206,6 @@ async function main() {
           family: "provision_jobs.error",
           capCite: "provision_jobs.error is UNBOUNDED at every layer — a POSTGRES :text column (the `modify :error, :text` migration under cloud/priv/repo/migrations) and ProvisionJob.changeset (registry/provision_job.ex) casts :error with ZERO validate_length. The row's cruelMin is therefore the smallest MEASURED biting length, not a legal maximum",
           class: "UNCAPPED-DERIVED",
-          cruelMin: 512,
           // The kind control is the live instance, whose detail reads "Online"
           // (6 characters). 64 keeps the ceiling identical across all three
           // rows rather than tuning one number per host: any status detail a
@@ -8334,7 +8336,6 @@ async function main() {
           // 212-char trap are proven against the SERVER by
           // cloud/test/barkpark_cloud/web/router_site_domain_format_legal_cap_test.exs.
           class: "FORMAT-LEGAL",
-          cruelMin: 253,
           kindMax: 64,
           // MEMBER-REACHABLE, re-derived by symbol on this tree rather than
           // inherited from the filing: `post "/v1/sites/:id/domains"` calls the
@@ -8366,7 +8367,6 @@ async function main() {
           // route — so this row IS a reachability claim, where the row above it
           // in this table deliberately is not.
           class: "CRUEL",
-          cruelMin: 255,
           kindMax: 64,
           predicate: "a person on the sites list can tell their sites apart by the name they typed — the whole name, not the leading fragment that happened to fit",
         },
@@ -8421,7 +8421,6 @@ async function main() {
           // 255 characters is what this card must survive, and no other
           // instrument would have found out.
           class: "INADMISSIBLE",
-          cruelMin: 255,
           // `providers-connected` renders "GitHub · acme-engineering" (25
           // characters). 64 is the ceiling every row in this table uses, and it
           // sits comfortably above a real GitHub login — github.com itself does
@@ -8452,7 +8451,6 @@ async function main() {
           // about wrapping or overflow — which is why the fixture string is a
           // single unbroken token (scenarios.mjs refuses one that is not).
           class: "CRUEL",
-          cruelMin: 255,
           // `mixed-fleet`'s meta line is the ordinary region · size · version ·
           // channel · autoupdate sentence. 64 is this table's shared ceiling and
           // is the number to move — with its measurement quoted — if an
@@ -8527,19 +8525,24 @@ async function main() {
           return die(`${D}: UNLISTED FAMILY — ${at} declares \`family: "${consumer.family}"\`, which is not a key in CRUEL_LEDGER (${Object.keys(CRUEL_LEDGER).join(", ")}). The row would be certified against a cap nobody derived: its \`capCite\` prose is a sentence, and a sentence cannot be compared to anything. Add the field to the ledger with its changeset/column/format layers, or correct the name`);
         }
         consumer.cap = entry.cap;
-        const uncapped = UNCAPPED_CLASSES.includes(consumer.class || entry.class);
-        const cls = consumer.class || entry.class;
+        // The row does not spell its own floor or verdict any more — it is
+        // HANDED them, by name, from the one place they are derived. A row that
+        // still carried its own copy could disagree with the ledger silently,
+        // which is the drift name-keying exists to end.
+        consumer.cruelMin = entry.cruelMin;
+        const uncapped = UNCAPPED_CLASSES.includes(entry.class);
+        const cls = entry.class;
         if (uncapped && entry.cap.effective !== null) {
           return die(`${D}: MISCLASSED — ${at} is filed ${cls}, which asserts that NO layer bounds this field, but the derivation finds ${capSentence(entry.cap)} for \`${consumer.family}\`. One of the two is wrong and the class is the cheaper thing to be wrong about: a family with a live cap filed as uncapped is a cruel string nobody is cutting to anything`);
         }
         if (!uncapped && entry.cap.effective === null) {
           return die(`${D}: MISCLASSED — ${at} is filed ${cls}, a class that claims the cruel string is cut TO A CAP, but the derivation finds no layer bounding \`${consumer.family}\` at all (${entry.cap.from}). An uncapped family belongs to NONE-POSSIBLE or UNCAPPED-DERIVED, and the difference between those two is whether cruelty has anything to measure against`);
         }
-        if (consumer.sel && !uncapped && consumer.cruelMin !== entry.cap.effective) {
-          return die(`${D}: MISCLASSED — ${at} drives a cruelMin of ${consumer.cruelMin} while \`${consumer.family}\` derives ${capSentence(entry.cap)}. A cruel string is cruel only while it still matches its cap; a floor above the cap can never be reached, and a floor below it measures a KIND value under a cruel name — which is the quietest green there is`);
+        if (consumer.sel && !uncapped && entry.cruelMin !== entry.cap.effective) {
+          return die(`${D}: MISCLASSED — ${at} drives a cruelMin of ${entry.cruelMin} while \`${consumer.family}\` derives ${capSentence(entry.cap)}. A cruel string is cruel only while it still matches its cap; a floor above the cap can never be reached, and a floor below it measures a KIND value under a cruel name — which is the quietest green there is`);
         }
-        if (consumer.sel && consumer.class !== entry.class) {
-          return die(`${D}: MISCLASSED — ${at} carries class "${consumer.class}" while the ledger files \`${consumer.family}\` as "${entry.class}". The ledger is name-keyed so that one field has ONE verdict; two spellings of it is the drift the keying exists to end`);
+        if (!CRUEL_CLASSES.includes(entry.class)) {
+          return die(`${D}: MISCLASSED — the ledger files \`${consumer.family}\` as "${entry.class}", which is not in the class vocabulary (${CRUEL_CLASSES.join(", ")}). An unclassified family is a cap with no recorded verdict, and this table's whole job is that no family goes without one`);
         }
       }
       // Per-scenario hash, normalized once. A row may hand `scens` a bare
