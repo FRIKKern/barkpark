@@ -16,9 +16,41 @@
 # idp_interop (need live services), boot_test and plugin_routes (each has its
 # own dedicated step/harness in elixir.yml).
 #
-# NOT a PR check, NOT required, NOT in any aggregator. Its red is main state and
-# reaches the main watcher by workflow name (elixir-nightly.yml). One run per
-# sha; a manual dispatch never cancels a scheduled run.
+# NOT a PR check, NOT required, NOT in any aggregator. One run per sha; a manual
+# dispatch never cancels a scheduled run.
+#
+# WHO READS ITS RED, and why the sentence that used to sit here was false. This
+# header previously claimed the red "reaches the main watcher by workflow name".
+# It did not, and could not: main-red-owner.yml's population is the enumeration
+# loop in scripts/main-red-predicate.sh under its banner comment
+# `--- enumerate workflows carrying a push: arm ---`, whose body skips any file
+# without a `push:` arm. This workflow declares schedule + workflow_dispatch and
+# nothing else, so it was STRUCTURALLY OUTSIDE the only mechanism in this repo
+# that gives a red on main's tip an owner. Measured at the workflow-runs API
+# (`actions/workflows/elixir-nightly.yml/runs?branch=main&event=schedule`, NOT
+# `gh run list`, which returned a months-old all-green page for a different
+# workflow the same day): of the six scheduled runs to 2026-09-23, two were
+# FAILURES — 35499914600 (head 56e0dbca4, 09-20, 31 failures) and 35323296944
+# (head d28e16420, 09-18, 2 failures). Both were real. Neither reached anyone;
+# both were fixed by unrelated lanes that never knew this run existed.
+#
+# THE READER IS NOW R3, the `Report a failed nightly to a human` step below,
+# which is what scripts/cron-scream-coverage.sh scores. R2 — a `push:` arm —
+# would ALSO have satisfied that guard and is the WRONG reader here twice over:
+# a nightly exists to run when nobody is pushing, so an arm that fires on pushes
+# reports on a different population than the one the cron measures; and this job
+# is a 60-minute full suite, so a push arm would run it on every merge to main,
+# turning a once-a-night instrument into a continuous one nobody sized it for.
+# R3 reports on the run that actually failed, and reports nothing otherwise.
+#
+# FILED IS NOT ROUTED. scripts/file-ci-failure-issue.sh assigns and @-mentions
+# on the issue it opens, because `gh repo view FRIKKern/barkpark --json
+# viewerSubscription` reads UNSUBSCRIBED — so an unassigned issue notifies
+# nobody. That is ROUTING, not delivery: whether a human opens it is not
+# something this workflow can prove, and the notifier's own header names #5658
+# (open since 2026-07-22, 8 comments, every one a bot) as the standing
+# counter-example. READ here means a declared channel exists, never that a
+# person was reached.
 name: elixir-nightly
 
 on:
@@ -28,6 +60,7 @@ on:
 
 permissions:
   contents: read
+  issues: write # so a failed scheduled run can surface itself to a human
 
 concurrency:
   group: elixir-nightly-${{ github.sha }}
@@ -175,3 +208,33 @@ jobs:
           name: elixir-nightly-log-${{ github.sha }}
           path: api/nightly-test.log
           retention-days: 14
+      - name: Report a failed nightly to a human
+        # THE READER. Without this step a red here reaches nobody at all: no
+        # push arm means main-red-predicate.sh never enumerates this file, and
+        # a scheduled run renders a check run on no pull request, so there is
+        # no surface a human passes by. `cancelled()` is included because the
+        # 60-minute timeout is a plausible outcome of the very stall list this
+        # run exists to measure, and a timeout that reports nothing is the same
+        # silence in a different costume.
+        #
+        # working-directory is overridden because this job defaults to `api`
+        # and the notifier lives at the repository root.
+        if: failure() || cancelled()
+        working-directory: ${{ github.workspace }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: elixir-nightly
+          CI_FAILURE_DETAIL: |
+            The nightly FULL Elixir suite failed on main. This is the suite the
+            per-PR matrix does NOT run: `--include flaky --include requires_node`
+            covers tests that api/test/test_helper.exs excludes by default, so a
+            red here can be a regression no PR check would ever have caught.
+            Read `### Totals` in the run's step summary for the failure count,
+            and download the `elixir-nightly-log-<sha>` artifact for the full
+            ExUnit output; the step summary also carries the 100 slowest tests.
+            A red is NOT automatically flake: the two failures in the six nights
+            to 2026-09-23 were both real and both needed a code change
+            (runs 35499914600 and 35323296944).
+            Exit on the `Install libxml2-utils` step instead means the runner's
+            apt index, not this repository, and the step log says which.
+        run: bash scripts/file-ci-failure-issue.sh
