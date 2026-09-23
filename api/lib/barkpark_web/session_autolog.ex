@@ -28,11 +28,12 @@ defmodule BarkparkWeb.SessionAutolog do
   into a document — and every bp call would suddenly look like it named a
   session doc. The session-DOC binding therefore rides its own header.
 
-  ## Best-effort, inline after commit
+  ## Best-effort, in-request after commit
 
   A session log NEVER blocks the milestone that triggered it (§5 error
-  handling). This runs INLINE, after the primary write has committed and
-  before the response is rendered — not in a spawned task — because:
+  handling). This runs IN THE REQUEST PROCESS, after the primary write has
+  committed, from a `Plug.Conn.register_before_send/2` callback — not in a
+  spawned task — because:
 
     * the primary write is already durable (`Tasks.Close.close_with_receipt/3`
       and `Content.upsert_paper/1` have returned `{:ok, _}`), so nothing here
@@ -42,6 +43,17 @@ defmodule BarkparkWeb.SessionAutolog do
       untestable log path is how a "best-effort" log becomes a "never" log;
     * the cost is one scoped read + one `UPDATE` under a per-slug advisory
       lock that only other session writers ever take.
+
+  ## Why a before_send callback
+
+  The success arm only `mark/3`s the conn (a `put_private`, no write); a
+  controller plug `arm/2`s the callback that appends when the response is a
+  2xx. Calling the append from the receipt-bearing function would make the
+  PDS receipt census (`scripts/pds-elixir-receipt-census.exs`, which walks a
+  receipt's enclosing def's callees for a write verb) credit the session
+  `Repo.update_all` to the receipt — i.e. file the paper-publish `ok: true` as
+  confirmed by a write it does not report. Keeping the write off the receipt's
+  call graph keeps the instrument honest.
 
   Every failure — missing/blank header, unknown or out-of-scope slug, CAS
   loss, or a raise from a corrupt row — is logged and swallowed. `record/5`
@@ -62,9 +74,37 @@ defmodule BarkparkWeb.SessionAutolog do
 
   @header "x-barkpark-session-doc"
   @max_slug_bytes 200
+  @private :barkpark_session_autolog
 
   @doc "The request header carrying the session-doc slug."
   def header, do: @header
+
+  @doc """
+  Note, on the conn, the event this request's SUCCESS should log. Pure: it
+  writes nothing. The append happens in the `arm/2` callback, after the
+  receipt is built — see "Why a before_send callback" in the moduledoc.
+  """
+  @spec mark(Plug.Conn.t(), binary(), map()) :: Plug.Conn.t()
+  def mark(conn, kind, attrs), do: Plug.Conn.put_private(conn, @private, {kind, attrs})
+
+  @doc """
+  Register the before_send callback that appends the `mark/3`-ed event when
+  the response is a 2xx. `scope_fun` resolves the tenant scope from the conn
+  at send time. Mounted as a controller plug on the doors that log.
+  """
+  @spec arm(Plug.Conn.t(), (Plug.Conn.t() -> keyword())) :: Plug.Conn.t()
+  def arm(conn, scope_fun) when is_function(scope_fun, 1) do
+    Plug.Conn.register_before_send(conn, fn conn ->
+      case conn.private[@private] do
+        {kind, attrs} when conn.status in 200..299 ->
+          _ = record(conn, kind, attrs, scope_fun.(conn))
+          conn
+
+        _ ->
+          conn
+      end
+    end)
+  end
 
   @doc """
   Append `kind` (with `attrs`' `"ref"`/`"note"`) to the session named by the

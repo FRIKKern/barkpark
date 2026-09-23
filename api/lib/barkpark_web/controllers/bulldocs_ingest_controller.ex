@@ -714,6 +714,14 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # `put_scope/3` re-resolves the same (pure) decision.
   plug(:require_resolvable_scope when action in [:ingest, :ingest_session])
 
+  # Session auto-log (task-bc34e83515bbd91f): arm the before_send callback that
+  # appends a `paper-published` event when `ingest/2`'s success arm `mark/3`ed
+  # the conn. Scoped by the SAME `session_scope_opts/2` the explicit
+  # `/sessions/:slug/events` door threads, so the header reaches exactly the
+  # sessions this caller could log by hand. A plug, not a call from the
+  # receipt body: see `BarkparkWeb.SessionAutolog`'s moduledoc.
+  plug(:arm_session_autolog when action in [:ingest])
+
   def ingest(conn, %{"ifRev" => _}), do: refuse_unfenced_if_rev(conn, "ifRev")
   def ingest(conn, %{"if_rev" => _}), do: refuse_unfenced_if_rev(conn, "if_rev")
 
@@ -845,7 +853,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
-        autolog_publish(conn, paper, params)
+        conn = BarkparkWeb.SessionAutolog.mark(conn, "paper-published", %{"ref" => paper.doc_id})
 
         body = %{
           ok: true,
@@ -988,7 +996,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
-        autolog_publish(conn, paper, conn.params)
+        conn = BarkparkWeb.SessionAutolog.mark(conn, "paper-published", %{"ref" => paper.doc_id})
 
         body = %{
           ok: true,
@@ -1260,19 +1268,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
         end
     end
-  end
-
-  # Session auto-log (task-bc34e83515bbd91f): the paper has COMMITTED; this is
-  # best-effort and never changes the receipt. Scoped by the SAME
-  # `session_scope_opts/2` the explicit `/sessions/:slug/events` door threads,
-  # so the header reaches exactly the sessions this caller could log by hand.
-  defp autolog_publish(conn, paper, params) do
-    BarkparkWeb.SessionAutolog.record(
-      conn,
-      "paper-published",
-      %{"ref" => paper.doc_id},
-      session_scope_opts(conn, params)
-    )
   end
 
   @doc """
@@ -2022,6 +2017,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # global read — matching the write side's own Default-workspace fallback
   # posture (a scope-less write still stamps a real workspace_id; a
   # scope-less read here just doesn't narrow by one).
+  defp arm_session_autolog(conn, _opts),
+    do: BarkparkWeb.SessionAutolog.arm(conn, &session_scope_opts(&1, &1.params))
+
   defp session_scope_opts(conn, params) do
     case resolve_scope(conn, params) do
       {nil, nil} -> []
