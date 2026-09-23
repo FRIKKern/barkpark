@@ -484,10 +484,11 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
       refute File.exists?(dest)
     end
 
-    test "a single byte after the member, across the 64 KiB chunk boundary, is refused",
+    test "ONE stray byte after a member spanning several 64 KiB input chunks is refused",
          %{dest: dest} do
-      # The member alone is > 64 KiB of INCOMPRESSIBLE body, so the stray byte
-      # arrives in a later input chunk than the member's trailer.
+      # The member carries > 64 KiB of INCOMPRESSIBLE body, so `feed_all/3`
+      # hands it to zlib in more than one chunk: the refusal must not depend on
+      # the whole artifact arriving in a single `safeInflate/2` call.
       big = :crypto.strong_rand_bytes(96 * 1024)
       member = gz(tarball([file_entry("index.html", "<!doctype html>"), file_entry("b", big)]))
       assert byte_size(member) > 64 * 1024
