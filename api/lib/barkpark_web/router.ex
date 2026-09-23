@@ -3419,8 +3419,9 @@ defmodule BarkparkWeb.Router do
   # or a restore sent with a token bound to the archived workspace would be
   # refused by the very guard it lifts.
   #
-  # Bare router+controller routes with NO capabilities manifest command, like
-  # DELETE above — invisible to the manifest-derived OpenAPI drift gate.
+  # UNLIKE DELETE above, both ARE capabilities-manifest commands
+  # (`workspace.archive` / `workspace.restore`), so `bp workspace archive|restore`
+  # exists and docs/openapi.json carries both operations.
   scope "/api", BarkparkWeb do
     pipe_through([:api, :require_admin])
 

@@ -119,7 +119,7 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
       # NON-VACUITY: there IS a document to lose.
       assert length(docs_before) >= 1
 
-      resp = archive(build_conn(), raw, ws.slug)
+      resp = archive(scoped_conn(), raw, ws.slug)
       assert resp.status == 200, resp.resp_body
       body = Jason.decode!(resp.resp_body)
       assert body["archived"] == true
@@ -148,7 +148,7 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
       assert first.status == 200
       at = Jason.decode!(first.resp_body)["workspace"]["archived_at"]
 
-      second = archive(build_conn(), raw, ws.slug)
+      second = archive(scoped_conn(), raw, ws.slug)
       assert second.status == 200
       assert Jason.decode!(second.resp_body)["workspace"]["archived_at"] == at
     end
@@ -174,7 +174,7 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
          %{conn: conn, ws: ws, project: project, member_raw: member_raw} do
       assert scoped_read(conn, member_raw, ws, project).status == 200
 
-      resp = scoped_write(build_conn(), member_raw, ws, project, "pre-archive")
+      resp = scoped_write(scoped_conn(), member_raw, ws, project, "pre-archive")
       assert resp.status == 200, resp.resp_body
     end
 
@@ -182,7 +182,7 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
          %{conn: conn, ws: ws, project: project, raw_admin: raw, member_raw: member_raw} do
       assert archive(conn, raw, ws.slug).status == 200
 
-      resp = scoped_read(build_conn(), member_raw, ws, project)
+      resp = scoped_read(scoped_conn(), member_raw, ws, project)
       assert resp.status == 409
       assert error_code(resp) == "workspace_archived"
       assert Jason.decode!(resp.resp_body)["error"]["details"]["workspace"] == ws.slug
@@ -193,7 +193,7 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
       assert archive(conn, raw, ws.slug).status == 200
       before = raw_rows("documents", ws.id)
 
-      resp = scoped_write(build_conn(), member_raw, ws, project, "while-archived")
+      resp = scoped_write(scoped_conn(), member_raw, ws, project, "while-archived")
       assert resp.status == 409
       assert error_code(resp) == "workspace_archived"
       assert raw_rows("documents", ws.id) == before
@@ -209,9 +209,9 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
       assert conn |> authed(bound_raw) |> get("/v1/data/counts/#{@dataset}") |> Map.get(:status) ==
                200
 
-      assert archive(build_conn(), raw, ws.slug).status == 200
+      assert archive(scoped_conn(), raw, ws.slug).status == 200
 
-      resp = build_conn() |> authed(bound_raw) |> get("/v1/data/counts/#{@dataset}")
+      resp = scoped_conn() |> authed(bound_raw) |> get("/v1/data/counts/#{@dataset}")
       assert resp.status == 409
       assert error_code(resp) == "workspace_archived"
     end
@@ -224,14 +224,14 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
       {:ok, _} = Auth.create_token(stranger_raw, "stranger", "test", ["read", "write"])
 
       unknown =
-        build_conn()
+        scoped_conn()
         |> authed(member_raw)
         |> get(
           "/w/no-such-ws-#{System.unique_integer([:positive])}/p/x/v1/data/counts/#{@dataset}"
         )
 
-      forbidden = scoped_read(build_conn(), stranger_raw, ws, project)
-      archived = scoped_read(build_conn(), member_raw, ws, project)
+      forbidden = scoped_read(scoped_conn(), stranger_raw, ws, project)
+      archived = scoped_read(scoped_conn(), member_raw, ws, project)
 
       assert {unknown.status, error_code(unknown)} == {404, "not_found"}
       assert {forbidden.status, error_code(forbidden)} == {403, "forbidden"}
@@ -246,20 +246,20 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
       member_raw: member_raw
     } do
       assert archive(conn, raw, ws.slug).status == 200
-      assert scoped_read(build_conn(), member_raw, ws, project).status == 409
-      assert restore(build_conn(), raw, ws.slug).status == 200
-      assert scoped_read(build_conn(), member_raw, ws, project).status == 200
+      assert scoped_read(scoped_conn(), member_raw, ws, project).status == 409
+      assert restore(scoped_conn(), raw, ws.slug).status == 200
+      assert scoped_read(scoped_conn(), member_raw, ws, project).status == 200
     end
 
     test "the /api/workspaces/:slug interior (projects list, project create) refuses 409 too",
          %{conn: conn, ws: ws, raw_admin: raw, member_raw: member_raw} do
       assert archive(conn, raw, ws.slug).status == 200
 
-      listed = build_conn() |> authed(member_raw) |> get("/api/workspaces/#{ws.slug}/projects")
+      listed = scoped_conn() |> authed(member_raw) |> get("/api/workspaces/#{ws.slug}/projects")
       assert {listed.status, error_code(listed)} == {409, "workspace_archived"}
 
       created =
-        build_conn()
+        scoped_conn()
         |> authed(member_raw)
         |> post("/api/workspaces/#{ws.slug}/projects", Jason.encode!(%{name: "Nope"}))
 
@@ -271,7 +271,7 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
          %{conn: conn, ws: ws, raw_admin: raw, member_raw: member_raw} do
       assert archive(conn, raw, ws.slug).status == 200
 
-      resp = build_conn() |> authed(member_raw) |> get("/api/workspaces")
+      resp = scoped_conn() |> authed(member_raw) |> get("/api/workspaces")
       assert resp.status == 200
 
       listed = Enum.find(Jason.decode!(resp.resp_body)["workspaces"], &(&1["slug"] == ws.slug))
@@ -292,10 +292,10 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
 
     assert archive(conn, raw, ws.slug).status == 200
 
-    listed = build_conn() |> authed(raw) |> get("/api/workspaces")
+    listed = scoped_conn() |> authed(raw) |> get("/api/workspaces")
     assert listed.status == 200
 
-    resp = restore(build_conn(), raw, ws.slug)
+    resp = restore(scoped_conn(), raw, ws.slug)
     assert resp.status == 200, resp.resp_body
     refute Tenancy.get_workspace_by_slug(ws.slug).archived_at
   end
@@ -324,7 +324,7 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
       assert archive(conn, raw_b, victim.slug).status == 200
       refute TenancyAuth.member?(token!(raw_a), victim.id)
 
-      resp = restore(build_conn(), raw_a, victim.slug)
+      resp = restore(scoped_conn(), raw_a, victim.slug)
       assert resp.status == 403
       assert error_code(resp) == "forbidden"
       assert Tenancy.get_workspace_by_slug(victim.slug).archived_at
@@ -354,7 +354,7 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
       {:ok, _} = Auth.create_token(raw, "non admin", "test", ["read", "write"], ws.id)
 
       assert archive(conn, raw, ws.slug).status == 403
-      assert restore(build_conn(), raw, ws.slug).status == 403
+      assert restore(scoped_conn(), raw, ws.slug).status == 403
       refute Tenancy.get_workspace_by_slug(ws.slug).archived_at
     end
 
@@ -362,9 +362,9 @@ defmodule BarkparkWeb.WorkspaceArchiveControllerTest do
       %{ws: ws, raw_admin: raw} = admin_workspace!("anon")
 
       assert post(conn, "/api/workspaces/#{ws.slug}/archive").status == 401
-      assert post(build_conn(), "/api/workspaces/#{ws.slug}/restore").status == 401
+      assert post(scoped_conn(), "/api/workspaces/#{ws.slug}/restore").status == 401
 
-      missing = archive(build_conn(), raw, "no-such-ws-#{System.unique_integer([:positive])}")
+      missing = archive(scoped_conn(), raw, "no-such-ws-#{System.unique_integer([:positive])}")
       assert {missing.status, error_code(missing)} == {404, "not_found"}
     end
 
