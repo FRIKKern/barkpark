@@ -665,9 +665,22 @@ test('R4: a successor equal to the epic is REFUSED before any clause is evaluate
   assert.doesNotMatch(out, /VERDICT: SEAL$/m);
 });
 
+// R9 (SUCCESSOR-OVERLAPS-EPIC, task-5f6267283fe7a277) is a SECOND fence behind R4: the
+// epic's own subtree overlaps itself. So the proof that R4's hole was a false PASS removes
+// BOTH, and a separate run pins that R9 alone still refuses when only R4 is gone.
+const DROP_R9 = (src) => replaceUnique(src, "  if (overlap.length)\n    throw new Refusal('SUCCESSOR-OVERLAPS-EPIC',",
+  "  if (false)\n    throw new Refusal('SUCCESSOR-OVERLAPS-EPIC',");
 test('R4 MUTATION PROOF: with R4 removed, the identical run seals at a=PASS', () => {
+  const dropR4 = (src) => {
+    const out = src.replace(/  if \(SUCCESSOR === EPIC\)\n    throw new Refusal\('SELF-SUCCESSOR',[\s\S]*?\);\n/, '');
+    assert.notEqual(out, src, 'the R4 mutation must apply');
+    return out;
+  };
+  const backstop = mutatedRun(dropR4, ['--ledger', withRequired('self-successor.json'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(backstop.status, REFUSED, `with only R4 gone, R9 still refuses: ${token(backstop.out)}`);
+  assert.match(token(backstop.out), /REFUSED reason=SUCCESSOR-OVERLAPS-EPIC/);
   const { status, out } = mutatedRun(
-    (src) => src.replace(/  if \(SUCCESSOR === EPIC\)\n    throw new Refusal\('SELF-SUCCESSOR',[\s\S]*?\);\n/, ''),
+    (src) => DROP_R9(dropR4(src)),
     ['--ledger', withRequired('self-successor.json'), '--repo', REPO, '--guard-cmd', 'true'],
   );
   assert.equal(status, SEAL, `without R4 the self-successor run seals: ${token(out)}`);
@@ -4071,7 +4084,14 @@ test('task-8532: the `forwarded`-seed spelling of a second parent is refused too
 
 test('task-8532 MUTATION: with the refusal removed, the planted two-parent world SCORES a green', () => {
   const planted = plantSecondParent('considering-forwarded.json', 'gr-fixture-considering-1', 'considering');
-  const r = mutatedRun((src) => replaceUnique(src, '    if (twoParents.length)\n', '    if (false)\n'),
+  // The planted row sits in BOTH walks, so R9 (task-5f6267283fe7a277) now refuses it as an
+  // overlap too. With only the two-parent refusal gone, R9 answers; with both gone, the
+  // world buys the green this arm exists to show.
+  const noTwoParents = (src) => replaceUnique(src, '    if (twoParents.length)\n', '    if (false)\n');
+  const backstop = mutatedRun(noTwoParents, ['--ledger', planted, '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(backstop.status, REFUSED, `with only FIXTURE-TWO-PARENTS gone, R9 still refuses: ${token(backstop.out)}`);
+  assert.match(token(backstop.out), /REFUSED reason=SUCCESSOR-OVERLAPS-EPIC/);
+  const r = mutatedRun((src) => DROP_R9(noTwoParents(src)),
     ['--ledger', planted, '--repo', REPO, '--guard-cmd', 'true']);
   assert.equal(r.status, SEAL, `without the refusal the unproducible fixture buys a seal: ${token(r.out)}`);
   assert.match(r.out, /^ {2}forwarded under successor : 1$/m,
