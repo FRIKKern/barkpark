@@ -2328,6 +2328,27 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "token.rotate",
+        "token",
+        "rotate",
+        "Mint a successor for a token seated here (same permissions and scope); the old one expires after the grace window.",
+        "POST",
+        "/v1/tokens/:id/rotate",
+        "scoped_admin",
+        args: [arg("id", true, "string", "Token id (from token ls).")],
+        flags: [
+          flag(
+            "grace_seconds",
+            "int",
+            "Seconds the old token keeps working (0 = revoke now; max 604800).",
+            default: 86_400
+          )
+        ],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "token.create",
         "token",
         "create",
