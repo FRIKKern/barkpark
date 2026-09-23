@@ -270,10 +270,16 @@ defmodule Barkpark.StudioChat.Recorder do
     # this surface's own workspace on the keyed one — so every document arrives
     # exactly once, WITH its payload, and no foreign tenant's body ever does.
     #
-    # The dataset and workspace come from `TaskLedgerScope.resolve/0` — the ONE
+    # The dataset and workspace come from `TaskLedgerScope.resolve/1` — the ONE
     # resolver `ChatLive`'s Doing strip subscribes through too, so the two chat
     # surfaces cannot ride different ledger streams (task-ff3ed7ae0a242160).
-    %{dataset: task_dataset, workspace_id: ledger_workspace_id} = TaskLedgerScope.resolve()
+    #
+    # The workspace is this session's OWN (`opts[:workspace_id]`, the store row's
+    # `owner_workspace_id`), the one its agent's task token is minted into, so
+    # the Recorder rides the stream that agent writes on (task-180a07e9d178d6a8).
+    %{dataset: task_dataset, workspace_id: ledger_workspace_id} =
+      TaskLedgerScope.resolve(Map.get(opts, :workspace_id))
+
     Broadcast.subscribe_documents(task_dataset, ledger_workspace_id)
 
     # A Task holder authorized this managed attempt but is not the Studio

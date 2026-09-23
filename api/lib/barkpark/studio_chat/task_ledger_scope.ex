@@ -25,12 +25,24 @@ defmodule Barkpark.StudioChat.TaskLedgerScope do
       `Tasks.task_schema/1`), as do the other ledger subscribers — the Tasks
       board LiveView's `@dataset "production"`. The ledger's home is therefore
       `"production"`, by definition, not by sort order.
-    * **workspace / project** — the flat `/v1/tasks` routes run
-      `DeriveWorkspaceFromToken` then `AssignDefaultScope`; the chat surfaces
-      read the seeded Default here. That is the arity-zero read
-      task-180a07e9d178d6a8 questions, and it is left EXACTLY as it was: a
-      disposition of that row is a change inside `resolve/0` (plus its callers
-      passing the viewer), and nowhere else.
+    * **workspace / project** — the VIEWER's, passed in (task-180a07e9d178d6a8).
+      The agent's task token is minted into the chat session's own workspace
+      (`Provider.Claude.mint_workspace_id/2`, arm 1), and `ensure_session/1`
+      stamps that from the socket's `:current_workspace`. The flat `/v1/tasks`
+      routes run `DeriveWorkspaceFromToken` BEFORE `AssignDefaultScope`, so a
+      token bound to workspace A writes every claim, pulse and create into A,
+      not into the seeded Default. This used to be `resolve/0`, reading
+      `Tenancy.get_default_workspace/0` for every caller: on the scoped mount
+      (`{LiveAuth, :scoped_admin}`, a TARGET-workspace gate) an admin of A
+      alone was shown the Default workspace's ready queue and claims, and never
+      the claims its own agent took in A. A resolver that cannot see the viewer
+      cannot scope to the viewer, so the workspace is an argument.
+
+      The project follows `AssignDefaultScope`'s rule, because that is the
+      project the writer's request resolves: the seeded Default project only
+      when the workspace IS the Default workspace, and no project otherwise (a
+      workspace-only filter). Pairing a non-Default workspace with the Default
+      project would AND two tenants and match nothing.
   """
 
   alias Barkpark.Tenancy
@@ -44,24 +56,28 @@ defmodule Barkpark.StudioChat.TaskLedgerScope do
         }
 
   @doc """
-  The workspace, project and dataset the task ledger is written in.
+  The workspace, project and dataset the task ledger is written in, for a
+  viewer acting in `workspace_id`.
 
-  Never raises: a missing Default workspace/project yields `nil` ids (the
-  callers' reads are fail-closed on a nil workspace, and the subscription then
-  joins only the global shared-layer topic).
+  Callers pass the workspace the viewer is acting in: `ChatLive` its
+  `:current_workspace` (the URL workspace on the scoped mount, the principal's
+  own or the authorized Default on the flat one), the `Recorder` its session's
+  `owner_workspace_id`. A `nil` workspace yields `nil` ids, never the Default:
+  the callers' reads are fail-closed on a nil workspace, and the subscription
+  then joins only the global shared-layer topic. Never raises.
   """
-  @spec resolve() :: t()
-  def resolve do
-    %{
-      workspace_id: default_id(&Tenancy.get_default_workspace/0),
-      project_id: default_id(&Tenancy.get_default_project/0),
-      dataset: @task_dataset
-    }
+  @spec resolve(String.t() | nil) :: t()
+  def resolve(workspace_id) when is_binary(workspace_id) and workspace_id != "" do
+    %{workspace_id: workspace_id, project_id: project_for(workspace_id), dataset: @task_dataset}
   end
 
-  defp default_id(fetch) do
-    case fetch.() do
-      %{id: id} when is_binary(id) -> id
+  def resolve(_workspace_id), do: %{workspace_id: nil, project_id: nil, dataset: @task_dataset}
+
+  # `AssignDefaultScope.maybe_assign_default_project/1`'s rule: the Default
+  # project belongs to the Default workspace and is paired with nothing else.
+  defp project_for(workspace_id) do
+    case Tenancy.get_default_project() do
+      %{id: id, workspace_id: ^workspace_id} when is_binary(id) -> id
       _ -> nil
     end
   rescue

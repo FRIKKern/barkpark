@@ -165,7 +165,7 @@ defmodule BarkparkWeb.Studio.ChatStripTaskDatasetTest do
 
   test "the resolver names the ledger's dataset and the Default scope", %{scope: scope} do
     assert %{dataset: @ledger, workspace_id: ws_id, project_id: proj_id} =
-             TaskLedgerScope.resolve()
+             TaskLedgerScope.resolve(scope[:workspace_id])
 
     assert ws_id == scope[:workspace_id]
     assert proj_id == scope[:project_id]
