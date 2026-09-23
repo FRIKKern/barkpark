@@ -164,7 +164,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def save(_params, socket), do: {:noreply, socket}
 
   defp do_save(params, socket) do
-    socket = Shared.do_autosave(socket, params)
+    socket = Shared.do_autosave(socket, params, :save)
 
     case socket.assigns[:save_status] do
       "Saved" ->
@@ -225,7 +225,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     case value do
       t when is_binary(t) and t != "" ->
         {:noreply,
-         mark_dirty(Shared.do_autosave(socket, %{field => Barkpark.Tenancy.slugify(t)}))}
+         mark_dirty(
+           Shared.do_autosave(socket, %{field => Barkpark.Tenancy.slugify(t)}, :slug_derive)
+         )}
 
       _ ->
         {:noreply, socket}
@@ -236,7 +238,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     socket = track_touched(socket, params)
 
     case fold_dot_paths(params, socket) do
-      %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc))}
+      %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc, :change))}
       _ -> {:noreply, socket}
     end
   end
@@ -499,7 +501,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         end
 
       new_form = StudioLive.put_value_at(form, key_path, new_list)
-      {:noreply, mark_dirty(Shared.do_autosave(socket, new_form))}
+      {:noreply, mark_dirty(Shared.do_autosave(socket, new_form, :array_op))}
     end
   end
 
