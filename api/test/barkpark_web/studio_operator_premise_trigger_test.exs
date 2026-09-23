@@ -288,7 +288,7 @@ defmodule BarkparkWeb.StudioOperatorPremiseTriggerTest do
       assert Enum.any?(scoped, fn m -> m.session == :scoped_admin_studio end),
              "ChatLive left :scoped_admin_studio — repoint the sibling surface below."
 
-      {user, conn} = user_session!(build_conn(), [{ws_b, "admin"}])
+      {user, conn} = user_session!(scoped_conn(), [{ws_b, "admin"}])
       refute TenancyAuth.workspace_admin?(user, default_ws.id)
 
       mounted? =
