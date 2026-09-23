@@ -5521,11 +5521,30 @@
 
       _paSettle(p) {
         var word = this._paSettleWord(p);
-        // NEUTRAL BY LAW when nothing observable moved (D263). The server
-        // answered — the ref appeared and dropped — but this desk looks the
-        // same, and the hook does not know why. "Done." reports the round trip
-        // and claims no outcome.
-        this._paRelease(word || "Done.");
+        // NO WITNESS, NO WORD. The server answered — the ref appeared and
+        // dropped — but nothing this hook watches moved, so the hook cannot
+        // tell a refusal from a success whose effect it does not watch.
+        //
+        // This used to release "Done.", justified as neutral. It is not
+        // neutral to the person hearing it: "Done." is the word an interface
+        // uses for a completed action, and every handler that answers a press
+        // with an unchanged socket — an authorization refusal in
+        // `switch_workspace/2`, a `publish` with no open document — was
+        // getting it. A user who saw nothing presses again; a user told
+        // "Done." walks away, so the old wordless tint was traded for a FALSE
+        // COMPLETION, which is worse.
+        //
+        // The outcome word belongs to the SERVER, which knows the reason and
+        // already owns an announced banner of its own — `Nav.studio_flash/1`,
+        // which carries the polite status role for info and the assertive
+        // alert role for errors. (Spelled in prose on purpose: the attribute
+        // literals would be counted by the served-body live-region census in
+        // `press_answer_region_guard_test.exs`, which reads THIS file's
+        // rendered output.) Every branch of this hook that
+        // HAS evidence still speaks — "Opened"/"Selected" above, the
+        // lost-press line, the discard line and the 8s ceiling below. Only
+        // the evidence-free branch goes quiet.
+        this._paRelease(word || "");
       },
 
       _paTick(p) {
@@ -5611,10 +5630,12 @@
         var name = this._paName(a);
         // THE HONESTY RULE, ANCHOR SHAPE. The ACTIVE tab's href IS the page you
         // are already on: the press answers, the browser re-fetches, and the
-        // desk is the same desk. It gets the same NEUTRAL clear a witness-less
-        // socket press gets. "Opening “Structure”" would name a move that does
-        // not happen — exactly the trade D263 refuses, silence for a lie.
-        if (to.href === location.href) { this._paRelease("Done."); return; }
+        // desk is the same desk. It gets the same evidence-free clear a
+        // witness-less socket press gets in `_paSettle` — and for the same
+        // reason it is a CLEAR rather than "Done.": nothing moved, so there is
+        // no outcome this hook is entitled to name. "Opening “Structure”"
+        // would name a move that does not happen.
+        if (to.href === location.href) { this._paRelease(""); return; }
         // Present tense on purpose: the navigation is IN FLIGHT. "Opened" is
         // reserved for a URL that has already moved.
         this._paRelease(name ? "Opening “" + name + "”…" : "Opening…");
