@@ -32,6 +32,16 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
   A pin that reads its own subject cannot fail from the only thing it purports
   to guard (charter D94).
 
+  The destination's POSITION COUPLING is asserted as an implication over a
+  predicate, not as a pin: every rule whose subject is
+  `.bp-doc-sidebar.is-open[data-user-opened]` (any bucket) and declares
+  `inset` or `width: auto` must declare `position: absolute` in the same rule,
+  because on an in-flow box that geometry is inert and the 300px flex basis
+  wins. The literal pins cover today's narrow/phone rule; the implication also
+  covers a sibling state added later. It has a non-vacuity floor (narrow and
+  phone must be in the matched set) and spliced discrimination controls in
+  both directions. It is a source-level contract, not a browser measurement.
+
   The ABOLITION is asserted as a PREDICATE OVER THE WHOLE SHEET, not as a list
   of five deleted selectors. An enumeration is a snapshot; a predicate is a
   rule. A five-name skip list would go green the day someone reintroduces a
@@ -268,6 +278,103 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
     end
   end
 
+  describe "the destination's geometry is COUPLED to position: absolute" do
+    # The pins above check today's rule property by property. They do not
+    # state the reason those properties belong together: `inset` and the
+    # `width: auto` neutraliser mean something ONLY on an out-of-flow box. On an
+    # in-flow box `inset` goes inert, `width: auto` stops fighting anything, the
+    # base `flex: 0 0 300px` basis wins, and the destination is a 300px dock
+    # again — the shape D113 measured as WORSE than the overlay at these widths.
+    #
+    # So the contract is an IMPLICATION, asserted over every rule the PREDICATE
+    # selects (the subject compound is `.bp-doc-sidebar.is-open[data-user-opened]`,
+    # any bucket), not over a hand-listed pair: a future sibling state added to
+    # the same selector family with `inset` but no `position` is caught the day
+    # it lands, with no constant in this file to update. This is a source-level
+    # contract over the parsed sheet, not a browser layout measurement.
+    test "every summoned-destination rule declaring inset or width: auto declares position: absolute" do
+      rules = destination_rules(sheet())
+      geometry = Enum.filter(rules, &declares_geometry?/1)
+
+      # NON-VACUITY FLOOR. An implication over an empty set is true for free; a
+      # predicate that stopped matching would pass this test forever. The two
+      # rules known to carry this geometry today must be in the matched set.
+      for sel <- [@narrow, @phone] do
+        assert Enum.any?(geometry, &(&1.selector == sel)),
+               """
+               THE IMPLICATION VERDICT BELOW IS VOID.
+
+               The destination predicate did not select `#{sel}` as a rule that
+               declares `inset` or `width: auto`. Matched #{length(rules)}
+               destination rule(s), #{length(geometry)} with geometry:
+               #{format_offenders(geometry)}
+               """
+      end
+
+      offenders = uncoupled_geometry(sheet())
+
+      assert offenders == [],
+             """
+             A SUMMONED-DESTINATION RULE DECLARES GEOMETRY WITHOUT `position: absolute`.
+
+             `inset` and `width: auto` only mean "fill the content pane" on an
+             out-of-flow box. Without `position: absolute` in the same rule the
+             inset is inert, the flex basis wins, and the destination silently
+             reverts to a 300px in-flow dock (charter D113).
+
+             Offending rules:
+             #{format_offenders(offenders)}
+             """
+    end
+
+    test "DISCRIMINATION — the implication reports a spliced sibling state missing position" do
+      # The literal pins above cannot see this: they read the narrow/phone
+      # block by its exact selector list, so a NEW sibling rule is invisible
+      # to them. Only a predicate over the whole sheet can report it.
+      for {label, sel, decls} <- [
+            {"inset, no position",
+             ~S|html[data-width-bucket="compact"] .bp-doc-sidebar.is-open[data-user-opened]|,
+             "inset: 0; z-index: 5;"},
+            {"width: auto under position: relative",
+             ~S|html[data-width-bucket="compact"] .bp-doc-sidebar.is-open[data-user-opened]|,
+             "position: relative; width: auto;"},
+            {"reordered compound",
+             ~S|html[data-width-bucket="compact"] .bp-doc-sidebar[data-user-opened].is-open|,
+             "inset: 0;"}
+          ] do
+        # Diffed against the unspliced sheet, so this control measures the
+        # PREDICATE and not the current state of the real rules.
+        offenders = spliced_offenders("#{sel} { #{decls} }")
+
+        assert Enum.map(offenders, & &1.selector) == [sel],
+               """
+               The coupling implication did NOT report a spliced sibling rule
+               (#{label}) that carries destination geometry without
+               `position: absolute`. It reported:
+               #{format_offenders(offenders)}
+
+               The implication is inert, so its green against the real sheet
+               means nothing.
+               """
+      end
+    end
+
+    test "DISCRIMINATION — a coupled or non-subject rule is NOT reported" do
+      # The other direction: an implication that flags everything is as useless
+      # as one that flags nothing. A rule that DOES declare `position: absolute`,
+      # a rule whose subject is a descendant (the Tier-3 exit button), and the
+      # painted-closed `:not([data-user-opened])` state are all outside it.
+      for rule <- [
+            ~S|html[data-width-bucket="compact"] .bp-doc-sidebar.is-open[data-user-opened] { position: absolute; inset: 0; width: auto; }|,
+            ~S|html[data-width-bucket="compact"] .bp-doc-sidebar.is-open[data-user-opened] .bp-doc-sidebar__collapse { inset: 0; }|,
+            ~S|html[data-width-bucket="compact"] .bp-doc-sidebar.is-open:not([data-user-opened]) { inset: 0; }|
+          ] do
+        assert spliced_offenders(rule) == [],
+               "the coupling implication falsely reported a rule outside its contract: #{rule}"
+      end
+    end
+  end
+
   describe "the scrim is ABOLISHED — no generated box attaches to .editor-with-preview" do
     test "the sheet declares no .editor-with-preview ::after/::before rule at all" do
       offenders = scrim_offenders(sheet())
@@ -455,6 +562,53 @@ defmodule BarkparkWeb.Studio.InspectorSummonedDestinationTest do
 
   defp format_offenders(offenders) do
     Enum.map_join(offenders, "\n", fn %{selector: s, body: b} -> "  #{s} { #{b} }" end)
+  end
+
+  # --- the position-coupling implication ------------------------------
+
+  # Every style rule whose SUBJECT is the summoned destination: the last
+  # compound of the selector carries `.bp-doc-sidebar`, `.is-open` and
+  # `[data-user-opened]` (in any order, at any bucket prefix). `:not(...)`
+  # groups are stripped first, so the painted-closed
+  # `.is-open:not([data-user-opened])` state is not mistaken for it, and a
+  # descendant such as `.bp-doc-sidebar__collapse` is a different subject.
+  defp destination_rules(sheet) do
+    Enum.filter(style_rules(sheet), fn %{selector: selector} ->
+      subject =
+        selector
+        |> String.split(~r/\s*[>+~]\s*|\s+/)
+        |> List.last()
+        |> String.replace(~r/:not\([^)]*\)/, "")
+
+      Regex.match?(~r/\.bp-doc-sidebar(?![\w-])/, subject) and
+        Regex.match?(~r/\.is-open(?![\w-])/, subject) and
+        String.contains?(subject, "[data-user-opened]")
+    end)
+  end
+
+  # The antecedent: the rule places the box with `inset` (or an `inset-*`
+  # longhand) or neutralises the overlay width with `width: auto`.
+  defp declares_geometry?(%{body: body}) do
+    Regex.match?(~r/(?:^|;)\s*inset(?:-[a-z-]+)?\s*:/, body) or
+      Regex.match?(~r/(?:^|;)\s*width\s*:\s*auto\s*(?:!important\s*)?(?:;|$)/, body)
+  end
+
+  defp declares_absolute?(%{body: body}),
+    do: Regex.match?(~r/(?:^|;)\s*position\s*:\s*absolute\s*(?:!important\s*)?(?:;|$)/, body)
+
+  # The implication's counterexamples: geometry declared, `position: absolute`
+  # not declared in the same rule.
+  defp uncoupled_geometry(sheet) do
+    sheet
+    |> destination_rules()
+    |> Enum.filter(&(declares_geometry?(&1) and not declares_absolute?(&1)))
+  end
+
+  # What a spliced rule ADDS to the implication's counterexamples. The
+  # discrimination controls use this rather than the raw result, so they stay
+  # a statement about the predicate even while the real sheet is red.
+  defp spliced_offenders(rule) do
+    uncoupled_geometry(splice!(sheet(), rule)) -- uncoupled_geometry(sheet())
   end
 
   # --- parsing ---------------------------------------------------------
