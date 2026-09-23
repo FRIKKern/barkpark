@@ -83,15 +83,22 @@ defmodule Barkpark.Tasks.Criteria do
   WHY THE PROSE ARM IS WIDE AND MUST STAY WIDE. The two error directions are
   NOT symmetric: a false positive is a LOUD refusal the caller can override in
   one flag, while a false negative is a SILENT permit that lets a builder
-  fabricate a lead's merge close and nothing ever objects. Measured over the
-  live corpus (31090 criteria, 2026-08-22):
+  fabricate a lead's merge close and nothing ever objects. Re-measured over
+  the live corpus 2026-09-17 (9062 rows, 38004 criteria; first measured
+  2026-08-22 as 65 of 1853 = 3.51%):
 
-    * the wide match hits 1853 criteria, of which **65 merely MENTION**
-      merge-gating — a 3.51% false-POSITIVE rate, all loud, all overridable,
-      and all permanently fixable by the author with `merge_gate: false`.
-    * position does NOT separate the two: of those 65 mentions one LEADS with
-      the marker, while 43 genuine gates carry it mid-sentence
-      ("LEAD-OWNED (merge-gated): PR merged to main"). An anchored/leading-only
+    * 2668 criteria are marker-worded. 1360 carry an explicit `true` and 146
+      an explicit `false` (23 of those marker-worded), so the prose arm alone
+      decides 1587. Read by hand, **66 merely MENTION** merge-gating: 2.47%
+      of the 2668, or 4.16% of the 1587 the prose arm decides (a seeded
+      random 40 of the 1587 found 2, 5.0%, consistent). All loud, all
+      overridable, all fixable by the author with `merge_gate: false` — yet
+      that remedy's take-up is 23 marker-worded rows against 66 that need it.
+      The rate held while structure took over.
+    * position does NOT separate the two: of the 2026-08-22 sample's 65
+      mentions one LEADS with the marker, while 43 genuine gates carry it
+      mid-sentence ("LEAD-OWNED (merge-gated): PR merged to main"). An
+      anchored/leading-only
       predicate would therefore MISS 43 real gates to save 64 loud refusals —
       trading a loud error for a silent one, the wrong way round.
 
