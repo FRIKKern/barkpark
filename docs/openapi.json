@@ -121,6 +121,7 @@
                   "create_wall",
                   "csrf_required",
                   "dataset_twin",
+                  "default_workspace_not_archivable",
                   "deploy_runner_unavailable",
                   "duplicate_of",
                   "duplicate_task",
@@ -191,6 +192,7 @@
                   "unsupported_media_type",
                   "validation_failed",
                   "webhook_not_found",
+                  "workspace_archived",
                   "workspace_scope_required",
                   "workspace_slug_conflict",
                   "workspace_suspended"
