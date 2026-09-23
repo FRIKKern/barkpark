@@ -31,7 +31,7 @@ defmodule Barkpark.Tasks.BoardFacetsRootsDraftsParentTest do
   Reverting any ONE of the five call sites to the raw `card.parent_id`. The
   CONTROL test pins the other direction: a plainly-parented child must keep
   working and the card must still RENDER the stored `drafts.` value, so the fix
-  can never be "normalise at `to_card/4`" or "ignore `parent_id`".
+  can never be "normalise at `to_card/5`" or "ignore `parent_id`".
   """
 
   use Barkpark.DataCase, async: false
@@ -163,7 +163,7 @@ defmodule Barkpark.Tasks.BoardFacetsRootsDraftsParentTest do
 
     board = Board.snapshot(dataset: @dataset)
 
-    # The operator still reads what the document stores. A fix at `to_card/4`
+    # The operator still reads what the document stores. A fix at `to_card/5`
     # would pass every other assertion in this file and fail this one.
     assert board.cards_by_id["child-drafted"].parent_id == "drafts.epic-three"
     assert board.cards_by_id["child-plain"].parent_id == "epic-three"

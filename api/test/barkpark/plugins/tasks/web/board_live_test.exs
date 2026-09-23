@@ -429,7 +429,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
     test "the readable? predicate redacts EXACTLY the 7 gated text/PII fields, ungated stays" do
       # A predicate that marks the schema-private text/PII fields unreadable —
-      # the same set `to_card/4` gates. `lifecycle_status`/`github`/
+      # the same set `to_card/5` gates. `lifecycle_status`/`github`/
       # `github_synced`/`blocker_statuses` are NOT in this set (parity law).
       private = ~w(priority parent_id labels assignee claim description design_doc
                    acceptance_criteria)
@@ -1948,7 +1948,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       # `acceptance_criteria` values were ALSO leaking via the deck card
       # (`card-desc`, `card-criteria`) and the gantt (`gantt-criteria`) off the
       # SEPARATE `Board.snapshot` list-card reads. That sibling bypass is now
-      # sealed at `Board.to_card/4` (felix W18, task-felix-w13-boardsnapshot-fieldvis-seal)
+      # sealed at `Board.to_card/5` (felix W18, task-felix-w13-boardsnapshot-fieldvis-seal)
       # and proven by the "deck card + gantt field-visibility seal" describe
       # below (and `board_test.exs`). These peek assertions stay scoped to the
       # peek surface.
@@ -1968,12 +1968,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
   end
 
   describe "deck card + gantt field-visibility seal (Board.snapshot Envelope gate)" do
-    # SIBLING of the peek seal: `Board.snapshot`'s `to_card/4` hand-picks the
+    # SIBLING of the peek seal: `Board.snapshot`'s `to_card/5` hand-picks the
     # same content fields for the DECK CARD (and, through the derived family
     # rows, the GANTT). Seed a `task` schema marking `description` +
     # `acceptance_criteria` private plus an in_progress doc carrying them; the
     # rendered board must never paint the private text on the card or in the
-    # gantt. Mutation: strip the `if(readable?...)` gate from `to_card/4` and
+    # gantt. Mutation: strip the `if(readable?...)` gate from `to_card/5` and
     # the SECRET strings reappear → these refutes go RED.
     setup do
       {:ok, _schema} =
@@ -2766,6 +2766,62 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert phone =~ ~s(data-role="draft"),
              "the deck is the DEFAULT view — it must label a draft too"
     end
+  end
+
+  describe "the UNPUBLISHED PAIR marker (task-9d0c7adbbe1a5af1, criterion 2)" do
+    # A logical id whose bucket holds 2+ rows and NO published one used to paint
+    # as an ordinary card. `Board` now flags it (`:twin_unpublished_pair`); this
+    # reader must PAINT it. The control arm reds on a marker painted for every
+    # card; the pair arm reds on a deleted badge or a dropped flag.
+    setup do
+      unpublished("up-bare", "Bare unpublished row")
+      unpublished("drafts.up-bare", "Its drafts. twin")
+      task("up-control", "An ordinary published row", lifecycle: "open")
+      :ok
+    end
+
+    test "an unpublished pair paints a visible marker in the grid and on the deck",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      [_, card] = String.split(html, ~s(data-doc-id="up-bare"), parts: 2)
+      card = card |> String.split("</article>", parts: 2) |> hd()
+
+      assert card =~ ~s(data-role="twin-unpublished-pair"),
+             "the unpublished pair painted no marker"
+
+      assert card =~ "UNPUBLISHED PAIR"
+
+      {:ok, _view, deck_html} = live(conn, "/admin/projects")
+      [_, deck] = String.split(deck_html, ~s(data-role="deck"), parts: 2)
+      [_, phone] = String.split(deck, ~s(data-doc-id="up-bare"), parts: 2)
+
+      assert phone =~ ~s(data-role="twin-unpublished-pair"),
+             "the deck is the DEFAULT view — it must surface the pair too"
+    end
+
+    test "an ordinary published card paints NO pair marker", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      [_, card] = String.split(html, ~s(data-doc-id="up-control"), parts: 2)
+      card = card |> String.split("</article>", parts: 2) |> hd()
+
+      refute card =~ ~s(data-role="twin-unpublished-pair")
+    end
+  end
+
+  # An unpublished (`status: "draft"`) task row — `task/3` always writes
+  # `status: "published"`, which is exactly what an unpublished pair lacks.
+  defp unpublished(doc_id, title) do
+    Repo.insert!(%Document{
+      doc_id: doc_id,
+      type: "task",
+      dataset: "production",
+      status: "draft",
+      title: title,
+      rev: "rev-#{doc_id}",
+      content: %{"lifecycle_status" => "open"}
+    })
   end
 
   describe "peek roles fail open dim (tlv-s5)" do
