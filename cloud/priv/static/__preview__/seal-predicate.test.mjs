@@ -665,9 +665,22 @@ test('R4: a successor equal to the epic is REFUSED before any clause is evaluate
   assert.doesNotMatch(out, /VERDICT: SEAL$/m);
 });
 
+// R9 (SUCCESSOR-OVERLAPS-EPIC, task-5f6267283fe7a277) is a SECOND fence behind R4: the
+// epic's own subtree overlaps itself. So the proof that R4's hole was a false PASS removes
+// BOTH, and a separate run pins that R9 alone still refuses when only R4 is gone.
+const DROP_R9 = (src) => replaceUnique(src, "  if (overlap.length)\n    throw new Refusal('SUCCESSOR-OVERLAPS-EPIC',",
+  "  if (false)\n    throw new Refusal('SUCCESSOR-OVERLAPS-EPIC',");
 test('R4 MUTATION PROOF: with R4 removed, the identical run seals at a=PASS', () => {
+  const dropR4 = (src) => {
+    const out = src.replace(/  if \(SUCCESSOR === EPIC\)\n    throw new Refusal\('SELF-SUCCESSOR',[\s\S]*?\);\n/, '');
+    assert.notEqual(out, src, 'the R4 mutation must apply');
+    return out;
+  };
+  const backstop = mutatedRun(dropR4, ['--ledger', withRequired('self-successor.json'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(backstop.status, REFUSED, `with only R4 gone, R9 still refuses: ${token(backstop.out)}`);
+  assert.match(token(backstop.out), /REFUSED reason=SUCCESSOR-OVERLAPS-EPIC/);
   const { status, out } = mutatedRun(
-    (src) => src.replace(/  if \(SUCCESSOR === EPIC\)\n    throw new Refusal\('SELF-SUCCESSOR',[\s\S]*?\);\n/, ''),
+    (src) => DROP_R9(dropR4(src)),
     ['--ledger', withRequired('self-successor.json'), '--repo', REPO, '--guard-cmd', 'true'],
   );
   assert.equal(status, SEAL, `without R4 the self-successor run seals: ${token(out)}`);
@@ -952,7 +965,7 @@ test('MUTATION PROOF: dropping the considering bucket from clause (a) seals an u
 // above …)` re-disclosure line and a `1 + 0 + 0 + 0 = 1` partition. Run over the LEGAL
 // shape with those assertions unchanged, the arm RED on the first of them (the token read
 // `considering=0 … re-homed=1`). Those three letters describe the in-roster `forwarded`
-// bucket, which R4/R6 make EMPTY on every legal invocation: a considering row that has a
+// bucket, which R4/R6/R9 make EMPTY on every legal invocation: a considering row that has a
 // forwarding address has LEFT the epic's roster, so it is no longer residue, no longer in
 // the token's `considering=` count, and never reaches the re-disclosure line. It is named
 // instead where a legal forwarding is named — on the forwarding line and under RE-HOMED,
@@ -986,6 +999,89 @@ test('a FORWARDED considering row seals — and is still disclosed by name', () 
   );
   assert.equal(noAddress.status, NO_SEAL, `without the re-home arm the row has no address: ${token(noAddress.out)}`);
   assert.match(noAddress.out, /^ {6}✗ gr-fixture-considering-1 {2}was=considering now=considering$/m);
+});
+
+// ── THE RE-DISCLOSURE LINE, AND THE ONLY PATH LEFT INTO IT (task-5f6267283fe7a277) ──
+//
+// The line under `considering (disclosed)` used to read "counted on a line above —
+// forwarded or gate-labelled". Every path into it, derived from the classify loop: a
+// `considering` row of the epic's roster lands outside its own bucket only through the
+// GATE branch (`PERMANENT_HUMAN_GATES[_id]`) or the FORWARDED branch (`forwarded.has(_id)`).
+//   * GATE — reachable legally: a permanent human gate whose status is `considering`.
+//     Pinned by considering-gate-labelled.json below.
+//   * FORWARDED, successor OUTSIDE the epic's ancestry — unreachable: `parent_id` is one
+//     field, so the successor's subtree and the epic's are disjoint, and a forwarded row
+//     has left the roster (it is named under RE-HOMED; see the arm above).
+//   * FORWARDED, successor IS the epic or INSIDE it — refused first by R4 / R6.
+//   * FORWARDED, successor ABOVE the epic — REACHABLE, legally, and it was a false PASS:
+//     every residue row read as forwarded. R9 now refuses it (successor-contains-epic.json),
+//     so the forwarded half is dead on every scored invocation and the line says gate only.
+const parentsOf = (fx, epic, successor) => {
+  const m = new Map();
+  const add = (r, p) => { const id = typeof r === 'string' ? r : r._id; m.set(id, new Set([...(m.get(id) || []), p])); };
+  (fx.children || []).forEach((r) => add(r, epic));
+  (fx.forwarded || []).forEach((r) => add(r, successor));
+  for (const [p, rows] of Object.entries(fx.subtrees || {})) rows.forEach((r) => add(r, p));
+  return m;
+};
+
+test('R9: a successor ABOVE the epic is REFUSED — its subtree holds the whole roster, and it sealed', () => {
+  // THE PRECONDITION, off the JSON: a LEGAL world (one parent per _id), the epic placed
+  // UNDER the successor, and no residue row on the successor's own direct roster.
+  const fx = JSON.parse(readFileSync(FIX('successor-contains-epic.json'), 'utf8'));
+  for (const [id, ps] of parentsOf(fx, EPIC, fx.successor))
+    assert.equal(ps.size, 1, `the precondition: ${id} has exactly one parent, got {${[...ps]}}`);
+  assert.ok(fx.subtrees[fx.successor].some((r) => r._id === EPIC), 'the precondition: the epic sits under the successor');
+  assert.deepEqual(fx.forwarded, [], 'the precondition: nothing was re-parented onto the successor');
+  assert.ok(fx.children.some((c) => c.lifecycle_status === 'considering'), 'the precondition: a considering row is in the roster');
+  assert.ok(fx.children.some((c) => c.lifecycle_status === 'open'), 'the precondition: an open row is in the roster');
+
+  const { status, out } = fixtureRun('successor-contains-epic.json');
+  assert.equal(status, REFUSED, `a successor above the epic forwards nothing: ${token(out)}`);
+  assert.match(token(out), /REFUSED reason=SUCCESSOR-OVERLAPS-EPIC a=UNEVALUATED/);
+  assert.match(out, /CONTAINS cloud-console-hardening-epic itself — the successor sits ABOVE the epic/);
+  assert.doesNotMatch(out, /^VERDICT: SEAL$/m);
+
+  // MUTATION: without R9 the same legal fixture SEALS, every residue row read as forwarded
+  // — the open row included — and the considering row reached the old forwarded half.
+  const hole = mutatedRun(
+    (src) => replaceUnique(src, "  if (overlap.length)\n    throw new Refusal('SUCCESSOR-OVERLAPS-EPIC',",
+      "  if (false)\n    throw new Refusal('SUCCESSOR-OVERLAPS-EPIC',"),
+    ['--ledger', withRequired('successor-contains-epic.json'), '--repo', REPO, '--guard-cmd', 'true'],
+  );
+  assert.equal(hole.status, SEAL, `without R9 the ancestor successor is a false PASS: ${token(hole.out)}`);
+  assert.match(token(hole.out), /SEAL a=PASS .*\borphans=0 considering=1\b/);
+  assert.match(hole.out, /^ {2}forwarded under successor : 2$/m);
+});
+
+test('a GATE-LABELLED considering row is named again, with its status, on the re-disclosure line', () => {
+  // THE PRECONDITION, off the JSON: the row is a registered permanent human gate, it is in
+  // the epic's roster with status considering, and it has one parent.
+  const fx = JSON.parse(readFileSync(FIX('considering-gate-labelled.json'), 'utf8'));
+  const ROW = 'gr-ops-platform-admin-emails';
+  const row = fx.children.find((c) => c._id === ROW);
+  assert.ok(row, 'the precondition: the gate row is in the epic\'s children');
+  assert.equal(row.lifecycle_status, 'considering', 'the precondition: and its status is considering');
+  assert.equal(fx.gates[ROW].lifecycle_status, 'considering', 'the precondition: the gate document agrees');
+  for (const [id, ps] of parentsOf(fx, EPIC, fx.successor))
+    assert.equal(ps.size, 1, `the precondition: ${id} has exactly one parent`);
+
+  const { status, out } = fixtureRun('considering-gate-labelled.json');
+  assert.equal(status, SEAL, `a gate does not block clause (a): ${token(out)}`);
+  assert.match(token(out), /SEAL a=PASS .*\borphans=0 considering=1\b/);
+  assert.match(out, /^ {2}permanent human gate {6}: 1 {2}\[gr-ops-platform-admin-emails\]$/m);
+  assert.match(out, /considering \(disclosed\) {3}: 0/);
+  assert.match(out, /^ {6}\(\+1 considering row\(s\) counted on the permanent human gate line above, named here with their status so no considering row is disclosed as a gate alone: gr-ops-platform-admin-emails\)$/m);
+  assert.doesNotMatch(out, /forwarded or gate-labelled/, 'the forwarded half is gone from the prose');
+
+  // MUTATION: delete the line's arm and the row is labelled only as a gate — its
+  // considering status is said nowhere in clause (a).
+  const noLine = mutatedRun(
+    (src) => replaceUnique(src, '  if (consideringElsewhere.length)\n    L.push(', '  if (false)\n    L.push('),
+    ['--ledger', withRequired('considering-gate-labelled.json'), '--repo', REPO, '--guard-cmd', 'true'],
+  );
+  assert.equal(noLine.status, SEAL);
+  assert.doesNotMatch(noLine.out, /considering row\(s\) counted on/);
 });
 
 test('MUTATION PROOF: with `considering` dropped from the residue set, the same fixture seals', () => {
@@ -3789,8 +3885,9 @@ test('wave 69: 0 behind PROCEEDS, and an UNREADABLE comparison is not a stale tr
 // THE DEFECT, from the source. `forwarded` was built from a subtree walk of the
 // SUCCESSOR; the classify loop ran over `residue`, drawn from `children`, the subtree
 // walk of the EPIC. R4 forbids `successor === epic`, R6 forbids a successor whose
-// parent chain reaches the epic, and `parent_id` is ONE field — so on every invocation
-// those refusals ALLOW, the two sets are disjoint BY CONSTRUCTION and `fwd` could only
+// parent chain reaches the epic, R9 (task-5f6267283fe7a277) forbids a successor ABOVE the
+// epic — which R4 and R6 alone let through — and `parent_id` is ONE field — so on every
+// invocation those refusals ALLOW, the two sets are disjoint BY CONSTRUCTION and `fwd` could only
 // ever print 0. Measured live 2026-09-20 at 149119d00: twelve rows re-parented onto the
 // successor with `bp task move` and read back on the successor's roster, and the next
 // run printed `forwarded under successor : 0` while the anti-filing arm named the same
@@ -3932,7 +4029,7 @@ test('wave 36: the re-home arm cannot rescue unaddressed residue, and R4/R6 are 
 // precondition for its own two. Nothing asserted it for the rest: `forward-to-grandchild.json`,
 // `considering-forwarded.json` and `orphan-residue.json` each listed one `_id` under TWO
 // parents (the epic's `children` AND the successor), and the first two were the only
-// fixtures that ever scored the in-roster `forwarded` bucket above zero — the bucket R4/R6
+// fixtures that ever scored the in-roster `forwarded` bucket above zero — the bucket R4/R6/R9
 // make empty on every legal invocation. Their arms were green over a world that cannot
 // exist, which is the one kind of green that could never have caught the bucket being dead.
 //
@@ -3987,11 +4084,18 @@ test('task-8532: the `forwarded`-seed spelling of a second parent is refused too
 
 test('task-8532 MUTATION: with the refusal removed, the planted two-parent world SCORES a green', () => {
   const planted = plantSecondParent('considering-forwarded.json', 'gr-fixture-considering-1', 'considering');
-  const r = mutatedRun((src) => replaceUnique(src, '    if (twoParents.length)\n', '    if (false)\n'),
+  // The planted row sits in BOTH walks, so R9 (task-5f6267283fe7a277) now refuses it as an
+  // overlap too. With only the two-parent refusal gone, R9 answers; with both gone, the
+  // world buys the green this arm exists to show.
+  const noTwoParents = (src) => replaceUnique(src, '    if (twoParents.length)\n', '    if (false)\n');
+  const backstop = mutatedRun(noTwoParents, ['--ledger', planted, '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(backstop.status, REFUSED, `with only FIXTURE-TWO-PARENTS gone, R9 still refuses: ${token(backstop.out)}`);
+  assert.match(token(backstop.out), /REFUSED reason=SUCCESSOR-OVERLAPS-EPIC/);
+  const r = mutatedRun((src) => DROP_R9(noTwoParents(src)),
     ['--ledger', planted, '--repo', REPO, '--guard-cmd', 'true']);
   assert.equal(r.status, SEAL, `without the refusal the unproducible fixture buys a seal: ${token(r.out)}`);
   assert.match(r.out, /^ {2}forwarded under successor : 1$/m,
-    'scored through the in-roster bucket — the one R4/R6 make unreachable on a legal ledger');
+    'scored through the in-roster bucket — the one R4/R6/R9 make unreachable on a legal ledger');
 });
 
 test('task-8532: EVERY committed fixture is producible — the population is read off the directory, not a list', () => {
