@@ -1129,7 +1129,16 @@ const PIN_MEMBER_SCENARIOS = 16;
 // was RE-DERIVED by RUNNING this sweep and reading what it PRINTED ("the
 // committed corpus grew to 144 scenario(s), pinned at 143") and the actor-set
 // line, which still says 16 — never by adding one.
-const PIN_TOTAL_SCENARIOS = 144;
+// 144 -> 146 (task-679663d0bee42b15): `new-launch-limit-reached` and
+// `new-launch-forbidden`, the Launch press driven into each of go_live's two
+// 403 slugs. The member slice STAYS at 16: both actors are `new-launch`'s OWNER
+// `me("Ada's Lab")` — the forbidden one is the owner whose role the SERVER no
+// longer honours, which is the only actor the post-hoc toast can reach, since a
+// member's /new step withholds the form. 146 was RE-DERIVED by RUNNING this
+// sweep and reading what it PRINTED ("the committed corpus grew to 146
+// scenario(s), pinned at 144") and the actor-set line, which still says 16 —
+// never by adding two.
+const PIN_TOTAL_SCENARIOS = 146;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 134
 // today (also unguarded prose; it read 66 while the sweep printed 69).

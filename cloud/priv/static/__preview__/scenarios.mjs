@@ -4670,6 +4670,66 @@ export const SCENARIOS = {
     },
   },
 
+  // task-679663d0bee42b15 — THE LAUNCH BUTTON'S TWO 403s, RENDERED.
+  // newLaunchRefusalToast (`grep -n 'function newLaunchRefusalToast'
+  // cloud/priv/static/app.js`) branches on the refusal's SLUG, never on the
+  // status, and __app.test.mjs pins every arm of it in node. Nothing drove a
+  // Launch press into a 403 in the rendered console: POST /v1/launch was
+  // unmodelled here and fell through to route()'s terminal `/v1/` 200 {}, so
+  // the toast a person sees when the server refuses a launch was reachable
+  // from neither harness. `launchFault` is the per-scenario override, on the
+  // same `{status, body}` contract as `meFault` / `sitesFault`, and it is
+  // POST-guarded and opt-in so no committed fixture moves by a byte.
+  //
+  // BOTH BODIES ARE THE ROUTER'S, NOT INVENTED. `go_live/1` in
+  // cloud/lib/barkpark_cloud/web/router.ex (`grep -n 'defp go_live'`):
+  //   • the QUOTA gate:
+  //       json(conn, 403, %{error: "limit_reached",
+  //                         limit: Billing.barkpark_limit(team),
+  //                         upgrade_path: "/v1/billing/checkout"})
+  //   • the SESSION authority gate (the console signs in with a session, not a
+  //     PAT, so this is the arm a browser meets):
+  //       Auth.forbidden(conn, required: "admin", scope: "team")
+  //     and Auth.forbidden/2 in web/auth.ex is
+  //       json_halt(conn, 403, Enum.into(evidence, %{error: "forbidden"}))
+  //     → {error: "forbidden", required: "admin", scope: "team"}.
+  //
+  // WHY THE FORBIDDEN ACTOR IS AN OWNER. A member never reaches the form — the
+  // /new step's pre-hoc band withholds it — so the post-hoc toast is only ever
+  // painted when the console's role read and the server DISAGREE: the role
+  // changed between /v1/me and the press. That is this fixture: /v1/me says
+  // owner, go_live says admin is required.
+  "new-launch-limit-reached": {
+    label: "/new — Launch pressed on a team at its plan's instance ceiling: POST /v1/launch 403 limit_reached → the plan-limit toast with its billing action",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog",
+    data: {
+      me: me("Ada's Lab"),
+      barkparks: [], subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+      launchFault: {
+        status: 403,
+        body: { error: "limit_reached", limit: 1, upgrade_path: "/v1/billing/checkout" },
+      },
+    },
+  },
+  "new-launch-forbidden": {
+    label: "/new — Launch pressed after the caller lost admin: POST /v1/launch 403 forbidden {required: admin, scope: team} → the authority toast, no billing action",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog",
+    data: {
+      me: me("Ada's Lab"),
+      barkparks: [], subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+      launchFault: {
+        status: 403,
+        body: { error: "forbidden", required: "admin", scope: "team" },
+      },
+    },
+  },
+
   // ── cch-r16-w11: THE LAUNCH WIZARD'S OWN ELEVATED WRITES, BOTH WAYS ─────────
   // Three of the five rows on __binding_census.mjs's UNPREDICATED ELEVATED
   // WRITES list live on these two screens — the /new ready hero and the /new
@@ -7822,6 +7882,12 @@ export function route(name, method, path, state, body) {
       body: { installation: { connected: true, account_login: inst.account_login } },
     };
   }
+
+  // task-679663d0bee42b15 — POST /v1/launch's refusal, opt-in per scenario via
+  // `launchFault` ({status, body}, forwarded verbatim like meFault). With no
+  // fault declared the press keeps falling through to the terminal 200 below,
+  // exactly as before, so no committed fixture moves.
+  if (method === "POST" && p === "/v1/launch" && d.launchFault) return d.launchFault;
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never
   // trips the 401→logout path or throws mid-render.
