@@ -51,7 +51,7 @@
           <%= if assigns[:dataset] do %>
             <BarkparkWeb.Studio.DatasetSwitcher.switcher
               current={@dataset}
-              current_section={assigns[:nav_section] || :structure}
+              current_path={assigns[:current_path]}
             />
           <% end %>
         <% end %>
@@ -61,7 +61,6 @@
       <.studio_tabs
         dataset={@dataset}
         scope_prefix={assigns[:scope_prefix] || ""}
-        nav_section={assigns[:nav_section]}
         current_path={assigns[:current_path]}
         admin?={assigns[:shares_admin?] == true}
         workspace_id={assigns[:current_workspace] && assigns[:current_workspace].id}
@@ -74,7 +73,7 @@
             presence used to be a position:fixed overlay pinned over
             this corner. .bar-focusable marks what Beta focus hides. --%>
       <div class="studio-bar-right">
-        <div :if={assigns[:nav_section] == :api_tester} class="studio-bar-actions bar-focusable">
+        <div :if={BarkparkWeb.Studio.Section.from_path(assigns[:current_path], assigns[:dataset]) == :api_tester} class="studio-bar-actions bar-focusable">
           <form phx-change="token-change" style="display:contents;">
             <label class="studio-bar-actions-label">Token</label>
             <input type="text" name="token" value={assigns[:token] || ""} class="form-input" style="width:180px;height:26px;font-size:11px;font-family:var(--font-mono);padding:0 8px;" phx-debounce="300" />

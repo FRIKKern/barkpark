@@ -164,7 +164,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
        socket
        |> assign(
          page_title: "chat",
-         nav_section: :chat,
          dataset: default_dataset(),
          # The dataset the URL SCOPE names, as distinct from the one above.
          # No chat route carries a `:dataset` segment today, so this is nil and

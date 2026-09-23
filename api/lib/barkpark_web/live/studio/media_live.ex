@@ -44,7 +44,6 @@ defmodule BarkparkWeb.Studio.MediaLive do
      socket
      |> assign_new(:scope_prefix, fn -> "" end)
      |> assign(
-       nav_section: :media,
        dataset: dataset,
        page_title: "Media Library"
      )

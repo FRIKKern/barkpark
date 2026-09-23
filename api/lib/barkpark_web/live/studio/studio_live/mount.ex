@@ -49,7 +49,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
     # studio_path stays byte-identical to the pre-scoped era.
     |> assign_new(:scope_prefix, fn -> "" end)
     |> assign(
-      nav_section: :structure,
       page_title: "Studio",
       # ── Responsive width bucket (studio-space-priority-desk spd-s2) ─────
       # Which viewport width band the desk is rendering for: "wide" (the
