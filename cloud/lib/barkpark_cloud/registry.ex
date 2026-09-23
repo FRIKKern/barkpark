@@ -3855,8 +3855,21 @@ defmodule BarkparkCloud.Registry do
   (instance-admin-token). Returns `{:ok, token}` when one was reported + stored,
   `{:ok, nil}` when the row never got an admin token (the ip-only succeed path, or
   a pre-feature instance), or `:error` when the stored ciphertext is tampered
-  (`Vault.decrypt/1` fails closed). The owner-facing `/credentials` route is the
-  only caller — it is show-to-owner, team-admin-gated.
+  (`Vault.decrypt/1` fails closed).
+
+  It has many callers, not one. Every seam that talks to an instance as its
+  admin decrypts through here, so a refusal or a fault here reaches all of them.
+  Re-derived 2026-09-23 with `git grep -n "reveal_admin_token(" -- cloud/lib`:
+
+    * the owner-facing `GET /v1/barkparks/:id/credentials` route (show-to-owner,
+      team-admin-gated) and the router's `fleet_provision_support/1` and
+      `reveal_parent_admin_token/1`;
+    * `Verify.run/1` and `Usage.instance_admin_token/1`;
+    * in this module, `mint_studio_link/2`, `mint_app_token/2`,
+      `revoke_app_token/3`, `refresh_update_status/1`, `relay_admin/4` and
+      `reveal_admin_token_or_error/1`.
+
+  This list goes stale. Re-run the grep instead of trusting it.
   """
   @spec reveal_admin_token(Barkpark.t()) :: {:ok, binary() | nil} | :error
   def reveal_admin_token(%Barkpark{admin_token_encrypted: nil}), do: {:ok, nil}
