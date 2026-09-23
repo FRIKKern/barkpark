@@ -335,6 +335,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
          workflow: %{},
          workflow_summaries: %{},
          epic_goals: %{},
+         # The listed rows' TRUE owners, re-read by `clamp_list_to_tenancy/2`
+         # (the list projection's own `owner_workspace_id` is always nil — see
+         # there). `epic_fold_permitted?/2` is the only reader; empty on the
+         # flat mount, where the gate it feeds is off anyway.
+         listed_session_owners: %{},
          # The hand-task surface (chat ⇄ ledger): every bp-task claim THIS
          # session's provider-scoped worker id currently holds, keyed by
          # published doc id — fed live off the dataset's task-document
@@ -2176,8 +2181,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
           s ->
             assign(socket,
-              epic_goals:
-                Map.put(socket.assigns.epic_goals, sid, StudioChat.epic_goal(s.provider, s.id))
+              epic_goals: Map.put(socket.assigns.epic_goals, sid, epic_goal_in_tenancy(socket, s))
             )
         end
       end
@@ -5224,7 +5228,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # `epic_goals` (which queries the task ledger per row) and
     # `pending_ask_roles` all derive from this list, so a row filtered here can
     # never reach a per-tenant count rendered into the page.
-    sessions =
+    {sessions, listed_owners} =
       [archived: socket.assigns[:show_archived] == true]
       |> StudioChat.list_sessions(:global)
       |> clamp_list_to_tenancy(socket)
@@ -5241,7 +5245,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # a sidebar of plain chats never queries the ledger.
     epic_goals =
       for s <- sessions, Map.has_key?(workflow_summaries, s.id), into: %{} do
-        {s.id, StudioChat.epic_goal(s.provider, s.id)}
+        {s.id, epic_goal_in_tenancy(socket, s, listed_owners)}
       end
 
     sessions = Enum.map(sessions, &%{&1 | rail_snapshot: nil})
@@ -5255,6 +5259,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     assign(socket,
       sessions: sessions,
+      listed_session_owners: listed_owners,
       workflow_summaries: workflow_summaries,
       epic_goals: epic_goals,
       pending_ask_roles: StudioChat.pending_ask_roles(pending_ids)
@@ -5273,7 +5278,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     goals =
       for s <- socket.assigns.sessions, MapSet.member?(ids, s.id), into: %{} do
-        {s.id, StudioChat.epic_goal(s.provider, s.id)}
+        {s.id, epic_goal_in_tenancy(socket, s)}
       end
 
     assign(socket, epic_goals: goals)
@@ -5469,13 +5474,65 @@ defmodule BarkparkWeb.Studio.ChatLive do
   #
   # A `nil` read scope (the flat superuser mount) short-circuits before the extra
   # query, so that path pays nothing.
+  # Returns `{permitted_rows, owners}` — the owner map is the byproduct the
+  # extra query already paid for, and `epic_fold_permitted?/2` is its consumer
+  # (the rows themselves cannot answer, per the select trap above). The flat
+  # mount short-circuits to an EMPTY map, which is correct rather than merely
+  # cheap: nothing downstream may read an owner it did not measure.
   defp clamp_list_to_tenancy(sessions, socket) do
     if is_nil(read_workspace_id(socket)) do
-      sessions
+      {sessions, %{}}
     else
       owners = session_owners(Enum.map(sessions, & &1.id))
-      Enum.filter(sessions, &owner_in_tenancy?(socket, Map.get(owners, &1.id)))
+      {Enum.filter(sessions, &owner_in_tenancy?(socket, Map.get(owners, &1.id))), owners}
     end
+  end
+
+  # ── The epic-goal fold's OWN tenancy gate (task-95902fb0528c2370) ─────────
+  #
+  # GREEN APART, RED TOGETHER. Two halves, each defensible where it is written:
+  #
+  #   * `owner_in_tenancy?/2` above ADMITS a NULL-owned session into a SCOPED
+  #     viewer's sidebar, deliberately — a NULL `owner_workspace_id` is a
+  #     legacy / pre-tenancy row and blanking those is a regression, not a fix.
+  #   * `StudioChat.epic_goal/2` derives ITS scope from the SESSION's
+  #     `owner_workspace_id`, so a NULL-owned session's three ledger hops run
+  #     UNSCOPED — also deliberate, because on the FLAT instance-admin mount
+  #     that global fold is the CORRECT answer for an operator surface.
+  #
+  # Composed, a workspace-B-scoped viewer folds a NULL-owned session and the
+  # epic line it renders is read from the WHOLE task ledger, workspace A
+  # included. Demonstrated end to end before this gate existed, against a ws-B
+  # admin mounting `/w/:ws/p/:proj/studio/chat` —
+  # `test/barkpark_web/live/studio/chat_live_null_owner_epic_fold_test.exs`.
+  #
+  # WHY HERE AND NOT IN `epic_goal/2`. That function is handed a session id and
+  # nothing else, so it cannot tell the flat instance-admin mount (global fold
+  # correct) from the scoped mount (global fold is a cross-tenant read). The
+  # VIEWER is knowable only on this side, which is why narrowing the store read
+  # is not the answer and the store's NULL passthrough is not inherited here.
+  #
+  # WHY NOT FAIL THE CLAMP CLOSED INSTEAD. Which SESSIONS a scoped admin may
+  # SEE is a different question, already answered above and not reopened: the
+  # leak is in what the fold READS, not in which row is listed. Suppressing the
+  # derived line costs a scoped viewer one cosmetic line on a legacy row and
+  # costs the flat mount nothing; dropping the row would make every
+  # pre-tenancy session unreachable, and no count of how many such rows exist
+  # was obtainable to bound that blast radius.
+  defp epic_goal_in_tenancy(socket, s),
+    do: epic_goal_in_tenancy(socket, s, socket.assigns[:listed_session_owners] || %{})
+
+  defp epic_goal_in_tenancy(socket, s, owners) do
+    if epic_fold_permitted?(socket, Map.get(owners, s.id)) do
+      StudioChat.epic_goal(s.provider, s.id)
+    end
+  end
+
+  # `nil` read scope is the flat instance-admin mount — the global fold stands.
+  # On a scoped mount only a row whose owner was MEASURED to be a workspace may
+  # fold; a NULL owner (and an id the owner map never covered) fails CLOSED.
+  defp epic_fold_permitted?(socket, owner) do
+    is_nil(read_workspace_id(socket)) or is_binary(owner)
   end
 
   defp session_owners([]), do: %{}
