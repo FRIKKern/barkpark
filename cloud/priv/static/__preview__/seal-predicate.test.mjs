@@ -25,7 +25,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -4295,6 +4295,7 @@ test("w37: THE RUNNER'S SHAPE — the ambient `node` IS the declaration, and not
     CONSOLE_HARNESS_FNM_DIR: "/nonexistent-fnm",
     CONSOLE_HARNESS_VOLTA_HOME: "/nonexistent-volta",
     CONSOLE_HARNESS_ASDF_DIR: "/nonexistent-asdf",
+    CONSOLE_HARNESS_TOOL_CACHE: "/nonexistent-tool-cache",
   };
   delete env.NVM_DIR; delete env.FNM_DIR; delete env.VOLTA_HOME; delete env.ASDF_DATA_DIR;
   const { status, out } = ladderWithPlantedGuard(planted.rel, env);
@@ -4326,4 +4327,131 @@ test("w37: the live ladder states the runtime it resolved for every guard it spa
     "no registered guard may be refused for a runtime reason on a host that has Node 20:\n" + out);
   assert.equal(launderedLines(out).length, 0,
     "and no registered guard reads as still-measurable once it runs on its declared runtime:\n" + out);
+});
+
+// ── task-88edd0348e6f703d · THE RUNNER TOOL CACHE IS A CANDIDATE ROOT ────────
+//
+// actions/setup-node installs into `$RUNNER_TOOL_CACHE/node/<version>/<arch>/bin/node`,
+// and a runner image may pre-cache majors there. Neither resolver searched it. This
+// arm puts a binary reporting a major nothing else on this host has (77) ONLY under a
+// fake tool cache laid out that way, with every other root pointed at nothing. The
+// stub answers `--version` itself and hands every other invocation to this process's
+// node, so the guard really runs. The same planted guard is then read again with the
+// tool-cache root pointed at nothing too: that control must refuse it, or the green
+// half was reached through some other door and measured nothing about this root.
+test("w88: a Node of the declared major found ONLY under RUNNER_TOOL_CACHE resolves; without that root it is refused", () => {
+  const cache = tmp("seal-pred-toolcache-");
+  const stub = join(cache, "node", "77.1.0", "x64", "bin", "node");
+  mkdirSync(dirname(stub), { recursive: true });
+  writeFileSync(stub, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo v77.1.0; exit 0; fi\nexec " +
+    JSON.stringify(process.execPath) + " \"$@\"\n");
+  chmodSync(stub, 0o755);
+  const planted = plantGuard({ exitWith: 0, declares: "77" });
+  const base = {
+    ...process.env,
+    CONSOLE_HARNESS_NVM_DIR: "/nonexistent-nvm",
+    CONSOLE_HARNESS_FNM_DIR: "/nonexistent-fnm",
+    CONSOLE_HARNESS_VOLTA_HOME: "/nonexistent-volta",
+    CONSOLE_HARNESS_ASDF_DIR: "/nonexistent-asdf",
+  };
+  delete base.NVM_DIR; delete base.FNM_DIR; delete base.VOLTA_HOME; delete base.ASDF_DATA_DIR;
+  delete base.RUNNER_TOOL_CACHE;
+
+  // Control first: no tool-cache root reachable -> refused, and the guard never ran.
+  const off = ladderWithPlantedGuard(planted.rel, { ...base, CONSOLE_HARNESS_TOOL_CACHE: "/nonexistent-tool-cache" });
+  assert.equal(off.status, 0, off.out);
+  assert.match(off.out, /RUNTIME-UNAVAILABLE: guard .*planted-guard\.mjs declares Node major 77/,
+    "CONTROL: with the tool cache pointed at nothing, major 77 must be unobtainable here:\n" + off.out);
+  assert.match(off.out, /\$RUNNER_TOOL_CACHE\/node\/77\.\*/, "…and the refusal must say it looked in the tool cache:\n" + off.out);
+  assert.equal(guardRan(planted.ran), false, "CONTROL: the guard must not have run:\n" + off.out);
+
+  // Through RUNNER_TOOL_CACHE itself (the variable the runner sets), not the override.
+  const on = ladderWithPlantedGuard(planted.rel, { ...base, RUNNER_TOOL_CACHE: cache });
+  assert.equal(on.status, 0, on.out);
+  assert.equal(runtimeUnavailableLines(on.out).length, 0,
+    "a Node 77 under $RUNNER_TOOL_CACHE/node/77.*/x64/bin/node was not found:\n" + on.out);
+  assert.ok(on.out.includes("planted-guard.mjs declares Node 77 (__node-version beside it); ran v77.1.0 from " + stub),
+    "…it must resolve to the tool-cache binary by its exact path:\n" + on.out);
+  assert.equal(guardRan(planted.ran), true, "…and the guard really ran on it:\n" + on.out);
+});
+
+// ── THE TWO RESOLVERS SEARCH THE SAME ROOTS, and a test says so ─────────────
+//
+// seal-predicate.mjs's guardRuntimeCandidates and scripts/console-harness.sh's
+// candidates() answer the same question, and both carry a comment saying their lists
+// must match. Until now nothing checked it. This arm derives each list FROM ITS
+// SOURCE (never retyped here) as a set of canonical keys:
+//   versioned root -> `<override var>|<env var>|<default>|<subpath>/<want>.*/<tail>`
+//   fixed path     -> the path with the major written `<want>`
+//   PATH lookups   -> `PATH:node`, `PATH:node<want>`
+// and reds on any key one side has and the other lacks, naming it. It also requires
+// every versioned root's env var to appear in BOTH "looked in" messages, so a refusal
+// never omits a place the resolver actually searched.
+function predicateRoots(src) {
+  const body = src.slice(src.indexOf("function guardRuntimeCandidates("), src.indexOf("const GUARD_RUNTIME_LOOKED_IN"));
+  assert.ok(body.length > 0, "could not find guardRuntimeCandidates in the predicate source");
+  const vars = {};
+  for (const m of body.matchAll(/const (\w+) = E\('(\w+)', E\('(\w+)', (?:`\$\{home\}([^`]*)`|'([^']*)')\)\);/g))
+    vars[m[1]] = `${m[2]}|${m[3]}|${m[4] !== undefined ? "$HOME" + m[4] : m[5]}`;
+  const keys = new Set();
+  for (const m of body.matchAll(/versionedInstalls\(`\$\{(\w+)\}\/([^`]*)`, want, '([^']+)'\)/g)) {
+    assert.ok(vars[m[1]], `versionedInstalls uses \${${m[1]}}, which no E(...) declaration defines`);
+    keys.add(`${vars[m[1]]}|${m[2]}/<want>.*/${m[3]}`);
+  }
+  for (const m of body.matchAll(/`(\/[^`$]*)\$\{want\}([^`]*)`/g)) keys.add(`${m[1]}<want>${m[2]}`);
+  const pathM = body.match(/for \(const n of \[([^\]]*)\]\)/);
+  assert.ok(pathM, "could not find the PATH lookup in guardRuntimeCandidates");
+  for (const n of pathM[1].split(",").map((x) => x.trim())) {
+    if (n === "'node'") keys.add("PATH:node");
+    else if (n === "`node${want}`") keys.add("PATH:node<want>");
+    else assert.fail(`unrecognised PATH lookup ${n} — teach predicateRoots()`);
+  }
+  return keys;
+}
+function harnessRoots(src) {
+  const body = src.slice(src.indexOf("\ncandidates() {"), src.indexOf("\nlooked_in() {"));
+  assert.ok(body.length > 0, "could not find candidates() in console-harness.sh");
+  const vars = {};
+  for (const m of body.matchAll(/^\s*(\w+)="\$\{(\w+):-\$\{(\w+):-([^}]*)\}\}"$/gm)) vars[m[1]] = `${m[2]}|${m[3]}|${m[4]}`;
+  const keys = new Set();
+  for (const m of body.matchAll(/^\s*for c in (.+); do$/gm)) {
+    for (const tok of m[1].trim().split(/\s+/)) {
+      const t = tok.replace(/"/g, "");
+      const v = /^\$(\w+)\/(.+?)\/v?\$want\.\*\/(.+)$/.exec(t);
+      if (v) {
+        assert.ok(vars[v[1]], `candidates() uses $${v[1]}, which no \${A:-\${B:-default}} assignment defines`);
+        keys.add(`${vars[v[1]]}|${v[2]}/<want>.*/${v[3]}`);
+      } else if (t.startsWith("/")) keys.add(t.replace("$want", "<want>"));
+      else assert.fail(`unrecognised candidates() token ${tok} — teach harnessRoots()`);
+    }
+  }
+  if (/command -v node 2>/.test(body)) keys.add("PATH:node");
+  if (/command -v "node\$want"/.test(body)) keys.add("PATH:node<want>");
+  return keys;
+}
+
+test("w88: LOCK — seal-predicate's and console-harness.sh's Node search roots are the SAME set, and both refusals name them", () => {
+  const pSrc = readFileSync(PREDICATE, "utf8");
+  const hSrc = readFileSync(join(REPO, "scripts", "console-harness.sh"), "utf8");
+  const p = predicateRoots(pSrc);
+  const h = harnessRoots(hSrc);
+  const onlyP = [...p].filter((k) => !h.has(k));
+  const onlyH = [...h].filter((k) => !p.has(k));
+  assert.deepEqual({ onlyInPredicate: onlyP, onlyInHarness: onlyH }, { onlyInPredicate: [], onlyInHarness: [] },
+    "the two resolvers search DIFFERENT roots — change both in the same PR");
+  // A parser that went blind would make both sets empty and "equal", so the
+  // comparison above is followed by a floor: what both files have carried since the
+  // resolver shipped, plus the tool cache. It comes SECOND so that a real divergence
+  // is reported as one (onlyInPredicate / onlyInHarness), not as a parser fault.
+  for (const must of ["PATH:node", "PATH:node<want>", "CONSOLE_HARNESS_TOOL_CACHE|RUNNER_TOOL_CACHE|/opt/hostedtoolcache|node/<want>.*/x64/bin/node"])
+    assert.ok(p.has(must) && h.has(must), `PARSER CONTROL: ${must} must be derived from BOTH sources. predicate=${[...p]} harness=${[...h]}`);
+  assert.ok(p.size >= 10, `PARSER CONTROL: only ${p.size} predicate roots derived: ${[...p]}`);
+  const pLooked = pSrc.slice(pSrc.indexOf("const GUARD_RUNTIME_LOOKED_IN"), pSrc.indexOf("function resolveGuardRuntime("));
+  const hLooked = hSrc.slice(hSrc.indexOf("\nlooked_in() {"), hSrc.indexOf("\nresolve_node() {"));
+  for (const k of p) {
+    const env = k.split("|")[1];
+    if (!env || k.startsWith("PATH:") || k.startsWith("/")) continue;
+    assert.ok(pLooked.includes("$" + env), `the predicate's "looked in" text omits $${env}, a root it searches`);
+    assert.ok(hLooked.includes("\\$" + env), `console-harness.sh's "looked in" text omits $${env}, a root it searches`);
+  }
 });

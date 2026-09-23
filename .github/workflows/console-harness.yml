@@ -1226,6 +1226,12 @@ jobs:
           # appears twice per step — the self-test arm and the comparison — plus
           # the step name and the two messages.
           #
+          # PIN 152 — RE-DERIVED 2026-09-24 (task-88edd0348e6f703d), which adds TWO arms:
+          #   `w88: a Node of the declared major found ONLY under RUNNER_TOOL_CACHE resolves; without that root it is refused`, and
+          #   `w88: LOCK — seal-predicate's and console-harness.sh's Node search roots are the SAME set, and both refusals name them`.
+          #   MEASURED, not added: `node --test cloud/priv/static/__preview__/seal-predicate.test.mjs` under
+          #   Node v20.20.2 -> `# tests 152 / # pass 152 / # fail 0`, rc=0, with `git rev-list --count HEAD..origin/main`
+          #   = 0 at both the start and the end of the run.
           # PIN 150 — RE-DERIVED 2026-09-23 (task-5f6267283fe7a277), which adds TWO arms:
           #   `R9: a successor ABOVE the epic is REFUSED — its subtree holds the whole roster, and it sealed`, and
           #   `a GATE-LABELLED considering row is named again, with its status, on the re-disclosure line`.
@@ -1376,14 +1382,14 @@ jobs:
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 150 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 150 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 152 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 152 — this pin can no longer lose"; exit 1; }
           PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
-          if [ "${tally:-0}" -ne 150 ]; then
-            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 150 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 150 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 152 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 152 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 152 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "seal predicate tests: ${tally} tests, exact pin 150 — the pin re-earned"
+          echo "seal predicate tests: ${tally} tests, exact pin 152 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"
