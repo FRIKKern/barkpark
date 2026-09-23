@@ -90,6 +90,42 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 // the union dedup (mergeInflight) degrades to window-truth, never garbage.
 const inflightFetchPath = "/v1/tasks?lifecycle_status=in_progress&limit=" + taskListLimitToken
 
+// ─── `?view=board` — the projection the LIST/POLL path asks for ──────────
+//
+// boardViewParam is the query fragment appended to every list GET a LIVE board
+// makes (corpusCache.listView; a one-shot CLI verb keeps the default shape —
+// see that method for why the cache's own lifetime is the right discriminator).
+//
+// WHAT IT BUYS, measured 2026-09-23T11:11Z against guerrilla, back-to-back full
+// cursor walks with `&cursor=` spelled EMPTY on the first request (a bare
+// `?limit=N` with no `&cursor=` returns no `next_cursor`, so the walk stops
+// after ONE page and reports a number that is not a walk at all):
+//
+//	default        105,755,961 B over 10 pages
+//	?view=board     13,035,765 B over 10 pages  — 12.33% of default
+//
+// WHAT IT COSTS, and what pays for it. The projection is the full card with
+// `content` DELETED and one bounded key, `content_digest`, put in its place
+// (api .../tasks_controller/params.ex, `render_doc(doc, :board)`). The two
+// things this package reads out of `content` on the ROW path both survive:
+// `criteriaLadder`'s per-rung state comes from `content_digest.criteria_marks`
+// and `completenessBadge`'s three missing rubric inputs from the digest's
+// booleans (decodeContentDigest / criteriaItemsFromMarks above). What does NOT
+// survive is the TaskDetail reading model's prose — description, evidence,
+// code_refs, purpose, the disposition strips — which is why the board hydrates
+// an OPEN detail pane from the always-full row route (FetchTaskDetailByID).
+//
+// THE ONE FIELD STILL MISSING, named rather than worked around (c1): the board
+// projection carries no `content.design_doc`. `papers` is lifted to the top
+// level and survives, `design_doc` is not, and `content_digest.has_paper`
+// collapses the two into ONE boolean — so the SLUG is unrecoverable from a
+// board card. That is the input to the paper→tasks inversion (`DrivenTasks` /
+// `TaskDetail.PaperRefs`, detail_data.go), which runs over the WHOLE corpus,
+// not just the open row, so per-row hydration cannot restore it. Until the api
+// lane adds it to the digest, a live board's FramePaper lists only the tasks
+// that name the paper in `papers`, and not those that name it in `design_doc`.
+const boardViewParam = "&view=board"
+
 // ─── exhaustive keyset paging (task-6c59bff7cb6b36ee) ────────────────────
 //
 // listFetchPath is the board's corpus GET. It is the ONE place the window
