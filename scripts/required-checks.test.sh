@@ -2545,6 +2545,8 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Flagship template bp-command parse"
         --expect-unrendered "Stale verdict watch"
         --expect-unrendered "Stale verdict harness"
+        --expect-unrendered "Report stale-verdict-watch read fault to a human"
+        --expect-unrendered "Report stale-verdict-watch scream to a human"
         --expect-unrendered "Break-glass harness"
         --expect-unrendered "Generate reference"
         # ── 2026-09-09: four rows #17111 (c19d7c7ab) added to .exclusions by hand for
