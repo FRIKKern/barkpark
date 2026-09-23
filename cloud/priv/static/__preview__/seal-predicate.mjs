@@ -168,6 +168,9 @@
 //       down. `gr-p5r5-successor-seal` was BOTH: done, and `parent_id:
 //       cloud-console-hardening-epic`. Residue forwarded to a row inside the epic has
 //       not left the epic, so clause (a) would certify a move that moved nothing.
+//   R9  the successor's subtree OVERLAPS the epic's — SUCCESSOR-OVERLAPS-EPIC. The third
+//       order: a successor ABOVE the epic contains the epic's whole roster, so every
+//       residue row read as forwarded. Checked after both roster walks, on their overlap.
 //
 // And a FOURTH clause-(a) shape, TERMINAL, reached only AFTER the roster is read:
 // `--successor TERMINAL` claims the epic has no residue to forward. It is accepted ONLY
@@ -1282,7 +1285,8 @@ const subtreeOf = (fixture, id, seedId, seedRows) => {
 // A ledger fixture is hand-written and nothing made it obey that: `forward-to-grandchild.json`
 // and `considering-forwarded.json` listed one `_id` in the epic's `children` AND under the
 // successor, and that two-parent row was the ONLY way any fixture reached the in-roster
-// `forwarded` bucket — a bucket R4/R6 make unreachable on every legal invocation. The arm
+// `forwarded` bucket — a bucket R4/R6/R9 make unreachable on every legal invocation (R9 since
+// task-5f6267283fe7a277: before it, a successor ABOVE the epic reached it legally). The arm
 // over it passed from the bucket's introduction to wave 36 while the bucket was dead: a
 // green whose subject cannot exist. `walkSubtree` already refuses a row reached twice INSIDE
 // one walk (ROSTER-CYCLE); the epic and the successor are two separate walks, so an `_id`
@@ -2567,6 +2571,29 @@ function main() {
       'SUBTREE-UNREAD');
   const forwarded = new Set(forwardWalk.rows.map((c) => c._id));
 
+  // R9 — THE SUCCESSOR'S SUBTREE OVERLAPS THE EPIC'S (task-5f6267283fe7a277). R4 refuses
+  // `successor === epic` and R6 refuses a successor whose parent chain reaches the epic,
+  // and between them they were believed to keep the two walks disjoint. They do not: a
+  // successor ABOVE the epic — its parent, or any ancestor — has a subtree that CONTAINS
+  // the epic and therefore every row of the epic's roster. `parent_id` is one field, so
+  // that is a shape the live ledger produces, and nothing refused it. Measured on a legal
+  // fixture (successor-contains-epic.json, one parent per `_id`) before this refusal
+  // existed: one open and one considering row, neither forwarded anywhere, and the run
+  // printed `forwarded under successor : 2` and exited 0 at `VERDICT: SEAL a=PASS
+  // orphans=0` — R4's 83-live-rows false PASS, one hop up.
+  //
+  // THE TEST IS THE OVERLAP ITSELF, not an ancestry walk, because the overlap is what
+  // clause (a) would score. On legal input it arises only from a successor at or above the
+  // epic; R4 and R6 answer the other two orders by name before this line is reached. With
+  // this refusal in place the two walks are disjoint on every invocation that is scored, so
+  // the in-roster `fwd` bucket below is empty by construction and a forwarded row can only
+  // be counted through the census, as RE-HOMED.
+  const overlap = forwarded.has(EPIC) ? [EPIC] : children.filter((c) => forwarded.has(c._id)).map((c) => c._id);
+  if (overlap.length)
+    throw new Refusal('SUCCESSOR-OVERLAPS-EPIC',
+      `the successor offered (${SUCCESSOR}) has a subtree that ${forwarded.has(EPIC) ? `CONTAINS ${EPIC} itself — the successor sits ABOVE the epic` : `shares ${overlap.length} row(s) with ${EPIC}'s own subtree [${overlap.slice(0, 6).join(', ')}${overlap.length > 6 ? ', …' : ''}]`}. A row both walks reach has not left the epic, so clause (a) would count it as forwarded by the act of naming a container it already sits in: every row of the epic's roster would read as forwarded and nothing would have moved. R4 refuses the epic itself and R6 a successor inside it; this is the third order. Name a successor OUTSIDE the epic's ancestry, and re-parent the residue onto it.`,
+      'after the roster reads, before any clause was evaluated');
+
   const byStatus = {};
   for (const c of children) byStatus[c.lifecycle_status] = (byStatus[c.lifecycle_status] || 0) + 1;
   const live = children.filter((c) => LIVE_STATUSES.includes(c.lifecycle_status));
@@ -2601,9 +2628,12 @@ function main() {
   //
   // ORDER MATTERS. `forwarded` is tested BEFORE the pending bucket, because a named
   // forwarding address is exactly what clause (a) asks for and a considering row that
-  // HAS one must not red. No name is lost by that ordering: `consideringElsewhere`
-  // below re-discloses every considering row that landed in another bucket, so D90's
-  // "printed by name" holds on every branch, not just the common one.
+  // HAS one must not red. Since R9 (SUCCESSOR-OVERLAPS-EPIC) that branch cannot fire on
+  // any scored invocation: the two walks are disjoint, `fwd` is empty, and a considering
+  // row with a forwarding address has left the roster and is named under RE-HOMED. The
+  // one branch a considering row CAN take other than its own bucket is the gate branch,
+  // which labels it by gate and not by status — `consideringElsewhere` below names those,
+  // so D90's "printed by name, as considering" holds on that branch too.
   const orphans = [], gatedLive = [], fwd = [], consideringResidue = [];
   for (const c of residue) {
     if (PERMANENT_HUMAN_GATES[c._id]) gatedLive.push(c._id);
@@ -2611,9 +2641,13 @@ function main() {
     else if (PENDING_STATUSES.includes(c.lifecycle_status)) consideringResidue.push(c._id);
     else orphans.push(c._id);
   }
+  // GATE-LABELLED ONLY. This used to be "every considering row not in its own bucket",
+  // described as "forwarded or gate-labelled"; the forwarded half was reachable only by a
+  // fixture listing one `_id` under two parents, or by a successor above the epic, which
+  // R9 now refuses. What is left is exactly the gate branch, so it is computed as that.
   const consideringElsewhere = considering
     .map((c) => c._id)
-    .filter((id) => !consideringResidue.includes(id));
+    .filter((id) => PERMANENT_HUMAN_GATES[id]);
   // Clause (a) is BOTH failing buckets, never just the orphan one. Splitting the
   // buckets without splitting this predicate would have turned a mis-labelled row
   // into an EXEMPT row — a fix that lowers the bar it was written to correct.
@@ -2631,8 +2665,10 @@ function main() {
   // THE DEFECT THIS CLOSES (cch-w36). `forwarded` is the SUCCESSOR's subtree; the
   // classify loop above walks `residue`, drawn from `children`, the EPIC's subtree. R4
   // forbids `successor === epic`, R6 forbids a successor whose parent chain reaches the
-  // epic, and `parent_id` is a single field — so on any invocation those two refusals
-  // ALLOW, the two sets are disjoint BY CONSTRUCTION and `fwd` is structurally empty.
+  // epic, R9 forbids a successor whose subtree overlaps the epic's (the successor ABOVE
+  // the epic — R4 and R6 alone let that through, task-5f6267283fe7a277), and `parent_id` is
+  // a single field — so on any invocation those three refusals ALLOW, the two sets are
+  // disjoint BY CONSTRUCTION and `fwd` is structurally empty.
   // Measured live 2026-09-20 at 149119d00: twelve rows re-parented onto the successor
   // with `bp task move`, read back from the store on the successor's roster, and the
   // next run printed `forwarded under successor : 0` while the anti-filing arm named
@@ -2730,7 +2766,7 @@ function main() {
   L.push(`  permanent human gate      : ${gatedLive.length}  [${gatedLive.join(', ') || '-'}]`);
   L.push(`  considering (disclosed)   : ${consideringResidue.length}  [${consideringResidue.slice(0, 8).join(', ') || '-'}${consideringResidue.length > 8 ? ', …' : ''}]`);
   if (consideringElsewhere.length)
-    L.push(`      (+${consideringElsewhere.length} considering row(s) counted on a line above — forwarded or gate-labelled, named here so no considering row is disclosed by count alone: ${consideringElsewhere.slice(0, 8).join(', ')}${consideringElsewhere.length > 8 ? ', …' : ''})`);
+    L.push(`      (+${consideringElsewhere.length} considering row(s) counted on the permanent human gate line above, named here with their status so no considering row is disclosed as a gate alone: ${consideringElsewhere.slice(0, 8).join(', ')}${consideringElsewhere.length > 8 ? ', …' : ''})`);
   L.push(`  UNNAMED RESIDUE (orphans) : ${orphans.length}`);
   orphans.slice(0, 8).forEach((o) => L.push(`      ✗ ${o}`));
   if (orphans.length > 8) L.push(`      … and ${orphans.length - 8} more`);
