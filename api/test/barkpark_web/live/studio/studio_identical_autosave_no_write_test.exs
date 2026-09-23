@@ -210,6 +210,35 @@ defmodule BarkparkWeb.Studio.StudioIdenticalAutosaveNoWriteTest do
     end
   end
 
+  describe "the RENDERED form, serialised by the browser's own rules" do
+    # The strongest form of the criterion. The two tests above push the event
+    # payload directly, which is faithful to the wire but bypasses the form
+    # SERIALISER: it cannot see an input the editor renders that the socket
+    # buffer does not carry, and such a key would be absent from the stored
+    # projection and force a write on every post — the guard would be inert in
+    # the browser while green in those tests. Here nothing is supplied at all;
+    # `form/2` serialises exactly what the editor rendered, untouched.
+    test "submitting it with no overrides writes no draft row" do
+      doc_id = "rendered-#{System.unique_integer([:positive])}"
+      seed_published!(doc_id)
+      assert draft_row(doc_id) == :no_draft
+
+      view = open!(doc_id)
+
+      html =
+        view
+        |> form("#editor-form")
+        |> render_change()
+
+      # POSITIVE CONTROL ON THE DRIVE: the form exists and rendered the fields.
+      # Without this, a selector that matched nothing would "pass".
+      assert html =~ ~s(name="doc[body]")
+
+      assert draft_row(doc_id) == :no_draft,
+             "the rendered form, posted untouched, created a draft row"
+    end
+  end
+
   describe "the flight recorder (crit 0)" do
     test "one line per autosave naming socket, trigger, param count and changed" do
       # `config/test.exs` pins the primary level at `:warning`, which filters an
