@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: js-sdk-consumption | budget: 500tok -->
 # JS SDK (js/ monorepo)
 
-Disambiguation first: **`sdk/` at repo root is the Bulldocs ingest SDK, NOT the general JS SDK** — that is the `js/` monorepo (`@barkpark/*`). Root `packages/client/` is the deprecated predecessor (pin v0.0.1).
+Disambiguation first: **`sdk/` at repo root is the Bulldocs ingest SDK, NOT the general JS SDK** — that is the `js/` monorepo (`@barkpark/*`).
 
 Consumption path:
 - `@barkpark/core` — `createClient(config)` → typed client: query builder (filter ops, ordering, `expand`, projection, paging), `search()`, reads (`doc`/`getDocuments`, backlinks, history, graph), mutations (`create`/`patch`/`publish`/`unpublish`/`delete`/`discardDraft` + patch ops, `transaction`), media (`uploadAsset`/`imageUrl`, asset CRUD, collections, `searchAssets`), schema CRUD, webhook mgmt (CRUD + `verifyWebhookSignature`), `listen()`, tenancy, draft perspectives. Framework-free; server + edge. Opt-in `resolve: 'tasks'` fills PortableDoc task blocks → js/packages/core/README.md.

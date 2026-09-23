@@ -134,7 +134,6 @@ registry() {
 .mcp.json none MCP server registration for agents
 .omx none omx tooling config
 .tool-versions none the asdf production toolchain pin; toolchain-skew-check reads it
-.vercelignore none vercel build context exclusions
 AGENTS.md none agent-facing router
 CHANGELOG.md none release notes
 CLAUDE.md none the repo router doc
@@ -164,10 +163,8 @@ go.sum go the Go module checksums
 internal cloud Go internals; cloud.yml dispatches on internal/**
 js none the JS SDK monorepo
 lighthouserc.json none lighthouse CI budget
-nixpacks.toml none nixpacks build config
 package-lock.json none npm lockfile
 package.json none root npm manifest
-packages none shared JS packages
 pnpm-lock.yaml none pnpm lockfile
 pnpm-workspace.yaml none the pnpm workspace definition
 run.sh none local run helper
@@ -176,7 +173,6 @@ scripts cloud the gate and ops scripts; cloud-path-escape-check.sh declares scri
 sdk none generated SDK artefacts
 templates cloud,go project templates both suites read
 tooling none standalone tooling trees
-transplant.py none one-off transplant utility
 vercel.json none vercel project config
 watch.sh none local watch helper
 web none the Next.js web demo
@@ -359,7 +355,11 @@ derive_changed_paths() {
     echo "toplevel-classifier: REFUSING — HEAD^1 is unresolvable in $ROOT, so the changed-path set cannot be determined. Check out with fetch-depth 2." >&2
     return 2
   fi
-  if ! out="$(git -C "$ROOT" diff --name-only "$base" HEAD)"; then
+  # --diff-filter=d leaves out DELETED paths. A deletion adds no unread code,
+  # and a deleted top-level entry has no row by design (its row must go too, or
+  # the STALE arm reds), so counting it would make every removal of a
+  # top-level entry impossible. Arm 13 below proves this line is load-bearing.
+  if ! out="$(git -C "$ROOT" diff --name-only --diff-filter=d "$base" HEAD)"; then
     echo "toplevel-classifier: REFUSING — git diff failed in $ROOT." >&2
     return 2
   fi
@@ -545,6 +545,25 @@ selftest() {
   out12="$(run_subject "$d12" "$tmp/p12")"; rc12=$?
   if [ "$rc12" -ne 0 ]; then ok "12a a row naming an untracked path reds (rc=$rc12)"; else bad "12a untracked row passed: $out12"; fi
   case "$out12" in *"UNTRACKED registry row 'docs-site'"*) ok "12b it is named" ;; *) bad "12b: $out12" ;; esac
+
+  # ── 13. DELETING a top-level entry passes: the derived diff leaves out
+  #        deleted paths, so removing an entry and its row is possible at all.
+  #        Mutation: without --diff-filter=d the deleted entry reds as unknown.
+  local d13="$tmp/d13"; mk_root "$d13"
+  : > "$d13/gone.txt"
+  git -C "$d13" add -A >/dev/null 2>&1
+  git -C "$d13" -c user.email=t@e -c user.name=t commit -qm add-gone >/dev/null 2>&1
+  git -C "$d13" rm -q gone.txt >/dev/null 2>&1
+  git -C "$d13" -c user.email=t@e -c user.name=t commit -qm delete-gone >/dev/null 2>&1
+  local out13 rc13
+  out13="$( TOPLEVEL_ROOT="$d13" bash "$d13/scripts/toplevel-classifier-check.sh" 2>&1 )"; rc13=$?
+  if [ "$rc13" -eq 0 ]; then ok "13a deleting a top-level entry passes (rc=0)"; else bad "13a a pure deletion reddened: rc=$rc13 / $out13"; fi
+  if mutate "$d13/scripts/toplevel-classifier-check.sh" 'out="\$\(git -C "\$ROOT" diff --name-only --diff-filter=d ' 's/(out="\$\(git -C "\$ROOT" diff --name-only) --diff-filter=d /\1 /'; then
+    local out13m rc13m
+    out13m="$( TOPLEVEL_ROOT="$d13" bash "$d13/scripts/toplevel-classifier-check.sh" 2>&1 )"; rc13m=$?
+    if [ "$rc13m" -ne 0 ]; then ok "13b without the filter the deletion reds, so the filter is load-bearing (rc=$rc13m)"; else bad "13b the filter is vacuous: the unfiltered diff also passed"; fi
+    case "$out13m" in *"UNRECOGNISED top-level entry 'gone.txt'"*) ok "13c and names the deleted entry" ;; *) bad "13c: $out13m" ;; esac
+  fi
 
   echo
   echo "SELFTEST: ${pass} passed, ${fail} failed"
