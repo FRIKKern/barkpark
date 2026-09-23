@@ -5522,6 +5522,7 @@
         // arm `row_press_state_guard_test.exs` mutates for.
         var prev = this._paPending;
         if (prev && prev.el) prev.el.removeAttribute("aria-busy");
+        if (prev && prev.refWatch) { prev.refWatch.disconnect(); prev.refWatch = null; }
         this._paPending = null;
       },
 
@@ -5715,6 +5716,22 @@
         // page-level region. Set after the release above, so the previous
         // press's row is cleared before this one is marked.
         p.el.setAttribute("aria-busy", "true");
+        // A REF THAT CAME AND WENT IS AN ANSWER, NOT A LOST PRESS
+        // (task-bd7f6c26b182d9c0). LiveView stamps `data-phx-ref-src` on this
+        // control synchronously in the same click dispatch, and removes it when
+        // the reply lands. On a fast link the reply lands BEFORE the 16ms probe
+        // below looks — measured on a local server: ref set at 0.4ms, cleared by
+        // the ok reply at 10.4ms, and the shipped probe then announced "That
+        // press did not reach the server" at 16.5ms over a section toggle whose
+        // aria-expanded had already flipped. Sampling the attribute cannot tell
+        // "never stamped" from "stamped and already dropped"; watching it can.
+        // The attribute is absent at this point (a present ref took the discard
+        // branch above), so ANY mutation of it means LiveView stamped a ref,
+        // i.e. the press was put on the wire.
+        if (window.MutationObserver) {
+          p.refWatch = new window.MutationObserver(function () { p.sawRef = true; });
+          p.refWatch.observe(el, { attributes: true, attributeFilter: ["data-phx-ref-src"] });
+        }
         // Within this same task, so the words are on screen at the next paint —
         // this is TIME-TO-FEEDBACK, not speed. Nothing here makes the server
         // faster (the root-cause slice is filed separately).
@@ -5724,12 +5741,16 @@
           this._paProbe = 0;
           if (this._paPending !== p) return;
           if (p.el.hasAttribute("data-phx-ref-src")) { p.sawRef = true; return; }
-          // NO REF 16ms AFTER THE CLICK — and that is not ambiguous. LiveView
-          // generates the ref SYNCHRONOUSLY inside the click dispatch, and only
-          // AFTER the connection check — `pushWithReply` returns
-          // `Promise.reject(new Error("no connection"))` when `isConnected()` is
-          // false, BEFORE any ref exists — so a press that was pushed always has
-          // its ref by now, and a press with no ref
+          // The ref was stamped and is already gone: the server ANSWERED inside
+          // the probe window. Settle it exactly as the poll would have.
+          if (p.sawRef) { this._paTick(p); return; }
+          // NO REF WAS EVER STAMPED 16ms AFTER THE CLICK — and that is not
+          // ambiguous. LiveView generates the ref SYNCHRONOUSLY inside the click
+          // dispatch, and only AFTER the connection check — `pushWithReply`
+          // returns `Promise.reject(new Error("no connection"))` when
+          // `isConnected()` is false, BEFORE any ref exists — so a press that was
+          // pushed has HAD its ref by now (`refWatch` above saw it even if the
+          // reply already removed it), and a press that never had one
           // was never put on the wire (independently confirmed: a discarded
           // press puts ZERO "type":"click" frames on /live/websocket, D265).
           // This is the owner's actual complaint, so it gets WORDS rather than
