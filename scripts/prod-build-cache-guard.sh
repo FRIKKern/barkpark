@@ -49,6 +49,18 @@
 # Contamination is checked BEFORE completeness, so a tree that is both partial
 # and dirty reds rather than quietly falling back.
 #
+# NOT PROD-ONLY, DESPITE THE NAME. The three arms judge a `<build>/lib`
+# directory against two name lists; nothing in them knows or cares which
+# MIX_ENV produced the tree. elixir.yml calls it from THREE jobs —
+# `mix-prod-compile` over `_build/prod/lib`, and `mix-test` and
+# `validation-perf` over `_build/test/lib`, where the same `actions/cache@v4`
+# + `restore-keys:` prefix shape used to restore a stale first-party tree with
+# nothing watching. The file keeps its name because that name is carried by
+# scripts/pipefail-sigpipe-baseline.txt, scripts/.posix-vacuous-green-census,
+# scripts/gate-refusal-vocabulary-check.sh and scripts/elixir-path-escape-check.sh;
+# renaming it is a registry change and belongs in its own PR.
+# aka: test-build-cache-guard, build-cache-guard, elixir _build cache tripwire.
+#
 # USAGE
 #   prod-build-cache-guard.sh <build_lib_dir> <allowlist_file> <required_file>
 #   prod-build-cache-guard.sh --selftest
@@ -142,7 +154,7 @@ guard() {
   fi
 
   if [ "$contaminated" -eq 1 ]; then
-    say "CACHE-CONTAMINATED: the restored _build/prod tree is not dependency-only"
+    say "CACHE-CONTAMINATED: the restored $dir tree is not dependency-only"
     return 1
   fi
 
