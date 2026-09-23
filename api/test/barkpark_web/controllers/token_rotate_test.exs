@@ -191,7 +191,9 @@ defmodule BarkparkWeb.TokenRotateTest do
 
       Process.sleep(3_000)
 
-      assert {:error, :unauthorized} = Auth.verify_token(old_raw),
+      verdict = Auth.verify_token(old_raw)
+
+      assert verdict == {:error, :unauthorized},
              "after the window the old token must stop authenticating"
 
       assert read_status(old_raw, ws, project) in @denials
