@@ -459,23 +459,61 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
 
   # ── past the gzip member ──────────────────────────────────────────────────
   #
-  # zlib at window bits 31 stops at the end of the FIRST gzip member. Whatever
-  # follows it — a second member, or junk — is never inflated, parsed or counted
-  # by `max_total_bytes`. The framing block above closed the tail INSIDE the
-  # member (after the tar marker); this is the layer outside it.
-  describe "bytes after the gzip member ends (PIN: current behaviour)" do
-    test "a two-member .tar.gz stages the FIRST member only", %{dest: dest} do
+  # zlib at window bits 31 stops at the end of the FIRST gzip member, and in its
+  # default mode silently discards whatever follows — a second member, or junk —
+  # so those bytes were never inflated, parsed or counted by `max_total_bytes`.
+  # Pinned first by run (both staged `{:ok, %{entries: 5, bytes: 94}}`, the
+  # second member's `second.html` dropped); now a typed refusal. The framing
+  # block above closed the tail INSIDE the member; this is the layer outside it.
+  describe "bytes after the gzip member ends" do
+    test "a two-member .tar.gz is refused — the second member would be dropped",
+         %{dest: dest} do
       second = tarball([file_entry("second.html", "<!doctype html><title>2</title>")])
       raw = gz(astro_dist()) <> gz(second)
 
-      assert {:ok, %{entries: 5, bytes: 94}} = stage_bytes(raw, dest)
-      refute File.exists?(Path.join(dest, "second.html"))
+      assert {:error, "E_MALFORMED", message} = stage_bytes(raw, dest)
+      assert message =~ "after its gzip member ends"
+      refute File.exists?(dest)
     end
 
-    test "a member followed by 10 000 junk bytes stages", %{dest: dest} do
+    test "a member followed by 10 000 junk bytes is refused", %{dest: dest} do
       raw = gz(astro_dist()) <> :crypto.strong_rand_bytes(10_000)
 
-      assert {:ok, %{entries: 5, bytes: 94}} = stage_bytes(raw, dest)
+      assert {:error, "E_MALFORMED", message} = stage_bytes(raw, dest)
+      assert message =~ "after its gzip member ends"
+      refute File.exists?(dest)
+    end
+
+    test "a single byte after the member, across the 64 KiB chunk boundary, is refused",
+         %{dest: dest} do
+      # The member alone is > 64 KiB of INCOMPRESSIBLE body, so the stray byte
+      # arrives in a later input chunk than the member's trailer.
+      big = :crypto.strong_rand_bytes(96 * 1024)
+      member = gz(tarball([file_entry("index.html", "<!doctype html>"), file_entry("b", big)]))
+      assert byte_size(member) > 64 * 1024
+
+      assert {:error, "E_MALFORMED", message} = stage_bytes(member <> <<0>>, dest)
+      assert message =~ "after its gzip member ends"
+      refute File.exists?(dest)
+    end
+
+    test "CONTROL — a corrupt member is still named corrupt, not a trailing-bytes refusal",
+         %{dest: dest} do
+      gzipped = gz(astro_dist())
+      size = byte_size(gzipped)
+      <<head::binary-size(size - 8), crc::binary-size(4), isize::binary-size(4)>> = gzipped
+      <<first, rest::binary>> = crc
+      corrupt = head <> <<Bitwise.bxor(first, 0xFF)>> <> rest <> isize
+
+      assert {:error, "E_MALFORMED", message} = stage_bytes(corrupt <> "junk", dest)
+      assert message =~ "corrupt"
+      refute message =~ "after its gzip member ends"
+    end
+
+    test "CONTROL — the same single member, with nothing after it, still stages",
+         %{dest: dest} do
+      assert {:ok, %{entries: 5, bytes: 94}} = stage_bytes(gz(astro_dist()), dest)
+      assert File.read!(Path.join(dest, "index.html")) =~ "hello"
     end
   end
 
