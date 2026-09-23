@@ -4,6 +4,16 @@
 # PR's current head and prints one line per required context with its real status/conclusion.
 #
 # CONTRACT: the verdict line ("MERGEABLE: 4/4 …" / "NOT YET: n/4 …" / "CONFLICTING: 4/4 … DIRTY") is ALWAYS THE LAST LINE. MERGEABLE now also means not DIRTY.
+#
+# EXIT CODES (2026-09-23 — HELD got its own, and it is a THIRD value, not a second):
+#   0  a VERDICT was measured — MERGEABLE / NOT YET / CONFLICTING. RED CHECKS ARE EXIT 0: a
+#      measured 3/4 is a verdict, and it is re-read as CI finishes.
+#   3  an INPUT was unreadable — CANNOT READ / HEAD-READ-FAILED / STALE-PR-OBJECT. Re-run it.
+#   4  HELD — the PR carries the label `hold` or `owner-hold` and a human said no. The last line
+#      is "HELD: <label> since <ts>" and NO checks verdict is printed, because none was read.
+#      NEVER retried and never waited out: the label has to come off first. A caller that only
+#      tests for non-zero must not confuse this with 3 — see the HOLD LABELS block below for the
+#      #18705 merge that cost a revert and a red required gate.
 # The verdict line now carries a VERDICT-AGE annotation AFTER the count — either
 # " [verdict <n> min old, <m> commit(s) behind <base>]" or, when the verdict is stale,
 # " (STALE VERDICT: <n> min old, <m> commits behind - update-branch before merging)". The
@@ -23,7 +33,15 @@
 # verdict / a FRESH verdict that must NOT be annotated stale / a verdict 0 commits behind that
 # must NOT be annotated stale / an unreadable compare that says CANNOT READ instead of zero /
 # a MUTANT with the staleness clause removed, which proves the stale arm is load-bearing / the
-# MIRROR copy under .claude/skills/orchestrate-tasks/helpers/ being byte-identical to this one)
+# MIRROR copy under .claude/skills/orchestrate-tasks/helpers/ being byte-identical to this one /
+# a PR labelled `hold` and one labelled `owner-hold` each REFUSING at exit 4 with a timestamp
+# read from the issue's labeled events / a PR carrying BOTH, where owner-hold must win and the
+# output must say so / an unreadable events endpoint still refusing but saying UNKNOWN instead
+# of inventing a date / an UNLABELLED PR and a NEAR-MISS-labelled PR (on-hold/holding/household)
+# still reaching the ordinary verdict at exit 0 — the arms that catch a refusal firing on
+# everything / a MUTANT with the hold refusal disabled, which proves those arms are
+# load-bearing / the three exit codes HELD/red-checks/CANNOT READ being three DISTINCT values /
+# the label read NOT deriving a repo of its own when arg 2 is omitted)
 # against a stub `gh` on PATH,
 # from a cwd that is NOT a git repo, and asserts for each that `| tail -1` reads the verdict or
 # the refusal — never an intermediate line — that no refusal contains the string "0/4", and
@@ -65,7 +83,30 @@ case "$1 $2" in
   "repo view"*) [ "${GH_STUB_BREAK:-}" = repo ] && exit 1; echo "acme/widget"; exit 0;;
   "pr view"*)   [ "${GH_STUB_BREAK:-}" = sha ]  && exit 1; echo "aaaaaaaaaa11112222333344445555666677778888"; exit 0;;
 esac
+# The labels read and the issue-events read answer the RAW API shape and then apply --jq to it
+# exactly as real gh does, so the arms exercise THIS SCRIPT'S OWN jq projection — a stub handing
+# back a pre-chewed label name or timestamp would leave the part that can be wrong unmeasured.
+_gh_stub_jq() { # $1 = raw JSON; rest = the argv gh was called with
+  local j="$1" f="" nx=0 x; shift
+  for x in "$@"; do
+    [ "$nx" = 1 ] && { f="$x"; break; }
+    [ "$x" = "--jq" ] && nx=1
+  done
+  if [ -n "$f" ]; then printf '%s\n' "$j" | jq -r "$f"; else printf '%s\n' "$j"; fi
+}
 if [ "$1" = api ]; then
+  case " $* " in
+    *".labels[].name"*)
+      [ "${GH_STUB_BREAK:-}" = labels ] && exit 1
+      _lj="[]"
+      for _n in ${GH_STUB_LABELS:-}; do
+        [ "$_lj" = "[]" ] && _lj="[{\"name\":\"$_n\"}]" || _lj="${_lj%]},{\"name\":\"$_n\"}]"
+      done
+      _gh_stub_jq "{\"labels\":$_lj}" "$@"; exit 0;;
+    *"/issues/"*"/events"*)
+      [ "${GH_STUB_BREAK:-}" = events ] && exit 1
+      _gh_stub_jq "${GH_STUB_LABEL_EVENTS:-[]}" "$@"; exit 0;;
+  esac
   for a in "$@"; do
     case "$a" in
       */check-runs*)   [ "${GH_STUB_BREAK:-}" = runs ] && exit 1
@@ -142,6 +183,126 @@ STUB
   # broken read in the opposite direction.
   ALLRED=1 _arm "genuine 0/4"    "NOT YET: 0/4"    0 ""     42 acme/widget
   unset ALLRED
+  # ---------------------------- arms: THE HOLD REFUSAL, IN BOTH DIRECTIONS (2026-09-23) -------
+  # These arms exist because #18705 was merged past a six-day-old owner hold on a MERGEABLE line
+  # this script printed. Four of them assert the refusal; three assert it does NOT fire -- and the
+  # NON-firing ones are the load-bearing half, because a refusal that fires on everything stops
+  # the whole fleet merging and is indistinguishable from a CI outage.
+  # The events fixture is deliberately adversarial: it holds a SUPERSEDED labeled event for `hold`,
+  # an `unlabeled` event for `hold`, a labeled event for the OTHER label, and a non-label event.
+  # A projection that took the FIRST match, ignored .event, or ignored .label.name would pick a
+  # different timestamp than the one asserted, so these arms measure the script's own jq.
+  HOLD_EVENTS='[{"event":"labeled","label":{"name":"hold"},"created_at":"2026-09-10T01:02:03Z"},{"event":"unlabeled","label":{"name":"hold"},"created_at":"2026-09-11T00:00:00Z"},{"event":"labeled","label":{"name":"hold"},"created_at":"2026-09-16T08:11:00Z"},{"event":"labeled","label":{"name":"owner-hold"},"created_at":"2026-09-16T09:22:33Z"},{"event":"closed","created_at":"2026-09-20T00:00:00Z"}]'
+  _hold_arm() { # label  GH_STUB_LABELS  expected-LAST-line-EXACTLY  [must-contain-somewhere]
+    local lbl="$1" labs="$2" want="$3" also="${4:-}" brk="${5:-}" o r l
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK="$brk" \
+         GH_STUB_LABELS="$labs" GH_STUB_LABEL_EVENTS="$HOLD_EVENTS" \
+         bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    if [ "$r" != 4 ] || [ "$l" != "$want" ]; then
+      printf 'FAIL %-20s exit=%s (want 4) | tail -1: %s (want EXACTLY: %s)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1)); return
+    fi
+    if [ -n "$also" ] && case "$o" in *"$also"*) false;; *) true;; esac; then
+      printf 'FAIL %-20s output does NOT contain: %s\n' "$lbl" "$also"; fails=$((fails+1)); return
+    fi
+    # A refusal must never carry a count it did not measure -- the required set was not even read.
+    case "$o" in *0/4*) printf 'FAIL %-20s the string 0/4 appears in a refusal\n' "$lbl"; fails=$((fails+1)); return;; esac
+    printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
+  }
+  _nohold_arm() { # label  GH_STUB_LABELS
+    local lbl="$1" labs="$2" o r l
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK="" \
+         GH_STUB_LABELS="$labs" GH_STUB_LABEL_EVENTS="$HOLD_EVENTS" \
+         bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    if [ "$r" = 0 ] && case "$l" in MERGEABLE:*) true;; *) false;; esac \
+       && case "$o" in *HELD:*) false;; *) true;; esac; then
+      printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
+    else
+      printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want a MERGEABLE verdict and NO "HELD:" anywhere -- a refusal here fires on PRs nobody held, which stops the whole fleet merging and looks exactly like a CI outage)\n' "$lbl" "$r" "$l"; fails=$((fails+1))
+    fi
+  }
+  _hold_arm  "hold refuses"       "hold"            "HELD: hold since 2026-09-16T08:11:00Z"       "This is NOT a checks verdict"
+  _hold_arm  "owner-hold refuses" "owner-hold"      "HELD: owner-hold since 2026-09-16T09:22:33Z" "This is NOT a checks verdict"
+  # BOTH labels: owner-hold must win, and the output must SAY which won (criterion 1).
+  _hold_arm  "both -> owner wins" "hold owner-hold" "HELD: owner-hold since 2026-09-16T09:22:33Z" "owner-hold WINS"
+  # The timestamp is READ, not invented. With the events endpoint dead the refusal must STILL
+  # refuse -- the label is the fact -- but it must say UNKNOWN rather than print a plausible date.
+  _hold_arm  "ts unreadable"      "hold"            "HELD: hold since UNKNOWN (the labeled event for hold could not be read)" "" events
+  # A CAPITALISED label is still a hold. merge-check.sh folds case (its arm A17g); if this did not,
+  # a `Hold` would be refused by one instrument and waved through by the other, and the lane would
+  # believe whichever it asked. The HELD line reports the CANONICAL lowercase name either way, so
+  # nothing downstream has to fold.
+  _hold_arm  "Hold folds to hold" "Hold"       "HELD: hold since 2026-09-16T08:11:00Z"
+  _hold_arm  "OWNER-HOLD folds"   "OWNER-HOLD" "HELD: owner-hold since 2026-09-16T09:22:33Z"
+  # THE OTHER DIRECTION -- the half that matters more.
+  _nohold_arm "unlabelled verdicts" ""
+  # Whole-name matching: these are other people's labels and must pass straight through. A
+  # substring or glob match (*hold*) would refuse all three and nobody would notice until the
+  # fleet stopped merging.
+  _nohold_arm "near-miss labels"   "on-hold holding household needs-review"
+  # ---------------------------- THE MUTATION CONTROL for the hold arms ----------------------
+  # The four _hold_arm assertions are only worth something if a build WITHOUT the refusal fails
+  # them. This disables the refusal in a COPY and proves a `hold`+`owner-hold` PR then verdicts
+  # MERGEABLE -- i.e. reproduces the exact #18705 behaviour the block exists to stop. It refuses
+  # if the mutation changed nothing (a stale sed probe) or broke the script (a mutant that cannot
+  # verdict says nothing about the clause).
+  _hold_mutation_arm() {
+    local lbl="mutation reds hold" m o r l
+    m="$d/mutant-hold.sh"
+    sed 's/^if \[ -n "$HELD_LABEL" \]; then$/if false; then/' "$SELF" > "$m" 2>/dev/null
+    if [ ! -s "$m" ] || cmp -s "$m" "$SELF"; then
+      printf 'FAIL %-20s the mutation changed NOTHING -- this control measures nothing; the sed probe is stale\n' "$lbl"; fails=$((fails+1)); return
+    fi
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK="" \
+         GH_STUB_LABELS="hold owner-hold" GH_STUB_LABEL_EVENTS="$HOLD_EVENTS" \
+         bash "$m" 42 acme/widget 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    case "$l" in
+      MERGEABLE:*) printf 'PASS %-20s refusal removed -> a held PR reads MERGEABLE again (the #18705 shape), so the hold arms are load-bearing | mutant tail: %s\n' "$lbl" "$l";;
+      HELD:*)      printf 'FAIL %-20s the mutant STILL refused -- the hold arms pass with the refusal gone, so they are not load-bearing\n' "$lbl"; fails=$((fails+1));;
+      *)           printf 'FAIL %-20s mutant produced no verdict (exit=%s, tail: %s) -- it broke the script, so it says nothing about the refusal\n' "$lbl" "$r" "$l"; fails=$((fails+1));;
+    esac
+  }
+  _hold_mutation_arm
+  # ---------------------------- THE EXIT CODES MUST BE THREE DISTINCT VALUES ------------------
+  # Criterion 4. A caller that only tests for non-zero must not confuse "the owner said no" with
+  # "CI is not finished". The three are measured from RUNS, not read off the header, because a
+  # header is a claim and a run is a fact: held / an honest red / an unreadable input.
+  _exitcode_arm() {
+    local lbl="exit codes distinct" rc_held rc_red rc_cr
+    ( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_LABELS="owner-hold" \
+      GH_STUB_LABEL_EVENTS="$HOLD_EVENTS" bash "$SELF" 42 acme/widget >/dev/null 2>&1 ); rc_held=$?
+    ( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_LABELS="" GH_STUB_ALLRED=1 \
+      bash "$SELF" 42 acme/widget >/dev/null 2>&1 ); rc_red=$?
+    ( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_LABELS="" GH_STUB_BREAK=runs \
+      bash "$SELF" 42 acme/widget >/dev/null 2>&1 ); rc_cr=$?
+    if [ "$rc_held" = 4 ] && [ "$rc_red" = 0 ] && [ "$rc_cr" = 3 ] \
+       && [ "$rc_held" != "$rc_red" ] && [ "$rc_held" != "$rc_cr" ]; then
+      printf 'PASS %-20s HELD=%s, red checks=%s, CANNOT READ=%s -- three distinct values\n' "$lbl" "$rc_held" "$rc_red" "$rc_cr"
+    else
+      printf 'FAIL %-20s HELD=%s (want 4), red checks=%s (want 0), CANNOT READ=%s (want 3) -- a caller testing only non-zero cannot tell a hold from an unfinished read\n' "$lbl" "$rc_held" "$rc_red" "$rc_cr"; fails=$((fails+1))
+    fi
+  }
+  _exitcode_arm
+  # ---------------------------- THE LABEL READ MUST NOT RESOLVE A REPO FROM THE CWD ----------
+  # Criterion 5. The label read sits BELOW the owner/repo refusal and uses the already-resolved
+  # $REPO. With NO repo argument, NO $GH_REPO, `gh repo view` dead and no git remote anywhere, the
+  # script must still print the owner/repo CANNOT READ refusal at exit 3 -- NOT a HELD line, and
+  # NOT a verdict. A label read that called gh with an empty repo would 404 into a silent no-hold.
+  _norepo_hold_arm() {
+    local lbl="hold needs the repo" o r l
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK=repo \
+         GH_STUB_LABELS="owner-hold" GH_STUB_LABEL_EVENTS="$HOLD_EVENTS" \
+         bash "$d/norepo/pr-required.sh" 42 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    if [ "$r" = 3 ] && case "$l" in "CANNOT READ: no owner/repo"*) true;; *) false;; esac; then
+      printf 'PASS %-20s exit=3 | tail -1: %s\n' "$lbl" "$l"
+    else
+      printf 'FAIL %-20s exit=%s (want 3) | tail -1: %s (want the owner/repo CANNOT READ refusal -- the label read must sit BELOW it and must not derive a repo of its own)\n' "$lbl" "$r" "$l"; fails=$((fails+1))
+    fi
+  }
+  _norepo_hold_arm
   # ------------------------------- arms: VERDICT AGE + COMMITS BEHIND (2026-09-20) ----------
   # The verdict is a SNAPSHOT; these arms pin that it now says how old a snapshot and how far the
   # base moved under it, and — the load-bearing half — that it only cries STALE when BOTH the age
@@ -569,7 +730,7 @@ selftest() {
   total=$(printf '%s\n' "$out" | grep -cE '^(PASS|FAIL) ')
   passed=$(printf '%s\n' "$out" | grep -cE '^PASS ')
   failed=$(printf '%s\n' "$out" | grep -cE '^FAIL ')
-  if [ "$total" -lt 14 ]; then
+  if [ "$total" -lt 22 ]; then
     echo "SELFTEST: CANNOT READ — only $total arm line(s) emitted; the body exited early and this tally measures nothing"
     return 1
   fi
@@ -602,6 +763,78 @@ REPO="${2:-}"
 if [ -z "$REPO" ]; then
   echo "CANNOT READ: no owner/repo — pass it as arg 2 (or set GH_REPO). No git remote at this script's own directory or at the cwd, and gh repo view (GraphQL) failed too. This is NOT a verdict, and NOT a count of zero green."
   exit 3
+fi
+# ---------------------------------------------------- HOLD LABELS: REFUSE, DO NOT VERDICT ----
+# WHY THIS EXISTS, at the source (2026-09-22). This script answered the merge question without
+# ever reading the PR's LABELS, so a PR under a hold read "MERGEABLE: 4/4" -- and MERGEABLE reads
+# as CONSENT. console merged #18705 past a hold the OWNER had placed on 2026-09-16, six days
+# earlier; the owner had to be told after the fact, and the revert (#19851, 0f79f4b1b) then had to
+# be built and landed to get main's required Elixir gate green again. One unreadable label cost a
+# merge, a revert and a red required gate. A merge verdict that ignores a hold is a LYING GATE,
+# and the remedy chosen was to make the INSTRUMENT refuse rather than to add a rule to a brief:
+# a written finding does not fire by itself.
+# Main's HOLD RULE v2 (2026-09-22T15:37Z): owner-hold is the owner's alone and no lane removes it
+# or merges past it; a lane hold is the hold label PLUS a "HELD by <lane> pending <reason>" comment
+# posted within the minute, and a hold label with NO such comment is treated as the owner's and the
+# lane asks main. The auto-merge sweep already skipped both labels. The HAND path -- the one a lead
+# uses when it decides a PR is ready -- did not. This is that path.
+#
+# EXIT CODES ARE THE CONTRACT, and HELD needs ITS OWN. A caller that only tests for non-zero must
+# never confuse "the owner said no" with "CI is not finished": the first is NEVER retried, the
+# second always is.
+#   0  a VERDICT was measured: MERGEABLE / NOT YET / CONFLICTING. Note that RED CHECKS are exit 0
+#      -- a measured 3/4 is a verdict, and it is re-read as CI finishes.
+#   3  CANNOT READ / HEAD-READ-FAILED / STALE-PR-OBJECT -- an INPUT was unreadable. Re-run.
+#   4  HELD -- a human said no. Distinct from BOTH of the above. Never retried, never waited out;
+#      the label has to come off (and for owner-hold, only the owner takes it off) first.
+#
+# TWO THINGS THIS MUST NOT DO. Both are measured failure modes, and both have selftest arms:
+#   - it must not fire on an UNLABELLED PR. A refusal that fires on everything stops the whole
+#     fleet merging and looks exactly like a CI outage. Arms "unlabelled verdicts" and "near-miss
+#     labels" are that control, and "mutation reds hold" proves the refusal is load-bearing.
+#   - it must not reintroduce a CWD-DERIVED repo. This read uses the ALREADY-RESOLVED $REPO and
+#     sits BELOW the refusal above, so arg 2 keeps being required exactly as it was; an empty
+#     $REPO can never reach here. (A cwd-derived repo went empty once and printed 0/4 at exit 0
+#     for PRs that were at 3/4 -- see the RESOLVING owner/repo block above.)
+# Matching is on the WHOLE label name, never a substring: on-hold, holding and household are other
+# people's labels and must pass straight through to an ordinary verdict.
+_LABELS=$(gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' 2>/dev/null || true)
+_HAS_HOLD=0; _HAS_OWNER_HOLD=0
+while IFS= read -r _lbl; do
+  # CASE-INSENSITIVE, because scripts/merge-check.sh's hold verdict already is (its arm A17g) and
+  # the two instruments must not disagree about what a hold IS: a label typed `Hold` that one tool
+  # refuses and the other waves through is worse than neither reading labels at all. Folded with
+  # tr, not `${_lbl,,}` — macOS ships bash 3.2 and the selftest runs this file under it.
+  # The comparison is still on the WHOLE folded name, never a substring.
+  _lbl=$(printf '%s' "$_lbl" | tr '[:upper:]' '[:lower:]')
+  case "$_lbl" in
+    owner-hold) _HAS_OWNER_HOLD=1;;
+    hold)       _HAS_HOLD=1;;
+  esac
+done <<LABELS_EOF
+$_LABELS
+LABELS_EOF
+HELD_LABEL=""
+# PRECEDENCE when a PR carries BOTH. owner-hold WINS and the output says which won: only the owner
+# applies owner-hold and no lane ever merges past it, so the stronger hold is the one to name.
+[ "$_HAS_HOLD" = 1 ]       && HELD_LABEL="hold"
+[ "$_HAS_OWNER_HOLD" = 1 ] && HELD_LABEL="owner-hold"
+if [ -n "$HELD_LABEL" ]; then
+  # The timestamp is READ, never invented: the ISSUE's `labeled` events carry created_at. Take the
+  # MOST RECENT labeled event for the WINNING label -- a label removed and re-applied is held since
+  # the re-application, not since the first one. If that read fails, say the timestamp is UNKNOWN
+  # rather than printing a plausible one: a made-up "since" is exactly how a six-day-old hold would
+  # read as an hour-old one, which is the mistake this whole block exists to stop.
+  HELD_TS=$(gh api "repos/$REPO/issues/$PR/events?per_page=100" --paginate \
+    --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$HELD_LABEL\") | .created_at] | last // empty" 2>/dev/null || true)
+  [ -n "${HELD_TS:-}" ] || HELD_TS="UNKNOWN (the labeled event for $HELD_LABEL could not be read)"
+  if [ "$_HAS_HOLD" = 1 ] && [ "$_HAS_OWNER_HOLD" = 1 ]; then
+    echo "  This PR carries BOTH hold labels. owner-hold WINS: only the owner applies it, and no lane removes it or merges past it."
+  fi
+  echo "  This is NOT a checks verdict -- the required set was NOT read, and nothing here says anything about CI. Do not re-run waiting for this to clear."
+  echo "  A LANE hold is the label PLUS a 'HELD by <lane> pending <reason>' comment posted within the minute. A hold label with NO such comment is the OWNER's: ask main, do not merge."
+  echo "HELD: $HELD_LABEL since $HELD_TS"
+  exit 4
 fi
 REQ='Elixir gate|PR references an active task|Cloud gate|Console gate'
 # READ THE HEAD SHA, AND REFUSE IF IT CANNOT BE READ (lead-silent, 2026-09-02).
