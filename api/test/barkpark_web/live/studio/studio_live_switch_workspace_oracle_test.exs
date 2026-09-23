@@ -90,7 +90,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSwitchWorkspaceOracleTest do
   # The rendered error banner's text (`Nav.studio_flash/1`, role="alert"), or
   # nil — what a sighted user sees and a screen reader announces.
   defp alert_text(html) do
-    case Regex.run(~r{<div class="flash flash-error" role="alert"[^>]*>([^<]*)</div>}, html) do
+    case Regex.run(~r{class="flash flash-error"[^>]*role="alert"[^>]*>([^<]*)</div>}, html) do
       [_, text] -> String.trim(text)
       nil -> nil
     end
