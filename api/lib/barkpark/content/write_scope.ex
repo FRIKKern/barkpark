@@ -68,13 +68,20 @@ defmodule Barkpark.Content.WriteScope do
   # silent dataset_id=NULL stamp on a dataset string the row nominally names.
   # Scope-id keys a client must never choose — dropped (string AND atom form)
   # before the scope is resolved from server-authoritative opts / Default.
+  #
+  # `scope_source` (task-b389fe352e013dce) is in this list for the same reason
+  # the ids are: it is a MEASUREMENT of what the server's resolver did, not a
+  # claim a caller gets to make. A write that could assert its own provenance
+  # would make the column worthless for exactly the count it exists to answer.
   @client_scope_keys [
     "workspace_id",
     "project_id",
     "dataset_id",
+    "scope_source",
     :workspace_id,
     :project_id,
-    :dataset_id
+    :dataset_id,
+    :scope_source
   ]
 
   def put_scope_attrs(attrs, opts) do
@@ -88,7 +95,7 @@ defmodule Barkpark.Content.WriteScope do
     # may assign ownership; a non-admin user write is forced to the acting user).
     attrs = Map.drop(attrs, @client_scope_keys)
 
-    with {:ok, {ws_id, project_id}} <- resolve_write_scope(opts),
+    with {:ok, {ws_id, project_id}, scope_source} <- resolve_write_scope_with_source(opts),
          {:ok, dataset_id} <- resolve_dataset_id_for_write(attrs, project_id) do
       owner_id = resolve_owner_id_for_write(attrs, opts)
 
@@ -98,6 +105,14 @@ defmodule Barkpark.Content.WriteScope do
         |> maybe_put_scope_attr("project_id", project_id)
         |> maybe_put_scope_attr("dataset_id", dataset_id)
         |> maybe_put_scope_attr("owner_id", owner_id)
+        # PROVENANCE, bound to the id it explains (task-b389fe352e013dce). The
+        # stamp is gated on `ws_id` being non-nil for a reason: on a pre-backfill
+        # DB with no seeded Default, `seeded_default_write_scope/0` yields
+        # `{nil, nil}` and stamps no workspace_id — a `scope_source` written
+        # there would describe a workspace that is not on the row, which is
+        # exactly the disagreeing-surface failure this column is supposed to
+        # prevent. No workspace stamped, no provenance stamped.
+        |> maybe_put_scope_attr("scope_source", ws_id && scope_source)
 
       {:ok, attrs}
     end
@@ -333,23 +348,68 @@ defmodule Barkpark.Content.WriteScope do
   @spec resolve_write_scope(keyword()) ::
           {:ok, {binary() | nil, binary() | nil}} | {:error, term()}
   def resolve_write_scope(opts) do
+    case resolve_write_scope_with_source(opts) do
+      {:ok, scope, _source} -> {:ok, scope}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc """
+  `resolve_write_scope/1` plus the NAME OF THE ARM that produced the scope —
+  the provenance `put_scope_attrs/2` stamps into `documents.scope_source`
+  (task-b389fe352e013dce).
+
+  The arms below are the whole vocabulary; `Content.Document.scope_sources/0`
+  is the same list on the schema side, and its `validate_inclusion` is what
+  stops a sixth value silently splitting a bucket.
+
+    * `"explicit"`         — the caller NAMED a `:workspace_id`.
+    * `"inferred"`         — no scope key (or `:shared_only`), but a principal
+                             with exactly one workspace membership.
+    * `"instance_wide"`    — an `instance_wide: true` DECLARATION.
+    * `"default_fallback"` — the residual: no key, no principal, no
+                             declaration.
+
+  WHY THIS EXISTS AS STORED BYTES rather than as something a reader could
+  recompute: `"explicit"` naming the seeded Default and `"default_fallback"`
+  land the IDENTICAL `{workspace_id, project_id}` pair. Recomputing the answer
+  would need the opts list at the instant of the write, which is the one thing
+  no reader has. `task-e6523cc7154304f0` closed its criterion 1 UNMEASURABLE on
+  exactly that: 527 of 3,959 documents (13.31%) carry the Default workspace,
+  and that number is `fallback UNION deliberate-Default` — a ceiling, not a
+  measurement. Rows written before migration 20260923120000 carry
+  `scope_source IS NULL` and stay permanently AMBIGUOUS; there is no join key
+  to backfill from, so there is no method to state.
+
+  The returned source is a STRING, not an atom, because its destination is a
+  varchar column and a `GROUP BY` over it — round-tripping through atoms would
+  buy nothing and invite `String.to_atom/1` on DB-read values.
+  """
+  @spec resolve_write_scope_with_source(keyword()) ::
+          {:ok, {binary() | nil, binary() | nil}, binary()} | {:error, term()}
+  def resolve_write_scope_with_source(opts) do
     opt_ws = Keyword.get(opts, :workspace_id)
     opt_proj = Keyword.get(opts, :project_id)
 
     cond do
       opt_ws == :shared_only ->
-        resolve_unscoped_request_write_scope(opts)
+        with_source(resolve_unscoped_request_write_scope(opts), "inferred")
 
       not is_nil(opt_ws) and is_nil(opt_proj) ->
-        {:ok, {opt_ws, default_project_id_for_workspace(opt_ws)}}
+        {:ok, {opt_ws, default_project_id_for_workspace(opt_ws)}, "explicit"}
 
       not is_nil(opt_ws) ->
-        {:ok, {opt_ws, opt_proj}}
+        {:ok, {opt_ws, opt_proj}, "explicit"}
 
       true ->
         resolve_key_absent_write_scope(opts)
     end
   end
+
+  # Attach the arm's name to a successful resolution; a typed refusal passes
+  # through with no source, because a refused write stamps nothing.
+  defp with_source({:ok, scope}, source), do: {:ok, scope, source}
+  defp with_source({:error, _reason} = error, _source), do: error
 
   # THE CLASSIFIED DOOR for a key-absent write (see the ruling block above).
   #
@@ -370,13 +430,16 @@ defmodule Barkpark.Content.WriteScope do
   defp resolve_key_absent_write_scope(opts) do
     cond do
       Keyword.get(opts, :instance_wide) == true ->
-        seeded_default_write_scope()
+        with_source(seeded_default_write_scope(), "instance_wide")
 
       ctx = attributable_caller_context(opts) ->
-        resolve_unscoped_request_write_scope(Keyword.put(opts, :caller_context, ctx))
+        with_source(
+          resolve_unscoped_request_write_scope(Keyword.put(opts, :caller_context, ctx)),
+          "inferred"
+        )
 
       true ->
-        seeded_default_write_scope()
+        with_source(seeded_default_write_scope(), "default_fallback")
     end
   end
 
@@ -605,17 +668,30 @@ defmodule Barkpark.Content.WriteScope do
   # public papers-backlinks / graph leak MEDIUM-5 names). `maybe_put_scope_attr`
   # skips nil, so a non-owner_scoped draft (owner_id NULL) still publishes to a
   # NULL owner_id row — byte-identical for unowned types.
+  #
+  # scope_source (task-b389fe352e013dce): the provenance TRAVELS WITH the
+  # workspace_id it explains. Copying `workspace_id` without it would leave the
+  # destination row carrying a workspace resolved one way and a provenance
+  # string describing a different resolution — a second surface that disagrees
+  # with the first, which is worse than no surface at all. Gated on the SOURCE's
+  # workspace_id being present, so a nil-workspace source (the
+  # `inherit_or_resolve_scope_attrs/3` door's case) copies nothing and the
+  # freshly-resolved stamp stands. A source row that predates the column carries
+  # nil provenance and yields `"inherited"` — true, and honest about being
+  # second-hand.
   def inherit_scope_attrs(attrs, %Document{
         workspace_id: ws_id,
         project_id: project_id,
         dataset_id: dataset_id,
-        owner_id: owner_id
+        owner_id: owner_id,
+        scope_source: scope_source
       }) do
     attrs
     |> maybe_put_scope_attr("workspace_id", ws_id)
     |> maybe_put_scope_attr("project_id", project_id)
     |> maybe_put_scope_attr("dataset_id", dataset_id)
     |> maybe_put_scope_attr("owner_id", owner_id)
+    |> maybe_put_scope_attr("scope_source", ws_id && (scope_source || "inherited"))
   end
 
   def inherit_scope_attrs(attrs, _), do: attrs
