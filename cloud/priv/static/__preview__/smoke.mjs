@@ -3196,6 +3196,43 @@ const EXPECTATIONS = {
     },
   },
 
+  // task-679663d0bee42b15 — THE LAUNCH PRESS'S TWO 403s, DRIVEN AND READ. Both
+  // bodies are go_live's own (quoted beside the fixtures in scenarios.mjs). The
+  // shared driver asserts every precondition that would otherwise let the
+  // toast assertions pass on a page where nothing was pressed: the form is
+  // rendered, its submit handler is wired, exactly ONE POST /v1/launch reached
+  // the wire, and a toast actually mounted. Each expectation then reads the
+  // arm-specific bytes, so a swapped or broken slug branch in
+  // newLaunchRefusalToast reds the scenario that owns it.
+  "new-launch-limit-reached": {
+    what: "/new Launch → POST /v1/launch 403 limit_reached: the plan-limit toast WITH the billing action, never the authority sentence",
+    async check(reg, hooks, ctx) {
+      const t = await driveLaunchRefusal(reg, ctx);
+      assert.ok(t.includes('<div class="toast-title">Plan limit reached</div>'),
+        "a 403 limit_reached must title the toast \"Plan limit reached\"; toast stack: " + t.slice(0, 400));
+      assert.ok(t.includes("You&#39;re at your plan&#39;s instance limit.") || t.includes("You're at your plan's instance limit."),
+        "the quota body must render; toast stack: " + t.slice(0, 400));
+      assert.equal(countMatches(t, '<button class="btn btn-sm toast-action">Open dashboard</button>'), 1,
+        "a quota refusal carries exactly ONE billing action (Open dashboard); toast stack: " + t.slice(0, 400));
+      assert.ok(!t.includes("can&#39;t launch for this team") && !t.includes("role on this team"),
+        "a quota refusal must not borrow the authority copy; toast stack: " + t.slice(0, 400));
+    },
+  },
+  "new-launch-forbidden": {
+    what: "/new Launch → POST /v1/launch 403 forbidden {required: admin, scope: team}: the authority toast naming admin, and NO billing action",
+    async check(reg, hooks, ctx) {
+      const t = await driveLaunchRefusal(reg, ctx);
+      assert.ok(t.includes('<div class="toast-title">You can&#39;t launch for this team</div>'),
+        "a 403 forbidden must title the toast with the authority sentence; toast stack: " + t.slice(0, 400));
+      assert.ok(t.includes("Launching needs the admin role on this team. Ask a team admin to launch it, or to give you that role."),
+        "the toast must name the role the SERVER required (admin); toast stack: " + t.slice(0, 400));
+      assert.ok(!t.includes("toast-action"),
+        "an authority refusal offers no billing action — paying does not grant a role; toast stack: " + t.slice(0, 400));
+      assert.ok(!t.includes("Plan limit reached"),
+        "an authority refusal must not read as a plan ceiling; toast stack: " + t.slice(0, 400));
+    },
+  },
+
   // ── cch-r16-w11: the launch wizard's own elevated writes, BOTH WAYS ─────────
   // The three rows this pair and `theater-failed-member` retire from
   // __binding_census.mjs's UNPREDICATED list. Each member assertion is an
@@ -6693,6 +6730,30 @@ const EXPECTATIONS = {
 
 function countMatches(hay, needle) {
   return hay.split(needle).length - 1;
+}
+
+// task-679663d0bee42b15 — press Launch on the /new step and return the toast
+// stack's markup, after proving the press really happened. Every assertion
+// here is a precondition: without them "the toast says X" could be read off a
+// form that never rendered, a submit nobody listened to, or a request that
+// never left.
+async function driveLaunchRefusal(reg, ctx) {
+  assert.equal(reg.get("new-screen").hidden, false, "the /new screen must be visible");
+  const body = reg.get("new-body").innerHTML || "";
+  assert.ok(body.includes('id="new-launch-form"') && body.includes('id="new-launch-btn"'),
+    "the launch step never rendered its form, so no press can be driven; #new-body: " + body.slice(0, 200));
+  const before = (reg.get("toast-stack") || {}).innerHTML || "";
+  assert.equal(before, "", "a toast was already mounted before the press — the assertions below could read it");
+  assert.equal(ctx.byId("new-launch-form").dispatchEvent({ type: "submit" }), 1,
+    "#new-launch-form has no \"submit\" handler — newLaunch was never wired, so nothing was pressed");
+  await ctx.settle();
+  assert.equal(ctx.countCalls("POST", "/v1/launch"), 1, "exactly one POST /v1/launch must reach the wire");
+  const btn = reg.get("new-launch-btn");
+  assert.equal(btn.disabled, false, "a refused launch must hand the button back");
+  assert.equal(btn.textContent, "Launch", "…and restore its label");
+  const t = (reg.get("toast-stack") || {}).innerHTML || "";
+  assert.ok(t.includes("toast-error"), "the refusal mounted no error toast at all; toast stack: " + JSON.stringify(t.slice(0, 200)));
+  return t;
 }
 
 // ── cch-w10: the destroy-tier confirm sheet, driven as an operator drives it ──

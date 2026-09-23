@@ -1278,13 +1278,20 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // UNMOVED: a cell is not residue, and a cell creates no family. Every integer
   // was RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` and reading the
   // `>> scenarios` line it PRINTED, never by adding one.
-  assert.equal(r.total, 144);
+  // task-679663d0bee42b15 moves it by TWO, both residue (family path:/new):
+  // `new-launch-limit-reached` and `new-launch-forbidden`, the Launch press's
+  // two 403 refusals. Total 144 -> 146, residue 119 -> 121; cells (26),
+  // distinctCovered (25) and families (14) are DELIBERATELY UNMOVED — path:/new
+  // already had eight members. RE-DERIVED by RUNNING `node breakpoint-sweep.mjs`
+  // and reading what it PRINTED (`146 scenarios · 25 distinct covered by 26
+  // cells · 121 residue over 14 families`), never by adding two.
+  assert.equal(r.total, 146);
   assert.equal(r.cells, 26);
   assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
-  assert.equal(r.residue, 119, "119 is the RESIDUE, not the census");
+  assert.equal(r.residue, 121, "121 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 119, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 121, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
