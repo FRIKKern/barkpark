@@ -2049,17 +2049,19 @@ jobs:
     # remediation, not the outage: it is what drags the missing commit onto the
     # box. It is self-limiting too — the first run that converges the box is
     # green again and the anchor moves forward with it.
-    # THIS CHECK STILL READS GREEN THROUGH A LOCK STALL, AND
-    # task-e0e4fa0b709c093e DID NOT CHANGE THAT. On 2026-09-22 all fifteen
-    # `instance` jobs that exited 15 behind the held deploy lock
-    # (35699709131 ... 35724457145) carried this check as SUCCESS, because it
-    # answers about a different leg and its adjudicator's middle row is
-    # "stranded AND a deploy in flight -> 0". A queue of runs waiting on a lock
-    # IS a deploy in flight, permanently, so the delay-not-cancel design that
-    # keeps this gate from being waived also keeps it green for as long as the
-    # queue lasts. Naming it here so the next reader does not mistake the lock
-    # work for a fix to this: the lock holder is now logged and breakable, and
-    # this check's reading trap is untouched.
+    # A LOCK STALL NO LONGER READS GREEN (task-a077f2e24350d3af). On
+    # 2026-09-22 all fifteen `instance` jobs that exited 15 behind the held
+    # deploy lock (35699709131 ... 35724457145) carried this check as SUCCESS:
+    # a queue of runs waiting on a lock IS a deploy in flight, permanently, so
+    # the middle row above kept it green for as long as the queue lasted. The
+    # middle row now EXPIRES on STRAND AGE — how long the box has served a
+    # commit behind the newest deploy-relevant main commit, measured from the
+    # merge date of the oldest relevant commit it lacks (each `converged` leg
+    # writes it via --emit-strand). Past 2 x the deploy lock wait read from
+    # the deploy scripts this ships (60 min today) the verdict is STALLED, exit
+    # 1; inside it the log says GREEN-BECAUSE-WAITING with the strand minutes,
+    # and a current box says GREEN-BECAUSE-SHIPPED. An unageable strand is
+    # CANNOT READ, exit 3.
     name: Production serves the newest deploy-relevant main commit
     needs: [changes, control-plane, instance]
     # THE PRECONDITION IS A RULE NOW, NOT AN ENUMERATION (task-c5955c660c7b9e55).
@@ -2140,6 +2142,15 @@ jobs:
             echo "::warning::the Actions API did not answer — using a 900s grace window instead of the leg start"
           fi
 
+          # ── THE STRAND RECORDS (task-a077f2e24350d3af) ───────────────────
+          # A stranded leg writes "strand_since served newest oldest" here, one
+          # line, via --emit-strand. The OLDEST strand across legs is what the
+          # adjudicator ages the in-flight suppression by. Pre-created empty so
+          # a converged leg contributes nothing rather than a missing file.
+          strand_cp="$RUNNER_TEMP/strand-cp"
+          strand_inst="$RUNNER_TEMP/strand-instance"
+          : > "$strand_cp"; : > "$strand_inst"
+
           # ── THE CONTROL PLANE: always, because /health is public ──────────
           echo "::group::control plane"
           cp_sha=""
@@ -2152,7 +2163,7 @@ jobs:
           else
             bash scripts/deploy-convergence-check.sh converged \
               --label "control plane (barkpark.cloud)" --target cp \
-              --served "$cp_sha" --tip "$TIP" $OWED_ARGS
+              --served "$cp_sha" --tip "$TIP" --emit-strand "$strand_cp" $OWED_ARGS
             case $? in
               0) detail="${detail}control-plane: converged. " ;;
               1) converged=false
@@ -2194,7 +2205,7 @@ jobs:
           else
             bash scripts/deploy-convergence-check.sh converged \
               --label "content instance (guerrilla)" --target instance \
-              --served "$inst_sha" --tip "$TIP" $OWED_ARGS
+              --served "$inst_sha" --tip "$TIP" --emit-strand "$strand_inst" $OWED_ARGS
             case $? in
               0) detail="${detail}instance: converged. "
                  inst_state=converged ;;
@@ -2239,12 +2250,23 @@ jobs:
           # survives someone restoring -e, and it is the house form (PR #16314).
           unchecked=false
           case "$detail" in *UNCHECKED*) unchecked=true ;; esac
+          # The OLDEST strand across both legs: ISO-Z timestamps sort
+          # chronologically as text. awk NR==1, never head -1 (SIGPIPE under
+          # pipefail). An empty result is passed through as empty on purpose:
+          # the adjudicator answers a strand it cannot age with CANNOT READ
+          # (rc 3), never with "age 0".
+          strand_line="$(sort "$strand_cp" "$strand_inst" | awk 'NR==1')"
+          strand_since=""; strand_served=""; strand_newest=""
+          read -r strand_since strand_served strand_newest _ <<< "$strand_line"
+          echo "oldest strand: ${strand_line:-<none — no leg reported one>}"
           verdict_rc=0
           bash scripts/deploy-convergence-check.sh adjudicate \
             --label "production" --stranded "$([ "$converged" = "false" ] && echo true || echo false)" \
             --unchecked "$unchecked" --in-flight-source "$IN_FLIGHT_SOURCE" \
             --instance-result "$INSTANCE_RESULT" --instance-state "$inst_state" \
             --instance-served "$inst_sha" --instance-tip "$TIP" \
+            --strand-since "$strand_since" --strand-served "$strand_served" \
+            --strand-newest "$strand_newest" \
             < "${flight_file}.other" || verdict_rc=$?
 
           echo "converged=${converged}" >> "$GITHUB_OUTPUT"
@@ -2258,8 +2280,13 @@ jobs:
             echo "::error::the convergence verdict could not be adjudicated — refusing to conclude green"
             exit 2
           fi
-          if [ "$verdict_rc" -ne 0 ]; then
-            echo "::error::production is STRANDED and no deploy is in flight to carry the missing commit — ${detail}"
+          # rc 3 is CANNOT READ (task-a077f2e24350d3af): stranded, a deploy
+          # notionally in flight, and the strand's AGE could not be established
+          # — so the suppression had no expiry and refused rather than green.
+          if [ "$verdict_rc" -eq 3 ]; then
+            echo "::error::CANNOT READ — production is stranded and the strand age (or the deploy lock wait) is unreadable, so in-flight suppression cannot be bounded — ${detail}"
+          elif [ "$verdict_rc" -ne 0 ]; then
+            echo "::error::production is STRANDED — a failed deploy attempt, a strand STALLED past 2x the deploy lock wait, or nothing in flight to carry it (the adjudication above names which) — ${detail}"
           fi
           exit "$verdict_rc"
 
