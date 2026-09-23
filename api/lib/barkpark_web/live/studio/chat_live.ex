@@ -608,7 +608,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   def handle_event("toggle-task-picker", _params, socket) do
     case socket.assigns.task_picker do
       nil ->
-        rows = Tasks.ready([limit: 8] ++ hand_task_scope(socket)) |> Enum.map(&hand_ready_row/1)
+        rows =
+          case hand_task_scope(socket) do
+            [workspace_id: nil, project_id: _] -> []
+            scope -> Tasks.ready([limit: 8] ++ scope) |> Enum.map(&hand_ready_row/1)
+          end
+
         {:noreply, assign(socket, task_picker: rows)}
 
       _open ->
@@ -6380,10 +6385,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # The workspace AND dataset are `TaskLedgerScope.resolve/1`'s — the SAME
     # scope the picker and the agent's own bp hands write in, so the strip folds
     # the rows it can act on.
-    if connected?(socket) do
-      %{dataset: dataset, workspace_id: workspace_id} =
-        TaskLedgerScope.resolve(ledger_workspace_id(socket))
+    #
+    # No workspace -> no subscription at all, not the global topic alone: the
+    # strip of a viewer acting in no workspace is empty, live as on hydrate.
+    %{dataset: dataset, workspace_id: workspace_id} =
+      TaskLedgerScope.resolve(ledger_workspace_id(socket))
 
+    if connected?(socket) and is_binary(workspace_id) do
       Broadcast.subscribe_documents(dataset, workspace_id)
     end
 
@@ -6413,7 +6421,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # into that workspace, so the strip reads the scope the agent WRITES in. It
   # used to be the instance Default for every viewer, which on the scoped mount
   # showed an admin of workspace A the Default workspace's queue and claims.
-  # No workspace resolved -> nil -> fail-closed reads, never a Default fallback.
+  # No workspace resolved -> nil -> NO read and NO subscription, never a Default
+  # fallback and never a global read. The three consumers short-circuit on nil
+  # themselves rather than trusting each callee's nil semantics: `Tasks.Queue`'s
+  # own comment calls a nil workspace "the explicit-global read" even though its
+  # outer `scope_to_workspace/3` happens to close it today.
   defp ledger_workspace_id(socket) do
     case socket.assigns[:current_workspace] do
       %{id: ws_id} when is_binary(ws_id) -> ws_id
@@ -6474,11 +6486,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
     worker = Runtime.worker_id(socket.assigns.provider, socket.assigns.store_session_id)
 
     rows =
-      Tasks.prime([worker: worker, limit: 10] ++ hand_task_scope(socket))
-      |> Map.get(:in_progress, [])
-      |> Map.new(fn d ->
-        {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
-      end)
+      case hand_task_scope(socket) do
+        [workspace_id: nil, project_id: _] ->
+          %{}
+
+        scope ->
+          Tasks.prime([worker: worker, limit: 10] ++ scope)
+          |> Map.get(:in_progress, [])
+          |> Map.new(fn d ->
+            {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
+          end)
+      end
 
     # SEED the transition scope off the SAME read (tlv, no second query): every
     # claim this worker already holds is a task this session has touched, so a

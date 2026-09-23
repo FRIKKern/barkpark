@@ -190,6 +190,62 @@ defmodule BarkparkWeb.Studio.ChatStripTaskWorkspaceTest do
     end
   end
 
+  # A viewer with NO resolved workspace. Reachable on the flat mount: an admin
+  # token whose `workspace_id` is NULL and which holds no membership passes
+  # `{LiveAuth, :admin}` (a workspace-blind permission gate), and
+  # `StudioChrome.default_scope_fallback/1` then refuses to pin the Default
+  # because `Tenancy.Auth.authorize/3` says it is authorized nowhere. The
+  # strip and picker must read NOTHING for that socket, never every tenant.
+  describe "flat /studio/chat — a viewer with NO current workspace" do
+    test "folds no tenant's claim and lists no tenant's ready task", ctx do
+      raw = "strip-unbound-#{System.unique_integer([:positive])}"
+
+      {:ok, token} =
+        Barkpark.Auth.create_token(raw, "strip unbound", @ledger, ["read", "write", "admin"])
+
+      {:ok, _} =
+        token |> Ecto.Changeset.change(%{workspace_id: nil}) |> Barkpark.Repo.update()
+
+      {sid, worker} = session!(ctx.ws_a)
+      held = claim_in_each!(ctx.scopes, worker)
+      ready = Map.new(ctx.scopes, fn {k, scope} -> {k, task!(scope, "ready #{k}")} end)
+
+      {:ok, view, _html} =
+        live(init_test_session(ctx.conn, %{"api_token" => raw}), "/studio/chat/#{sid}")
+
+      %{socket: %{assigns: assigns}} = :sys.get_state(view.pid)
+
+      assert is_nil(assigns[:current_workspace]),
+             "precondition: this socket resolved a workspace " <>
+               "(#{inspect(assigns[:current_workspace])}); the nil arm is not exercised"
+
+      assert assigns[:store_session_id] == sid,
+             "precondition: the session did not load, so the hydrate never ran"
+
+      assert label(strip_ids(render(view)), held) == [],
+             "a viewer with NO workspace was shown claims in the Doing strip: " <>
+               inspect(label(strip_ids(render(view)), held))
+
+      # The live path: a fresh claim in each tenant after mount.
+      later = claim_in_each!(ctx.scopes, worker)
+
+      assert label(strip_ids(render(view)), later) == [],
+             "a viewer with NO workspace folded live claims: " <>
+               inspect(label(strip_ids(render(view)), later))
+
+      picker = picker_html(render_click(view, "toggle-task-picker", %{}))
+
+      listed =
+        ready
+        |> Enum.filter(fn {_k, doc} -> picker =~ ~s(phx-value-id="#{doc.doc_id}") end)
+        |> Enum.map(fn {k, _doc} -> k end)
+        |> Enum.sort()
+
+      assert listed == [],
+             "a viewer with NO workspace was listed ready tasks: #{inspect(listed)}"
+    end
+  end
+
   describe "POSITIVE CONTROL: flat /studio/chat — an admin of Default" do
     test "the Doing strip still folds the Default claim, hydrate and live", ctx do
       {sid, worker} = session!(ctx.default_ws)
