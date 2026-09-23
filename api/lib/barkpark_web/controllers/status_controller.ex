@@ -52,6 +52,18 @@ defmodule BarkparkWeb.StatusController do
       # The sha is the identity; `version`'s trailing segment is only a
       # commits-since-tag distance. Public + unauthenticated on purpose.
       commit: health.commit,
+      # Inventory of this node. DISCLOSURE (task-fe88bf2ed4df476d): anonymous
+      # callers could NOT read which plugins are enabled before this field —
+      # anonymous /v1/capabilities projects every plugin-sourced command and
+      # noun away, and the named roster, GET /v1/plugins, sits behind
+      # :require_admin + :require_platform_operator. So this public payload
+      # carries the COUNT only and points at that existing admin route for the
+      # names; it never lists them.
+      capabilities: %{plugins_enabled: health.plugins_enabled, inventory: "/v1/plugins"},
+      # latest applied version + pending count. The `migrations` component was
+      # already public as a yes/no; the version is a filename in the public repo
+      # and, while nothing is pending, follows from the public `commit`.
+      migrations: health.migrations,
       uptime_seconds: health.uptime_seconds,
       sla: Status.sla(),
       incidents:
