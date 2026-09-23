@@ -1533,21 +1533,25 @@ jobs:
       # 20.20.2 (was a floor of 69; the suite had grown 11 arms past it), agreed
       # by main run 34647939447. Two-sided `-ne`: see the decision beside the
       # seal-predicate pin above.
-      - name: Responsive sweep unit tests (89-test exact pin)
+      # PIN 94 — re-derived 2026-09-24 on node 20.20.2 by task-1ac954ba0db927cb
+      # (was 89): five residue-verdict arms joined the suite. Read off a RUN of
+      # `node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs`
+      # (`# pass 94`), never by adding five.
+      - name: Responsive sweep unit tests (94-test exact pin)
         run: |
           set -euo pipefail
           # Same self-test as the console harness step above: the parser must still
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 89 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 89 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 94 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 94 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs 2>&1 | tee /tmp/breakpoint-sweep-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/breakpoint-sweep-tests.txt)
-          if [ "${tally:-0}" -ne 89 ]; then
-            echo "::error::responsive sweep unit tests: ran ${tally:-0} test(s), the committed pin is 89 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/breakpoint-sweep.test.mjs: bump every 89 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 94 ]; then
+            echo "::error::responsive sweep unit tests: ran ${tally:-0} test(s), the committed pin is 94 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/breakpoint-sweep.test.mjs: bump every 94 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "responsive sweep unit tests: ${tally} tests, exact pin 89 — the pin re-earned"
+          echo "responsive sweep unit tests: ${tally} tests, exact pin 94 — the pin re-earned"
 
       # THE ATTENTION-SCENARIO AXIS'S OWN TESTS (#16372, wired by task-e3bd53c0df306521).
       # attention-scenarios.mjs derives the scenario axis at run time from app.js's
