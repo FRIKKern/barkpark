@@ -3224,6 +3224,9 @@ defmodule BarkparkWeb.Router do
     # seat HERE (cross-tenant rail — an admin of A must not reach B's token).
     get("/v1/tokens", MemberController, :tokens)
     delete("/v1/tokens/:id", MemberController, :revoke_token)
+    # Rotate: same gate as revoke (seat HERE); the ceilings a secret-returning
+    # verb needs live in `Auth.rotate_token/3`.
+    post("/v1/tokens/:id/rotate", MemberController, :rotate_token)
   end
 
   # Scoped CHAT token mint (admin) — mints a workspace-bound token whose
