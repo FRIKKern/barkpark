@@ -23504,7 +23504,7 @@ test("task-1614ac4ba29eec9b: every derived user-text host wraps the user string 
 
   for (const [host, snip] of BIDI_SOURCE_PINS) {
     assert.ok(APP_SRC.includes(snip), host + ": the isolated markup is gone from app.js — " + JSON.stringify(snip));
-    const bare = snip.replace("<bdi>", "").replace("</bdi>", "");
+    const bare = snip.replace(/<\/?bdi>/g, "");
     assert.ok(!APP_SRC.includes(bare), host + ": an UN-isolated copy of this markup is in app.js — " + JSON.stringify(bare));
   }
   assert.equal(BIDI_SOURCE_PINS.length, 22, "the source-pinned roster is the 22 derived unmountable sites");

@@ -653,7 +653,7 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
-      # PIN 1535 — bumped 2026-09-24 from 1534 on console/1614-bidi-hosts (task-1614ac4ba29eec9b):
+      # PIN 1535 — bumped 2026-09-23 from 1534 on console/1614-bidi-hosts (task-1614ac4ba29eec9b):
       # +1 test. Every user-text host derived from app.js rides its name/email in
       # its own <bdi>; one __app.test.mjs test pins the hooked hosts by render and
       # the unmountable ones by source. RE-MEASURED, not added: `node --test
@@ -3078,7 +3078,7 @@ jobs:
       # as it paints alone in its own <bdi> — measured per code unit from glyph
       # rects in headless Chrome, never innerText. Two CONTROL rows render an RTL
       # string WITHOUT an isolate and must read BORROWED, or the run exits 3.
-      # Measured on a developer host (Chrome 153, 2026-09-24): 76/76 host rows
+      # Measured on a developer host (Chrome 153, 2026-09-23): 76/76 host rows
       # across 22 hosts green; removing the <bdi> from fleetRow's .fleet-name
       # alone reds 2 rows and exits 1. It launches Chrome over
       # --remote-debugging-pipe, so it needs no WebSocket and runs on this job's
