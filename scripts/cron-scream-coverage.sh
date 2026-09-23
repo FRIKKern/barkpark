@@ -15,8 +15,16 @@
 #   paper-readers.yml         its step `Report failure to a human`
 #   codebase-intel.yml        its step `Report failure to a human`
 #
-# Re-derive that table at any time, by the invocation rather than by a line
-# number:  grep -rln 'bash .*file-ci-failure-issue\.sh' .github/workflows/
+# RE-DERIVE, rather than trust the four lines above. The whole matrix, both
+# mechanisms, every cron'd workflow:
+#
+#     bash scripts/cron-scream-coverage.sh --list
+#
+# The R3 half alone — note it is NOT filtered to cron'd workflows and returns
+# every notifier invoker in the tree (22 of them today), so it is a lead, not
+# the verdict:
+#
+#     grep -rln 'bash .*file-ci-failure-issue\.sh' .github/workflows/
 #
 # The filing is not stale by half; it is 0-for-4. And the two questions it asked
 # for — did the cron DISPATCH, did it CONCLUDE green — are BOTH already answered
