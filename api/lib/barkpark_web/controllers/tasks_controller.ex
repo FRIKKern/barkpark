@@ -2729,7 +2729,9 @@ defmodule BarkparkWeb.TasksController do
   # lengthen every derivation, which crosses the TTL more often. Fail-open in
   # the only regime where the cap matters. The deadline arm is now GONE; the
   # deadline itself stays on the row as diagnostic data.
-  @graph_corpus_slots :barkpark_graph_corpus_slots
+  # The table itself is CORE (`Barkpark.Content.Graph.CorpusSlots`), created at
+  # boot by `Barkpark.Application.start/2` so it exists with every plugin off.
+  @graph_corpus_slots Barkpark.Content.Graph.CorpusSlots.table()
   @graph_corpus_max_concurrency 4
   @graph_corpus_slot_ttl_ms 60_000
 
@@ -3094,7 +3096,8 @@ defmodule BarkparkWeb.TasksController do
 
   defp acquire_graph_corpus_slot do
     # NO lazy `:ets.new` here. The table is created once from
-    # `Barkpark.Application.start/2`; a request-path create would hand ownership
+    # `Barkpark.Application.start/2` via the core
+    # `Barkpark.Content.Graph.CorpusSlots.init/0`; a request-path create would hand ownership
     # of the bound to a transient request process, and the bound would die (and
     # silently RESET) with it. If the table is somehow absent the `rescue` below
     # sheds rather than 500s.
@@ -3218,33 +3221,6 @@ defmodule BarkparkWeb.TasksController do
     end
 
     :ok
-  end
-
-  @doc """
-  Create the `/v1/graph` admission-cap slot table, owned by the caller.
-
-  Called ONCE from `Barkpark.Application.start/2` so the table's owner is the
-  application process rather than whichever request happened to arrive first —
-  a bound whose bookkeeping dies with a request is not a bound. Idempotent: a
-  second call (a re-boot in the test VM) is a no-op, and the rows are slots, so
-  nothing is lost by NOT clearing them.
-  """
-  def init_graph_corpus_slots, do: ensure_graph_corpus_slots()
-
-  defp ensure_graph_corpus_slots do
-    case :ets.whereis(@graph_corpus_slots) do
-      :undefined ->
-        try do
-          :ets.new(@graph_corpus_slots, [:named_table, :public, :set, read_concurrency: true])
-        rescue
-          # Lost the create race to a concurrent boot (the test VM re-starts the
-          # supervision tree) — the table exists, which is all this needs.
-          ArgumentError -> :ok
-        end
-
-      _ref ->
-        :ok
-    end
   end
 
   defp graph_corpus_max_concurrency,

@@ -173,8 +173,9 @@ defmodule Barkpark.Tasks.Judge do
   FAILS CLOSED: a configured-but-malformed URL raises rather than falling back
   to api.anthropic.com. A silent fallback would send an operator's prompts —
   and their key — to the vendor they deliberately routed away from.
-  `Barkpark.Application.start/2` resolves it once at boot, so a typo refuses the
-  node instead of surfacing as a judge that quietly never runs (every error on
+  The Tasks plugin's boot child (`Barkpark.Plugins.Tasks.register_workers/1`)
+  resolves it once at boot, so a typo refuses the node instead of surfacing as
+  a judge that quietly never runs (every error on
   this path is swallowed by design: the judge fails OPEN so an outage cannot
   block a create).
   """

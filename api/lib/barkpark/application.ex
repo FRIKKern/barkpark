@@ -35,8 +35,11 @@ defmodule Barkpark.Application do
     # runs while it is disabled). OnixEdit resolves it from its OWN
     # `register_workers/1` boot child instead, so it still refuses the node on
     # a malformed value wherever the plugin is enabled, and simply does not run
-    # where it is absent.
-    _ = Barkpark.Tasks.Judge.endpoint()
+    # where it is absent. The task-dedup judge's endpoint check follows the
+    # same shape (task-6325dacb0e233d75): it runs from the Tasks plugin's own
+    # `register_workers/1` boot child. The HOST value it validates,
+    # `:anthropic_api_url`, is still refused here at boot through the title
+    # check below, which reads the same key with the same validation.
     _ = Barkpark.StudioChat.Titles.endpoint()
 
     # Companion to the check above, and the other half of the same defect: the
@@ -73,7 +76,9 @@ defmodule Barkpark.Application do
     # (the bound silently resets) and a sibling's `:ets.insert`/`:ets.delete`
     # would raise ArgumentError, i.e. a 500 from the guard against 500s. This
     # process lives as long as the application, so the bound does too.
-    BarkparkWeb.TasksController.init_graph_corpus_slots()
+    # CORE, not the Tasks plugin: `GET /v1/graph` is core-mounted and must serve
+    # with every plugin off (see `Barkpark.Content.Graph.CorpusSlots`).
+    Barkpark.Content.Graph.CorpusSlots.init()
 
     # Goal barkpark-G1, task s2: ask the Plugins.Registry for every plugin-
     # contributed child spec BEFORE constructing the supervision tree. The
