@@ -22900,14 +22900,24 @@
   // (3-item glance, loadOverviewDigest) renders through this. The full #activity
   // feed does NOT: it coalesces through the grammar below. A 3-item preview has
   // nothing to fold, so it keeps the terse fleet-row shape.
+  //
+  // The two user-authored strings in .fleet-name (the actor email and the
+  // metadata name) each ride in their own <bdi> (cch-rtl-script-neutral-
+  // borrowing). esc() already drops the explicit bidi controls; what it cannot
+  // touch is IMPLICIT direction: an email written in Arabic or Hebrew letters is
+  // strong-RTL by script, and a neutral at its edge (a trailing "." or "-") was
+  // resolved against the LTR paragraph around it, so it painted on the far side
+  // of the RTL run from where the string itself puts it. <bdi> gives the string
+  // its own direction (dir=auto) and makes it one neutral unit in the row.
+  // Measured in headless Chrome by __preview__/bidi-isolation.mjs.
   function activityRow(e) {
     var who = (e.actor && e.actor.email) || "system";
     var when = e.inserted_at ? new Date(e.inserted_at).toLocaleString() : "";
-    var meta = e.metadata && e.metadata.name ? " &middot; " + esc(String(e.metadata.name)) : "";
+    var meta = e.metadata && e.metadata.name ? " &middot; <bdi>" + esc(String(e.metadata.name)) + "</bdi>" : "";
     var target = e.target_type ? '<span class="badge"><span class="dot unknown"></span>' + esc(e.target_type) + "</span>" : "";
     return '<div class="fleet-row activity-row">' +
       '<div class="fleet-main">' +
-        '<div class="fleet-name">' + esc(who) + " " + esc(humanAction(e.action)) + meta + "</div>" +
+        '<div class="fleet-name"><bdi>' + esc(who) + "</bdi> " + esc(humanAction(e.action)) + meta + "</div>" +
         '<div class="fleet-url dim">' + esc(when) + "</div>" +
       "</div>" +
       '<div class="fleet-badges">' + target + "</div>" +
@@ -28125,7 +28135,9 @@
     }
     return '<div class="set-row">' +
       '<span class="set-ava" aria-hidden="true">' + esc(memberInitials(m.email)) + "</span>" +
-      '<div class="set-row-main"><div class="set-row-name">' + esc(m.email) +
+      // The email rides in its own <bdi>, apart from the system's "(you)" — the
+      // same isolation, and the same reason, as activityRow's .fleet-name.
+      '<div class="set-row-main"><div class="set-row-name"><bdi>' + esc(m.email) + "</bdi>" +
         (isSelf ? ' <span class="dim">(you)</span>' : "") + "</div>" +
         '<div class="set-row-meta">joined ' + esc(relTime(m.joined_at)) + "</div></div>" +
       // THE CHIP READS `targetRole`, NOT `m.role`
