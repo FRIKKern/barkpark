@@ -50,8 +50,10 @@ try {
   assert.deepEqual(batches, [], "an undone indentation cannot emit a save");
 
   editor.commands.setHardBreak();
-  assert.deepEqual(editor.getJSON(), original, "Shift-Enter's command cannot create a disappearing break");
-  assert.match(canvas.querySelector('[role="status"]').textContent, /line breaks/);
+  assert.deepEqual(tiptapToBlock(editor.getJSON(), "list", "list").items[1],
+    [{ type: "text", value: "\n" }, { type: "text", value: "Beta" }], "Shift-Enter serializes its break");
+  editor.commands.undo();
+  assert.deepEqual(editor.getJSON(), original, "break Undo restores the exact source");
   assert.equal(canvas.flushPendingChanges(), false);
 
   const paste = new window.Event("paste", { bubbles: true, cancelable: true });
@@ -90,8 +92,10 @@ try {
     const initial = single._editor.getJSON();
     single._editor.commands.setTextSelection(7);
     single._editor.commands.setHardBreak();
-    assert.deepEqual(single._editor.getJSON(), initial, "per-block editing uses the same lossless boundary");
-    assert.match(single.querySelector('[role="status"]').textContent, /line breaks/);
+    assert.deepEqual(tiptapToBlock(single._editor.getJSON(), "paragraph", "paragraph").content,
+      [{ type: "text", value: "Before" }, { type: "text", value: "\n" }, { type: "text", value: "After" }]);
+    single._editor.commands.undo();
+    assert.deepEqual(single._editor.getJSON(), initial, "per-block break Undo restores source");
     single.flushPendingChanges();
     assert.deepEqual(singleOps, [{ op: "patch-block", id: "paragraph", patch: {
       content: [{ type: "text", value: "BeforeAfter" }],

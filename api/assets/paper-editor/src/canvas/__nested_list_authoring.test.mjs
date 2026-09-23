@@ -75,7 +75,9 @@ try {
       const beforeBreak = ed.getJSON();
       position(ed, "Build", 2);
       ed.commands.setHardBreak();
-      assert.deepEqual(ed.getJSON(), beforeBreak, "hard breaks remain rejected");
+      assert.match(JSON.stringify(saved().items), /Bu.*\\n.*ild/, "nested breaks serialize without losing the child");
+      ed.commands.undo();
+      assert.deepEqual(ed.getJSON(), beforeBreak, "nested break Undo restores exact carriers");
       const invalidStart = ed.state.schema.nodes.orderedList.create({ start: 3 },
         ed.state.schema.nodes.listItem.create(null, ed.state.schema.nodes.paragraph.create(null, ed.state.schema.text("Custom start"))));
       ed.view.dispatch(ed.state.tr.replaceWith(0, ed.state.doc.content.size, invalidStart));

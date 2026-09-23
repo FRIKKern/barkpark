@@ -34,6 +34,8 @@ Elixir/Phoenix backend: CRUD, real-time, plugins, Studio. Dev: `mix phx.server` 
 
 HTML table clipboard handling normalizes ordinary cell paragraphs/BRs to PortableDoc newlines before the schema parses them. Nested structures and merged headers keep the clipboard intact and show plain-text paste guidance. Canvas regression: `__html_table_paste.test.mjs`.
 
+Paragraph/heading inline breaks serialize as newline text, including list bodies; DOM newline normalization and Undo preserve source carriers. Other field and list-shape boundaries remain guarded. Regression: `__inline_breaks.test.mjs`.
+
 Clipboard format selection honors explicit plain paste before images. Unrepresented HTML images and ambiguous image-file plus rich/text payloads preserve the selection with visible recovery; file-only images retain the host uploader. One file plus image-only HTML uses that same upload and preserves alt text; independent text/captions/links or extra images stay explicit ambiguity. It does not fetch or convert external HTML image URLs.
 
 Mounted save-ack tests await native blur before settlement assertions; press-watchdog tests use a deterministic clock for the exact grace boundary. Production delays remain unchanged.

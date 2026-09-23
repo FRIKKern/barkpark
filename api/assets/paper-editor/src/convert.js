@@ -363,8 +363,8 @@ function pdKindToMark(kind) {
 // round-trips through these two, never a reinvented inline serializer.
 export function tiptapInlineToPd(content) {
   return (content || [])
-    .filter((n) => n.type === "text")
-    .map(tiptapTextNodeToPd);
+    .filter((n) => n.type === "text" || n.type === "hardBreak")
+    .map(n => tiptapTextNodeToPd(n.type === "hardBreak" ? { ...n, type: "text", text: "\n" } : n));
 }
 
 // ── block ⇄ TipTap document ────────────────────────────────────────────────
@@ -950,6 +950,13 @@ function comparableListInline(content) {
   const out = [];
   for (const node of content || []) {
     const next = deepCloneJson(node);
+    // Chromium may parse a literal inline newline as a native break while
+    // typing. Both represent the same PortableDoc text; retain source carriers
+    // when this DOM normalization is the only difference (including Undo).
+    if (next.type === "hardBreak") {
+      next.type = "text";
+      next.text = "\n";
+    }
     if (!next.marks?.length) delete next.marks;
     const previous = out[out.length - 1];
     if (previous?.type === "text" && next.type === "text" && jsonEqual(previous.marks, next.marks)) {
@@ -1159,8 +1166,8 @@ function clampLevel(level) {
 // carry a flat string in portable-doc, so marks are dropped here by design.
 function plainText(content) {
   return (content || [])
-    .filter((n) => n.type === "text")
-    .map((n) => n.text || "")
+    .filter((n) => n.type === "text" || n.type === "hardBreak")
+    .map((n) => n.type === "hardBreak" ? "\n" : n.text || "")
     .join("");
 }
 

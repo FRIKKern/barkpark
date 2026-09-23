@@ -2,7 +2,7 @@ import { Extension } from "@tiptap/core";
 import { Plugin } from "@tiptap/pm/state";
 
 // PortableDoc list items hold one inline body followed by nested lists. Its inline
-// serializer has no hard-break carrier. Reject other shapes before they can
+// serializer stores inline breaks as newline text. Reject other shapes before they can
 // look saved locally while disappearing in the persisted projection.
 export function portableTextBoundary(host, singleBlockType = () => null) {
   return Extension.create({
@@ -19,9 +19,9 @@ export function portableTextBoundary(host, singleBlockType = () => null) {
             message = "This field edits one block. Add separate blocks in the Paper canvas instead. This edit was not applied.";
           }
         }
-        tr.doc.descendants(node => {
-          if (node.type.name === "hardBreak") {
-            message = "Inline line breaks are not supported yet. Use separate paragraphs or list items instead. This edit was not applied.";
+        tr.doc.descendants((node, _pos, parent) => {
+          if (node.type.name === "hardBreak" && !["paragraph", "heading"].includes(parent?.type.name)) {
+            message = "Line breaks are not supported in this field yet. This edit was not applied.";
           } else if (node.type.name === "orderedList" && node.attrs.start !== 1) {
             message = "Custom list starting numbers are not supported yet. Start numbering at 1. This edit was not applied.";
           } else if (node.type.name === "listItem") {
