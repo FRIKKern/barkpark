@@ -423,8 +423,346 @@ fi
 # The env var exists ONLY so deploy/*_test.sh can drive this at 1 s; nothing on
 # a box sets it. A non-numeric or sub-second value falls back to 60 rather than
 # spinning.
+# ---- WHO HOLDS THE LOCK (task-e0e4fa0b709c093e) ----------------------------
+# A lock is correct. Two concurrent deploys onto one box would be worse than any
+# stall. What was wrong until this block existed is that the contention path was
+# MUTE: a queued run printed "another deploy holds the lock" and then, thirty
+# minutes later, "gave up waiting", and NOTHING in between or afterwards said
+# WHO held it. Every queued run rediscovered the same nothing, so no agent and
+# no human could act on the log they were given.
+#
+# MEASURED, 2026-09-22 (deploy.yml `instance` jobs, the whole failure set):
+#   35698504994  07:14:06Z -> 12:33:49Z  319.7 min, exit 14  <- took the lock
+#   35699709131  07:29:41Z -> 08:00:02Z   30.4 min, exit 15  <- first to queue
+#   ...thirteen more, every one 30.2-30.4 min, every one exit 15...
+#   35724457145  11:59:34Z -> 12:29:49Z   30.2 min, exit 15  <- last to queue
+# FIFTEEN runs burned 30 minutes each discovering a lock they could not name.
+# (The row that filed this said "eleven of twelve" over 09:27-12:51Z; the runs
+# say FIFTEEN of sixteen over 07:29-12:29Z. Both numbers describe the same
+# episode; the run list is the one that was counted.)
+#
+# THE CAUSE OF THAT EPISODE IS UNKNOWN AND IS NOT WHAT THIS BLOCK FIXES.
+# Nobody established how the lock cleared. Run 35698504994 held it, went silent
+# after 07:20:17Z, and ended exit 14 at 12:33:49Z, minutes before the queue
+# drained — but whether it exited on its own or an owner ended it was never
+# determined, and this block does not determine it either. Do not read the code
+# below as a remedy for a diagnosed root cause. It is a remedy for the fact that
+# the log could not answer the question.
+LOCK_HOLDER_RECORD="${LOCK}.holder"
+
+# N = 45 MINUTES, and it is not a round number (see the stale policy below).
+# TWO independent measurements put a legitimate holder far under it:
+#   * The longest SUCCESSFUL `instance` job in 195 jobs over 2026-09-17..23 ran
+#     752 s = 12.5 min (run 35287987631); the median ran 343 s = 5.7 min. That
+#     job clock is already an OVER-estimate of the hold: it also covers
+#     checkout, the served-sha probe, scp, and the smoke + ancestry steps that
+#     run AFTER the lock is released. 45 min is 3.6x the worst of those.
+#   * 45 min is exactly the runner's own tolerance for a silent remote:
+#     deploy.yml sets ServerAliveInterval=30 x ServerAliveCountMax=90 = 2700 s
+#     on the ssh session that STARTS a holder. Past 45 min that session is gone
+#     by construction, so a holder older than N has already lost the channel it
+#     would report success on. There is no legitimate deploy on the far side.
+DEPLOY_LOCK_STALE_SECS="${BARKPARK_DEPLOY_LOCK_STALE_SECS:-2700}"
+case "$DEPLOY_LOCK_STALE_SECS" in ''|*[!0-9]*) DEPLOY_LOCK_STALE_SECS=2700 ;; esac
+# The liveness SAMPLE WINDOW. Two samples this far apart; see holder_is_live.
+DEPLOY_LOCK_LIVENESS_SECS="${BARKPARK_DEPLOY_LOCK_LIVENESS_SECS:-30}"
+case "$DEPLOY_LOCK_LIVENESS_SECS" in ''|*[!0-9]*) DEPLOY_LOCK_LIVENESS_SECS=30 ;; esac
+# The DELIBERATE break: off unless a caller sets it to exactly 1. deploy.yml
+# passes it from the `break_deploy_lock` workflow_dispatch input, which is a
+# boolean defaulting to false. Anything that is not the literal 1 is off.
+DEPLOY_LOCK_BREAK="${BARKPARK_DEPLOY_LOCK_BREAK:-0}"
+[ "$DEPLOY_LOCK_BREAK" = 1 ] || DEPLOY_LOCK_BREAK=0
+
+# Every pid holding the lock file open, OURS EXCLUDED. `exec 9>"$LOCK"` below
+# opens the file before flock, so this process is always in the raw list and
+# would otherwise be reported as its own holder.
+# fuser(1) first (util-linux, present on the box), lsof(1) as the fallback. If
+# NEITHER exists this prints nothing, and every caller below treats "no
+# identifiable holder" as a refusal to break — never as permission.
+# fd 9 CLOSED IN THE ENUMERATOR, and this is not a nicety. `exec 9>"$LOCK"`
+# leaves fd 9 open across every fork, so the very subshell that runs fuser
+# INHERITS it — fuser then reports itself, its pipeline partner, and any other
+# child of ours as holders of the lock we are waiting for. Measured while
+# writing this: a single probe answered "88238 88240 88241 88242" where only
+# 88238 held anything; the rest were the probe. Unfixed, the automatic break
+# below would have SIGKILLed its own pipeline and reported the lock unbreakable.
+deploy_lock_holder_pids() {
+  local raw="" p tmpf
+  tmpf="${TMPDIR:-/tmp}/bp-deploy-lockpids.$$"
+  # THE ENUMERATOR WRITES TO A FILE, NOT INTO `$( )`, AND THAT IS THE WHOLE
+  # POINT. A command substitution forks a subshell of its own, and THAT subshell
+  # still holds fd 9 — so `raw="$( ( exec 9>&-; fuser ... ) | tr ... )"` still
+  # lists the substitution shell and the `tr` beside it. Measured while writing
+  # this: one probe answered "22329 22387 22388 22390" where only 22329 held
+  # anything, the liveness sampler then saw a set that "changed between samples"
+  # (it was reading its own transient pids), and every holder was judged LIVE
+  # forever. Redirecting to a file means the ONLY process alive at enumeration
+  # time is the subshell below, which has closed fd 9.
+  ( exec 9>&-
+    if command -v fuser >/dev/null 2>&1; then
+      fuser "$LOCK" 2>/dev/null
+    elif command -v lsof >/dev/null 2>&1; then
+      lsof -t -- "$LOCK" 2>/dev/null
+    fi
+  ) > "$tmpf" 2>/dev/null
+  raw="$(tr -s ' \t' '\n\n' < "$tmpf" 2>/dev/null)"
+  rm -f "$tmpf" 2>/dev/null || true
+  if [ -z "$raw" ] && command -v fuser >/dev/null 2>&1 && command -v lsof >/dev/null 2>&1; then
+    # fuser exists but answered nothing; lsof is the second opinion.
+    ( exec 9>&-; lsof -t -- "$LOCK" 2>/dev/null ) > "$tmpf" 2>/dev/null
+    raw="$(tr -s ' \t' '\n\n' < "$tmpf" 2>/dev/null)"
+    rm -f "$tmpf" 2>/dev/null || true
+  fi
+  # OUR OWN PROCESS TREE IS NOT THE HOLDER. Closing fd 9 in the enumerator is
+  # not enough on its own: callers capture this function with `$( )`, and THAT
+  # substitution shell holds fd 9 for as long as the function runs, so fuser
+  # lists it too. Two filters, because each catches what the other cannot:
+  #   * pids that are GONE by now (the transient shells of the enumeration
+  #     itself) — a process that has exited cannot be holding a flock, so this
+  #     is sound independently of what produced it; and
+  #   * pids that are $$ or a DESCENDANT of $$ — the live substitution shell.
+  #     A real holder is never a descendant of this script.
+  local mine
+  mine=" $$ $(proc_descendants "$$" | tr '\n' ' ') "
+  for p in $raw; do
+    # BSD fuser suffixes an access-mode letter to each pid ("1234c"); GNU fuser
+    # does not. Strip a trailing non-digit run rather than dropping the entry,
+    # or every holder is invisible on a BSD box.
+    p="${p%%[!0-9]*}"
+    case "$p" in ''|*[!0-9]*) continue ;; esac
+    case "$mine" in *" $p "*) continue ;; esac
+    ps -p "$p" >/dev/null 2>&1 || continue
+    printf '%s\n' "$p"
+  done
+}
+
+# Elapsed seconds for a pid. `ps -o etimes=` is GNU-only; the BSD/macOS ps this
+# harness also runs on has only the formatted `etime` ([[dd-]hh:]mm:ss), so the
+# fallback parses it rather than printing "?" on half the machines that read
+# this code. Prints nothing when the pid is gone.
+proc_elapsed_secs() {
+  local pid="$1" e d rest h m s
+  e="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
+  case "$e" in ''|*[!0-9]*) e="" ;; esac
+  if [ -n "$e" ]; then printf '%s\n' "$e"; return 0; fi
+  e="$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
+  [ -n "$e" ] || return 1
+  d=0; rest="$e"
+  case "$rest" in *-*) d="${rest%%-*}"; rest="${rest#*-}" ;; esac
+  h=0
+  case "$rest" in
+    *:*:*) h="${rest%%:*}"; rest="${rest#*:}" ;;
+  esac
+  m="${rest%%:*}"; s="${rest#*:}"
+  case "$d$h$m$s" in *[!0-9]*) return 1 ;; esac
+  printf '%s\n' $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$s ))
+}
+
+# Total CPU seconds consumed by a pid and every descendant of it. The second
+# half of the liveness test: a deploy that is working burns CPU even when it
+# happens to have no child at the instant we look.
+proc_tree_cputime() {
+  local pid="$1" total=0 t
+  for t in $(ps -eo pid=,ppid=,time= 2>/dev/null | awk -v root="$pid" '
+    { pid[$1]=$1; ppid[$1]=$2; tm[$1]=$3 }
+    END {
+      # mark root and everything reachable downward from it
+      for (i = 0; i < 64; i++) { mark[root]=1
+        for (p in pid) if (ppid[p] in mark) mark[p]=1 }
+      for (p in mark) if (p in tm) print tm[p]
+    }'); do
+    # [[dd-]hh:]mm:ss -> seconds
+    local dd=0 hh=0 mm ss r="$t"
+    case "$r" in *-*) dd="${r%%-*}"; r="${r#*-}" ;; esac
+    case "$r" in *:*:*) hh="${r%%:*}"; r="${r#*:}" ;; esac
+    mm="${r%%:*}"; ss="${r#*:}"; ss="${ss%%.*}"
+    case "$dd$hh$mm$ss" in ''|*[!0-9]*) continue ;; esac
+    total=$(( total + 10#$dd * 86400 + 10#$hh * 3600 + 10#$mm * 60 + 10#$ss ))
+  done
+  printf '%s\n' "$total"
+}
+
+# Direct + transitive children of a pid, one per line.
+proc_descendants() {
+  ps -eo pid=,ppid= 2>/dev/null | awk -v root="$1" '
+    { pid[$1]=$1; ppid[$1]=$2 }
+    END {
+      for (i = 0; i < 64; i++) { mark[root]=1
+        for (p in pid) if (ppid[p] in mark) mark[p]=1 }
+      for (p in mark) if (p != root && p in pid) print p
+    }'
+}
+
+# ---- THE LIVENESS TEST, which is the load-bearing part ---------------------
+# Returns 0 (LIVE, never break) / 1 (no sign of deploy work over the window).
+#
+# WHAT IT IS AND IS NOT DETECTING. A process that has EXITED cannot hold a
+# flock — the kernel closes its fds — so "the holder is dead" is not the state
+# we can find. What we can find is a holder that is doing NO DEPLOY WORK: an
+# instance-deploy.sh that is wedged, or a stray shell that inherited fd 9 and
+# is sitting in a read. The test is therefore "is this holder DOING anything",
+# sampled over a window, never a single instant.
+#
+# It is deliberately asymmetric. Every one of these is enough to declare LIVE:
+#   * the holder set could not be enumerated at all (no fuser/lsof)
+#   * the holder set CHANGED between samples (it is forking)
+#   * a holder has ANY descendant process in EITHER sample — this is the arm
+#     that protects a real deploy, because mix/git/curl/systemctl/npm/sleep are
+#     all children, and a health-poll loop sleeping between probes still has a
+#     `sleep` child
+#   * total CPU across the holder trees ADVANCED between the samples
+# DEAD requires ALL of: enumerable, unchanged set, zero descendants in BOTH
+# samples, and zero CPU advance across the full window. A single instant with
+# no children proves nothing and is not sufficient on its own.
+deploy_lock_holder_is_live() {
+  local pids1 pids2 p kids cpu1=0 cpu2=0 c
+  pids1="$(deploy_lock_holder_pids)"
+  if [ -z "$pids1" ]; then
+    log "lock liveness: the holder set could not be enumerated — treating the holder as LIVE (refusing to break what cannot be named)"
+    return 0
+  fi
+  for p in $pids1; do
+    kids="$(proc_descendants "$p")"
+    if [ -n "$kids" ]; then
+      log "lock liveness: holder pid=$p has running child process(es) [$(printf '%s' "$kids" | tr '\n' ' ')] — LIVE, not breaking"
+      return 0
+    fi
+    c="$(proc_tree_cputime "$p")"; cpu1=$(( cpu1 + c ))
+  done
+  log "lock liveness: no child process under any holder in sample 1 (cpu=${cpu1}s); re-sampling in ${DEPLOY_LOCK_LIVENESS_SECS}s before judging"
+  sleep "$DEPLOY_LOCK_LIVENESS_SECS"
+  pids2="$(deploy_lock_holder_pids)"
+  if [ -z "$pids2" ]; then
+    log "lock liveness: the holder set could not be enumerated on the second sample — treating the holder as LIVE"
+    return 0
+  fi
+  if [ "$pids1" != "$pids2" ]; then
+    log "lock liveness: the holder set changed between samples ($(printf '%s' "$pids1" | tr '\n' ' ')-> $(printf '%s' "$pids2" | tr '\n' ' ')) — it is forking, LIVE, not breaking"
+    return 0
+  fi
+  for p in $pids2; do
+    kids="$(proc_descendants "$p")"
+    if [ -n "$kids" ]; then
+      log "lock liveness: holder pid=$p has running child process(es) [$(printf '%s' "$kids" | tr '\n' ' ')] on the second sample — LIVE, not breaking"
+      return 0
+    fi
+    c="$(proc_tree_cputime "$p")"; cpu2=$(( cpu2 + c ))
+  done
+  if [ "$cpu2" -gt "$cpu1" ]; then
+    log "lock liveness: holder CPU advanced ${cpu1}s -> ${cpu2}s across ${DEPLOY_LOCK_LIVENESS_SECS}s — LIVE, not breaking"
+    return 0
+  fi
+  log "lock liveness: NO SIGN OF WORK — over ${DEPLOY_LOCK_LIVENESS_SECS}s the holder set was unchanged, had zero child processes in both samples, and burned zero CPU (${cpu1}s -> ${cpu2}s)"
+  return 1
+}
+
+# How long the CURRENT holder has held the lock, and on what basis. The record
+# is the truth when it is there and names a pid that really holds the file;
+# otherwise the holder process's own elapsed time, which is an UPPER BOUND on
+# the hold (the process is at least as old as its hold). The basis is printed,
+# because the two answers differ and a reader deciding whether a break was
+# justified needs to know which one was used.
+deploy_lock_holder_age() { # echoes "<secs> <basis>", or nothing
+  local rec_pid rec_epoch now pids p
+  pids="$(deploy_lock_holder_pids)"
+  [ -n "$pids" ] || return 1
+  if [ -r "$LOCK_HOLDER_RECORD" ]; then
+    rec_pid="$(sed -n 's/^pid=//p' "$LOCK_HOLDER_RECORD" | head -1)"
+    rec_epoch="$(sed -n 's/^acquired_epoch=//p' "$LOCK_HOLDER_RECORD" | head -1)"
+    case "$rec_epoch" in ''|*[!0-9]*) rec_epoch="" ;; esac
+    if [ -n "$rec_epoch" ]; then
+      for p in $pids; do
+        if [ "$p" = "$rec_pid" ]; then
+          now="$(date -u +%s)"
+          printf '%s holder-record\n' $(( now - rec_epoch ))
+          return 0
+        fi
+      done
+    fi
+  fi
+  for p in $pids; do
+    now="$(proc_elapsed_secs "$p")" || continue
+    printf '%s process-elapsed(upper-bound)\n' "$now"
+    return 0
+  done
+  return 1
+}
+
+# CRITERION 1: this is what eleven-to-fifteen runs could not print.
+log_deploy_lock_holder() {
+  local pids p elapsed cmd age
+  pids="$(deploy_lock_holder_pids)"
+  if [ -n "$pids" ]; then
+    for p in $pids; do
+      if elapsed="$(proc_elapsed_secs "$p")"; then elapsed="${elapsed}s"; else elapsed="unknown"; fi
+      cmd="$(ps -o args= -p "$p" 2>/dev/null | tr '\n' ' ')"
+      log "lock holder: pid=$p elapsed=$elapsed cmd=${cmd:-<exited between the listing and the read>}"
+    done
+  else
+    log "lock holder: NO pid could be identified as holding $LOCK — fuser(1) and lsof(1) are both absent or answered nothing. Install util-linux/lsof on this box; until then the holder cannot be named and will never be broken automatically."
+  fi
+  if [ -r "$LOCK_HOLDER_RECORD" ]; then
+    log "lock holder record ($LOCK_HOLDER_RECORD): $(tr '\n' ' ' < "$LOCK_HOLDER_RECORD")"
+  else
+    log "lock holder record: absent ($LOCK_HOLDER_RECORD) — the holder started before this script recorded holders, or could not write it"
+  fi
+  if age="$(deploy_lock_holder_age)"; then
+    log "lock holder age: ${age% *}s (basis: ${age#* }); the stale-holder threshold is ${DEPLOY_LOCK_STALE_SECS}s"
+  fi
+}
+
+# The holder writes itself down the moment it wins, so the NEXT contender does
+# not depend on fuser/lsof to learn who to blame. Written to a SIDECAR, never
+# into $LOCK: `exec 9>"$LOCK"` truncates that file at open, so every queued run
+# would wipe the holder's own record before it ever read it.
+record_deploy_lock_holder() {
+  {
+    printf 'pid=%s\n' "$$"
+    printf 'acquired_epoch=%s\n' "$(date -u +%s)"
+    printf 'acquired_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'mode=%s\n' "$MODE"
+    printf 'github_run_id=%s\n' "${GITHUB_RUN_ID:-<none>}"
+    printf 'cmd=%s\n' "$(ps -o args= -p $$ 2>/dev/null | tr '\n' ' ')"
+  } > "$LOCK_HOLDER_RECORD" 2>/dev/null \
+    || log "could not write $LOCK_HOLDER_RECORD — the next contender falls back to fuser/lsof"
+  # Held while the trap runs (fds close after traps), so this can never delete a
+  # successor's record.
+  trap 'rm -f "$LOCK_HOLDER_RECORD" 2>/dev/null || true' EXIT
+}
+
+# Break the lock by ending its holders, then retry. NEVER called on its own
+# judgement — both call sites below decide first and say which decision fired.
+# $1 is the reason, printed verbatim, because "it broke the lock" without
+# "and here is why it judged it broken" is the same mute log this block exists
+# to end.
+break_deploy_lock() { # <reason>
+  local pids p
+  pids="$(deploy_lock_holder_pids)"
+  if [ -z "$pids" ]; then
+    log "lock break: refusing — no holder pid could be identified, so there is nothing to end and a blind break would only race the real holder"
+    return 1
+  fi
+  log "lock break: ending holder pid(s) [$(printf '%s' "$pids" | tr '\n' ' ')] — $1"
+  for p in $pids; do kill -TERM "$p" 2>/dev/null || true; done
+  sleep 5
+  for p in $pids; do
+    if kill -0 "$p" 2>/dev/null; then
+      log "lock break: pid=$p ignored SIGTERM — SIGKILL"
+      kill -KILL "$p" 2>/dev/null || true
+    fi
+  done
+  sleep 2
+  rm -f "$LOCK_HOLDER_RECORD" 2>/dev/null || true
+  if flock -n 9; then
+    log "lock break: SUCCEEDED — this run now holds the deploy lock"
+    return 0
+  fi
+  log "lock break: the lock is STILL held after ending those pids — not proceeding; the deploy stays refused rather than running unserialised"
+  return 1
+}
+
 queue_for_deploy_lock() {
-  local budget="$1" label="${2:-the deploy lock}" beat waited=0 step
+  local budget="$1" label="${2:-the deploy lock}" beat waited=0 step holder_pids
   beat="${BARKPARK_LOCK_HEARTBEAT_SECS:-60}"
   case "$beat" in ''|*[!0-9]*) beat=60 ;; esac
   [ "$beat" -lt 1 ] && beat=60
@@ -433,19 +771,92 @@ queue_for_deploy_lock() {
     [ "$step" -gt "$beat" ] && step="$beat"
     flock -w "$step" 9 && return 0
     waited=$(( waited + step ))
-    log "still queued for $label — ${waited}s waited of ${budget}s max"
+    # The heartbeat carries the HOLDER, not just the clock. A reader who joins
+    # the log mid-queue should never have to scroll back to the first contention
+    # line to learn which pid to look at, and the pid can change under them:
+    # runs queued behind one holder are inherited by the next one that wins.
+    holder_pids="$(deploy_lock_holder_pids | tr '\n' ' ')"
+    log "still queued for $label — ${waited}s waited of ${budget}s max (holder pid(s): ${holder_pids:-<unidentifiable>})"
   done
   return 1
 }
 
 exec 9>"$LOCK"
 if ! flock -n 9; then
+  # THE MUTE PATH ENDS HERE. Whatever we do next, the log first says who holds
+  # it — this runs before the refusal, before the queue, and before any break.
+  log_deploy_lock_holder
   if [ "$MODE" != "deploy" ]; then
     log "deploy lock held — refusing to $MODE while a deploy runs (already_running)"
     exit 23
   fi
-  log "another deploy holds the lock — queueing (max 30 min)"
-  queue_for_deploy_lock 1800 || { log "gave up waiting for the deploy lock"; exit 15; }
+  # CRITERION 3: the DELIBERATE break. Off unless deploy.yml's
+  # `break_deploy_lock` workflow_dispatch input was set, and it does NOT consult
+  # the age or the liveness test — that is the point of it: it is the path for a
+  # human who already knows the holder is gone and is taking responsibility for
+  # that judgement. The wording below is deliberately distinct from the
+  # automatic path's, so an operator reading the run afterwards can tell which
+  # one fired without reading this file.
+  if [ "$DEPLOY_LOCK_BREAK" = 1 ]; then
+    log "lock break: MANUAL — requested by the break_deploy_lock workflow_dispatch input (BARKPARK_DEPLOY_LOCK_BREAK=1). The age and liveness tests are NOT consulted on this path; a human asserted the holder is gone."
+    if break_deploy_lock "MANUAL break requested by an operator via the break_deploy_lock dispatch input"; then
+      record_deploy_lock_holder
+    else
+      log "gave up: the MANUAL break did not obtain the deploy lock"
+      exit 15
+    fi
+  else
+    # The BUDGET, 30 min, unchanged. The env var exists ONLY so
+    # deploy/instance-deploy_test.sh can drive the exhaustion path in seconds --
+    # exactly like BARKPARK_LOCK_HEARTBEAT_SECS above; nothing on a box sets it.
+    queue_budget="${BARKPARK_DEPLOY_LOCK_QUEUE_SECS:-1800}"
+    case "$queue_budget" in ''|*[!0-9]*) queue_budget=1800 ;; esac
+    log "another deploy holds the lock — queueing (max ${queue_budget}s)"
+    if ! queue_for_deploy_lock "$queue_budget"; then
+      # CRITERION 2: the STALE-HOLDER POLICY, evaluated only here — after the
+      # full 30-minute budget is already spent, so it can never shorten a wait
+      # that would have succeeded. Its preconditions are ALL of:
+      #   (a) the holder is identifiable (fuser/lsof named a pid), and
+      #   (b) its age exceeds N = $DEPLOY_LOCK_STALE_SECS, and
+      #   (c) deploy_lock_holder_is_live says there is no sign of deploy work.
+      # Any one of them missing leaves the lock alone and this run exits 15 as
+      # it always did. A policy that can break a LIVE deploy is worse than the
+      # stall it replaces, so (c) is the load-bearing gate and every ambiguous
+      # answer inside it resolves to LIVE.
+      log_deploy_lock_holder
+      stale_age=""
+      if stale_age="$(deploy_lock_holder_age)"; then :; else stale_age=""; fi
+      if [ -z "$stale_age" ]; then
+        log "stale-holder policy: NOT APPLIED — the holder could not be identified, so its age is unknown. Exiting 15 with the lock untouched."
+        log "gave up waiting for the deploy lock"
+        exit 15
+      fi
+      stale_secs="${stale_age% *}"
+      stale_basis="${stale_age#* }"
+      if [ "$stale_secs" -lt "$DEPLOY_LOCK_STALE_SECS" ]; then
+        log "stale-holder policy: NOT APPLIED — the holder is ${stale_secs}s old (basis: $stale_basis), under the ${DEPLOY_LOCK_STALE_SECS}s threshold. A holder inside the threshold is a slow deploy, not a stuck one."
+        log "gave up waiting for the deploy lock"
+        exit 15
+      fi
+      log "stale-holder policy: the holder is ${stale_secs}s old (basis: $stale_basis), over the ${DEPLOY_LOCK_STALE_SECS}s threshold. Testing whether it is still doing deploy work before judging it."
+      if deploy_lock_holder_is_live; then
+        log "stale-holder policy: NOT APPLIED — the holder is over the age threshold but is STILL WORKING. An old deploy is not a broken one. Exiting 15 with the lock untouched."
+        log "gave up waiting for the deploy lock"
+        exit 15
+      fi
+      log "stale-holder policy: APPLIED — AUTOMATIC. Judged broken because it held the lock for ${stale_secs}s (basis: $stale_basis, over the ${DEPLOY_LOCK_STALE_SECS}s threshold) AND showed no child process and no CPU advance over a ${DEPLOY_LOCK_LIVENESS_SECS}s window. This is the automatic path, not an operator request."
+      if break_deploy_lock "AUTOMATIC stale-holder policy: ${stale_secs}s old (basis: $stale_basis) with no live child deploy process over ${DEPLOY_LOCK_LIVENESS_SECS}s"; then
+        record_deploy_lock_holder
+      else
+        log "gave up waiting for the deploy lock"
+        exit 15
+      fi
+    else
+      record_deploy_lock_holder
+    fi
+  fi
+else
+  record_deploy_lock_holder
 fi
 
 export PATH="$HOME/.asdf/shims:/usr/local/go/bin:$PATH"

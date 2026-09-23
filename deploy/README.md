@@ -108,7 +108,7 @@ while the status-scoped form answers **404** — with two controls (an existing
 file → 200, the proxied path → 503) identical under both arms, so the difference
 is the status list and nothing else. Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script: `bash deploy/instance-deploy_test.sh` — 494 checks: slot selection,
+script: `bash deploy/instance-deploy_test.sh` — 537 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
 typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
 and their install guards, and the on-box-compile ruling below. EVERY `<engine> …
@@ -147,6 +147,45 @@ each logs a WARN and leaves the bridge off, with `/connectors` on the maintenanc
 credential cipher key) and carries **no** chat token: one ambient operator token
 would serve every tenant. Runbook, including the "bring the unit up BEFORE you
 register a provider webhook URL" hazard: `docs/ops/connectors-deploy.md`.
+
+**The deploy lock, its holder, and how to break it (task-e0e4fa0b709c093e).**
+`instance-deploy.sh` serialises on `flock` over
+`/var/lock/barkpark-instance-deploy.lock`; overlapping runs queue up to 30 min
+and then exit 15. On 2026-09-22 that queue was the whole outage: FIFTEEN
+`deploy.yml` `instance` jobs exited 15 after ~30 min each (07:29Z-12:29Z),
+behind one holder (run 35698504994, 07:14:06Z-12:33:49Z, exit 14) — and not one
+of them could say WHO held the lock. **How that lock actually cleared was never
+established** — whether the owner cleared it or the holder exited on its own is
+unknown, and nothing below is a remedy for a diagnosed cause. What is fixed is
+that the contention path was mute.
+
+* **The holder is named.** On contention, and again on every queue heartbeat,
+  the run logs the holder's `pid`, elapsed time and full command line (`fuser`,
+  else `lsof`), plus the sidecar record `<lock>.holder` the winner writes for
+  itself. A box with neither `fuser(1)` nor `lsof(1)` says so and is never
+  broken automatically.
+* **The stale-holder policy, N = 45 min** (`BARKPARK_DEPLOY_LOCK_STALE_SECS`,
+  2700 s). Evaluated only AFTER the full 30-min budget is spent, so it can never
+  shorten a wait that would have succeeded. It fires on ALL of: the holder is
+  identifiable, it is older than N, and a two-sample liveness test over 30 s
+  (`BARKPARK_DEPLOY_LOCK_LIVENESS_SECS`) finds no child process and no CPU
+  advance. Any ambiguity resolves to LIVE. **N is not a round number:** the
+  longest SUCCESSFUL `instance` job in 195 jobs over 2026-09-17..23 ran 752 s
+  (12.5 min, run 35287987631) against a 343 s median, and that clock already
+  over-states the hold; separately, 45 min is exactly the runner's own
+  `ServerAliveInterval=30 x ServerAliveCountMax=90` tolerance, so past N the ssh
+  session that started the holder is gone by construction.
+* **The deliberate break** is the `break_deploy_lock` `workflow_dispatch` input
+  on `Deploy (production)` — boolean, default false, reaching the box as
+  `BARKPARK_DEPLOY_LOCK_BREAK=1`. It skips the age and liveness tests (a human
+  asserted the holder is gone) and logs `MANUAL`, where the automatic path logs
+  `AUTOMATIC` — so an operator reading the run afterwards can tell which fired.
+* **A refused run still exits 15** and prints no line that reads as a ship. The
+  separate reading trap — `Production serves the newest deploy-relevant main
+  commit` reporting SUCCESS on all fifteen of those exit-15 runs — is NOT closed
+  by this and is unchanged: that check adjudicates "stranded AND a deploy in
+  flight -> 0", and a queue of runs behind a lock keeps a deploy permanently in
+  flight.
 
 **Rollback (W6).** Every deploy stamps `.slots/<target>.sha` so the box knows
 what its idle slot holds. `instance-deploy.sh --rollback-preflight` (read-only)
