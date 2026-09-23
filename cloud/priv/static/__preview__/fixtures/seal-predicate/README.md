@@ -23,12 +23,21 @@ predicate so it is a test, not a manual run.
 | `forward-to-grandchild.json` | wave 26, the same blindness the other way: a row correctly forwarded to a GRANDCHILD of the successor read as an orphan — a false FAIL beside the false PASS |
 | `census-departure.json` | wave 26: a `priorCensus` row that LEFT the counted population and still resolves to `open` — a FILING EVENT, named and blocking |
 | `census-departure-transitioned.json` | the same departure with ONE field changed (`done`): a row that left by being finished is not a filing event. The pair is the anti-filing arm's mutation proof |
+| `reparent-to-successor.json` | wave 36: a census row RE-PARENTED out of the epic and onto the successor's wave — legally placed, so it is under the successor and NOWHERE in `children`. The pre-fix file could never count it (`forwarded` is the successor's subtree, the classify loop walked the epic's, and R4/R6 keep those disjoint), so it printed `forwarded under successor : 0` and charged a correct forwarding as a filing event. This is the arm that reds if the forwarded bucket is unreachable |
+| `paced-forwarding.json` | wave 36: THREE departures — two re-homed onto the successor's wave, one simply gone. Pre-fix all three read as `FILING EVENT(S) : 3`, so charter D93's paced forwarding was indistinguishable from a swept population. The committed file prints the two under `RE-HOMED UNDER` with `→` and the one under `FILING EVENT(S)` with `✗` |
 
 Fixture keys the predicate reads: `children`, `successor` (an id, `null`, or the
 literal `TERMINAL`), `tasks` (id → task document, for successor resolution),
 `forwarded`, `gates`, `landed`, `defectCommits`, `diffs` (sha → `{paths, body}`,
 standing in for `git show --format=`), and `unmeasuredWaivers` (rung-3 register
 entries a fixture may waive, named one by one and printed in the verdict).
+
+`reparent-to-successor.json` and `paced-forwarding.json` differ from
+`forward-to-grandchild.json` in a way that matters: that fixture reaches `fwd > 0` only
+by putting one `_id` in BOTH the epic's `children` and the successor's `subtrees` — a row
+with two parents, which `parent_id` cannot produce. The wave-36 pair places the re-homed
+row under the successor ONLY, which is what a real `bp task move` leaves behind, and
+scores it through the prior census.
 
 Wave 26 adds three, all optional so every fixture above reads identically:
 `subtrees` (parent id → rows, which is how a fixture describes a TREE — `children`
