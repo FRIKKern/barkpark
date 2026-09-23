@@ -329,7 +329,7 @@ defmodule Barkpark.Content.Writer do
 
   # ── The transient-connection seam on the CREATE path ───────────────────────
   #
-  # WHAT WAS BROKEN. `Barkpark.Tasks.Dedup.fetch_candidates/2` carries a
+  # WHAT WAS BROKEN. The task dedup fence's `fetch_candidates/2` carries a
   # function-wide rescue that renders a pool fault as a NAMED, retryable 503
   # (`{:error, {:dedup_unavailable, _}}`). Its own comment says the rescue is on
   # the wrong side of the boundary: "That DBConnection.ConnectionError is raised
@@ -371,7 +371,7 @@ defmodule Barkpark.Content.Writer do
   # NO FAIL-OPEN. `rescue e in DBConnection.ConnectionError` matches that one
   # struct. Nothing else is caught, nothing is reraised into a success, and no
   # arm returns `{:ok, _}` or an empty result — a fault becomes a named ERROR
-  # tuple or it keeps propagating untouched. The `Tasks.Dedup` pg_trgm fallback
+  # tuple or it keeps propagating untouched. The task dedup pg_trgm fallback
   # is the precedent: narrow on purpose.
   defp do_create_document(type, attrs, dataset, doc_id, opts) do
     do_create_document!(type, attrs, dataset, doc_id, opts)
@@ -441,71 +441,30 @@ defmodule Barkpark.Content.Writer do
 
     # Transition gate first (side-effect-free refusal, before dedup and
     # :before_save), then the find-or-create gate (task-obsession layer 1): a
-    # NEW kind:task birth is refused if it duplicates an existing task. Dedup
-    # only fires when prev_doc is nil (a genuine create — updates/autosaves/
+    # NEW kind:task birth is refused if it duplicates an existing task. The dedup
+    # gate only fires when prev_doc is nil (a genuine create — updates/autosaves/
     # publishes pass straight through) and fails LOUD: a scan that times out or
     # dies returns {:error, {:dedup_unavailable, msg}} rather than filing the
     # task unchecked. content.dedup_bypass: true is the deliberate escape.
-    # See Barkpark.Tasks.Dedup.
+    # The dedup gate is the Tasks plugin's `:late` pre-write fence.
+    fences = Barkpark.Plugins.Registry.collect_pre_write_fences()
+
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <-
            ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
-         # THE DRAFT-ONLY TERMINAL FENCE (task-e49058a7f2b46a63). The publish
-         # door's transition gate runs AT PUBLISH, so a row that never
-         # publishes never meets it — and for a never-published row the draft
-         # IS the row of record. Lives in `Barkpark.Tasks` beside the one
-         # transition table it complements, called from here exactly like
-         # `Tasks.Dedup.check_new_task/5` below.
+         # THE PLUGIN PRE-WRITE FENCES (task-e5baaaa14ddf2e1c). Declared by
+         # plugins via `pre_write_fences/0`, resolved once above in load
+         # order; the `:early` ones run here, the `:late` ones after the two
+         # core birth guards below. The Tasks plugin's five (draft-only
+         # terminal, dataset twin, terminal criteria, criteria required,
+         # find-or-create dedup) keep the order they had when this chain named
+         # them. With plugins off the list is empty and both steps are `:ok`.
          :ok <-
-           Barkpark.Tasks.DraftTerminalFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
-         # THE ONE RULE, PRODUCER SIDE (task-49eef068420df918). A task BIRTH of
-         # an id that already lives in a sibling dataset of this
-         # workspace+project is refused: the task doors take a bare id and no
-         # dataset, so the second copy makes the id ambiguous for every by-id
-         # reader. Lives in `Barkpark.Tasks` beside the resolver that states the
-         # rule; called from here exactly like the fence above.
-         :ok <-
-           Barkpark.Tasks.DatasetTwinFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
-         # THE TERMINAL-CRITERIA FENCE (task-3c3094aa8f5f3847). A raw document
-         # publish wrote a 7-entry criteria list with an UNMET entry onto the
-         # already-`done` published row `task-2b7cbaf8265f6b4e` (2026-09-04),
-         # with zero `task.criterion` events in that row's life. The publish
-         # door's `criteria_fence/2` is a REGRESSION fence keyed on the
-         # published row's own proof, so a row carrying no criteria (or one
-         # gaining a NEW unmet entry beside a met one) has nothing to regress
-         # and the write lands. Refuses a document-door write that changes
-         # `acceptance_criteria` on a row that is, and stays, closed-terminal;
-         # `bp task stamp --withdraw` (D745) is the sanctioned way to lower a
-         # lock. Head-matches on the write NAMING the criteria list, so it
-         # costs every other write nothing.
-         :ok <-
-           Barkpark.Tasks.TerminalCriteriaFence.check(
-             type,
-             attrs,
-             dataset,
-             doc_id,
-             prev_doc,
-             opts
-           ),
-         # THE CRITERIA-REQUIRED BIRTH FENCE, OPT-IN PER PARENT
-         # (dr-w33-bl-task-create-refuses-criteria-less-rows). A criteria-less
-         # row is UNFALSIFIABLE, and three censuses + three backfills in 24h
-         # lost to the fact that nothing REFUSED the write. Head-matches on
-         # `prev_doc == nil` like every birth guard above, and short-circuits
-         # before any read unless the create is BOTH parented and criteria-less
-         # — so it adds no query to any other write.
-         :ok <-
-           Barkpark.Tasks.CriteriaRequiredFence.check(
-             type,
-             attrs,
-             dataset,
-             doc_id,
-             prev_doc,
-             opts
-           ),
+           run_pre_write_fences(fences, :early, [type, attrs, dataset, doc_id, prev_doc, opts]),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
-         :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
+         :ok <-
+           run_pre_write_fences(fences, :late, [type, attrs, dataset, doc_id, prev_doc, opts]) do
       create_after_dedup(type, attrs, dataset, doc_id, ctx, prev_doc, opts)
     end
   end
@@ -1015,65 +974,24 @@ defmodule Barkpark.Content.Writer do
     # `prev_doc == nil` exactly like the two birth guards above, so every
     # UPDATE arriving here (autosave, patch merges, block ops, forms) is
     # structurally untouched — parity with `do_create_document:175`.
+    fences = Barkpark.Plugins.Registry.collect_pre_write_fences()
+
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <-
            ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
-         # THE DRAFT-ONLY TERMINAL FENCE (task-e49058a7f2b46a63). The publish
-         # door's transition gate runs AT PUBLISH, so a row that never
-         # publishes never meets it — and for a never-published row the draft
-         # IS the row of record. Lives in `Barkpark.Tasks` beside the one
-         # transition table it complements, called from here exactly like
-         # `Tasks.Dedup.check_new_task/5` below.
+         # THE PLUGIN PRE-WRITE FENCES (task-e5baaaa14ddf2e1c). Declared by
+         # plugins via `pre_write_fences/0`, resolved once above in load
+         # order; the `:early` ones run here, the `:late` ones after the two
+         # core birth guards below. The Tasks plugin's five (draft-only
+         # terminal, dataset twin, terminal criteria, criteria required,
+         # find-or-create dedup) keep the order they had when this chain named
+         # them. With plugins off the list is empty and both steps are `:ok`.
          :ok <-
-           Barkpark.Tasks.DraftTerminalFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
-         # THE ONE RULE, PRODUCER SIDE (task-49eef068420df918). A task BIRTH of
-         # an id that already lives in a sibling dataset of this
-         # workspace+project is refused: the task doors take a bare id and no
-         # dataset, so the second copy makes the id ambiguous for every by-id
-         # reader. Lives in `Barkpark.Tasks` beside the resolver that states the
-         # rule; called from here exactly like the fence above.
-         :ok <-
-           Barkpark.Tasks.DatasetTwinFence.check(type, attrs, dataset, doc_id, prev_doc, opts),
-         # THE TERMINAL-CRITERIA FENCE (task-3c3094aa8f5f3847). A raw document
-         # publish wrote a 7-entry criteria list with an UNMET entry onto the
-         # already-`done` published row `task-2b7cbaf8265f6b4e` (2026-09-04),
-         # with zero `task.criterion` events in that row's life. The publish
-         # door's `criteria_fence/2` is a REGRESSION fence keyed on the
-         # published row's own proof, so a row carrying no criteria (or one
-         # gaining a NEW unmet entry beside a met one) has nothing to regress
-         # and the write lands. Refuses a document-door write that changes
-         # `acceptance_criteria` on a row that is, and stays, closed-terminal;
-         # `bp task stamp --withdraw` (D745) is the sanctioned way to lower a
-         # lock. Head-matches on the write NAMING the criteria list, so it
-         # costs every other write nothing.
-         :ok <-
-           Barkpark.Tasks.TerminalCriteriaFence.check(
-             type,
-             attrs,
-             dataset,
-             doc_id,
-             prev_doc,
-             opts
-           ),
-         # THE CRITERIA-REQUIRED BIRTH FENCE, OPT-IN PER PARENT
-         # (dr-w33-bl-task-create-refuses-criteria-less-rows). A criteria-less
-         # row is UNFALSIFIABLE, and three censuses + three backfills in 24h
-         # lost to the fact that nothing REFUSED the write. Head-matches on
-         # `prev_doc == nil` like every birth guard above, and short-circuits
-         # before any read unless the create is BOTH parented and criteria-less
-         # — so it adds no query to any other write.
-         :ok <-
-           Barkpark.Tasks.CriteriaRequiredFence.check(
-             type,
-             attrs,
-             dataset,
-             doc_id,
-             prev_doc,
-             opts
-           ),
+           run_pre_write_fences(fences, :early, [type, attrs, dataset, doc_id, prev_doc, opts]),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
-         :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
+         :ok <-
+           run_pre_write_fences(fences, :late, [type, attrs, dataset, doc_id, prev_doc, opts]) do
       upsert_after_gate(type, attrs, dataset, doc_id, ctx, prev_doc, opts)
     end
   end
@@ -1188,6 +1106,23 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp defer_after_save(result, _payload), do: result
+
+  # Runs one phase of the plugin pre-write fences (`Barkpark.Plugin.pre_write_fence/0`)
+  # in declared order and stops at the first non-`:ok`, returning it UNCHANGED —
+  # exactly what the `with :ok <- Fence.check(...)` steps it replaced did, so no
+  # caller or test that matches a fence's error shape sees a difference.
+  defp run_pre_write_fences(fences, phase, args) do
+    Enum.reduce_while(fences, :ok, fn
+      {^phase, mod, fun}, :ok ->
+        case apply(mod, fun, args) do
+          :ok -> {:cont, :ok}
+          refusal -> {:halt, refusal}
+        end
+
+      _other_phase, :ok ->
+        {:cont, :ok}
+    end)
+  end
 
   # ── The Writer-seam transition gate (task-lifecycle-visibility, D7b + D21) ─
   #
@@ -1352,7 +1287,7 @@ defmodule Barkpark.Content.Writer do
   # precisely because the value never changes again.
   #
   # This is that fence, at the only place that can express "birth": beside
-  # `Tasks.Dedup.check_new_task/5` in `do_create_document`'s `with` chain, where
+  # the task dedup fence in `do_create_document`'s `with` chain, where
   # `prev_doc` is already resolved and `opts` is already in hand. Three other
   # placements were measured and REFUTED (PDS-D393):
   #

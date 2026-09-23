@@ -330,6 +330,44 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  The ordered pre-write fences every registered plugin declares via
+  `pre_write_fences/0` — the list `Barkpark.Content.Writer` runs before a
+  document write (see `Barkpark.Plugin.pre_write_fence/0`).
+
+  Plugins iterate in `ResolverChain.load_ordered_plugins/0` order; each
+  plugin's own list keeps its order. With no plugin registered (the
+  `BARKPARK_PLUGINS=""` kill switch) this is `[]` and the writer runs no
+  fence at all.
+
+  NOT cached and NOT enablement-filtered. It runs on every write, so it is
+  kept to what `load_ordered_plugins/0` already costs — one `Application`
+  env read plus the `:persistent_term` snapshot (`all/0`), no Repo read, and
+  no `GenServer.call` once any plugin has registered — plus one local call per
+  plugin. Deliberately does NOT go through `reduce_resolvers/3`: that chain
+  rescues a raising plugin to the accumulator, which here would silently drop
+  an integrity fence. A malformed entry raises instead.
+  """
+  @spec collect_pre_write_fences() :: [Barkpark.Plugin.pre_write_fence()]
+  def collect_pre_write_fences do
+    for %{module: mod, name: name} <- ResolverChain.load_ordered_plugins(),
+        Code.ensure_loaded?(mod),
+        function_exported?(mod, :pre_write_fences, 0),
+        fence <- mod.pre_write_fences() do
+      validate_pre_write_fence!(fence, name)
+    end
+  end
+
+  defp validate_pre_write_fence!({phase, mod, fun} = fence, _name)
+       when phase in [:early, :late] and is_atom(mod) and is_atom(fun),
+       do: fence
+
+  defp validate_pre_write_fence!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed pre-write fence " <>
+            "#{inspect(other)}; expected {:early | :late, module, function}"
+  end
+
+  @doc """
   Drives the `resolve_api_tests/2` chain → flat list of `api_test_spec()` maps
   the runner fires on demand. Not cached; accepts `:baseline` / `:ctx`. Plugins
   usually implement additive `api_tests/0` (default resolver lifts via
