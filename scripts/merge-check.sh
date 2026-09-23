@@ -126,21 +126,54 @@ mc_pooled_names_OLD(){
 # different objects and get different verdicts.
 #
 # Prints "<VERDICT>\t<detail>"; rc 0 CLEAR, 1 HELD, 2 UNREAD.
-MC_HOLD_LABEL="${MERGE_CHECK_HOLD_LABEL:-hold}"
+# THE VOCABULARY IS A SET, NOT A STRING (task-cbba29645c9c65d9, 2026-09-23). It used to be the
+# single default `hold`, so `owner-hold` — the label main created on 2026-09-22T15:37Z as HOLD
+# RULE v2, meaning ONLY THE OWNER APPLIES IT AND NO LANE MERGES PAST IT — was INVISIBLE to this
+# gate while scripts/pr-required.sh (#19893) refused it. Two instruments, two answers, one merge
+# button. The declaration line below is LOCKED against pr-required.sh and its mirror by
+# scripts/hold-vocabulary.sh, which both suites run: see arm A17n and that file's header.
+#
+# ORDER IS PRECEDENCE, ASCENDING: the STRONGEST member present is the one the refusal NAMES, so a
+# PR carrying both `hold` and `owner-hold` is refused as owner-hold. That is a rule, not a pair of
+# branches — a third member needs no new code, only a new term in the declaration on BOTH sides.
+#
+# MERGE_CHECK_HOLD_LABEL still overrides, and now takes a SPACE-SEPARATED LIST. A single value
+# keeps working exactly as before, so no existing caller changes.
+MC_HOLD_LABELS_DEFAULT="hold owner-hold" # @hold-vocabulary
+MC_HOLD_LABELS="${MERGE_CHECK_HOLD_LABEL:-$MC_HOLD_LABELS_DEFAULT}"
+# Kept for callers/readers that still name the old single-value variable. It is the WEAKEST
+# member, never the matcher: nothing below reads it to decide anything.
+MC_HOLD_LABEL="${MC_HOLD_LABELS%% *}"
 mc_hold_verdict(){
-  local raw="${1-}" names
+  local raw="${1-}" names h rank best_rank best seen
   if [ -z "$raw" ]; then
     printf 'UNREAD\tthe label read produced NO OUTPUT — an empty read is not an empty label set\n'; return 2
   fi
   printf '%s' "$raw" | jq -e 'type=="array" and (map(type=="string")|all)' >/dev/null 2>&1 || {
     printf 'UNREAD\tthe label read did not parse as a JSON array of names (got: %s)\n' "$raw"; return 2; }
-  if printf '%s' "$raw" | jq -e --arg h "$MC_HOLD_LABEL" \
-       'any(.[]; (ascii_downcase) == ($h|ascii_downcase))' >/dev/null 2>&1; then
+  if [ -z "${MC_HOLD_LABELS// /}" ]; then
+    printf 'UNREAD\tthe hold vocabulary is EMPTY — a gate that knows no hold label refuses nothing, which is not the same as a clear PR\n'; return 2
+  fi
+  best=""; best_rank=0; seen=""; rank=0
+  for h in $MC_HOLD_LABELS; do
+    rank=$((rank+1))
+    # EXACT membership per term, case-folded on BOTH sides — never a substring glob over a join.
+    if printf '%s' "$raw" | jq -e --arg h "$h" \
+         'any(.[]; (ascii_downcase) == ($h|ascii_downcase))' >/dev/null 2>&1; then
+      seen="${seen:+$seen, }$h"
+      if [ "$rank" -gt "$best_rank" ]; then best_rank=$rank; best="$h"; fi
+    fi
+  done
+  if [ -n "$best" ]; then
     names=$(printf '%s' "$raw" | jq -r 'join(", ")')
-    printf 'HELD\tlabels: [%s]\n' "$names"; return 1
+    # THE REFUSAL NAMES WHICH MEMBER MATCHED. "HELD by the hold label" and "HELD by the
+    # owner-hold label" are different instructions to the reader: a lane may clear its own hold,
+    # and NO lane clears an owner-hold.
+    printf 'HELD\tby the `%s` label (hold labels on this PR: %s; vocabulary: %s) — labels: [%s]\n' \
+      "$best" "$seen" "$MC_HOLD_LABELS" "$names"; return 1
   fi
   names=$(printf '%s' "$raw" | jq -r 'if length==0 then "(none)" else join(", ") end')
-  printf 'CLEAR\tlabels: [%s]\n' "$names"; return 0
+  printf 'CLEAR\tnone of the hold vocabulary [%s] is present — labels: [%s]\n' "$MC_HOLD_LABELS" "$names"; return 0
 }
 
 # THE PDS-CITATION CLASSIFIER. Lives HERE, above --selftest, for the same reason
@@ -930,6 +963,91 @@ if [ "${1:-}" = "--selftest" ]; then
     1:HELD*) _ok "hold among other labels" "$_out" ;;
     *) _no "hold among other labels" "rc=$_rc out=$_out" ;;
   esac
+  # ---- A17n..A17s: THE `owner-hold` MEMBER AND THE VOCABULARY LOCK (task-cbba29645c9c65d9).
+  # A17n — the label main created on 2026-09-22 as HOLD RULE v2 is REFUSED, and the refusal
+  # NAMES it. Before this the vocabulary was the single string `hold` and this arm read CLEAR.
+  _out=$(mc_hold_verdict '["owner-hold"]'); _rc=$?
+  case "$_rc:$_out" in
+    1:HELD*owner-hold*) _ok "owner-hold is a hold" "$_out" ;;
+    *) _no "owner-hold is a hold" "rc=$_rc out=$_out — the owner's hold label is invisible to this gate" ;;
+  esac
+  # A17o — CASE FOLDING, the SAME six specimens pr-required.sh's arms drive. A label typed
+  # `Hold` that one instrument refuses and the other waves through is worse than neither
+  # reading labels at all, so both suites pin the same set.
+  _foldfails=0; _folddetail=""
+  for _spec in hold Hold HOLD owner-hold Owner-Hold OWNER-HOLD; do
+    _out=$(mc_hold_verdict "[\"$_spec\"]"); _rc=$?
+    _want=hold; case "$_spec" in [Oo][Ww][Nn][Ee][Rr]-*) _want=owner-hold;; esac
+    case "$_rc:$_out" in
+      1:HELD*"\`$_want\`"*) : ;;
+      *) _foldfails=$((_foldfails+1)); _folddetail="$_folddetail [$_spec -> rc=$_rc want=$_want]" ;;
+    esac
+  done
+  if [ "$_foldfails" -eq 0 ]; then
+    _ok "case folds across 6 specimens" "hold/Hold/HOLD/owner-hold/Owner-Hold/OWNER-HOLD each HELD and each names its member"
+  else _no "case folds across 6 specimens" "$_foldfails specimen(s) wrong:$_folddetail"; fi
+  # A17p — PRECEDENCE. A PR carrying BOTH is refused as owner-hold, because only the owner
+  # applies that one and no lane removes it. pr-required.sh's "both -> owner wins" arm is the
+  # same assertion on the other side of the lock.
+  _out=$(mc_hold_verdict '["hold","owner-hold","area/gates"]'); _rc=$?
+  case "$_rc:$_out" in
+    1:HELD*"\`owner-hold\`"*) _ok "both labels -> owner-hold wins" "$_out" ;;
+    *) _no "both labels -> owner-hold wins" "rc=$_rc out=$_out — the weaker hold was named, and a lane may clear its own hold" ;;
+  esac
+  # A17q — NEAR-MISSES ARE NOT HOLDS, by EXACT membership. The fleet's auto-merge sweep uses a
+  # substring test that matches on-hold/holding/household too; erring toward refusing is safe
+  # THERE, but a gate a lane reads as a verdict must not refuse other people's labels.
+  _out=$(mc_hold_verdict '["on-hold","holding","household","needs-review"]'); _rc=$?
+  case "$_rc:$_out" in
+    0:CLEAR*) _ok "near-miss labels still verdict" "$_out" ;;
+    *) _no "near-miss labels still verdict" "rc=$_rc out=$_out — a refusal that fires on everything looks exactly like a CI outage" ;;
+  esac
+  # A17r — RED WITHOUT / GREEN WITH, run here rather than asserted in prose. REMOVE the
+  # owner-hold member from the vocabulary the REAL function reads, and A17n's specimen must go
+  # back to CLEAR; restore it and it must be HELD again. A green arm that has never been seen to
+  # go red proves nothing about the code, only about the fixture.
+  _vsave="$MC_HOLD_LABELS"
+  MC_HOLD_LABELS="hold"
+  _outm=$(mc_hold_verdict '["owner-hold"]'); _rcm=$?
+  MC_HOLD_LABELS="$_vsave"
+  _outr=$(mc_hold_verdict '["owner-hold"]'); _rcr=$?
+  if [ "$_rcm" = 0 ] && [ "$_rcr" = 1 ]; then
+    _ok "vocabulary mutation reds A17n" "member removed -> rc=0 CLEAR (the pre-fix shape); restored -> rc=1 HELD"
+  else _no "vocabulary mutation reds A17n" "mutant rc=$_rcm (want 0) restored rc=$_rcr (want 1) — A17n is not load-bearing on the vocabulary"; fi
+  # Also prove the mutant is not merely noise: with the member gone, the OTHER member still holds.
+  MC_HOLD_LABELS="hold"; _outc=$(mc_hold_verdict '["hold"]'); _rcc=$?; MC_HOLD_LABELS="$_vsave"
+  if [ "$_rcc" = 1 ]; then _ok "CONTROL the mutant still refuses hold" "removing owner-hold did not disable the whole classifier"
+  else _no "CONTROL the mutant still refuses hold" "rc=$_rcc — the mutant broke everything, so A17r measured a crash, not a member"; fi
+  # A17s — THE MIRROR LOCK. merge-check.sh and pr-required.sh (+ its byte-identical helper
+  # mirror) each DECLARE their hold vocabulary on one `@hold-vocabulary` line and DERIVE their
+  # matching from it; scripts/hold-vocabulary.sh decodes all three and asserts them
+  # term-identical IN ORDER. pr-required.sh's suite runs the SAME check, so a mutation on
+  # EITHER side reds the OTHER side's suite — a lock only one side checks is half a lock.
+  _hvsh="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/hold-vocabulary.sh"
+  if [ -f "$_hvsh" ]; then
+    _hvout=$(bash "$_hvsh" --check-live 2>&1); _hvrc=$?
+    case "$_hvrc:$_hvout" in
+      0:*LOCKED*) _ok "hold vocabulary is LOCKED" "$_hvout" ;;
+      *) _no "hold vocabulary is LOCKED" "rc=$_hvrc $_hvout" ;;
+    esac
+    # CONTROL: the lock is not vacuous. Mutate a COPY of this file's declaration and watch the
+    # very same checker refuse it — otherwise "LOCKED" could be a checker that always says yes.
+    _hvd=$(mktemp -d)
+    sed 's/^MC_HOLD_LABELS_DEFAULT=.*$/MC_HOLD_LABELS_DEFAULT="hold" # @hold-vocabulary/' "$0" > "$_hvd/mutant.sh"
+    _hvout2=$(bash "$_hvsh" --check "$_hvd/mutant.sh" "$0" 2>&1); _hvrc2=$?
+    rm -rf "$_hvd"
+    case "$_hvrc2:$_hvout2" in
+      1:*DIVERGED*) _ok "CONTROL the lock catches a drop" "a copy with owner-hold removed DIVERGED from this file" ;;
+      *) _no "CONTROL the lock catches a drop" "rc=$_hvrc2 $_hvout2 — the lock cannot tell the two vocabularies apart, so LOCKED means nothing" ;;
+    esac
+    # And the checker's own suite, so a broken checker cannot silently hold the lock open.
+    _hvout3=$(bash "$_hvsh" --selftest 2>&1); _hvrc3=$?
+    if [ "$_hvrc3" = 0 ]; then _ok "hold-vocabulary.sh selftest" "$(printf '%s\n' "$_hvout3" | grep 'SELFTEST:')"
+    else _no "hold-vocabulary.sh selftest" "rc=$_hvrc3 $(printf '%s\n' "$_hvout3" | grep -E '^FAIL|SELFTEST:')"; fi
+  else
+    _no "hold vocabulary is LOCKED" "scripts/hold-vocabulary.sh is MISSING beside this script — the two instruments are UNLOCKED again"
+  fi
+
   # A17j — PIN THE LIVE LINES, not just the classifier. Reverting the live arm to
   # `arm ok` would leave every arm above green. Assert POSITIVELY that the real
   # HELD branch calls `arm no`, that the UNREAD branch calls `cannot`, and that
@@ -1157,7 +1275,7 @@ HOLD_RAW=$(gh pr view "$PR" --repo "$REPO" --json labels --jq '[.labels[].name]|
 HOLD_OUT=$(mc_hold_verdict "$HOLD_RAW"); HOLD_RC=$?
 HOLD_WHY=${HOLD_OUT#*	}
 case "$HOLD_RC" in
-  1) arm no "hold label" "HELD by the \`$MC_HOLD_LABEL\` label — ${HOLD_WHY}. A hold is a REFUSAL, not a note: remove the label deliberately, then re-run this." ;;
+  1) arm no "hold label" "HELD — ${HOLD_WHY}. A hold is a REFUSAL, not a note: the label named above has to come off deliberately, and for \`owner-hold\` ONLY THE OWNER takes it off — no lane removes it or merges past it. Then re-run this." ;;
   0) arm ok "hold label" "not held — ${HOLD_WHY}" ;;
   *) cannot "hold-label" "${HOLD_WHY} — an unread label is NOT an absent hold" ;;
 esac

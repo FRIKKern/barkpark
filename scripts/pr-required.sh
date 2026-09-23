@@ -235,6 +235,10 @@ STUB
   # nothing downstream has to fold.
   _hold_arm  "Hold folds to hold" "Hold"       "HELD: hold since 2026-09-16T08:11:00Z"
   _hold_arm  "OWNER-HOLD folds"   "OWNER-HOLD" "HELD: owner-hold since 2026-09-16T09:22:33Z"
+  # The SIX specimens task-cbba29645c9c65d9 requires BOTH gates to agree on, completed here:
+  # merge-check.sh's arm A17o drives exactly this set through ITS classifier.
+  _hold_arm  "HOLD folds to hold" "HOLD"       "HELD: hold since 2026-09-16T08:11:00Z"
+  _hold_arm  "Owner-Hold folds"   "Owner-Hold" "HELD: owner-hold since 2026-09-16T09:22:33Z"
   # THE OTHER DIRECTION -- the half that matters more.
   _nohold_arm "unlabelled verdicts" ""
   # Whole-name matching: these are other people's labels and must pass straight through. A
@@ -714,6 +718,40 @@ STUB2
     fi
   }
   _mirror_arm
+  # ------------------- ARM: THE VOCABULARY LOCK (task-cbba29645c9c65d9, 2026-09-23) -----------
+  # The mirror arm above compares THIS file with its byte-identical helper copy. It says NOTHING
+  # about merge-check.sh, which is a DIFFERENT file with its own hold vocabulary, its own case
+  # handling and its own exit codes. Until this arm existed, `owner-hold` could be added here and
+  # merge-check.sh would keep merging past it with both suites green — which is exactly what had
+  # happened between #19893 and this change. scripts/hold-vocabulary.sh decodes the
+  # `@hold-vocabulary` declaration out of all three files and asserts them term-identical in
+  # order; merge-check.sh's arm A17s runs the SAME checker, so a mutation on EITHER side reds the
+  # OTHER side's suite. A lock only one side checks is half a lock.
+  _vocab_lock_arm() {
+    local lbl="hold vocab locked" top hv out rc mut
+    top=$(git -C "$SELFDIR" rev-parse --show-toplevel 2>/dev/null || true)
+    hv="$top/scripts/hold-vocabulary.sh"
+    if [ -z "$top" ] || [ ! -f "$hv" ]; then
+      printf 'NOTE %-20s NOT RUN: no checkout with scripts/hold-vocabulary.sh (toplevel: %s) — the vocabularies were NOT compared\n' "$lbl" "${top:-none}"
+      return
+    fi
+    out=$(bash "$hv" --check-live 2>&1); rc=$?
+    if [ "$rc" = 0 ]; then
+      printf 'PASS %-20s %s\n' "$lbl" "$out"
+    else
+      printf 'FAIL %-20s rc=%s %s -- merge-check.sh and this file disagree about what a hold label IS; the fleet gets two answers at the merge button\n' "$lbl" "$rc" "$out"; fails=$((fails+1))
+    fi
+    # CONTROL: the checker is not one that always says yes. Mutate a COPY of THIS file's
+    # declaration and watch the same checker refuse it.
+    mut="$d/vocab-mutant.sh"
+    sed 's/^PR_HOLD_LABELS=.*$/PR_HOLD_LABELS="hold" # @hold-vocabulary/' "$SELF" > "$mut"
+    out=$(bash "$hv" --check "$mut" "$top/scripts/merge-check.sh" 2>&1); rc=$?
+    case "$rc:$out" in
+      1:*DIVERGED*) printf 'PASS %-20s a copy of this file with owner-hold dropped DIVERGED from merge-check.sh -- the lock is load-bearing\n' "vocab lock reds" ;;
+      *) printf 'FAIL %-20s rc=%s %s -- the checker cannot tell a dropped member apart, so the lock above means nothing\n' "vocab lock reds" "$rc" "$out"; fails=$((fails+1)) ;;
+    esac
+  }
+  _vocab_lock_arm
   rm -rf "$d"
   return "$fails"
 }
@@ -798,27 +836,37 @@ fi
 #     for PRs that were at 3/4 -- see the RESOLVING owner/repo block above.)
 # Matching is on the WHOLE label name, never a substring: on-hold, holding and household are other
 # people's labels and must pass straight through to an ordinary verdict.
+# THE VOCABULARY IS DECLARED ON ONE LINE AND LOCKED AGAINST merge-check.sh
+# (task-cbba29645c9c65d9, 2026-09-23). Two merge instruments each carrying their own copy of this
+# list, with no shared fixture, is an UNLOCKED MIRROR: change one and BOTH suites stay green while
+# the fleet gets two different answers at the merge button. scripts/hold-vocabulary.sh decodes the
+# `@hold-vocabulary` line out of merge-check.sh, this file and this file's helper mirror and
+# asserts them term-identical IN ORDER; BOTH suites run that check, so a mutation on either side
+# reds the other side. A comment saying "mirrors X" is the tell for hand-maintained — this is not
+# that comment: the loop below MATCHES off this declaration, so the declaration is load-bearing.
+#
+# ORDER IS PRECEDENCE, ASCENDING. The STRONGEST member present on the PR is the one named, so a PR
+# carrying both `hold` and `owner-hold` is refused as owner-hold. A rule, not two branches.
+PR_HOLD_LABELS="hold owner-hold" # @hold-vocabulary
 _LABELS=$(gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' 2>/dev/null || true)
-_HAS_HOLD=0; _HAS_OWNER_HOLD=0
+HELD_LABEL=""; _HELD_RANK=0; _HELD_SEEN=""
 while IFS= read -r _lbl; do
-  # CASE-INSENSITIVE, because scripts/merge-check.sh's hold verdict already is (its arm A17g) and
-  # the two instruments must not disagree about what a hold IS: a label typed `Hold` that one tool
-  # refuses and the other waves through is worse than neither reading labels at all. Folded with
-  # tr, not `${_lbl,,}` — macOS ships bash 3.2 and the selftest runs this file under it.
+  # CASE-INSENSITIVE, because scripts/merge-check.sh's hold verdict already is (its arms A17g and
+  # A17o) and the two instruments must not disagree about what a hold IS: a label typed `Hold` that
+  # one tool refuses and the other waves through is worse than neither reading labels at all.
+  # Folded with tr, not `${_lbl,,}` — macOS ships bash 3.2 and the selftest runs this file under it.
   # The comparison is still on the WHOLE folded name, never a substring.
   _lbl=$(printf '%s' "$_lbl" | tr '[:upper:]' '[:lower:]')
-  case "$_lbl" in
-    owner-hold) _HAS_OWNER_HOLD=1;;
-    hold)       _HAS_HOLD=1;;
-  esac
+  _rank=0
+  for _cand in $PR_HOLD_LABELS; do
+    _rank=$((_rank+1))
+    [ "$_lbl" = "$_cand" ] || continue
+    _HELD_SEEN="${_HELD_SEEN:+$_HELD_SEEN, }$_cand"
+    if [ "$_rank" -gt "$_HELD_RANK" ]; then _HELD_RANK=$_rank; HELD_LABEL="$_cand"; fi
+  done
 done <<LABELS_EOF
 $_LABELS
 LABELS_EOF
-HELD_LABEL=""
-# PRECEDENCE when a PR carries BOTH. owner-hold WINS and the output says which won: only the owner
-# applies owner-hold and no lane ever merges past it, so the stronger hold is the one to name.
-[ "$_HAS_HOLD" = 1 ]       && HELD_LABEL="hold"
-[ "$_HAS_OWNER_HOLD" = 1 ] && HELD_LABEL="owner-hold"
 if [ -n "$HELD_LABEL" ]; then
   # The timestamp is READ, never invented: the ISSUE's `labeled` events carry created_at. Take the
   # MOST RECENT labeled event for the WINNING label -- a label removed and re-applied is held since
@@ -828,9 +876,9 @@ if [ -n "$HELD_LABEL" ]; then
   HELD_TS=$(gh api "repos/$REPO/issues/$PR/events?per_page=100" --paginate \
     --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$HELD_LABEL\") | .created_at] | last // empty" 2>/dev/null || true)
   [ -n "${HELD_TS:-}" ] || HELD_TS="UNKNOWN (the labeled event for $HELD_LABEL could not be read)"
-  if [ "$_HAS_HOLD" = 1 ] && [ "$_HAS_OWNER_HOLD" = 1 ]; then
-    echo "  This PR carries BOTH hold labels. owner-hold WINS: only the owner applies it, and no lane removes it or merges past it."
-  fi
+  case "$_HELD_SEEN" in
+    *,*) echo "  This PR carries MORE THAN ONE hold label ($_HELD_SEEN). $HELD_LABEL WINS: it is the strongest member of the vocabulary [$PR_HOLD_LABELS], and for owner-hold only the owner applies it, and no lane removes it or merges past it." ;;
+  esac
   echo "  This is NOT a checks verdict -- the required set was NOT read, and nothing here says anything about CI. Do not re-run waiting for this to clear."
   echo "  A LANE hold is the label PLUS a 'HELD by <lane> pending <reason>' comment posted within the minute. A hold label with NO such comment is the OWNER's: ask main, do not merge."
   echo "HELD: $HELD_LABEL since $HELD_TS"
