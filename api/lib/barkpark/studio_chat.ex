@@ -1960,8 +1960,12 @@ defmodule Barkpark.StudioChat do
        predicate — strictly wider than the read it was compared to, never
        equivalent to it.
 
-    2. It cites `studio_chat.ex` "~1805-1828" as holding a `d.dataset ==
-       ^dataset` read. No such read ever existed in this file. The whole
+    2. It cites a line range near the middle of this file (given there as a
+       tilde-prefixed span in the eighteen-hundreds) as holding a
+       `d.dataset == ^dataset` read. No such read ever existed in this file.
+       The range is deliberately NOT repeated here as a file-and-line token:
+       quoting a citation in order to refute it would plant a fresh one, and
+       the citation guard cannot tell a quotation from a claim. The whole
        history of the file contains exactly ONE commit that touches the
        string `dataset` at all:
 
@@ -2011,11 +2015,15 @@ defmodule Barkpark.StudioChat do
   # the second hop is keyed on a string.
   #
   # The scope is resolved HERE, at the read, from the session id the caller
-  # already passes — NOT per caller. All four callers of `epic_goal/2`
-  # (`chat_live.ex` :2180, :5244, :5276 and `chat_controller.ex` `put_epic/2`
-  # :1693) resolve to the same thing, the SESSION's `owner_workspace_id`, and
-  # deriving it from the primary key they all hand in makes it impossible for a
-  # fifth caller to get it wrong or to forget it.
+  # already passes — NOT per caller. All four callers of `epic_goal/2` resolve
+  # to the same thing, the SESSION's `owner_workspace_id`: three in
+  # `chat_live.ex` (the workflow-ping one-shot in `handle_info/2`, and the two
+  # session-list folds in `refresh_epic_goals/1` and its sibling) and
+  # `put_epic/2` in `chat_controller.ex`. Grep them with
+  # `git grep -n "StudioChat.epic_goal("` rather than by line — an enumeration
+  # by line number is a snapshot, and the audit that found this bug listed
+  # three of the four. Deriving the scope from the primary key they all hand in
+  # makes it impossible for a fifth caller to get it wrong or to forget it.
   #
   # A NULL `owner_workspace_id` is the ADMIN/GLOBAL session by construction (see
   # `owner_ws_from_scope/1`), so it keeps the unscoped fold — narrowing it would
