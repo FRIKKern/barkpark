@@ -75,6 +75,13 @@ defmodule Barkpark.Tasks.ClaimFenceTest do
       assert {:error, :task_not_found} = Tasks.verify_claim_fence("not-a-uuid", %{})
     end
 
+    test "a non-binary task_id hits the fallback clause and is :task_not_found, not a FunctionClauseError" do
+      # task-888cded6b75503ee: `verify/2`'s catch-all clause had no witness —
+      # delete it and this call raised with every suite green.
+      assert {:error, :task_not_found} = ClaimFence.verify(nil, %{})
+      assert {:error, :task_not_found} = Tasks.verify_claim_fence(42, %{})
+    end
+
     test "a well-formed but absent UUID still runs the query (guard did not swallow the real path)" do
       absent = Ecto.UUID.generate()
       assert {:error, :task_not_found} = ClaimFence.verify(absent, %{})
