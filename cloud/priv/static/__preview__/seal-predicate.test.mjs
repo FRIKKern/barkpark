@@ -27,7 +27,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // EVERY source mutation in this file goes through these. A bare `.replace` with a
 // string needle takes the first substring match anywhere and says nothing when the
@@ -404,13 +404,14 @@ const fixtureRun = (name, extra = []) =>
 // Write a mutated copy of the predicate to a temp dir and run it. The mutation must
 // actually apply — a regex that silently matched nothing would make every mutation
 // proof below vacuous.
-function mutatedRun(mutate, args) {
+function mutatedRun(mutate, args, env) {
   const src = readFileSync(PREDICATE, 'utf8');
   const out = mutate(src);
   assert.notEqual(out, src, 'the mutation must actually apply');
   const path = join(mkdtempSync(join(tmpdir(), 'seal-pred-mut-')), 'mutated.mjs');
   writeFileSync(path, out);
-  const r = spawnSync('node', [path, ...args], { encoding: 'utf8', timeout: 120000 });
+  const r = spawnSync('node', [path, ...args],
+    { encoding: 'utf8', timeout: 120000, ...(env ? { env } : {}) });
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
@@ -3694,4 +3695,206 @@ test('wave 36: the re-home arm cannot rescue unaddressed residue, and R4/R6 are 
   const self = fixtureRun('self-successor.json');
   assert.equal(self.status, REFUSED, 'R4 still refuses a successor that IS the epic');
   assert.match(token(self.out), /REFUSED reason=SELF-SUCCESSOR/);
+});
+
+
+// ── task-3e2226c69000587d · A RUNTIME REFUSAL IS NOT A MEASURED DEFECT ──────
+//
+// THE DEFECT: clause (b)'s spawn site read `spawnSync('node', …)` — `node` off
+// PATH — and turned ANY non-zero into `guard exited N — the defect is still
+// measurable at origin/main`. `cloud/priv/static/__app.test.mjs` carries the
+// cchi-w61-bl runtime self-check, which reds when the running major is not the
+// one `cloud/priv/static/__node-version` declares; a `node --test` file reds
+// with exit 1, so that refusal was indistinguishable from a product red and the
+// predicate published it as one. Measured at 8b7219e90: `--ladder-only` read
+// `b-clean=5/6` with CCH-D1 marked "still measurable" on a host whose PATH node
+// is 22 — including when the PREDICATE itself was launched from a v20 binary,
+// because the child took PATH's node either way.
+//
+// THE EARLIER FIX, and why this one is an EXTENSION of it and not a new idea:
+// the "WHY A GUARD'S EXIT 2 IS AN INFRA FAULT" block already refuses to launder
+// a REFUSAL into a defect claim — but it keys that entirely on the guard exiting
+// **2**, a vocabulary a node:test guard cannot speak. This row adds the second
+// key: a fact the PREDICATE measures about the runtime, independent of anything
+// the guard says.
+//
+// THE INVARIANT, and these three arms exist to drive it in BOTH directions:
+// UNREADABLE is reachable ONLY when this program could not obtain the runtime
+// the guard DECLARES. It is never reachable from an exit code and never from
+// output text — so a genuine product red is still "still measurable", whether or
+// not the guard carries a declaration.
+const GUARD_DECL = "__node-version";
+
+// A guard planted outside the repo and pointed at by a mutated register entry.
+// `exitWith` is the guard's OWN exit code, so each arm states what kind of
+// non-zero it is driving. `declares` writes a sibling __node-version, or null.
+// `ran` is a SENTINEL FILE, not a line of the guard's stdout: the predicate
+// captures a guard's output and never echoes it, so asserting on "the guard
+// printed X" would pass vacuously in the arm that expects no spawn — a control
+// that cannot fire. A file on disk is a fact about whether the process started.
+function plantGuard({ exitWith, declares }) {
+  const dir = tmp("seal-pred-rt-");
+  const g = join(dir, "planted-guard.mjs");
+  const ran = join(dir, "ran");
+  // ESM, because the plant is a `.mjs` — `require` is not defined there, and a
+  // guard that crashes on load would make every arm below measure the crash.
+  writeFileSync(g, "import { writeFileSync } from 'node:fs';\n" +
+    "writeFileSync(" + JSON.stringify(ran) + ", 'yes');\n" +
+    "process.exit(" + exitWith + ");\n");
+  if (declares !== null) writeFileSync(join(dir, GUARD_DECL), declares + "\n");
+  return { rel: relative(REPO, g), ran };
+}
+const guardRan = (ran) => { try { statSync(ran); return true; } catch { return false; } };
+
+// Swap CCH-D1's guard path for the planted one and read the ladder. Everything
+// else about the entry — its commit, its diff proof — is left alone, so the only
+// thing that can change the entry's mark is the guard.
+function ladderWithPlantedGuard(rel, env) {
+  return mutatedRun(
+    (src) => replaceUnique(src, "    guard: 'cloud/priv/static/__app.test.mjs',",
+      "    guard: '" + rel + "',"),
+    ["--repo", REPO, "--ladder-only"], env);
+}
+
+const D1 = "CCH-D1-overview-refetch-storm";
+const LAUNDERED = /guard exited \d+ — the defect is still measurable at origin\/main/;
+
+// ── WHY NOT ONE OF THESE ARMS PINS `b-clean=` OR `b-unavailable=` ───────────
+//
+// MEASURED THE HARD WAY, on this very row: the first cut of these arms asserted
+// `b-unavailable=1/6`, `b-unavailable=0/6` and `b-clean=6/6`. All four passed on
+// a developer box with whole history and THREE of them redded the required
+// Console gate, which reads:
+//
+//   b-rungs=rung1:2,rung2:4,rung3:0 b-clean=0/6 b-unavailable=6/6
+//
+// That is the CORRECT reading there and it has nothing to do with runtimes:
+// `console-unit` checks out at `actions/checkout@v4`'s depth-1 default, so every
+// registered commit answers HISTORY-UNAVAILABLE. Note `rung2:4` — four of those
+// six entries carry no `guard:` at all and can never reach the runtime resolver.
+// The block at the head of this file and `wave 29 SELECTOR` both already say so
+// in as many words ("0/6 in a checkout with whole history, 6/6 in a depth-1 CI
+// clone — because pinning a value would red the whole suite in exactly the
+// environment `console-unit` runs in"), and this row walked into it anyway.
+//
+// So every assertion below is RUNTIME-SCOPED: the per-entry sentences this row
+// owns, and counts of THOSE. Nothing here reads a number that moves with how
+// much history the checkout happens to have.
+const runtimeUnavailableLines = (out) =>
+  out.split("\n").filter((l) => /^ {8}RUNTIME-UNAVAILABLE: guard /.test(l));
+const launderedLines = (out) => out.split("\n").filter((l) => LAUNDERED.test(l));
+
+test("w37: a guard whose DECLARED Node major does not exist here reads UNREADABLE, never measured", () => {
+  // 999 is a major no host has and none ever will — so the refusal is a property
+  // of the declaration, not of which runtimes this particular machine happens to
+  // carry. The guard exits 1: if the exit code could reach the verdict this arm
+  // would see the laundered sentence.
+  const planted = plantGuard({ exitWith: 1, declares: "999" });
+  const { status, out } = ladderWithPlantedGuard(planted.rel);
+  assert.equal(status, 0, "a reading exits 0; an unreadable entry is not a failure of the run:\n" + out);
+  assert.equal(runtimeUnavailableLines(out).length, 1,
+    "EXACTLY one entry may be refused for a runtime reason — the one this arm planted:\n" + out);
+  assert.match(out, /RUNTIME-UNAVAILABLE: guard .*planted-guard\.mjs declares Node major 999/,
+    "the refusal must name the guard and the major it could not obtain:\n" + out);
+  assert.match(out, /Looked in — PATH node and node999/, "…and state where it looked:\n" + out);
+  assert.match(out, /^ {2}\? CCH-D1/m, "…and the entry's MARK must be `?`, not `✗`:\n" + out);
+  assert.equal(launderedLines(out).length, 0,
+    "THE DEFECT: a runtime this host cannot provide was reported as a product defect:\n" + out);
+  // The token's unread count must ACCOUNT for it, without pinning a value: whatever
+  // history this checkout has, the runtime refusal is inside `b-unavailable`.
+  const m = token(out).match(/ b-clean=(\d+)\/(\d+) b-unavailable=(\d+)\/(\d+) /);
+  assert.ok(m, "the token must carry b-clean and b-unavailable: " + token(out));
+  assert.ok(Number(m[3]) >= 1,
+    "a runtime refusal is counted as UNREAD, never as unclean: " + token(out));
+  assert.ok(Number(m[1]) + Number(m[3]) <= Number(m[2]),
+    "an entry read as unavailable is never also counted clean: " + token(out));
+  // The guard must not have RUN at all — an unreadable entry that still executed
+  // the guard would be asserting nothing while paying for a measurement.
+  assert.equal(guardRan(planted.ran), false,
+    "the guard must not be spawned at all — an unreadable entry that still ran the guard " +
+    "would pay for a measurement and assert nothing:\n" + out);
+});
+
+test("w37: THE OTHER DIRECTION — a guard that declares NO runtime and reds is still a measured defect", () => {
+  const planted = plantGuard({ exitWith: 1, declares: null });
+  const { status, out } = ladderWithPlantedGuard(planted.rel);
+  assert.equal(status, 0);
+  assert.equal(launderedLines(out).length, 1,
+    "a genuine guard red must STILL read as measurable — the refusal door may not become an escape hatch:\n" + out);
+  assert.match(out, /^ {2}✗ CCH-D1/m, "…and the entry's mark is `✗`:\n" + out);
+  assert.match(out, /RUNTIME: .*planted-guard\.mjs declares none .*ran this process's own v\d+\./,
+    "…and the reading still names the runtime it ran on:\n" + out);
+  assert.equal(runtimeUnavailableLines(out).length, 0, "nothing here is refused for a runtime reason:\n" + out);
+  assert.equal(guardRan(planted.ran), true, "and the guard really ran:\n" + out);
+});
+
+test("w37: and a guard that declares the runtime it GOT and reds is a measured defect too", () => {
+  // The sharp arm: the declaration is present AND satisfied. If the distinction
+  // had been keyed on "this guard has a __node-version" rather than on a measured
+  // mismatch, this red would have been laundered into UNREADABLE — a real defect
+  // escaping behind an environment word. The declared major is read from the
+  // running process, so this arm is correct on any host.
+  const running = String(process.versions.node).split(".")[0];
+  const planted = plantGuard({ exitWith: 1, declares: running });
+  const { status, out } = ladderWithPlantedGuard(planted.rel);
+  assert.equal(status, 0);
+  assert.equal(launderedLines(out).length, 1, "a satisfied declaration buys a red guard no amnesty:\n" + out);
+  assert.match(out, new RegExp("RUNTIME RESOLVED: .*planted-guard\\.mjs declares Node " + running),
+    "…and the resolved runtime is stated on the passing-resolution path too:\n" + out);
+  assert.equal(runtimeUnavailableLines(out).length, 0);
+  assert.equal(guardRan(planted.ran), true, "the guard really ran — this arm measured something:\n" + out);
+});
+
+test("w37: THE RUNNER'S SHAPE — the ambient `node` IS the declaration, and nothing is located", () => {
+  // THE OVER-FIRE THIS ROW COULD HAVE SHIPPED, driven as an arm. A CI runner has
+  // no nvm, no fnm, no volta, no asdf and exactly one `node` on PATH, put there by
+  // actions/setup-node and already the declared major. If resolution went looking
+  // for a VERSIONED binary — an nvm path, a `node20` name, a directory layout —
+  // it would find nothing there and refuse all six guards, and clause (b) would
+  // become structurally unmeasurable in the one environment that gates merges:
+  // a silent false NEGATIVE, which is a worse trade than the loud false positive
+  // this row was filed to delete.
+  //
+  // Every version-manager root is pointed at a directory that does not exist, so
+  // the ONLY door left is the running interpreter answering `--version` about
+  // itself. The guard declares the major this process really is.
+  const running = String(process.versions.node).split(".")[0];
+  const planted = plantGuard({ exitWith: 0, declares: running });
+  const env = {
+    ...process.env,
+    CONSOLE_HARNESS_NVM_DIR: "/nonexistent-nvm",
+    CONSOLE_HARNESS_FNM_DIR: "/nonexistent-fnm",
+    CONSOLE_HARNESS_VOLTA_HOME: "/nonexistent-volta",
+    CONSOLE_HARNESS_ASDF_DIR: "/nonexistent-asdf",
+  };
+  delete env.NVM_DIR; delete env.FNM_DIR; delete env.VOLTA_HOME; delete env.ASDF_DATA_DIR;
+  const { status, out } = ladderWithPlantedGuard(planted.rel, env);
+  assert.equal(status, 0, out);
+  assert.equal(runtimeUnavailableLines(out).length, 0,
+    "NOT ONE guard may be refused for a runtime reason when the running interpreter " +
+    "already satisfies the declaration — this is the all-six-unavailable over-fire:\n" + out);
+  assert.match(out, new RegExp("RUNTIME RESOLVED: .*planted-guard\\.mjs declares Node " + running),
+    "…and it resolved, naming the runtime:\n" + out);
+  assert.equal(guardRan(planted.ran), true, "the guard really ran on the ambient node:\n" + out);
+});
+
+test("w37: the live ladder states the runtime it resolved for every guard it spawned", () => {
+  // c2's second half, driven against the COMMITTED register rather than a plant:
+  // a reading that names the runtime only on the failure path cannot be compared
+  // across two hosts, which is the question this row was filed to answer.
+  //
+  // DEPTH-AGNOSTIC BY CONSTRUCTION. It asserts what this row owns — that no guard
+  // was refused for a runtime reason and none was laundered — and never `b-clean=`,
+  // which is 6/6 with whole history and 0/6 in the depth-1 clone `console-unit`
+  // checks out. The 6/6 claim is a MEASUREMENT, reported on both majors in the PR,
+  // not something a suite can assert in an environment that has no history to read.
+  const { status, out } = run(["--repo", REPO, "--ladder-only"]);
+  assert.equal(status, 0, out);
+  assert.match(out,
+    /RUNTIME RESOLVED: cloud\/priv\/static\/__app\.test\.mjs declares Node 20 \(__node-version beside it\); ran v20\.\d+\.\d+ from \S+/,
+    "CCH-D1's guard must be spawned on the major its own __node-version declares:\n" + out);
+  assert.equal(runtimeUnavailableLines(out).length, 0,
+    "no registered guard may be refused for a runtime reason on a host that has Node 20:\n" + out);
+  assert.equal(launderedLines(out).length, 0,
+    "and no registered guard reads as still-measurable once it runs on its declared runtime:\n" + out);
 });
