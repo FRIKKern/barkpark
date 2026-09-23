@@ -2338,7 +2338,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         content["blocks"] || [],
         canvas_resume_authorized?(socket, paper)
       )
-      |> assign(sidebar_assigns(paper))
+      |> assign_sidebar(paper)
       # pdd-t12b: with the canvas ON (the mainline default) a block paper opens
       # straight into the always-editable editor — the read-only streamed View
       # branch is unreachable, so resolving + rendering every block into the
@@ -2383,7 +2383,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
       )
-      |> assign(sidebar_assigns(paper))
+      |> assign_sidebar(paper)
       |> stream(:paper_blocks, [], reset: true)
     end
   end
@@ -2413,7 +2413,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # only reaches the server ~400ms after first paint, so a server-seeded close
   # would BE the flash D12 refused (measured: first paint t=20.1ms,
   # phx-connected t=419.5ms). The cascade closes it at first paint instead.
-  defp sidebar_assigns(paper) do
+  #
+  # `sidebar_open` has exactly one exception (spd-b1-pane-state-persistence):
+  # a user who collapsed the inspector at `wide` gets it seeded collapsed. That
+  # is NOT a server-seeded close in D12's sense — the pre-paint head script
+  # stamps `data-inspector-pref="closed"` from the same localStorage key before
+  # first paint, and the painted-closed rule already paints the strip, so the
+  # connected render only swaps `.is-open`-painted-as-strip for `.is-collapsed`,
+  # which is the same geometry. The pref reaches the socket only via
+  # connect_params (Mount.init), so on the static render it is always false.
+  defp assign_sidebar(socket, paper),
+    do: assign(socket, sidebar_assigns(paper, socket.assigns[:inspector_pref_closed] == true))
+
+  defp sidebar_assigns(paper, pref_closed?) do
     # NORMALISED through `published_id/1`, and that is not cosmetic. Since the
     # blocks branch resolves draft-first (spd-w17), a never-published paper
     # arrives here as `drafts.paper-…` — and `drafts.` is a STORAGE prefix, not
@@ -2429,7 +2441,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       end
 
     [
-      sidebar_open: true,
+      sidebar_open: not pref_closed?,
       sidebar_user_opened: false,
       sidebar_collapsed: MapSet.new(),
       sidebar_slug_draft: slug,
@@ -2504,7 +2516,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_unlinked: []
       )
       |> PaperCanvasLease.reset_socket()
-      |> assign(sidebar_assigns(nil))
+      |> assign_sidebar(nil)
     else
       socket
       |> assign(
