@@ -164,8 +164,21 @@ var codeExit = map[string]int{
 	"criteria_mismatch":           exitValidation,
 	"criteria_index_out_of_range": exitValidation,
 	"criterion_text_required":     exitValidation,
-	"note_required":               exitValidation,
-	"illegal_transition":          exitValidation,
+	// A sealed-row criterion-TEXT amendment (`bp task stamp --amend`, #19930)
+	// that arrives without its replacement wording. VALIDATION, not conflict,
+	// by this table's own rule two blocks down and not by the gate's printed
+	// remedy: NOTHING moved under the caller — no lease, no rev, no lifecycle —
+	// and re-sending the identical request can never succeed, because the
+	// missing thing is a field the caller must supply. Its nearest sibling is
+	// `criterion_text_required` directly above: same family, same shape, same
+	// bucket. Absent from this table it fell through to exit 2 (usage), so a
+	// caller could not tell "you typed the command wrong" from "the server
+	// refused your well-formed request" — the exact confusion the 5/6 split
+	// exists to remove, and TestCodeExitCoversCloseRefusalVocabulary is the
+	// ratchet that caught it.
+	"amended_criterion_required": exitValidation,
+	"note_required":              exitValidation,
+	"illegal_transition":         exitValidation,
 	// The four the D371 split MISSED, every one measured at exit 2 before this
 	// block (probe through the real `bp task close` dispatch, 2026-08-24) — the
 	// SAME code as a malformed command line, which is the exact confusion the
