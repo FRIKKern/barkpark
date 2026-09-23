@@ -2259,6 +2259,46 @@ function main() {
   const census = loadCensus(fixture);
   const censusKey = census ? census.key : 'NONE';
   const filingEvents = [];
+  // ── RE-HOMED: THE FORWARDED BUCKET'S ONLY REACHABLE POPULATION ─────────────────
+  //
+  // THE DEFECT THIS CLOSES (cch-w36). `forwarded` is the SUCCESSOR's subtree; the
+  // classify loop above walks `residue`, drawn from `children`, the EPIC's subtree. R4
+  // forbids `successor === epic`, R6 forbids a successor whose parent chain reaches the
+  // epic, and `parent_id` is a single field — so on any invocation those two refusals
+  // ALLOW, the two sets are disjoint BY CONSTRUCTION and `fwd` is structurally empty.
+  // Measured live 2026-09-20 at 149119d00: twelve rows re-parented onto the successor
+  // with `bp task move`, read back from the store on the successor's roster, and the
+  // next run printed `forwarded under successor : 0` while the anti-filing arm named
+  // the same twelve as having LEFT the population without a transition. Dead accounting
+  // printed beside live buckets, and — the part that is a seal-correctness problem, not
+  // a cosmetic one — "forward the residue to a named address" and "empty the roster by
+  // re-parenting" reached the reader in IDENTICAL letters.
+  //
+  // WHICH POPULATION IS HONEST, since it cannot be `residue`. A re-parented row is no
+  // longer in the epic's subtree at all, so no walk rooted at the epic can ever observe
+  // it. The only register that remembers the epic ever owed that row is the PRIOR
+  // CENSUS — which is precisely the population the arm below already iterates. So the
+  // forwarded bucket is scored over `residue ∪ {census departures still unfinished}`,
+  // and a departure is FORWARDED exactly when the successor's own subtree walk — the
+  // same `forwarded` set, the same evidence clause (a) has always demanded — contains
+  // it. Nothing new is fetched and no fence is consulted from a second place.
+  //
+  // THE REFUSALS ARE UNTOUCHED, and deliberately. Making the intersection non-empty by
+  // relaxing R4 or R6 would re-open the one-flag path to a false PASS those refusals
+  // were added to close (83 live rows -> `forwarded: 79`, `orphans: 0`, `a=PASS`). The
+  // fix is about WHICH POPULATION IS CLASSIFIED, never about how wide the fence is.
+  //
+  // THE INVARIANT, stated so a later edit can be checked against it: clause (a) must
+  // still FAIL when residue is genuinely unaddressed. It does — `aPass` is untouched
+  // and still reads `orphans` and `consideringResidue`, both of which are drawn from
+  // the epic's own roster. This arm can only move a row OUT of `filingEvents` (a
+  // blocking bucket) and into `reHomed` (a passing one), and only on positive evidence
+  // that the successor's subtree contains that exact `_id`. A row that left with no
+  // address, or that this run could not resolve, is still a filing event and still
+  // blocks. A re-home can therefore never manufacture a green that the pre-fix file
+  // would have refused for a residue reason; it can only stop charging a correctly
+  // forwarded row as a disappearance.
+  const reHomed = [];
   if (census) {
     const present = new Set(children.map((c) => c._id));
     for (const [id, was] of Object.entries(census.rows)) {
@@ -2267,9 +2307,16 @@ function main() {
       let now = null;
       try { now = resolveDeparted(id, fixture); } catch (e) { now = null; }
       if (now && CLOSED_STATUSES.includes(now)) continue;  // it left by being FINISHED
+      // ORDER MATTERS, exactly as it does in the residue loop above: a named forwarding
+      // address is what clause (a) asks for, so it is tested BEFORE the row is charged
+      // as a disappearance. No name is lost — every re-homed row is printed by id on
+      // the forwarding line AND under ANTI-FILING below.
+      if (forwarded.has(id)) { reHomed.push({ id, was, now: now || 'UNREADABLE' }); continue; }
       filingEvents.push({ id, was, now: now || 'UNREADABLE' });
     }
   }
+  // Clause (a)'s forwarded bucket, over both halves of its population.
+  const forwardedTotal = fwd.length + reHomed.length;
 
   // Bucket (c): every hardcoded gate must resolve. A gate that silently vanished is a
   // gate that stopped being disclosed — that is NO SEAL, not a clean sheet.
@@ -2304,7 +2351,7 @@ function main() {
   L.push(`census: ${census ? `${censusKey} (captured ${census.capturedAt}) — ${Object.keys(census.rows).length} row(s) recorded` : 'NONE — the anti-filing arm was NOT RUN and nothing here claims it passed'}`);
   L.push('');
   L.push(`CLAUSE (a) forwarding — residue ${residue.length} (live ${live.length}, considering ${considering.length})`);
-  L.push(`  forwarded under successor : ${fwd.length}`);
+  L.push(`  forwarded under successor : ${forwardedTotal}${reHomed.length ? `  (${fwd.length} still in the epic's roster, ${reHomed.length} RE-HOMED out of it: ${reHomed.slice(0, 8).map((r) => r.id).join(', ')}${reHomed.length > 8 ? ', …' : ''})` : ''}`);
   L.push(`  permanent human gate      : ${gatedLive.length}  [${gatedLive.join(', ') || '-'}]`);
   L.push(`  considering (disclosed)   : ${consideringResidue.length}  [${consideringResidue.slice(0, 8).join(', ') || '-'}${consideringResidue.length > 8 ? ', …' : ''}]`);
   if (consideringElsewhere.length)
@@ -2316,16 +2363,32 @@ function main() {
   // re-derivation caught this defect only by doing exactly this sum off the live
   // ledger. If the buckets ever double-count again, this line stops adding up.
   L.push(`  ── buckets partition residue: ${fwd.length} + ${gatedLive.length} + ${consideringResidue.length} + ${orphans.length} = ${residue.length}`);
+  // The sum is over RESIDUE, and a re-homed row is by definition not in it — it left the
+  // epic's subtree. Saying so on its own line keeps the partition arithmetic checkable
+  // instead of silently off by the re-homed count.
+  if (reHomed.length)
+    L.push(`     (+${reHomed.length} re-homed row(s) are NOT in residue — they are no longer in ${EPIC}'s subtree. They are counted on the forwarding line above and listed under ANTI-FILING below.)`);
   L.push('');
   L.push(`ANTI-FILING — rows that LEFT the counted population since the ${censusKey} census`);
   if (!census) {
     L.push('  NOT RUN — no census. A population can shrink by filing and this run cannot tell.');
-  } else if (filingEvents.length === 0) {
-    L.push(`  ✓ 0 filing event(s): every census row that left resolves to done or cancelled today.`);
   } else {
-    L.push(`  FILING EVENT(S) : ${filingEvents.length} — left the population with NO transition to done/cancelled`);
-    filingEvents.slice(0, 8).forEach((f) => L.push(`      ✗ ${f.id}  was=${f.was} now=${f.now}`));
-    if (filingEvents.length > 8) L.push(`      … and ${filingEvents.length - 8} more`);
+    // THE TWO DEPARTURES, IN DIFFERENT LETTERS — the whole point of charter D93's paced
+    // forwarding. "Re-homed under the named successor" and "vanished without a
+    // transition" were previously the SAME sentence, so an honest ~10-rows-a-wave
+    // forwarding read exactly like a population swept to look smaller.
+    if (reHomed.length) {
+      L.push(`  ✓ RE-HOMED UNDER ${SUCCESSOR} : ${reHomed.length} — left ${EPIC}'s roster WITH a forwarding address, found in the successor's own subtree. Counted as FORWARDED by clause (a) above; NOT a filing event.`);
+      reHomed.slice(0, 8).forEach((r) => L.push(`      → ${r.id}  was=${r.was} now=${r.now}`));
+      if (reHomed.length > 8) L.push(`      … and ${reHomed.length - 8} more`);
+    }
+    if (filingEvents.length === 0) {
+      L.push(`  ✓ 0 filing event(s): every census row that left resolves to done or cancelled today${reHomed.length ? `, or is re-homed under ${SUCCESSOR}` : ''}.`);
+    } else {
+      L.push(`  FILING EVENT(S) : ${filingEvents.length} — left the population with NO transition to done/cancelled and NO forwarding address under ${SUCCESSOR}`);
+      filingEvents.slice(0, 8).forEach((f) => L.push(`      ✗ ${f.id}  was=${f.was} now=${f.now}`));
+      if (filingEvents.length > 8) L.push(`      … and ${filingEvents.length - 8} more`);
+    }
   }
   L.push('');
   L.push('BUCKET (c) permanent human gates');
@@ -2352,7 +2415,7 @@ function main() {
     L.push('VERDICT: SEAL');
     L.push('');
     L.push(`SCOPE — what this green does and does NOT claim, read at ${STAMP}:`);
-    L.push(`  Sealed ${children.length} children of ${EPIC}: ${byStatus.done || 0} evidence-closed, ${fwd.length} forwarded by name`);
+    L.push(`  Sealed ${children.length} children of ${EPIC}: ${byStatus.done || 0} evidence-closed, ${forwardedTotal} forwarded by name`);
     L.push(`  ${terminal ? `with NO successor — TERMINAL, on a roster read of live=0 and considering=0` : `to ${SUCCESSOR}`}, and ${Object.keys(PERMANENT_HUMAN_GATES).length} permanent human gate(s) disclosed by hardcoded name.`);
     L.push('  Zero unnamed residue — open, in_progress AND considering all accounted for.');
     L.push(`  Clause (b): ${measuredHere} defect(s) measured HERE by a committed guard, ${measuredElsewhere} MEASURED-ELSEWHERE.`);
@@ -2409,7 +2472,7 @@ function main() {
   // out of the task layer. Zero is the overwhelming majority of parents, and on those the
   // token stays byte-identical to every one quoted before this field existed.
   const draftCount = children.filter((c) => c && c._draft).length;
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${aPass ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'} direct=${direct.length} depth=${rosterWalk.depth} subtree-unread=${rosterWalk.unread.length} census=${censusKey} filing-events=${filingEvents.length}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}${draftCount ? ` drafts=${draftCount}` : ''}`);
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${aPass ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'} direct=${direct.length} depth=${rosterWalk.depth} subtree-unread=${rosterWalk.unread.length} census=${censusKey} filing-events=${filingEvents.length}${reHomed.length ? ` re-homed=${reHomed.length}` : ''}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}${draftCount ? ` drafts=${draftCount}` : ''}`);
   console.log(L.join('\n'));
   return ok ? 0 : 1;
 }

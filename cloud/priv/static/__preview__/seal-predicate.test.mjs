@@ -3553,3 +3553,140 @@ test('wave 69: 0 behind PROCEEDS, and an UNREADABLE comparison is not a stale tr
   const fixtured = run(['--ledger', FIX('sealable.json'), '--repo', synthRepoBehind(9)]);
   assert.doesNotMatch(fixtured.out, /REPO-BEHIND-ORIGIN-MAIN/, 'a ledger fixture reads no tree date');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WAVE 36 — THE FORWARDED BUCKET WAS STRUCTURALLY UNREACHABLE
+//
+// THE DEFECT, from the source. `forwarded` was built from a subtree walk of the
+// SUCCESSOR; the classify loop ran over `residue`, drawn from `children`, the subtree
+// walk of the EPIC. R4 forbids `successor === epic`, R6 forbids a successor whose
+// parent chain reaches the epic, and `parent_id` is ONE field — so on every invocation
+// those refusals ALLOW, the two sets are disjoint BY CONSTRUCTION and `fwd` could only
+// ever print 0. Measured live 2026-09-20 at 149119d00: twelve rows re-parented onto the
+// successor with `bp task move` and read back on the successor's roster, and the next
+// run printed `forwarded under successor : 0` while the anti-filing arm named the same
+// twelve as having LEFT the population without a transition.
+//
+// WHY THAT IS A SEAL-CORRECTNESS PROBLEM AND NOT COSMETICS: "forward the residue to a
+// named address" and "empty the roster by re-parenting" reached the reader in IDENTICAL
+// letters, which makes charter D93's paced, partially-forwarded roster inexpressible —
+// the only path to a=PASS was live==0 AND considering==0, the all-or-nothing pressure
+// D93/D94/D83 exist to relieve.
+//
+// THE FENCES ARE NOT TOUCHED. R4 and R6 stay exactly as committed: relaxing either one
+// to make the intersection non-empty is the one-flag path to a false PASS they were
+// added to close (83 live rows -> `forwarded: 79`, `orphans: 0`, `a=PASS`). The fix is
+// WHICH POPULATION IS CLASSIFIED — the prior census is the only register that remembers
+// the epic ever owed a row that has since left its subtree.
+//
+// THE FIXTURES ARE LEGAL, and that word is load-bearing. `forward-to-grandchild.json`
+// reaches `fwd > 0` only by placing one `_id` in BOTH the epic's `children` and the
+// successor's `subtrees` — a world with two parents for one row, which the live ledger
+// cannot produce. The wave-36 fixtures place the re-homed row under the successor and
+// NOWHERE else, which is the shape a real `bp task move` leaves behind.
+const W36_REPARENT = 'reparent-to-successor.json';
+const W36_PACED = 'paced-forwarding.json';
+// THE PRE-FIX CLASSIFICATION, reconstructed in one line: delete the re-home arm and
+// every census departure is charged as a disappearance again.
+const noReHome = (src) => {
+  const out = replaceUnique(src,
+    "      if (forwarded.has(id)) { reHomed.push({ id, was, now: now || 'UNREADABLE' }); continue; }\n", '');
+  assert.notEqual(out, src, 'the no-re-home mutation must actually apply');
+  return out;
+};
+
+// c1 — THE ARM THAT REDS IF THE FORWARDED BUCKET IS UNREACHABLE.
+test('wave 36: a legally re-homed row REACHES the forwarded bucket (and could not before)', () => {
+  // THE PRECONDITION, asserted rather than assumed: the re-homed row is under the
+  // successor and is NOT in the epic's own roster. Were it in both, this fixture would
+  // describe a row with two parents and would prove nothing about the live ledger.
+  const fx = JSON.parse(readFileSync(FIX(W36_REPARENT), 'utf8'));
+  const ROW = 'gr-fixture-reparented-to-successor';
+  assert.ok(!fx.children.some((c) => c._id === ROW),
+    'the precondition: a re-parented row has LEFT the epic\'s roster — it is not in `children`');
+  assert.ok(Object.values(fx.subtrees).some((rows) => rows.some((r) => r._id === ROW)),
+    'the precondition: and it IS somewhere under the successor');
+  assert.equal(fx.priorCensus[ROW], 'open', 'the precondition: the census remembers the epic owed it');
+
+  // RED ON THE OLD CLASSIFICATION. forwarded stays 0 over a row that has an address,
+  // and the row is charged as a filing event — the two acts in one set of letters.
+  const args = ['--ledger', withRequired(W36_REPARENT), '--repo', REPO, '--guard-cmd', 'true'];
+  const pre = mutatedRun(noReHome, args);
+  assert.equal(pre.status, NO_SEAL, `the mutation must reproduce the defect: ${pre.out}`);
+  assert.match(pre.out, /^ {2}forwarded under successor : 0$/m,
+    'THE DEFECT: the bucket prints 0 over a row that IS under the successor');
+  assert.match(token(pre.out), /\bfiling-events=1\b/);
+  assert.doesNotMatch(pre.out, /\bre-homed=/, 'and nothing in the old letters tells the two acts apart');
+  assert.match(pre.out, new RegExp(`✗ ${ROW}`),
+    'a correct forwarding, printed with the same ✗ as a disappearance');
+
+  // GREEN ON THE COMMITTED FILE, same fixture, same flags.
+  const now = run(args);
+  assert.equal(now.status, SEAL, `a row forwarded by re-parenting is forwarded: ${now.out}`);
+  assert.match(now.out, /^ {2}forwarded under successor : 1 {2}\(0 still in the epic's roster, 1 RE-HOMED out of it: gr-fixture-reparented-to-successor\)$/m,
+    'forwarded>0 — the bucket is REACHABLE, and it names the row and which half it came from');
+  assert.match(token(now.out), /\bfiling-events=0 re-homed=1\b/);
+  assert.doesNotMatch(now.out, new RegExp(`✗ ${ROW}`), 'and it is no longer charged as a departure');
+  // c0, in its own words: forwarded, not an orphan, not only an anti-filing departure.
+  assert.match(token(now.out), /\borphans=0\b/);
+  assert.match(now.out, /0 evidence-closed, 1 forwarded by name/,
+    'and the SCOPE paragraph counts it too, so the green says what it certified');
+});
+
+// c2 — THE TWO DEPARTURES, IN DIFFERENT LETTERS. A paced roster (D93, ~10 rows a wave)
+// is only expressible if "re-homed under the successor" and "vanished without a
+// transition" do not read identically.
+test('wave 36: a PACED roster reads re-homed and vanished in different letters', () => {
+  const args = ['--ledger', withRequired(W36_PACED), '--repo', REPO, '--guard-cmd', 'true'];
+
+  // THE OLD LETTERS: three departures, one bucket, one ✗ apiece. Two of them were
+  // correctly forwarded and the reader cannot tell which.
+  const pre = mutatedRun(noReHome, args);
+  assert.equal(pre.status, NO_SEAL);
+  assert.match(pre.out, /FILING EVENT\(S\) : 3 — left the population with NO transition to done\/cancelled$/m);
+  assert.match(pre.out, /✗ gr-fixture-paced-1/);
+  assert.match(pre.out, /✗ gr-fixture-paced-2/);
+  assert.match(pre.out, /✗ gr-fixture-vanished/);
+  assert.match(token(pre.out), /\bfiling-events=3\b/,
+    'THE DEFECT: an honest paced forwarding is scored identically to a swept population');
+
+  // THE NEW LETTERS: two rows under RE-HOMED with →, one under FILING EVENT(S) with ✗.
+  const now = run(args);
+  assert.equal(now.status, NO_SEAL, 'the one true disappearance still blocks the seal');
+  assert.match(now.out, /^ {2}✓ RE-HOMED UNDER cch-fixture-successor-epic : 2 —/m);
+  assert.match(now.out, /^ {6}→ gr-fixture-paced-1 {2}was=open now=open$/m);
+  assert.match(now.out, /^ {6}→ gr-fixture-paced-2 {2}was=open now=in_progress$/m);
+  assert.match(now.out, /^ {2}FILING EVENT\(S\) : 1 — left the population with NO transition to done\/cancelled and NO forwarding address under cch-fixture-successor-epic$/m);
+  assert.match(now.out, /^ {6}✗ gr-fixture-vanished {2}was=open now=open$/m);
+  // The two acts are told apart by SYMBOL, by HEADING and in the machine token.
+  assert.doesNotMatch(now.out, /✗ gr-fixture-paced-/, 'a re-homed row never wears the disappearance mark');
+  assert.doesNotMatch(now.out, /→ gr-fixture-vanished/, 'and a disappearance never wears the forwarding arrow');
+  assert.match(token(now.out), /\bfiling-events=1 re-homed=2\b/);
+  assert.match(now.out, /^ {2}forwarded under successor : 2 {2}\(0 still in the epic's roster, 2 RE-HOMED out of it: gr-fixture-paced-1, gr-fixture-paced-2\)$/m);
+  // And the partition arithmetic stays checkable: re-homed rows are NOT residue.
+  assert.match(now.out, /^ {2}── buckets partition residue: 0 \+ 0 \+ 0 \+ 0 = 0$/m);
+  assert.match(now.out, /^ {5}\(\+2 re-homed row\(s\) are NOT in residue/m);
+});
+
+// THE INVARIANT, DRIVEN: clause (a) must still FAIL over genuinely unaddressed residue.
+// A re-home arm that lowered that bar would have traded a dead bucket for a false green,
+// which is the exact trade R4 and R6 were written to refuse.
+test('wave 36: the re-home arm cannot rescue unaddressed residue, and R4/R6 are untouched', () => {
+  // (a) An orphan is still an orphan with the arm in place.
+  const orphan = fixtureRun('orphan-residue.json');
+  assert.equal(orphan.status, NO_SEAL, 'unaddressed residue still fails clause (a)');
+  assert.match(token(orphan.out), /NO-SEAL a=FAIL /);
+  assert.doesNotMatch(orphan.out, /\bre-homed=/, 'and no re-home count is claimed where nothing was re-homed');
+
+  // (b) A departure with NO forwarding address is still a filing event.
+  const gone = fixtureRun('census-departure.json');
+  assert.equal(gone.status, NO_SEAL);
+  assert.match(token(gone.out), /\bcensus=fixture filing-events=1\b/);
+  assert.doesNotMatch(token(gone.out), /\bre-homed=/);
+
+  // (c) THE FENCES, READ OFF THE COMMITTED SOURCE. This row's fix was explicitly not
+  // allowed to widen them, so the two refusals are asserted to still fire.
+  const self = fixtureRun('self-successor.json');
+  assert.equal(self.status, REFUSED, 'R4 still refuses a successor that IS the epic');
+  assert.match(token(self.out), /REFUSED reason=SELF-SUCCESSOR/);
+});
