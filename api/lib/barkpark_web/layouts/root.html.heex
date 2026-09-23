@@ -4873,12 +4873,19 @@
     .api-schema-card { margin: 8px 0; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
     /* studio-r22: the summary WRAPS. `.pane-column` above is explicitly a
        squeezing column (flex-shrink:1 down to a clamp(140px, 18vw, 260px)
-       floor), so at 900 the docs pane lands near 255px — and a no-wrap flex
+       floor), so the docs pane at viewport 900 is narrow — and a no-wrap flex
        row of four intrinsically-sized chips (name, title, visibility badge,
-       field count) cannot fit there for a long schema name. It did not: 9 of
-       40 cards overflowed, worst 70px, with the field-count chip cut at or
-       pushed outside the card border. Two things make the invariant hold for
-       ANY name length:
+       field count) cannot fit there for a long schema name. It did not:
+       MEASURED in Chrome on the real served document, 15 of 38 cards
+       overflowed at viewport 900, worst 82px (coordinatorLoop), with the
+       field-count chip cut at or pushed outside the card border.
+       That measurement read the docs column at 336px. The originating report
+       read it at ~255px and counted 9 of 40; the gap between the two column
+       widths is UNRECONCILED — most likely a wider studio shell or a fourth
+       pane the measured render does not carry. Which way it cuts is the part
+       worth keeping: the wider column found MORE overflow, not less, so 15 of
+       38 is a conservative floor and the real page is worse.
+       Two things make the invariant hold for ANY name length:
          - `flex-wrap` lets the chips fall to a second line instead of
            overflowing. Chosen over `min-width:0` + `text-overflow: ellipsis`
            on the name because the NAME is the identifying content of this
@@ -4890,9 +4897,11 @@
            alone cannot save a line with one over-long item, because a flex
            item's automatic minimum size is its min-content width.
        Row gap is tightened to 4px so a wrapped card does not read as two
-       unrelated rows; the 12px COLUMN gap is unchanged, so the 31 cards that
-       already fit render exactly as before. This is not a `.text-xs`
-       consequence — the overflow reproduced with an 11px control too. */
+       unrelated rows; the 12px COLUMN gap is unchanged, so the 23 cards that
+       already fit at 900 render exactly as before. This is not a `.text-xs`
+       consequence: nothing here touches the type scale, and the originating
+       report reproduced the overflow with an 11px control in place of the
+       shipped 12px. */
     .api-schema-summary { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; cursor: pointer; }
     .api-schema-summary > * { min-width: 0; overflow-wrap: anywhere; }
     .api-schema-fields { margin-top: 8px; }
