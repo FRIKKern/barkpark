@@ -2761,7 +2761,16 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # with #19567 (7da416496) under slug `console-harness-pin` — but it first
         # RENDERED on a drift-examined sha when #19951 touched console-harness.yml,
         # so the gap sat latent until a push-to-main made the dispatcher emit it.
-        --expect-unrendered "console-harness.sh reads CI's pin (it must be able to LOSE)")
+        --expect-unrendered "console-harness.sh reads CI's pin (it must be able to LOSE)"
+        # ── 2026-09-23 (task-a0abaae6f64c0a9c): absent-context-census.yml. The
+        # census job's name had no row although it renders on main commits (never
+        # on a PR head — no pull_request trigger); the workflow_run leg added in
+        # the same change makes it render there several times an hour, and the new
+        # cadence job renders beside it. Both rows land in the same diff; the frozen
+        # fixture pair predates the workflow. DERIVED by
+        # scripts/required-checks-ack-derive.sh, which named exactly these two.
+        --expect-unrendered "Absent required-context census"
+        --expect-unrendered "Census cadence (hold, re-arm)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
