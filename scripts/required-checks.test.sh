@@ -2391,7 +2391,12 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
 # workflow landed on 2026-08-09, nine days after both frozen heads. They are
 # listed here ONE NAME AT
 # A TIME, exactly as an operator would type them, so a row that stops being
-# unrenderable reds this file instead of quietly widening a blanket waiver. §14b
+# unrenderable reds this file instead of quietly widening a blanket waiver.
+# The rule cuts both ways: a name the generator CAN re-derive leaves this list.
+# `PR task gate self-test` and `Re-land advisory (already-landed overlap)` did
+# (task-7ac46837d7b03e44): S8 PULL-REQUEST-ONLY now classifies both off the real
+# workflow tree (§30h/§30j below), and scripts/required-checks-ack-derive.sh
+# reported them as "did not need" on every run. §14b
 # below asserts the refusal that makes this list necessary; every section that
 # wants a successful EMIT passes "$ACK".
 #
@@ -2410,7 +2415,6 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Dispatch (compose-smoke paths)"
         --expect-unrendered "Elixir path-escape ratchet"
         --expect-unrendered "gofmt drift ceiling (blocking)"
-        --expect-unrendered "PR task gate self-test"
         --expect-unrendered "Dependabot PRs carry the standing task trailer"
         --expect-unrendered "Dependabot trailer injector self-test"
         --expect-unrendered "Prod compile gate (Elixir 1.18.1 / OTP 27.0)"
@@ -2462,7 +2466,6 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Renew every open PR's claim (20-min sweep)"
         --expect-unrendered "Report main-push failure to a human"
         --expect-unrendered "gofmt -l (advisory)"
-        --expect-unrendered "Re-land advisory (already-landed overlap)"
         --expect-unrendered "Boundary gate"
         --expect-unrendered "Dispatch (shell-harness paths)"
         --expect-unrendered ".claude/workflows engines load on a machine that is not this one"
