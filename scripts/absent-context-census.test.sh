@@ -1070,7 +1070,7 @@ else
 fi
 
 # ═══ 7. the workflow shape ═══════════════════════════════════════════════════
-section "7. the workflow is schedule-only with a static job name"
+section "7. the workflow keeps its schedule, never triggers on a pull request, and has a static job name"
 
 # THE SHAPE IS LOAD-BEARING, TWICE OVER. A `pull_request` trigger would put this
 # workflow's names into the required-check generator's sample; a templated job
@@ -1107,7 +1107,9 @@ if [ -z "$SHAPE" ]; then
 else
   bad "7.1 workflow shape is wrong: $(tr '\n' ';' <<<"$SHAPE")"
 fi
-JOBNAME="$(sed 's/#.*//' "$WF" | grep -E '^[[:space:]]+name:[[:space:]]*\S' | head -1 | sed 's/^[[:space:]]*name:[[:space:]]*//')"
+# The census job's own name, read inside its job block — the file also carries
+# a cadence job (§7b), declared first, so "the first name:" is not this one.
+JOBNAME="$(awk '/^  absent-context-census:/ {inj=1; next} /^  [A-Za-z0-9_-]+:[ \t]*$/ {inj=0} inj' "$WF" | sed 's/#.*//' | grep -E '^    name:[[:space:]]*\S' | head -1 | sed 's/^[[:space:]]*name:[[:space:]]*//')"
 ok "7.2 the literal job name is: $JOBNAME"
 
 # The shape checker must be able to fail, in each direction independently.
@@ -1129,6 +1131,146 @@ grep -q 'TEMPLATED JOB NAME' <<<"$(shape_report "$CANARY2")" \
 grep -q 'absent-context-census.test.sh' "$WF" \
   && ok "7.5 the scheduled run executes this harness — the instrument proves it can fail before it reports" \
   || bad "7.5 $(basename "$WF") never runs absent-context-census.test.sh"
+
+# ═══ 7b. THE CADENCE — the event leg, the re-arm, and the derived bound ══════
+section "7b. the cadence: event leg derived from the spec, re-arm wired, latency recomputed (task-a0abaae6f64c0a9c)"
+
+# WHAT THIS SECTION PINS. The census answers "re-arm now" only if it RUNS
+# within the blackout it is judged against — PR #18045's two hours. The
+# schedule cannot promise that (the workflow header carries the measurement),
+# so three static properties of the workflow file carry the bound, and each is
+# a YAML property: asserted here statically, then disarmed on a canary copy and
+# watched firing. Which one each assertion is, is stated beside it.
+#
+#   (a) `on: workflow_run: types: [completed]` names EXACTLY the workflows
+#       that produce the committed required set — derived from the spec
+#       through ctx_path (§0), never typed. PR #16709's absence
+#       (NAME_NOT_IN_RUN on "PR references an active task") ends in a
+#       pr-task-gate COMPLETION, and that completion is what fires the census.
+#   (b) the re-arm is wired end to end: census step id + opt-in env ->
+#       job output -> cadence job reads it -> dispatches this file.
+#   (c) the worst-case latency, recomputed from HOLD_MINUTES (P) and the census
+#       job's timeout-minutes (T): one cycle max(P,T)+T, the re-arm chain
+#       2*(max(P,T)+T). Both must be under 120 min, and the numbers the header
+#       prints must be the ones this arithmetic produces.
+
+# The `name:` of each workflow producing a required context, spec-derived.
+producer_names() {
+  local c f
+  for c in "${CONTEXTS[@]}"; do
+    f="$REPO_ROOT/$(ctx_path "$c")" || continue
+    sed -n 's/^name:[[:space:]]*//p' "$f" | head -1 | tr -d "\"'"
+  done | sort -u
+}
+
+# The `workflows:` list under the workflow-level `workflow_run:` trigger, one
+# per line. Same `on:` spellings as shape_report.
+wr_workflows() { # <yml>
+  awk '/^("on"|\047on\047|on)[ \t]*:/ {inon=1; next} /^[A-Za-z"\047]/ {inon=0}
+       inon && /^  workflow_run:/ {inwr=1; next}
+       inon && /^  [A-Za-z_]/ {inwr=0}
+       inon && inwr {print}' "$1" | sed 's/#.*//' \
+    | sed -n 's/^[[:space:]]*workflows:[[:space:]]*\[\(.*\)\].*/\1/p' \
+    | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | tr -d "\"'" | grep . | sort -u
+}
+wr_types() { # <yml>
+  awk '/^("on"|\047on\047|on)[ \t]*:/ {inon=1; next} /^[A-Za-z"\047]/ {inon=0}
+       inon && /^  workflow_run:/ {inwr=1; next}
+       inon && /^  [A-Za-z_]/ {inwr=0}
+       inon && inwr {print}' "$1" | sed 's/#.*//' \
+    | sed -n 's/^[[:space:]]*types:[[:space:]]*\[\(.*\)\].*/\1/p' | tr -d ' "'"'"
+}
+# A key inside one job block: <yml> <job id> <key regex>
+job_key() {
+  awk -v j="$2" '/^jobs:/ {injobs=1; next}
+       injobs && /^  [A-Za-z0-9_-]+:[ \t]*$/ {cur=$1; sub(":","",cur); next}
+       injobs && cur == j {print}' "$1" | sed 's/#.*//' | grep -E "$3" || true
+}
+
+cadence_report() { # <yml> -> findings, empty when the cadence is intact
+  local f="$1" want got p t cyc chain
+  want="$(producer_names)"
+  got="$(wr_workflows "$f")"
+  [ -n "$got" ] || echo "NO WORKFLOW_RUN LEG"
+  [ "$want" = "$got" ] || echo "EVENT LEG != SPEC PRODUCERS (want: $(tr '\n' ' ' <<<"$want")got: $(tr '\n' ' ' <<<"$got"))"
+  [ "$(wr_types "$f")" = "completed" ] || echo "WORKFLOW_RUN TYPES ARE NOT [completed]"
+  # (b) the re-arm wiring, link by link.
+  grep -q . <<<"$(job_key "$f" absent-context-census 'id:[[:space:]]*census$')" || echo "CENSUS STEP HAS NO id: census"
+  grep -q . <<<"$(job_key "$f" absent-context-census 'ABSENT_CENSUS_EMIT_OUTPUT:[[:space:]]*"1"')" || echo "CENSUS STEP DOES NOT OPT IN TO THE OUTPUT"
+  grep -q . <<<"$(job_key "$f" absent-context-census 'undispatched_young:[[:space:]]*\$\{\{ steps\.census\.outputs\.undispatched_young \}\}')" || echo "CENSUS JOB DOES NOT EXPORT undispatched_young"
+  grep -q . <<<"$(job_key "$f" cadence 'needs\.absent-context-census\.outputs\.undispatched_young')" || echo "CADENCE JOB DOES NOT READ undispatched_young"
+  grep -q . <<<"$(job_key "$f" cadence 'gh workflow run absent-context-census\.yml --ref main')" || echo "CADENCE JOB DOES NOT RE-ARM"
+  grep -q . <<<"$(job_key "$f" cadence 'if:[[:space:]]*always\(\)')" || echo "CADENCE JOB IS NOT always() — a red census would skip the hold and the re-arm"
+  # (c) the arithmetic, off the file's own numbers.
+  p="$(job_key "$f" cadence 'HOLD_MINUTES:' | sed -n 's/.*HOLD_MINUTES:[[:space:]]*"\{0,1\}\([0-9][0-9]*\).*/\1/p' | head -1)"
+  t="$(job_key "$f" absent-context-census '^    timeout-minutes:' | sed -n 's/.*timeout-minutes:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
+  if [ -z "$p" ] || [ -z "$t" ]; then
+    echo "LATENCY NOT DERIVABLE (P='$p' T='$t')"
+  else
+    cyc=$(( (p > t ? p : t) + t )); chain=$(( 2 * cyc ))
+    [ "$cyc" -lt 120 ] || echo "EVENT CYCLE ${cyc} min IS NOT UNDER THE 120-min BLACKOUT"
+    [ "$chain" -lt 120 ] || echo "RE-ARM CHAIN ${chain} min IS NOT UNDER THE 120-min BLACKOUT"
+    grep -qF "With P = $p and T = $t:" "$f" || echo "HEADER DOES NOT STATE P = $p, T = $t"
+    grep -qF "the event -> <= $cyc min" "$f" || echo "HEADER CYCLE IS NOT $cyc min"
+    grep -qF "run time + $chain min" "$f" || echo "HEADER RE-ARM CHAIN IS NOT $chain min"
+  fi
+  true
+}
+
+CAD="$(cadence_report "$WF")"
+if [ -z "$CAD" ]; then
+  ok "7.6 [static] workflow_run leg = spec producers ($(producer_names | tr '\n' ' ')), types [completed]; re-arm wired census->output->cadence->dispatch; latency derivable"
+else
+  bad "7.6 the cadence is broken: $(tr '\n' ';' <<<"$CAD")"
+fi
+P_NOW="$(job_key "$WF" cadence 'HOLD_MINUTES:' | sed -n 's/.*HOLD_MINUTES:[[:space:]]*"\{0,1\}\([0-9][0-9]*\).*/\1/p' | head -1)"
+T_NOW="$(job_key "$WF" absent-context-census '^    timeout-minutes:' | sed -n 's/.*timeout-minutes:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
+if [ -n "$P_NOW" ] && [ -n "$T_NOW" ]; then
+  CYC_NOW=$(( (P_NOW > T_NOW ? P_NOW : T_NOW) + T_NOW ))
+  ok "7.7 [derived] P=${P_NOW} T=${T_NOW}: event leg <= ${CYC_NOW} min, re-arm chain <= $((2 * CYC_NOW)) min, both < 120 (PR #18045's blackout) — plus GitHub dispatch/queue time, which no trigger bounds"
+else
+  bad "7.7 P or T could not be read from $(basename "$WF")"
+fi
+# PR #16709's producer is ON the event leg — the specimen's own completion fires it.
+PTG_NAME="$(sed -n 's/^name:[[:space:]]*//p' "$WORKFLOWS/pr-task-gate.yml" 2>/dev/null | head -1)"
+if [ -n "$PTG_NAME" ] && grep -qxF "$PTG_NAME" <<<"$(wr_workflows "$WF")"; then
+  ok "7.8 [static] '$PTG_NAME' (producer of #16709's missing context) is on the workflow_run leg — its completion is the event that censuses that head"
+else
+  bad "7.8 the #16709 specimen's producer '$PTG_NAME' is not on the workflow_run leg"
+fi
+
+# Each property disarmed on a canary, and the report must fire on each.
+cad_fires() { # <label> <canary> <expected finding substring>
+  if grep -qF "$3" <<<"$(cadence_report "$2")"; then
+    ok "$1 …and FIRES on the canary ($3)"
+  else
+    bad "$1 did not fire on its canary (wanted: $3)"; cadence_report "$2" | sed 's/^/       /' >&2
+  fi
+}
+C7A="$TMP/canary-drop-producer.yml"
+sed 's/workflows: \[elixir, cloud, console-harness, pr-task-gate\]/workflows: [elixir, cloud, console-harness]/' "$WF" > "$C7A"
+cad_fires "7.9 [mutation] a producer dropped from the event leg (pr-task-gate — the #16709 case)" "$C7A" "EVENT LEG != SPEC PRODUCERS"
+C7B="$TMP/canary-no-wr.yml"
+awk '/^  workflow_run:/ {skip=1; next} skip && /^  [a-z_]+:/ {skip=0} skip && /^    / {next} {skip=0; print}' "$WF" > "$C7B"
+cad_fires "7.10 [mutation] the workflow_run leg removed" "$C7B" "NO WORKFLOW_RUN LEG"
+C7C="$TMP/canary-no-rearm.yml"
+grep -v 'gh workflow run absent-context-census.yml --ref main' "$WF" > "$C7C"
+cad_fires "7.11 [mutation] the re-arm dispatch removed" "$C7C" "CADENCE JOB DOES NOT RE-ARM"
+C7D="$TMP/canary-slow-hold.yml"
+sed 's/HOLD_MINUTES: "[0-9]*"/HOLD_MINUTES: "60"/' "$WF" > "$C7D"
+cad_fires "7.12 [mutation] P raised to 60" "$C7D" "RE-ARM CHAIN 160 min IS NOT UNDER"
+C7E="$TMP/canary-no-timeout.yml"
+awk '/^  absent-context-census:/ {inj=1} /^  cadence:/ {inj=0} inj && /^    timeout-minutes:/ {next} {print}' "$WF" > "$C7E"
+cad_fires "7.13 [mutation] the census job's timeout-minutes removed (T unbounded)" "$C7E" "LATENCY NOT DERIVABLE"
+C7F="$TMP/canary-no-output.yml"
+grep -v 'ABSENT_CENSUS_EMIT_OUTPUT' "$WF" > "$C7F"
+cad_fires "7.14 [mutation] the census step's output opt-in removed" "$C7F" "CENSUS STEP DOES NOT OPT IN TO THE OUTPUT"
+# Reason 2 still holds with the new legs: the §7.3 planted-pull_request canary
+# is re-run over the CURRENT file (which now carries workflow_run).
+grep -q 'PULL_REQUEST TRIGGER' <<<"$(shape_report "$CANARY")" \
+  && [ -z "$(shape_report "$WF")" ] \
+  && ok "7.15 with the workflow_run leg in place the file still has NO pull_request trigger, and a planted one still FIRES 7.1" \
+  || bad "7.15 the event leg broke the pull_request shape check"
 
 # ═══ 8. the fence ════════════════════════════════════════════════════════════
 section "8. the three new files stay inside the fence"
@@ -1185,6 +1327,142 @@ for f in "${MINE[@]}"; do
   esac
 done
 ok "8.6 both shell files pass \`bash -n\`"
+
+# ═══ 9. NON-VACUITY — the trigger path on the two specimens and a healthy head ═
+section "9. the re-arm signal fires on PR #18045's shape and PR #16709's, and NOT on a healthy head"
+
+# THE SPECIMENS, as measured (task-a0abaae6f64c0a9c):
+#   #18045, head b1990da86, 2026-09-13. All four producers created 09:02:52Z.
+#     pr-task-gate  completed success 09:04:01Z  (rendered its context)
+#     console-harness completed STARTUP_FAILURE 09:05:28Z
+#     elixir          completed STARTUP_FAILURE 09:05:45Z
+#     cloud           queued, never dispatched, for the whole blackout
+#   pr-task-gate's completion is the ONLY event that head ever emitted, and it
+#   landed BEFORE either startup failure concluded — a startup_failure fires no
+#   workflow_run. So the census that event starts sees three runs created and
+#   dispatching nothing (UNDISPATCHED_YOUNG, exit 0, no finding), and the ONLY
+#   thing that makes the next look happen is the re-arm this section pins:
+#   9.1 at the event's moment, 9.2 one cycle later.
+#   #16709: pr-task-gate COMPLETED and rendered no "PR references an active
+#     task" — NAME_NOT_IN_RUN. Its own completion is the event (§7.8).
+#
+# Fixtures are the §0 base with fields moved; the three non-surviving producers
+# are the ones NOT made by pr-task-gate.yml, derived from the spec.
+cadence_line() { grep -o 'CADENCE  undispatched-young=[0-9]*' <<<"$1" | sed 's/.*=//'; }
+SURVIVOR_PATH=".github/workflows/pr-task-gate.yml"
+LOST=()
+for c in "${CONTEXTS[@]}"; do
+  [ "$(ctx_path "$c")" = "$SURVIVOR_PATH" ] || LOST+=("$c")
+done
+LOST_N="${#LOST[@]}"
+[ "$LOST_N" -ge 2 ] || bad "9.0 the spec needs >= 2 contexts not made by pr-task-gate.yml for the #18045 shape; has $LOST_N"
+lost_paths_json() {
+  local c; for c in "${LOST[@]}"; do ctx_path "$c"; done | jq -R . | jq -sc .
+}
+LP="$(lost_paths_json)"
+
+# 9.1 — #18045 at pr-task-gate's completion: three producers created, nothing
+# dispatched, all 2h old (< the 24h ZOMBIED threshold).
+D9A="$(derive rearm-18045-at-event)"
+jq --argjson lost "$(printf '%s\n' "${LOST[@]}" | jq -R . | jq -sc .)" \
+  '{check_runs: [.check_runs[] | select(.name as $n | $lost | index($n) | not)]}' \
+  "$D9A/checkruns-$SHA.json" > "$D9A/.tmp" && mv "$D9A/.tmp" "$D9A/checkruns-$SHA.json"
+jq --argjson lp "$LP" '{workflow_runs: [.workflow_runs[] | if (.path as $p | $lp | index($p)) then .status = "queued" else . end]}' \
+  "$D9A/runs-$SHA.json" > "$D9A/.tmp" && mv "$D9A/.tmp" "$D9A/runs-$SHA.json"
+for id in $(jq -r --argjson lp "$LP" '.workflow_runs[] | select(.path as $p | $lp | index($p)) | .id' "$D9A/runs-$SHA.json"); do
+  jq -n '{total_count: 0, jobs: []}' > "$D9A/jobs-$id.json"
+done
+OUT="$(run_census "$D9A")"; RC=$?
+Y="$(cadence_line "$OUT")"
+if [ "$RC" = "0" ] && [ "$Y" = "$LOST_N" ] && grep -q 'absent=0' <<<"$OUT"; then
+  ok "9.1 #18045 at the event: exit 0, absent=0 (not yet a finding) — and CADENCE undispatched-young=$Y, so the re-arm FIRES"
+else
+  bad "9.1 #18045-at-event should be exit 0 with undispatched-young=$LOST_N; got exit $RC, young='$Y'"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# 9.2 — the re-armed look, one cycle later: two of them concluded
+# startup_failure, the last is still queued. The scream arrives here, and the
+# re-arm stays armed for the one still silent.
+D9B="$(derive rearm-18045-next-cycle)"
+cp -R "$D9A/." "$D9B/"
+SF_PATHS="$(jq -c '.[0:-1]' <<<"$LP")"
+jq --argjson sf "$SF_PATHS" '{workflow_runs: [.workflow_runs[] | if (.path as $p | $sf | index($p)) then (.status = "completed" | .conclusion = "startup_failure") else . end]}' \
+  "$D9B/runs-$SHA.json" > "$D9B/.tmp" && mv "$D9B/.tmp" "$D9B/runs-$SHA.json"
+OUT="$(run_census "$D9B")"; RC=$?
+Y="$(cadence_line "$OUT")"
+SF_N="$(grep -cE '^ +class +STARTUP_FAILURE$' <<<"$OUT")"
+if [ "$RC" = "1" ] && [ "$SF_N" = "$((LOST_N - 1))" ] && [ "$Y" = "1" ]; then
+  ok "9.2 #18045 one cycle later: exit 1 with $SF_N STARTUP_FAILURE row(s) — the scream — and undispatched-young=1, so the re-arm stays armed for the queued one"
+else
+  bad "9.2 expected exit 1, $((LOST_N - 1)) STARTUP_FAILURE, young=1; got exit $RC, $SF_N, young='$Y'"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# 9.3 — the healthy head: nothing to re-arm for.
+OUT="$(run_census "$BASE")"; RC=$?
+Y="$(cadence_line "$OUT")"
+if [ "$RC" = "0" ] && [ "$Y" = "0" ]; then
+  ok "9.3 healthy head: exit 0 and undispatched-young=0 — the re-arm does NOT fire"
+else
+  bad "9.3 the healthy base should give exit 0, young=0; got exit $RC, young='$Y'"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# 9.4 — #16709: pr-task-gate completed, its context rendered nowhere. The
+# finding comes from the event itself; there is nothing silent left to re-arm for.
+D9D="$(derive rearm-16709)"
+PTG_CTX=""
+for c in "${CONTEXTS[@]}"; do [ "$(ctx_path "$c")" = "$SURVIVOR_PATH" ] && PTG_CTX="$c"; done
+jq --arg n "$PTG_CTX" '{check_runs: [.check_runs[] | select(.name != $n)]}' \
+  "$D9D/checkruns-$SHA.json" > "$D9D/.tmp" && mv "$D9D/.tmp" "$D9D/checkruns-$SHA.json"
+OUT="$(run_census "$D9D")"; RC=$?
+Y="$(cadence_line "$OUT")"
+if [ -n "$PTG_CTX" ] && [ "$RC" = "1" ] && grep -qE '^ +class +NAME_NOT_IN_RUN$' <<<"$OUT" \
+   && grep -qF "context \"$PTG_CTX\" renders nowhere" <<<"$OUT" && [ "$Y" = "0" ]; then
+  ok "9.4 #16709: \"$PTG_CTX\" NAME_NOT_IN_RUN at exit 1 on the census its own completion starts; undispatched-young=0 (no re-arm needed)"
+else
+  bad "9.4 #16709 shape: expected NAME_NOT_IN_RUN exit 1, young=0; got exit $RC, young='$Y'"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# 9.5 — only the SILENT population re-arms. The same #18045 fixture with one
+# producer's jobs dispatched is DISPATCHED_PENDING, whose completion is an event.
+D9E="$(derive rearm-dispatched)"
+cp -R "$D9A/." "$D9E/"
+FIRST_ID="$(jq -r --argjson lp "$LP" '[.workflow_runs[] | select(.path as $p | $lp | index($p)) | .id][0]' "$D9E/runs-$SHA.json")"
+jq -n '{total_count: 2, jobs: [{name: "changes", status: "in_progress", conclusion: null}]}' > "$D9E/jobs-$FIRST_ID.json"
+OUT="$(run_census "$D9E")"; Y="$(cadence_line "$OUT")"
+if [ "$Y" = "$((LOST_N - 1))" ] && grep -qE '^ +class +DISPATCHED_PENDING$' <<<"$OUT"; then
+  ok "9.5 a producer that HAS dispatched jobs is DISPATCHED_PENDING and is not counted (young=$Y): its completion is an event, only the silent ones re-arm"
+else
+  bad "9.5 expected young=$((LOST_N - 1)) with one DISPATCHED_PENDING; got young='$Y'"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# 9.6 — the step output the workflow reads: written only when opted in.
+GO="$TMP/gh-output"; : > "$GO"
+env GITHUB_OUTPUT="$GO" ABSENT_CENSUS_EMIT_OUTPUT=1 PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
+  bash "$CENSUS" --fixtures "$D9A" --now "$NOW" --spec "$SPEC" --workflows "$WORKFLOWS" --repo FRIKKern/barkpark >/dev/null 2>&1
+GO2="$TMP/gh-output-off"; : > "$GO2"
+env GITHUB_OUTPUT="$GO2" PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
+  bash "$CENSUS" --fixtures "$D9A" --now "$NOW" --spec "$SPEC" --workflows "$WORKFLOWS" --repo FRIKKern/barkpark >/dev/null 2>&1
+if [ "$(cat "$GO")" = "undispatched_young=$LOST_N" ] && [ ! -s "$GO2" ]; then
+  ok "9.6 opted in, the census writes 'undispatched_young=$LOST_N' to GITHUB_OUTPUT; not opted in, it writes nothing (a harness run inside a CI step cannot leak into that step's outputs)"
+else
+  bad "9.6 GITHUB_OUTPUT: opted-in='$(cat "$GO")' not-opted-in='$(cat "$GO2")'"
+fi
+
+# 9.7 — DISARM: a census that stopped counting the silent population reads the
+# #18045 event moment as nothing-to-do. 9.1 must be able to see that.
+MUT9="$TMP/mut9"; mkdir -p "$MUT9/scripts"
+grep -v 'UNDISPATCHED_YOUNG_ROWS=$((UNDISPATCHED_YOUNG_ROWS + 1))' "$CENSUS" > "$MUT9/scripts/absent-context-census.sh"
+if cmp -s "$CENSUS" "$MUT9/scripts/absent-context-census.sh"; then
+  bad "9.7 the disarm did not change the census (the counter line moved?)"
+else
+  OUT="$(env BARKPARK_CHECK_RUNS_LIB="$REPO_ROOT/scripts/lib/check-runs.sh" PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
+    bash "$MUT9/scripts/absent-context-census.sh" --fixtures "$D9A" --now "$NOW" --spec "$SPEC" --workflows "$WORKFLOWS" \
+    --repo FRIKKern/barkpark 2>&1)"
+  Y="$(cadence_line "$OUT")"
+  [ "$Y" = "0" ] \
+    && ok "9.7 …and with the counter disarmed the #18045 event moment reads undispatched-young=0 — the re-arm would NOT fire, so 9.1 is a check that can lose" \
+    || bad "9.7 the disarmed census still reported young='$Y' — 9.1 cannot tell a working re-arm from a dead one"
+fi
 
 echo
 echo "─────────────────────────────────────────────"

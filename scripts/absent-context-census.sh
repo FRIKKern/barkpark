@@ -219,6 +219,18 @@ ABSENT_ROWS=0
 STALE_ROWS=0
 UNKNOWN_ROWS=0
 PENDING_ROWS=0
+# THE RE-ARM SIGNAL (task-a0abaae6f64c0a9c). The in-flight rows whose producing
+# run was created and has dispatched NOTHING yet. Every other in-flight row ends
+# in a producer COMPLETION, and a completion is an event the workflow's
+# `workflow_run` leg already listens to. This population is the one that can
+# leave in silence: it concludes `startup_failure` (measured: GitHub creates NO
+# workflow_run event for that conclusion) or it never leaves the queue at all
+# and ages into ZOMBIED. No event will ever announce either, so the workflow
+# reads this count and, while it is non-zero, dispatches the census again one
+# cycle later — the census re-checks a condition for as long as it holds, which
+# is a level trigger built out of the only thing that knows the condition
+# exists. It is never a finding and never moves the exit code.
+UNDISPATCHED_YOUNG_ROWS=0
 # ORPHANED runs are stale-queued rows that are UNDISPATCHABLE and unattached:
 # jobs.total_count 0, and a head that is no longer the current head of any open
 # PR or of main. GitHub has no state transition for them — `gh run cancel` says
@@ -785,6 +797,7 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
            class   $class
            run     $rid  producer $wf"
         PENDING_ROWS=$((PENDING_ROWS + 1))
+        [ "$class" = "UNDISPATCHED_YOUNG" ] && UNDISPATCHED_YOUNG_ROWS=$((UNDISPATCHED_YOUNG_ROWS + 1))
         ;;
       *)
         say "ABSENT   $label  head $sha"
@@ -1042,6 +1055,13 @@ if [ "$ORPHAN_ROWS" -gt 0 ]; then
 fi
 say ""
 say "SUMMARY  absent=$ABSENT_ROWS  stale-queued=$STALE_ROWS  unknown=$UNKNOWN_ROWS  in-flight=$PENDING_ROWS  orphaned=$ORPHAN_ROWS  phantom-queued=$PHANTOM_ROWS"
+# Its own line, not a seventh SUMMARY field: readers already parse SUMMARY.
+say "CADENCE  undispatched-young=$UNDISPATCHED_YOUNG_ROWS  (non-zero = re-arm: a producer run exists that can end without emitting any event)"
+# The workflow reads the count as a step output. Opt-in, so a hermetic harness
+# run inside a CI step never writes into that step's outputs by accident.
+if [ "${ABSENT_CENSUS_EMIT_OUTPUT:-}" = "1" ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "undispatched_young=$UNDISPATCHED_YOUNG_ROWS" >> "$GITHUB_OUTPUT"
+fi
 
 [ "$CONFIG_FAULT" = "1" ] && {
   warn "CONFIGURATION FAULT — this run's credential cannot read the Actions and check-run endpoints. A census with no authority is not a clean census."
