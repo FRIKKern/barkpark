@@ -195,7 +195,14 @@ defmodule BarkparkWeb.Studio.PressAnswerRefusalWordTest do
       # THE REFUSAL SPEAKS. Its sibling cond arm has always flashed; this one
       # answered with an unchanged socket, which the press region could only
       # report as a round trip that happened.
-      assert flash_error(view) == "You do not have access to that workspace",
+      #
+      # The WORDING is the one sentence the not-found arm answers too
+      # (task-1829c2e22b31b2d6): a refusal-only "You do not have access to
+      # that workspace" told a forged press which slugs exist. The contract
+      # this test pins — the refusal is named, not mute — is unchanged; the
+      # no-oracle half is pinned by studio_live_switch_workspace_oracle_test.exs.
+      assert flash_error(view) ==
+               "Could not open that workspace — it does not exist, or you do not have access to it",
              "an AUTHORIZATION refusal a user can reach is still mute: #{inspect(flash_error(view))}"
     end
   end
