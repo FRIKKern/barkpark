@@ -253,7 +253,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   end
 
   def autosave_form(form, socket) do
-    {:noreply, Shared.do_autosave(socket, form)}
+    {:noreply, Shared.do_autosave(socket, form, :autosave_form)}
   end
 
   def paper_op(%{"op" => _} = op, socket) do

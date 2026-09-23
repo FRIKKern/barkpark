@@ -13,7 +13,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView
 
+  require Logger
+
   alias Barkpark.{Content, Tenancy}
+  alias Barkpark.Content.Forms
   alias Barkpark.Content.Warnings
   alias Barkpark.Media.Storage.Access, as: MediaAccess
   alias BarkparkWeb.Presence
@@ -397,7 +400,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # other type, so it must not shadow the two refusals that carry their own
   # user-facing wording.
   @doc false
-  def do_autosave(socket, params) do
+  def do_autosave(socket, params, trigger \\ :unknown) do
     doc = socket.assigns[:editor_doc]
     doc_id = if is_map(doc), do: Map.get(doc, :doc_id)
     type = socket.assigns[:editor_type]
@@ -418,11 +421,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         |> assign(save_status: "Read-only")
 
       true ->
-        autosave_write(socket, params)
+        autosave_write(socket, params, trigger)
     end
   end
 
-  defp autosave_write(socket, params) do
+  defp autosave_write(socket, params, trigger) do
     doc = socket.assigns[:editor_doc]
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
@@ -446,7 +449,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         ScopeHelpers.scope_opts(socket)
       )
 
-    if doc && type do
+    changed? = autosave_changes_something?(doc, schema, params)
+
+    # task-512fec7116c519e5 crit 0 — THE PHANTOM'S FLIGHT RECORDER.
+    #
+    # Two `drafts.frontpage` rows appeared on the Gyldendal twin in September
+    # whose content was byte-identical to the published document, and a later
+    # sweep found two more (both publications). NOBODY could say what wrote
+    # them: the autosave path left no trace, so every instance had to be
+    # reconstructed from row timestamps alone. One line per write attempt,
+    # naming the socket, WHICH door fired (a `phx-change`, an explicit save,
+    # the slug-derive arm, an array op, or the `{:autosave_form, …}`
+    # handle_info), how many params were posted, and whether the store would
+    # actually move. A future instance is then one grep, not an archaeology.
+    #
+    # `:info`, not `:debug` — prod runs at `:info` and a line nobody ships is
+    # not a flight recorder. One line per autosave, no content in it.
+    Logger.info(
+      "studio.autosave socket=#{inspect(socket.id)} trigger=#{trigger} " <>
+        "type=#{inspect(type)} doc_id=#{inspect(doc && Map.get(doc, :doc_id))} " <>
+        "params=#{map_size(params)} changed=#{changed?}"
+    )
+
+    if doc && type && changed? do
       case Content.upsert_draft(
              doc,
              type,
@@ -493,9 +518,99 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           assign(socket, save_status: "Save failed")
       end
     else
-      socket
+      # NOT a silent drop. When the post carried nothing new the store already
+      # holds what the editor shows, so "Saved" is the true answer — and it is
+      # the one `Fields.do_save/2` reads to clear the dirty flag on an explicit
+      # save of an untouched form. A socket with no doc/type still falls through
+      # untouched, exactly as before.
+      if doc && type, do: assign(socket, save_status: "Saved"), else: socket
     end
   end
+
+  # ── task-512fec7116c519e5 crit 1 — AN AUTOSAVE THAT CHANGES NOTHING ────────
+  #
+  # THE DEFECT. A `drafts.<id>` row whose content is byte-identical to the
+  # published document, with the published row untouched — observed four times
+  # on the Gyldendal twin across two types (frontpage, publication), no
+  # keystroke known for any of them. Harmless as bytes, not as state: it puts
+  # the document in "draft" in every desk, and it would carry a future
+  # serialisation regression into the store the day one lands.
+  #
+  # WHAT IS COMPARED, AND WHY THIS AND NOT SOMETHING ELSE. Both sides are
+  # normalised through `Forms.coerce_params/2` — the SAME function this write
+  # path already applies to the posted params two lines above — and the stored
+  # side is derived with `Forms.doc_to_form/2`, the very function that produced
+  # the form the browser is now posting back. That pair is the writer's own
+  # round trip, so the two known shape asymmetries cancel instead of
+  # manufacturing a false difference: an `image` value travels to the browser as
+  # a JSON STRING and returns as one while the stored value is a MAP, and a
+  # `richText` body is a map in content but an HTML string in the form.
+  # Comparing raw params to `doc.content` would report "changed" on every
+  # Forside — precisely the documents this is for.
+  #
+  # NOT a re-encode-and-compare-strings: JSON float formatting is not stable
+  # enough to carry a write decision. NOT a term compare of decoded content
+  # against a locally rebuilt candidate: that would fork the writer's
+  # normalisation into a second copy, and a fork here is a fork in "did this
+  # change anything".
+  #
+  # ONE-SIDED, DELIBERATELY. Only the keys the post actually carried are
+  # compared, and a key the stored projection does NOT carry counts as a
+  # DIFFERENCE. So a partial post (the slug-derive arm sends one field) is
+  # judged on what it sends, an empty post is "nothing changed", and anything
+  # this path cannot account for — an unknown key, a nil schema, a doc shape
+  # `doc_to_form/2` cannot project — falls through to the write. The failure
+  # direction is a write that was not needed, never an edit that was dropped.
+  defp autosave_changes_something?(doc, schema, params) when is_map(params) do
+    stored = stored_form(doc, schema)
+
+    cond do
+      stored == :unprojectable -> true
+      # CONTENT IS NOT THE WHOLE WRITE. A titleless type derives its `title`
+      # COLUMN on write from the schema's list-preview field
+      # (`TitleDerivation.maybe_derive/4`, Gyldendal parity E1.8) — and it fires
+      # only while that column is BLANK. So on a blank-titled row an autosave
+      # that posts nothing new still moves the store, and skipping it would
+      # strand the row as "Untitled" on every desk. Caught by
+      # `EditorTitlelessAuthorTest` "an autosave through the form back-fills the
+      # title column from the name", which went red the first time this guard
+      # ran the whole studio suite. A blank title always writes.
+      blank_title?(doc) -> true
+      params == %{} -> false
+      true -> Enum.any?(params, fn {k, v} -> Map.fetch(stored, k) != {:ok, v} end)
+    end
+  end
+
+  defp autosave_changes_something?(_doc, _schema, _params), do: true
+
+  # The stored document as the form the browser was handed. Read TOTALLY: a
+  # pane doc is a `%Content.Document{}` on the live path but a bare map in the
+  # unit fixtures, and `doc_to_form/2` reaches for `.title` / `.status` /
+  # `.content` — a KeyError on a shape that has always been legal here. An
+  # unprojectable doc (nil doc, nil schema) answers `:unprojectable`, which the
+  # caller reads as "cannot tell — write".
+  defp stored_form(doc, schema) when is_map(doc) and is_map(schema) do
+    shim = %{
+      title: Map.get(doc, :title),
+      status: Map.get(doc, :status),
+      content: Map.get(doc, :content)
+    }
+
+    Forms.coerce_params(Forms.doc_to_form(shim, schema), schema)
+  rescue
+    _ -> :unprojectable
+  end
+
+  defp stored_form(_doc, _schema), do: :unprojectable
+
+  defp blank_title?(doc) when is_map(doc) do
+    case Map.get(doc, :title) do
+      t when is_binary(t) -> String.trim(t) == ""
+      _ -> true
+    end
+  end
+
+  defp blank_title?(_doc), do: true
 
   @doc false
   def hook_opts(socket) do
