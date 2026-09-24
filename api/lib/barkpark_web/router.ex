@@ -2533,6 +2533,9 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token, :require_write, :idempotent])
 
     post("/mutate/:dataset", MutateController, :mutate)
+    # One PortableDoc block op on any document type: the HTTP twin of the call
+    # Studio's block editor makes in-process (docs/contracts/product-era.md).
+    post("/doc/:dataset/:type/:doc_id/ops", DocumentOpsController, :apply_op)
   end
 
   # ── Tasks API surface ───────────────────────────────────────────────────
@@ -3231,6 +3234,7 @@ defmodule BarkparkWeb.Router do
     pipe_through(:scoped_mutate)
 
     post("/v1/data/mutate/:dataset", MutateController, :mutate)
+    post("/v1/data/doc/:dataset/:type/:doc_id/ops", DocumentOpsController, :apply_op)
   end
 
   # Scoped admin reads (search insights/synonyms).
