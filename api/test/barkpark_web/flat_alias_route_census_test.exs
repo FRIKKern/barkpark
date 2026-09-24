@@ -133,6 +133,16 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "Tenancy.get_workspace_by_slug/1 and the caller must clear TenancyAuth.member?/2, " <>
          "authorize/3 or workspace_admin?/2 against THAT row. :current_workspace is never " <>
          "read."},
+    # WorkspaceController.archive / restore (task-55474a106554e65a)
+    {"POST", "/api/workspaces/:workspace_slug/archive"} =>
+      {:workspace_derived,
+       "slug-derived + admin-checked: the workspace comes from the URL slug through " <>
+         "Tenancy.get_workspace_by_slug/1 and the caller must clear " <>
+         "TenancyAuth.workspace_admin?/2 against THAT row. :current_workspace is never read."},
+    {"POST", "/api/workspaces/:workspace_slug/restore"} =>
+      {:workspace_derived,
+       "slug-derived + admin-checked, the same authorize_workspace_admin/2 bind as archive: " <>
+         "the URL slug's row, never :current_workspace."},
     # WorkspaceController.export
     {"GET", "/api/workspaces/:workspace_slug/export"} =>
       {:workspace_derived,

@@ -966,8 +966,10 @@ defmodule PDS.Census do
     # keeping one would leave the same contradiction under a different class name.
     {:post, "/api/playground", "BarkparkWeb.PlaygroundController", :provision, :status_only_receipt},
     {:post, "/api/workspaces", "BarkparkWeb.WorkspaceController", :create, :status_only_receipt},
+    {:post, "/api/workspaces/:workspace_slug/archive", "BarkparkWeb.WorkspaceController", :archive, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/projects", "BarkparkWeb.WorkspaceController", :create_project, :status_only_receipt},
+    {:post, "/api/workspaces/:workspace_slug/restore", "BarkparkWeb.WorkspaceController", :restore, :status_only_receipt},
     {:post, "/auth/reset/:token", "BarkparkWeb.SessionController", :reset_submit, :status_only_receipt},
     {:post, "/login", "BarkparkWeb.SessionController", :create, :status_only_receipt},
     {:post, "/login/account", "BarkparkWeb.SessionController", :account, :status_only_receipt},

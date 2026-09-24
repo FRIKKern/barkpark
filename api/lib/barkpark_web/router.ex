@@ -3361,7 +3361,13 @@ defmodule BarkparkWeb.Router do
   scope "/api", BarkparkWeb do
     pipe_through([:api, :require_token])
 
-    get("/workspaces", WorkspaceController, :index)
+    # `private:` exempts the LIST from DeriveWorkspaceFromToken's archive halt —
+    # a token bound to an archived workspace must still be able to SEE it
+    # (marked `archived_at`) to restore it. See that plug's moduledoc.
+    get("/workspaces", WorkspaceController, :index,
+      private: %{barkpark_archived_workspace_exempt: true}
+    )
+
     get("/workspaces/:workspace_slug/projects", WorkspaceController, :projects)
 
     get(
@@ -3397,6 +3403,38 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_admin])
 
     delete("/workspaces/:workspace_slug", WorkspaceController, :delete)
+  end
+
+  # ── Workspace ARCHIVE / RESTORE — the reversible sibling of DELETE ───────
+  # task-55474a106554e65a. SAME AUTHORISATION FLOOR AS DELETE, by construction:
+  # the same `[:api, :require_admin]` pipeline (global `admin` bit — the VERB)
+  # and, in the actions, the same `TenancyAuth.workspace_admin?/2` bind to the
+  # URL's workspace (the TENANT). As with delete, the pipeline is only half the
+  # gate — see the DELETE block above.
+  #
+  # ARCHIVE destroys nothing: `Tenancy.archive_workspace/1` sets `archived_at`
+  # and writes no other row. While archived, `ResolveWorkspace` and
+  # `DeriveWorkspaceFromToken` refuse scoped traffic with 409
+  # `workspace_archived`. The Default workspace refuses archive (409
+  # `default_workspace_not_archivable`): every unscoped route resolves to it.
+  #
+  # `private:` exempts BOTH verbs from DeriveWorkspaceFromToken's archive halt,
+  # or a restore sent with a token bound to the archived workspace would be
+  # refused by the very guard it lifts.
+  #
+  # UNLIKE DELETE above, both ARE capabilities-manifest commands
+  # (`workspace.archive` / `workspace.restore`), so `bp workspace archive|restore`
+  # exists and docs/openapi.json carries both operations.
+  scope "/api", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    post("/workspaces/:workspace_slug/archive", WorkspaceController, :archive,
+      private: %{barkpark_archived_workspace_exempt: true}
+    )
+
+    post("/workspaces/:workspace_slug/restore", WorkspaceController, :restore,
+      private: %{barkpark_archived_workspace_exempt: true}
+    )
   end
 
   # ── Playground front door — provision a disposable workspace + scoped token ─
