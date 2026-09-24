@@ -78,6 +78,9 @@ type Config struct {
 	// itself: the CLI fills them through the same sessionKey / session-doc
 	// binding its manifest path uses (internal/cli/session_doc_header.go).
 	// Empty sends no header — a sessionless close stays byte-identical.
+	// The key (never the doc) also rides claim and pulse
+	// (task-9af836a40731b63a), so a board / TUI / hook claim records
+	// claim.session_origin like `bp task claim` does.
 	SessionKey string
 	SessionDoc string
 }
@@ -171,8 +174,9 @@ type Client struct {
 	// Empty means "send no perspective param" — the server defaults to published.
 	Perspective string
 	client      *http.Client
-	// sessionKey / sessionDoc: see Config.SessionKey / Config.SessionDoc. Sent
-	// on the close door only (closeHeaders).
+	// sessionKey / sessionDoc: see Config.SessionKey / Config.SessionDoc. The
+	// key rides close, claim and pulse (closeHeaders, leaseHeaders); the doc
+	// rides close only.
 	sessionKey string
 	sessionDoc string
 	// OnChange, if set, is invoked when a real SSE mutation frame reports that
@@ -1298,8 +1302,8 @@ func (c *Client) taskPost(path string, payload map[string]interface{}) (*taskEnv
 }
 
 // taskPostWith is taskPost plus extra request headers (nil = none). Only the
-// close door passes any (closeHeaders); every other /v1/tasks write is
-// byte-identical to before.
+// close door (closeHeaders) and the claim / pulse doors (leaseHeaders) pass
+// any; every other /v1/tasks write is byte-identical to before.
 func (c *Client) taskPostWith(path string, payload map[string]interface{}, headers map[string]string) (*taskEnvelope, error) {
 	env, status, err := c.taskPostRawWith(path, payload, headers)
 	if err != nil {
@@ -1409,8 +1413,8 @@ func claimPayload(workerID string, resources []string, observedRailRev string) m
 // notices:[{"type":"rail_changed","parent_id":…,"rail_rev":…}]; without it,
 // notices is null.
 func (c *Client) TaskClaimObservedN(docID, workerID, observedRailRev string) (int, []TaskNotice, []string, string, error) {
-	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/claim",
-		claimPayload(workerID, nil, observedRailRev))
+	env, err := c.taskPostWith("/v1/tasks/"+url.PathEscape(docID)+"/claim",
+		claimPayload(workerID, nil, observedRailRev), c.leaseHeaders())
 	if err != nil {
 		return 0, nil, nil, "", err
 	}
@@ -1466,7 +1470,7 @@ func (c *Client) TaskClaimResources(docID, workerID string, resources []string) 
 // leaves the request byte-identical to TaskClaimResources.
 func (c *Client) TaskClaimResourcesObserved(docID, workerID string, resources []string, observedRailRev string) (TaskClaimOutcome, error) {
 	payload := claimPayload(workerID, resources, observedRailRev)
-	env, _, err := c.taskPostRaw("/v1/tasks/"+url.PathEscape(docID)+"/claim", payload)
+	env, _, err := c.taskPostRawWith("/v1/tasks/"+url.PathEscape(docID)+"/claim", payload, c.leaseHeaders())
 	if err != nil {
 		return TaskClaimOutcome{}, err
 	}
@@ -1563,6 +1567,20 @@ func (c *Client) closeHeaders() map[string]string {
 	return h
 }
 
+// leaseHeaders is what a claim or a pulse sends beyond auth
+// (task-9af836a40731b63a): the secret session key ONLY. The server derives
+// claim.session (+ session_origin on a fresh claim) and the event's session
+// from it — attribution, never a fence (Barkpark.Tasks.SessionId). The
+// session-DOC header stays off: the server auto-logs only close and publish
+// (BarkparkWeb.SessionAutolog), so on these doors it would be inert. nil when
+// no key is configured, keeping a keyless claim / pulse byte-identical.
+func (c *Client) leaseHeaders() map[string]string {
+	if c.sessionKey == "" {
+		return nil
+	}
+	return map[string]string{SessionKeyHeader: c.sessionKey}
+}
+
 // TaskPulse writes the claim's now-line AND renews the lease in one atomic
 // server write via POST /v1/tasks/:doc_id/pulse ({"worker_id","now"}).
 //
@@ -1588,8 +1606,8 @@ func (c *Client) closeHeaders() map[string]string {
 // now is the required now-line (the server caps it at 500 bytes; a longer one
 // is a 400, not a truncation, so callers bound it themselves).
 func (c *Client) TaskPulse(docID, workerID, now string) (int, []string, error) {
-	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/pulse",
-		map[string]interface{}{"worker_id": workerID, "now": now})
+	env, err := c.taskPostWith("/v1/tasks/"+url.PathEscape(docID)+"/pulse",
+		map[string]interface{}{"worker_id": workerID, "now": now}, c.leaseHeaders())
 	if err != nil {
 		return 0, nil, err
 	}
