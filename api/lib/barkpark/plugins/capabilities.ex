@@ -2162,6 +2162,35 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "minimal"
       ),
+      # Reversible archive / restore (task-55474a106554e65a). Tier `admin`, not
+      # `scoped_admin`: the route floor is `[:api, :require_admin]` (the GLOBAL
+      # admin bit) PLUS `TenancyAuth.workspace_admin?/2` in the action, so a
+      # caller without the global bit is refused before any workspace is read.
+      # The slug comes from the active --workspace, the workspace.project-create
+      # precedent; the Default workspace refuses archive (409
+      # default_workspace_not_archivable), so a fallback to it cannot archive it.
+      core_cmd(
+        "workspace.archive",
+        "workspace",
+        "archive",
+        "Archive a workspace reversibly (the active --workspace): content is kept, scoped reads/writes answer 409 workspace_archived until restored.",
+        "POST",
+        "/api/workspaces/:workspace_slug/archive",
+        "admin",
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "workspace.restore",
+        "workspace",
+        "restore",
+        "Restore an archived workspace (the active --workspace) to exactly its pre-archive state.",
+        "POST",
+        "/api/workspaces/:workspace_slug/restore",
+        "admin",
+        writes: true,
+        default_output: "minimal"
+      ),
       core_cmd(
         "workspace.project-ls",
         "workspace",
@@ -2325,6 +2354,27 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("id", true, "string", "Token id (from token ls).")],
         writes: true,
         default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "token.rotate",
+        "token",
+        "rotate",
+        "Mint a successor for a token seated here (same permissions and scope); the old one expires after the grace window.",
+        "POST",
+        "/v1/tokens/:id/rotate",
+        "scoped_admin",
+        args: [arg("id", true, "string", "Token id (from token ls).")],
+        flags: [
+          flag(
+            "grace_seconds",
+            "int",
+            "Seconds the old token keeps working (0 = revoke now; max 604800).",
+            default: 86_400
+          )
+        ],
+        writes: true,
+        default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(

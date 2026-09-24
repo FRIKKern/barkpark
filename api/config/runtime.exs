@@ -424,6 +424,30 @@ if bokbasen_env != [] do
   config :barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, bokbasen_env
 end
 
+# Per-kind default token expiry (task-a0f8cfd7f4800236). Unset = the shipped nil
+# (config.exs): no default, no behaviour change. A value must be a positive
+# integer number of days; `Barkpark.Auth.TokenExpiry` refuses one above the
+# kind's max age (api 365, share 365) at mint.
+token_default_expiry_days =
+  for {kind, env_name} <- [
+        api: "BARKPARK_TOKEN_DEFAULT_EXPIRY_DAYS_API",
+        share: "BARKPARK_TOKEN_DEFAULT_EXPIRY_DAYS_SHARE"
+      ],
+      raw = System.get_env(env_name),
+      raw not in [nil, ""],
+      into: %{} do
+    case Integer.parse(raw) do
+      {days, ""} when days > 0 -> {kind, days}
+      _ -> raise "#{env_name} must be a positive integer number of days, got: #{inspect(raw)}"
+    end
+  end
+
+if token_default_expiry_days != %{} do
+  config :barkpark,
+         :token_default_expiry_days,
+         Map.merge(%{api: nil, share: nil}, token_default_expiry_days)
+end
+
 # Indx search-engine credentials (retriever seam). `Barkpark.Plugins.Indx.Settings`
 # reads these from `Application.get_env(:barkpark, Barkpark.Plugins.Indx)` (env
 # wins, else the encrypted plugin_settings row, else defaults) — but nothing

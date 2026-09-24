@@ -73,22 +73,22 @@ defmodule Barkpark.Content.PreWriteFences do
   end
 
   @doc """
-  Run one phase of `fences` in order, stopping at the first non-`:ok` and
-  returning it UNCHANGED — exactly what the `with :ok <- Fence.check(...)`
-  steps it replaced did, so no caller or test matching a fence's error shape
-  sees a difference.
-  """
-  @spec run([Barkpark.Plugin.pre_write_fence()], :early | :late, list()) :: :ok | term()
-  def run(fences, phase, args) do
-    Enum.reduce_while(fences, :ok, fn
-      {^phase, mod, fun}, :ok ->
-        case apply(mod, fun, args) do
-          :ok -> {:cont, :ok}
-          refusal -> {:halt, refusal}
-        end
+  Run `fences` in order, stopping at the first non-`:ok` and returning it
+  UNCHANGED — exactly what the `with :ok <- Fence.check(...)` steps it replaced
+  did, so no caller or test matching a fence's error shape sees a difference.
 
-      _other_phase, :ok ->
-        {:cont, :ok}
+  ONE ordered list, no phases (task-2978357a0701cd10). Slice B needed an
+  `:early` / `:late` split only because two writer-owned birth guards sat
+  between the Tasks fences; they are Tasks fences now, so the list alone
+  carries the order.
+  """
+  @spec run([Barkpark.Plugin.pre_write_fence()], list()) :: :ok | term()
+  def run(fences, args) do
+    Enum.reduce_while(fences, :ok, fn {mod, fun}, :ok ->
+      case apply(mod, fun, args) do
+        :ok -> {:cont, :ok}
+        refusal -> {:halt, refusal}
+      end
     end)
   end
 end

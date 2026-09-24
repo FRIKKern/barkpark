@@ -843,6 +843,9 @@ defmodule PDS.Census do
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token, :status_only_receipt},
+    # Token rotate (task-e78edcc2145ed3df): its 201 carries the inserted row's
+    # `id`/`inserted_at`, but no `ok: true` literal — same class as its revoke twin.
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id/rotate", "BarkparkWeb.MemberController", :rotate_token, :status_only_receipt},
     {:post, "/v1/selftest-fixture-close", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     {:post, "/v1/selftest-departure-anchor", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     # THE LIVE ROUTE THE WAVE-42 FIXTURE ADDS. MANDATORY, not decorative: `live` is a
@@ -963,8 +966,10 @@ defmodule PDS.Census do
     # keeping one would leave the same contradiction under a different class name.
     {:post, "/api/playground", "BarkparkWeb.PlaygroundController", :provision, :status_only_receipt},
     {:post, "/api/workspaces", "BarkparkWeb.WorkspaceController", :create, :status_only_receipt},
+    {:post, "/api/workspaces/:workspace_slug/archive", "BarkparkWeb.WorkspaceController", :archive, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/projects", "BarkparkWeb.WorkspaceController", :create_project, :status_only_receipt},
+    {:post, "/api/workspaces/:workspace_slug/restore", "BarkparkWeb.WorkspaceController", :restore, :status_only_receipt},
     {:post, "/auth/reset/:token", "BarkparkWeb.SessionController", :reset_submit, :status_only_receipt},
     {:post, "/login", "BarkparkWeb.SessionController", :create, :status_only_receipt},
     {:post, "/login/account", "BarkparkWeb.SessionController", :account, :status_only_receipt},

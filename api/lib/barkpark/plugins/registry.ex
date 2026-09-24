@@ -540,14 +540,14 @@ defmodule Barkpark.Plugins.Registry do
     end
   end
 
-  defp validate_pre_write_fence!({phase, mod, fun} = fence, _name)
-       when phase in [:early, :late] and is_atom(mod) and is_atom(fun),
+  defp validate_pre_write_fence!({mod, fun} = fence, _name)
+       when is_atom(mod) and is_atom(fun),
        do: fence
 
   defp validate_pre_write_fence!(other, name) do
     raise ArgumentError,
           "plugin #{inspect(name)} declared a malformed pre-write fence " <>
-            "#{inspect(other)}; expected {:early | :late, module, function}"
+            "#{inspect(other)}; expected {module, function}"
   end
 
   # ─── GenServer ──────────────────────────────────────────────────────────

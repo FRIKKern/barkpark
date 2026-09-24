@@ -405,6 +405,14 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:tenant_bound, "TenancyAuth.workspace_admin?",
        "WorkspaceController.delete/2 resolves the slug THEN Tenancy.Auth.workspace_admin?/2 " <>
          "against the RESOLVED target before the cascade teardown."},
+    {:post, "/api/workspaces/:workspace_slug/archive"} =>
+      {:tenant_bound, "TenancyAuth.workspace_admin?",
+       "WorkspaceController.archive/2 resolves the slug THEN Tenancy.Auth.workspace_admin?/2 " <>
+         "against the RESOLVED target (authorize_workspace_admin/2) before archived_at is set."},
+    {:post, "/api/workspaces/:workspace_slug/restore"} =>
+      {:tenant_bound, "TenancyAuth.workspace_admin?",
+       "WorkspaceController.restore/2 — the same authorize_workspace_admin/2 bind as archive/2, " <>
+         "before archived_at is cleared."},
     {:post, "/api/playground"} =>
       {:instance_global, @operator_guard,
        "Provisioning primitive: mints a NEW workspace + owner + quota. RULING row 6."},

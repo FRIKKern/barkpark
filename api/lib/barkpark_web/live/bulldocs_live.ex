@@ -59,6 +59,7 @@ defmodule BarkparkWeb.BulldocsLive do
   alias BarkparkWeb.BulldocsLive.Edit
   alias BarkparkWeb.Presence
   alias BarkparkWeb.PaperActor
+  alias BarkparkWeb.PaperReaderStyle
   alias BarkparkWeb.PaperPresence
   alias BarkparkWeb.PaperViewer
   alias BarkparkWeb.Studio.StudioLive.Blocks
@@ -255,10 +256,11 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:found, not is_nil(paper))
       |> assign(:source_error, nil)
       |> assign(:rev, paper_rev(paper))
-      # `:article?` is the per-doc style marker (`content["style"] == "article"`).
-      # The root `:paper` layout reads it to switch on article page chrome; the
-      # block render path reads it to render each block in `:article` palette.
-      # Non-article papers leave it false → email default, chrome unchanged.
+      # `:article?` is the page-chrome decision (`BarkparkWeb.PaperReaderStyle`):
+      # true for `article`/`article-wide` AND for a paper with NO style (the web
+      # default, onb-residue-onb16); false only for an explicit non-article
+      # marker, which keeps the legacy chrome. Every block renders `:article`
+      # regardless (see `render_opts/1`).
       |> assign(:article?, paper_article?(paper))
       |> assign(:wide?, paper_wide?(paper))
       |> assign(:html, source_html(reader_source))
@@ -1065,15 +1067,13 @@ defmodule BarkparkWeb.BulldocsLive do
   # does, and the 660px reading measure was shrinking its tables into
   # thumbnails. Prose inside a wide paper still keeps its measure (the shell
   # rule caps p/h/list at 72ch); only the evidence blocks fill the width.
-  defp paper_article?(%{content: content}),
-    do: Map.get(content || %{}, "style") in ["article", "article-wide"]
+  #
+  # The article/legacy decision itself lives in `BarkparkWeb.PaperReaderStyle`,
+  # shared with the `/s/:token` static fallback so the two reader doors cannot
+  # disagree on a paper's chrome.
+  defp paper_article?(paper), do: PaperReaderStyle.article?(paper)
 
-  defp paper_article?(_), do: false
-
-  defp paper_wide?(%{content: content}),
-    do: Map.get(content || %{}, "style") == "article-wide"
-
-  defp paper_wide?(_), do: false
+  defp paper_wide?(paper), do: PaperReaderStyle.wide?(paper)
 
   # Render opts threaded into every block render. BOTH clauses name
   # `style: :article`: this is a SCREEN — the public LiveView paper reader —
@@ -1562,10 +1562,10 @@ defmodule BarkparkWeb.BulldocsLive do
     ~H"""
     <%!-- `bp-paper-surface` makes the reader main a SINK of the canonical
           paper-surface source (bulldocs.html.heex embeds it) so View↔Edit
-          parity is by construction. It is gated on `@article?` on purpose: the
-          shared `.bp-paper-surface` element rules must NOT reach legacy
-          non-article papers (which keep the dark chrome above) — those emit
-          bare `<h1>/<p>/…` the surface rules would restyle. The parchment
+          parity is by construction. It is gated on `@article?`, which is true
+          for article papers AND for style-less ones (the web default,
+          `BarkparkWeb.PaperReaderStyle`); only a paper carrying an explicit
+          non-article style marker keeps the legacy dark chrome. The parchment
           reader skin re-skins the `--paper-*` tokens on this same element. --%>
     <main data-paper-palette={if @article?, do: "article", else: "legacy"} class={[
       "bp-paper-shell",

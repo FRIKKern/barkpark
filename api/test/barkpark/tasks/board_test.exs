@@ -4,7 +4,7 @@ defmodule Barkpark.Tasks.BoardTest do
   seal (`board_live_test.exs` "peek field-visibility seal (Envelope gate)").
 
   `Board.snapshot/1` hand-picks content fields straight off the raw `type:task`
-  doc in `to_card/4` — unlike the sanctioned `tasks/query.ex` read path, nothing
+  doc in `to_card/5` — unlike the sanctioned `tasks/query.ex` read path, nothing
   here rides `Envelope.render`. So without the Envelope cross-check a
   schema-declared PRIVATE field would leak through the deck card AND every
   derived copy (`family_walk/4`'s tree rows / the gantt, `focus_of/1`'s focus
@@ -14,7 +14,7 @@ defmodule Barkpark.Tasks.BoardTest do
   `Content.get_schema/3`) that marks the two text-bearing content fields
   (`description`, `acceptance_criteria`) private, plus a doc carrying them, and
   assert the projection OMITS them. They are mutation-proven: strip the
-  `if(readable?...)` gate from `Board.to_card/4` and the private text reappears
+  `if(readable?...)` gate from `Board.to_card/5` and the private text reappears
   in `description_excerpt` / `criteria_list` / `next_criterion` (and, through
   them, in the family rows the gantt paints) — these assertions go RED.
   """
@@ -131,7 +131,7 @@ defmodule Barkpark.Tasks.BoardTest do
       # private text. The gantt (`gantt_data/1`) reads the ROOT card's
       # `criteria_list`; the family rows (`family_walk/4`) read each in-flight
       # CHILD's `description_excerpt` + `criteria_list`. Both must inherit the
-      # to_card/4 redaction — never re-read the raw doc.
+      # to_card/5 redaction — never re-read the raw doc.
       task!("fam-root", "Family root", %{
         "lifecycle_status" => "in_progress",
         "description" => "SECRET-ROOT-BODY",
@@ -174,7 +174,7 @@ defmodule Barkpark.Tasks.BoardTest do
 
       # `family_walk/4` populates `desc`/`crits` for in-flight rows straight
       # from the child card's gated fields — redacted to nil here. Strip the
-      # to_card/4 gate and "SECRET-CHILD-BODY" / "SECRET-CHILD-CRIT" leak into
+      # to_card/5 gate and "SECRET-CHILD-BODY" / "SECRET-CHILD-CRIT" leak into
       # the gantt through these keys → RED.
       assert child_row.desc == nil
       assert child_row.crits == nil
@@ -254,7 +254,7 @@ defmodule Barkpark.Tasks.BoardTest do
   end
 
   describe "snapshot/1 draft label contract (PDS-D749)" do
-    # NAMED FAILURE MODE: `to_card/4` keys the card by
+    # NAMED FAILURE MODE: `to_card/5` keys the card by
     # `Content.published_id(doc.doc_id)`, which DESTROYS the `drafts.` prefix —
     # the only signal a row is not published — and used to print nothing in its
     # place. Every reader downstream of this projection therefore painted an
@@ -371,7 +371,7 @@ defmodule Barkpark.Tasks.BoardTest do
     #   * "a PAIRED bucket yields the PUBLISHED row" pins the COLLAPSE: it reds
     #     when `load_task_docs/1` stops grouping by `Content.published_id/1` and
     #     both twins reach the board. It measures the COLUMNS, not
-    #     `cards_by_id` — `to_card/4` keys every card by the published id, so
+    #     `cards_by_id` — `to_card/5` keys every card by the published id, so
     #     both twins land on the SAME key and `map_size(cards_by_id)` is 1
     #     whether or not anything collapsed. A count taken there is vacuous.
     #   * "an UNPAIRED drafts. row resolves as itself" is the QUIET arm — it
@@ -415,7 +415,7 @@ defmodule Barkpark.Tasks.BoardTest do
       assert card != nil, "the published twin must be the row the board shows"
       assert card.title == "Published twin"
 
-      # The pair COLLAPSES to one card. `to_card/4` keys every card by the
+      # The pair COLLAPSES to one card. `to_card/5` keys every card by the
       # PUBLISHED id, so the surviving row is identified by its TITLE, not by
       # the key: "Draft twin" here would mean the draft won the slot — and for
       # the same reason `map_size(board.cards_by_id)` CANNOT see a lost
@@ -450,7 +450,7 @@ defmodule Barkpark.Tasks.BoardTest do
 
       board = Board.snapshot(dataset: "production")
 
-      # `to_card/4` keys by the published id even for an unpaired draft, so the
+      # `to_card/5` keys by the published id even for an unpaired draft, so the
       # key is the bare id; the point is that the ROW SURVIVES at all. A blanket
       # `drafts.` drop in canonical_twin/1 empties the board here.
       card = board.cards_by_id["twin-solo"]
@@ -481,7 +481,7 @@ defmodule Barkpark.Tasks.BoardTest do
     #
     # These two changes land on the same projection from opposite sides:
     # `TwinCollapse.canonical/1` decides WHICH twin becomes a card, and
-    # `to_card/4` then reads `draft: DraftId.draft?(doc.doc_id)` off THAT row's
+    # `to_card/5` then reads `draft: DraftId.draft?(doc.doc_id)` off THAT row's
     # RAW doc_id. The arms above pin the choice and the draft-label arms pin the
     # derivation, but neither watches the hand-off: in a COLLAPSED bucket both
     # spellings exist, so a flag read off the losing twin — or off the bucket
@@ -510,6 +510,64 @@ defmodule Barkpark.Tasks.BoardTest do
 
       assert cards["seam-drafty"].draft == true,
              "the surviving row is drafts.-spelled — the label must follow the row that WON"
+    end
+
+    # ── the UNPUBLISHED PAIR (task-9d0c7adbbe1a5af1, criterion 2) ──────────
+    #
+    # NAMED FAILURE MODE: a bucket of 2+ rows with NO published member reaches
+    # `TwinCollapse.canonical/1`, the tie-break picks one, and the board painted
+    # it as an ordinary card — the old `hd(twins)` default's unstated invariant.
+    # The three arms disagree on the expected flag, so no constant satisfies
+    # them: the pair arm reds when the bucket's `unpublished_pair?/1` answer is
+    # dropped (`load_task_docs/1` hands `false`), the other two red on a flag
+    # raised for every collapsed or every drafts.-spelled card.
+
+    test "a bare unpublished row + its drafts. twin is FLAGGED as an unpublished pair" do
+      twin_task!("up-pair", "Bare unpublished", "draft")
+      twin_task!("drafts.up-pair", "Draft twin", "draft")
+
+      card = Board.snapshot(dataset: "production").cards_by_id["up-pair"]
+
+      # The total order is untouched: rule 2 still picks the bare row.
+      assert card.title == "Bare unpublished"
+
+      assert card.twin_unpublished_pair == true,
+             "a twinned bucket with no published side must be surfaced, not an ordinary card"
+    end
+
+    test "a published + draft pair is NOT flagged" do
+      twin_task!("drafts.up-paired", "Draft twin", "draft")
+      twin_task!("up-paired", "Published twin", "published")
+
+      card = Board.snapshot(dataset: "production").cards_by_id["up-paired"]
+
+      assert card.title == "Published twin"
+      assert card.twin_unpublished_pair == false
+    end
+
+    test "an UNPAIRED drafts. row is NOT flagged — it IS the row of record" do
+      twin_task!("drafts.up-solo", "Solo draft", "draft")
+
+      card = Board.snapshot(dataset: "production").cards_by_id["up-solo"]
+
+      assert card.draft == true
+      assert card.twin_unpublished_pair == false
+    end
+
+    test "a broadcast carries the flag forward and clears it once its row is published" do
+      prev = %{blocker_statuses: [], twin_unpublished_pair: true}
+      open = fn _ -> true end
+
+      msg = fn status ->
+        %{doc_id: "drafts.up-bc", title: "t", content: %{}, status: status, updated_at: nil}
+      end
+
+      assert Board.card_from_broadcast(msg.("draft"), prev, open).twin_unpublished_pair == true
+
+      assert Board.card_from_broadcast(msg.("published"), prev, open).twin_unpublished_pair ==
+               false
+
+      assert Board.card_from_broadcast(msg.("draft"), nil, open).twin_unpublished_pair == false
     end
   end
 end

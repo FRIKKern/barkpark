@@ -260,15 +260,18 @@ defmodule Barkpark.Tasks.FenceWitnessLocalityTest do
       exempt: %{}
     },
     %{
-      # Scoped to the ONE cond the filing named. Its sibling
-      # `current_runtime_attempt_attribution/1` is NOT listed: its `with`
-      # fall-through returns `:task_not_claimed`, the same term ClaimFence
-      # returns through `prepare_runtime_attempt`, so an atom-level witness in
-      # runtime_usage_test.exs cannot say WHICH arm it reds for (measured by
-      # mutation in the PR that added this file).
+      # The runtime-attempt cond plus `current_runtime_attempt_attribution/1`
+      # (task-7e030886e10dc0d3). The latter's `with` fall-through returns
+      # `:task_not_claimed`, the same term ClaimFence returns through the `with`'s
+      # `{:error, reason}` pass-through, so an atom-level witness cannot say
+      # WHICH arm it reds for. The home witness in
+      # cycle_fleet_runtime_attempt_attribution_test.exs is arm-specific by
+      # construction (a malformed, truthy claim/epoch never reaches ClaimFence);
+      # that it reds for the fall-through and not the pass-through is a mutation
+      # fact recorded in that PR, not something this guard can see.
       name: "CycleFleet (runtime-attempt claim fence)",
       source: "lib/barkpark/cycle_fleet.ex",
-      scope: {:functions, [:verify_runtime_attempt_claim]},
+      scope: {:functions, [:verify_runtime_attempt_claim, :current_runtime_attempt_attribution]},
       entries: [
         {:CycleFleet, :prepare_runtime_attempt},
         {:CycleFleet, :start_runtime_attempt},

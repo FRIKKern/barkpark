@@ -478,7 +478,10 @@ defmodule BarkparkWeb.AppTokenController do
       label = fetch_label(params, email)
       dataset = fetch_dataset(params)
 
-      case Auth.create_token(raw, label, dataset, permissions, workspace.id) do
+      # `class: :app` — app tokens keep today's no-expiry mint: no max age and
+      # no configured default apply until the App shape exists
+      # (task-a0f8cfd7f4800236).
+      case Auth.create_token(raw, label, dataset, permissions, workspace.id, class: :app) do
         {:ok, minted} ->
           # Credential lifecycle event (the `revoke_token` twin): THAT a mint
           # happened, for whom, into which workspace — never the token value.

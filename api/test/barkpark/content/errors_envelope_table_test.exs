@@ -69,6 +69,13 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"workspace_suspended", {:error, :workspace_suspended}, "workspace_suspended", 403, []},
       {"workspace_suspended/reason", {:error, {:workspace_suspended, "abuse"}},
        "workspace_suspended", 403, [:details]},
+      # Reversible workspace archive (task-55474a106554e65a): 409 on both the
+      # read and the write refusal; the slug arm names WHICH workspace.
+      {"workspace_archived", {:error, :workspace_archived}, "workspace_archived", 409, []},
+      {"workspace_archived/slug", {:error, {:workspace_archived, "acme"}}, "workspace_archived",
+       409, [:details]},
+      {"default_workspace_not_archivable", {:error, :default_workspace_not_archivable},
+       "default_workspace_not_archivable", 409, []},
       # The unscoped-WRITE ruling (task-6fa023cdabdc5f6a): 422, well-formed but
       # unactionable as sent. The list arm carries the writable slugs.
       {"workspace_scope_required", {:error, :workspace_scope_required},

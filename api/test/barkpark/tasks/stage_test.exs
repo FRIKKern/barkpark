@@ -861,6 +861,47 @@ defmodule Barkpark.Tasks.StageTest do
       end
     end
 
+    test "a definition-shaped prefix probe is refused with its one-character remedy (PDS-D750)",
+         %{conn: conn, scope: scope} do
+      # `git grep` matches a SUBSTRING: this pattern still hits after a suffix
+      # rename, so it can never red. The refusal must NAME the terminated
+      # spelling and the family-probe remedy, and both must then be accepted —
+      # a refusal whose remedy is itself refused is a lie about its own remedy.
+      doc_id = uniq("stage-rerun-prefix")
+      task = mk_task!(doc_id, scope)
+      before = reload(task)
+
+      resp =
+        stage(conn, doc_id, %{
+          state: "considering",
+          note: "cites defp apply_engagement",
+          rerun:
+            "git grep -n 'defp apply_engagement' origin/main -- api/lib/barkpark/tasks/stage.ex"
+        })
+
+      assert resp.status == 422
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["reason"] == "unfalsifiable_rerun"
+      assert payload["shape"] == "prefix_match_probe"
+      assert payload["message"] =~ "PREFIX match"
+      assert payload["message"] =~ "'defp apply_engagement('"
+      assert payload["message"] =~ "'defp handle_[a-z]'"
+      assert reload(task).content == before.content
+
+      for rerun <- [
+            "git grep -n 'defp apply_engagement(' origin/main -- api/lib/barkpark/tasks/stage.ex",
+            "git grep -n 'defp handle_[a-z]' origin/main -- api/lib/barkpark/tasks/stage.ex",
+            # A REFERENCE ending in an identifier is NOT refused (the arm is narrow).
+            "git grep -n ROSTER_PAGE_LIMIT origin/main -- cloud/priv/static/__preview__/seal-predicate.mjs"
+          ] do
+        ok_id = uniq("stage-rerun-prefix-ok")
+        ok_task = mk_task!(ok_id, scope)
+        ok_resp = stage(conn, ok_id, %{state: "considering", note: "checkable", rerun: rerun})
+        assert ok_resp.status == 200, "#{inspect(rerun)} was REFUSED"
+        assert reload(ok_task).content["disposition_rerun"] == rerun
+      end
+    end
+
     test "a pipe-masked formatting tail is refused — and the pipeline really does exit 0",
          %{conn: conn, scope: scope} do
       # THE UNDERLYING FACT FIRST, measured on this checkout rather than
