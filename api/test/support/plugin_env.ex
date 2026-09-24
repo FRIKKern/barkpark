@@ -45,6 +45,25 @@ defmodule Barkpark.PluginEnv do
 
   `test/barkpark/plugins/plugin_env_test.exs` pins the round trip: an
   unset-baseline capture/restore must leave `fetch_env` == `:error`.
+
+  ## Every load-order SETTER goes through `put!/1`
+
+  Every reader of the load order (`Plugins.Hooks`, `Registry.ResolverChain`,
+  `Registry.BootCollectors`, `Registry.Discovery`, `Content.PreWriteFences`)
+  accepts exactly three entry shapes — a module atom, a `{plugin_name, module}`
+  tuple, a plugin-name string — and DROPS anything else without a word. A
+  test that sets the order to something else runs with that plugin silently
+  OFF and passes vacuously for the plugin half:
+  `stamp_publish_lost_update_test.exs` passed the Registry's ENTRY MAPS
+  (`Registry.all()`), so the Tasks plugin was out of its load order all along
+  (task-05ea4e4c31dbc750).
+
+  `put!/1` (and `with_plugins/2`, `run_with/2`, which call it) refuses such an
+  entry with an `ArgumentError` naming it, instead of letting it through to a
+  reader that drops it. `test/barkpark/plugins/plugin_order_setter_guard_test.exs`
+  scans `api/test` and reds on any `Application.put_env(:barkpark, :plugins, _)`
+  outside this module, so a setter cannot route around the check. Restores go
+  through `restore/1`, which puts a `capture/0` snapshot back verbatim.
   """
 
   @sentinel :unset
@@ -85,8 +104,91 @@ defmodule Barkpark.PluginEnv do
   """
   def with_plugins(modules, ctx) when is_list(modules) do
     prior = capture()
-    Application.put_env(:barkpark, :plugins, modules)
+    put!(modules)
     ExUnit.Callbacks.on_exit({__MODULE__, ctx}, fn -> restore(prior) end)
     :ok
+  end
+
+  @doc """
+  Set the `:plugins` load order to `order`, refusing any entry no reader
+  accepts (see "Every load-order SETTER goes through `put!/1`"). The caller
+  owns the restore: pair it with `capture/0` + `restore/1`, or use
+  `with_plugins/2` / `run_with/2`, which register one.
+  """
+  def put!(order) do
+    validate!(order)
+    Application.put_env(:barkpark, :plugins, order)
+    :ok
+  end
+
+  @doc """
+  Run `fun` with the load order set to `order`, restoring the prior value
+  (absence included) afterwards even when `fun` raises. Returns `fun`'s result.
+  """
+  def run_with(order, fun) when is_function(fun, 0) do
+    prior = capture()
+    put!(order)
+
+    try do
+      fun.()
+    after
+      restore(prior)
+    end
+  end
+
+  @doc """
+  Raise `ArgumentError` unless every entry of `order` is a shape the load-order
+  readers accept: a LOADED module atom, a `{plugin_name, module}` tuple, or a
+  non-empty plugin-name string.
+
+  A string is not resolved here: an unregistered name is skipped by the
+  readers by design, and `pre_write_fences_test.exs` exercises exactly that
+  skip. A module atom IS checked for loadability — a misspelt module is as
+  silently dropped as a map.
+  """
+  def validate!(order) when is_list(order) do
+    order
+    |> Enum.with_index()
+    |> Enum.each(fn {entry, index} ->
+      unless valid_entry?(entry), do: refuse!(entry, index, order)
+    end)
+  end
+
+  def validate!(order) do
+    raise ArgumentError,
+          "the :barkpark, :plugins load order must be a list, got: #{inspect(order)}"
+  end
+
+  defp valid_entry?(name) when is_binary(name), do: name != ""
+
+  defp valid_entry?({name, module}) when is_binary(name) and is_atom(module),
+    do: name != "" and loaded_module?(module)
+
+  defp valid_entry?(module) when is_atom(module), do: loaded_module?(module)
+  defp valid_entry?(_), do: false
+
+  defp loaded_module?(nil), do: false
+  defp loaded_module?(module), do: Code.ensure_loaded?(module)
+
+  defp refuse!(entry, index, order) do
+    hint =
+      case entry do
+        %{module: module} ->
+          " It looks like a Plugins.Registry ENTRY MAP; pass its module " <>
+            "(#{inspect(module)}) — e.g. `Enum.map(Registry.all(), & &1.module)`."
+
+        atom when is_atom(atom) and not is_nil(atom) ->
+          " #{inspect(atom)} is not a loadable module."
+
+        _ ->
+          ""
+      end
+
+    raise ArgumentError,
+          "refusing :barkpark, :plugins load-order entry #{index} " <>
+            "(#{inspect(entry, limit: 5)}): every load-order reader DROPS an " <>
+            "entry that is not a module atom, a {plugin_name, module} tuple, or " <>
+            "a plugin-name string, so this plugin would be silently OFF for the " <>
+            "test." <> hint <> " Full order: #{inspect(order, limit: 8)}"
   end
 end

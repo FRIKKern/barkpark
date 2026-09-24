@@ -16,7 +16,7 @@ defmodule Barkpark.Plugins.SheetsValidationTest do
   @dataset "sheets_validation_test"
 
   setup do
-    Application.put_env(:barkpark, :plugins, [Barkpark.Plugins.Sheets])
+    Barkpark.PluginEnv.put!([Barkpark.Plugins.Sheets])
     # RegistryCase + DataCase both restore the env baseline on exit.
     :ok
   end

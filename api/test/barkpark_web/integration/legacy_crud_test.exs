@@ -223,13 +223,13 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
   # halt branches now fall through to action_fallback → Errors.to_envelope.
   describe "lifecycle-hook veto (halt) → canonical envelope" do
     setup do
-      original = Application.get_env(:barkpark, :plugins)
-      on_exit(fn -> Application.put_env(:barkpark, :plugins, original) end)
+      original = Barkpark.PluginEnv.capture()
+      on_exit(fn -> Barkpark.PluginEnv.restore(original) end)
       :ok
     end
 
     test "POST create halt → 409 with code \"halted\" (not a bare string)", %{conn: conn} do
-      Application.put_env(:barkpark, :plugins, [HaltSavePlugin])
+      Barkpark.PluginEnv.put!([HaltSavePlugin])
       body = Jason.encode!(%{"id" => "lc-halt-create", "title" => "x", "status" => "draft"})
 
       resp = conn |> authed() |> post(~p"/api/documents/#{@type_name}", body)
@@ -252,7 +252,7 @@ defmodule BarkparkWeb.Integration.LegacyCrudTest do
           "production"
         )
 
-      Application.put_env(:barkpark, :plugins, [HaltDeletePlugin])
+      Barkpark.PluginEnv.put!([HaltDeletePlugin])
 
       resp = conn |> authed() |> delete(~p"/api/documents/#{@type_name}/drafts.lc-halt-del")
 

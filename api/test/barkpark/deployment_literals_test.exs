@@ -290,19 +290,7 @@ defmodule Barkpark.DeploymentLiteralsTest do
       )
     end
 
-    defp with_plugins(value, fun) do
-      previous = Application.fetch_env(:barkpark, :plugins)
-      Application.put_env(:barkpark, :plugins, value)
-
-      try do
-        fun.()
-      after
-        case previous do
-          {:ok, v} -> Application.put_env(:barkpark, :plugins, v)
-          :error -> Application.delete_env(:barkpark, :plugins)
-        end
-      end
-    end
+    defp with_plugins(value, fun), do: Barkpark.PluginEnv.run_with(value, fun)
 
     test "register_workers/1 contributes the check as a start-only child" do
       assert %{
