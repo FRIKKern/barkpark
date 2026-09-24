@@ -164,7 +164,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # is theme-threaded; the CONTAINER children are still composed at evergreen via
   # `render_children/2` (charter D1/D8 — see the SCOPE note above).
   def compose_block(%{"type" => "terminal"} = b, style, theme) when style != :article do
-    body = b |> container_children() |> render_children(style)
+    body = b |> container_children() |> render_children(style, render_opts(b))
 
     %{
       "kind" => "_raw",
@@ -636,7 +636,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     %{
       "kind" => "_raw",
-      "html" => figure_html(child, caption, style)
+      "html" => figure_html(child, caption, style, render_opts(b))
     }
   end
 
@@ -1377,7 +1377,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # threads style only — evergreen-nested, charter D1/D8).
   def compose_block(%{"type" => "terminal"} = b, :article) do
     parts = terminal_article_parts(b)
-    body = b |> container_children() |> render_blocks(:article)
+    body = b |> container_children() |> render_blocks(:article, render_opts(b))
 
     html =
       ~s|<div class="bp-term">#{parts.bar_html}<div class="bp-term__body">#{body}</div>#{parts.footer_html}</div>|
@@ -1386,7 +1386,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   def compose_block(%{"type" => "terminal"} = b, style) do
-    body = b |> container_children() |> render_children(style)
+    body = b |> container_children() |> render_children(style, render_opts(b))
 
     %{
       "kind" => "_raw",
@@ -1408,7 +1408,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       cols
       |> List.wrap()
       |> Enum.map(fn col ->
-        ~s|<div class="bp-cols__c">#{render_blocks(List.wrap(col), :article)}</div>|
+        ~s|<div class="bp-cols__c">#{render_blocks(List.wrap(col), :article, render_opts(b))}</div>|
       end)
       |> Enum.join("")
 
@@ -1522,7 +1522,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         |> Enum.with_index()
         |> Enum.map_join(fn {t, i} ->
           ~s(<div class="bp-tabs__panel" data-tab-index="#{i}">) <>
-            render_blocks(t.blocks, :article) <> ~s(</div>)
+            render_blocks(t.blocks, :article, render_opts(b)) <> ~s(</div>)
         end)
 
       %{
@@ -1543,7 +1543,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       sections =
         Enum.map_join(tabs, fn t ->
           ~s(<div class="bp-tabs__section"><p class="bp-tabs__label">#{Util.escape_html(t.label)}</p>) <>
-            render_blocks(t.blocks, style) <> ~s(</div>)
+            render_blocks(t.blocks, style, render_opts(b)) <> ~s(</div>)
         end)
 
       %{"kind" => "_raw", "html" => ~s(<div class="bp-tabs">#{sections}</div>)}
@@ -1728,7 +1728,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       if summary == "" and children == [] do
         ""
       else
-        inner = children |> Enum.map(&block_to_html(&1, style)) |> Enum.join()
+        inner = children |> Enum.map(&block_to_html(&1, style, render_opts(b))) |> Enum.join()
 
         open_attr =
           cond do
@@ -1794,7 +1794,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     html =
       if is_list(steps) and steps != [] do
-        rows = steps |> Enum.map(&steps_row_html(&1, style)) |> Enum.join()
+        rows = steps |> Enum.map(&steps_row_html(&1, style, render_opts(b))) |> Enum.join()
         if rows == "", do: "", else: ~s(<ol class="bp-steps">) <> rows <> ~s(</ol>)
       else
         ""
@@ -2294,14 +2294,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp footnote_row_html(_), do: ""
 
   # ── steps helpers ────────────────────────────────────────────────────────
-  defp steps_row_html(%{} = step, style) do
+  defp steps_row_html(%{} = step, style, opts) do
     title = stringish(Map.get(step, "title", ""))
     blocks = container_children(step)
 
     if title == "" and blocks == [] do
       ""
     else
-      body = blocks |> Enum.map(&block_to_html(&1, style)) |> Enum.join()
+      body = blocks |> Enum.map(&block_to_html(&1, style, opts)) |> Enum.join()
 
       title_html =
         if title == "",
@@ -2313,7 +2313,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  defp steps_row_html(_, _style), do: ""
+  defp steps_row_html(_, _style, _opts), do: ""
 
   # ── toc helpers ──────────────────────────────────────────────────────────
   # `toc_items/1` normalizes the authored outline: text-less entries are
@@ -2768,13 +2768,34 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # child block then renders it to a body fragment via `Render.Walk.render_body`
   # (the `doctype: false` body twin of `render_html`).
   # Render a list of child blocks to a concatenated HTML fragment — the same
-  # compose→walk bridge `figure_html/3` uses, for container blocks (terminal /
-  # columns) that hold arbitrary other blocks.
-  defp render_blocks(blocks, style) when is_list(blocks) do
-    blocks |> Enum.map(&block_to_html(&1, style)) |> Enum.join("")
+  # compose→walk bridge `figure_html/4` uses, for container blocks (terminal /
+  # columns / tabs / grid section / card / expandable / steps) that hold
+  # arbitrary other blocks.
+  #
+  # `opts` is the container's carried render options (`render_opts/1`): nil for
+  # a caller that composed the container directly (pure unit tests, Studio's
+  # edit-mode emitters), else the map `Render.render_block/2` was called with.
+  defp render_blocks(blocks, style, opts) when is_list(blocks) do
+    blocks |> Enum.map(&block_to_html(&1, style, opts)) |> Enum.join("")
   end
 
-  defp render_blocks(_, _), do: ""
+  defp render_blocks(_, _, _), do: ""
+
+  @doc """
+  The render options a container block carries for its children — stamped under
+  the transient `"_render_opts"` key by `Render.prepare_block/2` (so only a block
+  that went through `Render.render_block/2` has them). nil when absent.
+  """
+  def render_opts(b) when is_map(b), do: Map.get(b, "_render_opts")
+  def render_opts(_), do: nil
+
+  # A child of a container renders under the container's opts with three keys
+  # held back: `:theme` (nested children render at evergreen by design — the
+  # SCOPE note at the top of this module, charter D8), `:container_width` (a
+  # child takes its palette width, as it always has) and `:doctype` (a child is
+  # always a fragment). `style` is the style the container passes down.
+  defp child_render_opts(opts, style),
+    do: opts |> Map.drop([:theme, :container_width, :doctype]) |> Map.put(:style, style)
 
   @doc """
   Public compose→walk bridge for a slot's child blocks — the SAME
@@ -2785,9 +2806,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   a body fragment; an `image` child fast-paths to a `PdImage` `<img>`, an
   `action` child to a `PdButton` link — no card-specific media/action code.
   """
-  def render_children(blocks, style \\ :email)
-  def render_children(blocks, style) when is_list(blocks), do: render_blocks(blocks, style)
-  def render_children(_, _), do: ""
+  def render_children(blocks, style \\ :email, opts \\ nil)
+
+  def render_children(blocks, style, opts) when is_list(blocks),
+    do: render_blocks(blocks, style, opts)
+
+  def render_children(_, _, _), do: ""
 
   # columns email variant — composes each column's children at the call site
   # (evergreen-nested, style-only) then hands the list of ready column fragments
@@ -2798,7 +2822,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       b
       |> Map.get("columns")
       |> List.wrap()
-      |> Enum.map(fn col -> render_children(List.wrap(col), style) end)
+      |> Enum.map(fn col -> render_children(List.wrap(col), style, render_opts(b)) end)
 
     Barkpark.PortableDoc.Render.PanelsEmail.columns_email_html(cols_html, theme)
   end
@@ -2819,7 +2843,21 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         t -> [%{"kind" => "PdText", "weight" => "bold", "children" => [t]}]
       end
 
-    inner = Enum.map(blocks, &compose_block(&1, style))
+    # A stack child composes into THIS Pd-tree, so the outer walk's palette
+    # (wikilinks / embeds / values) already reaches it; the per-block pre-pass
+    # (paper-link metadata, reference titles, codelist labels, redaction) does
+    # not, so run it here with the section's carried opts.
+    inner =
+      case render_opts(b) do
+        nil ->
+          Enum.map(blocks, &compose_block(&1, style))
+
+        opts ->
+          Enum.map(
+            blocks,
+            &compose_block(Barkpark.PortableDoc.Render.prepare_block(&1, opts), style)
+          )
+      end
 
     # A section that OPENS with a heading (and carries no title of its own) draws
     # no rule pair in article mode: the heading IS the boundary, and the
@@ -2909,7 +2947,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> List.wrap()
       |> Enum.map(fn child ->
         ~s(<div class="bp-section__cell"#{cell_layout_attr(child)}>) <>
-          render_blocks([child], style) <> "</div>"
+          render_blocks([child], style, render_opts(b)) <> "</div>"
       end)
       |> Enum.join("")
 
@@ -2955,13 +2993,19 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  defp block_to_html(child, style) when is_map(child) do
+  defp block_to_html(child, style, nil) when is_map(child) do
     composed = compose_block(child, style)
     pal = Barkpark.PortableDoc.Render.Palettes.palette_for(style)
     Walk.render_body(composed, Map.fetch!(pal, :width), pal)
   end
 
-  defp block_to_html(_, _), do: ""
+  # Carried opts: the child renders through the SAME entry a top-level block
+  # does, so it gets the pre-pass AND the resolution palette — and, if it is a
+  # container itself, carries the opts one level further down.
+  defp block_to_html(child, style, opts) when is_map(child),
+    do: Barkpark.PortableDoc.Render.render_block(child, child_render_opts(opts, style))
+
+  defp block_to_html(_, _, _), do: ""
 
   @doc false
   def paper_links_presentation(block, style) do
@@ -3305,17 +3349,11 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # author's prose is never deleted to tidy a border), and a real child with no
   # caption is byte-UNCHANGED — the pre-existing `cap == ""` branches already
   # handle a caption-less figure and are untouched.
-  defp figure_html(child, caption, style) do
+  defp figure_html(child, caption, style, opts) do
     child_html =
       case child do
-        c when is_map(c) ->
-          composed = compose_block(c, style)
-          pal = Barkpark.PortableDoc.Render.Palettes.palette_for(style)
-          width = Map.fetch!(pal, :width)
-          Walk.render_body(composed, width, pal)
-
-        _ ->
-          ""
+        c when is_map(c) -> block_to_html(c, style, opts)
+        _ -> ""
       end
 
     if String.trim(stringish(child_html)) == "" and String.trim(caption) == "" do

@@ -115,7 +115,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SLACK_DEFAULT = 3;
@@ -211,7 +211,12 @@ function anchorsOf(line, citedBase) {
       if (tok.length < MIN_TOKEN) continue;
       if (/^[0-9]+$/.test(tok)) continue;
       if (STOP.has(tok.toLowerCase())) continue;
-      if (own.has(tok.toLowerCase())) continue;
+      // `__app` is the cited file's own word too: the split above keeps `_`, so
+      // `__app.test.mjs` yields `__app`, which the own-name set (split on
+      // non-alphanumerics: app/test/mjs) never held. Strip leading underscores
+      // before the test — the same rule as tokensOf() in
+      // scripts/file-line-citation-classify.mjs.
+      if (own.has(tok.toLowerCase().replace(/^_+/, ""))) continue;
       out.add(tok);
     }
   }
@@ -630,14 +635,61 @@ async function selftest() {
     if (!ok) fails++;
   }
 
-  const ARMS = 18;
+  // ARM 19 — the own-filename filter must drop a LEADING-UNDERSCORE own word.
+  // The only backticked span names the cited file itself, and the target holds
+  // that word at the cited line: under the old filter `__probe` survived as an
+  // anchor and self-credited the citation (PASS); stripped, nothing is left to
+  // anchor on, so the run is UNCHECKED.
+  {
+    const probe = path.join(wdir, "__probe.test.mjs");
+    const pb = [];
+    for (let i = 1; i <= 10; i++) pb.push(`// filler line ${i}`);
+    pb[4] = "// see __probe.test.mjs for the harness"; // line 5
+    fs.writeFileSync(probe, pb.join("\n"));
+    fs.writeFileSync(charter, "# fixture\n\n| D1 | `__probe.test.mjs` asserts it | __probe.test.mjs:5 |\n");
+    show("ARM 19 own-name filter strips leading underscores: `__probe` is not an anchor for __probe.test.mjs -> UNCHECKED (exit 2), not a self-credit",
+      call(["--map", `__probe.test.mjs=${probe}`, "--root", t, "--charter", charter]), 2, /NONE is machine-decidable/);
+  }
+
+  // ARM 20 — a --json PIPED to a consumer must carry the same bytes as one
+  // redirected to a file. The fixture's --json is well over the 64 KiB pipe
+  // buffer, so a process.exit() with stdout pending truncates the piped copy.
+  {
+    process.stdout.write("\n=== ARM 20  --json piped == --json redirected, on output > 64 KiB ===\n");
+    const many = ["# fixture", ""];
+    for (let i = 0; i < 1500; i++) many.push(`| D${i} | \`missingSymbol${i}\` is cited | widget.js:5 |`);
+    fs.writeFileSync(charter, many.join("\n") + "\n");
+    const args = [self, ...pinArg, "--charter", charter, "--json"];
+    const piped = spawnSync(nodeBin, args, { encoding: "buffer", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "ignore"] });
+    const outFile = path.join(t, "redirected.json");
+    const fd = fs.openSync(outFile, "w");
+    const redir = spawnSync(nodeBin, args, { stdio: ["ignore", fd, "ignore"] });
+    fs.closeSync(fd);
+    const pBytes = piped.stdout.length;
+    const rBytes = fs.statSync(outFile).size;
+    let parses = false;
+    try { parses = JSON.parse(piped.stdout.toString("utf8")).unresolved === 1500; } catch {}
+    process.stdout.write(`    piped ${pBytes} bytes (exit ${piped.status}), redirected ${rBytes} bytes (exit ${redir.status}); piped JSON parses with 1500 unresolved: ${parses}\n`);
+    const ok = rBytes > 65536 && pBytes === rBytes && parses && piped.status === 1 && redir.status === 1;
+    process.stdout.write(`    -> ${ok ? "ok" : "ARM FAILED"}\n`);
+    if (!ok) fails++;
+  }
+
+  const ARMS = 20;
   fs.rmSync(t, { recursive: true, force: true });
   process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${ARMS - fails}/${ARMS} arms\n`);
   return fails === 0 ? 0 : 1;
 }
 
+// exitCode, never process.exit(), once output may be pending: stdout to a PIPE
+// is asynchronous, and process.exit() discards whatever has not drained — a
+// piped --json over app.js stopped at exactly 65536 bytes. Setting exitCode and
+// falling off the end lets the event loop flush stdout first (ARM 20).
 const o = parseArgs(process.argv.slice(2));
-if (o.selftest) process.exit(await selftest());
-if (!o.charter) o.charter = ".claude/workflows/bp-cloud-console-hardening-charter.md";
-if (o.maps.length === 0) o.maps = ["app.js=cloud/priv/static/app.js"];
-process.exit(run(o));
+if (o.selftest) {
+  process.exitCode = await selftest();
+} else {
+  if (!o.charter) o.charter = ".claude/workflows/bp-cloud-console-hardening-charter.md";
+  if (o.maps.length === 0) o.maps = ["app.js=cloud/priv/static/app.js"];
+  process.exitCode = run(o);
+}

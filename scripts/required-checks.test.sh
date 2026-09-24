@@ -2398,7 +2398,14 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
 # workflow tree on this very pair (generator --explain: pr-task-gate.yml job
 # 'pr-task-gate-selftest', reland-check.yml job 'reland-check'; §30h/§30j below
 # pin the first), and scripts/required-checks-ack-derive.sh reported both as
-# "did not need" on every run. §14b
+# "did not need" on every run — as a NOTE, exit 0, which is why they sat here
+# until #19991 deleted them by hand. THAT DIRECTION NOW REDS TOO
+# (cch-w57-fu): an ACK_EX name no derived row needs is `EXTRA ACK_EX`, exit 1,
+# with the FILE:LINE to delete, exactly as a missing one is `MISSING ACK_EX`
+# with the line to paste. The list is derived-and-pasted, never auto-applied
+# beyond the generator's own S8 PULL-REQUEST-ONLY class: a paths-filtered row's
+# renderability depends on the paths the frozen heads touched, so auto-acking it
+# would hide a change in the sample. §14g proves both directions. §14b
 # below asserts the refusal that makes this list necessary; every section that
 # wants a successful EMIT passes "$ACK".
 #
@@ -3472,6 +3479,90 @@ else
   bad "the planted argv argument measured ${RC_MUT_MAX:-nothing} byte(s), not over $RC_CONS_CAP, AND the floor did not refuse by name (exit $RC_MUT_RC, verdict printed=$RC_MUT_VERDICT) — the floor clause above cannot be shown able to fail"
 fi
 
+section "14g. ACK_EX IS A RATCHET IN BOTH DIRECTIONS — a needed name deleted reds, and so does a name no row needs"
+
+# WHY (cch-w57-fu-exclusion-acks-are-typed-by-hand-every-regeneration). The
+# header above ACK_EX says a row that STOPS being unrenderable reds this file.
+# From a33e5ae39 (2026-09-10) that held in one direction only:
+# scripts/required-checks-ack-derive.sh redded a MISSING acknowledgement and
+# printed an EXTRA one as "note: ... (harmless ...)", exit 0. #19991 deleted two
+# such names by hand after they sat unread. The deriver now reds on both; this
+# section proves each direction by mutating a scratch copy of THIS file and
+# re-running the deriver against the set it derived from the real tree.
+#
+# ONE derive (two generator passes over the frozen pair), then three cheap
+# compares via --derived: the mutation arms test the ACK side only, which is
+# the whole subject — the derivation is the deriver's own selftest's job
+# (elixir.yml, `required-checks-ack-derive-selftest`).
+ACKD="$REPO_ROOT/scripts/required-checks-ack-derive.sh"
+ACKD_HARNESS="$REPO_ROOT/scripts/required-checks.test.sh"
+ACKD_DER="$TMP/ackd-derived.txt"
+ACKD_OUT="$(bash "$ACKD" --repo-root "$REPO_ROOT" --dump-derived "$ACKD_DER" 2>&1)" && ACKD_RC=0 || ACKD_RC=$?
+if [ "$ACKD_RC" -eq 0 ] && grep -q "OK  ACK_EX == the derived set" <<<"$ACKD_OUT" \
+   && ! grep -qE "^ +(MISSING|EXTRA) ACK_EX " <<<"$ACKD_OUT"; then
+  ok "the real tree: ACK_EX equals the derived set exactly — 0 MISSING, 0 EXTRA ($(grep -o 'all [0-9]* derived rows' <<<"$ACKD_OUT"))"
+else
+  bad "the real tree's ACK_EX is not the derived set (exit $ACKD_RC): $(grep -m5 -E '^ +(MISSING|EXTRA) ACK_EX |CANNOT READ' <<<"$ACKD_OUT" | tr '\n' '⏎')"
+fi
+if [ -s "$ACKD_DER" ]; then
+  ok "the precondition holds: the derived set was dumped ($(wc -l < "$ACKD_DER" | tr -d ' ') names) for the arms below"
+else
+  bad "the deriver dumped no derived set — every arm below would be vacuous"
+fi
+
+# CONTROL: the untouched harness through the --derived path is GREEN, so a red
+# below is the mutation's and not the path's.
+ACKD_C_OUT="$(bash "$ACKD" --repo-root "$REPO_ROOT" --harness "$ACKD_HARNESS" --derived "$ACKD_DER" 2>&1)" && ACKD_C_RC=0 || ACKD_C_RC=$?
+if [ "$ACKD_C_RC" -eq 0 ]; then
+  ok "control: the untouched harness through --derived is GREEN"
+else
+  bad "control: the untouched harness through --derived is not green (exit $ACKD_C_RC): $(head -3 <<<"$ACKD_C_OUT" | tr '\n' '⏎')"
+fi
+
+# ARM 1 — PLANT an EXTRA. One name no .exclusions row carries, right after the
+# `ACK_EX=(` line of a scratch copy.
+ACKD_PLANT="Planted by §14g — no .exclusions row carries this name"
+ACKD_PSRC="$TMP/ackd-harness-planted.sh"
+ACKD_PLANT="$ACKD_PLANT" awk '{ print }
+  !d && /^ACK_EX=\(/ { printf "        --expect-unrendered \"%s\"\n", ENVIRON["ACKD_PLANT"]; d = 1 }' \
+  "$ACKD_HARNESS" > "$ACKD_PSRC"
+if [ "$(wc -l < "$ACKD_PSRC" | tr -d ' ')" -eq $(( $(wc -l < "$ACKD_HARNESS" | tr -d ' ') + 1 )) ] \
+   && grep -qF -e "--expect-unrendered \"$ACKD_PLANT\"" "$ACKD_PSRC"; then
+  ok "the plant applies: the scratch copy is one ACK_EX line longer and carries the planted name"
+else
+  bad "the plant did not apply — ACK_EX=( moved, so the proof below is vacuous"
+fi
+ACKD_P_OUT="$(bash "$ACKD" --repo-root "$REPO_ROOT" --harness "$ACKD_PSRC" --derived "$ACKD_DER" 2>&1)" && ACKD_P_RC=0 || ACKD_P_RC=$?
+if [ "$ACKD_P_RC" -eq 1 ] && grep -qF "EXTRA ACK_EX  $ACKD_PLANT" <<<"$ACKD_P_OUT" \
+   && grep -qE "^  $ACKD_PSRC:[0-9]+: +--expect-unrendered \"$ACKD_PLANT\"$" <<<"$ACKD_P_OUT" \
+   && ! grep -q "MISSING ACK_EX " <<<"$ACKD_P_OUT"; then
+  ok "an EXTRA ACK_EX name REDS (exit 1), NAMES it, and prints the exact FILE:LINE to delete — and nothing else moved"
+else
+  bad "the planted EXTRA did not red by name with its delete line (exit $ACKD_P_RC): $(grep -m5 -E 'ACK_EX|CANNOT READ|note:' <<<"$ACKD_P_OUT" | tr '\n' '⏎')"
+fi
+
+# ARM 2 — DELETE a needed one. The victim is the first standalone ACK_EX line
+# (not the one carrying `ACK_EX=(`, not the one carrying the closing paren),
+# and it must be in the derived set, or the deletion proves nothing.
+ACKD_VICTIM="$(awk '/^ACK_EX=\(/{f=1; next}
+  f && /^[[:space:]]+--expect-unrendered "[^"$]*"[[:space:]]*$/ {
+    sub(/^[[:space:]]+--expect-unrendered "/, ""); sub(/"[[:space:]]*$/, ""); print; exit }' "$ACKD_HARNESS")"
+if [ -n "$ACKD_VICTIM" ] && grep -qxF "$ACKD_VICTIM" "$ACKD_DER"; then
+  ok "the deletion victim is a derived, acknowledged name: $ACKD_VICTIM"
+else
+  bad "no standalone ACK_EX line names a derived row (victim='$ACKD_VICTIM') — the deletion arm would be vacuous"
+fi
+ACKD_DSRC="$TMP/ackd-harness-deleted.sh"
+ACKD_VICTIM="$ACKD_VICTIM" awk '!d && /--expect-unrendered/ && index($0, "\"" ENVIRON["ACKD_VICTIM"] "\"") { d = 1; next } { print }' \
+  "$ACKD_HARNESS" > "$ACKD_DSRC"
+ACKD_D_OUT="$(bash "$ACKD" --repo-root "$REPO_ROOT" --harness "$ACKD_DSRC" --derived "$ACKD_DER" 2>&1)" && ACKD_D_RC=0 || ACKD_D_RC=$?
+if [ "$ACKD_D_RC" -eq 1 ] && grep -qF "MISSING ACK_EX  $ACKD_VICTIM" <<<"$ACKD_D_OUT" \
+   && ! grep -q "EXTRA ACK_EX " <<<"$ACKD_D_OUT"; then
+  ok "a needed ACK_EX name DELETED reds (exit 1) and NAMES it — and nothing else moved"
+else
+  bad "deleting $ACKD_VICTIM did not red by name (exit $ACKD_D_RC): $(grep -m5 -E 'ACK_EX|CANNOT READ' <<<"$ACKD_D_OUT" | tr '\n' '⏎')"
+fi
+
 section "15. S6 LEAF DEMOTION — an excluded aggregator takes its \`needs\` upstreams DOWN with it, never up"
 
 # THE FIXTURE IS THE SYNTHETIC AGGREGATOR BUILT IN §14b, not `Security gate` and
@@ -4029,6 +4120,20 @@ section "18. no UNPINNED in-repo text still claims this repo's \`main\` is unpro
 # which is not a claim at all. That is exactly why members are PINNED and
 # re-reviewed on edit rather than auto-classified — an edited line loses its pin
 # and comes back for a human reading.
+#
+# THE DECISION ON THAT LIMIT (cchi-bl-protection-claim-paraphrase-escape,
+# 2026-09-24): KEEP THE PINNED CENSUS, and refuse a semantic detector. A prose
+# detector that reds on "the gates are discipline" must also stay green on the
+# dated retractions (class B) and records (class C) that quote the same idea,
+# and the only thing that tells those apart is a reader. A detector that guesses
+# would red truths or be tuned until it cannot fire; either is worse than a
+# census that states its blind spot. The claim it hunts is also now checkable at
+# its source rather than in prose: main requires four contexts under
+# enforce_admins (scripts/required-checks-verify.sh reads live protection), and
+# scripts/merge-authority-claim-check.sh reds the OPPOSITE phantom on a required
+# context. So the escape sentence above stays green on purpose, and the term
+# list widens only by the rule this section already states: a new wording is
+# added together with a hand classification of every member it matches.
 #
 # THE PIN LIST BELOW IS CLASSIFIED, and the classes are the review contract:
 #   B  a CORRECT dated retraction or correction — the line says the claim is now
