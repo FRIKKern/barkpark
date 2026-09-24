@@ -215,6 +215,30 @@ defmodule Barkpark.Plugins.Tasks do
   @impl Barkpark.Plugin
   def paper_task_resolver, do: Barkpark.Tasks.PaperResolver
 
+  @doc """
+  The task guards of the RAW mutate door (`/v1/data/mutate`), formerly
+  private to `Barkpark.Content.Mutations` (task-b04cbe7823d084a6), each at the
+  position it held there — see `Barkpark.Tasks.MutateGuards`:
+
+    * `:before_rev` — the create family's published-fork fence, before the
+      revision precondition.
+    * `:after_claim` — after the door's close-CAS and claim fences, before the
+      writer: disposition by verb (term, rerun, operating instruction, reopen
+      trigger), adoption adjudicated, disposition owner registered — the order
+      the door's `with` chain named them in.
+
+  `mutate_door_fences_test.exs` pins the order.
+  """
+  @impl Barkpark.Plugin
+  def mutate_door_fences do
+    [
+      {:before_rev, Barkpark.Tasks.MutateGuards, :create_not_forking_published},
+      {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_via_verb},
+      {:after_claim, Barkpark.Tasks.MutateGuards, :adoption_adjudicated},
+      {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_owner_registered}
+    ]
+  end
+
   @tui_block_types ~w(
     heading paragraph list callout divider section code table figure action
     pullquote embed ingress eyebrow byline diagram asciicast image composite
