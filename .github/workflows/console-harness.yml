@@ -2359,10 +2359,13 @@ jobs:
       #
       # THE PIN, and the reason there is one: `node --test` on a file that
       # still LOADS but registers ZERO tests reports one passing test and exits
-      # 0 (task-2c39c3b9e1f925c2). 261 is this step's selection on 2026-09-21,
-      # MEASURED on node 22.22.0 across the 17 suites the predicate selects, by
-      # running this step's own selection and reading what it printed
-      # (`# tests 261 / # pass 261 / # fail 0`, task-a0258bec59b256d7);
+      # 0 (task-2c39c3b9e1f925c2). 264 is this step's selection on 2026-09-24,
+      # MEASURED on node 20.20.2 (this job's node-version) across the 18 suites
+      # the predicate selects, by running this step's own body under /bin/sh and
+      # reading what it printed (`# tests 264 / # pass 264 / # fail 0`,
+      # task-31d8058ed865a3bd); modal-oracle.test.mjs joined the selection with
+      # its 3 arms. It was 261 across 17 on 2026-09-21, MEASURED on node
+      # 22.22.0 (`# tests 261 / # pass 261 / # fail 0`, task-a0258bec59b256d7);
       # identity-seed.test.mjs and byte-comparability.test.mjs joined the
       # selection with that task. The number was NOT computed from the previous
       # pin: an arithmetic pin is a pin nobody re-earned, and the predicate's
@@ -2382,7 +2385,7 @@ jobs:
       # moves this number, so bump it in the PR that changes either the suites or
       # the steps that name them. Two-sided `-ne`: see the decision beside the
       # seal-predicate pin above.
-      - name: "__preview__ suites no other step runs (derived selection, 261-test exact pin)"
+      - name: "__preview__ suites no other step runs (derived selection, 264-test exact pin)"
         run: |
           set -euo pipefail
           dir=cloud/priv/static/__preview__
@@ -2459,16 +2462,16 @@ jobs:
           echo "selected (run by no other step):$todo"
 
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 261 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 261 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 264 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 264 — this pin can no longer lose"; exit 1; }
 
           # shellcheck disable=SC2086 # word splitting is the selection
           node --test $todo 2>&1 | tee /tmp/preview-unrun-suites.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/preview-unrun-suites.txt)
-          if [ "${tally:-0}" -ne 261 ]; then
-            echo "::error::preview suites: ran ${tally:-0} test(s), the committed pin is 261 — this pin is EXACT (two-sided). If the tally is HIGHER you grew the derived selection printed above: bump every 261 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 264 ]; then
+            echo "::error::preview suites: ran ${tally:-0} test(s), the committed pin is 264 — this pin is EXACT (two-sided). If the tally is HIGHER you grew the derived selection printed above: bump every 264 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "preview suites: ${tally} tests, exact pin 261 — the pin re-earned"
+          echo "preview suites: ${tally} tests, exact pin 264 — the pin re-earned"
 
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
