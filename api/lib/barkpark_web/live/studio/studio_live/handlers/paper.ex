@@ -389,14 +389,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       when is_binary(block_id) and block_id != "" do
     case SharedPaper.paper_save_master(socket, block_id, params["title"]) do
       {:ok, socket, master} ->
-        {:reply,
-         %{
-           saved: true,
-           master: %{
-             id: Barkpark.Plugins.Bulldocs.Masters.master_id(master),
-             title: master.title
-           }
-         }, socket}
+        {:reply, %{saved: true, master: master}, socket}
 
       {:error, socket, reason} ->
         {:reply, %{saved: false, rejected: to_string(reason)}, socket}

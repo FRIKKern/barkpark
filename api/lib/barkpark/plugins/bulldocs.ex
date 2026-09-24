@@ -34,6 +34,14 @@ defmodule Barkpark.Plugins.Bulldocs do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
 
+  @doc """
+  The paper-masters implementation (task-3b6e562e916c8ce4). Host Studio code
+  reaches masters ONLY through this function, resolved via the plugin registry
+  (`BarkparkWeb.Studio.StudioLive.PaperMastersSeam`), so with Bulldocs off the
+  masters affordances are absent instead of reaching into a disabled plugin.
+  """
+  def paper_masters, do: Barkpark.Plugins.Bulldocs.Masters
+
   # Papers is core content — surfaced in the MAIN tier of the Desk Structure.
   @impl Barkpark.Plugin
   def structure_placement, do: :main

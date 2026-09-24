@@ -1531,7 +1531,7 @@
       // every later save behind it — the history-failure precedent above.
       coordinator._terminalMasterFailure = (entry, reply) => {
         if (entry.kind !== "master" || reply?.request_id !== entry.requestId) return false;
-        if (!["master_not_found", "invalid_master_request"].includes(reply?.rejected)) return false;
+        if (!["master_not_found", "masters_unavailable", "invalid_master_request"].includes(reply?.rejected)) return false;
         mutationQueue.shift();
         mutationById.delete(entry.requestId);
         mutationPaused = false;
@@ -3661,7 +3661,7 @@
               onResult: (saved, result) => {
                 this._sendingOps = false;
                 const terminal = !saved && result != null &&
-                  ["master_not_found", "invalid_master_request"].includes(result?.rejected);
+                  ["master_not_found", "masters_unavailable", "invalid_master_request"].includes(result?.rejected);
                 if ((saved || terminal) && this._opsQueue[0] === entry) {
                   this._opsQueue.shift();
                 }

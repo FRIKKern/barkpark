@@ -27,7 +27,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
-  alias Barkpark.Plugins.Bulldocs.Masters
   alias Barkpark.PortableDoc.{Projection, Render, Slots, TaskResolver}
   alias Barkpark.PortableDoc.Render.{Compose, Figures, SectionLayout}
   alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
@@ -156,6 +155,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # public reader, the Beta document editor, a pane that may not write) renders
   # none of them, so those surfaces are byte-unchanged.
   attr(:masters, :any, default: nil)
+  # The masters implementation (`PaperMastersSeam.impl/1`), or nil when the
+  # plugin providing masters is off — then no Save action renders.
+  attr(:masters_impl, :any, default: nil)
 
   def paper_block_editor(assigns) do
     if assigns.canvas_resume_halt do
@@ -331,7 +333,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             phx-update="ignore" wrapper, read fresh by the canvas slash menu on
             each open, so a master saved a moment ago is offered at once. Lists
             only masters in THIS paper's workspace, project and dataset
-            (`Masters.list_for_paper/1`). Absent unless the pane may write,
+            (`list_for_paper/1`). Absent unless the pane may write,
             and on the canvas path only (the BARKPARK_PAPER_CANVAS=0 opt-out
             stays byte-identical to legacy). --%>
       <div
@@ -441,7 +443,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 tree_identity_safe={@tree_identity_safe}
                 table_editor_target_ids={@table_editor_target_ids}
                 canvas_retained={@canvas_retained}
-                masters_enabled={is_list(@masters)}
+                masters_impl={is_list(@masters) && @masters_impl}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -1027,7 +1029,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:tree_identity_safe, :boolean, default: true)
   attr(:table_editor_target_ids, :any, default: nil)
   attr(:canvas_retained, :any, default: nil)
-  attr(:masters_enabled, :boolean, default: false)
+  attr(:masters_impl, :any, default: nil)
 
   def edit_block(assigns) do
     ~H"""
@@ -1088,10 +1090,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           >▼</button>
           <%!-- Paper masters (task-3b6e562e916c8ce4): save this element,
                 widget or section as a master. Offered only where the pane may
-                write (masters_enabled) and the block is masterable — the same
-                refusal set `Masters.save_master/4` enforces server-side. --%>
+                write and masters are available (masters_impl) and the block is
+                masterable — the same refusal set `save_master/4` enforces. --%>
           <button
-            :if={@masters_enabled and Masters.masterable?(@block)}
+            :if={@masters_impl && @masters_impl.masterable?(@block)}
             type="button"
             class="btn btn-ghost btn-sm"
             title="Save as master"

@@ -166,6 +166,50 @@ defmodule BarkparkWeb.Studio.StudioLivePaperMastersTest do
     assert length(blocks(slug)) == 4
   end
 
+  test "with the Bulldocs plugin disabled, masters are absent and both events refuse without crashing",
+       %{conn: conn, slug: slug, paper: paper} do
+    # A master that exists, so a refusal cannot be "not found".
+    {:ok, master} =
+      Masters.save_master(slug, "pm-sec", @dataset,
+        workspace_id: paper.workspace_id,
+        project_id: paper.project_id
+      )
+
+    assert is_binary(paper.workspace_id)
+
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_plugin_settings(paper.workspace_id, %{
+        "bulldocs" => %{"enabled" => false}
+      })
+
+    assert BarkparkWeb.Studio.StudioLive.PaperMastersSeam.impl(paper.workspace_id) == nil
+
+    view = open(conn, slug)
+    html = render(view)
+
+    # The editor still renders; the masters affordances do not.
+    assert html =~ ~s(data-test-id="studio-paper-block-editor")
+    refute html =~ "data-paper-masters"
+    refute has_element?(view, ~s([data-test-id="paper-save-master"]))
+
+    render_hook(view, "paper-save-master", %{"block_id" => "pm-sec"})
+    assert_reply(view, %{saved: false, rejected: "masters_unavailable"})
+
+    request_id = Ecto.UUID.generate()
+
+    render_hook(view, "paper-insert-master", %{
+      "master_id" => Masters.master_id(master),
+      "after_id" => "pm-p",
+      "request_id" => request_id,
+      "if_rev" => assigns(view).paper_rev
+    })
+
+    assert_reply(view, %{saved: false, rejected: "masters_unavailable", request_id: ^request_id})
+    assert Process.alive?(view.pid)
+    assert Enum.map(blocks(slug), & &1["id"]) == ["pm-h", "pm-p", "pm-sec"]
+    assert [_only_the_seeded_one] = Masters.list_for_paper(paper)
+  end
+
   test "a master from another workspace is neither listed nor insertable",
        %{conn: conn, slug: slug, paper: paper} do
     other_ws = Barkpark.TenancyFixtures.create_workspace!()
