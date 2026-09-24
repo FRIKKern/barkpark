@@ -198,11 +198,18 @@ candidates() {
   for c in "$asdf_dir"/installs/nodejs/"$want".*/bin/node; do
     [ -x "$c" ] && printf '%s\n' "$c"
   done
-  # 6. homebrew's versioned formulae, both prefixes
+  # 6. the GitHub Actions runner tool cache (task-88edd0348e6f703d): where
+  #    actions/setup-node installs, and where runner images pre-cache majors.
+  #    Same layout on both arches; the caller still measures what it finds.
+  tool_cache="${CONSOLE_HARNESS_TOOL_CACHE:-${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}}"
+  for c in "$tool_cache"/node/"$want".*/x64/bin/node "$tool_cache"/node/"$want".*/arm64/bin/node; do
+    [ -x "$c" ] && printf '%s\n' "$c"
+  done
+  # 7. homebrew's versioned formulae, both prefixes
   for c in /opt/homebrew/opt/node@"$want"/bin/node /usr/local/opt/node@"$want"/bin/node; do
     [ -x "$c" ] && printf '%s\n' "$c"
   done
-  # 7. a plainly-named sibling on PATH (`node20`, `node22`)
+  # 8. a plainly-named sibling on PATH (`node20`, `node22`)
   p="$(command -v "node$want" 2>/dev/null || true)"
   [ -n "$p" ] && printf '%s\n' "$p"
   return 0
@@ -212,6 +219,7 @@ looked_in() {
   want="$1"
   echo "  PATH node, \$NVM_DIR/versions/node/v$want.*, \$FNM_DIR/node-versions/v$want.*," >&2
   echo "  \$VOLTA_HOME/tools/image/node/$want.*, \$ASDF_DATA_DIR/installs/nodejs/$want.*," >&2
+  echo "  \$RUNNER_TOOL_CACHE/node/$want.*/{x64,arm64}," >&2
   echo "  /opt/homebrew/opt/node@$want, /usr/local/opt/node@$want, node$want on PATH" >&2
 }
 
@@ -281,6 +289,7 @@ selftest() {
              CONSOLE_HARNESS_FNM_DIR=/nonexistent-fnm \
              CONSOLE_HARNESS_VOLTA_HOME=/nonexistent-volta \
              CONSOLE_HARNESS_ASDF_DIR=/nonexistent-asdf \
+             CONSOLE_HARNESS_TOOL_CACHE=/nonexistent-tool-cache \
              sh "$self" --resolve 2>&1)"
     rc=$?
     rmdir "$shim" 2>/dev/null || true
@@ -292,6 +301,37 @@ selftest() {
     case "$out" in
       *"looked in"*) ok "…and lists where it looked" ;;
       *) bad "…did not list where it looked. Got: $out" ;;
+    esac
+  fi
+
+  # 1b. THE RUNNER TOOL CACHE IS SEARCHED (task-88edd0348e6f703d). The same
+  #     no-matching-Node environment as arm 1, except that a binary reporting the
+  #     declared major sits ONLY under a fake RUNNER_TOOL_CACHE, laid out the way
+  #     actions/setup-node lays it out. It must resolve, by that exact path. The
+  #     stub answers `--version` and nothing else: --resolve never runs it further.
+  if [ "$sysmajor" = "$want" ]; then
+    echo "  skip — $sysnode is major $want, so the tool-cache arm cannot isolate its root here" >&2
+  else
+    shim="$(mktemp -d)"
+    tc="$(mktemp -d)"
+    stub="$tc/node/$want.99.0/x64/bin/node"
+    mkdir -p "$(dirname "$stub")"
+    printf '#!/bin/sh\necho v%s.99.0\n' "$want" > "$stub"
+    chmod +x "$stub"
+    out="$(env -u NODE_BIN -u RUNNER_TOOL_CACHE PATH="$shim:/usr/bin:/bin" \
+             CONSOLE_HARNESS_ROOT="$ROOT" \
+             CONSOLE_HARNESS_NVM_DIR=/nonexistent-nvm \
+             CONSOLE_HARNESS_FNM_DIR=/nonexistent-fnm \
+             CONSOLE_HARNESS_VOLTA_HOME=/nonexistent-volta \
+             CONSOLE_HARNESS_ASDF_DIR=/nonexistent-asdf \
+             CONSOLE_HARNESS_TOOL_CACHE="$tc" \
+             sh "$self" --resolve 2>&1)"
+    rc=$?
+    rm -rf "$shim" "$tc"
+    if [ "$rc" = "0" ]; then ok "a Node $want only under the runner tool cache -> resolves (exit 0)"; else bad "a Node $want only under the runner tool cache -> expected exit 0, got $rc. Got: $out"; fi
+    case "$out" in
+      *"running Node $want "*"$stub"*) ok "…and the banner names the tool-cache binary" ;;
+      *) bad "…banner did not name the tool-cache binary $stub. Got: $out" ;;
     esac
   fi
 
