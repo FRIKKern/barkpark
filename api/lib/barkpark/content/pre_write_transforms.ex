@@ -13,7 +13,11 @@ defmodule Barkpark.Content.PreWriteTransforms do
 
   What is stored is each plugin's declaration, NOT a pre-ordered list: `list/0`
   applies the `:barkpark, :plugins` load order at READ time, the same
-  precedence as `PreWriteFences.list/0`.
+  precedence as `PreWriteFences.list/0`, and through the same interpreter,
+  `Barkpark.Content.PluginLoadOrder.plugins/3` (task-21f5264a452b7cf9): an
+  entry that published no declaration (a loadable module that never
+  registered, an unknown name, a malformed entry) is skipped with a
+  `Logger.warning` naming it — never silently.
 
   Nothing published (the `BARKPARK_PLUGINS=""` kill switch registers nothing;
   Registry init publishes `[]`) resolves `[]`, and `run/3` returns the attrs
@@ -71,20 +75,13 @@ defmodule Barkpark.Content.PreWriteTransforms do
     declared = :persistent_term.get(@key, [])
 
     case Application.get_env(:barkpark, :plugins, []) do
-      [_ | _] = configured -> Enum.flat_map(configured, &steps_for(declared, &1))
-      _ -> Enum.flat_map(declared, & &1.steps)
-    end
-  end
+      [_ | _] = configured ->
+        configured
+        |> Barkpark.Content.PluginLoadOrder.plugins(declared, __MODULE__)
+        |> Enum.flat_map(& &1.steps)
 
-  defp steps_for(declared, name) when is_binary(name), do: by(declared, :name, name)
-  defp steps_for(declared, {name, _mod}) when is_binary(name), do: by(declared, :name, name)
-  defp steps_for(declared, mod) when is_atom(mod), do: by(declared, :module, mod)
-  defp steps_for(_declared, _other), do: []
-
-  defp by(declared, field, value) do
-    case Enum.find(declared, &(Map.fetch!(&1, field) == value)) do
-      nil -> []
-      entry -> entry.steps
+      _ ->
+        Enum.flat_map(declared, & &1.steps)
     end
   end
 
