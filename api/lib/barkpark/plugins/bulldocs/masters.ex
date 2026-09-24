@@ -30,6 +30,9 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
       fingerprint match), and its root carries provenance:
       `"master" => %{"id", "rev", "mode" => "detached"}`. Nothing links the
       copy back: later master edits never reach it.
+      References inside the node that name one of its own ids (a blockref or
+      TOC `anchor`, an in-page `href: "#<id>"`) are rewritten to the fresh
+      ids, so they point at the copy.
 
   LINKED (live-updating) instances are deliberately NOT here — a separate row.
   """
