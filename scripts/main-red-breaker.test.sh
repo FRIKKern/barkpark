@@ -723,7 +723,7 @@ fi
 
 # 19f. Drop the unambiguous marker parse (M4's fix) -> 18h2 must stop inheriting
 #      and fall back to the shredded ';' recovery.
-if mutate "19f MAIN-FAILED-STEP marker parse" "mark = \"main-red-breaker: MAIN-FAILED-STEP in '%s': \" % want" "mark = \"__no_such_marker__\"" 1; then
+if mutate "19f MAIN-FAILED-STEP marker parse" 'mark = re.compile(r"main-red-breaker: MAIN-FAILED-STEP in " + NAMED + r": ")' 'mark = re.compile(r"__no_such_marker__")' 1; then
   ( SUBJECT="$TMP/mut-subject.sh"; out="$(semi_run "$semi_log_marked" "$semi_cap")"
     case "$out" in *INHERITED-FROM-MAIN*) echo "  FAIL  19f) MUTATION SURVIVED: still inherited with the marker parse removed"; exit 1 ;; *) echo "  PASS  19f) removing the marker parse breaks 18h2 — the arm is not vacuous" ;; esac ) || FAIL=$((FAIL+1))
   [ $? -eq 0 ] && PASS=$((PASS+1))
@@ -1626,6 +1626,156 @@ if mutate "26l item-set corroboration" 'if sets[i] & sets[j]:' 'if False:' 1; th
     case "$out" in *"capability:field-encryption"*) echo "  FAIL  26l) it ALSO broke the bare slug, so the asymmetry against 26k is not real"; rc=1 ;;
                    *) echo "  PASS  26l) and the bare capability slug is UNCHANGED — the asymmetry against 26k holds" ;; esac
     exit $rc ) && PASS=$((PASS+2)) || FAIL=$((FAIL+1))
+fi
+
+# ── 27. THE DECIDE LINE ROUND-TRIPS, AND SAYS SO WHEN IT DOES NOT ───────────
+# (task-658971cd9db61621 c1/c2/c4.) api_trusted is unreachable by construction
+# (25b), so the accusing path rests on main's own Decide line being read back by
+# this script. If the WRITER (the `say` lines on main's push run) and the READER
+# (the classifier's head/mark/green patterns) ever disagree, log_parsed goes
+# false for every breaker job at once and nothing reds. These arms are the
+# tripwire, and they are built so the two sides CAN disagree:
+#   - 27a/27b drive the REAL writer (the subject, in push mode) and feed what it
+#     printed to the REAL reader (the subject, in PR mode). The writer's text is
+#     a bash string; the reader's is a python pattern. Neither is derived from
+#     the other, so a wording change on either side reds here (27m1/27m2).
+#   - 27c feeds lines CAPTURED VERBATIM from real main job logs. It pins the
+#     wire format against history, so a change that moves writer AND reader
+#     together — which 27a/27b cannot see — still reds (27m3).
+#   - 27d is the matrix-suffix case; 27e-27g are the LOUD line; 27h its silence.
+# RUNS WHERE THE REST OF THIS HARNESS RUNS: the tooling-harnesses leg of
+# shell-harnesses.yml (.github/shell-harness-legs.json), on every change to
+# scripts/main-red-breaker.sh or this file.
+SOB_JOB='Sobelow static analysis (regression gate, baseline .sobelow-skips)'
+SOB_NAMES='{"s1": "Fetch deps", "s2": "Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)", "s3": "Reconcile baseline on the pinned CI toolchain", "s4": "Fresh-finding guard can lose (selftest first, like its two siblings below)", "s5": "Prove a fresh String.to_atom finding still reds", "s6": "Anchor-token table still matches the Sobelow detector modules"}'
+SOB_S2='Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)'
+sob_out_s2='{"s1":{"outcome":"success"},"s2":{"outcome":"failure"},"s3":{"outcome":"success"},"s4":{"outcome":"success"},"s5":{"outcome":"success"},"s6":{"outcome":"success"}}'
+sob_out_green='{"s1":{"outcome":"success"},"s2":{"outcome":"success"},"s3":{"outcome":"success"},"s4":{"outcome":"success"},"s5":{"outcome":"success"},"s6":{"outcome":"success"}}'
+# Main's jobs listing in its REAL shape: the matrix leg is published WITH the
+# tuple (run 35968072109, job 107532012469), JOB_NAME is passed WITHOUT it.
+sob_steps='{"name":"Fetch deps","conclusion":"success"},{"name":"Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)","conclusion":"success"},{"name":"Reconcile baseline on the pinned CI toolchain","conclusion":"success"},{"name":"Fresh-finding guard can lose (selftest first, like its two siblings below)","conclusion":"success"},{"name":"Prove a fresh String.to_atom finding still reds","conclusion":"success"},{"name":"Anchor-token table still matches the Sobelow detector modules","conclusion":"success"}'
+sob_red="$TMP/sob-red.json"; printf '{"jobs":[{"id":107532012469,"name":"%s (27.0, 1.18.1)","conclusion":"failure","steps":[%s,{"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"failure"}]}]}\n' "$SOB_JOB" "$sob_steps" > "$sob_red"
+sob_green="$TMP/sob-green.json"; printf '{"jobs":[{"id":107532012469,"name":"%s (27.0, 1.18.1)","conclusion":"success","steps":[%s,{"name":"Decide (main-red breaker — inherited reds are neutral, own reds fail)","conclusion":"success"}]}]}\n' "$SOB_JOB" "$sob_steps" > "$sob_green"
+writer_log() { # $1 outcomes, $2 out file -> what main's push-run Decide step PRINTS, as runner log lines
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$1" STEP_NAMES="$SOB_NAMES" JOB_NAME="$SOB_JOB" WORKFLOW_FILE=security.yml \
+      GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$TMP/summary.md"
+    bash "$SUBJECT" > "$2.raw" 2>&1 )
+  awk '{ print "2026-09-24T07:17:28.3140432Z " $0 }' "$2.raw" > "$2"
+}
+reader() { # $1 jobs fixture, $2 main log, $3 JOB_NAME the PR-side Decide step was given -> output + RC + report
+  rm -f "$TMP/rt-report.txt"
+  ( export PATH="$TMP/bin:$PATH" STEP_OUTCOMES="$sob_out_s2" STEP_NAMES="$SOB_NAMES" JOB_NAME="$3" WORKFLOW_FILE=security.yml \
+      GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r GITHUB_TOKEN=t GITHUB_STEP_SUMMARY="$TMP/summary.md" \
+      MAIN_RED_BREAKER_FIXTURE="$1" MAIN_RED_BREAKER_LOG_FIXTURE="$2" MAIN_RED_BREAKER_REPORT_OUT="$TMP/rt-report.txt"
+    bash "$SUBJECT" 2>&1; echo "RC=$?" )
+  echo "---REPORT"; cat "$TMP/rt-report.txt" 2>/dev/null
+}
+UNREAD='DECIDE-LINE UNREADABLE'
+UNREAD_ANN='::warning title=Main-red breaker: Decide line unreadable::'
+silent() { case "$1" in *"$UNREAD"*|*"$UNREAD_ANN"*) bad "$2 — the liveness line fired on a Decide line that parses" ;; *) ok "$2" ;; esac; }
+
+# 27a. WRITER -> READER, red main. PRECONDITION first: the writer must have
+#      printed a marker at all, or the arm measures an empty file.
+writer_log "$sob_out_s2" "$TMP/w-red.log"
+if grep -q "MAIN-FAILED-STEP" "$TMP/w-red.log"; then ok "27a) PRECONDITION: main's writer printed a MAIN-FAILED-STEP marker"; else bad "27a) PRECONDITION FAILED: the writer printed no marker — $(head -c 200 "$TMP/w-red.log")"; fi
+o="$(reader "$sob_red" "$TMP/w-red.log" "$SOB_JOB")"
+has "$o" "LOGMARKED=1" "27a) the reader parses the writer's MAIN-FAILED-STEP marker (not merely the legacy sentence)"
+has "$o" "DECIDESTATE=PARSED" "27a) DECIDESTATE=PARSED"
+has "$o" "$(printf 'STEP\tFAILED\t%s' "$SOB_S2")" "27a) and recovers main's failed step by name, through a matrix-suffixed jobs listing"
+silent "$o" "27a) silent on a Decide line that parses"
+# 27b. WRITER -> READER, green main: the "no gate step failed" line is the ONLY
+#      pass proof an all-success security.yml job has in production.
+writer_log "$sob_out_green" "$TMP/w-green.log"
+if grep -q "no gate step failed" "$TMP/w-green.log"; then ok "27b) PRECONDITION: main's writer printed the all-green line"; else bad "27b) PRECONDITION FAILED: no all-green line — $(head -c 200 "$TMP/w-green.log")"; fi
+o="$(reader "$sob_green" "$TMP/w-green.log" "$SOB_JOB")"
+has "$o" "LOGGREEN=1" "27b) the reader parses the writer's all-green line"
+has "$o" "$(printf 'STEP\tPASSED\t%s' "$SOB_S2")" "27b) so main's pass is PROVEN (log_parsed), not UNKNOWN"
+silent "$o" "27b) silent on a Decide line that parses"
+# 27c. THE CAPTURED LINES. Verbatim from main's own job logs (see the ids);
+#      only the wire format matters, so the rest of each log is elided.
+real_green="$TMP/real-green.log"; cat > "$real_green" <<'L'
+2026-09-24T07:17:28.2775358Z ##[group]Run bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" main-red-breaker-sobelow -- bash "$GITHUB_WORKSPACE/scripts/main-red-breaker.sh"
+2026-09-24T07:17:28.3140432Z main-red-breaker: no gate step failed in 'Sobelow static analysis (regression gate, baseline .sobelow-skips)' — nothing to decide
+2026-09-24T07:17:28.3154349Z instrument main-red-breaker-sobelow: exit 0 -> MEASURED-CLEAN
+L
+real_red="$TMP/real-red.log"; cat > "$real_red" <<'L'
+2026-09-20T12:06:07.3871289Z main-red-breaker: FAIL — 'Sobelow static analysis (regression gate, baseline .sobelow-skips)' failed on: Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding). This is not a pull_request run, so the red is main's state and stands.
+2026-09-20T12:06:07.3873167Z main-red-breaker: MAIN-FAILED-STEP in 'Sobelow static analysis (regression gate, baseline .sobelow-skips)': Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)
+L
+real_check() { # $1 green log, $2 red log -> "OK" or the first thing that failed to parse
+  local g r
+  g="$(reader "$sob_green" "$1" "$SOB_JOB")"; r="$(reader "$sob_red" "$2" "$SOB_JOB")"
+  case "$g" in *"LOGGREEN=1"*) ;; *) echo "green line did not parse"; return ;; esac
+  case "$r" in *"LOGMARKED=1"*) ;; *) echo "red marker did not parse"; return ;; esac
+  echo OK
+}
+has "$(real_check "$real_green" "$real_red")" "OK" "27c) main's REAL captured Decide lines (green: job 107532012469; red: job 106074787706, run 35509451177, a matrix leg) still parse"
+# 27d. THE MATRIX TAIL ON THE WRITER'S SIDE. Both sides take the name from
+#      JOB_NAME today, so no tuple appears in practice (27a-27c). If a workflow
+#      ever templates the tuple into the writer's JOB_NAME and not the reader's,
+#      M1's convention — exact name OR name + " (…)" — must hold here too.
+sfx_log="$TMP/sfx.log"; printf "2026-09-24T07:17:28.3Z main-red-breaker: MAIN-FAILED-STEP in '%s (27.0, 1.18.1)': %s\n" "$SOB_JOB" "$SOB_S2" > "$sfx_log"
+o="$(reader "$sob_red" "$sfx_log" "$SOB_JOB")"
+has "$o" "LOGMARKED=1" "27d) a matrix-suffixed marker round-trips (M1's convention on the read side)"
+silent "$o" "27d) silent on it"
+# 27e. LOUD: main's Decide wrote a line this reader cannot parse (the wording
+#      drifted). The line and the annotation fire, and the VERDICT is unchanged
+#      from what an unparsed log always produced: undetermined, never an accusation.
+drift_log="$TMP/drift.log"; sed 's/no gate step failed in/no gate steps failed in/' "$real_green" > "$drift_log"
+# sob_red, not sob_green: an all-green, error-free main job carries job_trusted
+# independently of the Decide line, so it would (correctly) still accuse.
+o="$(reader "$sob_red" "$drift_log" "$SOB_JOB")"
+has "$o" "$UNREAD" "27e) a drifted Decide line prints DECIDE-LINE UNREADABLE"
+has "$o" "$UNREAD_ANN" "27e) …with its OWN annotation title, not the undetermined one"
+has "$o" "First line(s) seen: main-red-breaker: no gate steps failed in" "27e) …quoting what main DID write, so the drift is visible"
+has "$o" "OWNERSHIP-UNDETERMINED" "27e) the verdict is still undetermined"
+case "$o" in *"the red is this PR's own"*) bad "27e) an unreadable Decide line made the breaker MORE accusing" ;; *) ok "27e) and never more accusing" ;; esac
+# 27f. LOUD, on a REAL log: the reader handed the RENDERED matrix name — the one
+#      the jobs API prints — while main's writer used JOB_NAME. That is the
+#      mismatch this row's 2026-09-08 measurement made in its own reader.
+o="$(reader "$sob_green" "$real_green" "$SOB_JOB (27.0, 1.18.1)")"
+has "$o" "$UNREAD" "27f) a JOB_NAME that differs from the writer's fires the liveness line on a real log"
+# 27g. LOUD, other reason: main's log holds no breaker line at all.
+nodecide="$TMP/nodecide.log"; grep -v 'main-red-breaker: ' "$real_green" > "$nodecide"
+o="$(reader "$sob_green" "$nodecide" "$SOB_JOB")"
+has "$o" "NO main-red-breaker line at all" "27g) a log with no Decide output says main's Decide did not run"
+# 27h. SILENT when there was no log to read: that is NOLOG, already said by the
+#      masking note, and not a parse failure.
+: > "$TMP/empty.log"
+o="$(reader "$sob_green" "$TMP/empty.log" "$SOB_JOB")"
+has "$o" "DECIDESTATE=NOLOG" "27h) an empty log is NOLOG"
+silent "$o" "27h) silent on NOLOG"
+
+# ── 27m. MUTATIONS — each proves an arm above can fail.
+# 27m1. The WRITER's marker wording moves; the reader does not. 27a must red.
+if mutate "27m1 writer marker wording" "say \"MAIN-FAILED-STEP in '\${JOB_NAME}': \${_s}\"" "say \"MAIN-FAILED-STEP for '\${JOB_NAME}': \${_s}\"" 1; then
+  # Only the MARKER moves here, so main's legacy ';'-joined sentence still
+  # parses and the breaker is not yet blind — which is exactly why the tripwire
+  # asserts LOGMARKED rather than log_parsed: the drift is caught while a
+  # fallback is still masking it, before the loud line would ever fire.
+  ( SUBJECT="$TMP/mut-subject.sh"; writer_log "$sob_out_s2" "$TMP/m1.log"; o="$(reader "$sob_red" "$TMP/m1.log" "$SOB_JOB")"
+    case "$o" in *"LOGMARKED=1"*) echo "  FAIL  27m1) MUTATION SURVIVED: the reader still parsed a marker the writer no longer writes"; exit 1 ;; *) echo "  PASS  27m1) a writer-only wording change reds 27a — writer and reader can disagree" ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+fi
+# 27m2. The WRITER's all-green wording moves. 27b must red.
+if mutate "27m2 writer all-green wording" "say \"no gate step failed in '\${JOB_NAME}' — nothing to decide\"" "say \"no gate steps failed in '\${JOB_NAME}' — nothing to decide\"" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; writer_log "$sob_out_green" "$TMP/m2.log"; o="$(reader "$sob_green" "$TMP/m2.log" "$SOB_JOB")"
+    case "$o" in *"LOGGREEN=1"*) echo "  FAIL  27m2) MUTATION SURVIVED: all-green line still parsed"; exit 1 ;; *) echo "  PASS  27m2) a writer-only all-green wording change reds 27b" ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+fi
+# 27m3. The CAPTURED fixture's format moves (what a writer+reader co-change would
+#       look like against history). 27c must red, for each captured line.
+sed 's/MAIN-FAILED-STEP in/MAIN-FAILED-STEP for/' "$real_red" > "$TMP/real-red-mut.log"
+sed 's/no gate step failed in/no gate steps failed in/' "$real_green" > "$TMP/real-green-mut.log"
+case "$(real_check "$real_green" "$TMP/real-red-mut.log")" in OK) bad "27m3) MUTATION SURVIVED: a changed red marker in the captured fixture still parsed" ;; *) ok "27m3) a changed MAIN-FAILED-STEP format in the captured fixture reds 27c" ;; esac
+case "$(real_check "$TMP/real-green-mut.log" "$real_red")" in OK) bad "27m3) MUTATION SURVIVED: a changed all-green line in the captured fixture still parsed" ;; *) ok "27m3) a changed all-green format in the captured fixture reds 27c" ;; esac
+# 27m4. Strip the matrix handling from the reader. 27d must red.
+if mutate "27m4 reader matrix tail" "NAMED = r\"'%s(?: \\([^()']*\\))?'\" % re.escape(want)" "NAMED = r\"'%s'\" % re.escape(want)" 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; o="$(reader "$sob_red" "$sfx_log" "$SOB_JOB")"
+    case "$o" in *"LOGMARKED=1"*) echo "  FAIL  27m4) MUTATION SURVIVED: suffixed marker still parsed without the matrix tail"; exit 1 ;; *) echo "  PASS  27m4) without the matrix tail 27d reds" ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+fi
+# 27m5. Silence the liveness line. 27e must red.
+if mutate "27m5 liveness line" 'if [ "$DECIDESTATE" = "UNREADABLE" ]; then' 'if false; then' 1; then
+  ( SUBJECT="$TMP/mut-subject.sh"; o="$(reader "$sob_red" "$drift_log" "$SOB_JOB")"
+    case "$o" in *"$UNREAD"*) echo "  FAIL  27m5) MUTATION SURVIVED: the line printed with its guard removed"; exit 1 ;; *) echo "  PASS  27m5) without the guard 27e reds — the line is not printed by anything else" ;; esac ) && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
 fi
 
 echo; echo "main-red-breaker.test.sh: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]
