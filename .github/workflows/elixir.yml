@@ -519,6 +519,23 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh merge-authority-claim -- bash scripts/merge-authority-claim-check.sh
 
+      # ── the static census of merge-blocking names (cchi-w57) ─────────────
+      # .github/required-checks.json is generated from names that RENDERED on
+      # sampled heads, so a job whose `if:` skipped it there is in no census.
+      # scripts/blocking-name-census.py reads the workflows instead: every job
+      # in a required aggregator's transitive `needs:` closure must be named in
+      # required ∪ exclusions, or this reds by name. Here, and as a STEP, for
+      # the reasons written above the skip-disclosure ratchet: this job is
+      # judged NEVER by `elixir-gate`, so the census reds a REQUIRED context,
+      # and a step adds no rendered name of its own.
+      - name: The blocking-name census must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh blocking-name-census-selftest -- python3 scripts/blocking-name-census.py --selftest
+
+      - name: Every merge-blocking job name is in the spec
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh blocking-name-census -- python3 scripts/blocking-name-census.py
+
       # ── the unrecognised-top-level default (task-fb7857b984ff5ff8) ────────
       # Every path set in this tree fails OPEN. Re-derived live on origin/main
       # ad7f16319 with each ratchet's own `--match`, a head touching only
