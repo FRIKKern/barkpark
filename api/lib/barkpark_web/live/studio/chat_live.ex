@@ -43,13 +43,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.ContextIdentity
   alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.StudioChat.QuestionAnswer
-  alias Barkpark.Tasks
   alias Barkpark.Tenancy
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.StreamTail
   alias Barkpark.StudioChat.TaskTransition
   alias Barkpark.StudioChat.TaskLedgerScope
+  alias BarkparkWeb.Studio.ChatTaskSeam
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -166,6 +166,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
        socket
        |> assign(
          page_title: "chat",
+         # The task reader (task-ed873c9ae56685b7): every ledger read this view
+         # makes goes through `ChatTaskSeam`, resolved ONCE for the viewer's
+         # workspace. nil = the tasks plugin is off for this workspace (or not
+         # loaded): no Doing strip, no ready picker, no picker toggle.
+         task_reader: ChatTaskSeam.resolve(ledger_workspace_id(socket)),
          dataset: default_dataset(),
          # The dataset the URL SCOPE names, as distinct from the one above.
          # No chat route carries a `:dataset` segment today, so this is nil and
@@ -605,13 +610,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # Toggle the ready-task picker (hand-task surface). Open loads the ready
   # head FRESH from the queue — the panel is a window, never a cache.
+  # With tasks unavailable for the workspace there is no picker to open: the
+  # event is a no-op, never an empty panel that reads as "nothing is ready".
+  def handle_event("toggle-task-picker", _params, %{assigns: %{task_reader: nil}} = socket),
+    do: {:noreply, assign(socket, task_picker: nil)}
+
   def handle_event("toggle-task-picker", _params, socket) do
     case socket.assigns.task_picker do
       nil ->
         rows =
           case hand_task_scope(socket) do
-            [workspace_id: nil, project_id: _] -> []
-            scope -> Tasks.ready([limit: 8] ++ scope) |> Enum.map(&hand_ready_row/1)
+            [workspace_id: nil, project_id: _] ->
+              []
+
+            scope ->
+              socket.assigns.task_reader
+              |> ChatTaskSeam.ready([limit: 8] ++ scope)
+              |> Enum.map(&hand_ready_row/1)
           end
 
         {:noreply, assign(socket, task_picker: rows)}
@@ -624,6 +639,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Hand a ready task to the agent: close the picker and ride the NORMAL send
   # path with the claim-first work prompt — the echo, queueing, persistence,
   # and status flip all behave exactly like a typed message.
+  def handle_event("hand_task", _params, %{assigns: %{task_reader: nil}} = socket),
+    do: {:noreply, socket}
+
   def handle_event("hand_task", %{"id" => id}, socket) do
     handle_event("send", %{"message" => task_work_prompt(id)}, assign(socket, task_picker: nil))
   end
@@ -2124,7 +2142,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       when is_map(doc) do
     id = msg.doc_id
 
-    if String.starts_with?(id, "drafts.") do
+    # Tasks unavailable for this workspace: no subscription is taken, and a
+    # stray frame folds nothing either (task-ed873c9ae56685b7).
+    if is_nil(socket.assigns.task_reader) or String.starts_with?(id, "drafts.") do
       {:noreply, socket}
     else
       # SIBLING step (wsc charter D9): a mutation of a held hand-task's PARENT
@@ -3921,6 +3941,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     ready-queue head above the composer; each row hands its
                     task to the agent as a claim-first work prompt. --%>
               <button
+                :if={@task_reader != nil}
                 type="button"
                 class="bp-iconbtn"
                 phx-click="toggle-task-picker"
@@ -5580,7 +5601,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp epic_goal_in_tenancy(socket, s, owners) do
     if epic_fold_permitted?(socket, Map.get(owners, s.id)) do
-      StudioChat.epic_goal(s.provider, s.id)
+      ChatTaskSeam.epic_goal(socket.assigns[:task_reader], s.provider, s.id)
     end
   end
 
@@ -6391,7 +6412,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     %{dataset: dataset, workspace_id: workspace_id} =
       TaskLedgerScope.resolve(ledger_workspace_id(socket))
 
-    if connected?(socket) and is_binary(workspace_id) do
+    if connected?(socket) and is_binary(workspace_id) and
+         ChatTaskSeam.available?(socket.assigns.task_reader) do
       Broadcast.subscribe_documents(dataset, workspace_id)
     end
 
@@ -6491,8 +6513,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
           %{}
 
         scope ->
-          Tasks.prime([worker: worker, limit: 10] ++ scope)
-          |> Map.get(:in_progress, [])
+          socket.assigns.task_reader
+          |> ChatTaskSeam.held_claims(worker, scope)
           |> Map.new(fn d ->
             {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
           end)
@@ -6537,10 +6559,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
     ids = hand_epic_ids(socket.assigns.hand_tasks)
 
     rows =
-      ids
-      |> MapSet.to_list()
-      |> StudioChat.epic_children(Keyword.get(hand_task_scope(socket), :workspace_id))
-      |> Map.new(fn d -> {d.doc_id, hand_epic_row(d.doc_id, d.title, d.content)} end)
+      ChatTaskSeam.epic_children(
+        socket.assigns.task_reader,
+        MapSet.to_list(ids),
+        Keyword.get(hand_task_scope(socket), :workspace_id)
+      )
+      |> Map.new(fn d -> {d.doc_id, hand_epic_row(socket, d.doc_id, d.title, d.content)} end)
 
     assign(socket, hand_epic: %{ids: ids, rows: rows})
   end
@@ -6559,7 +6583,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
       MapSet.member?(ids, content["parent_id"]) ->
         assign(socket,
-          hand_epic: %{ids: ids, rows: Map.put(rows, id, hand_epic_row(id, title, content))}
+          hand_epic: %{
+            ids: ids,
+            rows: Map.put(rows, id, hand_epic_row(socket, id, title, content))
+          }
         )
 
       Map.has_key?(rows, id) ->
@@ -6574,17 +6601,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # summarises: the pulse is decoded (content.claim.now is a
   # `{"text","ts"}` MAP, never a string) and the criteria meter is the
   # server's own `criteria_progress` (nil when the row carries none).
-  defp hand_epic_row(doc_id, title, content) when is_map(content) do
+  defp hand_epic_row(socket, doc_id, title, content) when is_map(content) do
     %{
       doc_id: doc_id,
       title: title || content["title"],
       lifecycle_status: content["lifecycle_status"],
-      criteria: Tasks.criteria_progress(content),
+      criteria: ChatTaskSeam.criteria_progress(socket.assigns.task_reader, content),
       pulse: AgentTaskJoin.decode_pulse(get_in(content, ["claim", "now"]))
     }
   end
 
-  defp hand_epic_row(doc_id, title, _content),
+  defp hand_epic_row(_socket, doc_id, title, _content),
     do: %{doc_id: doc_id, title: title, lifecycle_status: nil, criteria: nil, pulse: nil}
 
   # The Doing strip's agent lines: every rail agent label that resolves to
