@@ -11,7 +11,7 @@ defmodule Barkpark.Plugins.LoadOrderReadersTest do
     * plugin-record readers (`Registry.ResolverChain`,
       `Content.PreWriteFences`, `Content.PrePublishFences`,
       `Content.PreWriteTransforms`, `Content.PaperTaskResolver`,
-      `Registry.Discovery`) SKIP it, with a `Logger.warning` naming it.
+      `Content.MutateDoorFences`, `Registry.Discovery`) SKIP it, with a `Logger.warning` naming it.
 
   Every skipped entry of any shape is logged by name, once per
   `{reader, entry}` per VM — so every test here uses its OWN module or a
@@ -27,6 +27,7 @@ defmodule Barkpark.Plugins.LoadOrderReadersTest do
   import ExUnit.CaptureLog
 
   alias Barkpark.Content.{
+    MutateDoorFences,
     PaperTaskResolver,
     PluginLoadOrder,
     PrePublishFences,
@@ -106,6 +107,18 @@ defmodule Barkpark.Plugins.LoadOrderReadersTest do
     @moduledoc false
     def paper_task_resolver, do: __MODULE__.Impl
     defmodule Impl, do: @moduledoc(false)
+  end
+
+  defmodule MutateDoorBare do
+    @moduledoc false
+    def mutate_door_fences, do: [{:after_claim, __MODULE__, :refuse}]
+    def refuse(_t, _e, _m, _o, _d, _opts), do: {:error, :bare}
+  end
+
+  defmodule MutateDoorRegistered do
+    @moduledoc false
+    def mutate_door_fences, do: [{:after_claim, __MODULE__, :refuse}]
+    def refuse(_t, _e, _m, _o, _d, _opts), do: {:error, :registered}
   end
 
   defmodule DiscoveryBare do
@@ -304,6 +317,23 @@ defmodule Barkpark.Plugins.LoadOrderReadersTest do
 
       assert log =~ "Barkpark.Content.PaperTaskResolver: skipping"
       assert log =~ inspect(PaperResolverBare)
+      assert log =~ "not a registered plugin"
+    end
+  end
+
+  describe "Content.MutateDoorFences (plugin-record reader)" do
+    test "SKIPS a loadable module's fences when it is not a registered plugin and warns by " <>
+           "name; the same shape REGISTERED contributes its fences (control)",
+         ctx do
+      _name = register!(MutateDoorRegistered)
+      :ok = Barkpark.PluginEnv.with_plugins([MutateDoorBare, MutateDoorRegistered], ctx)
+
+      {fences, log} = with_log(fn -> MutateDoorFences.list() end)
+
+      assert fences == [{:after_claim, MutateDoorRegistered, :refuse}]
+
+      assert log =~ "Barkpark.Content.MutateDoorFences: skipping"
+      assert log =~ inspect(MutateDoorBare)
       assert log =~ "not a registered plugin"
     end
   end

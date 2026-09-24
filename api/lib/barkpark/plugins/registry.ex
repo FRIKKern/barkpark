@@ -362,6 +362,17 @@ defmodule Barkpark.Plugins.Registry do
   defdelegate collect_pre_write_transforms, to: Barkpark.Content.PreWriteTransforms, as: :list
 
   @doc """
+  The mutate-door fences `Content.apply_mutations/3` will run, in load order —
+  a read of `Barkpark.Content.MutateDoorFences.list/0`, which this Registry
+  PUBLISHES to exactly as it does the pre-write fences (see
+  `publish_mutate_door_fences/1`). The mutate door reads the content-side
+  holder directly; this delegate exists for callers already holding the
+  Registry (boot checks, release eval).
+  """
+  @spec collect_mutate_door_fences() :: [Barkpark.Plugin.mutate_door_fence()]
+  defdelegate collect_mutate_door_fences, to: Barkpark.Content.MutateDoorFences, as: :list
+
+  @doc """
   Drives the `resolve_api_tests/2` chain → flat list of `api_test_spec()` maps
   the runner fires on demand. Not cached; accepts `:baseline` / `:ctx`. Plugins
   usually implement additive `api_tests/0` (default resolver lifts via
@@ -538,6 +549,7 @@ defmodule Barkpark.Plugins.Registry do
     publish_pre_publish_fences(plugins)
     publish_pre_write_transforms(plugins)
     publish_paper_task_resolvers(plugins)
+    publish_mutate_door_fences(plugins)
 
     state
   end
@@ -666,6 +678,36 @@ defmodule Barkpark.Plugins.Registry do
     end
   end
 
+  # The mutate-door twin of `publish_pre_publish_fences/1`
+  # (task-b04cbe7823d084a6): every registered plugin's `mutate_door_fences/0`
+  # declaration, into the content-owned holder `Content.Mutations` reads. Same
+  # rules — not routed through `reduce_resolvers/3`, a raising declaration or
+  # a malformed entry raises.
+  defp publish_mutate_door_fences(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_mutate_door_fences/1)
+    |> Barkpark.Content.MutateDoorFences.publish()
+  end
+
+  defp declared_mutate_door_fences(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :mutate_door_fences, 0) do
+      fences = Enum.map(mod.mutate_door_fences(), &validate_mutate_door_fence!(&1, name))
+      [%{name: name, module: mod, fences: fences}]
+    else
+      []
+    end
+  end
+
+  defp validate_mutate_door_fence!({phase, mod, fun} = fence, _name)
+       when phase in [:before_rev, :after_claim] and is_atom(mod) and is_atom(fun),
+       do: fence
+
+  defp validate_mutate_door_fence!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed mutate-door fence " <>
+            "#{inspect(other)}; expected {:before_rev | :after_claim, module, function}"
+  end
+
   # ─── GenServer ──────────────────────────────────────────────────────────
 
   @impl true
@@ -678,13 +720,14 @@ defmodule Barkpark.Plugins.Registry do
     # `handle_call(:capture_baseline, …)` and `handle_call(:reset, …)`.
     #
     # A fresh Registry has no plugins, so it publishes NO pre-write fences, NO
-    # pre-publish fences and NO pre-write transforms —
+    # pre-publish fences, NO pre-write transforms and NO mutate-door fences —
     # the kill-switch boot never registers, and a `:persistent_term` left by a
     # previous start of the app in the same VM must not survive it.
     publish_pre_write_fences([])
     publish_pre_publish_fences([])
     publish_pre_write_transforms([])
     publish_paper_task_resolvers([])
+    publish_mutate_door_fences([])
     {:ok, %{plugins: %{}, baseline_plugins: nil}}
   end
 

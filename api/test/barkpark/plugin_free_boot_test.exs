@@ -519,6 +519,14 @@ defmodule Barkpark.PluginFreeBootTest do
                )
     end
 
+    test "no mutate-door fence resolves: the raw mutate door runs no plugin guard under :plugins []" do
+      # task-b04cbe7823d084a6 — the Tasks published-fork fence and adjudication
+      # guards moved behind `mutate_door_fences/0`; with nothing registered
+      # `apply_mutations/3` runs neither phase.
+      assert Barkpark.Plugins.Registry.collect_mutate_door_fences() == []
+      assert Barkpark.Content.MutateDoorFences.list() == []
+    end
+
     test "GET /studio/production renders 200 with Structure marker (following the scoped-shell redirect)" do
       conn = get_following_redirects("/studio/production")
       body = html_response(conn, 200)

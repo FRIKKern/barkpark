@@ -35,7 +35,7 @@ defmodule Barkpark.Content.PluginLoadOrder do
     * plugin-record readers (`plugins/3`: `Registry.ResolverChain`,
       `Content.PreWriteFences`, `Content.PrePublishFences`,
       `Content.PreWriteTransforms`, `Content.PaperTaskResolver`,
-      `Registry.Discovery`) SKIP it, LOUDLY. What they consume is a product of
+      `Content.MutateDoorFences`, `Registry.Discovery`) SKIP it, LOUDLY. What they consume is a product of
       registration — a Registry entry (whose `name` drives enablement and desk
       grouping), a fence declaration the Registry validated and published, or a
       `plugin.json` manifest. Accepting a bare module there would mean

@@ -221,8 +221,14 @@ defmodule Barkpark.Content.MutationsAdjudicationVocabularyLockTest do
 
   # ── 4. The mirror is GONE from the source ─────────────────────────────────
 
+  # The mutate door's adjudication guards moved to `Barkpark.Tasks.MutateGuards`
+  # (task-b04cbe7823d084a6), so the retype check reads BOTH files: the guards'
+  # new home, and the door they left (a copy re-appearing there is the same
+  # defect).
   test "mutations.ex retypes none of Stage's adjudication vocabulary" do
-    source = File.read!("lib/barkpark/content/mutations.ex")
+    source =
+      File.read!("lib/barkpark/content/mutations.ex") <>
+        File.read!("lib/barkpark/tasks/mutate_guards.ex")
 
     retyped =
       for {label, literal} <- [

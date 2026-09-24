@@ -941,6 +941,46 @@ defmodule Barkpark.Plugin do
   """
   @callback paper_task_resolver() :: module() | nil
 
+  # ── Mutate-door fences (Barkspark phase 1, task-b04cbe7823d084a6) ─────
+
+  @typedoc """
+  Where a mutate-door fence runs in `Barkpark.Content.Mutations.apply_mutations/3`
+  (see `Barkpark.Content.MutateDoorFences`):
+
+    * `:before_rev` — the create family's first step (`create`,
+      `createOrReplace`, `createIfNotExists`, and the legacy create door),
+      before the revision precondition and every other mutate-door guard.
+    * `:after_claim` — after the mutate door's close-CAS and claim fences,
+      directly before the writer call, on `createOrReplace`, `replace` and
+      both `patch` clauses.
+
+  Called as `apply(module, function, [type, existing, merged, op, dataset,
+  opts])`; any non-`:ok` return is returned from the mutation VERBATIM.
+  """
+  @type mutate_door_fence_phase :: :before_rev | :after_claim
+
+  @typedoc "One mutate-door fence: `{phase, module, function}`."
+  @type mutate_door_fence :: {mutate_door_fence_phase(), module(), atom()}
+
+  @doc """
+  Declare the ORDERED list of fences the raw mutate door (`/v1/data/mutate`,
+  `Content.apply_mutations/3`) runs on each mutation, each at its phase's
+  position (see `t:mutate_door_fence_phase/0`). These run ONLY on that door —
+  not on the writer's other callers — and before the writer is called, with
+  the row the mutate door resolved.
+
+  Published by `Barkpark.Plugins.Registry` to
+  `Barkpark.Content.MutateDoorFences` and read there in plugin load order
+  (this list's order kept within a plugin). Within a phase the door runs them
+  in that order and stops at the first non-`:ok`.
+
+  NOT filtered by per-workspace enablement and a raising declaration is NOT
+  swallowed — the same integrity-gate rules as `pre_write_fences/0`.
+
+  Default (supplied by `use Barkpark.Plugin`) returns `[]`.
+  """
+  @callback mutate_door_fences() :: [mutate_door_fence()]
+
   # ── Lifecycle hooks callback (Goal barkpark-9lq) ─────────────────────
 
   @doc """
@@ -1148,6 +1188,7 @@ defmodule Barkpark.Plugin do
                       pre_publish_fences: 0,
                       pre_write_transforms: 0,
                       paper_task_resolver: 0,
+                      mutate_door_fences: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
                       cli_commands: 0,
@@ -1361,6 +1402,9 @@ defmodule Barkpark.Plugin do
       def paper_task_resolver, do: nil
 
       @impl Barkpark.Plugin
+      def mutate_door_fences, do: []
+
+      @impl Barkpark.Plugin
       def api_tests, do: []
 
       @impl Barkpark.Plugin
@@ -1430,6 +1474,7 @@ defmodule Barkpark.Plugin do
                      pre_publish_fences: 0,
                      pre_write_transforms: 0,
                      paper_task_resolver: 0,
+                     mutate_door_fences: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,
                      cli_commands: 0,
