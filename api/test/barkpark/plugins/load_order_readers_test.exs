@@ -10,6 +10,7 @@ defmodule Barkpark.Plugins.LoadOrderReadersTest do
       RoutesFake* fakes) are exactly such modules;
     * plugin-record readers (`Registry.ResolverChain`,
       `Content.PreWriteFences`, `Content.PrePublishFences`,
+      `Content.PreWriteTransforms`, `Content.PaperTaskResolver`,
       `Registry.Discovery`) SKIP it, with a `Logger.warning` naming it.
 
   Every skipped entry of any shape is logged by name, once per
@@ -25,7 +26,14 @@ defmodule Barkpark.Plugins.LoadOrderReadersTest do
 
   import ExUnit.CaptureLog
 
-  alias Barkpark.Content.{PluginLoadOrder, PrePublishFences, PreWriteFences}
+  alias Barkpark.Content.{
+    PaperTaskResolver,
+    PluginLoadOrder,
+    PrePublishFences,
+    PreWriteFences,
+    PreWriteTransforms
+  }
+
   alias Barkpark.Plugins.Hooks
   alias Barkpark.Plugins.Registry.{BootCollectors, Discovery, ResolverChain}
 
@@ -74,6 +82,30 @@ defmodule Barkpark.Plugins.LoadOrderReadersTest do
     @moduledoc false
     def pre_publish_fences, do: [{:door, __MODULE__, :refuse}]
     def refuse(_a), do: {:error, :registered}
+  end
+
+  defmodule TransformBare do
+    @moduledoc false
+    def pre_write_transforms, do: [{:transform, __MODULE__, :shape}]
+    def shape(attrs, _type), do: attrs
+  end
+
+  defmodule TransformRegistered do
+    @moduledoc false
+    def pre_write_transforms, do: [{:transform, __MODULE__, :shape}]
+    def shape(attrs, _type), do: attrs
+  end
+
+  defmodule PaperResolverBare do
+    @moduledoc false
+    def paper_task_resolver, do: __MODULE__.Impl
+    defmodule Impl, do: @moduledoc(false)
+  end
+
+  defmodule PaperResolverRegistered do
+    @moduledoc false
+    def paper_task_resolver, do: __MODULE__.Impl
+    defmodule Impl, do: @moduledoc(false)
   end
 
   defmodule DiscoveryBare do
@@ -237,6 +269,42 @@ defmodule Barkpark.Plugins.LoadOrderReadersTest do
 
       assert log =~ "Barkpark.Content.PrePublishFences: skipping"
       assert log =~ inspect(PublishFenceBare)
+    end
+  end
+
+  describe "Content.PreWriteTransforms (plugin-record reader)" do
+    test "SKIPS a loadable module's steps when it is not a registered plugin and warns by " <>
+           "name; the same shape REGISTERED contributes its steps (control)",
+         ctx do
+      _name = register!(TransformRegistered)
+      :ok = Barkpark.PluginEnv.with_plugins([TransformBare, TransformRegistered], ctx)
+
+      {steps, log} = with_log(fn -> PreWriteTransforms.list() end)
+
+      assert steps == [{:transform, TransformRegistered, :shape}]
+
+      assert log =~ "Barkpark.Content.PreWriteTransforms: skipping"
+      assert log =~ inspect(TransformBare)
+      assert log =~ "not a registered plugin"
+    end
+  end
+
+  describe "Content.PaperTaskResolver (plugin-record reader)" do
+    test "SKIPS a loadable module's resolver when it is not a registered plugin and warns " <>
+           "by name; the same shape REGISTERED still resolves (control)",
+         ctx do
+      _name = register!(PaperResolverRegistered)
+      # The unregistered module sits FIRST: under the old private read it would
+      # never win (it published nothing), so only the warning tells the two apart.
+      :ok = Barkpark.PluginEnv.with_plugins([PaperResolverBare, PaperResolverRegistered], ctx)
+
+      {resolver, log} = with_log(fn -> PaperTaskResolver.get() end)
+
+      assert resolver == PaperResolverRegistered.Impl
+
+      assert log =~ "Barkpark.Content.PaperTaskResolver: skipping"
+      assert log =~ inspect(PaperResolverBare)
+      assert log =~ "not a registered plugin"
     end
   end
 

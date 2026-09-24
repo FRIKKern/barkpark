@@ -34,6 +34,7 @@ defmodule Barkpark.Content.PluginLoadOrder do
       even if it wanted to;
     * plugin-record readers (`plugins/3`: `Registry.ResolverChain`,
       `Content.PreWriteFences`, `Content.PrePublishFences`,
+      `Content.PreWriteTransforms`, `Content.PaperTaskResolver`,
       `Registry.Discovery`) SKIP it, LOUDLY. What they consume is a product of
       registration — a Registry entry (whose `name` drives enablement and desk
       grouping), a fence declaration the Registry validated and published, or a
