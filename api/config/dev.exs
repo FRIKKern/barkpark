@@ -89,6 +89,11 @@ config :barkpark,
 # media upload works without visiting /login first.
 config :barkpark, :dev_browser_token, "barkpark-dev-token"
 
+# Dev seeds the demo world by default, because :dev_browser_token above needs
+# the dev token that only the demo profile mints. Every other environment
+# defaults to "clean" (Barkpark.Seeds.profile/0).
+config :barkpark, :default_seed_profile, "demo"
+
 # SSRF guard escape hatch (Barkpark.Net.SafeOutbound). Local webhooks commonly
 # point at localhost during development; prod/runtime leaves this false.
 config :barkpark, :allow_private_outbound, true
