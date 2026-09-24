@@ -916,6 +916,31 @@ defmodule Barkpark.Plugin do
   """
   @callback pre_write_transforms() :: [pre_write_transform()]
 
+  # ── Paper task resolver (Barkspark phase 1, task-9c59aa555e1e015e) ────
+
+  @doc """
+  Declare the module a paper reads TASK data through: a task chip's criteria
+  segment and the rows / aggregates of a query-carrying task block. The
+  module implements `Barkpark.Content.PaperTaskResolver`
+  (`criteria_progress/1`, `rows_for_query/3`, `agg_for_query/3`).
+
+  Published by `Barkpark.Plugins.Registry` to
+  `Barkpark.Content.PaperTaskResolver` and read there in plugin load order —
+  the first declared resolver wins. When none is declared (the Tasks plugin is
+  out of the load order, or the `BARKPARK_PLUGINS=""` kill switch), papers
+  render an explicit "unavailable" placeholder for each task chip's criteria
+  and each task query block instead of reading task data.
+
+  Why a new callback and not an existing one: `content_renderer/3` returns
+  preview iodata for a whole doc type, and the `resolve_*` chains accumulate
+  lists/maps and rescue a raising plugin back to the accumulator. Neither
+  carries a data provider with three call shapes that papers invoke per chip
+  and per query block.
+
+  Default (supplied by `use Barkpark.Plugin`) returns `nil`.
+  """
+  @callback paper_task_resolver() :: module() | nil
+
   # ── Lifecycle hooks callback (Goal barkpark-9lq) ─────────────────────
 
   @doc """
@@ -1122,6 +1147,7 @@ defmodule Barkpark.Plugin do
                       pre_write_fences: 0,
                       pre_publish_fences: 0,
                       pre_write_transforms: 0,
+                      paper_task_resolver: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
                       cli_commands: 0,
@@ -1332,6 +1358,9 @@ defmodule Barkpark.Plugin do
       def pre_write_transforms, do: []
 
       @impl Barkpark.Plugin
+      def paper_task_resolver, do: nil
+
+      @impl Barkpark.Plugin
       def api_tests, do: []
 
       @impl Barkpark.Plugin
@@ -1400,6 +1429,7 @@ defmodule Barkpark.Plugin do
                      pre_write_fences: 0,
                      pre_publish_fences: 0,
                      pre_write_transforms: 0,
+                     paper_task_resolver: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,
                      cli_commands: 0,
