@@ -158,7 +158,10 @@ function tokensOf(span, base, keepHyphen) {
 // anchorsOf() in file-line-citation-check.mjs.
 function lineAnchors(text, base) {
   const out = new Set();
-  for (const m of text.replace(PIN_RE, "").matchAll(/`([^`]+)`/g)) for (const t of tokensOf(m[1], base, false)) out.add(t);
+  // A pin is replaced by a SPACE, never removed: removing it from inside a
+  // backtick span leaves an empty `` pair, which `([^`]+)` skips, and every
+  // later span on the line then pairs the wrong backticks.
+  for (const m of text.replace(PIN_RE, " ").matchAll(/`([^`]+)`/g)) for (const t of tokensOf(m[1], base, false)) out.add(t);
   return [...out];
 }
 
@@ -179,11 +182,11 @@ function localAnchors(text, base, p, e) {
   const inside = spans.find((sp) => sp.s < p && sp.e > e);
   const keepHyphen = base.endsWith(".css") || base.endsWith(".html");
   let toks = [];
-  if (inside) toks = tokensOf(inside.body.replace(PIN_RE, ""), base, keepHyphen);
+  if (inside) toks = tokensOf(inside.body.replace(PIN_RE, " "), base, keepHyphen);
   if (toks.length === 0) {
     const before = spans.filter((sp) => sp.e <= p && p - sp.e <= 80 && !(inside && sp === inside)).pop();
     const after = spans.find((sp) => sp.s >= e && sp.s - e <= 40);
-    for (const sp of [before, after]) if (sp) toks.push(...tokensOf(sp.body.replace(PIN_RE, ""), base, keepHyphen));
+    for (const sp of [before, after]) if (sp) toks.push(...tokensOf(sp.body.replace(PIN_RE, " "), base, keepHyphen));
   }
   return [...new Set(toks)];
 }
