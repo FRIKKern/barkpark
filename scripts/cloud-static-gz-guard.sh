@@ -322,6 +322,34 @@ selftest() {
 
   run_case "restored tree passes" 0
 
+  # 5. THE OVERRIDE'S FLOOR (task-362f02ac6403a169). Every case above already
+  # re-execs the whole script and asserts its exit code, so the verdict wiring
+  # (`exit 1` on a nonzero $fail) is covered: flip it to `exit 0` and six cases
+  # red. What no case pinned is the trap PR #13405 names for any env-overridable
+  # root — pointed at a root holding NOTHING, the guard must not report a green
+  # over a corpus of zero files. Today need_file and check-ignore make both of
+  # these red; these arms keep it that way.
+  local empty_root="$tmp/empty-root"
+  mkdir -p "$empty_root"
+  set +e
+  CLOUD_GZ_GUARD_ROOT="$empty_root" bash "${BASH_SOURCE[0]}" >/dev/null 2>&1
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "  PASS  an EMPTY root is never green (rc=$rc)"; passed=$((passed + 1))
+  else
+    echo "  FAIL  an EMPTY root exited 0 — a green over zero files"; failed=$((failed + 1))
+  fi
+  set +e
+  CLOUD_GZ_GUARD_ROOT="$tmp/does-not-exist" bash "${BASH_SOURCE[0]}" >/dev/null 2>&1
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "  PASS  a MISSING root is never green (rc=$rc)"; passed=$((passed + 1))
+  else
+    echo "  FAIL  a MISSING root exited 0 — a typo'd override would certify nothing"; failed=$((failed + 1))
+  fi
+
   echo "cloud-static-gz-guard --selftest: $passed passed, $failed failed"
   [ "$failed" -eq 0 ]
 }
