@@ -840,7 +840,7 @@ defmodule Barkpark.Content.Lifecycle do
   # task through the SANCTIONED verbs, then republish a coexisting stale open
   # draft → the published row silently reverts done→open and content.claim
   # becomes nil, obliterating the attribution record. The Writer-seam gate
-  # (D7b, `Writer.ensure_task_transition_legal/6`) cannot see this door.
+  # (D7b, `Tasks.ChangeGuards.transition_legal/6`) cannot see this door.
   #
   # Contract — mirrors the Writer-seam gate, adapted to the publish seam (the
   # collapse target IS the published row, so `was` is simply its current

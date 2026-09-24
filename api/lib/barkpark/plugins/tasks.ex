@@ -128,6 +128,12 @@ defmodule Barkpark.Plugins.Tasks do
   decides which refusal a write that trips two fences receives — and
   `pre_write_fences_test.exs` pins it.
 
+  The two change guards (`Barkpark.Tasks.ChangeGuards`, formerly the writer's
+  own `ensure_task_transition_legal/6` and
+  `ensure_close_reason_lands_with_a_close/6`, task-d91ccf54d43b9800) come
+  FIRST, where the writer ran them: before every other fence, so an illegal
+  lifecycle transition is refused as one before any sibling judges the write.
+
   The two birth guards (`Barkpark.Tasks.BirthGuards`, formerly the writer's own
   `ensure_task_born_adjudicated/5` and `ensure_task_surface_declared/5`,
   task-2978357a0701cd10) sit where the writer ran them: after
@@ -138,6 +144,8 @@ defmodule Barkpark.Plugins.Tasks do
   @impl Barkpark.Plugin
   def pre_write_fences do
     [
+      {Barkpark.Tasks.ChangeGuards, :transition_legal},
+      {Barkpark.Tasks.ChangeGuards, :close_reason_lands_with_a_close},
       {Barkpark.Tasks.DraftTerminalFence, :check},
       {Barkpark.Tasks.DatasetTwinFence, :check},
       {Barkpark.Tasks.TerminalCriteriaFence, :check},
