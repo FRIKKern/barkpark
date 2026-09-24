@@ -208,7 +208,7 @@ import {
 // default_block/2 to build), the canvas inserts the default NODE DIRECTLY into the
 // ProseMirror doc — so runToOps emits an insert-after carrying the reconstructed
 // block and the S4a echo stamps the server id. See _maybeSlash / _chooseSlash below.
-import { SlashMenu, SLASH_ITEMS } from "../slash-menu.js";
+import { SlashMenu, SLASH_ITEMS, readExpectedItems, readMasterItems } from "../slash-menu.js";
 // The DOM-free tone normalizer (note→info, warn→warning, error→danger, …) shared
 // with the per-block `> [!type]` callout shorthand. Reused VERBATIM so the canvas
 // shorthand maps tones identically. See _maybeCalloutShorthand below.
@@ -226,6 +226,7 @@ import {
   CANVAS_SLASH_TEXTABLE_NODES,
   slashTriggerAllowsParent,
   CANVAS_COMPOUND_INSERTS,
+  masterInsertAnchor,
 } from "./slash-insert.js";
 // P5 command palette: the Obsidian Cmd-P analog — a fuzzy, keyboard-triggered (Mod-p)
 // launcher over editor COMMANDS (NOT a typed "/" trigger). CommandPalette is a THIN
@@ -1034,7 +1035,16 @@ class BpPaperCanvas extends HTMLElement {
     if (this._editable) {
       this._bubble = new FormatBubble({ editor: this._editor });
       // Notion-style block gutter: + to add below, ⋮⋮ to drag / open the block menu.
-      this._handle = new BlockHandle({ host: this, editor: this._editor, openSlash: () => this._openSlash("") });
+      this._handle = new BlockHandle({
+        host: this,
+        editor: this._editor,
+        openSlash: () => this._openSlash(""),
+        // Paper masters: "Save as master" in the block menu, offered only where
+        // the editor carries the masters carrier (the pane may write) and the
+        // block is one the server already holds.
+        canSaveMaster: (node) => this._canSaveMaster(node),
+        saveMaster: (node) => this._saveMaster(node),
+      });
     }
 
     // Lifecycle: one-shot bubbling/composed signal a host hook can await —
@@ -2316,6 +2326,12 @@ class BpPaperCanvas extends HTMLElement {
         ),
         onChoose: (item) => this._chooseSlash(item),
         onDismiss: () => this._dismissSlash(),
+        // EXPECTED fields (the default extra group) plus the paper's MASTERS,
+        // read fresh on every open from this editor's own carrier.
+        readExtraItems: () => {
+          const root = this._mastersRoot();
+          return [...readExpectedItems(), ...(root ? readMasterItems(root) : [])];
+        },
       });
     }
     // Anchor the popup to the live caret rectangle. open() handles both the first
@@ -2363,6 +2379,11 @@ class BpPaperCanvas extends HTMLElement {
       insertCompoundAtSelection(this._editor, item.compound);
       return;
     }
+    // A MASTER row (the Masters group): the SERVER inserts the detached copy.
+    if (item && item.master) {
+      this._insertMaster(item.master);
+      return;
+    }
     // A SECTION PRESET row (the Presets group): insert the whole ORDERED SEQUENCE of
     // top-level blocks through the same landing seam — same guard, same degrade, and
     // the preset's declared placeholder is selected so the next keystroke overtypes it.
@@ -2387,6 +2408,73 @@ class BpPaperCanvas extends HTMLElement {
     // items carry a `fieldName` binding (threaded through so a bound-field insert
     // round-trips). Caret placement (into-body vs atom-select) is handled by the seam.
     insertSlashTypeAtSelection(this._editor, item.type, item.fieldName);
+  }
+
+  // ── paper masters (task-3b6e562e916c8ce4) ──────────────────────────────────
+  //
+  // The masters affordances exist only inside a Studio paper editor that rendered
+  // the `[data-paper-masters]` carrier (the pane may write). A field canvas
+  // (data-vocabulary) and the public reader never get them.
+  _mastersRoot() {
+    if (this.hasAttribute("data-vocabulary")) return null;
+    const editor = this.closest(".bp-paper-editor");
+    return editor && editor.querySelector("[data-paper-masters]") ? editor : null;
+  }
+
+  _canSaveMaster(node) {
+    if (!this._editable || !node || !this._mastersRoot()) return false;
+    const id = node.attrs && node.attrs.bpId;
+    if (typeof id !== "string" || id === "" || node.attrs.locked === true) return false;
+    return (this._blocks || []).some((block) => block && block.id === id);
+  }
+
+  // Ask the host to save a confirmed block as a master (the hook forwards it as
+  // `paper-save-master`); the server re-validates masterability.
+  _saveMaster(node) {
+    if (!this._canSaveMaster(node)) return false;
+    this.dispatchEvent(
+      new CustomEvent("bp-save-master", {
+        detail: { block_id: node.attrs.bpId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    return true;
+  }
+
+  // A Masters pick: remove the "/query" paragraph, flush that removal so it is
+  // queued BEFORE the insert, then ask the host to insert the detached copy after
+  // a block the server already holds (masterInsertAnchor). The editor is blurred
+  // so the server echo carrying the copy renders as soon as it lands instead of
+  // waiting for the author to leave the editor.
+  _insertMaster(masterId) {
+    const editor = this._editor;
+    if (!editor || typeof masterId !== "string" || masterId === "") return false;
+    const slashIndex = topLevelIndexAtSelection(editor);
+    const liveIds = [];
+    editor.state.doc.forEach((node) => liveIds.push(node.attrs.bpId));
+    const confirmed = new Set((this._blocks || []).map((block) => block && block.id));
+    const afterId = masterInsertAnchor(liveIds, slashIndex, confirmed);
+
+    // Drop the "/query" block (an only child is replaced by an empty paragraph).
+    const { state } = editor;
+    let offset = 0;
+    for (let i = 0; i < slashIndex; i++) offset += state.doc.child(i).nodeSize;
+    const slashNode = state.doc.child(slashIndex);
+    let tr = state.tr.delete(offset, offset + slashNode.nodeSize);
+    if (tr.doc.childCount === 0) tr = tr.insert(0, state.schema.nodes.paragraph.create());
+    editor.view.dispatch(tr);
+    this.flushPendingChanges();
+    editor.commands.blur();
+
+    this.dispatchEvent(
+      new CustomEvent("bp-master-insert", {
+        detail: { master_id: masterId, after_id: afterId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    return true;
   }
 
   // Esc / outside-click: close the menu but LEAVE the typed "/" in place — the user

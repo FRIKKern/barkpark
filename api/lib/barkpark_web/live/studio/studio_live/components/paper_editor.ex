@@ -331,9 +331,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             phx-update="ignore" wrapper, read fresh by the canvas slash menu on
             each open, so a master saved a moment ago is offered at once. Lists
             only masters in THIS paper's workspace, project and dataset
-            (`Masters.list_for_paper/1`). Absent unless the pane may write. --%>
+            (`Masters.list_for_paper/1`). Absent unless the pane may write,
+            and on the canvas path only (the BARKPARK_PAPER_CANVAS=0 opt-out
+            stays byte-identical to legacy). --%>
       <div
-        :if={is_list(@masters)}
+        :if={is_list(@masters) and @canvas_on?}
         id="bp-paper-masters"
         data-paper-masters={Jason.encode!(@masters)}
         data-test-id="bp-paper-masters"

@@ -122,6 +122,41 @@ export function readExpectedItems(doc = document) {
     }));
 }
 
+// Paper MASTERS group (task-3b6e562e916c8ce4). The Studio paper editor renders
+// the open paper's in-scope masters as JSON on `[data-paper-masters]` (a
+// LiveView-driven carrier, re-rendered after every save — the EXPECTED-group
+// precedent above). Each entry becomes a "Masters" row carrying a `master` id;
+// the canvas picks it by asking the SERVER to insert a detached copy (it never
+// builds the node client-side: fresh ids, provenance and reference rewriting
+// are server work). Returns [] when the carrier is absent (the public reader,
+// a field canvas, a pane that may not write) — the group then never renders.
+// `root` scopes the lookup to one editor (default: the whole document).
+export const MASTERS_GROUP = "Masters";
+
+export function readMasterItems(root = document) {
+  const el = root && root.querySelector ? root.querySelector("[data-paper-masters]") : null;
+  if (!el) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(el.getAttribute("data-paper-masters") || "[]");
+  } catch (_e) {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((m) => m && typeof m.id === "string" && m.id !== "")
+    .map((m) => ({
+      group: MASTERS_GROUP,
+      // `type` feeds only the row's dataset/filter haystack; the pick branches on
+      // `master`, never on type (it is not a default_block/2 type).
+      type: "master",
+      master: m.id,
+      label: typeof m.title === "string" && m.title !== "" ? m.title : m.block_type || "Master",
+      hint: "★",
+      desc: typeof m.tier === "string" && m.tier !== "" ? `master ${m.tier}` : "master",
+    }));
+}
+
 export class SlashMenu {
   // `eyebrow`, `extraClass`, `footHtml`, and `filter` are OPTIONAL parameterization
   // seams (added for the Phase-5 command palette, which subclasses this popup). When
