@@ -83,6 +83,18 @@
 // matched as a literal substring. Only the NAMED thing credits a pin — never the
 // rest of the citing line, so a pin carries none of the whole-line over-credit.
 //
+// DEFINITION, NOT USE. When the version being read DEFINES the named thing — a
+// JS `function NAME(`, `NAME = function`, `NAME: function`, `NAME = (...) =>`,
+// a method head `NAME(...) {` or `class NAME`; a CSS selector head `.NAME {` —
+// only a definition line credits it, and comments never count as one. Until
+// task-eb534ada6569c7da any occurrence credited, so charter L677's
+// `app.js (tokenRow @ 55513d908f, L3462)` verified on the call
+// `list.map(tokenRow)` at 3464 (the definition sat at 3472). A thing the
+// version never defines (a variable, an id, a CSS property) keeps whole-name
+// matching. To cite a USE on purpose — a call site, a gate line, a comment —
+// quote it: `app.js ("readFailureCopy" @ <sha>, L8010)` is matched as literal
+// text. The rule is thingMatcher() in the classifier, imported here.
+//
 // WHY THIS SHAPE, AND NOT `app.js:675 (at <sha>)`: E11 in
 // cloud/priv/static/__css_check.mjs bans `app.js` + `[:~ ]+~?` + two or more
 // digits (and `<name>.{js,mjs,sh,css}` + `:` or ` ~` + digits). A form that
@@ -129,7 +141,7 @@ import os from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // THE ADJACENCY RULE — one definition, owned by the classifier (see THE TEST).
-import { subjectOf as adjacentSubject } from "./file-line-citation-classify.mjs";
+import { subjectOf as adjacentSubject, thingMatcher } from "./file-line-citation-classify.mjs";
 
 const SLACK_DEFAULT = 3;
 
@@ -195,21 +207,23 @@ function pinRe(bases) {
 }
 
 // A pinned thing: "quoted" -> literal substring; otherwise a whole word where
-// `-` is a word character (CSS class names), so a prefix never credits.
-function thingRe(thing) {
-  const q = thing.match(/^["\u201c](.+)["\u201d]$/);
-  if (q) return new RegExp(escRe(q[1]));
-  return new RegExp(`(^|[^A-Za-z0-9_$-])${escRe(thing)}([^A-Za-z0-9_$-]|$)`);
-}
+// `-` is a word character (CSS class names), so a prefix never credits — and,
+// when the file version DEFINES the thing (a function, or a CSS rule), only
+// its definition line credits, never a use. thingMatcher() in the classifier
+// owns that rule (see DEFINITION, NOT USE there); this file never re-derives
+// it. Built per file version, because "is it a function?" is asked of the
+// version being read.
+const thingRe = (thing, base, fileLines) => thingMatcher(thing, base, fileLines);
 
 // ── the subject of an unpinned citation: ADJACENT only ───────────────────────
 // The classifier's subjectOf(), imported: nearest first, tokens as strings and
 // quotes as { label, re }. Each subject is returned here as { label, re }: a
-// token matches as a whole word (thingRe, `-` is a word character), a quoted
-// sentence as a substring. ANY candidate landing in the window credits.
-function subjectOf(c) {
+// token matches by thingRe() against the cited file (`-` is a word character;
+// a function or CSS rule by its definition), a quoted sentence as a substring.
+// ANY candidate landing in the window credits.
+function subjectOf(c, fileLines) {
   return adjacentSubject(c.text, c.base, c.p, c.e)
-    .map((x) => typeof x === "string" ? { label: x, re: thingRe(x) } : { label: x.label, re: x.re });
+    .map((x) => typeof x === "string" ? { label: x, re: thingRe(x, c.base, fileLines) } : { label: x.label, re: x.re });
 }
 
 // ── parse every `<base>:<N>` citation in a charter ───────────────────────────
@@ -268,16 +282,17 @@ function evaluatePin(c, tgt, root, slack) {
   const fl = pinBlob(root, c.pin.sha, tgt.rel);
   if (!fl) { c.unreadable = true; c.resolved = null; return; }
   c.beyondEof = c.line > fl.length;
-  const re = thingRe(c.pin.thing);
+  const re = thingRe(c.pin.thing, c.base, fl);
+  c.pinKind = re.kind();
   const [lo, hi] = windowOf(c, fl.length, slack);
   let hit = null;
-  for (let n = lo; n <= hi; n++) if (re.test(fl[n - 1])) { hit = { tok: c.pin.thing, at: n }; break; }
+  for (let n = lo; n <= hi; n++) if (re.test(fl[n - 1], n - 1)) { hit = { tok: c.pin.thing, at: n }; break; }
   c.resolved = !!hit;
   c.hit = hit;
   if (!hit) {
     let best = null;
     for (let n = 1; n <= fl.length; n++) {
-      if (!re.test(fl[n - 1])) continue;
+      if (!re.test(fl[n - 1], n - 1)) continue;
       const d = n < c.line ? c.line - n : (n > (c.hi || c.line) ? n - (c.hi || c.line) : 0);
       if (best === null || d < best.dist) best = { tok: c.pin.thing, at: n, dist: d };
     }
@@ -290,7 +305,7 @@ function evaluate(cites, targets, slack, root) {
   for (const c of cites) {
     const tgt = targets.get(c.base);
     if (c.pin) { evaluatePin(c, tgt, root, slack); continue; }
-    const subject = subjectOf(c);
+    const subject = subjectOf(c, tgt.lines);
     c.anchors = subject.map((x) => x.label);
     c.decidable = subject.length > 0;
     c.beyondEof = c.line > tgt.lines.length;
@@ -299,7 +314,7 @@ function evaluate(cites, targets, slack, root) {
     let hit = null;
     for (const { label: tok, re } of subject) {
       for (let n = lo; n <= hi; n++) {
-        if (re.test(tgt.lines[n - 1])) { hit = { tok, at: n }; break; }
+        if (re.test(tgt.lines[n - 1], n - 1)) { hit = { tok, at: n }; break; }
       }
       if (hit) break;
     }
@@ -314,7 +329,7 @@ function evaluate(cites, targets, slack, root) {
       for (const { label: tok, re } of subject) {
         let best = null;
         for (let n = 1; n <= tgt.lines.length; n++) {
-          if (!re.test(tgt.lines[n - 1])) continue;
+          if (!re.test(tgt.lines[n - 1], n - 1)) continue;
           const d = n < c.line ? c.line - n : (n > (c.hi || c.line) ? n - (c.hi || c.line) : 0);
           if (best === null || d < best.d) best = { at: n, d };
         }
@@ -689,7 +704,52 @@ async function selftest() {
   show("ARM 24 control for ARM 23: `paintChip/1` is a name with an arity, not a path -> GREEN",
     call(cite("The chip is painted by `paintChip/1` at widget.js:20 today")), 0, /PASS — 1\/1/);
 
-  const ARMS = 24;
+  // ── DEFINITION, NOT USE (task-eb534ada6569c7da) ────────────────────────────
+  // Commit C: tokenRow is DEFINED at 30 and CALLED at 22 (charter L677's shape:
+  // `list.map(tokenRow)` 8 lines above `function tokenRow`). pausedGap is a
+  // variable (no definition shape anywhere), used at 12. drawRow is never a
+  // function, but a comment at 40 says "class drawRow"; it is used at 44.
+  // style.css: `.chip {` at 5, and a comment at 12 that names `.chip` and ends
+  // with a comma.
+  {
+    const bodyC = [];
+    for (let i = 1; i <= 50; i++) bodyC.push(`// filler line ${i}`);
+    bodyC[9] = "  var pausedGap = null;";                         // line 10
+    bodyC[11] = "      if (a.paused) { pausedGap = a; }";         // line 12
+    bodyC[21] = "    box.innerHTML = list.map(tokenRow).join(\"\");"; // line 22
+    bodyC[29] = "  function tokenRow(t) {";                      // line 30
+    bodyC[39] = "  // the old class drawRow was removed in the rename";   // line 40
+    bodyC[43] = "    var key = \"drawRow\";";                     // line 44
+    fs.writeFileSync(widget, bodyC.join("\n"));
+    const css = path.join(wdir, "style.css");
+    const cssBody = [];
+    for (let i = 1; i <= 20; i++) cssBody.push(`/* filler ${i} */`);
+    cssBody[4] = ".chip { color: red; }";                             // line 5
+    cssBody[10] = "/* shared base:";                                  // line 11
+    cssBody[11] = "   .chip is reused by the pill,";                  // line 12
+    cssBody[12] = "   and nothing else. */";                          // line 13
+    fs.writeFileSync(css, cssBody.join("\n"));
+    g("add", "src/widget.js", "src/style.css"); g("commit", "-q", "-m", "C");
+    const shaC = g("rev-parse", "--short=10", "HEAD");
+    const cssArg = ["--map", "style.css=src/style.css", "--root", t, "--slack", "3"];
+    const citeCss = (lineText) => { fs.writeFileSync(charter, `# fixture\n\n${lineText}\n`); return [...cssArg, "--charter", charter, "--report"]; };
+    show("ARM 25 a FUNCTION pinned at its CALL site (definition 8 lines off) -> RED (charter L677's `list.map(tokenRow)`)",
+      call(cite(`\`tokenRow\` — widget.js (tokenRow @ ${shaC}, L22)`)), 1, /tokenRow@30 \(8 away\)/);
+    show("ARM 26 control for ARM 25: the same function pinned at its DEFINITION -> GREEN",
+      call(cite(`\`tokenRow\` — widget.js (tokenRow @ ${shaC}, L30)`)), 0, /pinned         : 1   \(verified 1/);
+    show("ARM 27 a QUOTED thing is literal text, so a use site is cited by quoting it -> GREEN at the call",
+      call(cite(`the call — widget.js ("tokenRow" @ ${shaC}, L22)`)), 0, /pinned         : 1   \(verified 1/);
+    show("ARM 28 a name the file never defines (a variable) keeps name matching -> GREEN at its use",
+      call(cite(`\`pausedGap\` — widget.js (pausedGap @ ${shaC}, L12)`)), 0, /pinned         : 1   \(verified 1/);
+    show("ARM 29 a COMMENT is not a definition: `// the old class drawRow` does not make drawRow a class -> its use still credits",
+      call(cite(`the key — widget.js (drawRow @ ${shaC}, L44)`)), 0, /pinned         : 1   \(verified 1/);
+    show("ARM 30 a CSS rule pinned at a comment that names it (rule head 7 lines off) -> RED",
+      call(citeCss(`\`.chip\` — style.css (.chip @ ${shaC}, L12)`)), 1, /\.chip@5 \(7 away\)/);
+    show("ARM 31 control for ARM 30: the same rule pinned at its selector head -> GREEN",
+      call(citeCss(`\`.chip\` — style.css (.chip @ ${shaC}, L5)`)), 0, /pinned         : 1   \(verified 1/);
+  }
+
+  const ARMS = 31;
   fs.rmSync(t, { recursive: true, force: true });
   process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${ARMS - fails}/${ARMS} arms\n`);
   return fails === 0 ? 0 : 1;

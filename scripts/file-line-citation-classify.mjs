@@ -249,6 +249,128 @@ export function subjectOf(text, base, p, e) {
   return quotesNear(text, p, e);
 }
 
+// ── DEFINITION, NOT USE (task-eb534ada6569c7da) ──────────────────────────────
+// A citation of a FUNCTION (or a CSS RULE) cites where it is defined. Matching
+// its bare name credited a use: charter L677's pin `app.js (tokenRow @
+// 55513d908f, L3462)` verified on the call site `list.map(tokenRow)` at 3464
+// while `function tokenRow` sat at 3472. So a thing is matched by its
+// DEFINITION when the file version being read defines it, and by its name
+// otherwise.
+//
+// IS IT A FUNCTION? Decided per file version, by the file itself: a thing is a
+// function (or a CSS rule) there when at least one line of that version is a
+// definition of it —
+//   JS (.js, .mjs, .html):  function NAME(   NAME = function   NAME: function
+//                           NAME = (...) =>  NAME = arg =>     class NAME
+//                           a method head at line start: NAME(...) {
+//   CSS (.css):             a selector head holding the thing — the thing sits
+//                           before the line's first `{`, and the line opens a
+//                           block or ends a selector-list line with `,`; not a
+//                           comment line, not a `property: value` line.
+// A thing with no definition anywhere in that version — a string literal, a
+// variable, an element id, a CSS property or custom property, a "quoted"
+// thing — keeps whole-name (or substring) matching. A NAME must look like an
+// identifier (JS) or a selector token (CSS) to be tested at all.
+
+// The pin test's name match — must mirror thingRe() in the checker: "quoted"
+// -> literal substring, else a whole word where `-` is a word character.
+export function nameRe(thing) {
+  const q = thing.match(/^["\u201c](.+)["\u201d]$/);
+  if (q) return new RegExp(esc(q[1]));
+  return new RegExp(`(^|[^A-Za-z0-9_$-])${esc(thing)}([^A-Za-z0-9_$-]|$)`);
+}
+
+// A predicate "is this CODE line a definition of thing?", or null when the
+// thing cannot have one (quoted, or not identifier/selector shaped). It is
+// asked of codeLines() — comments blanked — never of the raw line: a comment
+// saying "a class that has no rule" is not `class that`, and a CSS comment
+// line ending in `,` is not a selector list.
+export function definitionTest(thing, base) {
+  if (/^["“]/.test(thing)) return null;
+  if (base.endsWith(".css")) {
+    if (!/^[.#]?-{0,2}[A-Za-z_][\w-]*$/.test(thing)) return null;
+    // A class or id selector: the thing as written when it carries its `.`/`#`,
+    // else preceded by one — `topbar` is defined by `.topbar {`, not by
+    // `grid-area: topbar` or `@media (width ...)`.
+    const at = /^[.#]/.test(thing)
+      ? new RegExp(`(^|[^A-Za-z0-9_$-])${esc(thing)}(?![A-Za-z0-9_$-])`)
+      : new RegExp(`[.#]${esc(thing)}(?![A-Za-z0-9_$-])`);
+    return (code) => {
+      const t = code.trim();
+      if (t.startsWith("@") || /^[\w-]+\s*:\s/.test(t)) return false;
+      const brace = t.indexOf("{");
+      if (brace < 0 && !/,$/.test(t)) return false;
+      return at.test(brace < 0 ? t : t.slice(0, brace));
+    };
+  }
+  if (!/^[A-Za-z_$][\w$]*$/.test(thing)) return null;
+  const n = esc(thing);
+  const res = [
+    new RegExp(`\\bfunction\\s*\\*?\\s*${n}\\s*\\(`),
+    new RegExp(`(^|[^\\w$.])${n}\\s*[:=]\\s*(async\\s+)?function\\b`),
+    new RegExp(`(^|[^\\w$.])${n}\\s*[:=]\\s*(async\\s*)?(\\([^()]*\\)|[A-Za-z_$][\\w$]*)\\s*=>`),
+    new RegExp(`^\\s*((async|static|get|set)\\s+)*${n}\\s*\\([^()]*\\)\\s*\\{`),
+    new RegExp(`\\bclass\\s+${n}\\b`),
+  ];
+  return (code) => res.some((r) => r.test(code));
+}
+
+// The file with comments blanked (same line count, same line numbers): block
+// comments across lines, and `//` line comments in JS. Quotes are tracked
+// within a line so a `/*` or `//` inside a string is not a comment.
+const codeCache = new WeakMap();
+function codeLines(fileLines, base) {
+  if (codeCache.has(fileLines)) return codeCache.get(fileLines);
+  const css = base.endsWith(".css");
+  const out = [];
+  let inBlock = false;
+  for (const line of fileLines) {
+    let o = "", q = null;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i], nx = line[i + 1];
+      if (inBlock) { if (ch === "*" && nx === "/") { inBlock = false; i++; o += "  "; } else o += " "; continue; }
+      if (q) { o += ch; if (ch === "\\" && i + 1 < line.length) { o += nx; i++; } else if (ch === q) q = null; continue; }
+      if (ch === "/" && nx === "*") { inBlock = true; i++; o += "  "; continue; }
+      if (!css && ch === "/" && nx === "/") break;
+      if (ch === '"' || ch === "'" || ch === "`") q = ch;
+      o += ch;
+    }
+    out.push(o);
+  }
+  codeCache.set(fileLines, out);
+  return out;
+}
+
+// The ONE line matcher for a named thing in ONE file version (an array of
+// lines): { test(line, index), kind() }, index 0-based into that array. When
+// the version DEFINES the thing (kind() "definition") only a definition line
+// matches; otherwise (kind() "name") any whole-name occurrence does. The
+// whole-file "does it define it?" scan runs only when a name hit is not itself
+// a definition, and is cached per (file version, thing).
+const defCache = new WeakMap();
+export function thingMatcher(thing, base, fileLines) {
+  const name = nameRe(thing);
+  const def = definitionTest(thing, base);
+  const isDef = (k) => { const code = codeLines(fileLines, base)[k]; return name.test(code) && def(code); };
+  const defines = () => {
+    if (!def) return false;
+    let m = defCache.get(fileLines);
+    if (!m) { m = new Map(); defCache.set(fileLines, m); }
+    const key = `${base}\0${thing}`;
+    if (!m.has(key)) m.set(key, fileLines.some((l, k) => name.test(l) && isDef(k)));
+    return m.get(key);
+  };
+  return {
+    test: (line, k) => {
+      if (line === undefined || !name.test(line)) return false;
+      if (!def) return true;
+      if (k === undefined) throw new Error("thingMatcher.test needs the line index");
+      return isDef(k) || !defines();
+    },
+    kind: () => (defines() ? "definition" : "name"),
+  };
+}
+
 // Run the CLI only when executed directly (`node file-line-citation-classify.mjs`),
 // never on import: the checker imports the four functions above, and an import
 // that parsed the checker's argv, ran git blame and called process.exit would
@@ -311,16 +433,7 @@ for (const spec of o.maps) {
   targets.set(base, { rel, head: fs.readFileSync(path.resolve(root, rel), "utf8").split("\n") });
 }
 
-const wordRe = (tok) => new RegExp(`(^|[^A-Za-z0-9_$-])${esc(tok)}([^A-Za-z0-9_$-]|$)`);
 const checkerWordRe = (tok) => new RegExp(`(^|[^A-Za-z0-9_$])${esc(tok)}([^A-Za-z0-9_$]|$)`);
-// The checker's PIN test for a named thing — must mirror thingRe() in
-// file-line-citation-check.mjs: "quoted" -> literal substring, else a whole word
-// where `-` is a word character.
-function checkerThingRe(thing) {
-  const q = thing.match(/^["\u201c](.+)["\u201d]$/);
-  if (q) return new RegExp(esc(q[1]));
-  return new RegExp(`(^|[^A-Za-z0-9_$-])${esc(thing)}([^A-Za-z0-9_$-]|$)`);
-}
 
 
 // The checker's own anchor set (whole line, pins stripped) — must mirror
@@ -358,18 +471,21 @@ lines.forEach((text, idx) => {
 
 // A range is its own tolerance (no slack), a single line gets +/-slack — the
 // checker's windowOf(), so a pin this writes is one the checker accepts.
-function lands(fileLines, c, toks, re) {
+// `mk(tok, fileLines)` builds the line test for a string token; a quote object
+// carries its own `re`. The pin test is thingMatcher() (definition, not use).
+const byThing = (base) => (tok, fl) => thingMatcher(tok, base, fl);
+function lands(fileLines, c, toks, mk) {
   const lo = c.hi !== c.n ? Math.max(1, c.n) : Math.max(1, c.n - o.slack);
   const hi = c.hi !== c.n ? Math.min(fileLines.length, c.hi) : Math.min(fileLines.length, c.n + o.slack);
   for (const tok of toks) {
-    const r = typeof tok === "object" ? tok.re : re(tok);
+    const r = typeof tok === "object" ? tok.re : mk(tok, fileLines);
     const name = typeof tok === "object" ? tok.label : tok;
-    for (let k = lo; k <= hi; k++) if (r.test(fileLines[k - 1])) return { tok: name, at: k, re: r };
+    for (let k = lo; k <= hi; k++) if (r.test(fileLines[k - 1], k - 1)) return { tok: name, at: k, re: r };
   }
   return null;
 }
 
-const countIn = (fl, r) => fl.reduce((n, l) => n + (r.test(l) ? 1 : 0), 0);
+const countIn = (fl, r) => fl.reduce((n, l, k) => n + (r.test(l, k) ? 1 : 0), 0);
 
 // ── dating: when was each citation's OWN text written? (see DATING above) ────
 // Replays the charter's first-parent history as -U0 diffs, carrying each
@@ -494,7 +610,7 @@ for (const c of cites) {
   const headHit = c.decidable ? lands(t.head, c, c.lineAnchors, checkerWordRe) : null;
   c.headResolved = !!headHit;
   c.credit = headHit;
-  const localHead = c.local.length ? lands(t.head, c, c.local, wordRe) : null;
+  const localHead = c.local.length ? lands(t.head, c, c.local, byThing(c.base)) : null;
   if (!c.decidable) { c.bucket = "UNDECIDABLE"; continue; }
   if (c.local.length === 0) { c.bucket = c.headResolved ? "R-NO-LOCAL" : "NO-LOCAL"; continue; }
 
@@ -505,10 +621,9 @@ for (const c of cites) {
   let start = vs.findIndex((v) => v.time <= c.dated.time);
   if (start < 0) start = vs.length;
   let pin = null;
-  const pinCandidates = c.local.map((tok) => {
-    const label = typeof tok === "object" ? tok.label : tok;
-    return { label, re: checkerThingRe(label) };
-  });
+  // The checker's pin test for the exact thing the pin will name: a quote as a
+  // literal, anything else by thingMatcher() (definition, not use).
+  const pinCandidates = c.local.map((tok) => (typeof tok === "object" ? tok.label : tok));
   const order = [];
   for (let d = 0; d < o.depth; d++) {
     if (start + d < vs.length) order.push(start + d);
@@ -518,7 +633,7 @@ for (const c of cites) {
     const fl = blob(vs[k].sha, t.rel);
     if (!fl) continue;
     // The checker's pin test, and only it (see THE LOCAL ANCHOR).
-    const lh = lands(fl, c, pinCandidates, null);
+    const lh = lands(fl, c, pinCandidates, byThing(c.base));
     if (!lh) continue;
     pin = { sha: vs[k].sha, back: k - start, tok: lh.tok, at: lh.at, freq: countIn(fl, lh.re) };
     break;
@@ -535,8 +650,8 @@ for (const c of cites) {
     const fl = blob(vs[Math.min(start, vs.length - 1)].sha, t.rel) || t.head;
     let best = null;
     for (const tok of c.local) {
-      const r = typeof tok === "object" ? tok.re : wordRe(tok);
-      for (let k = 1; k <= fl.length; k++) if (r.test(fl[k - 1])) {
+      const r = typeof tok === "object" ? tok.re : thingMatcher(tok, c.base, fl);
+      for (let k = 1; k <= fl.length; k++) if (r.test(fl[k - 1], k - 1)) {
         const d = k < c.n ? c.n - k : (k > c.hi ? k - c.hi : 0);
         if (!best || d < best.d) best = { tok: typeof tok === "object" ? tok.label : tok, at: k, d };
       }
@@ -826,6 +941,23 @@ function selftest() {
       arm("SUBJECT: the nearer span 22 lines off does not hide a quote that lands on the cited line -> PIN-EXACT on the quote",
         c.bucket === "PIN-EXACT" && c.pin && c.pin.sha === shaA && /^"Autoupdate is off/.test(c.pin.tok),
         `bucket ${c.bucket} pin ${labelOf(c)}${c.near ? ` near ${c.near.tok} d=${c.near.d}` : ""} (want PIN-EXACT on the quote; span-only gives BLOCK-NEAR d=22)`);
+    }
+
+    // ── DEFINITION, NOT USE (task-eb534ada6569c7da): charter L677's shape. A
+    // defines tokenRow AT the cited line 22; B (the version current when the
+    // charter row is written) calls it at 22 and defines it at 32. The name
+    // alone lands at B via the call -> the old rule proposed PIN-EXACT at B, the
+    // call-site pin #20128 wrote. The definition lands only at A -> PIN-OLDER.
+    {
+      const { t, commit } = repo();
+      const shaA = commit("src/widget.js", widget({ 22: "  function tokenRow(t) {" }));
+      const shaB = commit("src/widget.js", widget({ 22: "    box.innerHTML = list.map(tokenRow).join(\"\");", 32: "  function tokenRow(t) {" }));
+      commit("charter.md", "# fixture\n\n| D1 | `.token-row` is emitted by `tokenRow` at widget.js:22 alone |\n");
+      commit("src/widget.js", widget({}));
+      const r = find(buckets(t), "widget.js:22");
+      arm("DEFINITION: a function whose name lands only as a CALL at the dated version is not pinned there -> PIN-OLDER at its definition",
+        r.bucket === "PIN-OLDER" && r.pin && r.pin.sha === shaA && r.pin.at === 22,
+        `bucket ${r.bucket}${r.pin ? ` pin ${s10(r.pin.sha)} at ${r.pin.at}` : ""} (want PIN-OLDER at ${s10(shaA)} L22; name matching gives PIN-EXACT at ${s10(shaB)} via the call)`);
     }
   } catch (e) {
     fails++;
