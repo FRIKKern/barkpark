@@ -35,6 +35,7 @@ defmodule Barkpark.Content.Papers do
     DraftId,
     Envelope,
     Labels,
+    PaperTaskResolver,
     SchemaDefinition
   }
 
@@ -770,11 +771,13 @@ defmodule Barkpark.Content.Papers do
       title: doc.title,
       kind: "task",
       status: task_chip_status(content),
-      # {met,total} semantics owned by Barkpark.Tasks.Criteria (lvw-t6; the
-      # canonical task-criteria-progress impl): met === true only,
-      # garbage-tolerant, nil when absent → renderers omit the segment.
+      # {met,total} semantics owned by the Tasks plugin's resolver, read
+      # through the content-owned PaperTaskResolver seam (task-9c59aa555e1e015e):
+      # met === true only, garbage-tolerant, nil when absent → renderers omit
+      # the segment; `:unavailable` when no resolver is loaded → renderers show
+      # an explicit placeholder segment.
       priority: task_chip_priority(content),
-      criteria: Barkpark.Tasks.criteria_progress(content)
+      criteria: task_chip_criteria(content)
     }
   end
 
@@ -785,6 +788,13 @@ defmodule Barkpark.Content.Papers do
     case Map.get(content, "lifecycle_status") do
       s when is_binary(s) and s != "" -> s
       _ -> nil
+    end
+  end
+
+  defp task_chip_criteria(content) do
+    case PaperTaskResolver.get() do
+      nil -> :unavailable
+      resolver -> resolver.criteria_progress(content)
     end
   end
 
@@ -1263,19 +1273,30 @@ defmodule Barkpark.Content.Papers do
     # come from. The schema is loaded lazily inside `agg_for_query` and ONLY for
     # a non-count (sum/avg/min/max) block, so a count-only / rows-only paper pays
     # no schema query.
-    Barkpark.PortableDoc.TaskResolver.resolve(
-      blocks,
-      fn query ->
-        query
-        |> task_query_dataset(dataset)
-        |> Barkpark.Tasks.Query.rows_for_query(scope, dataset: dataset)
-      end,
-      fn query ->
-        query
-        |> task_query_dataset(dataset)
-        |> Barkpark.Tasks.Query.agg_for_query(scope, dataset: dataset)
-      end
-    )
+    #
+    # The rows and aggregates come from the resolver a plugin declares through
+    # the content-owned PaperTaskResolver seam (task-9c59aa555e1e015e). With
+    # none loaded, every query-carrying task block is marked `unavailable` so
+    # each renderer shows an explicit placeholder, never an empty board.
+    case PaperTaskResolver.get() do
+      nil ->
+        Barkpark.PortableDoc.TaskResolver.mark_unavailable(blocks)
+
+      resolver ->
+        Barkpark.PortableDoc.TaskResolver.resolve(
+          blocks,
+          fn query ->
+            query
+            |> task_query_dataset(dataset)
+            |> resolver.rows_for_query(scope, dataset: dataset)
+          end,
+          fn query ->
+            query
+            |> task_query_dataset(dataset)
+            |> resolver.agg_for_query(scope, dataset: dataset)
+          end
+        )
+    end
   end
 
   def resolve_tasks_in_blocks(blocks, _scope, _dataset), do: blocks

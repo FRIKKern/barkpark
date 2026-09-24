@@ -537,6 +537,7 @@ defmodule Barkpark.Plugins.Registry do
     publish_pre_write_fences(plugins)
     publish_pre_publish_fences(plugins)
     publish_pre_write_transforms(plugins)
+    publish_paper_task_resolvers(plugins)
 
     state
   end
@@ -634,6 +635,37 @@ defmodule Barkpark.Plugins.Registry do
             "#{inspect(other)}; expected {:transform | :check, module, function}"
   end
 
+  # Every registered plugin's `paper_task_resolver/0` declaration, into the
+  # content-owned holder papers read for task chips and task query blocks
+  # (task-9c59aa555e1e015e). Content never names this Registry; the Registry
+  # writes INTO content. Load order is applied at read time by the holder. Same
+  # rules as the fence publishers: a raising declaration or a malformed entry
+  # raises rather than silently dropping the resolver.
+  defp publish_paper_task_resolvers(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_paper_task_resolver/1)
+    |> Barkpark.Content.PaperTaskResolver.publish()
+  end
+
+  defp declared_paper_task_resolver(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :paper_task_resolver, 0) do
+      case mod.paper_task_resolver() do
+        nil ->
+          []
+
+        resolver when is_atom(resolver) ->
+          [%{name: name, module: mod, resolver: resolver}]
+
+        other ->
+          raise ArgumentError,
+                "plugin #{inspect(name)} declared a malformed paper task resolver " <>
+                  "#{inspect(other)}; expected a module or nil"
+      end
+    else
+      []
+    end
+  end
+
   # ─── GenServer ──────────────────────────────────────────────────────────
 
   @impl true
@@ -652,6 +684,7 @@ defmodule Barkpark.Plugins.Registry do
     publish_pre_write_fences([])
     publish_pre_publish_fences([])
     publish_pre_write_transforms([])
+    publish_paper_task_resolvers([])
     {:ok, %{plugins: %{}, baseline_plugins: nil}}
   end
 

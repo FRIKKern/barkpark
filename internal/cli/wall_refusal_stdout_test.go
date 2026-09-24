@@ -198,9 +198,13 @@ func TestWallRefusalGoesToStdout_CreatePublishLabelSpine(t *testing.T) {
 // the draft it created, or -o json would leave the phantom the human path does
 // not.
 type createPublishRefusalLedger struct {
-	mu             sync.Mutex
-	discarded      []string
-	refuseDiscard  bool
+	mu            sync.Mutex
+	discarded     []string
+	refuseDiscard bool
+	// discardStatus/discardBody override the refusal refuseDiscard sends; the
+	// zero values keep the server's own already-gone answer (404 not_found).
+	discardStatus  int
+	discardBody    string
 	publishStatus  int
 	publishBody    string
 	createdDraftID string
@@ -237,11 +241,15 @@ func (l *createPublishRefusalLedger) serve(t *testing.T) *httptest.Server {
 			id, _ := d["id"].(string)
 			l.mu.Lock()
 			l.discarded = append(l.discarded, id)
-			refuse := l.refuseDiscard
+			refuse, status, rbody := l.refuseDiscard, l.discardStatus, l.discardBody
 			l.mu.Unlock()
 			if refuse {
-				rw.WriteHeader(http.StatusNotFound)
-				_, _ = rw.Write([]byte(`{"error":{"code":"not_found","message":"document not found"}}`))
+				if status == 0 {
+					status = http.StatusNotFound
+					rbody = `{"error":{"code":"not_found","message":"document not found"}}`
+				}
+				rw.WriteHeader(status)
+				_, _ = rw.Write([]byte(rbody))
 				return
 			}
 			_, _ = rw.Write([]byte(`{"results":[]}`))
@@ -326,6 +334,12 @@ func TestWallRefusalGoesToStdout_CreatePublishServerRefusalDiscardFailed(t *test
 		publishStatus:  http.StatusConflict,
 		publishBody:    `{"error":{"code":"duplicate_of","message":"near-duplicate","details":{"duplicate_of":"task-999"}}}`,
 		refuseDiscard:  true,
+		// A GENUINE refusal. A 404 not_found here would be the server's own
+		// "already discarded" answer to a duplicate_of refusal, which is NOT
+		// residue (task-9a97e96c35fba472); this test is about a draft that
+		// really survives, so the discard is refused for a reason that says so.
+		discardStatus: http.StatusForbidden,
+		discardBody:   `{"error":{"code":"forbidden","message":"token lacks write"}}`,
 	}
 	srv := led.serve(t)
 

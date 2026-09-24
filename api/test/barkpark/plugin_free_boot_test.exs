@@ -506,6 +506,19 @@ defmodule Barkpark.PluginFreeBootTest do
       assert Barkpark.Plugins.Registry.collect_pre_write_transforms() == []
     end
 
+    test "no paper task resolver resolves: papers mark task blocks unavailable under :plugins []" do
+      # task-9c59aa555e1e015e — task chips and task query blocks read task data
+      # through `paper_task_resolver/0`; with nothing registered the seam
+      # answers nil and a query block renders its explicit placeholder.
+      assert Barkpark.Content.PaperTaskResolver.get() == nil
+
+      assert [%{"unavailable" => true}] =
+               Barkpark.Content.Papers.resolve_tasks_in_blocks(
+                 [%{"type" => "task-list", "query" => %{"parent_id" => "x"}}],
+                 []
+               )
+    end
+
     test "GET /studio/production renders 200 with Structure marker (following the scoped-shell redirect)" do
       conn = get_following_redirects("/studio/production")
       body = html_response(conn, 200)
