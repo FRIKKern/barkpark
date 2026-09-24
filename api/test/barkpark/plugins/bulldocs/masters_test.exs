@@ -291,6 +291,130 @@ defmodule Barkpark.Plugins.Bulldocs.MastersTest do
     end
   end
 
+  describe "internal references (task-3b6e562e916c8ce4)" do
+    # A node whose blocks point at each other by id: a TOC entry and a blockref
+    # anchor at the heading, an in-page link to it. Plus references that are
+    # NOT internal — an anchor/href naming an id outside the node, and an
+    # absolute URL that merely ends in the heading's id.
+    @linked %{
+      "id" => "ref-sec",
+      "type" => "section",
+      "blocks" => [
+        %{"id" => "ref-h", "type" => "heading", "level" => 2, "text" => "Pricing"},
+        %{
+          "id" => "ref-toc",
+          "type" => "toc",
+          "items" => [
+            %{"text" => "Pricing", "level" => 2, "anchor" => "ref-h"},
+            %{"text" => "Elsewhere", "level" => 2, "anchor" => "outside"}
+          ]
+        },
+        %{
+          "id" => "ref-p",
+          "type" => "paragraph",
+          "content" => [
+            %{
+              "type" => "text",
+              "value" => "see pricing",
+              "marks" => [%{"type" => "link", "attrs" => %{"href" => "#ref-h"}}]
+            },
+            %{
+              "type" => "text",
+              "value" => "elsewhere",
+              "marks" => [%{"type" => "link", "attrs" => %{"href" => "#outside"}}]
+            },
+            %{
+              "type" => "text",
+              "value" => "absolute",
+              "marks" => [%{"type" => "link", "attrs" => %{"href" => "https://x.test/#ref-h"}}]
+            },
+            %{"type" => "blockref", "target" => "Source paper", "anchor" => "ref-h"}
+          ]
+        }
+      ]
+    }
+
+    test "references to the node's own ids follow the copy's fresh ids" do
+      master = %Content.Document{
+        doc_id: "drafts.m-linked",
+        rev: "r1",
+        content: %{"node" => @linked}
+      }
+
+      copy = Masters.detached_copy(master, "seed-linked")
+      [heading, toc, para] = copy["blocks"]
+      new_h = heading["id"]
+
+      assert "mst-" <> _ = new_h
+      refute new_h == "ref-h"
+
+      [pricing, elsewhere] = toc["items"]
+      assert pricing["anchor"] == new_h
+      assert elsewhere["anchor"] == "outside"
+
+      [inpage, outside, absolute, blockref] = para["content"]
+      assert hd(inpage["marks"])["attrs"]["href"] == "#" <> new_h
+      assert hd(outside["marks"])["attrs"]["href"] == "#outside"
+      assert hd(absolute["marks"])["attrs"]["href"] == "https://x.test/#ref-h"
+      assert blockref["anchor"] == new_h
+      assert blockref["target"] == "Source paper"
+
+      # No old id survives anywhere in the copy, as an id or as a reference.
+      old_ids = MapSet.new(ids(@linked))
+      assert MapSet.disjoint?(old_ids, MapSet.new(ids(copy)))
+
+      for old <- old_ids do
+        refute inspect(copy, limit: :infinity) =~ ~s("#{old}"),
+               "old id #{old} still referenced in the copy"
+
+        refute inspect(copy, limit: :infinity) =~ ~s("##{old}")
+      end
+    end
+
+    test "an inserted copy's in-page link points at the copy's heading, not the source", ctx do
+      section = %{
+        "id" => "lk-sec",
+        "type" => "section",
+        "blocks" => [
+          %{"id" => "lk-h", "type" => "heading", "level" => 2, "text" => "Pricing"},
+          %{
+            "id" => "lk-p",
+            "type" => "paragraph",
+            "content" => [
+              %{
+                "type" => "text",
+                "value" => "back to pricing",
+                "marks" => [%{"type" => "link", "attrs" => %{"href" => "#lk-h"}}]
+              }
+            ]
+          }
+        ]
+      }
+
+      {slug, paper} =
+        seed_paper!([section], workspace_id: ctx.ws.id, project_id: ctx.project.id)
+
+      {:ok, master} = Masters.save_master(slug, "lk-sec", @dataset, scope_opts(paper))
+
+      assert {:ok, _receipt, :applied} =
+               Masters.insert_detached(
+                 slug,
+                 Masters.master_id(master),
+                 "lk-sec",
+                 @dataset,
+                 Ecto.UUID.generate(),
+                 "user:master-links",
+                 [if_rev: paper.content["rev"] || 0] ++ scope_opts(paper)
+               )
+
+      [_source, copy] = reload(slug, paper).content["blocks"]
+      [heading, para] = copy["blocks"]
+      [text] = para["content"]
+      assert hd(text["marks"])["attrs"]["href"] == "#" <> heading["id"]
+      refute heading["id"] == "lk-h"
+    end
+  end
+
   # Give `source` the ids `copy` carries, position by position.
   defp align_ids(%{} = source, %{} = copy) do
     source

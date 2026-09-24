@@ -544,6 +544,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-op", params, socket), do: Paper.paper_op(params, socket)
   def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
 
+  # Paper masters (task-3b6e562e916c8ce4): save a block as a master, insert a
+  # detached copy from the slash picker. Both ride this socket (no HTTP route).
+  def handle_event("paper-save-master", params, socket),
+    do: Paper.paper_save_master(params, socket)
+
+  def handle_event("paper-insert-master", params, socket),
+    do: Paper.paper_insert_master(params, socket)
+
   def handle_event("paper-history-step", params, socket),
     do: Paper.paper_history_step(params, socket)
 

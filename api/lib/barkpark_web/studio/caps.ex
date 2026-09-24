@@ -210,6 +210,7 @@ defmodule BarkparkWeb.Studio.Caps do
     paper-move-block-to paper-callout-fold valueref-writeback-confirm
     access-revoke
     paper-publish sidebar-description-change sidebar-label-add
+    paper-save-master paper-insert-master
   )
 
   @doc """
