@@ -4542,8 +4542,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      where the strip fits whole, which is every other width the sweep walks.
      It also fades the bottom hairline at the edge while clipped; that is the
      same trade `.sidebar`'s `--nav-fade` takes — the fade IS the edge there.
-     NOT IN THE FIREFOX FALLBACK below: that block keys on a class app.js's
-     EDGE_CUES table measures, and this strip is not in that table. */
+     FIREFOX: the no-timeline fallback block further down keys this fade on
+     `.is-tabs-clipped`, a class app.js's EDGE_CUES table measures
+     (task-db582d05e675115d). */
   -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - var(--inst-tabs-fade)), transparent);
   mask-image: linear-gradient(to right, currentColor calc(100% - var(--inst-tabs-fade)), transparent);
   animation-name: inst-tabs-edge-fade;
@@ -5727,7 +5728,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    the widths where the surface FITS (the chip fits whole at >= 721). So the
    length is keyed on a class app.js MEASURES — `edgeCueSync` reads
    scrollWidth - clientWidth - scrollLeft live on every element, on scroll,
-   on resize and after each of the two paints — which is the ruling
+   on resize and after each of the three paints — which is the ruling
    `--nav-fade` already took (cch-w14-s2) for the same reason: both surfaces
    are painted by JS after load. The lengths here are the `from` keyframes
    above; __app.test.mjs derives the expected value FROM those keyframes rather
@@ -5742,6 +5743,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .set-matrix.is-matrix-clipped { --set-matrix-fade: 48px; }
   .archive-resurrect .cli-chip-code { animation-name: none; }
   .archive-resurrect .cli-chip-code.is-cli-clipped { --archive-cli-fade: 32px; }
+  .inst-tabs { animation-name: none; }
+  .inst-tabs.is-tabs-clipped { --inst-tabs-fade: 32px; }
 }
 .archive-resurrect-btn {
   flex: 0 0 auto;

@@ -1,0 +1,51 @@
+{
+  "_what": "ADVISORY FLOOR for scripts/file-line-citation-check.mjs, read by the `charter file:line citation drift` step of .github/workflows/seal-reading.yml. Per target, `unresolved` is the floor: a run ABOVE it warns (new drift, and the step names the new misses by diffing against a re-run at derived_at), a run BELOW it notices (repairs landed; lower the floor in the same PR as the repair). Nothing here fails a job. Turning it into a failing check is a separate later change, after the hand-repair slices of task-b881189fa7f7395d land.",
+  "owner": "lead-console",
+  "task": "task-8390f73ced655243",
+  "charter": ".claude/workflows/bp-cloud-console-hardening-charter.md",
+  "derived_at": "70e21ced462d6f1dbbac1c8394e79ae459adc09d",
+  "derived_on": "2026-09-24",
+  "derivation": "one run per target at derived_at: node scripts/file-line-citation-check.mjs --charter <charter> --map <base>=<path> --json > file (NOT a pipe: the checker exits before a piped stdout drains and truncates at 65536 bytes); every count below is copied from that JSON, none typed. Slack is the checker default (+/-3).",
+  "targets": [
+    {
+      "base": "app.js",
+      "path": "cloud/priv/static/app.js",
+      "citations": 311,
+      "decidable": 304,
+      "resolved": 101,
+      "unresolved": 203,
+      "proseOnly": 7,
+      "beyondEof": 0
+    },
+    {
+      "base": "app.css",
+      "path": "cloud/priv/static/app.css",
+      "citations": 116,
+      "decidable": 113,
+      "resolved": 65,
+      "unresolved": 48,
+      "proseOnly": 3,
+      "beyondEof": 0
+    },
+    {
+      "base": "index.html",
+      "path": "cloud/priv/static/index.html",
+      "citations": 18,
+      "decidable": 16,
+      "resolved": 12,
+      "unresolved": 4,
+      "proseOnly": 2,
+      "beyondEof": 0
+    },
+    {
+      "base": "__app.test.mjs",
+      "path": "cloud/priv/static/__app.test.mjs",
+      "citations": 70,
+      "decidable": 69,
+      "resolved": 14,
+      "unresolved": 55,
+      "proseOnly": 1,
+      "beyondEof": 0
+    }
+  ]
+}
