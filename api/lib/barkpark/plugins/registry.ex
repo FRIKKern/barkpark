@@ -562,6 +562,17 @@ defmodule Barkpark.Plugins.Registry do
   # NOT routed through `reduce_resolvers/3`: that chain rescues a raising
   # plugin back to the accumulator, which here would silently drop an
   # integrity fence. A raising declaration or a malformed entry raises.
+  #
+  # EVERY registered plugin is published, one declared entry each — with an
+  # EMPTY list (or a `nil` resolver) when it declares nothing for this holder
+  # (task-a67de91e32edf1a4). The holder hands its declarations to
+  # `Content.PluginLoadOrder.plugins/3` as the plugins it KNOWS, so publishing
+  # only the declarers made an explicit load order naming any other registered
+  # plugin warn "names no plugin this reader knows" / "not a registered
+  # plugin" — false. An empty entry adds no step, so the fences, steps and
+  # resolver a holder yields are unchanged; a module that never registered is
+  # still unknown to the holder and still warned about by name. All five
+  # publishers below follow this one rule.
   defp publish_pre_write_fences(plugins) do
     plugins
     |> Enum.flat_map(&declared_pre_write_fences/1)
@@ -573,7 +584,7 @@ defmodule Barkpark.Plugins.Registry do
       fences = Enum.map(mod.pre_write_fences(), &validate_pre_write_fence!(&1, name))
       [%{name: name, module: mod, fences: fences}]
     else
-      []
+      [%{name: name, module: mod, fences: []}]
     end
   end
 
@@ -603,7 +614,7 @@ defmodule Barkpark.Plugins.Registry do
       fences = Enum.map(mod.pre_publish_fences(), &validate_pre_publish_fence!(&1, name))
       [%{name: name, module: mod, fences: fences}]
     else
-      []
+      [%{name: name, module: mod, fences: []}]
     end
   end
 
@@ -633,7 +644,7 @@ defmodule Barkpark.Plugins.Registry do
       steps = Enum.map(mod.pre_write_transforms(), &validate_pre_write_transform!(&1, name))
       [%{name: name, module: mod, steps: steps}]
     else
-      []
+      [%{name: name, module: mod, steps: []}]
     end
   end
 
@@ -662,9 +673,6 @@ defmodule Barkpark.Plugins.Registry do
   defp declared_paper_task_resolver(%{module: mod, name: name}) do
     if Code.ensure_loaded?(mod) and function_exported?(mod, :paper_task_resolver, 0) do
       case mod.paper_task_resolver() do
-        nil ->
-          []
-
         resolver when is_atom(resolver) ->
           [%{name: name, module: mod, resolver: resolver}]
 
@@ -674,7 +682,7 @@ defmodule Barkpark.Plugins.Registry do
                   "#{inspect(other)}; expected a module or nil"
       end
     else
-      []
+      [%{name: name, module: mod, resolver: nil}]
     end
   end
 
@@ -694,7 +702,7 @@ defmodule Barkpark.Plugins.Registry do
       fences = Enum.map(mod.mutate_door_fences(), &validate_mutate_door_fence!(&1, name))
       [%{name: name, module: mod, fences: fences}]
     else
-      []
+      [%{name: name, module: mod, fences: []}]
     end
   end
 

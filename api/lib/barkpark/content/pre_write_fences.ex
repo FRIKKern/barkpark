@@ -19,9 +19,10 @@ defmodule Barkpark.Content.PreWriteFences do
   a plugin that PUBLISHED a declaration contributes fences; a loadable module
   that never registered, an unknown name and a malformed entry are skipped with
   a `Logger.warning` naming them — never silently. (The "known" set here is the
-  published declarations, so a warning for a name means "no declaration was
-  published under it": unregistered, or a registered module that does not
-  export the callback at all.)
+  published declarations, and the Registry publishes one for EVERY registered
+  plugin — an empty one when it declares no fences (task-a67de91e32edf1a4) —
+  so a warning for a name means "no plugin is registered under it", never
+  "that plugin declares nothing". The four sibling holders share the rule.)
 
   Freezing the order at publish time would let a registration made under a
   temporarily narrowed load order (a test's `with_plugins`) leave a fence list

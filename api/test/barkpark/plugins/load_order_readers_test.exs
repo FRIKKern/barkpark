@@ -353,6 +353,110 @@ defmodule Barkpark.Plugins.LoadOrderReadersTest do
     end
   end
 
+  # ── a REGISTERED plugin that declares nothing is not a misconfiguration ──
+  #
+  # task-a67de91e32edf1a4. Each content holder's known set used to be the
+  # plugins that PUBLISHED a non-empty declaration for it, so an explicit load
+  # order naming a registered plugin that declares nothing for that holder
+  # logged a false "names no plugin this reader knows" (name entry) or "not a
+  # registered plugin" (module entry). The Registry now publishes an EMPTY
+  # declaration for every registered plugin, so each holder knows exactly the
+  # registered set; an unregistered module is still warned about by name.
+  #
+  # Every read below first erases the once-per-VM warned flag for each entry it
+  # names, so a sibling test (or a real boot) that already made this reader warn
+  # cannot turn a `refute` vacuous or an `assert` red.
+
+  defmodule DeclaresNothing do
+    @moduledoc false
+    # A registered module that exports none of the holder callbacks.
+  end
+
+  defmodule UnregisteredInOrder do
+    @moduledoc false
+  end
+
+  defp fresh_warnings!(reader, entries) do
+    Enum.each(entries, &:persistent_term.erase({PluginLoadOrder, :warned, reader, &1}))
+  end
+
+  @holders [
+    {PreWriteFences, :list, WriteFenceRegistered, [{WriteFenceRegistered, :refuse}]},
+    {PrePublishFences, :list, PublishFenceRegistered, [{:door, PublishFenceRegistered, :refuse}]},
+    {PreWriteTransforms, :list, TransformRegistered, [{:transform, TransformRegistered, :shape}]},
+    {PaperTaskResolver, :get, PaperResolverRegistered, PaperResolverRegistered.Impl},
+    {MutateDoorFences, :list, MutateDoorRegistered,
+     [{:after_claim, MutateDoorRegistered, :refuse}]}
+  ]
+
+  for {holder, read, declaring, expected} <- @holders do
+    # Test: named by name AND by module, no warning; an unregistered module is
+    # still warned about by name; the declaring plugin still resolves.
+    describe "#{inspect(holder)}: a registered plugin that declares nothing" do
+      test "no false warning, unregistered still named, declarer resolves", ctx do
+        holder = unquote(holder)
+        silent_name = register!(DeclaresNothing)
+        _ = register!(unquote(declaring))
+
+        # The declaring plugin sits LAST so every earlier entry is read first.
+        order = [silent_name, DeclaresNothing, UnregisteredInOrder, unquote(declaring)]
+        :ok = Barkpark.PluginEnv.with_plugins(order, ctx)
+        fresh_warnings!(holder, order)
+
+        {result, log} = with_log(fn -> apply(holder, unquote(read), []) end)
+
+        assert result == unquote(Macro.escape(expected))
+
+        refute log =~ inspect(silent_name),
+               "false warning for a registered plugin named by name:\n" <> log
+
+        refute log =~ inspect(DeclaresNothing),
+               "false warning for a registered plugin named by module:\n" <> log
+
+        assert log =~ "#{inspect(holder)}: skipping"
+        assert log =~ inspect(UnregisteredInOrder)
+        assert log =~ "not a registered plugin"
+      end
+    end
+  end
+
+  describe "every content holder — the REAL registered plugins (BARKPARK_PLUGINS shape)" do
+    test "a load order of real plugin NAMES warns about none of them, and Tasks still " <>
+           "contributes to every holder",
+         ctx do
+      names = Registry.all() |> Enum.map(& &1.name) |> Enum.sort()
+
+      # Register Tasks if the baseline did not, so the declaring control is real.
+      names =
+        if "tasks" in names do
+          names
+        else
+          :ok = Registry.register(Barkpark.Plugins.Tasks, %{"plugin_name" => "tasks"})
+          names ++ ["tasks"]
+        end
+
+      # Precondition: at least one registered plugin other than Tasks is named,
+      # or the refutes below measure nothing.
+      assert Enum.any?(names, &(&1 != "tasks")), "only Tasks registered: #{inspect(names)}"
+
+      :ok = Barkpark.PluginEnv.with_plugins(names, ctx)
+
+      holders = [PreWriteFences, PrePublishFences, PreWriteTransforms, MutateDoorFences]
+      Enum.each([PaperTaskResolver | holders], &fresh_warnings!(&1, names))
+
+      {results, log} =
+        with_log(fn ->
+          {Enum.map(holders, & &1.list()), PaperTaskResolver.get()}
+        end)
+
+      {lists, resolver} = results
+      assert Enum.all?(lists, &(&1 != [])), "Tasks contributed nothing to a holder"
+      assert resolver == Barkpark.Tasks.PaperResolver
+
+      refute log =~ "load-order entry", "false load-order warnings:\n" <> log
+    end
+  end
+
   # ── never silent: every other dropped shape names itself too ──
 
   describe "a dropped entry of any shape is logged by name" do
