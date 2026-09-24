@@ -1,15 +1,18 @@
 defmodule Barkpark.Plugins.PreWriteFencesTest do
   @moduledoc """
-  The plugin pre-write fence seam (task-e5baaaa14ddf2e1c): the Tasks plugin's
-  five write fences, formerly named directly in `Barkpark.Content.Writer`,
-  now declared by `Barkpark.Plugins.Tasks.pre_write_fences/0` and resolved by
+  The plugin pre-write fence seam (task-e5baaaa14ddf2e1c, task-2978357a0701cd10):
+  the Tasks plugin's seven write fences, formerly named directly in
+  `Barkpark.Content.Writer` (the last two moved were the writer's own birth
+  guards, `ensure_task_born_adjudicated/5` and `ensure_task_surface_declared/5`,
+  now `Barkpark.Tasks.BirthGuards`), declared by
+  `Barkpark.Plugins.Tasks.pre_write_fences/0` and resolved by
   `Barkpark.Plugins.Registry.collect_pre_write_fences/0`.
 
   Pins the two properties the move could silently break:
 
-    * ORDER — the five resolve in exactly the order the writer's `with`
-      chain ran them, with dedup alone in the `:late` phase (it ran after the
-      core birth guards).
+    * ORDER — the seven resolve as ONE list in exactly the order the
+      writer's `with` chain ran them: the four early fences, born-adjudicated,
+      surface-declared, then dedup. No phases remain.
     * THE EMPTY PATH — with the Tasks plugin out of the load order the list is
       `[]`, and a write the draft-terminal fence refuses with Tasks loaded
       LANDS, so the writer names no Tasks fence of its own. The true kill
@@ -25,19 +28,21 @@ defmodule Barkpark.Plugins.PreWriteFencesTest do
   @dataset "pre_write_fences_test"
 
   @writer_order [
-    {:early, Barkpark.Tasks.DraftTerminalFence, :check},
-    {:early, Barkpark.Tasks.DatasetTwinFence, :check},
-    {:early, Barkpark.Tasks.TerminalCriteriaFence, :check},
-    {:early, Barkpark.Tasks.CriteriaRequiredFence, :check},
-    {:late, Barkpark.Plugins.Tasks, :dedup_check_new_task}
+    {Barkpark.Tasks.DraftTerminalFence, :check},
+    {Barkpark.Tasks.DatasetTwinFence, :check},
+    {Barkpark.Tasks.TerminalCriteriaFence, :check},
+    {Barkpark.Tasks.CriteriaRequiredFence, :check},
+    {Barkpark.Tasks.BirthGuards, :born_adjudicated},
+    {Barkpark.Tasks.BirthGuards, :surface_declared},
+    {Barkpark.Plugins.Tasks, :dedup_check_new_task}
   ]
 
   describe "order" do
-    test "the Tasks plugin declares the five fences in the writer's order" do
+    test "the Tasks plugin declares the seven fences in the writer's order" do
       assert Barkpark.Plugins.Tasks.pre_write_fences() == @writer_order
     end
 
-    test "the Registry resolves exactly those five, in that order, under the default load order" do
+    test "the Registry resolves exactly those seven, in that order, under the default load order" do
       assert Registry.collect_pre_write_fences() == @writer_order
     end
   end
@@ -71,6 +76,21 @@ defmodule Barkpark.Plugins.PreWriteFencesTest do
                write("pwf-witness-off", %{"lifecycle_status" => "cancelled"}, scope)
 
       assert doc.content["lifecycle_status"] == "cancelled"
+    end
+
+    test "with Tasks out of the load order the writer runs no birth guard: an " <>
+           "off-vocabulary disposition birth is refused with Tasks in, and lands with it out" do
+      scope = seed_task_schema!()
+
+      # CONTROL — Tasks loaded: `BirthGuards.born_adjudicated/6` refuses the term.
+      assert {:error, {:invalid_task_content, %{"disposition" => [_]}}} =
+               write("pwf-birth-on", %{"disposition" => "OPEN"}, scope)
+
+      :ok = Barkpark.PluginEnv.with_plugins(["media"], %{test: __MODULE__})
+      assert Registry.collect_pre_write_fences() == []
+
+      assert {:ok, doc} = write("pwf-birth-off", %{"disposition" => "OPEN"}, scope)
+      assert doc.content["disposition"] == "OPEN"
     end
   end
 

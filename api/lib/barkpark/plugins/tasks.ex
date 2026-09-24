@@ -128,19 +128,23 @@ defmodule Barkpark.Plugins.Tasks do
   decides which refusal a write that trips two fences receives — and
   `pre_write_fences_test.exs` pins it.
 
-  `Dedup.check_new_task/5` is `:late`: it ran after the core's birth guards
-  (`ensure_task_born_adjudicated/5`, `ensure_task_surface_declared/5`), so the
-  pure refusals still come before its trigram scan. It takes no `doc_id`;
+  The two birth guards (`Barkpark.Tasks.BirthGuards`, formerly the writer's own
+  `ensure_task_born_adjudicated/5` and `ensure_task_surface_declared/5`,
+  task-2978357a0701cd10) sit where the writer ran them: after
+  `CriteriaRequiredFence`, before dedup, so the pure refusals still come
+  before dedup's trigram scan. `Dedup.check_new_task/5` takes no `doc_id`;
   `dedup_check_new_task/6` adapts it to the uniform fence arity.
   """
   @impl Barkpark.Plugin
   def pre_write_fences do
     [
-      {:early, Barkpark.Tasks.DraftTerminalFence, :check},
-      {:early, Barkpark.Tasks.DatasetTwinFence, :check},
-      {:early, Barkpark.Tasks.TerminalCriteriaFence, :check},
-      {:early, Barkpark.Tasks.CriteriaRequiredFence, :check},
-      {:late, __MODULE__, :dedup_check_new_task}
+      {Barkpark.Tasks.DraftTerminalFence, :check},
+      {Barkpark.Tasks.DatasetTwinFence, :check},
+      {Barkpark.Tasks.TerminalCriteriaFence, :check},
+      {Barkpark.Tasks.CriteriaRequiredFence, :check},
+      {Barkpark.Tasks.BirthGuards, :born_adjudicated},
+      {Barkpark.Tasks.BirthGuards, :surface_declared},
+      {__MODULE__, :dedup_check_new_task}
     ]
   end
 
