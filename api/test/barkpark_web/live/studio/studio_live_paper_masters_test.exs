@@ -107,9 +107,15 @@ defmodule BarkparkWeb.Studio.StudioLivePaperMastersTest do
     assert master.content["source_block_id"] == "pm-sec"
     master_id = Masters.master_id(master)
 
-    # The picker lists it at once.
-    assert [%{"id" => ^master_id, "tier" => "section", "block_type" => "section"}] =
-             carrier(render(view))
+    # The picker lists it at once, named by the section's own title.
+    assert [
+             %{
+               "id" => ^master_id,
+               "title" => "Pricing block",
+               "tier" => "section",
+               "block_type" => "section"
+             }
+           ] = carrier(render(view))
 
     # ── INSERT: what the canvas hook pushes on a slash-menu master pick ─────
     request_id = Ecto.UUID.generate()

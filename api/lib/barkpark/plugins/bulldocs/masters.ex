@@ -59,7 +59,8 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
   Save the node `block_id` of paper `slug` as a master.
 
   `opts`: `:workspace_id` / `:project_id` scope the paper lookup exactly like
-  the block-op path; `:title` names the master (defaults to the block type).
+  the block-op path; `:title` names the master (defaults to the node's own
+  `title`, else its type).
   Returns `{:ok, %Document{}}` or `{:error, reason}` —
   `:paper_not_found`, `:block_not_found`, `:not_masterable` (unclassified
   type), `:locked_block` (a template-locked or slot-role node) or
@@ -72,7 +73,7 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
          {:ok, node} <- find_node(paper, block_id),
          {:ok, tier} <- masterable(node) do
       attrs = %{
-        "title" => opts[:title] || node["type"],
+        "title" => opts[:title] || default_title(node),
         "content" => %{
           "tier" => Atom.to_string(tier),
           "block_type" => node["type"],
@@ -289,6 +290,11 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
       true -> {:ok, tier}
     end
   end
+
+  # The name the picker shows when the author gave none: the node's own title
+  # (a section's heading line), else its block type.
+  defp default_title(%{"title" => title}) when is_binary(title) and title != "", do: title
+  defp default_title(node), do: node["type"]
 
   defp any_node?(node, pred),
     do: BodyWalk.collect(node, &if(pred.(&1), do: [true], else: [])) != []
