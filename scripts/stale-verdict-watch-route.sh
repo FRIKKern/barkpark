@@ -50,20 +50,40 @@
 #   the list and not main's history, 9 refused before issuing a rollup budget it
 #   could not afford. None of them names a pull request a human must go touch.
 #
-#   THE VERDICT SET is 0 1 2 8 — every run that DID look. 0 clean, 1 a novel
-#   stale green (RED), 2 partial coverage (warning, not a green claim about the
-#   unread rows), 8 BASELINE DRIFT (the pin outlived the debt; the remedy is to
-#   delete a line from scripts/stale-verdict-watch.baseline, which is the
-#   opposite of 1's remedy and so gets its own sentence rather than the old
-#   "not a verdict it defines" catch-all).
+#   THE VERDICT SET is 0 1 2 8 10 — every run that DID look. 0 clean, 1 a
+#   novel stale green (RED), 2 partial coverage (warning, not a green claim
+#   about the unread rows), 8 BASELINE DRIFT (the pin outlived the debt; the
+#   remedy is to delete a line from scripts/stale-verdict-watch.baseline, which
+#   is the opposite of 1's remedy and so gets its own sentence rather than the
+#   old "not a verdict it defines" catch-all), 10 AGED CONFLICT (a CONFLICTING
+#   pull request no pin covers has sat unrebased past the age bound, or its
+#   age could not be read — task-87f845f92d7884c8).
+#
+# A GREEN CHECK RUN IS rc 0 OR rc 2, AND IT SAYS WHICH (task-87f845f92d7884c8).
+# Until this, rc 2 exited 0 with an untitled `::warning::` and rc 0 printed a
+# plain line, so a reader holding only the check run's conclusion was holding
+# "0 or 2" — the scheduled run's rc had to be read out of the LOG. Now EVERY
+# verdict-role rc emits exactly ONE annotation whose title carries the rc
+# (`title=stale-verdict-watch rc=N …`) at a level that differs between the two
+# greens: rc 0 is a `notice`, rc 2 a `warning`, 1/8/10 an `error`. Annotations
+# are part of the check run itself — the run page lists them and
+# `gh api repos/<o>/<r>/check-runs/<id>/annotations` returns them — so rc 2 is
+# distinguishable from rc 0 without opening a log. The same rc heads the job
+# summary when GITHUB_STEP_SUMMARY is set. Why not a distinct CONCLUSION: an
+# Actions job can only conclude success/failure/cancelled/skipped, and making
+# rc 2 a failure would red main every time GitHub is slow to compute
+# mergeability — the transient the rc-2 arm exists to NOT scream about. Why not
+# a dynamic job name: `Stale verdict watch` keeps the name it has always
+# published (the workflow's own rule), and a name carrying the rc would be a
+# new check-run name per outcome.
 #
 #   role=fault:   a read-fault rc -> exit 1 with that class's sentence.
 #                 A verdict rc -> exit 0: the read had a population, and whether
 #                 a stale green is in it is the sibling job's subject.
 #                 Any other rc -> exit 1: an rc stale-verdict-watch.sh does not
 #                 define is a fault OF THE INSTRUMENT, which is this job's.
-#   role=verdict: 0 -> exit 0 · 1 -> exit 1 · 2 -> exit 0 (warning) ·
-#                 8 -> exit 1 (BASELINE DRIFT).
+#   role=verdict: 0 -> exit 0 (notice) · 1 -> exit 1 · 2 -> exit 0 (warning) ·
+#                 8 -> exit 1 (BASELINE DRIFT) · 10 -> exit 1 (AGED CONFLICT).
 #                 A read-fault rc -> exit 1 as a ROUTING ERROR: the workflow's
 #                 job-level `if:` is supposed to SKIP this job on one, so
 #                 reaching here means the wiring drifted. It reds rather than
@@ -86,6 +106,13 @@ fi
 
 role="$1"
 rc="$2"
+
+# The job-summary headline. Best effort: a summary that cannot be written
+# changes no exit code — the annotation is the channel the harness asserts.
+headline() { # <text>
+  [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
+  { echo "## Stale verdict watch: $1"; echo; } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+}
 
 # An rc that is not a plain non-negative integer is never a verdict. `''` is the
 # shape a missing `needs.<job>.outputs.rc` takes when the upstream job died
@@ -125,7 +152,7 @@ case "$role" in
         echo "::error::ROLLUP BUDGET EXCEEDED — more CONFLICTING pull requests need a status rollup than --rollup-max allows, so this run refused BEFORE issuing them rather than re-creating the timeout that made this watch blind. This is not a green and not a pass: the population was read, the conflicted set is too large to adjudicate within budget, and the log above names the count and the cap. REMEDY: drain the conflicted population, or raise --rollup-max deliberately with a measurement behind it."
         exit 1
         ;;
-      0|1|2|8)
+      0|1|2|8|10)
         echo "the watch looked (stale-verdict-watch.sh rc=$rc). Whether a conflicted pull request is asserting a stale green is the 'Stale verdict watch' check run's subject, not this one's."
         exit 0
         ;;
@@ -138,23 +165,32 @@ case "$role" in
   verdict)
     case "$rc" in
       0)
-        echo "no conflicted pull request is asserting a green required verdict the pinned baseline does not already cover."
+        headline "rc=0 CLEAN"
+        echo "::notice title=stale-verdict-watch rc=0 CLEAN::no conflicted pull request is asserting a green required verdict the pinned baseline does not already cover, and none is past the age bound. Every row was classified."
         exit 0
         ;;
       1)
-        echo "::error::A CONFLICTING pull request is asserting a green required verdict main has moved past. It re-dispatches nothing, so this cannot clear itself: rebase or close the PRs named above. This run fails, and it will keep failing every 30 minutes."
+        headline "rc=1 NOVEL STALE GREEN"
+        echo "::error title=stale-verdict-watch rc=1 NOVEL STALE GREEN::A CONFLICTING pull request is asserting a green required verdict main has moved past. It re-dispatches nothing, so this cannot clear itself: rebase or close the PRs named above. This run fails, and it will keep failing every 30 minutes."
         exit 1
         ;;
       2)
-        echo "::warning::rows were still mergeable=UNKNOWN after re-polling. That is a SILENCE, not a green — those rows are named in the log above and will be re-read on the next run."
+        headline "rc=2 PARTIAL (green, and NOT rc 0)"
+        echo "::warning title=stale-verdict-watch rc=2 PARTIAL - this green is NOT rc 0::rows were still mergeable=UNKNOWN after re-polling. That is a SILENCE, not a green — those rows are named in the log above and will be re-read on the next run."
         exit 0
         ;;
       8)
-        echo "::error::BASELINE DRIFT — no novel row, and at least one PINNED entry in scripts/stale-verdict-watch.baseline is no longer reported. The debt shrank and the committed file did not. REMEDY: delete the healed line from the baseline. This is the OPPOSITE of the rc-1 remedy: nobody needs to touch a pull request."
+        headline "rc=8 BASELINE DRIFT"
+        echo "::error title=stale-verdict-watch rc=8 BASELINE DRIFT::BASELINE DRIFT — no novel row, and at least one PINNED entry in scripts/stale-verdict-watch.baseline is no longer reported. The debt shrank and the committed file did not. REMEDY: delete the healed line from the baseline. This is the OPPOSITE of the rc-1 remedy: nobody needs to touch a pull request."
+        exit 1
+        ;;
+      10)
+        headline "rc=10 AGED CONFLICT"
+        echo "::error title=stale-verdict-watch rc=10 AGED CONFLICT::AGED CONFLICT — a CONFLICTING pull request that no pin covers has sat unrebased past the age bound, or its age could not be read (which fails closed). The age is measured from the head's own timestamp, so it is an UPPER bound on how long it has conflicted. REMEDY: rebase or close the PR named in the log, or pin it with a written reason. It cannot clear itself: a conflicted PR only gets older."
         exit 1
         ;;
       3|4|5|6|7|9)
-        echo "::error::ROUTING ERROR — rc=$rc is a READ FAULT and this job's \`if:\` is supposed to SKIP it on one, leaving the scream to the 'Stale verdict watch read fault' check run. Reaching here means .github/workflows/stale-verdict-watch.yml's job wiring drifted from scripts/stale-verdict-watch.test.sh section (m). Reds rather than reporting a verdict it does not have."
+        echo "::error title=stale-verdict-watch ROUTING ERROR::ROUTING ERROR — rc=$rc is a READ FAULT and this job's \`if:\` is supposed to SKIP it on one, leaving the scream to the 'Stale verdict watch read fault' check run. Reaching here means .github/workflows/stale-verdict-watch.yml's job wiring drifted from scripts/stale-verdict-watch.test.sh section (m). Reds rather than reporting a verdict it does not have."
         exit 1
         ;;
       *)

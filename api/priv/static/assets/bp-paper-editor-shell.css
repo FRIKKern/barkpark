@@ -926,11 +926,14 @@
        The bundled ProseMirror base CSS kills ligatures + onum with
        `font-variant-ligatures: none` / `font-feature-settings: "liga" 0`;
        this higher-specificity rule (`.bp-paper-surface .ProseMirror`) wins it
-       back so `1234567890` renders as old-style numerals, matching surface. */
+       back so `1234567890` renders as old-style numerals, matching surface.
+       The feature list is the surface's own, and there is deliberately NO
+       `font-variant-numeric`: the reader has none, and `oldstyle-nums` here gave
+       every editable element a computed style the reader lacks for the same
+       glyphs (editor_control_island_parity_test). */
     .bp-paper-surface .ProseMirror {
       font-variant-ligatures: normal;
       -webkit-font-variant-ligatures: normal;
-      font-variant-numeric: oldstyle-nums;
       font-feature-settings: "kern", "liga", "onum";
     }
     .bp-paper-editor-body code {
@@ -963,6 +966,8 @@
       font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
       color: var(--paper-ink); white-space: pre; overflow-wrap: normal;
       background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
+      letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+      font-feature-settings: inherit; font-variant-ligatures: inherit;
     }
     /* loop-epic/parity-callout: `bp-canvas-callout` is a thin edit-only layout
        hook; the tone card (padding/border-left/background/color) rides the
@@ -1146,6 +1151,8 @@
       color: var(--paper-ink-soft, #6a6a6a);
       font-size: 0.9rem; line-height: 1.45;
       font-family: var(--paper-font-serif, 'Iowan Old Style', Palatino, Georgia, serif);
+      letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+      font-feature-settings: inherit; font-variant-ligatures: inherit;
     }
     .bp-canvas-figure-caption-input:focus { outline: none; }
     /* live-data task-list: the bpTaskList widget wears "bp-canvas-readonly
@@ -1197,13 +1204,13 @@
        to the --paper- and --st- token vocabulary. Keep BYTE-IDENTICAL with
        assets/paper-editor/src/styles.css (mirror-check). */
     .bp-canvas-term { position: relative; }
-    .bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; }
+    .bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; }
     .bp-canvas-term__title-input::placeholder { color: var(--paper-ink-faint); }
     .bp-canvas-term__live-toggle, .bp-canvas-term__add-foot { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 1px 7px; cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
     .bp-canvas-term__live-toggle { margin-left: auto; }
     .bp-canvas-term__live-toggle.is-on { color: var(--st-ok); border-color: var(--st-ok); }
     .bp-canvas-term:hover .bp-canvas-term__live-toggle, .bp-canvas-term:focus-within .bp-canvas-term__live-toggle, .bp-canvas-term:hover .bp-canvas-term__add-foot, .bp-canvas-term:focus-within .bp-canvas-term__add-foot { opacity: 1; }
-    .bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; }
+    .bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; }
     .bp-canvas-term__foot-input::placeholder { color: var(--paper-ink-faint); }
     .bp-canvas-term__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
     /* Featured-image placeholder (t13) — the calm evergreen ghost frame an
@@ -1829,7 +1836,7 @@
 .bp-paper-figure-caption-paint {
   display: block; width: 100%; padding: 0; margin: 0; border: 0;
   background: transparent; color: inherit; font: inherit; text-align: inherit;
-  letter-spacing: inherit; word-spacing: inherit;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
   white-space: normal; cursor: text;
 }
 .bp-paper-figure-caption-paint:focus-visible {
@@ -1848,6 +1855,7 @@ textarea.bp-paper-figure-caption-input {
   display: block; width: 100%; min-width: 0; box-sizing: border-box;
   margin: 0; padding: 0; border: 0; border-radius: 0;
   background: transparent; color: inherit; font: inherit;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
   resize: none; overflow: hidden; outline-offset: 3px;
 }
 textarea.bp-paper-figure-caption-input:focus-visible {
@@ -1932,6 +1940,7 @@ textarea.bp-paper-inline-text.bp-paper-card-action-label-input {
   margin: 0; padding: 0; border: 0; border-radius: 0;
   background: transparent; color: inherit; font: inherit; font-weight: inherit;
   text-align: inherit; letter-spacing: inherit; word-spacing: inherit;
+  text-rendering: inherit;
   white-space: normal; overflow-wrap: anywhere; cursor: text;
 }
 .bp-paper-section-title-paint:focus-visible,
@@ -1947,7 +1956,8 @@ textarea.bp-paper-inline-text.bp-paper-section-title-input {
   box-sizing: border-box; margin: 0; padding: 0;
   border: 0; border-radius: 0; background: transparent;
   color: inherit; font: inherit; font-weight: inherit; text-align: inherit;
-  letter-spacing: inherit; resize: none; overflow: hidden;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+  resize: none; overflow: hidden;
   overflow-wrap: anywhere;
 }
 [data-paper-section-title-empty="true"]:not(:focus-within) {
@@ -2205,6 +2215,8 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-description-input {
   font: inherit;
   color: inherit;
   letter-spacing: inherit;
+  word-spacing: inherit;
+  text-rendering: inherit;
   resize: none;
   overflow: hidden;
   outline-offset: 3px;

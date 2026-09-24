@@ -256,17 +256,22 @@ jobs:
           #     core.quotepath=false — `api/lib/we"ird.ex` prints as
           #     `"api/lib/we\"ird.ex"`, the anchored ERE below misses it, and the
           #     ENTIRE suite is skipped under a green required context. `-z`
-          #     emits the raw bytes, which cannot be quoted; `tr` restores the
-          #     line format the matcher reads.
+          #     emits the raw bytes, which cannot be quoted, and the matcher
+          #     reads those NUL records itself (`--null`).
           #   * rename detection (default-on since git 2.9) prints only the
           #     DESTINATION, so `git mv api/lib/a.ex docs/a.ex` yields
           #     compile=false test=false while compiled code just left the tree.
           #     `--no-renames` prints both sides.
-          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          # NUL-separated, ON DISK, never re-lined: the old `tr` back to lines
+          # split a path holding a NEWLINE into two pseudo-paths before the
+          # matcher saw it (cch-bl-nul-native-path-matcher). A file, not a
+          # variable: command substitution drops NUL bytes.
+          changed_z="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/elixir-dispatcher-changed.XXXXXX")"
+          git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" >"$changed_z"
           echo "changed files:"
-          printf '%s\n' "$changed"
+          while IFS= read -r -d '' f; do printf '%s\n' "$f"; done <"$changed_z"
 
-          if [ -z "$changed" ]; then
+          if [ ! -s "$changed_z" ]; then
             # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
             # PR, nets to nothing against the base. The old polarity failed here
             # — a permanently red required context on a legal PR, with no
@@ -326,12 +331,14 @@ jobs:
           echo "path-set script: ${pin_src}"
 
           # The path sets are declared ONCE, in the ratchet that proves them.
-          # A HERE-STRING, not a pipe (house D37): `--match` answers through
+          # A FILE REDIRECT, not a pipe (house D37): `--match` answers through
           # `grep -Eq`, which exits the instant it matches, and a writer still
           # holding bytes then takes SIGPIPE that `set -o pipefail` promotes
-          # over the match that DID occur.
-          compile="$(bash "$pin_script" --match compile <<<"$changed")"
-          test="$(bash "$pin_script" --match test <<<"$changed")"
+          # over the match that DID occur. A copy of the script that predates
+          # `--null` REFUSES it (exit 2, `unknown flag`) — this step dies loud,
+          # the same as every other skew, never a silent false.
+          compile="$(bash "$pin_script" --match compile --null <"$changed_z")"
+          test="$(bash "$pin_script" --match test --null <"$changed_z")"
 
           # Containment invariant: compile ⊆ test, by construction of the two
           # path sets — every path that recompiles the app is also a path the
@@ -518,6 +525,23 @@ jobs:
       - name: No workflow or card claims merge authority the spec denies
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: bash scripts/run-instrument.sh merge-authority-claim -- bash scripts/merge-authority-claim-check.sh
+
+      # ── the static census of merge-blocking names (cchi-w57) ─────────────
+      # .github/required-checks.json is generated from names that RENDERED on
+      # sampled heads, so a job whose `if:` skipped it there is in no census.
+      # scripts/blocking-name-census.py reads the workflows instead: every job
+      # in a required aggregator's transitive `needs:` closure must be named in
+      # required ∪ exclusions, or this reds by name. Here, and as a STEP, for
+      # the reasons written above the skip-disclosure ratchet: this job is
+      # judged NEVER by `elixir-gate`, so the census reds a REQUIRED context,
+      # and a step adds no rendered name of its own.
+      - name: The blocking-name census must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh blocking-name-census-selftest -- python3 scripts/blocking-name-census.py --selftest
+
+      - name: Every merge-blocking job name is in the spec
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh blocking-name-census -- python3 scripts/blocking-name-census.py
 
       # ── the unrecognised-top-level default (task-fb7857b984ff5ff8) ────────
       # Every path set in this tree fails OPEN. Re-derived live on origin/main

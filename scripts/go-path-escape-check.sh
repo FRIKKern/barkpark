@@ -99,6 +99,7 @@
 #   go-path-escape-check.sh --list-reads     # print the resolved census
 #   go-path-escape-check.sh --print-set      # print the declared globs
 #   go-path-escape-check.sh --match          # changed paths on stdin -> true|false
+#   go-path-escape-check.sh --match --null   # …NUL-separated (`git diff -z`)
 #   go-path-escape-check.sh --selftest       # prove the scanner is not neutered
 #
 # Env, for proof runs only (neither can weaken a real run):
@@ -256,11 +257,50 @@ list_reads() {
 # ---------------------------------------------------------------------------
 # modes
 # ---------------------------------------------------------------------------
+# ── --null: one path per NUL-terminated record (cch-bl-nul-native-path-matcher)
+# `git diff -z` ends every path with a NUL, and a path may hold a literal
+# NEWLINE. A LINE reader splits that path into two pseudo-paths before the
+# anchored ERE sees it: for a glob anchored at BOTH ends (`docs/cards/*.md`),
+# `docs/cards/a<LF>b.md` becomes `docs/cards/a` and `b.md`, neither matches,
+# and a path IN the set answers false. That was the dispatchers' old
+# `git diff -z … | tr '\0' '\n'`. Under --null each record stays ONE line: an
+# embedded newline is rewritten to \037 (US), a byte no declared glob names and
+# one that `.` and `[^/]` match exactly as they match a newline — so the
+# declared EREs are UNCHANGED and `^…$` anchors the WHOLE path. Without --null
+# stdin is newline-separated, as every other caller (scripts/which-gates.sh,
+# the harness's line fixtures) still writes it.
+#
+# MATCH-INPUT-NUL — the dispatchers grep for this token: a copy that predates
+# --null IGNORES the flag and reads the NUL stream as ONE line (a silent
+# false), so a pinned copy without it is refused, never trusted.
+match_input() {
+  local rec
+  if [ "$1" = null ]; then
+    while IFS= read -r -d '' rec || [ -n "$rec" ]; do
+      printf '%s\n' "${rec//$'\n'/$'\037'}"
+    done
+  else
+    cat
+  fi
+}
+
 mode="${1:---check}"
 
 case "$mode" in
   --print-set) declared_globs; exit 0 ;;
   --match)
+    case "${2:-}" in
+      '') m_input=lines ;;
+      --null) m_input=null ;;
+      *)
+        echo "go-path-escape-check: unknown flag '${2}' (want --null)" >&2
+        exit 2
+        ;;
+    esac
+    if [ "$#" -gt 2 ]; then
+      echo "go-path-escape-check: unexpected argument '${3}' after --match" >&2
+      exit 2
+    fi
     # Changed paths on stdin -> `true` if ANY of them is in the declared set.
     # This is the DISPATCHER's decision, computed by this script's copy of the
     # same parser and the same glob translator — it exists so a dry run (e.g.
@@ -274,7 +314,7 @@ case "$mode" in
       echo "::error::go-path-escape-check --match: the declared set translated to an EMPTY pattern, which matches everything. Refusing to answer." >&2
       exit 2
     fi
-    m_changed="$(cat)"
+    m_changed="$(match_input "$m_input")"
     if grep -Eq -- "$m_ere" <<<"$m_changed"; then echo true; else echo false; fi
     exit 0
     ;;
@@ -287,7 +327,7 @@ case "$mode" in
   --check) ;;
   *)
     echo "go-path-escape-check: unknown argument '$mode'" >&2
-    echo "usage: $0 [--check|--selftest|--list-reads|--print-set|--match]" >&2
+    echo "usage: $0 [--check|--selftest|--list-reads|--print-set|--match [--null]]" >&2
     exit 2
     ;;
 esac

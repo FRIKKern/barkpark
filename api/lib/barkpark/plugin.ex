@@ -819,11 +819,13 @@ defmodule Barkpark.Plugin do
 
   Published by `Barkpark.Plugins.Registry` to `Barkpark.Content.PreWriteFences`
   and read there in plugin load order (this list's order kept within a
-  plugin). The writer runs them in that order, after its own transition
-  gate, and stops at the first non-`:ok`. There are no phases: slice B's
-  `:early` / `:late` split existed only to straddle two writer-owned task
-  birth guards, which the Tasks plugin now declares as fences itself
-  (task-2978357a0701cd10).
+  plugin). The writer runs them in that order, directly after it resolves
+  `prev_doc`, and stops at the first non-`:ok`; it runs no task guard of its
+  own before or between them. There are no phases: slice B's `:early` /
+  `:late` split existed only to straddle two writer-owned task birth guards,
+  which the Tasks plugin now declares as fences itself (task-2978357a0701cd10),
+  as it does the writer's former transition and close-reason gates
+  (task-d91ccf54d43b9800).
 
   Unlike `lifecycle_hooks/0` `:before_*`, a fence sees `prev_doc` and `opts`
   and its error is returned verbatim, not wrapped as `{:halted, _}`. NOT
@@ -834,6 +836,85 @@ defmodule Barkpark.Plugin do
   Default (supplied by `use Barkpark.Plugin`) returns `[]`.
   """
   @callback pre_write_fences() :: [pre_write_fence()]
+
+  # ── Pre-publish fences (Barkspark phase 1, task-8273f2f1b24a6de1) ─────
+
+  @typedoc """
+  Where a pre-publish fence runs in `Barkpark.Content.Lifecycle`'s publish:
+
+    * `:door` — right after the draft read and the core render-shape and
+      bound-title gates, BEFORE the authoring wall, the `:before_publish` hook
+      chain and the transaction, so a refusal is side-effect-free. Called as
+      `apply(module, function, [type, draft, published, opts])`, where
+      `published` is the incumbent published row or `nil` on a first publish.
+      Any non-`:ok` return is returned from the publish VERBATIM.
+    * `:in_transaction` — inside the publish transaction, directly after the
+      incumbent row is re-read and locked `FOR UPDATE` (only when one exists),
+      before the update. Called as
+      `apply(module, function, [type, locked_published, pub_attrs, opts])`.
+      Must return `:ok` or `{:error, reason}`; the lifecycle rolls back with
+      `reason`, so the publish returns `{:error, reason}`.
+
+  Two phases exist because the task gates this seam carries sat on opposite
+  sides of the transaction (see `Barkpark.Content.PrePublishFences`); one
+  phase would have moved one of them past the wall, the hooks or the lock.
+  """
+  @type pre_publish_fence_phase :: :door | :in_transaction
+
+  @typedoc "One pre-publish fence: `{phase, module, function}`."
+  @type pre_publish_fence :: {pre_publish_fence_phase(), module(), atom()}
+
+  @doc """
+  Declare the ORDERED list of fences the core publish runs, each at its
+  phase's position (see `t:pre_publish_fence_phase/0`).
+
+  Published by `Barkpark.Plugins.Registry` to `Barkpark.Content.PrePublishFences`
+  and read there in plugin load order (this list's order kept within a
+  plugin). Within a phase the lifecycle runs them in that order and stops at
+  the first non-`:ok`; it names no task gate of its own at either position.
+
+  NOT filtered by per-workspace enablement and a raising declaration is NOT
+  swallowed — the same integrity-gate rules as `pre_write_fences/0`.
+
+  Default (supplied by `use Barkpark.Plugin`) returns `[]`.
+  """
+  @callback pre_publish_fences() :: [pre_publish_fence()]
+
+  # ── Pre-write transforms (Barkspark phase 1, task-aed4f02e57d3a760) ───
+
+  @typedoc """
+  The kind of one pre-write transform step (see
+  `Barkpark.Content.PreWriteTransforms`):
+
+    * `:transform` — called as `apply(module, function, [attrs, type])`;
+      returns the attrs, unchanged when the step does not apply.
+    * `:check` — called as `apply(module, function, [type, attrs])` on the
+      attrs every earlier step produced; returns `:ok` or a refusal the write
+      returns VERBATIM.
+  """
+  @type pre_write_transform_kind :: :transform | :check
+
+  @typedoc "One pre-write transform step: `{kind, module, function}`."
+  @type pre_write_transform :: {pre_write_transform_kind(), module(), atom()}
+
+  @doc """
+  Declare the ORDERED steps the core writer runs over a write's attrs at the
+  last step of its attrs pipeline on both write doors (`create_document/4`,
+  `upsert_document/4`) — before the prev-doc read, the label-spine shape gate
+  and every `pre_write_fences/0` fence.
+
+  Published by `Barkpark.Plugins.Registry` to
+  `Barkpark.Content.PreWriteTransforms` and read there in plugin load order
+  (this list's order kept within a plugin). The writer runs them in that
+  order and stops at the first `:check` refusal; it names no task step of its
+  own at that position.
+
+  NOT filtered by per-workspace enablement and a raising declaration is NOT
+  swallowed — the same integrity-gate rules as `pre_write_fences/0`.
+
+  Default (supplied by `use Barkpark.Plugin`) returns `[]`.
+  """
+  @callback pre_write_transforms() :: [pre_write_transform()]
 
   # ── Lifecycle hooks callback (Goal barkpark-9lq) ─────────────────────
 
@@ -1039,6 +1120,8 @@ defmodule Barkpark.Plugin do
                       resolve_extract_edges: 2,
                       lifecycle_hooks: 0,
                       pre_write_fences: 0,
+                      pre_publish_fences: 0,
+                      pre_write_transforms: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
                       cli_commands: 0,
@@ -1243,6 +1326,12 @@ defmodule Barkpark.Plugin do
       def pre_write_fences, do: []
 
       @impl Barkpark.Plugin
+      def pre_publish_fences, do: []
+
+      @impl Barkpark.Plugin
+      def pre_write_transforms, do: []
+
+      @impl Barkpark.Plugin
       def api_tests, do: []
 
       @impl Barkpark.Plugin
@@ -1309,6 +1398,8 @@ defmodule Barkpark.Plugin do
                      resolve_extract_edges: 2,
                      lifecycle_hooks: 0,
                      pre_write_fences: 0,
+                     pre_publish_fences: 0,
+                     pre_write_transforms: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,
                      cli_commands: 0,

@@ -58,7 +58,7 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
         )
     end
 
-    prev_plugins = Application.get_env(:barkpark, :plugins)
+    prev_plugins = Barkpark.PluginEnv.capture()
     Application.delete_env(:barkpark, :plugins)
 
     # Register the REAL Bulldocs plugin so the collector drives its
@@ -68,10 +68,7 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
     on_exit(fn ->
       Registry.reset()
 
-      case prev_plugins do
-        nil -> Application.delete_env(:barkpark, :plugins)
-        v -> Application.put_env(:barkpark, :plugins, v)
-      end
+      Barkpark.PluginEnv.restore(prev_plugins)
     end)
 
     %{scope: scope, ws: ws}

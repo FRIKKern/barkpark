@@ -224,7 +224,7 @@ defmodule Barkpark.Plugins.RegistryCollectTest do
       # default would restore an EXPLICIT `[]` — the discovery kill switch.
       prior = Barkpark.PluginEnv.capture()
       # Configured order: A (zz-…) THEN B (aa-…) — opposite of alphabetical.
-      Application.put_env(:barkpark, :plugins, [name_a, name_b])
+      Barkpark.PluginEnv.put!([name_a, name_b])
       on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
 
       assert :ok = Registry.run_all_codelist_seeders()

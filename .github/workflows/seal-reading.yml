@@ -103,6 +103,11 @@
 #
 # Related: scripts/seal-run.sh (the runner and its four refusals),
 # scripts/seal-run.test.sh (52 mutation proofs, run by shell-harnesses.yml).
+#
+# SECOND TENANT (task-8390f73ced655243): the last step of the job reads the
+# console charter's file:line citation drift against a committed floor. It is
+# advisory by the same contract and never touches the seal reading — see the
+# comment above that step.
 
 name: Seal reading
 
@@ -149,6 +154,19 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+
+      # THE GUARDS' DECLARED RUNTIME (task-88edd0348e6f703d). Clause (b) runs
+      # each guard on the Node major declared in the __node-version file beside
+      # it; cloud/priv/static/__node-version says 20. The ubuntu-24.04 image
+      # ships Node 22 on PATH and caches NO Node 20 (setup-node elsewhere in this
+      # repo logs "Attempting to download 20..." on these images, a cache miss),
+      # so without this step the predicate honestly reports that guard
+      # RUNTIME-UNAVAILABLE, b-unavailable=1/6, and seal-run.sh refuses (exit 6).
+      # The version is READ from that declaration file, not retyped here, so the
+      # guard's pin and this job cannot drift apart.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: cloud/priv/static/__node-version
 
       - name: node is present (the predicate is a node program)
         run: |
@@ -244,3 +262,170 @@ jobs:
             exit 1
           fi
           echo "::notice title=Seal reading — $status::${closing:-no closing line}"
+
+      # ── SECOND TENANT: charter file:line citation drift (owner: lead-console) ──
+      #
+      # task-8390f73ced655243, child of task-b881189fa7f7395d. The console
+      # hardening charter cites `app.js:N`, `app.css:N`, `index.html:N` and
+      # `__app.test.mjs:N`; every merge above line N walks the citation off its
+      # subject and nothing noticed. scripts/file-line-citation-check.mjs
+      # measures that, and this step runs it per target on every main push, on
+      # the daily schedule, and on dispatch.
+      #
+      # WHY IT LIVES IN THIS JOB. It asks the same kind of question this job
+      # already asks — one about the REPOSITORY'S STATE, not a PR diff — on the
+      # same triggers, and it is console's. A step here renders no new
+      # check-run name, so `.github/required-checks.json` needs no new row.
+      #
+      # ADVISORY, BY CONTRACT: this step NEVER exits non-zero and never changes
+      # the seal reading above. `if: !cancelled()` so a seal refusal above does
+      # not skip it; `set +e` step-wide because a red here would red the SEAL
+      # job, which would make a citation count look like a finding about the
+      # epic. Every fault is a ::warning:: CANNOT READ plus a summary line, never
+      # a quiet pass. Turning drift into a red is a separate later change, after
+      # the hand-repair slices land — and it will be its own job, not this step.
+      #
+      # THE FLOOR is scripts/file-line-citation-check.floor.json: per target,
+      # the `unresolved` count at `derived_at`, with its date and derivation.
+      #   now > floor  -> ::warning:: per target, and the NEW misses are named:
+      #                   the same checker is re-run over the tree at
+      #                   `derived_at` and the two miss sets are diffed by
+      #                   `cite [anchors]` (charter line numbers shift, keys
+      #                   do not). Each new miss is also annotated on its
+      #                   charter line.
+      #   now < floor  -> ::notice:: repairs landed; lower the floor in the
+      #                   repair's own PR.
+      #
+      # WHICH TREE IS READ: `github.sha` — the pushed commit on push, main's
+      # head on schedule, the dispatching ref's head on workflow_dispatch. NOT
+      # the parked origin/main tip above: that park is the seal reading's
+      # contract, and reading the dispatched ref is what lets a branch dispatch
+      # prove this step on a planted citation before it merges.
+      #
+      # NEVER PIPE THE CHECKER'S --json. It calls process.exit() before a piped
+      # stdout drains and truncates at 65536 bytes (measured: app.js's JSON is
+      # ~184 KB; `| wc -c` reads 65536). Every call below redirects to a file.
+      - name: charter file:line citation drift (advisory, owner lead-console)
+        if: ${{ !cancelled() }}
+        env:
+          CITE_SHA: ${{ github.sha }}
+        run: |
+          set +e
+          set -o pipefail
+          FLOOR_REL="scripts/file-line-citation-check.floor.json"
+          CHECKER_REL="scripts/file-line-citation-check.mjs"
+          tree="$RUNNER_TEMP/cite-tree"
+          ftree="$RUNNER_TEMP/cite-floor-tree"
+          work="$RUNNER_TEMP/cite-work"
+          mkdir -p "$work"
+
+          cannot_read() {
+            echo "CITATION DRIFT CANNOT READ: $1" >&2
+            echo "::warning title=Citation drift CANNOT READ::$1 — no citation reading was taken; this is NOT a clean result."
+            {
+              echo "## Charter file:line citation drift — advisory (owner: lead-console)"
+              echo
+              echo "- **CANNOT READ**: $1"
+              echo "- nothing was measured; this is not a pass."
+            } >> "$GITHUB_STEP_SUMMARY"
+            git worktree remove --force "$tree" >/dev/null 2>&1
+            git worktree remove --force "$ftree" >/dev/null 2>&1
+            exit 0
+          }
+
+          command -v node >/dev/null 2>&1 || cannot_read "node is not on this runner"
+          command -v jq >/dev/null 2>&1 || cannot_read "jq is not on this runner"
+          if ! git cat-file -e "${CITE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --quiet origin "$CITE_SHA" || cannot_read "could not fetch the triggering commit $CITE_SHA"
+          fi
+          git worktree add --detach --quiet "$tree" "$CITE_SHA" || cannot_read "could not materialise the tree at $CITE_SHA"
+          [ -f "$tree/$CHECKER_REL" ] || cannot_read "$CHECKER_REL is absent at $CITE_SHA"
+          [ -f "$tree/$FLOOR_REL" ] || cannot_read "$FLOOR_REL is absent at $CITE_SHA"
+
+          floor="$tree/$FLOOR_REL"
+          checker="$tree/$CHECKER_REL"
+          charter="$(jq -r '.charter // empty' "$floor")"
+          fsha="$(jq -r '.derived_at // empty' "$floor")"
+          fdate="$(jq -r '.derived_on // empty' "$floor")"
+          owner="$(jq -r '.owner // empty' "$floor")"
+          ntgt="$(jq -r '.targets | length' "$floor")"
+          [ -n "$charter" ] && [ -n "$fsha" ] || cannot_read "$FLOOR_REL has no charter or no derived_at"
+          case "$ntgt" in ''|0|*[!0-9]*) cannot_read "$FLOOR_REL lists no targets" ;; esac
+          if ! git cat-file -e "${fsha}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --quiet origin "$fsha" || cannot_read "the floor's derived_at $fsha is not in this clone"
+          fi
+          git worktree add --detach --quiet "$ftree" "$fsha" || cannot_read "could not materialise the floor tree at $fsha"
+
+          echo "reading $charter at $CITE_SHA against the floor derived at $fsha ($fdate), owner $owner"
+          rows=""; above=0; below=0; faults=0; newlist=""
+          i=0
+          while [ "$i" -lt "$ntgt" ]; do
+            base="$(jq -r ".targets[$i].base" "$floor")"
+            tpath="$(jq -r ".targets[$i].path" "$floor")"
+            fl="$(jq -r ".targets[$i].unresolved" "$floor")"
+            out="$work/now-$i.json"; err="$work/now-$i.err"
+            rc=0
+            node "$checker" --root "$tree" --charter "$charter" --map "$base=$tpath" --json >"$out" 2>"$err" || rc=$?
+            now="$(jq -r '.unresolved // empty' "$out" 2>/dev/null)"
+            dec="$(jq -r '.decidable // empty' "$out" 2>/dev/null)"
+            if { [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; } || [ -z "$now" ]; then
+              faults=$((faults + 1))
+              msg="$(head -c 300 "$err" | tr '\n' ' ')"
+              echo "::warning title=Citation drift CANNOT READ ${base}::checker exit $rc — ${msg:-no JSON produced}"
+              rows="${rows}| \`${base}\` | ${fl} | — | — | CANNOT READ (exit ${rc}) |"$'\n'
+              i=$((i + 1)); continue
+            fi
+            delta=$((now - fl))
+            if [ "$now" -gt "$fl" ]; then
+              above=$((above + 1)); verdict="**ABOVE FLOOR (+${delta})**"
+              # Name the new misses: same checker, the floor's tree, diff by key.
+              fout="$work/floor-$i.json"
+              node "$checker" --root "$ftree" --charter "$charter" --map "$base=$tpath" --json >"$fout" 2>/dev/null || :
+              jq -r '.misses[] | "\(.cite) [\(.anchors | join(","))]"' "$fout" 2>/dev/null | LC_ALL=C sort >"$work/fk-$i"
+              jq -r '.misses[] | "\(.cite) [\(.anchors | join(","))]"' "$out" | LC_ALL=C sort >"$work/nk-$i"
+              LC_ALL=C comm -13 "$work/fk-$i" "$work/nk-$i" >"$work/new-$i"
+              nnew="$(wc -l <"$work/new-$i" | tr -d ' ')"
+              echo "::warning title=Citation drift ABOVE FLOOR ${base}::${now} unresolved > floor ${fl} (+${delta}); ${nnew} miss(es) not present at the floor's ${fsha:0:9} — named below and in the step summary. Advisory: this job stays green."
+              # One annotation per new miss, on its charter line (first 20).
+              jq -r --slurpfile keys <(jq -R . "$work/new-$i" | jq -s .) \
+                'limit(20; .misses[] | select(("\(.cite) [\(.anchors | join(","))]") as $k | $keys[0] | index($k))) | "\(.charterLine)\t\(.cite)\t\(.anchors | join(", "))"' \
+                "$out" >"$work/ann-$i"
+              while IFS=$'\t' read -r cl cite anchors; do
+                [ -n "$cl" ] || continue
+                echo "::warning file=${charter},line=${cl},title=New stale citation ${cite}::${cite} at charter line ${cl} — none of [${anchors}] lands within +/-3 lines of it in ${tpath}"
+                newlist="${newlist}- \`${cite}\` — charter line ${cl}, anchors: ${anchors}"$'\n'
+              done <"$work/ann-$i"
+            elif [ "$now" -lt "$fl" ]; then
+              below=$((below + 1)); verdict="below floor (${delta}) — lower the floor"
+              echo "::notice title=Citation drift BELOW FLOOR ${base}::${now} unresolved < floor ${fl} (${delta}): repairs landed. Lower ${FLOOR_REL} in the repair's own PR."
+            else
+              verdict="at floor"
+            fi
+            echo "  ${base}: unresolved ${now}/${dec} decidable, floor ${fl} -> ${verdict}"
+            rows="${rows}| \`${base}\` | ${fl} | ${now} | ${delta} | ${verdict} |"$'\n'
+            i=$((i + 1))
+          done
+
+          {
+            echo "## Charter file:line citation drift — advisory (owner: ${owner})"
+            echo
+            echo "- charter: \`${charter}\`, read at \`${CITE_SHA}\`"
+            echo "- floor: \`${FLOOR_REL}\`, derived at \`${fsha}\` on ${fdate}"
+            echo "- targets above floor: **${above}** · below floor: ${below} · cannot read: ${faults}"
+            echo
+            echo "| target | floor (unresolved) | now | delta | verdict |"
+            echo "|---|---|---|---|---|"
+            printf '%s' "$rows"
+            if [ -n "$newlist" ]; then
+              echo
+              echo "### New unresolved citations (not present at the floor's commit)"
+              echo
+              printf '%s' "$newlist"
+            fi
+            echo
+            echo "Advisory: this step never fails the job. A count is a directional floor on drift, not a census"
+            echo "(see the checker's header for its over-credit and over-flag biases)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          git worktree remove --force "$tree" >/dev/null 2>&1
+          git worktree remove --force "$ftree" >/dev/null 2>&1
+          exit 0

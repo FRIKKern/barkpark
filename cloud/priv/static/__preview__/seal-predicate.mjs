@@ -375,6 +375,11 @@ function guardRuntimeCandidates(want) {
   const fnm = E('CONSOLE_HARNESS_FNM_DIR', E('FNM_DIR', `${home}/.local/share/fnm`));
   const volta = E('CONSOLE_HARNESS_VOLTA_HOME', E('VOLTA_HOME', `${home}/.volta`));
   const asdf = E('CONSOLE_HARNESS_ASDF_DIR', E('ASDF_DATA_DIR', `${home}/.asdf`));
+  // The GitHub Actions runner tool cache (task-88edd0348e6f703d). actions/setup-node
+  // installs into `$RUNNER_TOOL_CACHE/node/<version>/<arch>/bin/node`, and some runner
+  // images ship majors there pre-cached. It is one more place a binary MAY be; like
+  // every other root, what is found here is trusted only for the major it REPORTS.
+  const toolCache = E('CONSOLE_HARNESS_TOOL_CACHE', E('RUNNER_TOOL_CACHE', '/opt/hostedtoolcache'));
   const onPath = [];
   for (const dir of String(GUARD_ENV.PATH || '').split(':')) {
     if (!dir) continue;
@@ -390,6 +395,8 @@ function guardRuntimeCandidates(want) {
     ...versionedInstalls(`${fnm}/node-versions`, want, 'installation/bin/node'),
     ...versionedInstalls(`${volta}/tools/image/node`, want, 'bin/node'),
     ...versionedInstalls(`${asdf}/installs/nodejs`, want, 'bin/node'),
+    ...versionedInstalls(`${toolCache}/node`, want, 'x64/bin/node'),
+    ...versionedInstalls(`${toolCache}/node`, want, 'arm64/bin/node'),
     `/opt/homebrew/opt/node@${want}/bin/node`,
     `/usr/local/opt/node@${want}/bin/node`,
   ];
@@ -398,6 +405,7 @@ function guardRuntimeCandidates(want) {
 const GUARD_RUNTIME_LOOKED_IN = (want) =>
   `PATH node and node${want}, $NVM_DIR/versions/node/v${want}.*, $FNM_DIR/node-versions/v${want}.*, ` +
   `$VOLTA_HOME/tools/image/node/${want}.*, $ASDF_DATA_DIR/installs/nodejs/${want}.*, ` +
+  `$RUNNER_TOOL_CACHE/node/${want}.*/{x64,arm64}, ` +
   `/opt/homebrew/opt/node@${want}, /usr/local/opt/node@${want}`;
 
 // Returns one of:

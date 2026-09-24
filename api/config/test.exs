@@ -1,10 +1,59 @@
 import Config
 
-# Configure your database
+# ── Which test database (task-a0b11b3ae0cf45f0) ────────────────────────────
 #
-# The MIX_TEST_PARTITION environment variable can be used
-# to provide built-in test partitioning in CI environment.
-# Run `mix help test` for more information.
+# The database is `barkpark_test<suffix>`. The suffix is chosen in this order:
+#
+#   1. MIX_TEST_PARTITION is SET (even to "") -> it wins, verbatim. Setting it to
+#      the empty string is the explicit opt-in to the unpartitioned
+#      `barkpark_test`.
+#   2. CI is set (GitHub Actions always sets CI=true) -> "" — CI keeps
+#      `barkpark_test`, the POSTGRES_DB of its own ephemeral postgres service
+#      (.github/workflows/elixir.yml). CI's database is unchanged by this block.
+#   3. Otherwise -> a per-checkout default, `_wt_<dirname>_<hash>`, derived from
+#      THIS checkout's absolute path. Two worktrees therefore never share a
+#      database unless one opts in.
+#
+# Why 3 is the default: with the variable unset every worktree on a box shared
+# ONE `barkpark_test`, and each inherited the others' migrations and committed
+# rows — a peer branch's unmerged migration (20260923150000) showed up as a red
+# in every other worktree's SharedTestDbTest. The `test` alias in mix.exs runs
+# `ecto.create` + `ecto.migrate` before `test`, so a fresh partition database is
+# created and migrated on first use with no manual step.
+#
+# The chosen suffix and its source are recorded under `:test_db_partition` so
+# test/support/shared_test_db.ex can say which database a red ran in and why.
+test_db_partition =
+  case System.fetch_env("MIX_TEST_PARTITION") do
+    {:ok, explicit} ->
+      %{suffix: explicit, source: :explicit}
+
+    :error ->
+      if System.get_env("CI") in [nil, "", "false", "0"] do
+        # config/ -> api/ -> the checkout root.
+        root = Path.expand("../..", __DIR__)
+
+        slug =
+          root
+          |> Path.basename()
+          |> String.downcase()
+          |> String.replace(~r/[^a-z0-9]+/, "_")
+          |> String.slice(0, 24)
+          |> String.trim("_")
+
+        # phash2 is stable across machines and ERTS versions, so the same path
+        # always names the same database. The slug is for humans; the hash is
+        # what keeps two checkouts with the same dirname apart.
+        hash = root |> :erlang.phash2() |> Integer.to_string(36) |> String.downcase()
+
+        %{suffix: "_wt_#{slug}_#{hash}", source: :worktree_default, root: root}
+      else
+        %{suffix: "", source: :ci}
+      end
+  end
+
+config :barkpark, :test_db_partition, test_db_partition
+
 # CI keeps the stock postgres/postgres service creds (the defaults). The env
 # overrides exist for boxes whose Postgres has real auth (e.g. the prod host),
 # where tests run as a dedicated random-password role instead of downgrading
@@ -13,7 +62,7 @@ config :barkpark, Barkpark.Repo,
   username: System.get_env("BARKPARK_TEST_DB_USER", "postgres"),
   password: System.get_env("BARKPARK_TEST_DB_PASS", "postgres"),
   hostname: System.get_env("BARKPARK_TEST_DB_HOST", "localhost"),
-  database: "barkpark_test#{System.get_env("MIX_TEST_PARTITION")}",
+  database: "barkpark_test#{test_db_partition.suffix}",
   pool: Ecto.Adapters.SQL.Sandbox,
   # Flat, generous, env-overridable pool — was `System.schedulers_online() * 2`.
   # On a cgroup-throttled CI runner schedulers_online() can report 1–2, giving a
@@ -23,6 +72,11 @@ config :barkpark, Barkpark.Repo,
   # SCHEMA sits in the checkout queue until it is DROPPED — reddening the whole
   # gate before a single test runs (run 29665467133: 89.7s in-queue, 0 tests).
   # postgres:15's default max_connections is 100, so 20 is comfortably safe.
+  # The per-checkout database default above does NOT change this budget: a
+  # connection is held by a RUNNING suite, not by a database, so N concurrent
+  # suites hold ~N x pool_size whether they share one database or use N. An idle
+  # partition database holds zero. Locally that means at most ~4 concurrent
+  # suites at the default pool against max_connections 100.
   # DIAGNOSTIC VALUE: if the boot checkout STILL starves for ~90s at pool 20,
   # the cause is a lock/held-connection or a wedged CI Postgres service — NOT
   # pool math — and the fix belongs at the workflow/infra layer.

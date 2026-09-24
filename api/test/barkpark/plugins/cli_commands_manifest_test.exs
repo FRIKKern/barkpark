@@ -343,6 +343,38 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert files.summary =~ "ONE changed path per occurrence"
     end
 
+    # pdf-bl-roster-enrichment's CLI half (task-ba602058cd90881d): the server has
+    # accepted a beat's `feed` since #20100, but `bp` refuses an undeclared flag
+    # and sends NOTHING, so the annotation was reachable by curl alone. The
+    # vocabulary is read from Fleet.feeds/0 — the list put_feed/2 enforces — so
+    # a value added or dropped server-side reds here until the help says so.
+    test "fleet.beat declares --feed and its help names every value the server accepts" do
+      beat = Enum.find(Tasks.cli_commands(), &(&1.id == "fleet.beat"))
+      feed = Enum.find(beat.flags, &(&1.name == "feed"))
+
+      assert feed,
+             "fleet.beat declares no --feed flag, so `bp fleet beat w --feed sse` is an " <>
+               "unknown-flag usage error and the beat's feed key is unreachable from the CLI"
+
+      assert feed.type == "string"
+      assert Barkpark.Tasks.Fleet.feeds() == ~w(sse poll)
+      assert feed.summary =~ Enum.join(Barkpark.Tasks.Fleet.feeds(), " | ")
+      assert feed.summary =~ "invalid_feed"
+    end
+
+    # task-ba602058cd90881d: #20073 added the fifth rerun-screen arm
+    # (:prefix_match_probe in Barkpark.Tasks.Stage). The help is the only place a
+    # writer learns why an unterminated definition-shaped grep is a 422, and what
+    # the one-character fix is.
+    test "task.stage --rerun help names the prefix-match probe refusal and its fix" do
+      stage = Enum.find(Tasks.cli_commands(), &(&1.id == "task.stage"))
+      rerun = Enum.find(stage.flags, &(&1.name == "rerun"))
+
+      assert rerun.summary =~ "PREFIX match"
+      assert rerun.summary =~ "`'defp apply_engagement('`"
+      assert rerun.summary =~ "`'defp handle_[a-z]'`"
+    end
+
     test "declares the sixteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 

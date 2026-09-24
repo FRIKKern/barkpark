@@ -2489,6 +2489,57 @@ git -C "$DR" mv docs/guide.md api/lib/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true true pull_request "$BASE_SHA"
 
+# ── (4) A NEWLINE INSIDE A PATH (cch-bl-nul-native-path-matcher) ────────────
+# `-z` closed quoting, but the old producer's `| tr '\0' '\n'` re-opened ONE
+# class: a path holding a literal NEWLINE was split into two pseudo-paths
+# before the anchored ERE saw it. The dispatcher now hands the NUL records
+# straight to `--match … --null`. MUTATION HOOK: ELIXIR_DISPATCH_WF=<a pre-fix copy
+# of the workflow> drives these same arms through the tr producer.
+#   (4a) THE FALSE SKIP. A glob anchored at BOTH ends — the derived family
+#        `docs/cards/*.md`, enumerated by scripts/check-doc-budgets.sh — and the
+#        path `docs/cards/a<LF>b.md`. Split, `docs/cards/a` and `b.md` each
+#        miss, so the tr producer answered compile=false test=false for a path
+#        IN the test set: the suite skipped under a green required context.
+#   (4b) a newline inside the DIRECTORY of an in-set path, `api/li<LF>b/x.ex`.
+#        The split fragment `api/li` still matches `^api(/|$)`, so this is
+#        green on BOTH producers — a `dir/**` glob cannot be skipped by a
+#        split, which is why (4a) needs a two-ended family to be red.
+#   (4c) the filing's own example, `api<LF>foo/lib/x.ex`. Its top directory is
+#        `api<LF>foo`, not `api`, so the true answer is false/false. The tr
+#        producer answered true/true (its `api` fragment matches
+#        `^api(/|$)`) — an over-run, not the skip the filing described.
+#        Asserted so a matcher that still splits records cannot pass.
+git -C "$DR" checkout -q -b nlfamily-base "$BASE_SHA"
+cp "$REAL_ROOT/scripts/check-doc-budgets.sh" "$DR/scripts/"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nlfamily-base >/dev/null 2>&1
+NL_BASE="$(git -C "$DR" rev-parse HEAD)"
+# THE PRECONDITION: the fixture must DERIVE the family, or (4a) is vacuous.
+nl_fam="$( (cd "$DR" && bash scripts/elixir-path-escape-check.sh --print-families) 2>&1 )" || true
+if grep -qF -- 'docs/cards/*.md' <<<"$nl_fam"; then
+  ok "(4) the fixture derives the two-ended family docs/cards/*.md"
+else
+  no "(4) the fixture does not derive docs/cards/*.md — (4a) cannot fail for the right reason. It printed: $nl_fam"
+fi
+git -C "$DR" checkout -q -b nlfamily "$NL_BASE"
+mkdir -p "$DR/docs/cards"
+printf 'x\n' >"$DR/docs/cards/a"$'\n'"b.md"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nlfamily >/dev/null 2>&1
+dispatch '(4a) a NEWLINE inside a two-ended family path (docs/cards/a<LF>b.md)' 0 false true pull_request "$NL_BASE"
+git -C "$DR" checkout -q -b nldir "$BASE_SHA"
+mkdir -p "$DR/api/li"$'\n'"b"
+printf 'x\n' >"$DR/api/li"$'\n'"b/x.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nldir >/dev/null 2>&1
+dispatch '(4b) a NEWLINE inside the directory of an in-set path (api/li<LF>b/x.ex)' 0 true true pull_request "$BASE_SHA"
+git -C "$DR" checkout -q -b nltop "$BASE_SHA"
+mkdir -p "$DR/api"$'\n'"foo/lib"
+printf 'x\n' >"$DR/api"$'\n'"foo/lib/x.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nltop >/dev/null 2>&1
+dispatch '(4c) the filing example api<LF>foo/lib/x.ex is NOT under api/' 0 false false pull_request "$BASE_SHA"
+
 # ── THE WORKFLOW/SCRIPT VERSION SKEW (task-3a81e68f7027ca98) ───────────────
 # GitHub takes the WORKFLOW FILE for a pull_request run from the MERGE REF while
 # this job checks out the PR HEAD (D34), so main's invocation used to run against
@@ -2687,6 +2738,49 @@ else
   no "case 12b: green and silent — the honesty half is missing: $out"
 fi
 rm -f "$FX_UNSEEN/api/test/barkpark/unseen_test.exs"
+echo
+
+# ── case NUL: `--match … --null` reads one path per NUL record ─────────────
+# (cch-bl-nul-native-path-matcher) The dispatchers now feed `git diff -z`
+# output straight in. A path holding a NEWLINE must reach the anchored ERE as
+# ONE record, in both directions; newline-mode stdin must keep working for
+# every other caller (scripts/which-gates.sh).
+echo "case NUL: --match test --null reads NUL-terminated records"
+NUL_IN="$TMPROOT/nul-match.in"
+printf '%s\0%s\0' docs/x.md "docs/cards/a"$'\n'"b.md" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match test --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: docs/cards/a<LF>b.md (family docs/cards/*.md) is IN the set -> true"
+else
+  no "--null: docs/cards/a<LF>b.md (family docs/cards/*.md) answered '$nul_out', wanted true"
+fi
+printf '%s\0' docs/x.md "api"$'\n'"foo/lib/x.ex" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match test --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = false ]; then
+  ok "--null: api<LF>foo/lib/x.ex (the filing's example) is ONE record, not in the set -> false"
+else
+  no "--null: api<LF>foo/lib/x.ex (the filing's example) answered '$nul_out', wanted false — the matcher still splits records"
+fi
+printf '%s\0%s' docs/x.md "docs/cards/a"$'\n'"b.md" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match test --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: an unterminated LAST record is still read"
+else
+  no "--null: an unterminated last record was dropped ('$nul_out')"
+fi
+nul_out="$(printf '%s\n%s\n' docs/x.md "docs/cards/a"$'\n'"b.md" | bash "$SCRIPT" --match test 2>&1)" || true
+if [ "$nul_out" = false ]; then
+  ok "control: the same bytes read as LINES answer false — the SPLIT: both halves miss a two-ended glob, which is the false skip --null closes"
+else
+  no "control: newline mode answered '$nul_out', wanted false"
+fi
+nul_rc=0
+nul_out="$(bash "$SCRIPT" --match test --nul </dev/null 2>&1)" || nul_rc=$?
+if [ "$nul_rc" -eq 2 ]; then
+  ok "--nul (a typo) is REFUSED with exit 2, never read as newline mode"
+else
+  no "--nul exited $nul_rc ('$nul_out'), wanted 2"
+fi
 echo
 
 echo "----"
