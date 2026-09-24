@@ -82,7 +82,7 @@ defmodule Barkpark.Tasks.CriteriaRequiredFence do
       merges patches BEFORE it validates (`Content.Writer`, PDS-D393), so a
       content-only rule that ignored the prior row would be RETROACTIVE and
       422 every future patch to an already-criteria-less row — the tombstone
-      fence's lesson (`Writer.ensure_close_reason_lands_with_a_close/6`). This
+      fence's lesson (`Tasks.ChangeGuards.close_reason_lands_with_a_close/6`). This
       fence is about the BIRTH, and it is the birth that the three backfills
       kept losing to.
     * **A root row, or a child of an unflagged parent.** The whole point of the
