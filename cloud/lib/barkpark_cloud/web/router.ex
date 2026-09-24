@@ -1856,6 +1856,16 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/account/two-factor/confirm {code}
   #   → 200 {recovery_codes: [...]} — 2FA now ON; codes shown EXACTLY once
   #   → 422 {error: "invalid_otp" | "not_enrolled"}
+  #
+  # NO RATE LIMITER HERE, ON PURPOSE (task gr-backlog-tfa-confirm-throttle).
+  # The caller is already authenticated, the pending secret it would be guessing
+  # was handed to this same session by /enroll, and this same session can
+  # DELETE /v1/account/two-factor outright — so a throttle closes no boundary.
+  # A future limiter here MUST use its own key namespace, never
+  # TwoFactorRateLimiter (that budget belongs to the login challenge; sharing it
+  # would let fumbled enrollment lock a user out of signing in), and needs a
+  # documented lesser-principal threat first (e.g. an admin or a scoped token
+  # reaching this route on another user's behalf).
   post "/v1/account/two-factor/confirm" do
     conn = Auth.require_user(conn, [])
 

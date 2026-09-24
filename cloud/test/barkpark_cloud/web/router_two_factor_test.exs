@@ -289,6 +289,10 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
       assert call(:post, "/v1/account/two-factor/enroll", %{}).status == 401
       assert call(:get, "/v1/account/two-factor", nil).status == 401
       assert call(:delete, "/v1/account/two-factor", nil).status == 401
+      # The two routes that RETURN secret material (recovery codes). Pinned so a
+      # router refactor that drops Auth.require_user from either reds here.
+      assert call(:post, "/v1/account/two-factor/confirm", %{code: "000000"}).status == 401
+      assert call(:post, "/v1/account/two-factor/recovery-codes", %{}).status == 401
     end
 
     test "regenerate recovery codes invalidates the old set" do

@@ -793,6 +793,16 @@ if System.get_env("BARKPARK_ALLOW_BUNDLE_IMPORT") in ~w(1 true yes on) do
   config :barkpark, :allow_bundle_import, true
 end
 
+# Filing-law HARD tier for an ABSENT `surface` under cloud-console-hardening-epic
+# (cch-w28-s4-followup). Fail-open by design: OFF unless the env var is truthy,
+# and `Barkpark.Tasks.BirthGuards.surface_declared/6` reads the key with a false
+# default at call time. Off = an undeclared surface is warned and allowed
+# (`filing law: undeclared surface`); on = refused 422. Flip it only once the
+# open epic rows carry a surface — see that guard's header.
+if System.get_env("BARKPARK_FILING_LAW_ABSENT_SURFACE_HARD") in ~w(1 true yes on) do
+  config :barkpark, :filing_law_absent_surface_hard, true
+end
+
 # INSTANCE-OPERATOR allowlist (task-c7e2b87f1bbca815), mirroring cloud's
 # PLATFORM_ADMIN_EMAILS shape (cloud/config/runtime.exs). Comma-separated, in
 # ALL envs. BOTH unset/blank => the lists stay [] => UNSET => legacy behaviour

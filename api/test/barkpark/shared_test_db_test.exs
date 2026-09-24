@@ -31,6 +31,7 @@ defmodule Barkpark.SharedTestDbTest do
       %{
         database: "barkpark_test_lane",
         partition: "lane",
+        partition_source: :explicit,
         residue: [{"epic_assignments", 0}, {"share_links", 0}, {"documents", 0}],
         tables_inspected: ["epic_assignments", "share_links", "documents"],
         applied_versions: [20_260_101_000_000, 20_260_102_000_000],
@@ -78,6 +79,28 @@ defmodule Barkpark.SharedTestDbTest do
 
       assert {:ok, findings} = SharedTestDb.assess(obs)
       assert {:migration_drift, :db_ahead_of_checkout, [20_260_103_999_999]} in findings
+
+      # task-a0b11b3ae0cf45f0: the red names the version AND where it was seen.
+      report = SharedTestDb.drift_report(obs)
+      assert report =~ "20260103999999"
+      assert report =~ ~s("barkpark_test_lane")
+      assert report =~ ~s("lane")
+      assert report =~ "another branch migrated this database"
+    end
+
+    test "drift_report is nil when there is no drift, and names EVERY version when there is" do
+      assert SharedTestDb.drift_report(clean_observation()) == nil
+
+      many = Enum.map(1..5, &(20_260_200_000_000 + &1))
+
+      obs =
+        clean_observation(%{
+          applied_versions: [20_260_101_000_000, 20_260_102_000_000 | many],
+          checkout_versions: [20_260_101_000_000, 20_260_102_000_000]
+        })
+
+      report = SharedTestDb.drift_report(obs)
+      for v <- many, do: assert(report =~ Integer.to_string(v))
     end
 
     test "a database missing a checkout migration is DB-BEHIND (a mid-flight up/down test)" do
@@ -219,7 +242,88 @@ defmodule Barkpark.SharedTestDbTest do
       drift = Enum.filter(findings, &match?({:migration_drift, _, _}, &1))
 
       assert drift == [],
-             "this database's schema is not this checkout's: #{inspect(drift)}"
+             "this database's schema is not this checkout's: " <>
+               "#{SharedTestDb.drift_report(obs)} (raw: #{inspect(drift)})"
+    end
+  end
+
+  describe "REAL: the ahead-of-checkout red, forced, names the version and the database" do
+    # task-a0b11b3ae0cf45f0 criterion 2. The fake version is inserted INSIDE this
+    # test's sandbox transaction, so it is never committed: `observe/2` runs in
+    # this process on the sandbox connection and sees it, every other connection
+    # does not, and the rollback at test end removes it even if the test crashes.
+    # 9999-12-31 23:59:59 is later than any migration a checkout can carry.
+    @fake_version 99_991_231_235_959
+
+    test "an uncommitted foreign schema_migrations row reds with version AND database" do
+      :ok = Sandbox.checkout(Barkpark.Repo)
+
+      Ecto.Adapters.SQL.query!(
+        Barkpark.Repo,
+        "INSERT INTO schema_migrations (version, inserted_at) VALUES ($1, now())",
+        [@fake_version]
+      )
+
+      obs = SharedTestDb.observe(Barkpark.Repo)
+
+      # NON-VACUITY: the probe ran against the database this suite is on.
+      assert obs.database == Barkpark.Repo.config()[:database]
+      assert is_list(obs.applied_versions) and @fake_version in obs.applied_versions
+      refute @fake_version in obs.checkout_versions
+
+      {:ok, findings} = SharedTestDb.assess(obs)
+      assert {:migration_drift, :db_ahead_of_checkout, [@fake_version]} in findings
+
+      report = SharedTestDb.drift_report(obs)
+      assert report =~ Integer.to_string(@fake_version)
+      assert report =~ inspect(obs.database)
+      assert report =~ "chosen by"
+
+      # the banner a builder actually reads carries both as well
+      banner = SharedTestDb.banner(obs)
+      assert banner =~ Integer.to_string(@fake_version)
+      assert banner =~ inspect(obs.database)
+    end
+
+    test "CONTROL: the fake version never reached any other connection" do
+      applied =
+        Sandbox.unboxed_run(Barkpark.Repo, fn ->
+          %{rows: rows} =
+            Ecto.Adapters.SQL.query!(
+              Barkpark.Repo,
+              "SELECT version FROM schema_migrations WHERE version = $1",
+              [@fake_version]
+            )
+
+          rows
+        end)
+
+      assert applied == []
+    end
+  end
+
+  describe "which database this run is on" do
+    test "the always-printed line names the database, the partition, and why" do
+      line = SharedTestDb.which_line(clean_observation())
+      assert line =~ "BARKPARK-TEST-DB"
+      assert line =~ ~s("barkpark_test_lane")
+      assert line =~ "MIX_TEST_PARTITION (set explicitly)"
+
+      default =
+        SharedTestDb.which_line(
+          clean_observation(%{partition: "_wt_x_1", partition_source: :worktree_default})
+        )
+
+      assert default =~ "per-checkout default"
+
+      ci = SharedTestDb.which_line(clean_observation(%{partition: nil, partition_source: :ci}))
+      assert ci =~ "unpartitioned"
+      assert ci =~ "CI"
+    end
+
+    test "the live run's partition comes from config, and matches the database name" do
+      %{suffix: suffix} = Application.fetch_env!(:barkpark, :test_db_partition)
+      assert Barkpark.Repo.config()[:database] == "barkpark_test" <> suffix
     end
   end
 

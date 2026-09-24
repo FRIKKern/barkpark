@@ -80,7 +80,10 @@ defmodule Barkpark.Content.PreWriteFences do
   ONE ordered list, no phases (task-2978357a0701cd10). Slice B needed an
   `:early` / `:late` split only because two writer-owned birth guards sat
   between the Tasks fences; they are Tasks fences now, so the list alone
-  carries the order.
+  carries the order. The writer's two change guards (transition legality,
+  close reason lands with a close) that ran just before this list are its
+  first two entries since task-d91ccf54d43b9800, so the writer runs nothing
+  task-specific around it.
   """
   @spec run([Barkpark.Plugin.pre_write_fence()], list()) :: :ok | term()
   def run(fences, args) do

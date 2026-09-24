@@ -48,6 +48,15 @@ a lying harness and a lying rate limiter are the same defect class pointed at di
    overstates. **And a review owed before merge is FILED AS A ROW** — that law was written in wave 9,
    kept only as Paper prose in waves 9, 10 and 11, and was 0-for-3 until wave 12 filed
    `cch-w12-bl-independent-review-owed-wave-12`.
+   **A live-count CRITERION is a DELTA, never an absolute floor** (added 2026-09-24,
+   `cch-bl-live-count-criteria-must-be-deltas-not-absolute-floors`). Other sessions file into these
+   rosters while a slice runs, so write "the live count drops by at least N, against a before-census
+   taken in the same run", never "the live count is at or below X". Wave 54's arrears slice carried
+   "live at or below 340", computed as the decide-time 365 minus its 25 closes; by build time the
+   roster was 382, the slice closed all 25 it was authorised to close, and the best it could reach
+   was 357. The floor could only be met by closing a row nobody had verified, so it was a criterion
+   that only a lie could satisfy. Both census reads come from the same instrument in the same run,
+   and the evidence quotes both numbers and the difference.
 
 1. **Cite MERGE SHAs, never branch SHAs.** `origin/main` is a linear squash chain, so
    `git merge-base --is-ancestor <branch-head> origin/main` always false-negatives. Get the SHA from
