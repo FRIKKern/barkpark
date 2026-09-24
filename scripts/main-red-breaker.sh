@@ -754,25 +754,47 @@ log_marked = False      # main used the unambiguous one-name-per-line markers
 log_ambiguous = False   # only the legacy ';'-joined sentence was available AND it
                         # held a ';' — so the split may have shredded a step name
                         # that legitimately contains one (M4).
-head = "main-red-breaker: FAIL — '%s' failed on" % want
-mark = "main-red-breaker: MAIN-FAILED-STEP in '%s': " % want
-green = "main-red-breaker: no gate step failed in '%s'" % want
+# THE QUOTED JOB NAME, and why it is a pattern rather than a literal
+# (task-658971cd9db61621). These three lines are the READ side of a wire format
+# whose WRITE side is the `say` calls near the top of this file, on main's push
+# run. Both sides take the name from the Decide step's JOB_NAME env, not from the
+# jobs API, so today they agree for every breaker job INCLUDING the security.yml
+# matrix jobs: JOB_NAME there carries no ' (27.0, 1.18.1)' tuple on either side
+# (main job 107532012469, 2026-09-24: "no gate step failed in 'Sobelow static
+# analysis (regression gate, baseline .sobelow-skips)'", parsed). The optional
+# ' (…)' tail is M1's matrix-leg convention applied to the one name-matching
+# site that lacked it, so a JOB_NAME that someday carries the tuple on the
+# writer's side and not the reader's still round-trips. It is NOT a second
+# spelling of the name: the leading part is re.escape()d and must match whole.
+NAMED = r"'%s(?: \([^()']*\))?'" % re.escape(want)
+head = re.compile(r"main-red-breaker: FAIL — " + NAMED + r" failed on")
+mark = re.compile(r"main-red-breaker: MAIN-FAILED-STEP in " + NAMED + r": ")
+green = re.compile(r"main-red-breaker: no gate step failed in " + NAMED)
 legacy = set()
+# LIVENESS (task-658971cd9db61621 c1/c4). log_parsed going false is SILENT: the
+# classifier just stops finding PASSED and every red reads UNDETERMINED. So the
+# reader also records whether it READ a log at all and whether that log held ANY
+# line this script writes — the difference between "main's Decide did not run"
+# and "main's Decide wrote something this reader no longer understands".
+decide_lines_read, breaker_seen = 0, []
 try:
     for raw in open(log_path, errors="replace"):
         line = raw.rstrip("\r\n")
-        if green in line:
+        decide_lines_read += 1
+        if "main-red-breaker: " in line and len(breaker_seen) < 3:
+            breaker_seen.append(line[line.find("main-red-breaker: "):][:160])
+        if green.search(line):
             log_green = True; log_parsed = True
-        k = line.find(mark)
-        if k >= 0:
-            name = line[k + len(mark):].strip()
+        km = mark.search(line)
+        if km:
+            name = line[km.end():].strip()
             if name:
                 log_failed.add(name); log_marked = True; log_parsed = True
             continue
-        i = line.find(head)
-        if i < 0:
+        hm = head.search(line)
+        if not hm:
             continue
-        m = re.search(r":\s*(.*?)\.\s+(?:This is not a pull_request run|\(Main run |Main's newest)", line[i + len(head):])
+        m = re.search(r":\s*(.*?)\.\s+(?:This is not a pull_request run|\(Main run |Main's newest)", line[hm.end():])
         if not m:
             continue
         log_parsed = True
@@ -993,12 +1015,25 @@ else:
 # every all-green, clean-log job as newly accusable without checking whether the
 # job ALREADY had a proof — and an all-green main job makes the breaker print
 # "no gate step failed in '<job>'" into its own log, which sets `log_green` ->
-# `log_parsed` -> already a pass. The 10 that remain are real: they are the
-# security.yml matrix jobs (Sobelow, Dependency CVE audit), whose Decide line
-# does not round-trip under their matrix-suffixed job names. A denominator
-# derived from the property being measured cannot detect that property's
-# absence; log_parsed had to be READ out of the log, exactly as this script
-# reads it.
+# `log_parsed` -> already a pass. A denominator derived from the property being
+# measured cannot detect that property's absence.
+#
+# AND THE "10 THAT REMAIN" WERE ALSO AN INSTRUMENT ERROR — RE-MEASURED
+# 2026-09-24 (task-658971cd9db61621 c0). They were the security.yml matrix jobs
+# (Sobelow, Dependency CVE audit), said not to round-trip under their
+# matrix-suffixed names. They do round-trip: main's writer and this reader both
+# take the name from JOB_NAME, which carries no tuple. The 2026-09-08 pass read
+# the log with the jobs API's RENDERED name ("… (27.0, 1.18.1)"), which this
+# script never does. Re-derived by running THIS classifier (fixture mode +
+# MAIN_RED_BREAKER_REPORT_OUT) over 377 executed breaker jobs in 203 main push
+# runs, 2026-09-10..09-24, all 10 breaker jobs:
+#     api_trusted 0/377 · log_parsed 377/377 · job_trusted 252/377 · none 0/377
+#     log_parsed the ONLY proof: 125/377 (every red main job, plus 24 green
+#     CVE-audit jobs whose ##[error] the masking detector reads as AMBIG)
+# Handing the reader the rendered name instead reproduces the old claim
+# exactly: Sobelow + CVE audit drop to log_parsed 0/88, the rest unchanged.
+# THE SINGLE-LEG DEPENDENCY IS REAL; ITS KNOWN CRACK WAS NOT. The DECIDE-LINE
+# UNREADABLE line below exists because the leg can still break silently.
 job_trusted = job_all_success and mask_state == "NOERR"
 
 print("STATUS=%s" % status)
@@ -1007,6 +1042,13 @@ print("JOBCONCL=%s" % ",".join(str(c) for c in job_concls))
 print("LOGPARSED=%d" % int(log_parsed))
 print("LOGGREEN=%d" % int(log_green))
 print("LOGAMBIGUOUS=%d" % int(log_ambiguous))
+print("LOGMARKED=%d" % int(log_marked))
+# PARSED: a Decide line for this job was read. NOLOG: there was no log to read.
+# UNREADABLE: a log WAS read and none of the three lines parsed — the silent
+# global failure this state exists to make loud.
+print("DECIDESTATE=%s" % ("PARSED" if log_parsed else ("NOLOG" if decide_lines_read == 0 else "UNREADABLE")))
+print("DECIDESEEN=%s" % " | ".join(x.replace("\t", " ") for x in breaker_seen))
+print("APITRUSTED=%d" % int(api_trusted))
 print("MASKSTATE=%s" % mask_state)
 print("MASKEDSTEPS=%s" % ";".join(sorted(masked_steps)))
 print("JOBTRUSTED=%d" % int(job_trusted))
@@ -1098,6 +1140,32 @@ case "$MASKSTATE" in
 esac
 cls_of() { awk -F'\t' -v c="$1" '$1=="STEP" && $2==c {print $3}' "$TMPD/report.txt"; }
 NOTREACHED="$(cls_of NOTREACHED)"; PASSED="$(cls_of PASSED)"; UNKNOWN="$(cls_of UNKNOWN)"; FAILEDONMAIN="$(cls_of FAILED)"
+
+# ── DECIDE-LINE LIVENESS (task-658971cd9db61621 c1/c4) ──────────────────────
+# The accusing path rests on main's own Decide line round-tripping: api_trusted
+# is unreachable by construction (every gate step is continue-on-error, see its
+# comment) and job_trusted needs an all-green, error-free main job. If that line
+# stops parsing — its wording changes, a workflow stops emitting it, JOB_NAME
+# drifts between main and the PR — log_parsed goes false for EVERY breaker job
+# at once and nothing reds: every red simply reads OWNERSHIP-UNDETERMINED. That
+# is a guard failing by going quiet. So when main's log WAS read and no Decide
+# line for this job parsed, say so on its own line and its own annotation,
+# distinct from the UNDETERMINED verdict that may follow. It is a SIGNAL, not a
+# verdict: nothing below changes because of it, and it can never make the
+# breaker more accusing (it only ever fires when a pass proof is MISSING).
+# The harness pins it both ways (arms 27a-27h, and the writer->reader round trip
+# that reds when either side's wording moves).
+DECIDESTATE="$(get DECIDESTATE)"
+if [ "$DECIDESTATE" = "UNREADABLE" ]; then
+  DECIDESEEN="$(get DECIDESEEN)"
+  if [ -n "$DECIDESEEN" ]; then
+    _dl_why="main's log DOES carry main-red-breaker line(s), so its Decide step ran and wrote something this reader cannot parse for this job — the marker FORMAT or the JOB_NAME has drifted between writer and reader, which silences the accusing path for every breaker job at once. First line(s) seen: ${DECIDESEEN}"
+  else
+    _dl_why="main's log carries NO main-red-breaker line at all, so main's Decide step did not run or printed nothing (job cancelled or timed out before it, or the step was removed or renamed)."
+  fi
+  say "DECIDE-LINE UNREADABLE — main's job log for '${JOB_NAME}' was READ but none of the lines main's Decide step writes for this job parsed. Looked for: \"main-red-breaker: MAIN-FAILED-STEP in '${JOB_NAME}': <step>\", \"main-red-breaker: FAIL — '${JOB_NAME}' failed on: …\", \"main-red-breaker: no gate step failed in '${JOB_NAME}'\". ${_dl_why} Without it the breaker cannot use main's own verdict as a pass proof, so it will accuse only on other evidence. ${MAIN_RUN_DESC}" >&2
+  echo "::warning title=Main-red breaker: Decide line unreadable::main's log for '${JOB_NAME}' was read but its Decide line did not parse (looked for MAIN-FAILED-STEP / FAIL / no gate step failed in '${JOB_NAME}'). ${_dl_why}"
+fi
 
 # M3: four states that used to share one confident "GREEN or absent" sentence.
 if [ "$STATUS" = "NOJSON" ]; then
