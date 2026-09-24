@@ -71,7 +71,7 @@ defmodule BarkparkWeb.DocumentOpsController do
 
     case Content.apply_document_block_op(target, type, op, dataset, opts) do
       {:ok, result} ->
-        json(conn, %{ok: true, result: result})
+        json(conn, %{result: result})
 
       {:error, :not_found} ->
         ErrorResponse.emit(conn, {:error, :not_found})

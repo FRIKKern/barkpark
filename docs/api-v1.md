@@ -105,7 +105,7 @@ Failures: §9. A write whose searchable text (title + every string in `content`)
 
 ### 6a. `POST /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops` [token]
 
-One PortableDoc block op on any document type (Studio's block editor, over HTTP). Body `{"op":{…},"ifRev":"<_rev>"}`, `ifRev` required; edits `drafts.<id>` if any. Stale rev → `412`; papers/sessions → `422 invalid_op` (use their Bulldocs ops routes); unknown type → `404`. Success: `{ok, result}`.
+One PortableDoc block op on any document type (Studio's block editor, over HTTP). Body `{"op":{…},"ifRev":"<_rev>"}`, `ifRev` required; edits `drafts.<id>` if any. Stale rev → `412`; papers/sessions → `422 invalid_op` (use their Bulldocs ops routes); unknown type → `404`. Success: `{result}`.
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
