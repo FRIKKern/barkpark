@@ -1,4 +1,4 @@
-// spellings.mjs — PDS-D390. THE FOUR FORBIDDEN SPELLINGS, EACH REFUSED WITH A
+// spellings.mjs — PDS-D390 (+ PDS-D750). THE FIVE FORBIDDEN SPELLINGS, EACH REFUSED WITH A
 // NAMED LEGAL SUBSTITUTE.
 //
 // WHY THIS LAYER EXISTS AT ALL, GIVEN grip ALREADY HAS A SCREEN. Measured on
@@ -162,6 +162,29 @@ function hasMergeBaseIsAncestor(command) {
   return /\bgit\b[^|;&]*\bmerge-base\b/.test(s) && /--is-ancestor\b/.test(s);
 }
 
+/**
+ * Is this a DEFINITION-SHAPED `git grep` whose pattern is a PREFIX match?
+ * (PDS-D750, the fifth arm; Elixir twin: :prefix_match_probe.)
+ *
+ * `git grep` matches a SUBSTRING, so `'defp apply_engagement'` still hits after
+ * a suffix rename to `defp apply_engagement_RENAMED(` — measured exit 0 against
+ * the mutated ref, printing the renamed line as its evidence. Refused only when
+ * the QUOTED pattern opens with a definition keyword + an identifier AND ends in
+ * [A-Za-z0-9_] that is not the `b` of `\b`. A bare reference
+ * (`ROSTER_PAGE_LIMIT`, a quoted charter sentence) is NOT refused: 432 of the
+ * corpus's 440 identifier-tail reruns are references with no delimiter to add.
+ *
+ * ONE REGEX, THE WRITER'S, CHARACTER FOR CHARACTER. This arm is a shape over
+ * the raw string, not a head-token rule, so the mirror is the same expression
+ * rather than a re-derivation in tokens(); the fixture pins both.
+ */
+const PREFIX_MATCH_PROBE =
+  /(?<![\w.-])git\s+grep(?:\s+(?:-[mABCf]|--max-count)\s+\S+|\s+-(?!-(?:\s|$))\S*)*\s+(?:'\s*(?:defp?|defmodule|defmacrop?|defstruct|func|function|class|type|struct|interface|const|let|var|fn|pub\s+fn)\s+[A-Za-z_](?:[^']*[A-Za-z0-9_])?(?<!\\b)'|"\s*(?:defp?|defmodule|defmacrop?|defstruct|func|function|class|type|struct|interface|const|let|var|fn|pub\s+fn)\s+[A-Za-z_](?:[^"]*[A-Za-z0-9_])?(?<!\\b)")/;
+
+function hasPrefixMatchProbe(command) {
+  return PREFIX_MATCH_PROBE.test(String(command));
+}
+
 // ORDER IS PART OF THE ANSWER. A command can breach more than one rule; the
 // first match is reported because the author has to fix that one first, and a
 // list of four names is not more actionable than the one that blocks them.
@@ -212,6 +235,18 @@ const RULES = Object.freeze([
       `${LEGAL_SUBSTITUTES.EXISTENCE} — measured on this host: exit 0 printing \`blob\` when the path ` +
       "is present, exit 128 `fatal: path '…' does not exist in 'origin/main'` when it is not, which " +
       "grip rules PATH-GONE and therefore a real absence answer.",
+  },
+  {
+    // LAST, as on the writer: a command an earlier arm refuses keeps its name.
+    name: "PREFIX-MATCH-PROBE",
+    test: hasPrefixMatchProbe,
+    message:
+      "a definition-shaped `git grep` pattern that ends in an identifier character is a PREFIX " +
+      "match — `git grep` matches a substring, so `'defp apply_engagement'` still hits after a " +
+      "suffix rename to `defp apply_engagement_RENAMED(` and prints the renamed line as its " +
+      "evidence. Terminate the pattern: the language's delimiter (`'defp apply_engagement('`), " +
+      "`$`, or `\\b` — " + `${LEGAL_SUBSTITUTES.CONTENT} with <token> terminated. A deliberate FAMILY ` +
+      "probe (`'defp handle_'`) takes one character: `'defp handle_[a-z]'`.",
   },
 ]);
 

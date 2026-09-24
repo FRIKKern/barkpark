@@ -486,7 +486,32 @@ defmodule Barkpark.Tasks.Stage do
        "so the inner probe's failure is swallowed"},
     {:filesystem_predicate, ~r/(?:^|[|;&]\s*)(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:test|\[)\s/,
      "a `test` / `[` predicate asserts about the local CHECKOUT — per-machine state that " <>
-       "says nothing about origin/main"}
+       "says nothing about origin/main"},
+    # PDS-D750. LAST of the regex arms, so a command an earlier arm already
+    # refuses keeps its code. `git grep` matches a SUBSTRING, so a
+    # definition-shaped pattern ending in an identifier character is a PREFIX
+    # match and survives a suffix rename: measured, `git grep -n 'defp
+    # apply_engagement'` exits 0 against a ref where the function is
+    # `apply_engagement_RENAMED`, printing the renamed line as its hit.
+    #
+    # NARROW ON PURPOSE (440 of 470 corpus git-grep reruns end in a bare
+    # identifier; 8 are definition-shaped). The pattern must be QUOTED, OPEN
+    # with a definition keyword + an identifier, and END in [A-Za-z0-9_] that is
+    # not the `b` of `\b`. A reference (`ROSTER_PAGE_LIMIT`, a quoted charter
+    # sentence) is not refused. The keyword set is the reader seam's
+    # (scripts/pds-rerun-symbol-coverage.py DEF_KEYWORD), so the writer refuses
+    # exactly what the census names. Pattern slot: the first token after
+    # `git grep` that is not an option; `-m/-A/-B/-C/-f/--max-count` consume
+    # their argument, `--` ends the options (what follows is a path).
+    # Mirrored by tooling/pds/spellings.mjs PREFIX-MATCH-PROBE.
+    {:prefix_match_probe,
+     ~r/(?<![\w.-])git\s+grep(?:\s+(?:-[mABCf]|--max-count)\s+\S+|\s+-(?!-(?:\s|$))\S*)*\s+(?:'\s*(?:defp?|defmodule|defmacrop?|defstruct|func|function|class|type|struct|interface|const|let|var|fn|pub\s+fn)\s+[A-Za-z_](?:[^']*[A-Za-z0-9_])?(?<!\\b)'|"\s*(?:defp?|defmodule|defmacrop?|defstruct|func|function|class|type|struct|interface|const|let|var|fn|pub\s+fn)\s+[A-Za-z_](?:[^"]*[A-Za-z0-9_])?(?<!\\b)")/,
+     "a definition-shaped `git grep` pattern that ends in an identifier character is a " <>
+       "PREFIX match — `git grep` matches a substring, so `'defp apply_engagement'` still " <>
+       "hits after a suffix rename to `defp apply_engagement_RENAMED(` and prints the " <>
+       "renamed line as its evidence. Terminate the pattern: the language's delimiter " <>
+       "(`'defp apply_engagement('`), `$`, or `\\b`. A deliberate FAMILY probe " <>
+       "(`'defp handle_'`) takes one character: `'defp handle_[a-z]'`"}
   ]
 
   # Why the assignment prefix is stepped over (pds-w28-bl-two-rerun-screens-drift):
@@ -642,7 +667,8 @@ defmodule Barkpark.Tasks.Stage do
   @doc """
   THE WRITE SEAM'S SCREEN, AS A PURE FUNCTION — `nil` when the rerun is legal,
   otherwise the refusal code (`:repo_redirect`, `:merge_base_ancestor`,
-  `:command_substitution`, `:filesystem_predicate`, `:pipe_masked`).
+  `:command_substitution`, `:filesystem_predicate`, `:prefix_match_probe`,
+  `:pipe_masked`).
 
   Made public for ONE reason: `tooling/pds/spellings.mjs` is a SECOND screen for
   the same law, and until this row nothing re-derived that the two agreed — they
