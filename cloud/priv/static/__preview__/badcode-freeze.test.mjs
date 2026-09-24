@@ -58,6 +58,9 @@
 // ───────
 // 2026-09-20  created (task-f8318f7734a52c52). Preview-suite pin re-measured in
 //             the same PR: 225 -> 230 over 15 suites, node 22.22.0.
+// 2026-09-24  the browser arm also asserts the TWIN property (gr-backlog-scenario-
+//             drive-field): no badcode PNG byte-identical to its plain twin. Added
+//             INSIDE the existing test, so `# pass` does not move.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -173,6 +176,24 @@ test('two clean shoots of the badcode drive produce byte-identical PNGs', { time
     }
     runs.push({ out, log });
   }
+
+  // THE TWIN ASSERTION (gr-p5r5; kept by gr-backlog-scenario-drive-field). Before
+  // the drive existed every badcode PNG was byte-identical to its plain twin —
+  // 20 files, one sha256, and a green count certifying them. It lived only in a
+  // PR body until now. It runs BEFORE the control-stability early return below
+  // on purpose: a control that drifts can only make the pair MORE different, so
+  // it never voids this comparison.
+  const twins = runs.flatMap((run, i) => SHOTS
+    .filter((s) => fs.readFileSync(join(run.out, `${BADCODE}-${s}-iris.png`))
+      .equals(fs.readFileSync(join(run.out, `${CONTROL}-${s}-iris.png`))))
+    .map((s) => `  run ${i + 1}: ${BADCODE}-${s}-iris.png == ${CONTROL}-${s}-iris.png`));
+  assert.deepEqual(
+    twins,
+    [],
+    `the badcode shot photographed its plain twin again:\n${twins.join('\n')}\n` +
+      'The scenario\'s declared `modal` driver (account-2fa-badcode in scenarios.mjs, ' +
+      'MODAL_DRIVERS in mock.js) did not drive the enrollment through to the 422.',
+  );
 
   // THE PRECONDITION, asserted: the control shots must be stable on this host.
   const controlMoved = SHOTS.filter(
