@@ -47,10 +47,18 @@ defmodule BarkparkWeb.Studio.ChatTaskSeam do
   @typedoc "A resolved task reader: the paper task resolver module, or nil (unavailable)."
   @type t :: module() | nil
 
-  @doc "The task reader for `workspace_id`, or nil when tasks are unavailable there."
+  @doc """
+  The task reader for `workspace_id`, or nil when tasks are unavailable there.
+
+  A `nil` workspace (the flat instance-admin mount, or a viewer authorized
+  nowhere) resolves against the plugins' DECLARATION defaults, the same
+  `Enablement.effective(nil)` answer every other workspace-less surface gets.
+  That keeps the flat admin's global epic-goal fold; the workspace-keyed reads
+  stay fail-closed on their own (ChatLive short-circuits a nil workspace).
+  """
   @spec resolve(binary() | nil) :: t()
-  def resolve(nil), do: nil
-  def resolve(workspace_id) when is_binary(workspace_id), do: PaperTaskSeam.resolver(workspace_id)
+  def resolve(workspace_id) when is_binary(workspace_id) or is_nil(workspace_id),
+    do: PaperTaskSeam.resolver(workspace_id)
 
   @doc "Whether a resolved reader can serve task reads."
   @spec available?(t()) :: boolean()

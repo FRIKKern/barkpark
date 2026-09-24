@@ -163,6 +163,10 @@ defmodule BarkparkWeb.Studio.ChatTaskSeamTest do
     test "the same fixture shows the held claim, the toggle and the ready row", ctx do
       assert ChatTaskSeam.resolve(ctx.ws.id) == Barkpark.Tasks.PaperResolver
 
+      # A workspace-less viewer (the flat instance-admin mount) resolves the
+      # declaration defaults, so its global epic-goal fold survives.
+      assert ChatTaskSeam.resolve(nil) == Barkpark.Tasks.PaperResolver
+
       view = mount!(ctx)
       assert_loaded!(view, ctx, Barkpark.Tasks.PaperResolver)
 
