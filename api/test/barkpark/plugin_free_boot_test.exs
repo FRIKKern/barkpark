@@ -499,6 +499,13 @@ defmodule Barkpark.PluginFreeBootTest do
       assert Barkpark.Plugins.Registry.collect_pre_publish_fences() == []
     end
 
+    test "no pre-write transform resolves: a write runs no plugin transform or check under :plugins []" do
+      # task-aed4f02e57d3a760 — the Tasks brief re-sync and kind check moved
+      # behind `pre_write_transforms/0`; with nothing registered the writer
+      # stores a write's attrs as sent.
+      assert Barkpark.Plugins.Registry.collect_pre_write_transforms() == []
+    end
+
     test "GET /studio/production renders 200 with Structure marker (following the scoped-shell redirect)" do
       conn = get_following_redirects("/studio/production")
       body = html_response(conn, 200)

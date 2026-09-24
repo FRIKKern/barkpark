@@ -880,6 +880,42 @@ defmodule Barkpark.Plugin do
   """
   @callback pre_publish_fences() :: [pre_publish_fence()]
 
+  # ── Pre-write transforms (Barkspark phase 1, task-aed4f02e57d3a760) ───
+
+  @typedoc """
+  The kind of one pre-write transform step (see
+  `Barkpark.Content.PreWriteTransforms`):
+
+    * `:transform` — called as `apply(module, function, [attrs, type])`;
+      returns the attrs, unchanged when the step does not apply.
+    * `:check` — called as `apply(module, function, [type, attrs])` on the
+      attrs every earlier step produced; returns `:ok` or a refusal the write
+      returns VERBATIM.
+  """
+  @type pre_write_transform_kind :: :transform | :check
+
+  @typedoc "One pre-write transform step: `{kind, module, function}`."
+  @type pre_write_transform :: {pre_write_transform_kind(), module(), atom()}
+
+  @doc """
+  Declare the ORDERED steps the core writer runs over a write's attrs at the
+  last step of its attrs pipeline on both write doors (`create_document/4`,
+  `upsert_document/4`) — before the prev-doc read, the label-spine shape gate
+  and every `pre_write_fences/0` fence.
+
+  Published by `Barkpark.Plugins.Registry` to
+  `Barkpark.Content.PreWriteTransforms` and read there in plugin load order
+  (this list's order kept within a plugin). The writer runs them in that
+  order and stops at the first `:check` refusal; it names no task step of its
+  own at that position.
+
+  NOT filtered by per-workspace enablement and a raising declaration is NOT
+  swallowed — the same integrity-gate rules as `pre_write_fences/0`.
+
+  Default (supplied by `use Barkpark.Plugin`) returns `[]`.
+  """
+  @callback pre_write_transforms() :: [pre_write_transform()]
+
   # ── Lifecycle hooks callback (Goal barkpark-9lq) ─────────────────────
 
   @doc """
@@ -1085,6 +1121,7 @@ defmodule Barkpark.Plugin do
                       lifecycle_hooks: 0,
                       pre_write_fences: 0,
                       pre_publish_fences: 0,
+                      pre_write_transforms: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
                       cli_commands: 0,
@@ -1292,6 +1329,9 @@ defmodule Barkpark.Plugin do
       def pre_publish_fences, do: []
 
       @impl Barkpark.Plugin
+      def pre_write_transforms, do: []
+
+      @impl Barkpark.Plugin
       def api_tests, do: []
 
       @impl Barkpark.Plugin
@@ -1359,6 +1399,7 @@ defmodule Barkpark.Plugin do
                      lifecycle_hooks: 0,
                      pre_write_fences: 0,
                      pre_publish_fences: 0,
+                     pre_write_transforms: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,
                      cli_commands: 0,

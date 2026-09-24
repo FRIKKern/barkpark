@@ -1,7 +1,7 @@
 defmodule Barkpark.Content.Writer do
   @moduledoc """
   The document WRITE concern (E) — create / clone / upsert plus the write-path
-  helpers: envelope coercion, id/rev generation, task-kind validation, schema
+  helpers: envelope coercion, id/rev generation, plugin pre-write transforms, schema
   initial-values + Expectation scaffolding, deep-merge, and dynamic-token
   resolution.
 
@@ -31,36 +31,29 @@ defmodule Barkpark.Content.Writer do
   }
 
   alias Barkpark.Content.Papers.BlockOps
-  alias Barkpark.Content.PreWriteFences
+  alias Barkpark.Content.{PreWriteFences, PreWriteTransforms}
 
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
-  alias Barkpark.Tasks.BriefMirror
 
   require Logger
 
-  # W7a step 1 — task documents carry a tight `content` field contract
-  # (`Barkpark.Tasks.validate_kind_content/2`) on top of the generic
-  # schema-field validation. Enforced here at the write boundary so neither
-  # `create_document/4` nor `upsert_document/4` can land a malformed task
-  # row. Defense-in-depth: migration `20260528100000_w7a_task_schema` adds a
-  # DB CHECK constraint that catches raw-Repo writes that bypass this hook.
-  #
-  # Everything is a task — goals/phases/events are gone as document types.
-  # Returns `:ok` for non-task types so the existing post/page/paper write
-  # path is unaffected.
-  def validate_task_kind("task", attrs) do
-    content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
+  @doc """
+  Run the registered pre-write `:check` steps over `attrs` and answer `:ok`
+  or the first refusal, verbatim.
 
-    case Barkpark.Tasks.validate_kind_content("task", content) do
-      :ok ->
-        :ok
-
-      {:error, errors} ->
-        {:error, {:invalid_task_content, errors}}
+  Kept for callers of the old name: the task kind check that used to live
+  here is now the Tasks plugin's `Validation.validate_task_kind/2`, declared by
+  that plugin as a `pre_write_transforms/0` `:check` and run by the two
+  write doors through `Barkpark.Content.PreWriteTransforms` (task-aed4f02e57d3a760).
+  With plugins off nothing is registered and every write answers `:ok`.
+  """
+  @spec validate_task_kind(String.t(), map()) :: :ok | term()
+  def validate_task_kind(type, attrs) do
+    case PreWriteTransforms.run(PreWriteTransforms.list(), type, attrs) do
+      {:ok, _attrs} -> :ok
+      refusal -> refusal
     end
   end
-
-  def validate_task_kind(_type, _attrs), do: :ok
 
   @doc """
   Validate document content against its schema. Returns {:ok, content} or
@@ -268,14 +261,13 @@ defmodule Barkpark.Content.Writer do
            # continuous canvas keys its diff on block id, and an id-less block
            # projects to bpId:null → spurious insert-after → duplicate-block
            # corruption on the next edit. Additive (present ids preserved), idempotent.
-           |> maybe_ensure_block_ids()
-           # A task brief's `purpose-copy` and `criteria-list` blocks are composed
-           # from `description` and `acceptance_criteria`; only the CLI create path
-           # ever composed them, so every later edit froze the brief a dispatched
-           # worker reads first. Re-derive on every write, matching by exact block
-           # id and preserving every other block untouched.
-           |> BriefMirror.maybe_resync_task_brief(type),
-         :ok <- validate_task_kind(type, attrs),
+           |> maybe_ensure_block_ids(),
+         # THE PLUGIN PRE-WRITE TRANSFORMS (task-aed4f02e57d3a760): the last
+         # attrs step, then the checks that judge the result — the position the
+         # task brief re-sync and the task kind check held when this pipe named
+         # them (the Tasks plugin declares both, in that order). With plugins
+         # off the list is empty and the attrs pass through untouched.
+         {:ok, attrs} <- PreWriteTransforms.run(PreWriteTransforms.list(), type, attrs),
          :ok <- refuse_malformed_label_spine(type, attrs) do
       do_create_document(type, attrs, dataset, doc_id, opts)
     end
@@ -293,7 +285,7 @@ defmodule Barkpark.Content.Writer do
   # validating a write; it is committing half of one.
   #
   # This runs the SHAPE half BEFORE any row is persisted. It sits here — inside
-  # `create_document/4`'s pre-write `with`, beside `validate_task_kind/2` — for
+  # `create_document/4`'s pre-write `with`, beside the pre-write checks — for
   # the same reason the two collision gates sit at the top of that function: all
   # four create-family verbs (create / createOrReplace / createIfNotExists /
   # replace) funnel through this one function, so the gate covers the family
@@ -848,11 +840,11 @@ defmodule Barkpark.Content.Writer do
            # XSS hardening (mirror of create_after_dedup): scrub a verbatim
            # content["body_html"] on the patch/autosave path so poisoned markup
            # never persists as a draft that publish later promotes unchanged.
-           |> maybe_sanitize_paper_body_html(type)
-           # Same brief re-sync as the create path — this is the door a `patch`
-           # comes through, and the one the drift was measured on.
-           |> BriefMirror.maybe_resync_task_brief(type),
-         :ok <- validate_task_kind(type, attrs) do
+           |> maybe_sanitize_paper_body_html(type),
+         # Same plugin pre-write transforms as the create path, at the position
+         # the brief re-sync and kind check held — this is the door a `patch`
+         # comes through (task-aed4f02e57d3a760).
+         {:ok, attrs} <- PreWriteTransforms.run(PreWriteTransforms.list(), type, attrs) do
       do_upsert_document(type, attrs, dataset, doc_id, opts)
     end
   end
@@ -936,7 +928,7 @@ defmodule Barkpark.Content.Writer do
 
     # Transition gate (`Tasks.ChangeGuards.transition_legal/6`, the first
     # pre-write fence) immediately after prev-doc resolution, BEFORE
-    # :before_save fires — a refusal is side-effect-free (the validate_task_kind
+    # :before_save fires — a refusal is side-effect-free (the pre-write check
     # position precedent).
     #
     # THE BIRTH GUARDS RIDE HERE TOO (cch-w28, D331). This function has its own
@@ -986,7 +978,7 @@ defmodule Barkpark.Content.Writer do
     # FINAL whole-document content (patch merging, projection and block-id fill
     # all ran in `upsert_document/4`), so there is no pre-merge shape to warn
     # about. Placed before `:before_save` fires so an enforcing refusal is
-    # side-effect-free — the `validate_task_kind` position precedent.
+    # side-effect-free — the pre-write check position precedent.
     with :ok <- check_document_schema(type, attrs, dataset) do
       do_upsert_after_gate(type, attrs, dataset, ctx, prev_doc, opts)
     end
