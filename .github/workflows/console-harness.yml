@@ -318,16 +318,21 @@ jobs:
           #     `"cloud/priv/static/we\"ird.js"`, the anchored ERE below misses
           #     it, and this job reports a GREEN required context over a harness
           #     that never looked. `-z` emits the raw bytes, which cannot be
-          #     quoted; `tr` restores the line format the matcher reads.
+          #     quoted, and the matcher reads those NUL records itself (`--null`).
           #   * rename detection (default-on since git 2.9) prints only the
           #     DESTINATION, so `git mv cloud/priv/static/app.js docs/app.js`
           #     yields console=false while the file under test moved out from
           #     under the harness. `--no-renames` prints both sides.
-          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          # NUL-separated, ON DISK, never re-lined: the old `tr` back to lines
+          # split a path holding a NEWLINE into two pseudo-paths before the
+          # matcher saw it (cch-bl-nul-native-path-matcher). A file, not a
+          # variable: command substitution drops NUL bytes.
+          changed_z="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/console-dispatcher-changed.XXXXXX")"
+          git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" >"$changed_z"
           echo "changed files:"
-          printf '%s\n' "$changed"
+          while IFS= read -r -d '' f; do printf '%s\n' "$f"; done <"$changed_z"
 
-          if [ -z "$changed" ]; then
+          if [ ! -s "$changed_z" ]; then
             # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
             # PR, nets to nothing against the base. The old polarity failed here
             # — a permanently red required context on a legal PR, with no
@@ -392,12 +397,21 @@ jobs:
           # the script refuses rather than return it). Left bare under
           # `set -euo pipefail` that 2 killed this step with no classification,
           # and the merge button read a refusal as an ordinary failure.
+          # THE `--null` SKEW. A copy of the script that predates `--match … --null`
+          # does not refuse the flag, it IGNORES it and greps the NUL stream as
+          # ONE line: a silent false, not a refusal. The MATCH-INPUT-NUL token
+          # is how this step tells the two apart.
+          if [ -f "$pin_script" ] && ! grep -qF MATCH-INPUT-NUL "$pin_script"; then
+            verdict REFUSED
+            echo "::error::dispatcher REFUSED: ${pin_script} (read from ${pin_src}) predates '--match … --null' and would read the NUL-separated diff as ONE line. No path verdict is emitted — the harness runs or the gate reds, never a silent skip."
+            exit 1
+          fi
           rc=0
-          # A HERE-STRING, not a pipe (house D37): `--match` answers through
+          # A FILE REDIRECT, not a pipe (house D37): `--match` answers through
           # `grep -Eq`, which exits the instant it matches, and a writer still
           # holding bytes then takes SIGPIPE that `set -o pipefail` promotes
           # over the match that DID occur.
-          console="$(bash "$pin_script" --match console <<<"$changed")" || rc=$?
+          console="$(bash "$pin_script" --match console --null <"$changed_z")" || rc=$?
           if [ "$rc" -ne 0 ]; then
             case "$rc" in
               2) v=REFUSED ;;
