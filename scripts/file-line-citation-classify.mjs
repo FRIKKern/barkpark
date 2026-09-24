@@ -30,9 +30,13 @@
 //
 // ── THE LOCAL ANCHOR — the classifier's stricter test ─────────────────────────
 //
-// The checker scrapes anchors from the WHOLE charter line, so a 60-token row
-// resolves if any one word lands in a +/-3 window (over-credit). The classifier
-// uses a LOCAL anchor set instead — subjectOf() below: tokens from the backtick
+// "Does it resolve at HEAD?" is the CHECKER's question, and this file asks it
+// with the checker's own function, creditUnpinned() below (task-12d6e8868ef5d88a):
+// only the adjacent subject credits, never a common word. Until then this file
+// kept a copy of the checker's retired whole-line crediting (any backticked
+// word on the row landing in +/-3), and on one tree reported 175 unresolved
+// where the checker reported 321. The LOCAL anchor set is subjectOf() below —
+// the same set the checker credits by: tokens from the backtick
 // span that CONTAINS the citation, else the spans and quotes beside it (nearest
 // span ending within 80 chars before, nearest starting within 40 after, quotes
 // in the same window), ranked by distance; a directory prefix is never one.
@@ -62,10 +66,14 @@
 // reproduce the working charter byte-for-byte or the run exits 2 (UNCHECKED).
 //
 // ── BUCKETS ───────────────────────────────────────────────────────────────────
-//   R-LOCAL      checker resolves at HEAD and a LOCAL token lands too
-//   R-FOREIGN    checker resolves at HEAD only via a token NOT in the local set
-//                (over-credit suspects — the resolved-side audit samples these)
-//   R-NO-LOCAL   checker resolves at HEAD; no local subject to test it by
+// The resolve side is the checker's verdict at HEAD, imported (creditUnpinned):
+//   R-HEAD       the checker credits it at HEAD -> pinned at its dated version
+//                so it cannot rot on the next insertion above it
+//   PROSE-ONLY   no adjacent subject: the checker counts it prose-only, never a
+//                miss and never a resolve; name one with --subject to pin it
+// Every other unpinned citation with a subject is a checker MISS at HEAD, and
+// the sum of the buckets below (less any --subject'd PROSE-ONLY ones) IS the
+// checker's unresolved count for the same targets:
 //   PIN-EXACT    local set lands at the version current when the citation's
 //                own text was written (see DATING) -> pin there
 //   PIN-OLDER    lands only at an OLDER version, within --depth versions
@@ -78,14 +86,20 @@
 //                records "verified at sha", so pinning a word common enough to
 //                land by chance — `index` landing on `o.index` — makes a false
 //                citation look confirmed)
-//   NO-LOCAL     no backticked subject and no quoted sentence near the citation
-//                -> hand (no rule can pick the subject out of prose)
 //   BLOCK-NEAR   the local subject sits <= 40 lines off at the dated version
 //                (cites a block body, or an off-main base) -> hand
 //   FAR          the local subject sits > 40 lines off -> hand
 //   ABSENT-THEN  no local token exists anywhere in the dated file -> hand
-//   UNDECIDABLE  no backticked anchor on the line (the checker skips it too)
-// RESIDUE = PIN-WEAK + NO-LOCAL + BLOCK-NEAR + FAR + ABSENT-THEN. Per the lead's
+// RETIRED with the whole-line copy (task-12d6e8868ef5d88a), because the checker
+// can no longer produce what they named: R-FOREIGN ("credited only by a word
+// NOT in the local set") — the checker credits by the local set alone; R-LOCAL
+// — every resolve is now by a local token, so it is R-HEAD; R-NO-LOCAL
+// ("credited, but no local subject") and NO-LOCAL ("a miss with no local
+// subject") — a citation with no adjacent subject is neither credited nor
+// missed by the checker, so both are PROSE-ONLY, as is the old UNDECIDABLE
+// ("no backticked anchor on the line").
+// RESIDUE = PIN-WEAK + BLOCK-NEAR + FAR + ABSENT-THEN (NO-LOCAL left with its
+// retirement: a PROSE-ONLY citation is not a checker miss). Per the lead's
 // ruling the hand pass is capped (--cap, default 30): over the cap this exits 1
 // with a STOP verdict and --apply refuses to touch the charter, so the residue is
 // split into rows instead of being waved through by a tired reader.
@@ -129,6 +143,7 @@ const STOP = new Set([
 // The pin form — must mirror PIN_ANY in scripts/file-line-citation-check.mjs.
 const PIN_RE = /\b[\w.-]+\.[A-Za-z0-9]+ \(([^@()\n]+?) @ ([0-9a-f]{7,40}), L(\d+)(?:[-\u2013]L?(\d+))?\)/g;
 const RULE_PINNABLE = new Set(["PIN-EXACT", "PIN-OLDER", "PIN-NEWER"]);
+const RESIDUE = ["PIN-WEAK", "BLOCK-NEAR", "FAR", "ABSENT-THEN"];
 
 // ── THE ADJACENCY RULE, exported ─────────────────────────────────────────────
 // tokensOf / spansOf / quotesNear / subjectOf are the ONE definition of "the
@@ -385,6 +400,65 @@ export const WEAK_MIN = 10;
 // lines, never its uses) or a quote's RegExp (literal substring).
 export const linesHolding = (fileLines, r) => fileLines.reduce((n, l, k) => n + (r.test(l, k) ? 1 : 0), 0);
 
+// ── THE CHECKER'S CREDITING, exported (task-12d6e8868ef5d88a) ────────────────
+// "Does an UNPINNED citation resolve at this file version?" — ONE definition,
+// used by BOTH tools. scripts/file-line-citation-check.mjs calls creditUnpinned()
+// for every unpinned citation it evaluates; this file calls the same function
+// for its R-HEAD bucket and its "unresolved at HEAD" count. Until this task the
+// classifier carried its own copy of the checker's OLD whole-line crediting
+// (every backticked token on the line, any word landing in the window), so on
+// one tree it said 175 unresolved where the checker said 321.
+//
+// WHY IT LIVES HERE, not in the checker or a third module: the checker already
+// imports this file's adjacency rule (subjectOf, thingMatcher, WEAK_MIN,
+// linesHolding), and the crediting is built from nothing else. Putting it here
+// keeps the import arrow one-way (checker -> classifier). In the checker it
+// would need the reverse import (a cycle), and the checker runs its CLI on
+// import. A third module would have to take subjectOf & co. with it or import
+// them back from here, which is the same cycle one file over.
+//
+// The window: a range is its own tolerance, a single line gets +/-slack.
+// `hi` is null, undefined or equal to `line` for a single line.
+export function creditWindow(line, hi, nLines, slack) {
+  if (hi != null && hi !== line) return [Math.max(1, line), Math.min(nLines, hi)];
+  return [Math.max(1, line - slack), Math.min(nLines, line + slack)];
+}
+// How many lines of a file version hold a subject, cached per (version, label).
+const freqCache = new WeakMap();
+function freqIn(fileLines, label, re) {
+  let m = freqCache.get(fileLines);
+  if (!m) { m = new Map(); freqCache.set(fileLines, m); }
+  if (!m.has(label)) m.set(label, linesHolding(fileLines, re));
+  return m.get(label);
+}
+// c = { text, base, p, e, line, hi }: the citation `F:line[-hi]` at [p, e) on
+// charter line `text`. Returns
+//   subject    [{ label, re }], nearest first — subjectOf(), a token matched by
+//              thingMatcher() (definition, not use), a quote as a substring
+//   decidable  subject non-empty (no subject = prose-only: never a miss)
+//   hit        { tok, at, lines } for the first subject that lands in the
+//              window and sits on fewer than `weak` lines of the file; else null
+//   weak       [{ tok, at, lines }] every subject that landed but was refused as
+//              a common word
+// ONLY the adjacent subject credits; a common word cannot credit by itself.
+export function creditUnpinned(c, fileLines, slack, weak = WEAK_MIN) {
+  const subject = subjectOf(c.text, c.base, c.p, c.e)
+    .map((x) => typeof x === "string" ? { label: x, re: thingMatcher(x, c.base, fileLines) } : { label: x.label, re: x.re });
+  const out = { subject, decidable: subject.length > 0, hit: null, weak: [] };
+  if (!out.decidable) return out;
+  const [lo, hi] = creditWindow(c.line, c.hi, fileLines.length, slack);
+  for (const { label: tok, re } of subject) {
+    let at = 0;
+    for (let n = lo; n <= hi; n++) if (re.test(fileLines[n - 1], n - 1)) { at = n; break; }
+    if (!at) continue;
+    const lines = freqIn(fileLines, tok, re);
+    if (lines >= weak) { out.weak.push({ tok, at, lines }); continue; }
+    out.hit = { tok, at, lines };
+    break;
+  }
+  return out;
+}
+
 // Run the CLI only when executed directly (`node file-line-citation-classify.mjs`),
 // never on import: the checker imports the functions above, and an import
 // that parsed the checker's argv, ran git blame and called process.exit would
@@ -447,25 +521,11 @@ for (const spec of o.maps) {
   targets.set(base, { rel, head: fs.readFileSync(path.resolve(root, rel), "utf8").split("\n") });
 }
 
-const checkerWordRe = (tok) => new RegExp(`(^|[^A-Za-z0-9_$])${esc(tok)}([^A-Za-z0-9_$]|$)`);
-
-
-// The checker's own anchor set (whole line, pins stripped) — must mirror
-// anchorsOf() in file-line-citation-check.mjs.
-function lineAnchors(text, base) {
-  const out = new Set();
-  // A pin is replaced by a SPACE, never removed: removing it from inside a
-  // backtick span leaves an empty `` pair, which `([^`]+)` skips, and every
-  // later span on the line then pairs the wrong backticks.
-  for (const m of text.replace(PIN_RE, " ").matchAll(/`([^`]+)`/g)) for (const t of tokensOf(m[1], base, false)) out.add(t);
-  return [...out];
-}
-
-
-
 // ── parse ────────────────────────────────────────────────────────────────────
 const alt = [...targets.keys()].map(esc).join("|");
-const CITE = new RegExp(`\\b(${alt}):(\\d+)(?:[-–](\\d+))?`, "g");
+// The checker's citation grammar (parseCitations() there), trailing `\b`
+// included, so both tools count the same population.
+const CITE = new RegExp(`\\b(${alt}):(\\d+)(?:[-–](\\d+))?\\b`, "g");
 const PINNED = new RegExp(`(?<![\\w.-])(${alt}) \\(([^@()\\n]+?) @ ([0-9a-f]{7,40}), L(\\d+)(?:[-\u2013]L?(\\d+))?\\)`, "g");
 const cites = [];
 lines.forEach((text, idx) => {
@@ -609,24 +669,27 @@ function blob(sha, rel) {
 // ── classify ─────────────────────────────────────────────────────────────────
 for (const c of cites) {
   const t = targets.get(c.base);
-  c.lineAnchors = lineAnchors(c.text, c.base);
   c.local = subjectOf(c.text, c.base, c.p, c.e);
+  let hand = false;
   if (!c.pin) {
     const label = `${c.base}:${c.n}${c.hi !== c.n ? "-" + c.hi : ""}`;
     for (const s of o.subjects) if (s.line === c.charterLine && s.cite === label) {
       s.used = true;
+      hand = true;
       const q = s.thing.match(/^["\u201c](.+)["\u201d]$/);
       c.local = [q ? { label: s.thing, re: new RegExp(esc(q[1])) } : s.thing];
     }
   }
-  c.decidable = c.lineAnchors.length > 0;
   if (c.pin) { c.bucket = "ALREADY-PINNED"; continue; }
-  const headHit = c.decidable ? lands(t.head, c, c.lineAnchors, checkerWordRe) : null;
-  c.headResolved = !!headHit;
-  c.credit = headHit;
-  const localHead = c.local.length ? lands(t.head, c, c.local, byThing(c.base)) : null;
-  if (!c.decidable) { c.bucket = "UNDECIDABLE"; continue; }
-  if (c.local.length === 0) { c.bucket = c.headResolved ? "R-NO-LOCAL" : "NO-LOCAL"; continue; }
+  // THE CHECKER'S VERDICT at HEAD — creditUnpinned(), the function the checker
+  // itself calls, never a copy. A --subject names what to PIN; it never changes
+  // what the checker credits, so it is not passed here.
+  const cr = creditUnpinned({ text: c.text, base: c.base, p: c.p, e: c.e, line: c.n, hi: c.hi }, t.head, o.slack, o.weak);
+  c.decidable = cr.decidable;
+  c.headResolved = !!cr.hit;
+  c.credit = cr.hit;
+  c.weakRefused = cr.weak;
+  if (!c.decidable && !hand) { c.bucket = "PROSE-ONLY"; continue; }
 
   // pin search: newest version at or before the commit that wrote THIS
   // citation's text (DATING), walking older.
@@ -654,7 +717,7 @@ for (const c of cites) {
   }
   c.pinTo = pin;
   if (c.headResolved) {
-    c.bucket = localHead ? "R-LOCAL" : "R-FOREIGN";
+    c.bucket = "R-HEAD";
   } else if (pin && pin.freq >= o.weak) {
     c.bucket = "PIN-WEAK";
   } else if (pin) {
@@ -673,7 +736,6 @@ for (const c of cites) {
     c.near = best;
     c.bucket = !best ? "ABSENT-THEN" : best.d <= 40 ? "BLOCK-NEAR" : "FAR";
   }
-  c.localHead = localHead;
 }
 {
   const unused = o.subjects.filter((x) => !x.used);
@@ -685,18 +747,15 @@ for (const c of cites) {
 
 // ── report ───────────────────────────────────────────────────────────────────
 const RULES = {
-  "R-LOCAL": "resolves at HEAD by a local token; pinned (at the dated version) so it cannot rot",
-  "R-FOREIGN": "checker credits it at HEAD by a NON-local token (over-credit suspect); pinned if the local set lands historically",
-  "R-NO-LOCAL": "checker credits it at HEAD; no local anchor, so no rule can pin it -> left unpinned",
+  "R-HEAD": "the checker credits it at HEAD (its adjacent subject lands, not a common word); pinned at the dated version so it cannot rot",
   "PIN-EXACT": "local set lands at the version current when the line was written -> rewrite to <file> (<thing> @ <sha>, L<n>)",
   "PIN-OLDER": "local set lands only at an older version (cited on a stale base) -> rewrite to <file> (<thing> @ <sha>, L<n>)",
   "PIN-NEWER": `local set lands only at a NEWER version (<=${o.ahead}; cited from a base carrying unmerged siblings) -> rewrite to <file> (<thing> @ <sha>, L<n>)`,
   "PIN-WEAK": `would pin, but the crediting local token occurs >= ${o.weak} times in the pinned file (generic word) -> RESIDUE (hand)`,
-  "NO-LOCAL": "no backticked subject and no quoted sentence near the citation -> RESIDUE (hand)",
   "BLOCK-NEAR": "local set never lands in +/-slack, but sits <=40 lines off at the dated version (cites a block body, or a sibling base) -> RESIDUE (hand)",
   "FAR": "local set sits >40 lines off at the dated version -> RESIDUE (hand)",
   "ABSENT-THEN": "no local token exists anywhere in the dated file (prose word, other file, or later rename) -> RESIDUE (hand)",
-  "UNDECIDABLE": "no backticked anchor on the line at all (checker does not count it)",
+  "PROSE-ONLY": "no adjacent subject: the checker counts it prose-only (never a miss, never a resolve); name one with --subject to pin it",
   "ALREADY-PINNED": "already in the pin form <file> (<thing> @ <sha>, L<n>)",
 };
 const order = Object.keys(RULES);
@@ -719,7 +778,7 @@ const excerpt = (s, a, b) => s.slice(Math.max(0, a), b).replace(/\s+/g, " ");
 if (o.json) {
   process.stdout.write(JSON.stringify(cites.map((c) => ({
     cite: `${c.base}:${c.n}${c.hi !== c.n ? "-" + c.hi : ""}`, charterLine: c.charterLine, bucket: c.bucket,
-    local: c.local, credit: c.credit, localHead: c.localHead, pin: c.pinTo,
+    decidable: c.pin ? true : c.decidable, local: c.local, credit: c.credit || null, weak: c.weakRefused || [], pin: c.pinTo,
     dated: c.dated || null, near: c.near || null,
   })), null, 1) + "\n");
 } else {
@@ -731,9 +790,13 @@ if (o.json) {
     if (!row.length) continue;
     process.stdout.write(`  ${k.padEnd(15)}` + [...targets.keys()].map((b) => String(row.filter((c) => c.base === b).length).padStart(15)).join("") + String(row.length).padStart(10) + "\n");
   }
+  // The checker's own verdict, per target: equal to the checker's `unresolved`
+  // minus its `pinnedFailed` for the same --map (pins are the checker's to
+  // verify at their sha; this file only buckets them ALREADY-PINNED).
   const unresolvedHead = cites.filter((c) => c.decidable && !c.pin && !c.headResolved);
-  process.stdout.write(`\n  unresolved at HEAD (decidable, unpinned): ${unresolvedHead.length}\n`);
-  const residue = cites.filter((c) => ["PIN-WEAK", "NO-LOCAL", "BLOCK-NEAR", "FAR", "ABSENT-THEN"].includes(c.bucket));
+  process.stdout.write(`\n  unresolved at HEAD (the checker's crediting; decidable, unpinned): ${unresolvedHead.length}   ` +
+    [...targets.keys()].map((b) => `${b}=${unresolvedHead.filter((c) => c.base === b).length}`).join(" ") + "\n");
+  const residue = cites.filter((c) => RESIDUE.includes(c.bucket));
   process.stdout.write(`  RESIDUE (hand): ${residue.length}   ` + [...targets.keys()].map((b) => `${b}=${residue.filter((c) => c.base === b).length}`).join(" ") + "\n");
   for (const k of order) {
     const row = byBucket.get(k);
@@ -758,7 +821,7 @@ if (o.json) {
   }
 }
 
-const residueN = cites.filter((c) => ["PIN-WEAK", "NO-LOCAL", "BLOCK-NEAR", "FAR", "ABSENT-THEN"].includes(c.bucket)).length;
+const residueN = cites.filter((c) => RESIDUE.includes(c.bucket)).length;
 if (o.only) {
   const unknown = [...o.only].filter((b) => !(b in RULES));
   if (unknown.length) { process.stderr.write(`UNCHECKED: --only names unknown bucket(s): ${unknown.join(", ")}\n`); process.exit(2); }
@@ -803,7 +866,10 @@ if (residueN > o.cap && !(o.apply && ruleOnly)) {
 // is its positive control; arm 3 guards the working-tree replay, which blame of
 // HEAD never saw). PIN SEARCH: arms 4 and 6 red when the pin search demands the
 // whole-line anchors; arm 5 is the negative control (a subject off its line is
-// still no pin).
+// still no pin). ONE CREDITING: arm 11 runs this file and the checker on one
+// fixture and reds if R-HEAD holds a citation the checker misses, or the
+// unresolved counts differ (a far word, and a common word, each credited by
+// the retired whole-line copy).
 function selftest() {
   const self = fileURLToPath(import.meta.url);
   const checker = path.join(path.dirname(self), "file-line-citation-check.mjs");
@@ -972,6 +1038,47 @@ function selftest() {
       arm("DEFINITION: a function whose name lands only as a CALL at the dated version is not pinned there -> PIN-OLDER at its definition",
         r.bucket === "PIN-OLDER" && r.pin && r.pin.sha === shaA && r.pin.at === 22,
         `bucket ${r.bucket}${r.pin ? ` pin ${s10(r.pin.sha)} at ${r.pin.at}` : ""} (want PIN-OLDER at ${s10(shaA)} L22; name matching gives PIN-EXACT at ${s10(shaB)} via the call)`);
+    }
+
+    // ── ONE CREDITING (task-12d6e8868ef5d88a): the classifier's R-HEAD bucket
+    // and its unresolved-at-HEAD count must be the CHECKER's verdict. Run both
+    // tools on one fixture and diff. Line 3 is the positive control (both
+    // credit `paintChip`). Line 4 is the far-word shape: `paintChip` sits > 80
+    // chars before the citation and lands at 20, but the adjacent `makeWidget`
+    // is absent — the old whole-line copy called it resolved (R-FOREIGN). Line
+    // 5 is the common word: `sheet` lands at 40 but sits on WEAK_MIN lines —
+    // the old copy had no weak rule and called it resolved (R-LOCAL). Either
+    // copy coming back reds this arm.
+    {
+      const { t, commit } = repo();
+      const at = { 20: "function paintChip(el) { return el; }" };
+      for (let k = 0; k < WEAK_MIN; k++) at[31 + k] = `  var s${k} = sheet;`; // 31..40
+      commit("src/widget.js", widget(at));
+      const pad = "this clause is filler prose that pushes the first span well over eighty characters away";
+      commit("charter.md", "# fixture\n\n" +
+        "| D1 | `paintChip` paints the chip at widget.js:20 |\n" +
+        `| D2 | \`paintChip\` paints the chip; ${pad}. The widget \`makeWidget\` is built at widget.js:20 |\n` +
+        "| D3 | the sheet is resurrected in `sheet` at widget.js:40 |\n");
+      const rows = buckets(t) || [];
+      let ck = null;
+      try {
+        execFileSync(process.execPath, [checker, "--root", t, "--charter", "charter.md", "--map", "widget.js=src/widget.js", "--json"],
+          { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      } catch (e) { try { ck = JSON.parse(e.stdout || ""); } catch {} }
+      const missKeys = new Set(((ck && ck.misses) || []).map((m) => `${m.charterLine}:${m.cite}`));
+      const unpinned = rows.filter((x) => x.bucket !== "ALREADY-PINNED");
+      const clsResolved = unpinned.filter((x) => x.bucket === "R-HEAD");
+      const clsUnresolved = unpinned.filter((x) => x.decidable && x.bucket !== "R-HEAD");
+      const overCredit = clsResolved.filter((x) => missKeys.has(`${x.charterLine}:${x.cite}`));
+      // PRECONDITION: the checker ran and holds both verdicts (1 resolve, 2
+      // misses), so neither half of the comparison is vacuous.
+      const pre = !!ck && ck.resolved === 1 && ck.unresolved === 2 && ck.pinnedFailed === 0;
+      arm("ONE CREDITING: the classifier never counts resolved a citation the checker counts unresolved, and the unresolved counts are equal",
+        pre && overCredit.length === 0 && clsResolved.length === ck.resolved && clsUnresolved.length === ck.unresolved,
+        `checker resolved ${ck ? ck.resolved : "?"} unresolved ${ck ? ck.unresolved : "?"}; classifier R-HEAD ${clsResolved.length} ` +
+        `[${clsResolved.map((x) => "L" + x.charterLine).join(",")}] unresolved ${clsUnresolved.length}; ` +
+        `R-HEAD rows the checker misses: ${overCredit.length ? overCredit.map((x) => `L${x.charterLine} ${x.cite}`).join(", ") : "none"}` +
+        (pre ? "" : " (PRECONDITION FAILED: the checker's JSON is not 1 resolved / 2 unresolved)"));
     }
   } catch (e) {
     fails++;

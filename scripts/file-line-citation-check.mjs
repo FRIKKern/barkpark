@@ -53,6 +53,12 @@
 //                (on 251, a parameter). --selftest ARMS 32-34; `--weak K`
 //                re-measures at another cut.
 //
+// ONE CREDITING. SUBJECT + RESOLVES + COMMON WORD together are creditUnpinned()
+// in the classifier, imported; the classifier buckets (R-HEAD) and counts its
+// "unresolved at HEAD" with the same call (task-12d6e8868ef5d88a), so the two
+// tools cannot disagree on which citations resolve. Its selftest ARM 11 diffs
+// the two on one fixture.
+//
 // WHY NOT THE WHOLE LINE. Until task-b3961db653fbbf58 the anchor set was every
 // backticked token ANYWHERE on L, and a citation resolved if any one of them
 // landed in the window. A charter row names 30-60 tokens, so a wrong citation
@@ -157,7 +163,12 @@ import os from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // THE ADJACENCY RULE — one definition, owned by the classifier (see THE TEST).
-import { subjectOf as adjacentSubject, thingMatcher, WEAK_MIN, linesHolding } from "./file-line-citation-classify.mjs";
+// THE CREDITING — "does an unpinned citation resolve?" — one definition, also
+// owned by the classifier and imported (task-12d6e8868ef5d88a): the classifier
+// buckets and counts with the SAME function, so the two tools cannot disagree
+// on which citations resolve. It lives there, not here, to keep the import
+// arrow one-way (see creditUnpinned() in the classifier).
+import { thingMatcher, WEAK_MIN, creditUnpinned, creditWindow } from "./file-line-citation-classify.mjs";
 
 const SLACK_DEFAULT = 3;
 
@@ -233,17 +244,6 @@ function pinRe(bases) {
 // version being read.
 const thingRe = (thing, base, fileLines) => thingMatcher(thing, base, fileLines);
 
-// ── the subject of an unpinned citation: ADJACENT only ───────────────────────
-// The classifier's subjectOf(), imported: nearest first, tokens as strings and
-// quotes as { label, re }. Each subject is returned here as { label, re }: a
-// token matches by thingRe() against the cited file (`-` is a word character;
-// a function or CSS rule by its definition), a quoted sentence as a substring.
-// ANY candidate landing in the window credits.
-function subjectOf(c, fileLines) {
-  return adjacentSubject(c.text, c.base, c.p, c.e)
-    .map((x) => typeof x === "string" ? { label: x, re: thingRe(x, c.base, fileLines) } : { label: x.label, re: x.re });
-}
-
 // ── parse every `<base>:<N>` citation in a charter ───────────────────────────
 function parseCitations(charterText, bases) {
   const alt = bases.map((b) => b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
@@ -275,10 +275,7 @@ const citeLabel = (c) => c.pin
 
 // The window a citation credits in: a range is its own tolerance, a single
 // line gets +/-slack.
-function windowOf(c, nLines, slack) {
-  if (c.hi) return [Math.max(1, c.line), Math.min(nLines, c.hi)];
-  return [Math.max(1, c.line - slack), Math.min(nLines, c.line + slack)];
-}
+const windowOf = (c, nLines, slack) => creditWindow(c.line, c.hi, nLines, slack);
 
 // THAT commit's copy of the cited file. null = unreadable (unknown sha, or a
 // shallow clone): the caller turns it into UNCHECKED, never a pass or a miss.
@@ -319,40 +316,23 @@ function evaluatePin(c, tgt, root, slack) {
 }
 
 
-// How many lines of the target hold a subject, cached per (target, label).
-function freqOf(tgt, label, re) {
-  tgt.freq ||= new Map();
-  if (!tgt.freq.has(label)) tgt.freq.set(label, linesHolding(tgt.lines, re));
-  return tgt.freq.get(label);
-}
-
 function evaluate(cites, targets, slack, root, weak) {
   for (const c of cites) {
     const tgt = targets.get(c.base);
     if (c.pin) { evaluatePin(c, tgt, root, slack); continue; }
-    const subject = subjectOf(c, tgt.lines);
+    // THE CREDITING, imported: only the ADJACENT subject credits, and a
+    // subject on >= `weak` lines of the file is a common word that cannot
+    // credit by itself (it stays the subject: the citation is decidable, and a
+    // miss). c.weak names every one that LANDED in the window and was refused,
+    // so a reader sees what the old rule would have credited.
+    const cr = creditUnpinned(c, tgt.lines, slack, weak);
+    const subject = cr.subject;
     c.anchors = subject.map((x) => x.label);
-    c.decidable = subject.length > 0;
+    c.decidable = cr.decidable;
     c.beyondEof = c.line > tgt.lines.length;
     if (!c.decidable) { c.resolved = null; continue; }
-    const [lo, hi] = windowOf(c, tgt.lines.length, slack);
-    // THE WEAK RULE: a subject on >= `weak` lines of the file is a common word
-    // and cannot credit by itself (it is still the subject: the citation stays
-    // decidable, and a miss). c.weak names every one that LANDED in the window
-    // and was refused, so a reader sees what the old rule would have credited.
-    let hit = null;
-    c.weak = [];
-    for (const { label: tok, re } of subject) {
-      let at = 0;
-      for (let n = lo; n <= hi; n++) {
-        if (re.test(tgt.lines[n - 1], n - 1)) { at = n; break; }
-      }
-      if (!at) continue;
-      const freq = freqOf(tgt, tok, re);
-      if (freq >= weak) { c.weak.push({ tok, at, lines: freq }); continue; }
-      hit = { tok, at, lines: freq };
-      break;
-    }
+    const hit = cr.hit;
+    c.weak = cr.weak;
     c.resolved = !!hit;
     c.hit = hit;
     if (!hit) {
