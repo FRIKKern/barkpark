@@ -7413,9 +7413,9 @@
 
   // ── THE NO-TIMELINE ENGINES' EDGE CUE (cch-bl-scroll-driven-cue-firefox-
   //    fallback) ───────────────────────────────────────────────────────────────
-  // Two horizontal scrollers carry a scroll-driven edge fade — `.set-matrix`
-  // (W12, `--set-matrix-fade`) and `.archive-resurrect .cli-chip-code` (W15-S2,
-  // `--archive-cli-fade`). In Chrome and Safari that idiom is right and stays:
+  // Three horizontal scrollers carry a scroll-driven edge fade — `.set-matrix`
+  // (W12, `--set-matrix-fade`), `.archive-resurrect .cli-chip-code` (W15-S2,
+  // `--archive-cli-fade`) and `.inst-tabs` (ba31, `--inst-tabs-fade`). In Chrome and Safari that idiom is right and stays:
   // with nothing to scroll the timeline is inactive, so the cue is 0px BY
   // CONSTRUCTION rather than by a class somebody has to remember to toggle.
   //
@@ -7448,6 +7448,10 @@
   var EDGE_CUES = [
     { sel: ".set-matrix", cls: "is-matrix-clipped" },
     { sel: ".archive-resurrect .cli-chip-code", cls: "is-cli-clipped" },
+    // The instance tab strip (ba31, `--inst-tabs-fade`): at 721px its six tabs
+    // run 15px past a 441px strip. Singular per screen, but the plural walk
+    // costs nothing and needs no special case.
+    { sel: ".inst-tabs", cls: "is-tabs-clipped" },
   ];
 
   function edgeCueSync() {
@@ -9963,6 +9967,9 @@
       // admin-only writes it offers (Attach domain, Roll back) are decided here,
       // at OFFER time, instead of by the server after the click.
       box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady }, instanceAdminAuthority());
+      // The `.inst-tabs` strip this paint just created is fresh DOM; in a
+      // no-timeline engine its cue is a measured class. See edgeCueSync.
+      edgeCueSync();
       // cch-w46-rv: remember WHAT was painted with WHICH authority, so a /v1/me
       // that answers after this line can repaint the header strip and the
       // Updates panel from the bp already held — no second read of anything.
