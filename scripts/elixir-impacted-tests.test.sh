@@ -20,6 +20,8 @@
 # §3  the ALWAYS set: non-empty, derived, and pinned entries exist
 # §4  PAST-DEFECT REPLAY — real merged fixes, replayed through the selector
 # §5  refusals: unknown flags, empty ALWAYS set
+# §6  a stdin-reading child cannot truncate the changed-path list
+# §7  a sink-invariant xref is refused (the discriminating control)
 set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -696,6 +698,51 @@ else
   [ "$rc" -eq 2 ] && ok "an unknown flag is refused with exit 2" || bad "an unknown flag is refused with exit 2" "got rc=$rc"
 fi
 
+# A `mix` stand-in for the sections that run the xref path for real (§6, §7).
+#   varying   — answers PER SINK, the shape a working xref has: the hub
+#               (lib/barkpark/plugin.ex) gets its `use Barkpark.Plugin`
+#               dependents, the leaf (lib/barkpark/tasks/landed.ex) gets
+#               nothing, anything else a small graph with `.ex` in it.
+#   invariant — ONE fixed graph whatever --sink says: the shape measured on
+#               CI's Elixir 1.18.4 / OTP 27 pin (task-37b4448cb9ccb000).
+#   inverted  — varies, but the leaf's graph is BIGGER than the hub's.
+# `greedy` adds a child that drains stdin (§6's mutation).
+write_mix_stub() {
+  local out="$1" shape="$2" greedy="${3:-}"
+  {
+    echo '#!/usr/bin/env bash'
+    [ "$greedy" = greedy ] && echo 'cat >/dev/null 2>&1 || true'
+    # shellcheck disable=SC2016 # the stub's own code, written literally
+    echo 'sink=""; while [ "$#" -gt 0 ]; do [ "$1" = "--sink" ] && sink="${2:-}"; shift; done'
+    case "$shape" in
+      varying)
+        cat <<'STUB'
+case "$sink" in
+  lib/barkpark/plugin.ex) printf '%s\n' "lib/barkpark/plugins/media.ex" "\`-- lib/barkpark/plugin.ex (compile)" "lib/barkpark/plugins/quiz.ex" "\`-- lib/barkpark/plugin.ex (compile)" ;;
+  lib/barkpark/tasks/landed.ex) : ;;
+  *) printf '%s\n' "lib/barkpark/content/lifecycle.ex" "lib/barkpark/repo.ex" ;;
+esac
+STUB
+        ;;
+      invariant)
+        cat <<'STUB'
+printf '%s\n' "lib/barkpark_web/router.ex" "\`-- lib/barkpark_web/router/plugins.ex (compile)" "lib/barkpark/tasks/events.ex" "\`-- lib/barkpark/tasks/internal.ex (compile)"
+STUB
+        ;;
+      inverted)
+        cat <<'STUB'
+case "$sink" in
+  lib/barkpark/plugin.ex) printf '%s\n' "lib/barkpark/plugins/media.ex" ;;
+  lib/barkpark/tasks/landed.ex) printf '%s\n' "lib/barkpark_web/router.ex" "lib/barkpark/tasks/events.ex" ;;
+  *) printf '%s\n' "lib/barkpark/content/lifecycle.ex" "lib/barkpark/repo.ex" ;;
+esac
+STUB
+        ;;
+    esac
+  } >"$out"
+  chmod +x "$out"
+}
+
 echo
 echo "=== §6  A CHILD THAT READS STDIN MUST NOT TRUNCATE THE CHANGED-PATH LIST"
 # THE DEFECT THIS SECTION EXISTS FOR (task-627ab62e43790c0e). The classify loop
@@ -714,9 +761,11 @@ echo "=== §6  A CHILD THAT READS STDIN MUST NOT TRUNCATE THE CHANGED-PATH LIST"
 # a real child, so it must NOT inherit that export.
 sec6_dir="$(mktemp -d "${TMPDIR:-/tmp}/bp-impacted-sec6.XXXXXX")"
 # Two `mix` stand-ins, identical but for ONE line: whether the child reads stdin.
-# That single-line difference IS the mutation.
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "lib/barkpark/content/lifecycle.ex" "lib/barkpark/repo.ex"\n' >"$sec6_dir/mix-quiet"
-printf '#!/usr/bin/env bash\ncat >/dev/null 2>&1 || true\nprintf "%%s\\n" "lib/barkpark/content/lifecycle.ex" "lib/barkpark/repo.ex"\n' >"$sec6_dir/mix-greedy"
+# That single-line difference IS the mutation. Both answer PER SINK (see
+# write_mix_stub): a stub that printed one fixed graph for every --sink would be
+# refused by the discriminating control (§7) before §6 measured anything.
+write_mix_stub "$sec6_dir/mix-quiet" varying
+write_mix_stub "$sec6_dir/mix-greedy" varying greedy
 chmod +x "$sec6_dir/mix-quiet" "$sec6_dir/mix-greedy"
 
 # A lib file FIRST (so a child runs), then a changed test file that
@@ -765,6 +814,73 @@ else
   fi
 fi
 rm -rf -- "$sec6_dir"
+
+echo
+echo "=== §7  A SINK-INVARIANT xref IS REFUSED, NOT NARROWED ON (task-37b4448cb9ccb000)"
+# THE DEFECT. `mix xref graph --sink S --label compile-connected` printed the
+# SAME 10-line graph (md5 6d8d306d06f1628f5a38755f53898b71) for landed.ex,
+# media.ex, accounts.ex and plugin.ex on CI's own pin, Elixir 1.18.4 / OTP 27.
+# The repo.ex positive control passed it, because it only asks for `.ex` in the
+# output. The selector then narrowed every lib change on a constant.
+#
+# THREE ARMS, one stub each (write_mix_stub): invariant must be REFUSED by name,
+# varying must be TRUSTED (the control — without it, a probe hard-wired to DEAD
+# passes the first arm while measuring nothing), inverted must be refused too.
+sec7_dir="$(mktemp -d "${TMPDIR:-/tmp}/bp-impacted-sec7.XXXXXX")"
+sec7_input='api/lib/barkpark/content/lifecycle.ex'
+sec7_run() {
+  # $1 = stub shape; stdout -> $sec7_dir/out, stderr -> $sec7_dir/err
+  mkdir -p "$sec7_dir/bin"
+  write_mix_stub "$sec7_dir/bin/mix" "$1"
+  printf '%s\n' "$sec7_input" | \
+    env -u BP_IMPACTED_NO_XREF \
+        BP_IMPACTED_ROOT="$ROOT" \
+        PATH="$sec7_dir/bin:$PATH" \
+        bash "$SEL" --select >"$sec7_dir/out" 2>"$sec7_dir/err"
+}
+sec7_probe_rc() {
+  mkdir -p "$sec7_dir/bin"
+  write_mix_stub "$sec7_dir/bin/mix" "$1"
+  env -u BP_IMPACTED_NO_XREF BP_IMPACTED_ROOT="$ROOT" PATH="$sec7_dir/bin:$PATH" \
+    bash "$SEL" --xref-probe >/dev/null 2>&1
+}
+sec7_named='xref is SINK-INVARIANT: --sink lib/barkpark/plugin.ex and --sink lib/barkpark/tasks/landed.ex returned the IDENTICAL closure'
+
+if [ ! -f "$ROOT/api/lib/barkpark/content/lifecycle.ex" ] || [ ! -f "$ROOT/api/lib/barkpark/plugin.ex" ] || [ ! -f "$ROOT/api/lib/barkpark/tasks/landed.ex" ]; then
+  bad "§7 fixtures are present" "lifecycle.ex, plugin.ex or landed.ex is gone — §7 measured NOTHING"
+else
+  # CONTROL: a per-sink answer narrows.
+  sec7_run varying
+  sec7_out="$(cat "$sec7_dir/out")"
+  if is_all "$sec7_out" || [ -z "$sec7_out" ]; then
+    bad "§7 control: a sink-VARYING xref is trusted and narrows" "got '$(head -c 200 "$sec7_dir/out")' / stderr: $(head -3 "$sec7_dir/err" | tr '\n' ' ')"
+  else
+    ok "§7 control: a sink-VARYING xref is trusted and narrows ($(grep -c . <<<"$sec7_out") files)"
+  fi
+  if sec7_probe_rc varying; then ok "§7 control: --xref-probe says OK for a sink-varying xref"; else bad "§7 control: --xref-probe says OK for a sink-varying xref" "it exited non-zero"; fi
+
+  # THE ARM: one graph for every sink -> ALL, and the refusal names both sinks.
+  sec7_run invariant
+  sec7_out="$(cat "$sec7_dir/out")"
+  if ! is_all "$sec7_out"; then
+    bad "§7 a SINK-INVARIANT xref falls back to ALL" "it NARROWED to $(grep -c . <<<"$sec7_out") files on a closure that does not depend on the changed file"
+  elif grep -qF -- "$sec7_named" "$sec7_dir/err"; then
+    ok "§7 a SINK-INVARIANT xref falls back to ALL, naming both sinks"
+  else
+    bad "§7 a SINK-INVARIANT xref falls back to ALL, naming both sinks" "ALL, but stderr lacks the named line: $(head -3 "$sec7_dir/err" | tr '\n' ' ')"
+  fi
+  if sec7_probe_rc invariant; then bad "§7 --xref-probe reports DEAD for a sink-invariant xref" "it exited 0 (OK)"; else ok "§7 --xref-probe reports DEAD for a sink-invariant xref"; fi
+
+  # A leaf whose closure is not smaller than the hub's does not discriminate either.
+  sec7_run inverted
+  sec7_out="$(cat "$sec7_dir/out")"
+  if is_all "$sec7_out" && grep -qF -- 'xref does not discriminate' "$sec7_dir/err"; then
+    ok "§7 a leaf closure BIGGER than the hub's falls back to ALL"
+  else
+    bad "§7 a leaf closure BIGGER than the hub's falls back to ALL" "got $(grep -c . <<<"$sec7_out") lines / stderr: $(head -3 "$sec7_dir/err" | tr '\n' ' ')"
+  fi
+fi
+rm -rf -- "$sec7_dir"
 
 echo
 echo "=== $PASS passed, $FAIL failed"
