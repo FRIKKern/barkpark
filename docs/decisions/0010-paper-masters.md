@@ -6,10 +6,10 @@ Ratified by main, 2026-09-23 (`cd-5b-template-generalization`). Code:
 
 ## 1. Storage
 
-One document per master, type `paper_master` (Bulldocs, private). `content`:
-`node` (the saved block, verbatim), `tier`, `block_type`, `source_paper`,
-`source_block_id`. The row's `rev` is the master revision. Not masterable: an
-unclassified type, `locked: true`, a slot role, a `fieldName` binding.
+One `paper_master` document per master (Bulldocs, private). `content`: `node`
+(verbatim), `tier`, `block_type`, `source_paper`, `source_block_id`. `rev` is
+the master revision. Not masterable: an unclassified type, `locked: true`, a
+slot role, a `fieldName` binding.
 
 ## 2. Tenancy
 
@@ -37,36 +37,38 @@ reaches the plugin only via `PaperMastersSeam` (registry + enablement).
 - Block `master-ref`: `{master, version}`; `version: nil` follows latest, a
   `_rev` pins. Inserted by `paper-insert-master` with `mode: "linked"`.
 - Resolved at READ time: compose → `PdMasterRef`, the walker injects
-  `:masters[key]` HTML. Callers that do not resolve (body_html cache, delta
-  frames, email, Go TUI) show a neutral "Linked master". The JS renderer is
-  unchanged (generic unknown-block degrade; out of pd-parity scope, like
-  `embed`).
-- `Linked.render_map/3` batches per nesting level (current rows + pinned
-  revisions), at most 3 levels; a master already on the chain renders
-  "Master unavailable", as do missing and foreign masters (identical bytes).
-  The public reader resolves published master rows only.
+  `:masters[key]` HTML. Non-resolving callers (body_html cache, delta frames,
+  email, Go TUI) show a neutral "Linked master"; JS degrades it like `embed`.
+- `Linked.render_map/3` batches per nesting level, at most 3 levels; a
+  master already on the chain renders "Master unavailable", as do missing
+  and foreign masters (identical bytes). The public reader resolves
+  published master rows only.
 - A master edit never writes an instance paper.
-- Detach (`paper-detach-master`): `replace-block` with a detached copy of
-  what it shows. Pin (`paper-pin-master`): `patch-block` `version` = a rev
-  (§5b); Unpin sets nil. Both ride the request-identified op path.
-- Deleting a master with live instances (same-scope papers holding a
-  `master-ref` to it, any depth) is refused (`before_delete`): 409
-  `halted`, listing their ids (never another tenant's).
-- `save_master` PUBLISHES the master (task-59be65118320fa0e): the save is the
-  author's choice to reuse it. Later edits are drafts; the reader shows the
-  published row. Rejected: the reader resolving a draft-only master (an
-  UNPUBLISHED master is draft-only too: it would re-expose what the author
-  withdrew); an insert warning only. A nested master-ref previews in
-  Studio; the slash menu offers "(linked)".
+- Detach (`paper-detach-master`): `replace-block` with a detached copy
+  (§5b). Pin (`paper-pin-master`): `patch-block` `version` = a rev (§5b);
+  Unpin sets nil. Both ride the request-identified op path.
+- Deleting a master with live instances (same-scope papers, any depth) is
+  refused (`before_delete`): 409 `halted`, listing their ids.
+- `save_master` PUBLISHES the master (task-59be65118320fa0e); later edits
+  are drafts, and the reader shows the published row. Rejected: the reader
+  resolving a draft-only master (it would re-expose a withdrawn one); an
+  insert warning only. Nested master-refs preview in Studio.
 
-## 5b. Pin freezes the latest PUBLISHED rev (task-881d4b6e857b1b65)
+## 5b. Pin and Detach take PUBLISHED content (task-881d4b6e857b1b65, task-01c812041613a8d3)
 
-Publish mints a new rev, so a pin to a draft rev read "Master unavailable"
-publicly forever. Pin takes the published row's rev; Studio previews what
-readers see. No published row: refused, `master_unpublished`. Rejected:
-refusing while a draft exists (a pin guards a paper from that pending edit);
-the reader resolving pins in any state (a paper editor would publish a
-master draft). Unpublishing still hides every pin.
+Both need only paper write access and publish with the paper, so neither
+may reach a master draft.
+- Pin takes the published row's rev (a draft rev is never published, so it
+  read "Master unavailable" forever); Studio previews what readers see.
+- Detach copies what the public reader shows: the pinned published revision,
+  else the latest published row.
+- Nothing published (draft-only, withdrawn, a pre-§5b draft-rev pin):
+  refused, `master_unpublished`; foreign stays `master_not_found`.
+
+Rejected: refusing while a draft exists (a pin guards a paper from that
+edit); pins resolving in any state; detaching the draft when the actor may
+publish the master (the socket checks paper grants only; publish first).
+Unpublishing still hides every pin.
 
 ## 6. Deferred (deliberate)
 

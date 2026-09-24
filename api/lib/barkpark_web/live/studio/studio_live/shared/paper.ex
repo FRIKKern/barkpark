@@ -685,7 +685,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @doc """
   DETACH linked instance `block_id` (task-59f078a2fd248698): replace the
   `master-ref` block with a detached copy of the PUBLISHED content the public
-  reader shows for it (0010 §5c, task-01c812041613a8d3), through
+  reader shows for it (0010 §5b, task-01c812041613a8d3), through
   `paper_ops/5` — the same guard ladder, request-identified replay and echo as
   every paper op. Same return shape as `paper_insert_master/6`; a block that is
   not a linked instance, or whose master is unavailable or has nothing

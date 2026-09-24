@@ -359,7 +359,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperLinkedMastersTest do
     assert %{"type" => "master-ref", "version" => nil} = Enum.at(blocks(slug), 2)
   end
 
-  # task-01c812041613a8d3 (0010 §5c): Detach copies the PUBLISHED version the
+  # task-01c812041613a8d3 (0010 §5b): Detach copies the PUBLISHED version the
   # public reader shows, never the master's unpublished draft that the
   # unpinned edit-mode preview follows. The copy is published with the paper,
   # and Detach needs write access to the paper only.

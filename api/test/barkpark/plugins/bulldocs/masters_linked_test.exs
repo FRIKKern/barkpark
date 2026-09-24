@@ -499,7 +499,7 @@ defmodule Barkpark.Plugins.Bulldocs.MastersLinkedTest do
     end
   end
 
-  # task-01c812041613a8d3 (0010 §5c): Detach copies exactly what the PUBLIC
+  # task-01c812041613a8d3 (0010 §5b): Detach copies exactly what the PUBLIC
   # reader shows for the instance: the latest PUBLISHED revision when unpinned,
   # the pinned published revision when pinned. Never the authoring view's
   # draft: Detach needs write access to the PAPER only, and the copy is

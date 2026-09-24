@@ -83,7 +83,7 @@ defmodule Barkpark.Plugins.Bulldocs.Masters.Linked do
   came from: `{:ok, node, %Document{}}` or `:error`. Draft-first (the
   authoring view) by default; `published_only: true` resolves exactly what the
   public reader shows, which is what Detach copies (`Masters.detach_op/3`,
-  0010 §5c).
+  0010 §5b).
   """
   def resolve(scope, {master, version} = ref, opts \\ []) when is_binary(master) do
     scope = scope_of(scope)

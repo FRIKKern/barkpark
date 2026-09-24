@@ -248,7 +248,7 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
   builds for an insert. After it the block is plain blocks; later master edits
   never reach it.
 
-  Never the authoring view's draft (0010 §5c, task-01c812041613a8d3): Detach
+  Never the authoring view's draft (0010 §5b, task-01c812041613a8d3): Detach
   needs write access to the PAPER only, and the copy is published with the
   paper, so copying a draft would let a paper editor publish a master draft
   they could not publish. When the reader shows the instance as unavailable
