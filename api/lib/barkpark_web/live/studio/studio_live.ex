@@ -552,6 +552,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-insert-master", params, socket),
     do: Paper.paper_insert_master(params, socket)
 
+  # Linked master instances (task-59f078a2fd248698): Detach and Pin.
+  def handle_event("paper-detach-master", params, socket),
+    do: Paper.paper_detach_master(params, socket)
+
+  def handle_event("paper-pin-master", params, socket),
+    do: Paper.paper_pin_master(params, socket)
+
   def handle_event("paper-history-step", params, socket),
     do: Paper.paper_history_step(params, socket)
 

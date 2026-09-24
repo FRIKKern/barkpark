@@ -125,7 +125,8 @@ export function readExpectedItems(doc = document) {
 // Paper MASTERS group (task-3b6e562e916c8ce4). The Studio paper editor renders
 // the open paper's in-scope masters as JSON on `[data-paper-masters]` (a
 // LiveView-driven carrier, re-rendered after every save — the EXPECTED-group
-// precedent above). Each entry becomes a "Masters" row carrying a `master` id;
+// precedent above). Each entry becomes TWO "Masters" rows carrying a `master`
+// id: a detached copy, and a LINKED instance (`linked: true`);
 // the canvas picks it by asking the SERVER to insert a detached copy (it never
 // builds the node client-side: fresh ids, provenance and reference rewriting
 // are server work). Returns [] when the carrier is absent (the public reader,
@@ -145,16 +146,34 @@ export function readMasterItems(root = document) {
   if (!Array.isArray(parsed)) return [];
   return parsed
     .filter((m) => m && typeof m.id === "string" && m.id !== "")
-    .map((m) => ({
-      group: MASTERS_GROUP,
-      // `type` feeds only the row's dataset/filter haystack; the pick branches on
-      // `master`, never on type (it is not a default_block/2 type).
-      type: "master",
-      master: m.id,
-      label: typeof m.title === "string" && m.title !== "" ? m.title : m.block_type || "Master",
-      hint: "★",
-      desc: typeof m.tier === "string" && m.tier !== "" ? `master ${m.tier}` : "master",
-    }));
+    .flatMap((m) => {
+      const label = typeof m.title === "string" && m.title !== "" ? m.title : m.block_type || "Master";
+      const tier = typeof m.tier === "string" && m.tier !== "" ? ` ${m.tier}` : "";
+      return [
+        {
+          group: MASTERS_GROUP,
+          // `type` feeds only the row's dataset/filter haystack; the pick branches on
+          // `master`, never on type (it is not a default_block/2 type).
+          type: "master",
+          master: m.id,
+          label,
+          hint: "★",
+          desc: `master${tier}`,
+        },
+        // LINKED (task-59be65118320fa0e): the same master as a live instance — the
+        // server inserts a `master-ref` block (`mode: "linked"`) that renders the
+        // master's latest content at read time instead of a copy.
+        {
+          group: MASTERS_GROUP,
+          type: "master-linked",
+          master: m.id,
+          linked: true,
+          label: `${label} (linked)`,
+          hint: "⛓",
+          desc: `linked master${tier}`,
+        },
+      ];
+    });
 }
 
 export class SlashMenu {

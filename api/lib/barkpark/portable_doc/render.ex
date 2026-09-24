@@ -162,6 +162,14 @@ defmodule Barkpark.PortableDoc.Render do
       # byte-identical for callers that don't opt in). The walker only INJECTS
       # the string — it never renders recursively (one-level + cycle-safe).
       |> Map.put(:embeds, Map.get(opts, :embeds, %{}))
+      # Linked master instances (task-59f078a2fd248698) ride the palette the
+      # same way. `:masters` is a caller-supplied `%{key => prerendered_html}`
+      # map (Bulldocs masters' batched render map). Deliberately NO `%{}`
+      # default: nil means "this caller does not resolve masters" (the
+      # body_html cache, delta frames, email) and renders a neutral
+      # placeholder, while a map with the key missing renders "Master
+      # unavailable" (missing, foreign-tenant and cyclic masters alike).
+      |> Map.put(:masters, Map.get(opts, :masters))
       # Inline live values (lvw-t1, wire §5) ride the palette the same way.
       # `:values` is a caller-supplied `%{{target, field} => rendered_string}`
       # map — the caller pre-resolves every (target, field) pair in ONE batched

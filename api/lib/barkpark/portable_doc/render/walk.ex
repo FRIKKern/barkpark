@@ -156,6 +156,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   def walk(%{"kind" => "PdWikilink"} = n, width, pal), do: wikilink(n, width, pal)
   def walk(%{"kind" => "PdEmbed"} = n, _width, pal), do: embed(n, pal)
+  def walk(%{"kind" => "PdMasterRef"} = n, _width, pal), do: master_ref(n, pal)
   def walk(%{"kind" => "PdBlockref"} = n, _width, pal), do: blockref(n, pal)
   def walk(%{"kind" => "PdTag"} = n, _width, pal), do: tag_node(n, pal)
   def walk(%{"kind" => "PdChip"} = n, _width, pal), do: chip(n, pal)
@@ -1001,6 +1002,60 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         # broken-link span). NO <a> — a raw human title is not a slug, so a link
         # would 404; show the broken reference, muted + framed, instead.
         ~s(<section class="paper-embed paper-embed--unresolved" data-embed="#{target}" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted};font-style:italic">↪ #{target}</section>)
+    end
+  end
+
+  # Linked master instance (task-59f078a2fd248698). `pal.masters` is the
+  # caller's `%{key => prerendered_html}` map (Bulldocs masters' render map,
+  # resolved per read and batched), or nil when the caller did not resolve
+  # masters at all (the body_html cache, delta frames, email).
+  #
+  #   * nil map      → a neutral "Linked master" placeholder: this surface does
+  #     not resolve at read time, so it shows no content rather than a copy that
+  #     would go stale when the master changes.
+  #   * key present  → the master's HTML, injected VERBATIM (already renderer
+  #     output) inside the instance frame.
+  #   * key absent   → "Master unavailable". A missing master, a master in
+  #     another tenant and a cycle all land here, and the output names no id,
+  #     so the two are byte-identical (no existence oracle).
+  #
+  # PURE: only injects the string — no Repo, no recursive Render.
+  defp master_ref(n, %{style: :article} = pal) do
+    case master_ref_html(n, pal) do
+      {:ok, html} ->
+        ~s(<div class="bp-master-ref">#{html}</div>)
+
+      :pending ->
+        ~s(<div class="bp-master-ref bp-master-ref--pending">Linked master</div>)
+
+      :unavailable ->
+        ~s(<div class="bp-master-ref bp-master-ref--unavailable">Master unavailable</div>)
+    end
+  end
+
+  defp master_ref(n, pal) do
+    case master_ref_html(n, pal) do
+      {:ok, html} ->
+        ~s(<div class="bp-master-ref">#{html}</div>)
+
+      :pending ->
+        ~s(<div class="bp-master-ref" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted}">Linked master</div>)
+
+      :unavailable ->
+        ~s(<div class="bp-master-ref" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted};font-style:italic">Master unavailable</div>)
+    end
+  end
+
+  defp master_ref_html(n, pal) do
+    case Map.get(pal, :masters) do
+      masters when is_map(masters) ->
+        case Map.get(masters, Map.get(n, "key")) do
+          html when is_binary(html) -> {:ok, html}
+          _ -> :unavailable
+        end
+
+      _ ->
+        :pending
     end
   end
 

@@ -34,14 +34,19 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
       TOC `anchor`, an in-page `href: "#<id>"`) are rewritten to the fresh
       ids, so they point at the copy.
 
-  LINKED (live-updating) instances are deliberately NOT here — a separate row.
+  LINKED (live-updating) instances (task-59f078a2fd248698) are a `master-ref`
+  block resolved at read time — the read side lives in
+  `Barkpark.Plugins.Bulldocs.Masters.Linked`; the op builders
+  (`linked_insert_op/4`, `detach_op/3`, `pin_op/3`) live here, beside the
+  detached copy Detach reuses.
   """
 
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content
   alias Barkpark.Content.{Document, DraftId}
-  alias Barkpark.PortableDoc.{BodyWalk, Tiers}
+  alias Barkpark.Plugins.Bulldocs.Masters.Linked
+  alias Barkpark.PortableDoc.{BodyWalk, MasterRef, Tiers}
   alias Barkpark.Repo
 
   @type_name "paper_master"
@@ -61,7 +66,9 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
   `opts`: `:workspace_id` / `:project_id` scope the paper lookup exactly like
   the block-op path; `:title` names the master (defaults to the node's own
   `title`, else its type).
-  Returns `{:ok, %Document{}}` or `{:error, reason}` —
+  The master is PUBLISHED by the save (0010 §5a), so a linked instance on a
+  published paper renders it for the public reader.
+  Returns `{:ok, %Document{}}` (the published row) or `{:error, reason}` —
   `:paper_not_found`, `:block_not_found`, `:not_masterable` (unclassified
   type), `:locked_block` (a template-locked or slot-role node) or
   `:bound_field` (a node carrying a `fieldName` binding: a copy would bind a
@@ -83,10 +90,18 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
         }
       }
 
-      Content.create_document(@type_name, attrs, dataset,
-        workspace_id: paper.workspace_id,
-        project_id: paper.project_id
-      )
+      scope = [workspace_id: paper.workspace_id, project_id: paper.project_id]
+
+      # PUBLISHED ON SAVE (task-59be65118320fa0e, 0010 §5a). `create_document`
+      # births every document as a draft, and the public reader resolves
+      # published master rows only, so a draft-born master read "Master
+      # unavailable" on every published paper. Saving a block as a master IS
+      # the author's choice to make it a reusable component, so the save
+      # publishes it. Later edits land as drafts again (`upsert_document`) and
+      # stay off the public reader until published.
+      with {:ok, draft} <- Content.create_document(@type_name, attrs, dataset, scope) do
+        Content.publish_document(draft.doc_id, @type_name, dataset, scope)
+      end
     else
       nil -> {:error, :paper_not_found}
       {:error, _} = err -> err
@@ -189,6 +204,134 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
     end
   end
 
+  # ── linked instances (task-59f078a2fd248698) ────────────────────────────────
+
+  @doc """
+  The op that inserts a LINKED instance of master `master_id` into the
+  already-resolved `paper`: ONE `master-ref` block carrying the master's
+  published id and `version: nil` (follow latest), or
+  `{:error, :master_not_found}`. Resolved in the paper's scope exactly like
+  `insert_op/4`; the block id is seeded off the canonical request id, so a
+  retry builds the byte-identical op.
+  """
+  def linked_insert_op(%Document{} = paper, master_id, after_id, request_id)
+      when is_binary(master_id) do
+    case get_master_in_scope(master_id, paper) do
+      %Document{} = master ->
+        seed = "#{canonical_request_id(request_id)}\u0000linked\u0000#{master_id(master)}"
+
+        block = %{
+          "id" => fresh_id(seed, "master-ref"),
+          "type" => MasterRef.type_name(),
+          "master" => master_id(master),
+          "version" => nil
+        }
+
+        case after_id do
+          nil ->
+            {:ok, %{"op" => "append-block", "block" => block}}
+
+          id when is_binary(id) ->
+            {:ok, %{"op" => "insert-after", "afterId" => id, "block" => block}}
+        end
+
+      :master_not_found ->
+        {:error, :master_not_found}
+    end
+  end
+
+  @doc """
+  DETACH: the op that replaces linked instance `block_id` of `paper` with a
+  detached copy of what the PUBLIC reader shows for it — the pinned published
+  revision, or the master's latest PUBLISHED row — fresh ids and
+  `master.mode = "detached"` provenance, the same copy `detached_copy/2`
+  builds for an insert. After it the block is plain blocks; later master edits
+  never reach it.
+
+  Never the authoring view's draft (0010 §5b, task-01c812041613a8d3): Detach
+  needs write access to the PAPER only, and the copy is published with the
+  paper, so copying a draft would let a paper editor publish a master draft
+  they could not publish. When the reader shows the instance as unavailable
+  but the master exists in scope (draft only, withdrawn, or a pin to a
+  non-published rev) the detach is refused with `:master_unpublished`; a
+  foreign master stays `:master_not_found`, exactly like a missing one.
+  `{:error, :block_not_found | :not_linked | :master_not_found |
+  :master_unpublished}`.
+  """
+  def detach_op(%Document{} = paper, block_id, request_id) when is_binary(block_id) do
+    with {:ok, ref} <- find_linked(paper, block_id),
+         {:ok, node, master} <- resolve_published(paper, ref) do
+      seed = "#{canonical_request_id(request_id)}\u0000detach\u0000#{block_id}"
+      copy = detached_copy(%{master | content: %{"node" => node}}, seed)
+      {:ok, %{"op" => "replace-block", "id" => block_id, "block" => copy}}
+    end
+  end
+
+  @doc """
+  PIN (`pin? = true`): the op that freezes linked instance `block_id` to the
+  master's latest PUBLISHED revision (the published row's `rev`), so later
+  master edits and publishes no longer show. UNPIN (`false`): back to
+  `version: nil`, follow latest.
+
+  Never the draft (0010 §5b, task-881d4b6e857b1b65): publishing mints a NEW
+  rev, so a draft rev is never a published revision and the public reader
+  (published rows and revisions only) could never show a pin to it. A master
+  with no published row — unpublished by its author, or born as a draft
+  through another door — has nothing the public may see, so the pin is
+  refused with `:master_unpublished`.
+  `{:error, :block_not_found | :not_linked | :master_not_found |
+  :master_unpublished}`.
+  """
+  def pin_op(%Document{} = paper, block_id, pin?) when is_binary(block_id) do
+    with {:ok, {master_id, _version}} <- find_linked(paper, block_id) do
+      version = if pin?, do: published_rev_in_scope(master_id, paper), else: {:ok, nil}
+
+      with {:ok, v} <- version do
+        {:ok, %{"op" => "patch-block", "id" => block_id, "patch" => %{"version" => v}}}
+      end
+    end
+  end
+
+  @doc "True when `block` is a linked instance (a `master-ref` block)."
+  def linked?(%{"type" => type}), do: type == MasterRef.type_name()
+  def linked?(_), do: false
+
+  @doc "See `Barkpark.Plugins.Bulldocs.Masters.Linked.render_map/3`."
+  defdelegate render_map(scope, blocks, opts \\ []), to: Linked
+
+  @doc "See `Barkpark.Plugins.Bulldocs.Masters.Linked.live_instances/1`."
+  defdelegate live_instances(master), to: Linked
+
+  defp find_linked(%Document{content: content}, block_id) do
+    case find_node(%Document{content: content}, block_id) do
+      {:ok, %{"type" => "master-ref", "master" => master} = block} when is_binary(master) ->
+        {:ok, {master, MasterRef.version(block)}}
+
+      {:ok, _other} ->
+        {:error, :not_linked}
+
+      {:error, :block_not_found} = err ->
+        err
+    end
+  end
+
+  # What the public reader resolves for `ref` (published rows and published
+  # revisions only). Unresolvable while the master exists in scope in any form
+  # is `:master_unpublished`; absent from scope (missing or foreign) is
+  # `:master_not_found`.
+  defp resolve_published(paper, {master_id, _version} = ref) do
+    case Linked.resolve(paper, ref, published_only: true) do
+      {:ok, node, master} ->
+        {:ok, node, master}
+
+      :error ->
+        case get_master_in_scope(master_id, paper) do
+          %Document{} -> {:error, :master_unpublished}
+          :master_not_found -> {:error, :master_not_found}
+        end
+    end
+  end
+
   @doc """
   The masters an author may insert into `paper`: exactly the masters in the
   paper's own workspace, project and dataset (`list_masters/2` with the
@@ -261,6 +404,31 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
     |> case do
       %Document{} = master -> master
       nil -> :master_not_found
+    end
+  end
+
+  # The PUBLISHED row's rev of master `master_id`, in the paper's exact scope
+  # (the same rule as `get_master_in_scope/2`, so a foreign master is
+  # `:master_not_found`, exactly like a missing one). A master that exists in
+  # scope only as a draft is `:master_unpublished`.
+  defp published_rev_in_scope(master_id, %Document{} = paper) do
+    base = DraftId.published_id(master_id)
+
+    rows =
+      from(d in Document,
+        where:
+          d.type == @type_name and d.dataset == ^paper.dataset and
+            d.doc_id in ^[base, DraftId.draft_id(base)],
+        select: {d.doc_id, d.rev}
+      )
+      |> scope_eq(:workspace_id, paper.workspace_id)
+      |> scope_eq(:project_id, paper.project_id)
+      |> Repo.all()
+
+    case {List.keyfind(rows, base, 0), rows} do
+      {{^base, rev}, _} when is_binary(rev) -> {:ok, rev}
+      {_, []} -> {:error, :master_not_found}
+      {_, _draft_only} -> {:error, :master_unpublished}
     end
   end
 

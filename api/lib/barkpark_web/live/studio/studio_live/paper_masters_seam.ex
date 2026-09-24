@@ -13,8 +13,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperMastersSeam do
   both socket events) treats `nil` as "masters are absent" — never a crash.
 
   The returned module implements `list_for_paper/1`, `master_id/1`,
-  `save_master/4`, `insert_op/4` and `masterable?/1`.
+  `save_master/4`, `insert_op/4` and `masterable?/1`, and for LINKED
+  instances (task-59f078a2fd248698) `linked_insert_op/4`, `detach_op/3`,
+  `pin_op/3`, `linked?/1` and `render_map/3`.
   """
+
+  alias Barkpark.PortableDoc.MasterRef
 
   alias Barkpark.Plugins.{Enablement, Registry}
 
@@ -29,6 +33,27 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperMastersSeam do
       plugin.paper_masters()
     else
       _ -> nil
+    end
+  end
+
+  @doc """
+  The `:masters` render option for `paper`'s `blocks`: the prerendered HTML of
+  every linked master instance they hold, resolved at READ time inside the
+  paper's own workspace, project and dataset (`render_map/3`). `opts` pass
+  through (`published_only: true` on the public reader).
+
+  A paper with no `master-ref` block answers `%{}` WITHOUT touching the plugin
+  registry or the database, so a paper that uses no masters pays nothing. With
+  the plugin off, or no paper, every instance renders as unavailable (`%{}`).
+  """
+  @spec render_map(map() | nil, list(), keyword()) :: map()
+  def render_map(paper, blocks, opts \\ []) do
+    with [_ | _] <- MasterRef.refs(blocks),
+         %{workspace_id: workspace_id} <- paper,
+         impl when not is_nil(impl) <- impl(workspace_id) do
+      impl.render_map(paper, blocks, opts)
+    else
+      _ -> %{}
     end
   end
 end

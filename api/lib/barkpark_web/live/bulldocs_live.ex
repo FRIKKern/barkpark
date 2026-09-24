@@ -1165,7 +1165,15 @@ defmodule BarkparkWeb.BulldocsLive do
       %{
         wikilinks: Content.resolve_wikilinks_in_blocks(blocks, dataset, scope),
         values: Content.resolve_values_in_blocks(blocks, dataset, scope),
-        paper_links: resolve_paper_link_details(blocks, dataset, scope)
+        paper_links: resolve_paper_link_details(blocks, dataset, scope),
+        # Linked master instances (task-59f078a2fd248698): resolved per page
+        # load inside the paper's own tenant, PUBLISHED master rows only (the
+        # same D5 gate as the rest of this map); a paper with no instance
+        # costs nothing. Reached through the masters seam, never the plugin.
+        masters:
+          BarkparkWeb.Studio.StudioLive.PaperMastersSeam.render_map(paper, blocks,
+            published_only: true
+          )
       }
       |> Map.merge(Labels.render_opts(dataset, scope))
     end

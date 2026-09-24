@@ -3841,6 +3841,9 @@
               ...(typeof detail.after_id === "string" && detail.after_id !== ""
                 ? { after_id: detail.after_id }
                 : {}),
+              // A LINKED pick (task-59be65118320fa0e): the server inserts a
+              // `master-ref` block instead of a detached copy.
+              ...(detail.mode === "linked" ? { mode: "linked" } : {}),
             },
             boundaryLeasePending: false,
             containerContext: {},

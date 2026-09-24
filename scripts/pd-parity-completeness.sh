@@ -200,9 +200,10 @@ legacy_dispatched_types() {
   } | sort -u
 }
 
-# The 15 excluded types (charter D7). Space-padded so a `case` glob matches whole
+# The 15 excluded types (charter D7), plus `master-ref` (task-59f078a2fd248698:
+# a linked master instance resolves server side at read time, like `embed`). Space-padded so a `case` glob matches whole
 # words only. This is the ONE lever a later wave edits to pull the field-* set in.
-EXCLUDED=" field-string field-slug field-text field-boolean field-select field-datetime field-color field-reference field-image field-number composite arrayOf codelist localizedText embed "
+EXCLUDED=" field-string field-slug field-text field-boolean field-select field-datetime field-color field-reference field-image field-number composite arrayOf codelist localizedText embed master-ref "
 
 # ── --selftest: CONTROLS ON THE INSTRUMENT ───────────────────────────────────
 # This guard's whole failure mode is a census that answers confidently about a

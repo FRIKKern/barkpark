@@ -56,6 +56,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # or nil when this pane may not write (no Save action, no slash picker).
   attr(:paper_masters, :any, default: nil)
   attr(:paper_masters_impl, :any, default: nil)
+  # Linked master instances (task-59f078a2fd248698): `%{key => html}` or nil.
+  attr(:paper_master_render, :any, default: nil)
   attr(:shares_admin?, :boolean, default: false)
   attr(:dataset, :string, required: true)
   attr(:api_token_raw, :string, default: "")
@@ -350,6 +352,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   paper_links={@paper_links}
                   masters={@paper_masters}
                   masters_impl={@paper_masters_impl}
+                  master_render={@paper_master_render}
                   save_status={@save_status}
                   paper_halt={@paper_halt}
                 />
@@ -1712,6 +1715,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_links={@paper_link_details}
           paper_masters={Map.get(assigns, :paper_masters)}
           paper_masters_impl={Map.get(assigns, :paper_masters_impl)}
+          paper_master_render={Map.get(assigns, :paper_master_render)}
           save_status={Map.get(assigns, :save_status, "")}
           paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}
