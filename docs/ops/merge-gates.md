@@ -222,12 +222,10 @@ add its context to `.github/required-checks.json` and apply — never hand-PUT.
 
 ### A pull request runs the IMPACTED ExUnit set; main runs all of it
 
-`Test (Elixir …)` no longer runs all 1,458 ExUnit files on a pull request. A
+`Test (Elixir …)` may run less than the whole suite on a pull request. A
 step before it, `Which tests does this pull request need?`, computes the
 impacted subset with `scripts/elixir-impacted-tests.sh`; the `Test` step reads
-that answer from a file and runs either the list or the whole suite. Replayed
-over the last 40 api/-touching commits on main: 12 select everything, the rest a
-median of ~200 files.
+that answer from a file and runs either the list or the whole suite.
 
 **Nothing about a push to main changed.** The dispatcher already emits every path
 set `true` on a non-pull_request event, and the selection step returns `ALL` on
@@ -242,8 +240,10 @@ along with an empty diff, an unresolvable `HEAD^1`, a failed `mix xref`, a lib
 file with no module in it, and a missing or empty selection file. Nothing is
 enumerated, so a new kind of path can only ever make this run more. Since an
 empty `xref` graph is legitimate for a leaf and catastrophic from a broken
-instrument, a positive control over `lib/barkpark/repo.ex` runs first: no
-dependents there and the whole run falls back to `ALL`.
+instrument, a probe runs first: a hub (`lib/barkpark/plugin.ex`) and a leaf
+(`lib/barkpark/tasks/landed.ex`) must get different closures, or the run logs
+`narrowing unavailable: running ALL`. On today's toolchain they do not (#20217),
+so an `api/lib` PR runs everything until a direct-edge closure lands (#20219).
 
 **The ALWAYS set** rides every narrowed selection — the tests a compile closure
 structurally cannot reach. Source-scanning censuses are DERIVED from the tree on
