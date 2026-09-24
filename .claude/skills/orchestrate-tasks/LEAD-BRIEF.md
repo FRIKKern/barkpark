@@ -89,6 +89,7 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    CODE, not the output: 64 = REFUSED, nothing ran (fix the argv); 2 = the suite RAN
    and tests FAILED (fix the code); 0 = green. Before 2026-09-20 a refusal also exited
    2, so `… || echo REFUSED` called a red suite a refusal (task-620ea822de73bf5e). Go: `go build ./... && go test ./internal/cli/...`.
+   Beside mix-test-strict.sh, any api/test edit also runs `bash scripts/unreachable-assert-message-check.sh --files <staged api/test files>` (the required Elixir gate's ratchet; the pre-commit hook runs it too, but a `--no-verify` commit skips it).
    `cc` on this Mac is a Claude Code shim: cgo/NIF builds die on a fake "unknown option" — use
    `CGO_ENABLED=0` for Go (as the Makefile does) and `CC=/usr/bin/clang` for mix when a NIF compiles.
    A change with a test proves red-without / green-with (mutation-prove it).

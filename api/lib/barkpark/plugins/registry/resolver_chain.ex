@@ -19,8 +19,10 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
        that register without an Application config entry continue to work.
 
   Whichever source provides the names, each name is resolved to its
-  registered entry via `Registry.lookup/1`; plugins listed in config but
-  never registered are silently skipped (with a debug log line).
+  registered entry by `Barkpark.Content.PluginLoadOrder.plugins/3`; an entry
+  that is not a registered plugin (an unknown name, a loadable module that
+  never registered, a malformed entry) is skipped with a `Logger.warning`
+  naming it.
   """
 
   require Logger
@@ -187,42 +189,22 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
         # `register/2`, and routing through `lookup/1` (a `GenServer.call` to
         # self) deadlocks the registry — "process attempted to call itself" — on
         # any boot with `:barkpark, :plugins` configured (e.g. BARKPARK_PLUGINS).
-        by_name = Map.new(Registry.all(), &{&1.name, &1})
-
-        configured
-        |> Enum.map(&plugin_name_of/1)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.flat_map(fn name ->
-          case Map.fetch(by_name, name) do
-            {:ok, entry} ->
-              [entry]
-
-            :error ->
-              Logger.debug(
-                "Barkpark.Plugins.Registry: plugin #{inspect(name)} listed in " <>
-                  ":barkpark, :plugins but not registered — skipping"
-              )
-
-              []
-          end
-        end)
+        #
+        # Entries are interpreted by `Barkpark.Content.PluginLoadOrder.plugins/3`
+        # (task-3fbd48182b1d35ea): this is a plugin-RECORD reader, so a loadable
+        # module that is not registered is skipped — and, like every other
+        # skipped entry, logged by name at warning level (it was a `debug` line,
+        # invisible at the default level, before).
+        #
+        # Quiet INSIDE the Registry process: there this runs from
+        # `refresh_snapshot/1` mid-registration, and with a configured
+        # `BARKPARK_PLUGINS="a,b"` boot, "b" is simply not registered YET while
+        # "a" registers. Every other caller warns.
+        Barkpark.Content.PluginLoadOrder.plugins(configured, Registry.all(), __MODULE__,
+          warn: self() != Process.whereis(Registry)
+        )
     end
   end
-
-  # The Application config entry can be a bare module atom, a `{name, module}`
-  # tuple, or a string plugin name. We only need the name to look up the
-  # registered entry — module form gets reverse-mapped via `Registry.all/0`.
-  defp plugin_name_of(name) when is_binary(name), do: name
-
-  defp plugin_name_of({name, _module}) when is_binary(name), do: name
-
-  defp plugin_name_of(module) when is_atom(module) do
-    Enum.find_value(Registry.all(), fn entry ->
-      if entry.module == module, do: entry.name
-    end)
-  end
-
-  defp plugin_name_of(_), do: nil
 
   # Per-plugin resolver dispatch. Three paths:
   #
