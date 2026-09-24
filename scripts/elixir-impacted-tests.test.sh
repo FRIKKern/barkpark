@@ -185,16 +185,18 @@ fi
 tmp_ext_rows="$(mktemp "${TMPDIR:-/tmp}/bp-ext-rows.XXXXXX")"
 bash "$HERE/elixir-path-escape-check.sh" --list-escapes 2>/dev/null \
   | awk -F'\t' '{print $1 "\t" $2}' | LC_ALL=C sort -u >"$tmp_ext_rows" || true
+# The selector follows every existing ancestor, including a root like "cloud".
+# The independent join must include those roots too, not only slash-bearing literals.
 ext_expect="$(
   cut -f1 "$tmp_ext_rows" | LC_ALL=C sort -u | while IFS= read -r s; do
     [ -n "$s" ] || continue
     [ "$s" = "scripts/elixir-path-escape-check.sh" ] && continue
     [ -f "$ROOT/$s" ] || continue
-    grep -ohaE '"[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_.-]+)+"' -- "$ROOT/$s" </dev/null 2>/dev/null \
+    grep -ohaE '"[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_.-]+)*"' -- "$ROOT/$s" </dev/null 2>/dev/null \
       | tr -d '"' | LC_ALL=C sort -u | while IFS= read -r t; do
         [ -n "$t" ] || continue
         [ -e "$ROOT/$t" ] || continue
-        [ "$t" = "cloud/test" ] || continue
+        case "$ct_path" in "$t"|"$t"/*) ;; *) continue ;; esac
         awk -F'\t' -v s="$s" '$1 == s { print $2 }' "$tmp_ext_rows"
       done
   done | LC_ALL=C sort -u
