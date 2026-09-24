@@ -371,8 +371,22 @@ export function thingMatcher(thing, base, fileLines) {
   };
 }
 
+// ── A COMMON WORD IS NOT EVIDENCE (the weak rule), exported ─────────────────
+// A subject that sits on WEAK_MIN or more lines of the file version being read
+// is a generic word: it lands near almost any N by chance, so a hit proves
+// nothing. The classifier refuses to PIN by one (PIN-WEAK, --weak), and the
+// checker refuses to CREDIT by one (task-b3961db653fbbf58: `body` crediting
+// app.js:3143 off a comment "resurrect sheet body"). One constant, one count,
+// both files: a second definition would let the two drift apart.
+// 10 since the lead's ruling on #20128 (was > 25); see PIN-WEAK above.
+export const WEAK_MIN = 10;
+// How many lines of fileLines the line test `r` accepts. `r` is a
+// thingMatcher() (so a function the version defines counts its DEFINITION
+// lines, never its uses) or a quote's RegExp (literal substring).
+export const linesHolding = (fileLines, r) => fileLines.reduce((n, l, k) => n + (r.test(l, k) ? 1 : 0), 0);
+
 // Run the CLI only when executed directly (`node file-line-citation-classify.mjs`),
-// never on import: the checker imports the four functions above, and an import
+// never on import: the checker imports the functions above, and an import
 // that parsed the checker's argv, ran git blame and called process.exit would
 // kill the importing process.
 const IS_MAIN = (() => {
@@ -384,7 +398,7 @@ if (IS_MAIN) {
 
 
 const o = { charter: ".claude/workflows/bp-cloud-console-hardening-charter.md", maps: [],
-  depth: 80, ahead: 20, slack: 3, weak: 10, cap: 30, apply: false, json: false, residue: false, only: null,
+  depth: 80, ahead: 20, slack: 3, weak: WEAK_MIN, cap: 30, apply: false, json: false, residue: false, only: null,
   root: null, subjects: [], selftest: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
@@ -485,7 +499,7 @@ function lands(fileLines, c, toks, mk) {
   return null;
 }
 
-const countIn = (fl, r) => fl.reduce((n, l, k) => n + (r.test(l, k) ? 1 : 0), 0);
+const countIn = linesHolding;
 
 // ── dating: when was each citation's OWN text written? (see DATING above) ────
 // Replays the charter's first-parent history as -U0 diffs, carrying each
