@@ -13,10 +13,20 @@
 // the day D292 was written. Rewriting 675 to today's line would make D292 claim
 // it measured something it never measured. So the repair for a drifted citation
 // in a dated record is PROVENANCE, not a new number: append the main commit the
-// number was true at — `app.js:675 (at <sha>)` — and the checker then verifies
-// the pin against `git show <sha>:<path>`, which never drifts. An unpinned
-// citation keeps being checked against HEAD, so a NEW citation that rots still
-// reds.
+// number was true at, NAMING the thing it cites — `app.js (renderFoo @ <sha10>,
+// L675)` — and the checker then verifies that thing against `git show
+// <sha>:<path>`, which never drifts. An unpinned citation keeps being checked
+// against HEAD, so a NEW citation that rots still reds.
+//
+// THE PIN FORM IS E11-CLEAN BY CONSTRUCTION. An earlier draft of this header
+// proposed appending `(at <sha>)` after the old `app.js:675`; that keeps the
+// exact shape E11 (cloud/priv/static/__css_check.mjs) bans. The written form
+// drops the `:` — filename, space, `(` — so neither branch of E11's alternation
+// can bind, and the line number rides behind `L`. The grammar, the verification
+// and the E11 proof live in scripts/file-line-citation-check.mjs (--selftest
+// arm 18 runs E11's own exported function over it). The thing written is the
+// LOCAL token that landed at the pinned version — the same token the checker
+// will then look for, and nothing else on the line.
 //
 // ── THE LOCAL ANCHOR — the classifier's stricter test ─────────────────────────
 //
@@ -39,8 +49,12 @@
 //                (cited from a stale base)
 //   PIN-NEWER    lands only at a NEWER version, within --ahead versions (cited
 //                from a base carrying siblings that merged after the charter)
-//   PIN-WEAK     would pin, but the crediting token occurs > --weak times in the
+//   PIN-WEAK     would pin, but the crediting token occurs >= --weak times in the
 //                pinned file: a generic word, so the pin is not evidence -> hand
+//                (default 10; was > 25 until the lead's ruling on #20128: a pin
+//                records "verified at sha", so pinning a word common enough to
+//                land by chance — `index` landing on `o.index` — makes a false
+//                citation look confirmed)
 //   NO-LOCAL     no backticked subject and no quoted sentence near the citation
 //                -> hand (no rule can pick the subject out of prose)
 //   BLOCK-NEAR   the local subject sits <= 40 lines off at the blame-era version
@@ -59,6 +73,11 @@
 //   node scripts/file-line-citation-classify.mjs                # buckets + samples
 //   node scripts/file-line-citation-classify.mjs --residue      # every residue row
 //   node scripts/file-line-citation-classify.mjs --apply        # write the pins
+//   node scripts/file-line-citation-classify.mjs --apply --only PIN-EXACT,PIN-OLDER,PIN-NEWER
+//        write ONLY the named buckets. When every named bucket is rule-pinnable
+//        (PIN-EXACT / PIN-OLDER / PIN-NEWER) the residue cap does not gate the
+//        write: the cap bounds HAND work, and these buckets are settled by rule.
+//        The residue is left untouched either way.
 //   node scripts/file-line-citation-classify.mjs --json
 //   [--charter P] [--map base=path]... [--depth K] [--ahead K] [--weak K] [--cap N] [--slack K]
 //   exit 0 residue <= cap · 1 residue > cap (STOP) · 2 bad argument
@@ -76,10 +95,12 @@ const STOP = new Set([
   "length", "push", "then", "data", "text", "json", "html", "http",
   "https", "type", "name", "node", "item", "list", "void",
 ]);
-const PIN_RE = /\(at ([0-9a-f]{7,40})\)/g;
+// The pin form — must mirror PIN_ANY in scripts/file-line-citation-check.mjs.
+const PIN_RE = /\b[\w.-]+\.[A-Za-z0-9]+ \(([^@()\n]+?) @ ([0-9a-f]{7,40}), L(\d+)(?:[-\u2013]L?(\d+))?\)/g;
+const RULE_PINNABLE = new Set(["PIN-EXACT", "PIN-OLDER", "PIN-NEWER"]);
 
 const o = { charter: ".claude/workflows/bp-cloud-console-hardening-charter.md", maps: [],
-  depth: 80, ahead: 20, slack: 3, weak: 25, cap: 30, apply: false, json: false, residue: false };
+  depth: 80, ahead: 20, slack: 3, weak: 10, cap: 30, apply: false, json: false, residue: false, only: null };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -94,6 +115,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "--apply") o.apply = true;
   else if (a === "--json") o.json = true;
   else if (a === "--residue") o.residue = true;
+  else if (a === "--only") o.only = new Set(String(need() || "").split(",").map((x) => x.trim()).filter(Boolean));
   else { process.stderr.write(`UNCHECKED: unknown argument ${a}\n`); process.exit(2); }
 }
 if (o.maps.length === 0) {
@@ -140,7 +162,10 @@ function tokensOf(span, base, keepHyphen) {
 // anchorsOf() in file-line-citation-check.mjs.
 function lineAnchors(text, base) {
   const out = new Set();
-  for (const m of text.replace(PIN_RE, "").matchAll(/`([^`]+)`/g)) for (const t of tokensOf(m[1], base, false)) out.add(t);
+  // A pin is replaced by a SPACE, never removed: removing it from inside a
+  // backtick span leaves an empty `` pair, which `([^`]+)` skips, and every
+  // later span on the line then pairs the wrong backticks.
+  for (const m of text.replace(PIN_RE, " ").matchAll(/`([^`]+)`/g)) for (const t of tokensOf(m[1], base, false)) out.add(t);
   return [...out];
 }
 
@@ -161,31 +186,39 @@ function localAnchors(text, base, p, e) {
   const inside = spans.find((sp) => sp.s < p && sp.e > e);
   const keepHyphen = base.endsWith(".css") || base.endsWith(".html");
   let toks = [];
-  if (inside) toks = tokensOf(inside.body.replace(PIN_RE, ""), base, keepHyphen);
+  if (inside) toks = tokensOf(inside.body.replace(PIN_RE, " "), base, keepHyphen);
   if (toks.length === 0) {
     const before = spans.filter((sp) => sp.e <= p && p - sp.e <= 80 && !(inside && sp === inside)).pop();
     const after = spans.find((sp) => sp.s >= e && sp.s - e <= 40);
-    for (const sp of [before, after]) if (sp) toks.push(...tokensOf(sp.body.replace(PIN_RE, ""), base, keepHyphen));
+    for (const sp of [before, after]) if (sp) toks.push(...tokensOf(sp.body.replace(PIN_RE, " "), base, keepHyphen));
   }
   return [...new Set(toks)];
 }
 
 // ── parse ────────────────────────────────────────────────────────────────────
 const alt = [...targets.keys()].map(esc).join("|");
-const CITE = new RegExp(`\\b(${alt}):(\\d+)(?:[-–](\\d+))?(\`?\\s?\\(at ([0-9a-f]{7,40})\\))?`, "g");
+const CITE = new RegExp(`\\b(${alt}):(\\d+)(?:[-–](\\d+))?`, "g");
+const PINNED = new RegExp(`(?<![\\w.-])(${alt}) \\(([^@()\\n]+?) @ ([0-9a-f]{7,40}), L(\\d+)(?:[-\u2013]L?(\\d+))?\\)`, "g");
 const cites = [];
 lines.forEach((text, idx) => {
   for (const m of text.matchAll(CITE)) {
     const n = Number(m[2]);
     const hi = m[3] ? Number(m[3]) : n;
-    const endNoPin = m.index + m[1].length + 1 + m[2].length + (m[3] ? m[3].length + 1 : 0);
-    cites.push({ base: m[1], n, hi: hi >= n ? hi : n, charterLine: idx + 1, text, p: m.index, e: endNoPin,
-      pin: m[5] || null });
+    const end = m.index + m[0].length;
+    cites.push({ base: m[1], n, hi: hi >= n ? hi : n, charterLine: idx + 1, text, p: m.index, e: end, pin: null });
+  }
+  for (const m of text.matchAll(PINNED)) {
+    const n = Number(m[4]);
+    const hi = m[5] && Number(m[5]) >= n ? Number(m[5]) : n;
+    cites.push({ base: m[1], n, hi, charterLine: idx + 1, text, p: m.index, e: m.index + m[0].length, pin: m[3] });
   }
 });
 
+// A range is its own tolerance (no slack), a single line gets +/-slack — the
+// checker's windowOf(), so a pin this writes is one the checker accepts.
 function lands(fileLines, c, toks, re) {
-  const lo = Math.max(1, c.n - o.slack), hi = Math.min(fileLines.length, c.hi + o.slack);
+  const lo = c.hi !== c.n ? Math.max(1, c.n) : Math.max(1, c.n - o.slack);
+  const hi = c.hi !== c.n ? Math.min(fileLines.length, c.hi) : Math.min(fileLines.length, c.n + o.slack);
   for (const tok of toks) {
     const r = typeof tok === "object" ? tok.re : re(tok);
     const name = typeof tok === "object" ? tok.label : tok;
@@ -280,7 +313,7 @@ for (const c of cites) {
   c.pinTo = pin;
   if (c.headResolved) {
     c.bucket = localHead ? "R-LOCAL" : "R-FOREIGN";
-  } else if (pin && pin.freq > o.weak) {
+  } else if (pin && pin.freq >= o.weak) {
     c.bucket = "PIN-WEAK";
   } else if (pin) {
     c.bucket = pin.back === 0 ? "PIN-EXACT" : pin.back > 0 ? "PIN-OLDER" : "PIN-NEWER";
@@ -306,28 +339,31 @@ const RULES = {
   "R-LOCAL": "resolves at HEAD by a local token; pinned (at the blame-era version) so it cannot rot",
   "R-FOREIGN": "checker credits it at HEAD by a NON-local token (over-credit suspect); pinned if the local set lands historically",
   "R-NO-LOCAL": "checker credits it at HEAD; no local anchor, so no rule can pin it -> left unpinned",
-  "PIN-EXACT": "local set lands at the version current when the line was written -> append (at <sha>)",
-  "PIN-OLDER": "local set lands only at an older version (cited on a stale base) -> append (at <sha>)",
-  "PIN-NEWER": `local set lands only at a NEWER version (<=${o.ahead}; cited from a base carrying unmerged siblings) -> append (at <sha>)`,
-  "PIN-WEAK": `would pin, but the crediting local token occurs > ${o.weak} times in the pinned file (generic word) -> RESIDUE (hand)`,
+  "PIN-EXACT": "local set lands at the version current when the line was written -> rewrite to <file> (<thing> @ <sha>, L<n>)",
+  "PIN-OLDER": "local set lands only at an older version (cited on a stale base) -> rewrite to <file> (<thing> @ <sha>, L<n>)",
+  "PIN-NEWER": `local set lands only at a NEWER version (<=${o.ahead}; cited from a base carrying unmerged siblings) -> rewrite to <file> (<thing> @ <sha>, L<n>)`,
+  "PIN-WEAK": `would pin, but the crediting local token occurs >= ${o.weak} times in the pinned file (generic word) -> RESIDUE (hand)`,
   "NO-LOCAL": "no backticked subject and no quoted sentence near the citation -> RESIDUE (hand)",
   "BLOCK-NEAR": "local set never lands in +/-slack, but sits <=40 lines off at the blame-era version (cites a block body, or a sibling base) -> RESIDUE (hand)",
   "FAR": "local set sits >40 lines off at the blame-era version -> RESIDUE (hand)",
   "ABSENT-THEN": "no local token exists anywhere in the blame-era file (prose word, other file, or later rename) -> RESIDUE (hand)",
   "UNDECIDABLE": "no backticked anchor on the line at all (checker does not count it)",
-  "ALREADY-PINNED": "carries (at <sha>) already",
+  "ALREADY-PINNED": "already in the pin form <file> (<thing> @ <sha>, L<n>)",
 };
 const order = Object.keys(RULES);
 const shortSha = (s) => s.slice(0, 10);
 const byBucket = new Map(order.map((k) => [k, []]));
 for (const c of cites) byBucket.get(c.bucket).push(c);
 
+// The pinned thing is written INTO the citation, so it must survive the pin
+// grammar: no `(`, `)`, `@` or newline. A token that cannot is left unpinned
+// and counted (THING-UNWRITABLE), never mangled.
+const writableThing = (t) => !/[()@\n]/.test(t);
 function withPin(c) {
-  if (!c.pinTo || c.bucket === "PIN-WEAK" || (c.bucket.startsWith("R-") && c.pinTo.freq > o.weak)) return null;
-  const tail = c.text.slice(c.e);
-  const pinStr = ` (at ${shortSha(c.pinTo.sha)})`;
-  if (tail.startsWith("`")) return { at: c.e + 1, str: pinStr };
-  return { at: c.e, str: pinStr };
+  if (!c.pinTo || c.bucket === "PIN-WEAK" || (c.bucket.startsWith("R-") && c.pinTo.freq >= o.weak)) return null;
+  if (!writableThing(c.pinTo.tok)) return null;
+  const range = c.hi !== c.n ? `L${c.n}-${c.hi}` : `L${c.n}`;
+  return { at: c.p, end: c.e, str: `${c.base} (${c.pinTo.tok} @ ${shortSha(c.pinTo.sha)}, ${range})` };
 }
 const excerpt = (s, a, b) => s.slice(Math.max(0, a), b).replace(/\s+/g, " ");
 
@@ -359,8 +395,8 @@ if (o.json) {
         (c.credit ? ` credit=${c.credit.tok}@${c.credit.at}` : "") + (c.pinTo ? ` pin=${shortSha(c.pinTo.sha)} (${c.pinTo.back} versions from blame, ${c.pinTo.tok}@${c.pinTo.at} x${c.pinTo.freq})` : "") + "\n");
       process.stdout.write(`      before: …${excerpt(c.text, c.p - 60, c.e + 30)}…\n`);
       if (w) {
-        const after = c.text.slice(0, w.at) + w.str + c.text.slice(w.at);
-        process.stdout.write(`      after : …${excerpt(after, c.p - 60, c.e + 30 + w.str.length)}…\n`);
+        const after = c.text.slice(0, w.at) + w.str + c.text.slice(w.end);
+        process.stdout.write(`      after : …${excerpt(after, c.p - 60, c.p + w.str.length + 30)}…\n`);
       }
     }
   }
@@ -373,25 +409,40 @@ if (o.json) {
 }
 
 const residueN = cites.filter((c) => ["PIN-WEAK", "NO-LOCAL", "BLOCK-NEAR", "FAR", "ABSENT-THEN"].includes(c.bucket)).length;
-if (residueN > o.cap) {
+if (o.only) {
+  const unknown = [...o.only].filter((b) => !(b in RULES));
+  if (unknown.length) { process.stderr.write(`UNCHECKED: --only names unknown bucket(s): ${unknown.join(", ")}\n`); process.exit(2); }
+}
+const ruleOnly = o.only && [...o.only].every((b) => RULE_PINNABLE.has(b));
+if (residueN > o.cap && !(o.apply && ruleOnly)) {
   if (!o.json) process.stdout.write(`\nSTOP — residue ${residueN} exceeds the hand-adjudication cap ${o.cap}. Split it; do not apply.\n`);
-  if (o.apply) process.stderr.write("REFUSED: --apply with residue over the cap writes nothing.\n");
+  if (o.apply) process.stderr.write("REFUSED: --apply with residue over the cap writes nothing (unless --only names rule-pinnable buckets alone).\n");
   process.exit(1);
 }
 if (o.apply) {
   const edits = new Map();
+  const perBucket = new Map();
+  const unwritable = [];
   for (const c of cites) {
+    if (o.only && !o.only.has(c.bucket)) continue;
     const w = withPin(c);
-    if (!w) continue;
+    if (!w) { if (c.pinTo && RULE_PINNABLE.has(c.bucket)) unwritable.push(c); continue; }
+    perBucket.set(c.bucket, (perBucket.get(c.bucket) || 0) + 1);
     if (!edits.has(c.charterLine)) edits.set(c.charterLine, []);
     edits.get(c.charterLine).push(w);
   }
   let n = 0;
   for (const [ln, ws] of edits) {
     let t = lines[ln - 1];
-    for (const w of ws.sort((a, b) => b.at - a.at)) { t = t.slice(0, w.at) + w.str + t.slice(w.at); n++; }
+    for (const w of ws.sort((a, b) => b.at - a.at)) { t = t.slice(0, w.at) + w.str + t.slice(w.end); n++; }
     lines[ln - 1] = t;
   }
   fs.writeFileSync(charterPath, lines.join("\n"));
-  process.stdout.write(`\nAPPLIED ${n} pin(s) across ${edits.size} charter line(s) in ${charterRel}\n`);
+  process.stdout.write(`\nAPPLIED ${n} pin(s) across ${edits.size} charter line(s) in ${charterRel}` +
+    (o.only ? ` (only: ${[...o.only].join(",")})` : "") + "\n");
+  for (const [b, k] of perBucket) process.stdout.write(`  ${b.padEnd(15)} ${k}\n`);
+  if (unwritable.length) {
+    process.stdout.write(`  THING-UNWRITABLE ${unwritable.length} (rule-pinnable, but the thing holds ( ) @ or a newline — left unpinned):\n`);
+    for (const c of unwritable) process.stdout.write(`    L${c.charterLine} ${c.base}:${c.n} thing=${c.pinTo.tok}\n`);
+  }
 }
