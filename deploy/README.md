@@ -108,7 +108,7 @@ while the status-scoped form answers **404** — with two controls (an existing
 file → 200, the proxied path → 503) identical under both arms, so the difference
 is the status list and nothing else. Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script: `bash deploy/instance-deploy_test.sh` — 561 checks: slot selection,
+script: `bash deploy/instance-deploy_test.sh` — 566 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
 typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
 and their install guards, and the on-box-compile ruling below. EVERY `<engine> …
@@ -695,7 +695,12 @@ supplied but fails validation logs a different line that names the refused
 entry (`WARN: BARKPARK_CLOUD_EGRESS_IPS REFUSED by the validator: entry '…'`), so
 a deploy log never confuses "nothing supplied" with "supplied and refused". The
 validator is plain bash, not awk: the awk regex it replaced refused every IPv4
-address under mawk 1.3.4 20200120/20240123 (stock Ubuntu 22.04/24.04, Debian 12).
+address under mawk 1.3.4 20200120/20240123 (stock Ubuntu 22.04/24.04, Debian 12). Its
+grammar is the runtime's: anything it accepts, `:inet.parse_address` (what
+runtime.exs calls) accepts too — the IPv6 arm once checked shape only and passed
+`1:2`. It is stricter on legacy forms the runtime re-reads as another address
+(`010.0.0.1` is octal 8.0.0.1, `127.1`, zone ids). Both verdicts per specimen:
+Case 16c of the harness.
 
 Check a box: `grep BARKPARK_TRUSTED_PROXIES /opt/barkpark/.env`.
 
