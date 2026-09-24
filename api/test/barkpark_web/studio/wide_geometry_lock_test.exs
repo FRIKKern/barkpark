@@ -302,6 +302,15 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
      ~w(display)},
     {~S|html[data-width-bucket="phone"] .pane-column--last|, ~w(flex)},
     {~S|html[data-width-bucket="phone"] .editor-panel|, ~w(min-width)},
+    # task-134dd8b12b5ce305: phone-only residue fixes. The nothing-selected
+    # placeholder yields so the lone list owns the width, and the CLOSED
+    # inspector toggle gets a 24px target (its -4px margin keeps the 16px flex
+    # footprint, so the strip does not move). Both are phone-scoped; wide
+    # cannot match either.
+    {~S|html[data-width-bucket="phone"] .pane-layout:has(> .pane-column--last) > .editor-empty[data-reason="nothing_selected"]|,
+     ~w(display)},
+    {~S|html[data-width-bucket="phone"] .bp-doc-sidebar:not([data-user-opened]) .bp-doc-sidebar__collapse|,
+     ~w(min-width)},
 
     # --- beta editor focus: opt-in attribute, off by default ---
     {~S|html[data-editor-focus="beta"] .pane-column.bp-doc-list|, ~w(display)},
