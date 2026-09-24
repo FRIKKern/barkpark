@@ -864,6 +864,8 @@ else
   sec7_out="$(cat "$sec7_dir/out")"
   if ! is_all "$sec7_out"; then
     bad "§7 a SINK-INVARIANT xref falls back to ALL" "it NARROWED to $(grep -c . <<<"$sec7_out") files on a closure that does not depend on the changed file"
+  elif ! grep -qF -- "narrowing unavailable: running ALL" "$sec7_dir/err"; then
+    bad "§7 a SINK-INVARIANT xref falls back to ALL, naming both sinks" "ALL, but stderr lacks the fallback line 'narrowing unavailable: running ALL' (main ruling 2026-09-24)"
   elif grep -qF -- "$sec7_named" "$sec7_dir/err"; then
     ok "§7 a SINK-INVARIANT xref falls back to ALL, naming both sinks"
   else

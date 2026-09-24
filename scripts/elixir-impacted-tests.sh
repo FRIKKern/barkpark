@@ -900,6 +900,7 @@ select_tests() {
         return 0
       fi
       if ! xref_probe || ! closure="$(compile_closure "$p")"; then
+        echo "elixir-impacted-tests: narrowing unavailable: running ALL (the compile-closure instrument failed its probe or could not close ${p})." >&2
         echo "ALL"
         return 0
       fi
@@ -967,6 +968,7 @@ select_tests() {
               return 0
             fi
             if ! xref_probe || ! closure="$(compile_closure "$r")"; then
+              echo "elixir-impacted-tests: narrowing unavailable: running ALL (the compile-closure instrument failed its probe or could not close ${r})." >&2
               echo "ALL"
               return 0
             fi
