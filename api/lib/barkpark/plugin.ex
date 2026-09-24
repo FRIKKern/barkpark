@@ -837,6 +837,49 @@ defmodule Barkpark.Plugin do
   """
   @callback pre_write_fences() :: [pre_write_fence()]
 
+  # ── Pre-publish fences (Barkspark phase 1, task-8273f2f1b24a6de1) ─────
+
+  @typedoc """
+  Where a pre-publish fence runs in `Barkpark.Content.Lifecycle`'s publish:
+
+    * `:door` — right after the draft read and the core render-shape and
+      bound-title gates, BEFORE the authoring wall, the `:before_publish` hook
+      chain and the transaction, so a refusal is side-effect-free. Called as
+      `apply(module, function, [type, draft, published, opts])`, where
+      `published` is the incumbent published row or `nil` on a first publish.
+      Any non-`:ok` return is returned from the publish VERBATIM.
+    * `:in_transaction` — inside the publish transaction, directly after the
+      incumbent row is re-read and locked `FOR UPDATE` (only when one exists),
+      before the update. Called as
+      `apply(module, function, [type, locked_published, pub_attrs, opts])`.
+      Must return `:ok` or `{:error, reason}`; the lifecycle rolls back with
+      `reason`, so the publish returns `{:error, reason}`.
+
+  Two phases exist because the task gates this seam carries sat on opposite
+  sides of the transaction (see `Barkpark.Content.PrePublishFences`); one
+  phase would have moved one of them past the wall, the hooks or the lock.
+  """
+  @type pre_publish_fence_phase :: :door | :in_transaction
+
+  @typedoc "One pre-publish fence: `{phase, module, function}`."
+  @type pre_publish_fence :: {pre_publish_fence_phase(), module(), atom()}
+
+  @doc """
+  Declare the ORDERED list of fences the core publish runs, each at its
+  phase's position (see `t:pre_publish_fence_phase/0`).
+
+  Published by `Barkpark.Plugins.Registry` to `Barkpark.Content.PrePublishFences`
+  and read there in plugin load order (this list's order kept within a
+  plugin). Within a phase the lifecycle runs them in that order and stops at
+  the first non-`:ok`; it names no task gate of its own at either position.
+
+  NOT filtered by per-workspace enablement and a raising declaration is NOT
+  swallowed — the same integrity-gate rules as `pre_write_fences/0`.
+
+  Default (supplied by `use Barkpark.Plugin`) returns `[]`.
+  """
+  @callback pre_publish_fences() :: [pre_publish_fence()]
+
   # ── Lifecycle hooks callback (Goal barkpark-9lq) ─────────────────────
 
   @doc """
@@ -1041,6 +1084,7 @@ defmodule Barkpark.Plugin do
                       resolve_extract_edges: 2,
                       lifecycle_hooks: 0,
                       pre_write_fences: 0,
+                      pre_publish_fences: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
                       cli_commands: 0,
@@ -1245,6 +1289,9 @@ defmodule Barkpark.Plugin do
       def pre_write_fences, do: []
 
       @impl Barkpark.Plugin
+      def pre_publish_fences, do: []
+
+      @impl Barkpark.Plugin
       def api_tests, do: []
 
       @impl Barkpark.Plugin
@@ -1311,6 +1358,7 @@ defmodule Barkpark.Plugin do
                      resolve_extract_edges: 2,
                      lifecycle_hooks: 0,
                      pre_write_fences: 0,
+                     pre_publish_fences: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,
                      cli_commands: 0,

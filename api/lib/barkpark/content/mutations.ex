@@ -46,7 +46,7 @@ defmodule Barkpark.Content.Mutations do
   draft. Two consequences worth naming:
 
     * a task patch now passes the publish door's gates —
-      `Content.Lifecycle.ensure_task_publish_transition_legal/5` (legal
+      `Tasks.PublishGuards.door_gate/4`, a `:door` pre-publish fence (legal
       lifecycle transition, no claim substitution, no criteria regression) and
       `Content.AuthoringWall.enforce/5` (`task` is a walled type). Those turn
       writes that used to 200-onto-nothing into honest refusals. This is the

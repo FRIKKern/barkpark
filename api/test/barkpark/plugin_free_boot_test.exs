@@ -495,6 +495,13 @@ defmodule Barkpark.PluginFreeBootTest do
       assert Barkpark.Plugins.Registry.collect_pre_write_fences() == []
     end
 
+    test "no pre-publish fence resolves: a publish runs no plugin gate under :plugins []" do
+      # task-8273f2f1b24a6de1 — the Tasks publish-door gates moved behind
+      # `pre_publish_fences/0`; with nothing registered the lifecycle runs no
+      # fence at the door or inside the publish transaction.
+      assert Barkpark.Plugins.Registry.collect_pre_publish_fences() == []
+    end
+
     test "GET /studio/production renders 200 with Structure marker (following the scoped-shell redirect)" do
       conn = get_following_redirects("/studio/production")
       body = html_response(conn, 200)

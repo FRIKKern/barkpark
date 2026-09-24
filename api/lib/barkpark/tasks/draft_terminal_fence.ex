@@ -2,7 +2,7 @@ defmodule Barkpark.Tasks.DraftTerminalFence do
   @moduledoc """
   THE DRAFT-ONLY TERMINAL FENCE (task-e49058a7f2b46a63).
 
-  `Content.Lifecycle.ensure_task_publish_transition_legal/5` is the gate that
+  `Tasks.PublishGuards.door_gate/4` (a `:door` pre-publish fence) is the gate that
   closes the blind-terminal hole for task rows — but it runs AT PUBLISH. A row
   that never publishes never meets it, and for a never-published row the DRAFT
   IS THE ROW OF RECORD: `bp task get` reads it, and `bp task ready` serves

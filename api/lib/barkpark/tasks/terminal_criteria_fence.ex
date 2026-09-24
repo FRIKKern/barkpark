@@ -20,7 +20,7 @@ defmodule Barkpark.Tasks.TerminalCriteriaFence do
       said the word "withdraw".
     * **A publish carries no authorial intent about a field it did not name.**
       This is the standing ruling of the door beside this one
-      (`Content.Lifecycle`'s `task_door_field_fence/2`, the six task-door-owned
+      (`Tasks.PublishGuards`'s `task_door_field_fence/2`, the six task-door-owned
       fields): publishing copies a draft's content over the published row
       WHOLESALE, so a draft that merely predates the close is indistinguishable
       from an author asking to rewrite the proof. That door refuses rather than
@@ -47,7 +47,7 @@ defmodule Barkpark.Tasks.TerminalCriteriaFence do
   `task.criterion` events in its entire life: no stamp, no withdrawal, no
   attribution. It is false-done, and nothing in the chain refused it.
 
-  `Content.Lifecycle`'s `criteria_fence/2` cannot see this shape. It is a
+  `Tasks.PublishGuards`'s `criteria_fence/2` cannot see this shape. It is a
   REGRESSION fence: it walks the PUBLISHED row's proof-bearing criteria (`met:
   true` or non-blank `evidence`) and refuses a draft that drops or unproves
   one. A published row carrying NO criteria has no proof to regress, so a draft
@@ -73,10 +73,11 @@ defmodule Barkpark.Tasks.TerminalCriteriaFence do
   **RESIDUE, stated rather than hidden:** a draft minted BEFORE the close, with
   criteria already divergent, and published AFTER it, never passes through this
   fence — the publish write itself happens in
-  `Content.Lifecycle.publish_after_gate/5` (`Document.changeset |> Repo.update`
+  `Content.Lifecycle.publish_after_gate/7` (`Document.changeset |> Repo.update`
   inside its own transaction), not through `Content.Writer`. Closing that last
-  notch means a terminal arm on `gate_task_publish/2` +
-  `assert_no_criteria_regression!/3` in `content/lifecycle.ex`, which is
+  notch means a terminal arm on `gate_task_publish/3` +
+  `no_criteria_regression/4` (then in `content/lifecycle.ex`, now
+  `Tasks.PublishGuards`), which was
   outside this row's granted fence. It is the natural follow-up and it is
   small: the predicate below is public (`changes_terminal_criteria?/2`) so the
   lifecycle gate can call it without restating the rule.
@@ -186,7 +187,8 @@ defmodule Barkpark.Tasks.TerminalCriteriaFence do
   The rule AND ITS REFUSAL, for the PUBLISH seam (task-b821ec4b2bcf8087 — the
   residue this module's moduledoc states above).
 
-  `Content.Lifecycle`'s publish gate decides with
+  The publish-door gate (`Tasks.PublishGuards`, run by `Content.Lifecycle`
+  as a pre-publish fence) decides with
   `changes_terminal_criteria?/2` and then calls this to BUILD the refusal, so
   the second seam restates neither the rule nor the sentence that teaches it:
   a caller cannot tell which of the two doors refused it, exactly as the
