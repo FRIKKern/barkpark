@@ -31,7 +31,8 @@
 //   node scripts/check-vendor-blocks.mjs --selftest  # prove the gate can fail
 //   node scripts/check-vendor-blocks.mjs --template templates/search-starter
 
-import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -505,6 +506,55 @@ export function renderPortableDocument(blocks) {
         raised = true
       }
       if (!raised) throw new Error('a dist without the renderer probed green')
+    })
+
+    // THE VERDICT WIRING (task-362f02ac6403a169). Every check above grades an
+    // engine function IN PROCESS; none executes main()'s one line that turns
+    // gate()'s boolean into the process exit code, so inverting that line kept
+    // this selftest green while the real run certified a stale vendor. Same
+    // family as never-cancel-main-check.sh (PR #13405): RE-EXEC THE WHOLE
+    // PROGRAM against a fixture root and assert the PROCESS exit code.
+    //
+    // The fixture root is a throwaway repo: THIS FILE copied to <root>/scripts/
+    // (REPO_ROOT is derived from the script's own location, so the copy reads
+    // only the fixture — no override, nothing that can point a real run at an
+    // empty corpus), a two-file registry, and one template whose installed dist
+    // is swapped between a stale and a fresh renderer.
+    const root = join(dir, 'e2e-root')
+    const tpl = 'templates/fixture-starter'
+    const blocks = join(root, 'js/packages/react/src/blocks')
+    const dist = join(root, tpl, 'node_modules/@barkpark/react/dist')
+    mkdirSync(join(root, 'scripts'), { recursive: true })
+    mkdirSync(blocks, { recursive: true })
+    mkdirSync(dist, { recursive: true })
+    copyFileSync(fileURLToPath(import.meta.url), join(root, 'scripts/check-vendor-blocks.mjs'))
+    writeFileSync(join(blocks, 'registry.ts'), FIXTURE_DISPATCH.replace(/import \{ mathEmitters \}[^\n]*\n/, '').replace('  ...mathEmitters,\n', ''))
+    writeFileSync(join(blocks, 'core.ts'), 'export const coreEmitters = {\n  heading,\n  paragraph,\n}\n')
+    writeFileSync(join(root, tpl, 'package.json'), JSON.stringify({ name: 'fixture-starter', engines: { node: '>=22.19.0' } }))
+    writeFileSync(join(root, tpl, 'package-lock.json'), JSON.stringify(LOCK))
+    const exec = (args) =>
+      spawnSync(process.execPath, [join(root, 'scripts/check-vendor-blocks.mjs'), ...args], { encoding: 'utf8' })
+
+    check('E2E: the fixture registry derives exactly heading, paragraph, direct (the plant below is not vacuous)', () => {
+      eq(expectedTypes(root), ['direct', 'heading', 'paragraph'], 'fixture expected set')
+    })
+
+    check('E2E: the whole program exits 1 on a template whose installed dist unknown-boxes a registered type', () => {
+      copyFileSync(stale, join(dist, 'server.mjs'))
+      const r = exec(['--template', tpl])
+      if (r.status !== 1) throw new Error(`planted stale dist must exit 1, got ${r.status}\n${r.stdout}${r.stderr}`)
+      if (!/bp-unknown-block: direct\b/.test(r.stdout)) throw new Error(`exit 1 but not for the plant:\n${r.stdout}`)
+    })
+
+    check('E2E: …and exits 0 on the same template once the dist renders every registered type', () => {
+      copyFileSync(fresh, join(dist, 'server.mjs'))
+      const r = exec(['--template', tpl])
+      if (r.status !== 0) throw new Error(`fresh dist must exit 0, got ${r.status}\n${r.stdout}${r.stderr}`)
+    })
+
+    check('E2E: an UNINSTALLED template exits 1 — an unprobed template is never a passing one', () => {
+      const r = exec(['--template', 'templates/not-installed'])
+      if (r.status !== 1) throw new Error(`missing template must exit 1, got ${r.status}`)
     })
 
     let passed = 0
