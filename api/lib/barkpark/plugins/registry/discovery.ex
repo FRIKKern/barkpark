@@ -139,8 +139,13 @@ defmodule Barkpark.Plugins.Registry.Discovery do
     |> Enum.flat_map(&manifest_index_entry/1)
   end
 
-  # The manifest path is built from a discovery root we own plus a directory
-  # entry enumerated from that root — no caller-supplied segment reaches it.
+  # Waiver authored FOR this def (task-3fbd48182b1d35ea; it supersedes the
+  # deleted `manifest_names_for_module/1` and BootCollectors'
+  # `module_of_configured_entry/1`, whose waivers went with them). `dir` comes
+  # only from `plugin_dirs_in(default_paths())` in `manifest_index/0` — a root
+  # we own and an entry listed under it; no load-order entry or other
+  # caller-supplied string is ever joined into the path. Verified necessary:
+  # without it `mix sobelow` reports Traversal.FileModule on the File.read below.
   # sobelow_skip ["Traversal.FileModule"]
   defp manifest_index_entry(dir) do
     with {:ok, raw} <- File.read(Path.join(dir, "plugin.json")),
