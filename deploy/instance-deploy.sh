@@ -1256,34 +1256,83 @@ fi
 # mawk 20250131+ accepted. Character classes below are spelled out (no ranges),
 # so no locale collation can widen them either.
 #
-# egress_ip_ok: true only if $1 is a bare IPv4 literal (four dot-separated
-# decimal parts, each <= 255) or an IPv6-shaped literal (hex digits and colons
-# only, at least one colon, no ':::').
-egress_ip_ok() {
+# THE GRAMMAR IS THE RUNTIME'S (task-74d16d239fff7df7). runtime.exs parses each
+# entry with :inet.parse_address/1, and this validator exists to refuse, before the
+# write, exactly what that call would refuse at boot. It used to check IPv6 by
+# SHAPE (hex digits and colons), so it passed 1:2, 1::2::3 and nine-group
+# addresses that :inet.parse_address refuses: a deploy wrote the line, the slot
+# restart raised on it, and a typo in one env var became a down instance. Its IPv4
+# arm stripped leading zeros, so it passed 1.2.3.08, which the runtime reads as
+# octal and refuses. The rule now:
+#
+#   ACCEPTED here  =>  accepted by :inet.parse_address   (never write a boot failure)
+#
+# and on every canonical form the two agree exactly (the table in
+# deploy/instance-deploy_test.sh, Case 16c, records both verdicts per specimen).
+# The validator is deliberately STRICTER than the runtime on two legacy forms the
+# runtime accepts but silently re-reads as a DIFFERENT address, so writing them
+# would trust a host nobody named:
+#   * BSD inet_aton IPv4 forms: shorthand (127.1 -> 127.0.0.1, 1 -> 0.0.0.1),
+#     octal (010.0.0.1 -> 8.0.0.1, 203.0.113.07) and hex (0x7f.1). Only a
+#     dotted quad of decimal parts with no leading zero is accepted.
+#   * IPv6 zone ids (fe80::1%eth0): the runtime maps an interface NAME to scope 0.
+#
+# egress_ip4_ok: a dotted quad, each part 0 or 1-255 with no leading zero (the
+# grammar of OTP's ipv4strict_address, which is also what the runtime applies to
+# the IPv4 tail of an IPv6 address).
+egress_ip4_ok() {
   local s="$1" dots o
+  case "$s" in ''|.*|*.|*..*|*[!0123456789.]*) return 1 ;; esac
+  dots="${s//[!.]/}"
+  [ "${#dots}" = 3 ] || return 1
+  local IFS=.
+  # shellcheck disable=SC2086  # $s holds only digits and dots (checked above): no glob can fire
+  set -- $s
+  for o in "$@"; do
+    case "$o" in 0) ;; 0*) return 1 ;; esac      # 010 is octal to the runtime: refuse, never reinterpret
+    [ "${#o}" -le 3 ] || return 1
+    [ "$o" -le 255 ] || return 1
+  done
+  return 0
+}
+# egress_ip6_ok: RFC 4291 text form as OTP's ipv6strict_address reads it — groups
+# of 1-4 hex digits; exactly 8 of them, or at most 7 around exactly ONE '::'; an
+# optional dotted-quad tail counts as two groups. No zone id.
+egress_ip6_ok() {
+  local s="$1" tail head half g rest n=0
+  case "$s" in *:*) ;; *) return 1 ;; esac
+  case "$s" in *[!0123456789abcdefABCDEF:.]*) return 1 ;; esac
   case "$s" in
-    '' ) return 1 ;;
-    *[!0123456789.]*) ;;                           # not v4-shaped: try v6 below
-    *)
-      case "$s" in .*|*.|*..*) return 1 ;; esac
-      dots="${s//[!.]/}"
-      [ "${#dots}" = 3 ] || return 1
-      local IFS=.
-      # shellcheck disable=SC2086  # $s holds only digits and dots (checked above): no glob can fire
-      set -- $s
-      for o in "$@"; do
-        o="${o#"${o%%[!0]*}"}"                     # strip leading zeros (010 -> 10, like awk's +0)
-        [ "${#o}" -le 3 ] || return 1
-        [ "${o:-0}" -le 255 ] || return 1
-      done
-      return 0 ;;
+    *.*)                                          # IPv4 tail: only after the LAST colon
+      tail="${s##*:}"; head="${s%"$tail"}"
+      case "$head" in *.*) return 1 ;; esac
+      egress_ip4_ok "$tail" || return 1
+      s="${head}0:0" ;;
   esac
+  case "$s" in *:::*|*::*::*) return 1 ;; esac
   case "$s" in
-    *[!0123456789abcdefABCDEF:]*) return 1 ;;
-    *:::*) return 1 ;;
-    *:*) return 0 ;;
+    *::*) set -- "${s%%::*}" "${s#*::}" ;;
+    *)    set -- "$s" ;;
   esac
-  return 1
+  for half in "$@"; do
+    [ -n "$half" ] || continue
+    rest="$half"
+    while :; do                                   # manual split: IFS=: would drop a trailing empty group
+      g="${rest%%:*}"
+      [ -n "$g" ] && [ "${#g}" -le 4 ] || return 1
+      n=$((n + 1))
+      case "$rest" in *:*) rest="${rest#*:}" ;; *) break ;; esac
+    done
+  done
+  case "$s" in *::*) [ "$n" -le 7 ] ;; *) [ "$n" = 8 ] ;; esac
+}
+# egress_ip_ok: true only if $1 is an address egress_ip4_ok or egress_ip6_ok accepts.
+egress_ip_ok() {
+  case "$1" in
+    '') return 1 ;;
+    *[!0123456789.]*) egress_ip6_ok "$1" ;;
+    *) egress_ip4_ok "$1" ;;
+  esac
 }
 # egress_ips_check: $1=comma-separated candidate. Entries are trimmed of spaces
 # and tabs; empty entries are skipped. Three outcomes, three exit codes:

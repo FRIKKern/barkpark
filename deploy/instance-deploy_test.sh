@@ -1109,9 +1109,9 @@ echo "== Case 16b: the egress validator gives ONE verdict whichever awk the host
 #   per-awk verdicts print beside each awk's version string. Fixed check count
 #   (aggregated over awks) so the README count guard stays host-independent.
 EGV="$(mktemp -d)"
-sed -n '/^egress_ip_ok() {/,/^}/p; /^egress_ips_check() {/,/^}/p' "$SCRIPT" > "$EGV/fns.sh"
-check "egress arm1: both validator functions lifted from the real script" \
-  "grep -q '^egress_ip_ok() {' '$EGV/fns.sh' && grep -q '^egress_ips_check() {' '$EGV/fns.sh'"
+sed -n '/^egress_ip[a-z0-9_]*() {/,/^}/p' "$SCRIPT" > "$EGV/fns.sh"
+check "egress arm1: all four validator functions lifted from the real script" \
+  "grep -q '^egress_ip_ok() {' '$EGV/fns.sh' && grep -q '^egress_ip4_ok() {' '$EGV/fns.sh' && grep -q '^egress_ip6_ok() {' '$EGV/fns.sh' && grep -q '^egress_ips_check() {' '$EGV/fns.sh'"
 mkdir -p "$EGV/poison"
 printf '#!/bin/sh\necho called >> "%s/poison.hit"\nexit 97\n' "$EGV" > "$EGV/poison/awk"
 chmod +x "$EGV/poison/awk"
@@ -1122,7 +1122,7 @@ ACCEPT|198.51.100.9
 ACCEPT|203.0.113.7, 2a01:4f9::1
 ACCEPT|2a01:4f9::1
 ACCEPT|::1
-ACCEPT|010.0.0.1
+REFUSE(010.0.0.1)|010.0.0.1
 ACCEPT|<TAB>203.0.113.7 ,<TAB>198.51.100.9,
 REFUSE(not-an-ip)|not-an-ip
 REFUSE(10.0.0.0/8)|10.0.0.0/8
@@ -1190,6 +1190,104 @@ check "egress arm2: valid list ACCEPTED and WRITTEN under every awk${egv_valid_b
 check "egress arm2: invalid entry REFUSED BY NAME under every awk${egv_invalid_bad:+ - failed under:$egv_invalid_bad}" "[ -z \"\$egv_invalid_bad\" ]"
 check "egress arm2: blank list refused as EMPTY (not as invalid) under every awk${egv_empty_bad:+ - failed under:$egv_empty_bad}" "[ -z \"\$egv_empty_bad\" ]"
 rm -rf "$EGV"
+
+echo "== Case 16c: the egress validator answers with the RUNTIME's grammar (:inet.parse_address) =="
+# task-74d16d239fff7df7. runtime.exs raises at boot on any BARKPARK_TRUSTED_PROXIES
+# entry :inet.parse_address/1 refuses, so a validator verdict of ACCEPT on such an
+# entry writes a down instance. The IPv6 arm used to check SHAPE only and accepted
+# 1:2, 1::2::3 and a nine-group address; the IPv4 arm stripped leading zeros and
+# accepted 1.2.3.08 (octal to the runtime, refused).
+# Each row: RUNTIME verdict | VALIDATOR verdict wanted | specimen.
+#   RUNTIME is :inet.parse_address(String.to_charlist(s)) — recorded from real runs
+#   (Elixir 1.19.5 / OTP 28); when elixir is on PATH this case re-derives it live.
+#   AGREE rows must match exactly. STRICT rows are forms the runtime accepts but
+#   re-reads as a DIFFERENT address (BSD inet_aton shorthand/octal/hex, IPv6 zone
+#   ids): the validator refuses them on purpose, the safe direction.
+# MUTATION PROOF: put the old shape-only IPv6 arm back (hex digits + colons, no
+# ':::' -> accept) and the AGREE check reds naming 1:2, 1::2::3,
+# 1:2:3:4:5:6:7:8:9 and the other malformed rows; the boot-failure check reds too.
+AGR="$(mktemp -d)"
+sed -n '/^egress_ip[a-z0-9_]*() {/,/^}/p' "$SCRIPT" > "$AGR/fns.sh"
+cat > "$AGR/table" <<'SPEC'
+A|A|203.0.113.7
+A|A|2a01:4f9::1
+A|A|::1
+R|R|1:2
+R|R|1::2::3
+R|R|1:2:3:4:5:6:7:8:9
+A|A|1:2:3:4:5:6:7:8
+A|A|::ffff:203.0.113.7
+R|R|10.0.0.0/8
+R|R|256.1.1.1
+R|R|not-an-ip
+R|R|
+A|A|::
+A|A|0.0.0.0
+A|A|1:2:3:4:5:6:7::
+A|A|::1:2:3:4:5:6:7
+A|A|1:2:3:4:5:6:1.2.3.4
+A|A|FE80::ABCD
+R|R|1::2:3:4:5:6:7:8
+R|R|1:2:3:4:5:6:7::8
+R|R|1:2:3:4:5:6:7:1.2.3.4
+R|R|12345::1
+R|R|1:::2
+R|R|:1::2
+R|R|1::2:
+R|R|g::1
+R|R|::ffff:1.2.3.04
+R|R|::ffff:256.1.1.1
+R|R|1.2.3.08
+R|R|1.2.3.4.5
+R|R|1.2.3.
+STRICT|R|010.0.0.1
+STRICT|R|203.0.113.07
+STRICT|R|127.1
+STRICT|R|1
+STRICT|R|0x7f.1
+STRICT|R|fe80::1%eth0
+SPEC
+agr_out="$(bash -c '
+  . "$1"
+  while IFS="|" read -r rt want s; do
+    if egress_ip_ok "$s"; then v=A; else v=R; fi
+    printf "%s|%s|%s|%s\n" "$rt" "$want" "$v" "$s"
+  done < "$2"' _ "$AGR/fns.sh" "$AGR/table")"
+echo "  runtime | validator | specimen"
+while IFS="|" read -r rt _ v s; do
+  printf '  %-7s | %-9s | %s\n' "$rt" "$v" "'$s'"
+done <<<"$agr_out"
+agr_n="$(grep -c '^[AR]|' "$AGR/table")"; agr_s="$(grep -c '^STRICT|' "$AGR/table")"
+agr_bad=""; agr_strict_bad=""; agr_boot_bad=""
+while IFS="|" read -r rt _ v s; do
+  case "$rt" in
+    A|R) [ "$v" = "$rt" ] || agr_bad="$agr_bad [$s: runtime $rt validator $v]" ;;
+    STRICT) [ "$v" = R ] || agr_strict_bad="$agr_strict_bad [$s]" ;;
+  esac
+  [ "$rt" = R ] && [ "$v" = A ] && agr_boot_bad="$agr_boot_bad [$s]"
+done <<<"$agr_out"
+check "runtime-agreement: validator == :inet.parse_address on every AGREE specimen ($agr_n)${agr_bad:+ -$agr_bad}" "[ -z \"\$agr_bad\" ]"
+check "runtime-agreement: no specimen the runtime REFUSES is accepted (a write that fails boot)${agr_boot_bad:+ - accepted:$agr_boot_bad}" "[ -z \"\$agr_boot_bad\" ]"
+check "runtime-agreement: the $agr_s STRICT forms (runtime re-reads them as another address) are refused${agr_strict_bad:+ - accepted:$agr_strict_bad}" "[ -z \"\$agr_strict_bad\" ]"
+# The table names ONE parser. If runtime.exs stops calling it, the recorded column
+# no longer describes the consumer and this case must be re-derived.
+check "runtime-agreement: runtime.exs still parses each entry with :inet.parse_address (the table's parser)" \
+  "grep -q ':inet.parse_address(String.to_charlist(proxy))' '$HERE/../api/config/runtime.exs'"
+# Live re-derivation of the RUNTIME column where elixir exists (developer hosts);
+# the CI runner has no elixir, and the label says which column was checked.
+agr_live_bad=""; agr_live="RECORDED column only (no elixir on PATH)"
+if command -v elixir >/dev/null 2>&1; then
+  agr_live_out="$(cut -d'|' -f3- "$AGR/table" | elixir -e '
+    IO.stream(:stdio, :line) |> Enum.each(fn l ->
+      s = String.trim_trailing(l, "\n")
+      v = case :inet.parse_address(String.to_charlist(s)) do {:ok, _} -> "A"; _ -> "R" end
+      IO.puts(v) end)' 2>&1)"
+  agr_rec="$(cut -d'|' -f1 "$AGR/table" | sed 's/^STRICT$/A/')"
+  agr_live="re-derived LIVE under OTP $(elixir -e 'IO.write(:erlang.system_info(:otp_release))' 2>/dev/null)"
+  [ "$agr_live_out" = "$agr_rec" ] || agr_live_bad=" - live column differs from the recorded one: $(paste -d' ' <(printf '%s\n' "$agr_rec") <(printf '%s\n' "$agr_live_out") <(cut -d'|' -f3- "$AGR/table") | grep -v '^\(.\) \1 ' | tr '\n' ';')"
+fi
+check "runtime-agreement: the RUNTIME column is true ($agr_live)$agr_live_bad" "[ -z \"\$agr_live_bad\" ]"
+rm -rf "$AGR"
 
 echo "== Case 17: ADVANCE vs STALL — a deploy that reports SUCCESS without moving HEAD is now VISIBLE =="
 # THE FAILURE CLASS (D292): "deploy said SUCCESS while the box stayed one commit
