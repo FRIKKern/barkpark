@@ -49,9 +49,9 @@ defmodule Barkpark.PortableDoc.MasterRef do
   """
   def refs(tree) do
     tree
-    |> BodyWalk.collect_nodes([@type_name])
-    |> Enum.flat_map(fn
-      %{"master" => master} = block when is_binary(master) and master != "" ->
+    |> BodyWalk.collect(fn
+      %{"type" => @type_name, "master" => master} = block
+      when is_binary(master) and master != "" ->
         [{master, version(block)}]
 
       _ ->

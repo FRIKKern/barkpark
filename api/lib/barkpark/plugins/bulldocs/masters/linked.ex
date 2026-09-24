@@ -20,10 +20,11 @@ defmodule Barkpark.Plugins.Bulldocs.Masters.Linked do
       pinned revisions that are not the current row. At most `max_depth/0`
       levels, so a render costs at most `2 * max_depth()` queries however many
       instances the paper holds.
-    * **Cycles.** A master may itself contain a linked instance. Rendering keeps
-      the chain of masters it is inside; a master already on that chain, or a
-      chain deeper than `max_depth/0`, renders as unavailable instead of
-      recursing.
+    * **Cycles and depth.** A master may itself contain a linked instance.
+      Rendering keeps the chain of masters it is inside, and a master already
+      on that chain renders as unavailable instead of recursing. Reads stop
+      after `max_depth/0` levels, so an instance nested deeper than that was
+      never read and renders as unavailable too.
     * **Pinned versions** resolve from the master's revision history
       (`revisions.rev` is the document's opaque `_rev` at snapshot time), or
       from the current row when it still carries that rev. A pinned reference
@@ -106,7 +107,7 @@ defmodule Barkpark.Plugins.Bulldocs.Masters.Linked do
       where:
         d.type == @paper_type and d.dataset == ^master.dataset and
           fragment(
-            "jsonb_path_exists(?, ?::jsonpath, jsonb_build_object('m', ?::text, 'd', ?::text))",
+            "jsonb_path_exists(?, ?::text::jsonpath, jsonb_build_object('m', ?::text, 'd', ?::text))",
             d.content,
             ^@instance_path,
             ^pid,
@@ -133,7 +134,10 @@ defmodule Barkpark.Plugins.Bulldocs.Masters.Linked do
     end)
   end
 
-  # `chain` is the masters this render is already inside (outermost last).
+  # `chain` is the masters this render is already inside (innermost first).
+  # THE CYCLE GUARD: a master already on the chain renders as unavailable. The
+  # DEPTH guard is `fetch_closure/3`'s level bound — a reference past it was
+  # never read, so it is absent from `nodes` and unavailable here.
   defp render_ref({master, _} = ref, nodes, chain, render_opts) do
     node = Map.get(nodes, ref)
     id = base(master)
@@ -141,7 +145,6 @@ defmodule Barkpark.Plugins.Bulldocs.Masters.Linked do
     cond do
       not is_map(node) -> nil
       id in chain -> nil
-      length(chain) >= @max_depth -> nil
       true -> render_node(node, nodes, [id | chain], render_opts)
     end
   end
