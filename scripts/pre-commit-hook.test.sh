@@ -29,7 +29,21 @@ for bin in git elixir mix perl; do
 done
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+# CLEANUP MUST NEVER DECIDE THE VERDICT. Main run 35986369149 (2026-09-24)
+# printed SELFTEST PASSED: 6 of 6 arms and still exited 1, because the EXIT
+# trap's rm -rf hit "Directory not empty": something was still writing into
+# the probe repo's .git as it was removed (git's detached auto-maintenance
+# after a commit is the likely writer; it is also switched off below). Under
+# errexit a failing trap command becomes the script's exit status, so a
+# cleanup race reddened the required Elixir gate on a charter-text commit.
+# The verdict is the arms' alone: retry once, then warn and keep the status.
+cleanup() {
+  local st=$?
+  rm -rf "$TMP" 2>/dev/null || { sleep 1; rm -rf "$TMP" 2>/dev/null; } \
+    || echo "pre-commit-hook.test: WARNING — could not remove $TMP (a leftover temp dir; the verdict above stands)" >&2
+  exit "$st"
+}
+trap cleanup EXIT
 R="$TMP/repo"
 mkdir -p "$R/.githooks" "$R/scripts" "$R/.github" "$R/api/test" "$R/api/lib" "$R/docs" "$R/cmd"
 cp "$ROOT/.githooks/pre-commit" "$R/.githooks/pre-commit"
@@ -50,6 +64,11 @@ g init -q
 g config user.email hook-probe@example.invalid
 g config user.name hook-probe
 g config commit.gpgsign false
+# No background writers in the probe repo: detached auto-maintenance or gc
+# started by a commit would still be writing when the trap removes the repo.
+g config maintenance.auto false
+g config gc.auto 0
+g config gc.autoDetach false
 g add -A
 g commit -q -m init            # hooksPath not yet set: the seed commit is not under test
 g config core.hooksPath .githooks
