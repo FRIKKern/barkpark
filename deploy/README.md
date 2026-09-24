@@ -108,7 +108,7 @@ while the status-scoped form answers **404** — with two controls (an existing
 file → 200, the proxied path → 503) identical under both arms, so the difference
 is the status list and nothing else. Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script: `bash deploy/instance-deploy_test.sh` — 544 checks: slot selection,
+script: `bash deploy/instance-deploy_test.sh` — 561 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
 typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
 and their install guards, and the on-box-compile ruling below. EVERY `<engine> …
@@ -690,7 +690,12 @@ shape before writing** (bare IPs, no ranges): the Elixir side raises on a
 malformed entry, so an unvalidated write would not degrade a bucket key, it would
 refuse to boot the box. Value absent on both paths → the script appends a
 commented placeholder and logs the gap (`WARN: no BARKPARK_CLOUD_EGRESS_IPS …`),
-the worker logs it at startup, and the deploy still succeeds.
+the worker logs it at startup, and the deploy still succeeds. A value that IS
+supplied but fails validation logs a different line that names the refused
+entry (`WARN: BARKPARK_CLOUD_EGRESS_IPS REFUSED by the validator: entry '…'`), so
+a deploy log never confuses "nothing supplied" with "supplied and refused". The
+validator is plain bash, not awk: the awk regex it replaced refused every IPv4
+address under mawk 1.3.4 20200120/20240123 (stock Ubuntu 22.04/24.04, Debian 12).
 
 Check a box: `grep BARKPARK_TRUSTED_PROXIES /opt/barkpark/.env`.
 

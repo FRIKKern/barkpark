@@ -19,7 +19,7 @@ defmodule Barkpark.Tasks.DraftTerminalFence do
       patch (proven: the same patch without the precondition 422s) but its
       revision escape is explicitly "NOT proof that a CAS-carrying close is
       attributed" (mutations.ex). `Content.Writer`'s
-      `ensure_task_transition_legal/6` then passes it because `open → cancelled`
+      `ChangeGuards.transition_legal/6` then passes it because `open → cancelled`
       is a LEGAL charter-D7 edge — legal for the sanctioned `close` verb, which
       is not what walked through.
     * BIRTH — `bp doc create task` with `lifecycle_status: "cancelled"` on a
@@ -67,7 +67,7 @@ defmodule Barkpark.Tasks.DraftTerminalFence do
       no attribution, which is the 2026-07-23 witness.
     * **Same → same.** An already-`cancelled` draft may still be patched on
       every other field. The tombstone fence paid for this lesson
-      (`Writer.ensure_close_reason_lands_with_a_close/6`): `/v1/data/mutate`
+      (`Tasks.ChangeGuards.close_reason_lands_with_a_close/6`): `/v1/data/mutate`
       merges patches BEFORE validation, so a content-only rule that ignored the
       prior state would be RETROACTIVE and 422 every future patch to a row that
       already carries the value.
@@ -88,7 +88,7 @@ defmodule Barkpark.Tasks.DraftTerminalFence do
   alias Barkpark.Content.{Document, DraftId}
 
   # The CLOSED terminals. Deliberately NARROWER than
-  # `Writer.@terminal_lifecycle_statuses` / `Mutations.@terminal_lifecycle_statuses`
+  # `ChangeGuards.@terminal_lifecycle_statuses` / `Mutations.@terminal_lifecycle_statuses`
   # (`done cancelled blocked`) — see the moduledoc on `blocked`.
   @closed_terminal_statuses ~w(done cancelled)
 

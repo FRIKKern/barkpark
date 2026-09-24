@@ -819,11 +819,13 @@ defmodule Barkpark.Plugin do
 
   Published by `Barkpark.Plugins.Registry` to `Barkpark.Content.PreWriteFences`
   and read there in plugin load order (this list's order kept within a
-  plugin). The writer runs them in that order, after its own transition
-  gate, and stops at the first non-`:ok`. There are no phases: slice B's
-  `:early` / `:late` split existed only to straddle two writer-owned task
-  birth guards, which the Tasks plugin now declares as fences itself
-  (task-2978357a0701cd10).
+  plugin). The writer runs them in that order, directly after it resolves
+  `prev_doc`, and stops at the first non-`:ok`; it runs no task guard of its
+  own before or between them. There are no phases: slice B's `:early` /
+  `:late` split existed only to straddle two writer-owned task birth guards,
+  which the Tasks plugin now declares as fences itself (task-2978357a0701cd10),
+  as it does the writer's former transition and close-reason gates
+  (task-d91ccf54d43b9800).
 
   Unlike `lifecycle_hooks/0` `:before_*`, a fence sees `prev_doc` and `opts`
   and its error is returned verbatim, not wrapped as `{:halted, _}`. NOT

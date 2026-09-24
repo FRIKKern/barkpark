@@ -119,7 +119,7 @@ defmodule Barkpark.Tasks.TerminalCriteriaFence do
   alias Barkpark.Content.{Document, DraftId}
 
   # The CLOSED terminals. Deliberately NARROWER than
-  # `Writer.@terminal_lifecycle_statuses` (`done cancelled blocked`) — see the
+  # `ChangeGuards.@terminal_lifecycle_statuses` (`done cancelled blocked`) — see the
   # moduledoc on `blocked`. Same set `DraftTerminalFence` uses.
   @closed_terminal_statuses ~w(done cancelled)
 

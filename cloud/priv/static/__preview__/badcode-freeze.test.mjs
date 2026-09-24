@@ -32,12 +32,29 @@
 // THE CONTROL, AND WHY A DIFFERING CONTROL IS NOT A RED
 // ────────────────────────────────────────────────────
 // Each run also shoots the PLAIN `account-modal` scenario. Those four PNGs have
-// no caret and no focus ring, so they are stable by construction; if THEY move
-// across two runs, this host is producing noise that has nothing to do with the
-// freeze and blaming mock.js for it would be a false accusation. That case
-// prints INCONCLUSIVE and passes. It is the precondition, asserted rather than
-// assumed — a control that fires tells you the measurement is void, not that
-// the subject is fine.
+// no caret — but they are NOT stable by construction on their own, and this
+// header used to say they were. The card opens through app.css's 150ms
+// `modal-in` keyframe and openModal() focuses its first control, and Chrome's
+// --virtual-time-budget does NOT pin the animation phase at capture: with
+// `modal-in` lengthened to 20s in a scratch tree, three unfrozen shoots gave
+// three different sha256 per cell (task-72461a1551fb00f2). At 150ms the capture
+// lands after the animation on an ordinary host, which is why the plain shot
+// USED to look stable; that was a race won, not a construction. The plain
+// `account` driver in mock.js now calls freezeShotSurface too, so the control
+// is stable BY THE SAME FREEZE, and a static arm below holds that call in place.
+// (The 20s probe with the freeze: three runs, one sha256 per cell, byte-equal
+// to the natural 150ms shot.)
+//
+// If the control shots still move across two runs, this host is producing
+// noise that has nothing to do with the freeze and blaming mock.js for it would
+// be a false accusation. That case prints INCONCLUSIVE and passes. It is the
+// precondition, asserted rather than assumed — a control that fires tells you
+// the measurement is void, not that the subject is fine. KNOWN LIMIT: the
+// control now shares freezeShotSurface's BODY with the subject, so a freeze
+// whose body stops working moves both and reads INCONCLUSIVE instead of red.
+// The static arm on the body's three declarations is what covers that case;
+// the browser arm still reds a removed CALL at the badcode arrival point,
+// because the plain driver's own call keeps the control frozen.
 //
 // STATED HONESTLY: the instability is a COIN FLIP per shot, not an always-
 // differ (#19583 measured 3 of 4 in one pair). A single pair of runs can
@@ -61,6 +78,10 @@
 // 2026-09-24  the browser arm also asserts the TWIN property (gr-backlog-scenario-
 //             drive-field): no badcode PNG byte-identical to its plain twin. Added
 //             INSIDE the existing test, so `# pass` does not move.
+// 2026-09-24  the plain `account` driver freezes too (task-72461a1551fb00f2);
+//             the "stable by construction" sentence above was corrected, and
+//             the first static arm also asserts the plain driver's freeze call.
+//             Asserted inside that existing test, so `# pass` does not move.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -81,12 +102,21 @@ const SHOTS = ['light-1440', 'light-768', 'dark-1440', 'dark-768'];
 
 // ── the static arms ─────────────────────────────────────────────────────────
 
-test('mock.js installs the freeze at the badcode drive\'s OWN arrival point', () => {
+test('mock.js installs the freeze at the badcode drive\'s OWN arrival point, and on the plain open', () => {
   assert.match(
     MOCK,
     /whenPresent\("#a2f-error",\s*freezeShotSurface\)/,
     'the 422 arrival callback no longer calls freezeShotSurface — the shot goes back to ' +
       'catching an arbitrary caret phase. See the browser arm below for what that costs.',
+  );
+  // The CONTROL's freeze. Without it the plain shot is whatever phase of the
+  // 150ms `modal-in` keyframe the capture lands on, and a plain shot that moves
+  // can make the twin assertion below pass for the wrong reason.
+  assert.match(
+    MOCK,
+    /\baccount:\s*function\s*\(\)\s*\{\s*openAccountModalThen\(freezeShotSurface\);\s*\}/,
+    'the plain `account` modal driver no longer freezes the shot surface — the control ' +
+      'goes back to racing the modal-in open animation (task-72461a1551fb00f2).',
   );
 });
 
@@ -181,8 +211,13 @@ test('two clean shoots of the badcode drive produce byte-identical PNGs', { time
   // the drive existed every badcode PNG was byte-identical to its plain twin —
   // 20 files, one sha256, and a green count certifying them. It lived only in a
   // PR body until now. It runs BEFORE the control-stability early return below
-  // on purpose: a control that drifts can only make the pair MORE different, so
-  // it never voids this comparison.
+  // on purpose: a control that drifts cannot HIDE a real twin — it can only make
+  // the pair more different. The converse is the hazard: a drifting plain shot
+  // could make this assertion PASS with the drive switched off, because the
+  // twins would differ by animation phase. That is why the plain driver freezes
+  // too (see the header); with both frozen, a drive switched off reds here —
+  // measured by task-72461a1551fb00f2 with the badcode driver pointed at
+  // MODAL_DRIVERS.account.
   const twins = runs.flatMap((run, i) => SHOTS
     .filter((s) => fs.readFileSync(join(run.out, `${BADCODE}-${s}-iris.png`))
       .equals(fs.readFileSync(join(run.out, `${CONTROL}-${s}-iris.png`))))
