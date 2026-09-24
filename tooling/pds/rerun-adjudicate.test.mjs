@@ -71,7 +71,6 @@ function sh(cmd) {
 
 // ── 1. THE FENCE ─────────────────────────────────────────────────────────────
 {
-  const gripDiff = sh("git diff --stat origin/main -- tooling/grip/").stdout.trim();
   // 1.1 WAS REMOVED BY DECISION (2026-09-24, task-b71f7affdc15671b). It asserted
   // that `git diff --stat origin/main -- tooling/grip/` was empty — PDS-D386's
   // "PDS MUST NOT modify tooling/grip/**", written into the slice that first
@@ -106,7 +105,6 @@ function sh(cmd) {
   //   - grip's behaviour in general: grip's own node --test suite in
   //     .github/workflows/grip-suite.yml (push-to-main only today); the same
   //     screen mutation fails 82 of its 880 tests.
-  eq("1.1 zero bytes changed under tooling/grip/", gripDiff, "");
   // 1.2 — THE PATH IS THE FILE THE LABEL NAMES, AND THAT WAS A RULING, NOT A
   // REFLEX. Until 2026-09-20 the path here was `scripts/`, the whole directory,
   // while the label said `scripts/pds-ledger-census.sh`. So the check measured
