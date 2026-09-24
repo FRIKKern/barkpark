@@ -22,14 +22,17 @@
 // ── THE TEST: ONLY THE ADJACENT SUBJECT CREDITS ───────────────────────────────
 //
 // For each unpinned citation `F:N` at position p on a charter line L:
-//   SUBJECT      the backticked span that CONTAINS the citation; else the nearest
-//                span ending <= 80 chars before it and the nearest starting
-//                <= 40 chars after it; else a quoted sentence (>= 12 chars) within
-//                140 chars. Tokens shorter than 4, JS keywords, shas and the cited
-//                file's own words (leading underscores stripped) are dropped. This
-//                is localAnchors()/quotesNear(), IMPORTED from
-//                scripts/file-line-citation-classify.mjs — one definition of
-//                adjacency, shared, never a second copy here.
+//   SUBJECT      the backticked span that CONTAINS the citation, if it names
+//                anything; else every candidate in the adjacency window — the
+//                nearest span ending <= 80 chars before, the nearest starting
+//                <= 40 chars after, and each quote (>= 8 chars) ending <= 80
+//                before or starting <= 40 after — ranked by distance; else a
+//                quoted sentence (>= 12 chars) within 140 chars. Directory
+//                components (`cloud/priv/static/`) are never a subject. Tokens
+//                shorter than 4, JS keywords, shas and the cited file's own
+//                words (leading underscores stripped) are dropped. This is
+//                subjectOf(), IMPORTED from scripts/file-line-citation-classify.mjs
+//                — one definition of adjacency, shared, never a second copy here.
 //   DECIDABLE    a citation with a non-empty subject. A citation with no adjacent
 //                subject has nothing to match and is counted separately (prose
 //                only), never as a miss and never as a resolve.
@@ -95,7 +98,7 @@
 // line keeps +/-slack. The same holds for a pinned range.
 //
 // A pin inside an adjacent span is blanked before its tokens are read (the
-// classifier's localAnchors does this), so a sha, an `L<n>` or a pinned thing
+// classifier's subjectOf does this), so a sha, an `L<n>` or a pinned thing
 // never becomes the subject of a sibling citation.
 //
 // ── VACUITY REFUSAL ───────────────────────────────────────────────────────────
@@ -126,7 +129,7 @@ import os from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // THE ADJACENCY RULE — one definition, owned by the classifier (see THE TEST).
-import { localAnchors, quotesNear } from "./file-line-citation-classify.mjs";
+import { subjectOf as adjacentSubject } from "./file-line-citation-classify.mjs";
 
 const SLACK_DEFAULT = 3;
 
@@ -200,14 +203,13 @@ function thingRe(thing) {
 }
 
 // ── the subject of an unpinned citation: ADJACENT only ───────────────────────
-// localAnchors() (backtick span holding it, else nearest before/after), else
-// quotesNear() — both imported from the classifier. Each subject is returned as
-// { label, re }: a token matches as a whole word (thingRe, `-` is a word
-// character), a quoted sentence as a substring.
+// The classifier's subjectOf(), imported: nearest first, tokens as strings and
+// quotes as { label, re }. Each subject is returned here as { label, re }: a
+// token matches as a whole word (thingRe, `-` is a word character), a quoted
+// sentence as a substring. ANY candidate landing in the window credits.
 function subjectOf(c) {
-  const toks = localAnchors(c.text, c.base, c.p, c.e);
-  if (toks.length) return toks.map((t) => ({ label: t, re: thingRe(t) }));
-  return quotesNear(c.text, c.p, c.e).map((q) => ({ label: q.label, re: q.re }));
+  return adjacentSubject(c.text, c.base, c.p, c.e)
+    .map((x) => typeof x === "string" ? { label: x, re: thingRe(x) } : { label: x.label, re: x.re });
 }
 
 // ── parse every `<base>:<N>` citation in a charter ───────────────────────────
@@ -418,7 +420,7 @@ function run(o) {
     process.stdout.write(
       "  CREDIT         : only the citation's ADJACENT subject credits it (the backtick span\n" +
       "                   holding it, else the nearest span or quoted sentence beside it —\n" +
-      "                   the classifier's localAnchors), never another word on the line.\n" +
+      "                   the classifier's subjectOf), never another word on the line.\n" +
       "  BIAS           : a citation of a BLOCK whose name sits outside the window is\n" +
       "                   flagged though morally right (over-flag); a line with no adjacent\n" +
       "                   subject is prose-only above, never a miss.\n" +
@@ -673,7 +675,21 @@ async function selftest() {
   show("ARM 22 control for ARM 21: same line, citation beside `paintChip` -> GREEN",
     call(cite(`\`paintChip\` paints the chip at widget.js:20; ${pad}. The widget \`makeWidget\` is built elsewhere`)), 0, /PASS — 1\/1/);
 
-  const ARMS = 22;
+  // ARM 23 — a directory component is not a subject (task-c99f9579606babbd).
+  // `filler/widget.js:20` names widget.js; `filler` is where it lives. Every
+  // line of the fixture says "filler", so treating the prefix as the subject
+  // credits the citation (PASS); without it nothing adjacent names a thing, the
+  // only citation is prose-only, and the run is UNCHECKED.
+  show("ARM 23 a path prefix is not a subject: `filler/widget.js:20` beside a file full of \"filler\" -> UNCHECKED (exit 2), not a credit",
+    call(cite("The widget lives at `filler/widget.js:20` today")), 2, /NONE is machine-decidable/);
+
+  // ARM 24 — control for ARM 23: a `/` before a bare number is an ARITY, not a
+  // directory. `paintChip/1` names paintChip (at 20), so it credits; blanking
+  // every `<seg>/` would leave only `1` and make the run UNCHECKED.
+  show("ARM 24 control for ARM 23: `paintChip/1` is a name with an arity, not a path -> GREEN",
+    call(cite("The chip is painted by `paintChip/1` at widget.js:20 today")), 0, /PASS — 1\/1/);
+
+  const ARMS = 24;
   fs.rmSync(t, { recursive: true, force: true });
   process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${ARMS - fails}/${ARMS} arms\n`);
   return fails === 0 ? 0 : 1;
