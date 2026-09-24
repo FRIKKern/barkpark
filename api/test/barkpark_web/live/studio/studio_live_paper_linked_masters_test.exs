@@ -359,6 +359,66 @@ defmodule BarkparkWeb.Studio.StudioLivePaperLinkedMastersTest do
     assert %{"type" => "master-ref", "version" => nil} = Enum.at(blocks(slug), 2)
   end
 
+  # task-01c812041613a8d3 (0010 §5c): Detach copies the PUBLISHED version the
+  # public reader shows, never the master's unpublished draft that the
+  # unpinned edit-mode preview follows. The copy is published with the paper,
+  # and Detach needs write access to the paper only.
+  test "Detach of an unpinned instance while the master has an unpublished draft copies the published version",
+       %{conn: conn, slug: slug, master: master} do
+    view = open(conn, slug)
+    insert_linked!(view, master)
+    ref_id = Enum.at(blocks(slug), 2)["id"]
+    edit_master!(master, "Unpublished draft copy")
+
+    view = open(conn, slug)
+    assert preview(view, ref_id) =~ "Unpublished draft copy"
+
+    button =
+      view
+      |> element(~s([data-edit-block-id="#{ref_id}"] [data-test-id="paper-detach-master"]))
+
+    assert render(button) =~ "published version readers see"
+    render_click(button)
+
+    copy = Enum.at(blocks(slug), 2)
+    assert copy["type"] == "section"
+
+    assert copy["master"] == %{
+             "id" => Masters.master_id(master),
+             "rev" => master.rev,
+             "mode" => "detached"
+           }
+
+    assert Enum.map(copy["blocks"], & &1["text"]) == ["Pricing", "Original master copy"]
+    refute inspect(blocks(slug)) =~ "Unpublished draft copy"
+  end
+
+  test "Detach of an instance whose master has no published revision is refused with a reason",
+       %{conn: conn, slug: slug, paper: paper, master: master} do
+    view = open(conn, slug)
+    insert_linked!(view, master)
+    ref_id = Enum.at(blocks(slug), 2)["id"]
+
+    {:ok, _} =
+      Content.unpublish_document(Masters.master_id(master), Masters.type_name(), @dataset,
+        workspace_id: paper.workspace_id,
+        project_id: paper.project_id
+      )
+
+    view = open(conn, slug)
+    request_id = Ecto.UUID.generate()
+
+    render_hook(view, "paper-detach-master", %{
+      "block_id" => ref_id,
+      "request_id" => request_id,
+      "if_rev" => assigns(view).paper_rev
+    })
+
+    assert_reply(view, %{saved: false, rejected: "master_unpublished", request_id: ^request_id})
+    assert render(view) =~ "Publish the master before detaching"
+    assert %{"type" => "master-ref", "version" => nil} = Enum.at(blocks(slug), 2)
+  end
+
   test "with the Bulldocs plugin disabled, no Pin/Detach renders and both events refuse",
        %{conn: conn, slug: slug, paper: paper, master: master} do
     view = open(conn, slug)

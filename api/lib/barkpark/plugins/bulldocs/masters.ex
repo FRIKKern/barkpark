@@ -242,15 +242,25 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
 
   @doc """
   DETACH: the op that replaces linked instance `block_id` of `paper` with a
-  detached copy of the content it currently shows (its pinned version, or the
-  master's latest), fresh ids and `master.mode = "detached"` provenance — the
-  same copy `detached_copy/2` builds for an insert. After it the block is plain
-  blocks; later master edits never reach it.
-  `{:error, :block_not_found | :not_linked | :master_not_found}`.
+  detached copy of what the PUBLIC reader shows for it — the pinned published
+  revision, or the master's latest PUBLISHED row — fresh ids and
+  `master.mode = "detached"` provenance, the same copy `detached_copy/2`
+  builds for an insert. After it the block is plain blocks; later master edits
+  never reach it.
+
+  Never the authoring view's draft (0010 §5c, task-01c812041613a8d3): Detach
+  needs write access to the PAPER only, and the copy is published with the
+  paper, so copying a draft would let a paper editor publish a master draft
+  they could not publish. When the reader shows the instance as unavailable
+  but the master exists in scope (draft only, withdrawn, or a pin to a
+  non-published rev) the detach is refused with `:master_unpublished`; a
+  foreign master stays `:master_not_found`, exactly like a missing one.
+  `{:error, :block_not_found | :not_linked | :master_not_found |
+  :master_unpublished}`.
   """
   def detach_op(%Document{} = paper, block_id, request_id) when is_binary(block_id) do
     with {:ok, ref} <- find_linked(paper, block_id),
-         {:ok, node, master} <- resolve_linked(paper, ref) do
+         {:ok, node, master} <- resolve_published(paper, ref) do
       seed = "#{canonical_request_id(request_id)}\u0000detach\u0000#{block_id}"
       copy = detached_copy(%{master | content: %{"node" => node}}, seed)
       {:ok, %{"op" => "replace-block", "id" => block_id, "block" => copy}}
@@ -305,10 +315,20 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
     end
   end
 
-  defp resolve_linked(paper, ref) do
-    case Linked.resolve(paper, ref) do
-      {:ok, node, master} -> {:ok, node, master}
-      :error -> {:error, :master_not_found}
+  # What the public reader resolves for `ref` (published rows and published
+  # revisions only). Unresolvable while the master exists in scope in any form
+  # is `:master_unpublished`; absent from scope (missing or foreign) is
+  # `:master_not_found`.
+  defp resolve_published(paper, {master_id, _version} = ref) do
+    case Linked.resolve(paper, ref, published_only: true) do
+      {:ok, node, master} ->
+        {:ok, node, master}
+
+      :error ->
+        case get_master_in_scope(master_id, paper) do
+          %Document{} -> {:error, :master_unpublished}
+          :master_not_found -> {:error, :master_not_found}
+        end
     end
   end
 

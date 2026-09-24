@@ -79,16 +79,18 @@ defmodule Barkpark.Plugins.Bulldocs.Masters.Linked do
   end
 
   @doc """
-  The node a single reference resolves to in `scope` (draft-first, the
-  authoring view), plus the master row it came from:
-  `{:ok, node, %Document{}}` or `:error`. Used by Detach (Pin reads the
-  published row's rev instead, `Masters.pin_op/3`).
+  The node a single reference resolves to in `scope`, plus the master row it
+  came from: `{:ok, node, %Document{}}` or `:error`. Draft-first (the
+  authoring view) by default; `published_only: true` resolves exactly what the
+  public reader shows, which is what Detach copies (`Masters.detach_op/3`,
+  0010 §5c).
   """
-  def resolve(scope, {master, version} = ref) when is_binary(master) do
+  def resolve(scope, {master, version} = ref, opts \\ []) when is_binary(master) do
     scope = scope_of(scope)
 
-    with %Document{} = row <- scope |> current_rows([base(master)], []) |> Map.get(base(master)),
-         node when is_map(node) <- Map.get(fetch(scope, [ref], []), ref) do
+    with %Document{} = row <-
+           scope |> current_rows([base(master)], opts) |> Map.get(base(master)),
+         node when is_map(node) <- Map.get(fetch(scope, [ref], opts), ref) do
       {:ok, node, %{row | rev: version || row.rev}}
     else
       _ -> :error

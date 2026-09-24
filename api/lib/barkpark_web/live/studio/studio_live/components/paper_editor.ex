@@ -1112,7 +1112,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%!-- Linked master instance (task-59f078a2fd248698): Pin freezes it
                 to the master's latest PUBLISHED revision, the one the public
                 reader shows (task-881d4b6e857b1b65; Unpin follows latest again);
-                Detach copies what it shows in as plain blocks. Offered only
+                Detach copies in the PUBLISHED version readers see, never the
+                master's draft (task-01c812041613a8d3). Offered only
                 where masters are available and the pane may write. --%>
           <button
             :if={@masters_impl && @masters_impl.linked?(@block)}
@@ -1129,7 +1130,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             :if={@masters_impl && @masters_impl.linked?(@block)}
             type="button"
             class="btn btn-ghost btn-sm"
-            title="Detach: copy the master in as plain blocks"
+            title="Detach: copy the published version readers see in as plain blocks"
             phx-click="paper-detach-master"
             phx-value-block_id={Map.get(@block, "id")}
             phx-value-if_rev={@paper_rev}

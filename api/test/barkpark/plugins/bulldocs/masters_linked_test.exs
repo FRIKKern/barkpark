@@ -499,6 +499,115 @@ defmodule Barkpark.Plugins.Bulldocs.MastersLinkedTest do
     end
   end
 
+  # task-01c812041613a8d3 (0010 §5c): Detach copies exactly what the PUBLIC
+  # reader shows for the instance: the latest PUBLISHED revision when unpinned,
+  # the pinned published revision when pinned. Never the authoring view's
+  # draft: Detach needs write access to the PAPER only, and the copy is
+  # published with it, so a draft copy would let a paper editor publish a
+  # master draft they could not publish themselves.
+  describe "Detach copies only published content" do
+    test "Detach of an unpinned instance while an unpublished draft exists copies the PUBLISHED revision",
+         ctx do
+      master = master!(ctx)
+      mid = Masters.master_id(master)
+      published_rev = master.rev
+      {slug, paper} = seed_paper!([ref("r1", mid)], scope_opts(master))
+
+      draft =
+        edit_master!(master, put_in(@section, ["blocks", Access.at(1), "text"], "Draft copy"))
+
+      refute draft.rev == published_rev
+
+      assert {:ok, op} = Masters.detach_op(paper, "r1", request_id())
+      detached = apply_op!(slug, paper, op)
+      assert [copy] = detached.content["blocks"]
+
+      assert Enum.map(copy["blocks"], & &1["text"]) == ["Pricing", "Master body copy"]
+      assert copy["master"] == %{"id" => mid, "rev" => published_rev, "mode" => "detached"}
+
+      public = render(detached, detached.content["blocks"], published_only: true)
+      assert public =~ "Master body copy"
+      refute public =~ "Draft copy"
+    end
+
+    test "Detach of a pinned instance copies the pinned published revision", ctx do
+      master = master!(ctx)
+      mid = Masters.master_id(master)
+      {slug, paper} = seed_paper!([ref("r1", mid, master.rev)], scope_opts(master))
+
+      # A later edit is published (a newer published rev), then edited again
+      # (a pending draft): the pin still names the first published revision.
+      edit_master!(master, put_in(@section, ["blocks", Access.at(1), "text"], "Second"))
+      {:ok, _} = Content.publish_document(mid, Masters.type_name(), @dataset, scope_opts(master))
+      edit_master!(master, put_in(@section, ["blocks", Access.at(1), "text"], "Draft copy"))
+
+      assert {:ok, op} = Masters.detach_op(paper, "r1", request_id())
+      detached = apply_op!(slug, paper, op)
+      assert [copy] = detached.content["blocks"]
+      assert Enum.map(copy["blocks"], & &1["text"]) == ["Pricing", "Master body copy"]
+      assert copy["master"]["rev"] == master.rev
+    end
+
+    test "Detach of an instance pinned to a draft rev (a pre-§5b pin) is refused", ctx do
+      master = master!(ctx)
+      mid = Masters.master_id(master)
+
+      draft =
+        edit_master!(master, put_in(@section, ["blocks", Access.at(1), "text"], "Draft copy"))
+
+      {_slug, paper} = seed_paper!([ref("r1", mid, draft.rev)], scope_opts(master))
+
+      assert render(paper, paper.content["blocks"], published_only: true) =~
+               "Master unavailable"
+
+      assert {:error, :master_unpublished} = Masters.detach_op(paper, "r1", request_id())
+    end
+
+    test "Detach is refused when the master has no published revision; foreign reads as missing",
+         ctx do
+      scope = scope_opts(%{workspace_id: ctx.ws.id, project_id: ctx.project.id})
+
+      # Born as a draft through another door: nothing public to copy.
+      draft_only =
+        raw_master!(scope, %{"id" => "n", "type" => "paragraph", "text" => "Never public"}, "D")
+
+      {_slug, paper} = seed_paper!([ref("r1", Masters.master_id(draft_only))], scope)
+      assert {:error, :master_unpublished} = Masters.detach_op(paper, "r1", request_id())
+
+      # Withdrawn by its author: the unpublish leaves only the draft.
+      withdrawn = master!(ctx)
+      wid = Masters.master_id(withdrawn)
+      {_slug, holder} = seed_paper!([ref("r1", wid)], scope)
+
+      {:ok, _} =
+        Content.unpublish_document(wid, Masters.type_name(), @dataset, scope_opts(withdrawn))
+
+      assert {:error, :master_unpublished} = Masters.detach_op(holder, "r1", request_id())
+
+      # A PUBLISHED master in another tenant, and a DRAFT-ONLY one, both answer
+      # exactly like a missing one: no existence or publication oracle.
+      other_ws = TenancyFixtures.create_workspace!()
+      other_project = TenancyFixtures.create_project!(other_ws)
+      foreign = master!(%{ws: other_ws, project: other_project})
+
+      foreign_draft =
+        raw_master!(
+          [workspace_id: other_ws.id, project_id: other_project.id],
+          %{"id" => "n", "type" => "paragraph", "text" => "Foreign draft"},
+          "FD"
+        )
+
+      for id <- [
+            Masters.master_id(foreign),
+            Masters.master_id(foreign_draft),
+            "paper_master-missing"
+          ] do
+        {_s, p} = seed_paper!([ref("r1", id)], scope)
+        assert {:error, :master_not_found} = Masters.detach_op(p, "r1", request_id())
+      end
+    end
+  end
+
   describe "master delete refusal" do
     test "deleting a master with live instances is refused 409 listing the instance ids", ctx do
       master = master!(ctx)

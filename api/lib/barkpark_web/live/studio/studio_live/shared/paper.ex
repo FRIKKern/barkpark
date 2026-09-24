@@ -684,15 +684,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc """
   DETACH linked instance `block_id` (task-59f078a2fd248698): replace the
-  `master-ref` block with a detached copy of the content it shows, through
+  `master-ref` block with a detached copy of the PUBLISHED content the public
+  reader shows for it (0010 §5c, task-01c812041613a8d3), through
   `paper_ops/5` — the same guard ladder, request-identified replay and echo as
   every paper op. Same return shape as `paper_insert_master/6`; a block that is
-  not a linked instance, or whose master is unavailable, is refused with
-  `last_paper_save_result.rejected` set to the reason.
+  not a linked instance, or whose master is unavailable or has nothing
+  published to copy, is refused with `last_paper_save_result.rejected` set to
+  the reason.
   """
   def paper_detach_master(socket, block_id, request_id, supplied_rev)
       when is_binary(block_id) do
-    linked_op(socket, request_id, supplied_rev, fn impl, paper ->
+    linked_op(socket, :detach, request_id, supplied_rev, fn impl, paper ->
       impl.detach_op(paper, block_id, request_id)
     end)
   end
@@ -705,12 +707,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   """
   def paper_pin_master(socket, block_id, pin?, request_id, supplied_rev)
       when is_binary(block_id) and is_boolean(pin?) do
-    linked_op(socket, request_id, supplied_rev, fn impl, paper ->
+    linked_op(socket, :pin, request_id, supplied_rev, fn impl, paper ->
       impl.pin_op(paper, block_id, pin?)
     end)
   end
 
-  defp linked_op(socket, request_id, supplied_rev, build) do
+  defp linked_op(socket, action, request_id, supplied_rev, build) do
     paper = socket.assigns[:paper_doc]
 
     with :ok <- master_write_refusal(socket),
@@ -726,13 +728,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       {:error, reason}
       when reason in [:master_not_found, :master_unpublished, :not_linked, :block_not_found] ->
-        {:error, master_insert_refused(socket, request_id, reason)}
+        {:error, master_insert_refused(socket, request_id, reason, linked_flash(action, reason))}
     end
   end
 
-  defp master_insert_refused(socket, request_id, reason) do
+  # The one refusal whose remedy differs by action: Pin and Detach both take
+  # the published version, but the author is doing something different.
+  defp linked_flash(:detach, :master_unpublished),
+    do:
+      "Publish the master before detaching: a detached copy takes the published version readers see, and there is none."
+
+  defp linked_flash(_action, _reason), do: nil
+
+  defp master_insert_refused(socket, request_id, reason, flash \\ nil) do
     socket
-    |> put_flash(:error, master_refusal_flash(reason))
+    |> put_flash(:error, flash || master_refusal_flash(reason))
     |> assign(save_status: "Save failed", last_paper_save_ok?: false)
     |> assign(
       last_paper_save_result: %{
