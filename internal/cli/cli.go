@@ -1071,14 +1071,16 @@ func bakedDefaults() manifest.Defaults {
 // default.
 func ResolvedAPIConfig() apiclient.Config {
 	ctx := resolveContext(globals{})
-	return apiclient.Config{
+	// The desk TUI closes tasks through this client (TaskCloseN), so it carries
+	// the same session headers `bp task close` sends (task-e4cbf4cd9f672c33).
+	return apiSessionConfig(apiclient.Config{
 		BaseURL:     ctx.Server,
 		Token:       ctx.Token,
 		Workspace:   ctx.Workspace,
 		Project:     ctx.Project,
 		Dataset:     ctx.Dataset,
 		Perspective: apiclient.PerspectiveFromEnv(),
-	}
+	}, globals{}, ctx)
 }
 
 // ServerSource describes where ResolvedAPIConfig's server came from, for the
