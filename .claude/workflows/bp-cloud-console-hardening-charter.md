@@ -9878,5 +9878,3 @@ require_primary_team_admin -> require_current_team_admin  # renamed in #15871; t
 require_primary_team_owner -> require_current_team_owner  # renamed in #15871, same rename and the same reason
 require_team_member -> require_team_role  # never existed and is not to be written (D352): require_user/2 already implies membership, and a ranked check is Auth.require_team_role(conn, team_id, :member)
 -->
-
-| PLANT | `meFailureCopy` renders the failure copy (THROWAWAY: planted stale citation, reverted in the next commit) | app.js:1 |
