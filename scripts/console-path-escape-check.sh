@@ -80,6 +80,7 @@
 #   console-path-escape-check.sh --print-floors  # print the per-idiom floors
 #   console-path-escape-check.sh --print-set console
 #   console-path-escape-check.sh --match console      # changed paths on stdin
+#   console-path-escape-check.sh --match console --null # …NUL-separated (`git diff -z`)
 #                                                     # -> prints true|false
 #
 # `--print-set` / `--match` are consumed by the console-harness.yml dispatcher,
@@ -719,6 +720,33 @@ is_exempt() {
 # modes
 # ---------------------------------------------------------------------------
 
+# ── --null: one path per NUL-terminated record (cch-bl-nul-native-path-matcher)
+# `git diff -z` ends every path with a NUL, and a path may hold a literal
+# NEWLINE. A LINE reader splits that path into two pseudo-paths before the
+# anchored ERE sees it: for a glob anchored at BOTH ends (`docs/cards/*.md`),
+# `docs/cards/a<LF>b.md` becomes `docs/cards/a` and `b.md`, neither matches,
+# and a path IN the set answers false. That was the dispatchers' old
+# `git diff -z … | tr '\0' '\n'`. Under --null each record stays ONE line: an
+# embedded newline is rewritten to \037 (US), a byte no declared glob names and
+# one that `.` and `[^/]` match exactly as they match a newline — so the
+# declared EREs are UNCHANGED and `^…$` anchors the WHOLE path. Without --null
+# stdin is newline-separated, as every other caller (scripts/which-gates.sh,
+# the harness's line fixtures) still writes it.
+#
+# MATCH-INPUT-NUL — the dispatchers grep for this token: a copy that predates
+# --null IGNORES the flag and reads the NUL stream as ONE line (a silent
+# false), so a pinned copy without it is refused, never trusted.
+match_input() {
+  local rec
+  if [ "$1" = null ]; then
+    while IFS= read -r -d '' rec || [ -n "$rec" ]; do
+      printf '%s\n' "${rec//$'\n'/$'\037'}"
+    done
+  else
+    cat
+  fi
+}
+
 mode="${1:---check}"
 
 case "$mode" in
@@ -734,8 +762,23 @@ case "$mode" in
     # ratchet can never disagree about what the path set contains.
     want="${2:?--match needs console}"
     assert_set_name "$want"
+    case "${3:-}" in
+      '') input=lines ;;
+      --null) input=null ;;
+      *)
+        echo "console-path-escape-check: unknown flag '${3}' (want --null)" >&2
+        exit 2
+        ;;
+    esac
+    if [ "$#" -gt 3 ]; then
+      echo "console-path-escape-check: unexpected argument '${4}' after --match" >&2
+      exit 2
+    fi
     ere="$(set_ere "$want")"
-    if grep -Eq -- "$ere"; then
+    # A HERE-STRING, never `match_input … | grep -q` (house D37): grep -q
+    # exits on the first match and a writer still holding bytes takes SIGPIPE.
+    changed="$(match_input "$input")"
+    if grep -Eq -- "$ere" <<<"$changed"; then
       echo "true"
     else
       echo "false"
@@ -768,7 +811,7 @@ case "$mode" in
 
   *)
     echo "console-path-escape-check: unknown argument '$mode'" >&2
-    echo "usage: $0 [--check|--selftest|--list-escapes|--print-floors|--print-set SET|--match SET]" >&2
+    echo "usage: $0 [--check|--selftest|--list-escapes|--print-floors|--print-set SET|--match SET [--null]]" >&2
     exit 2
     ;;
 esac
