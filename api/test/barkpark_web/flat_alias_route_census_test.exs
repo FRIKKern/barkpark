@@ -483,6 +483,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # DocumentOpsController.apply_op
+    {"POST", "/v1/data/doc/:dataset/:type/:doc_id/ops"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into the schema read, the draft lookup and " <>
+         "Content.apply_document_block_op/5, so the document it edits is the " <>
+         "pipeline-derived :current_workspace's, the same as MutateController.mutate."},
     # QueryController.index
     {"GET", "/v1/data/query/:dataset/:type"} =>
       {:workspace_derived,
