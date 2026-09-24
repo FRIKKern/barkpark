@@ -485,6 +485,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               a paper carries a single calm metadata column. Collapsing it (or any
               section) never reflows or transforms the body — chrome around
               content. --%>
+        <%!-- PAPERS ONLY, BY DECISION (inspector-destination-for-sheet-graph-media,
+              ruled by main 2026-09-23): sheet, graph and media editors get NO
+              metadata inspector and no Tier-3 summoned destination. They have no
+              metadata surface to show, so this :if is the intended scope, not a
+              gap; sidebar_user_opened is seeded only on the paper path
+              (Shared.Paper sidebar_assigns). Widening it is a new product row. --%>
         <.paper_metadata_sidebar
           :if={@paper_doc}
           paper_doc={@paper_doc}
@@ -635,6 +641,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
 
+  # Rendered for PAPERS ONLY (the caller gates it on @paper_doc). Sheet, graph
+  # and media editors deliberately have no inspector: see the ruling recorded at
+  # the render site (inspector-destination-for-sheet-graph-media, 2026-09-23).
   def paper_metadata_sidebar(assigns) do
     paper = assigns.paper_doc
     status = (paper && Map.get(paper, :status)) || "draft"
