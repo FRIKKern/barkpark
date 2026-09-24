@@ -97,8 +97,7 @@ defmodule BarkparkWeb.ScopedPaperController do
   # template wraps it in the paper shell.
   defp paper_body_html(%{content: content}), do: Map.get(content || %{}, "body_html") || ""
 
-  # Article papers get the `.bp-paper-article` chrome class (parchment + serif),
-  # mirroring BulldocsLive's `@article?` toggle.
-  defp paper_article?(%{content: content}),
-    do: Map.get(content || %{}, "style") in ["article", "article-wide"]
+  # The SAME chrome decision as BulldocsLive's `@article?` (article, or no
+  # style at all — the web default); one predicate so the doors cannot drift.
+  defp paper_article?(paper), do: BarkparkWeb.PaperReaderStyle.article?(paper)
 end

@@ -20,8 +20,8 @@
 # package.json. That distinction is the whole judgement call in this file and it
 # is deliberate:
 #
-#   * `js/packages/*` (12 members), `js/docs`, `apps/mobile` and
-#     `packages/client` carry a package.json but NO lockfile — they are
+#   * `js/packages/*` (12 members), `js/docs` and `apps/mobile`
+#     carry a package.json but NO lockfile — they are
 #     workspace MEMBERS resolved by `js/pnpm-lock.yaml` and the root
 #     `pnpm-lock.yaml`. Dependabot updates a workspace from its LOCKFILE root
 #     and walks the members from there, so entries for the members would be

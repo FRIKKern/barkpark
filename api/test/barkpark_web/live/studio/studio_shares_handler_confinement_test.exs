@@ -75,7 +75,13 @@ defmodule BarkparkWeb.Studio.StudioSharesHandlerConfinementTest do
     raw = "shares-edge-parity-#{System.unique_integer([:positive])}"
 
     {:ok, token} =
-      Auth.create_token(raw, "shares edge parity", @dataset, ~w(read write admin))
+      Auth.create_token(
+        raw,
+        "shares edge parity",
+        @dataset,
+        ~w(read write admin),
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     # The VICTIM tenant. Real, resolvable, and foreign to the mounted scope.
     ws_b = create_workspace!("shares-edge-b-#{System.unique_integer([:positive])}")
@@ -246,6 +252,102 @@ defmodule BarkparkWeb.Studio.StudioSharesHandlerConfinementTest do
 
       refute Sharing.shared?(default_ws.slug, default_proj.slug, @dataset, :papers),
              "the confinement broke the panel's own workspace un-share"
+    end
+  end
+
+  # ── PARITY IS ASSERTED, NOT ASSUMED (task-5f5a97a503755b2e) ──────────────
+  #
+  # Every other test in this file drives ONE door and names the other in a
+  # FAILURE MESSAGE — "which POST /v1/shares answers 403 for". A sentence in an
+  # assertion message is a claim about the other door, never a measurement of
+  # it: it is rendered only when the LiveView arm fails, and it would keep
+  # reading true word for word if the HTTP arm had regressed to 201 that
+  # morning. The ghost test above has exactly this shape. So the DIVERGENCE
+  # between the two doors — the whole subject of the row — was never under
+  # test; only each door's own behaviour was.
+  #
+  # This test closes that by driving BOTH doors with THE SAME ghost slug in the
+  # SAME run, and asserting the refusal at each. It fails if either door alone
+  # regresses, which is what makes it a parity assertion rather than two
+  # coincidental one-door assertions in two files that no one diffs.
+  #
+  # THE TWO DOORS REFUSE IN DIFFERENT WORDS, ON PURPOSE, and this test pins
+  # that too rather than papering over it. `POST /v1/shares` answers 422 "the
+  # workspace/project does not exist" — an unknown workspace is a bad ATTRIBUTE
+  # of the submitted entity, and the HTTP surface deliberately keeps 403
+  # (foreign-but-real) distinct from 422 (nonexistent) because an admin
+  # debugging a failing deploy needs to tell the two apart. The LiveView panel
+  # collapses both into `@not_workspace_admin_error` because it is reachable by
+  # a browser session and must not be walkable as an existence oracle. PARITY
+  # IS ON THE OUTCOME — no row, either way — NOT on the sentence.
+  describe "THE GHOST SHARE — both doors, one scope, one run" do
+    test "the LiveView panel and POST /v1/shares BOTH refuse the same unresolvable workspace",
+         %{conn: conn, raw: raw, default_ws: default_ws, default_proj: default_proj} do
+      ghost = "shares-edge-parity-ghost-#{System.unique_integer([:positive])}"
+
+      # PRECONDITION, asserted: the slug really resolves to nothing. Without
+      # this both doors could be refusing for some other reason entirely.
+      assert is_nil(Barkpark.Tenancy.get_workspace_by_slug(ghost))
+      scope = "#{ghost}/default/#{@dataset}"
+
+      # ── DOOR 1: the LiveView shares panel ──────────────────────────────
+      {:ok, view, _html} = instance_admin_view(conn, raw)
+      assert render_hook(view, "shares-open", %{}) =~ "Network shares"
+
+      live_html =
+        render_hook(view, "shares-add", %{"scope" => scope, "surfaces" => ["papers"]})
+
+      assert live_html =~ "not an admin of that scope&#39;s workspace",
+             "the LiveView door did not refuse the ghost scope"
+
+      refute Sharing.shared?(ghost, "default", @dataset, :papers),
+             "the LiveView door made the ghost share live"
+
+      assert stored_rows_for(ghost) == [],
+             "the LiveView door persisted a ghost StoredShare row"
+
+      # ── DOOR 2: POST /v1/shares, SAME slug, SAME token ─────────────────
+      resp =
+        Phoenix.ConnTest.build_conn()
+        |> put_req_header("authorization", "Bearer " <> raw)
+        |> put_req_header("content-type", "application/json")
+        |> post("/v1/shares", %{scope: scope, surfaces: "papers", access: "read"})
+
+      assert resp.status == 422,
+             "POST /v1/shares admitted the ghost scope the LiveView door refuses"
+
+      assert json_response(resp, 422)["error"]["message"] ==
+               "could not add share: the workspace/project does not exist"
+
+      refute Sharing.shared?(ghost, "default", @dataset, :papers),
+             "the HTTP door made the ghost share live"
+
+      assert stored_rows_for(ghost) == [],
+             "the HTTP door persisted a ghost StoredShare row"
+
+      # ── POSITIVE CONTROL, BOTH DOORS ───────────────────────────────────
+      # A blanket deny at either door would satisfy everything above. These two
+      # arms drive the SAME two doors with a workspace the caller genuinely
+      # administers and require each to SUCCEED, so the parity being asserted
+      # is "both refuse THIS scope", never "both are broken".
+      home = "#{default_ws.slug}/#{default_proj.slug}/#{@dataset}"
+
+      render_hook(view, "shares-add", %{"scope" => home, "surfaces" => ["papers"]})
+
+      assert Sharing.shared?(default_ws.slug, default_proj.slug, @dataset, :papers),
+             "the LiveView door refuses the caller's OWN workspace — blanket deny"
+
+      ok =
+        Phoenix.ConnTest.build_conn()
+        |> put_req_header("authorization", "Bearer " <> raw)
+        |> put_req_header("content-type", "application/json")
+        |> post("/v1/shares", %{scope: home, surfaces: "docs", access: "read"})
+
+      assert ok.status == 201,
+             "POST /v1/shares refuses the caller's OWN workspace — blanket deny"
+
+      assert Sharing.shared?(default_ws.slug, default_proj.slug, @dataset, :docs),
+             "the HTTP door's own-workspace share did not go live"
     end
   end
 end

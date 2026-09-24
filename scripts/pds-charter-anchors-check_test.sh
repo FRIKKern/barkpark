@@ -23,7 +23,10 @@
 # the unmodified tree: 3 of 5 runs red, the failing arm set varying run to run
 # (4/5/11, then 5/11). A here-string has no producer process to kill. Arming a
 # flaky harness is arming a broken one, so this had to be fixed in the same PR.
-# Baseline: 20 passed, 0 failed (14 before arm D added arms 15-20).
+# Baseline: 37 passed, 0 failed (20 before arm E added arms 21-29; 29 before
+# arms 30-32 pinned where the roster LIVES, task-67a7d8d5b2fd4482; 32 before
+# arms 33-36 mutation-proved the resolution loop's count identity,
+# task-fb55d468c7dea75b).
 
 # shellcheck disable=SC2016  # backticks inside single quotes are literal citation syntax, not expansions
 set -uo pipefail
@@ -375,6 +378,173 @@ run_e "$REPO_ROOT/.github/workflows/shell-harnesses.yml" 0
 if [ "$rc" -eq 0 ] && grep -q 'untriggerable cites . 0 ' <<<"$out"; then
   ok "ARM 29 CONTROL — the REAL shell-harnesses.yml covers every cited path at ceiling 0 (arm E lock)"
 else bad "ARM 29 CONTROL — the REAL shell-harnesses.yml covers every cited path at ceiling 0 (arm E lock)" "rc=$rc $out"; fi
+
+# ── ARMS 30-32 (arm E): the roster is found where the roster LIVES, not in one
+# hardcoded filename (task-67a7d8d5b2fd4482).
+#
+# #19505 moved the `pds-harnesses <path>` rows OUT of the workflow and into
+# scripts/shell-harness-dispatch.sh. Arm E read only the workflow, so @roster
+# parsed EMPTY, the precondition fired, and 12 of the arms above reddened on
+# main for four days with NO coverage verdict at all. Re-pointing the read at
+# the new filename would have re-armed the identical trap for the next move.
+#
+# Arm E now FOLLOWS the sources: every `.sh` the workflow names, then anything
+# those scripts `source`. These three arms pin that read in both directions
+# through a fixture PAIR — same workflow, same script, the roster rows present
+# in one and absent in the other — so neither is satisfiable by an arm E stuck
+# at one verdict, and neither can pass by reading the real repo's dispatcher.
+#
+# mk_wf_dispatch <paths-glob> <script-basename>: a workflow that carries NO
+# roster row of its own and names a script in its own directory.
+mk_wf_dispatch() {
+  printf 'on:\n  pull_request:\n    paths:\n      - "%s"\njobs:\n  changes:\n    steps:\n      - run: bash %s\n' "$1" "$2"
+}
+
+# ── ARM 30 (QUIET/CONTROL, arm E): a roster living in a SCRIPT is found ─────
+# The repair itself. The workflow half is `**` (covers everything) and the
+# roster half is `**` too, but ONLY inside the script — so a gap of 0 here is
+# reachable only by an arm E that opened the script. An arm E reading the
+# workflow alone scores UNCHECKED and fails this arm.
+mk_wf_dispatch '**' 'disp30.sh' > "$TMP/wf_disp.yml"
+printf '#!/usr/bin/env bash\nroster=\x27\npds-harnesses **\n\x27\n' > "$TMP/disp30.sh"
+run_e "$TMP/wf_disp.yml" 0
+if [ "$rc" -eq 0 ] && grep -q 'untriggerable cites . 0 ' <<<"$out"; then
+  ok "ARM 30 CONTROL — roster rows carried by a script the workflow names are found (arm E source-following)"
+else bad "ARM 30 CONTROL — roster rows carried by a script the workflow names are found (arm E source-following)" "rc=$rc $out"; fi
+
+# ── ARM 31 (RED, arm E): the roster moving AGAIN reds, and NAMES what it read ─
+# The regression guard. Same workflow, same script name, rows deleted from the
+# script — i.e. the next #19505. The arm asserts more than the red: it asserts
+# the message carries the file it looked in, so the next person gets a worklist
+# instead of a silent zero. Without this arm, an arm E that resolved the roster
+# from a hardcoded path would still pass arm 30.
+mk_wf_dispatch '**' 'disp31.sh' > "$TMP/wf_disp_empty.yml"
+printf '#!/usr/bin/env bash\necho no roster here\n' > "$TMP/disp31.sh"
+run_e "$TMP/wf_disp_empty.yml" 0
+if [ "$rc" -ne 0 ] && grep -q 'roster rows parsed EMPTY — read' <<<"$out" && grep -q 'disp31.sh' <<<"$out"; then
+  ok "ARM 31 RED — a roster that moved out of every reachable source reds UNCHECKED naming the files read (arm E guard)"
+else bad "ARM 31 RED — a roster that moved out of every reachable source reds UNCHECKED naming the files read (arm E guard)" "rc=$rc $out"; fi
+
+# ── ARM 32 (RED, arm E): a script-carried roster can still LOSE ─────────────
+# Arm 30 proves the script-carried roster can score 0. On its own that is
+# satisfiable by an arm E that treats "found a script" as coverage. Here the
+# script's roster covers nothing, so every cited path must come back a gap with
+# `in workflow paths: yes  in pds-harnesses roster: no` — the verdict is still
+# an AND of the two halves when the halves live in two different files.
+mk_wf_dispatch '**' 'disp32.sh' > "$TMP/wf_disp_nocov.yml"
+printf '#!/usr/bin/env bash\nroster=\x27\npds-harnesses no/such/path/at/all\n\x27\n' > "$TMP/disp32.sh"
+run_e "$TMP/wf_disp_nocov.yml" 0
+if [ "$rc" -ne 0 ] && grep -q 'in workflow paths: yes  in pds-harnesses roster: no' <<<"$out"; then
+  ok "ARM 32 RED — a script-carried roster that covers nothing still reds as a gap (arm E AND, across files)"
+else bad "ARM 32 RED — a script-carried roster that covers nothing still reds as a gap (arm E AND, across files)" "rc=$rc $out"; fi
+
+# ═══ THE ANCHOR-RESOLUTION COUNT IDENTITY (task-fb55d468c7dea75b) ═══════════
+# Arm A resolves every `path`@`literal` pair on fd 0 (`done <<< "$anchors"`).
+# $fails and $checked are BOTH read off that loop, so a body child that steals
+# stdin truncates it and the run prints
+#     RESULT: PASS — every charter content anchor resolves uniquely.
+# in the same words as a complete sweep. "Every" is the assertion, and an anchor
+# never reached never rots. $pairs — the parsed-pair count, taken BEFORE the
+# loop — is the only quantity that can disagree.
+#
+#   33  CONTROL   an intact sweep over a 3-anchor fixture resolves all three and
+#                 exits 0; 33b breaks one literal in the SAME fixture and must
+#                 still red, so arm 33 is not passing on an unfalsifiable input
+#   34  SHORT     a stdin-draining child is spliced into the resolution loop; the
+#                 identity must REFUSE naming BOTH numbers ("resolved 1 of 3"),
+#                 exit 2, and NO RESULT: PASS may print
+#   35  CUT       the identity block is CUT from the same mutated copy; arm 34's
+#                 short read must then print RESULT: PASS over 1 of 3 resolved,
+#                 at exit 0. That is the defect reproduced verbatim, and it is
+#                 what makes arms 33 and 34 mean anything
+#   36  QUIET     the documented `<path>` placeholder is SKIPPED by $checked but
+#                 must still be COUNTED by $seen — a guard that reds on the
+#                 charter's own documented form gets deleted
+# ── THE MUTATION HELPERS (task-fb55d468c7dea75b) ─────────────────────────────
+# A count identity is a guard over a defect nobody can trigger by hand, so the
+# only way to show it MEANS anything is to build the defect: splice a
+# stdin-draining child into the loop body and watch the guard refuse, then CUT
+# the guard out of the same mutated copy and watch the old verdict come back.
+# Both operate on a COPY; the live script is never touched.
+#
+# `cat >/dev/null` is the minimal honest specimen of the hazard: it is what a
+# `gh` without `</dev/null`, an `ssh`, a `psql` or a `read` does to fd 0 — it
+# consumes the remainder, so the loop ends after ONE iteration with exit 0 and
+# nothing printed.
+mut_splice() { # <src> <dst> <marker-name>
+  awk -v m="# MUT-SPLICE: $3" '{ print } index($0, m) { print "cat >/dev/null" }' "$1" > "$2"
+  grep -q '^cat >/dev/null$' "$2" || { printf 'mut_splice: marker %s not found in %s\n' "$3" "$1" >&2; return 2; }
+}
+mut_cut() { # <src> <dst> <block-name>
+  awk -v a="# MUT-ANCHOR: $3" -v b="# MUT-END: $3" '
+    index($0, a) { skip = 1; cut = 1 }
+    !skip { print }
+    index($0, b) { skip = 0 }
+    END { if (!cut) exit 3 }' "$1" > "$2"
+}
+mk_anchor_fixture() { # <dir> -> writes three files, prints three anchor lines
+  local d="$1" i=1
+  while [ "$i" -le 3 ]; do
+    printf 'unique anchor literal %s-a7c1\n' "$i" > "$d/anchored$i.txt"
+    printf 'anchor: `%s`@`unique anchor literal %s-a7c1`\n' "$d/anchored$i.txt" "$i"
+    i=$((i + 1))
+  done
+}
+
+# The fixtures below anchor at files in $TMP, which no workflow path can name,
+# so arm E's trigger-coverage ratchet would red on every one of them for a
+# reason that has nothing to do with the count identity under test. The ceiling
+# is raised for THESE arms only; the live ceiling of 0 is arm 29's subject.
+run_c() { out="$(PDS_ANCHOR_TRIGGER_GAP_CEILING=99 bash "$CHECK" "$1" 2>&1)"; rc=$?; }
+# A MUTATED COPY lives in $TMP, so the check resolves its own REPO_ROOT to $TMP
+# and arm E cannot find the workflow. Point arm E at the real one by absolute
+# path — the subject of these arms is the resolution loop, not arm E.
+run_c_script() { local sc="$1"; shift
+  out="$(PDS_ANCHOR_TRIGGER_GAP_CEILING=99 PDS_ANCHOR_WORKFLOW="$REPO_ROOT/.github/workflows/shell-harnesses.yml" bash "$sc" "$1" 2>&1)"; rc=$?; }
+
+mkdir -p "$TMP/anchors"
+mk_anchor_fixture "$TMP/anchors" > "$TMP/anchors/fixture.md"
+
+# ── ARM 33 (CONTROL): an intact three-anchor sweep resolves all three ────────
+run_c "$TMP/anchors/fixture.md"
+if [ "$rc" -eq 0 ] && grep -q '^RESULT: PASS' <<<"$out" && ! grep -q 'SHORT ANCHOR SWEEP' <<<"$out"; then
+  ok "ARM 33 CONTROL — an intact 3-anchor sweep passes and the identity stays silent"
+else bad "ARM 33 CONTROL — an intact 3-anchor sweep passes and the identity stays silent" "rc=$rc $out"; fi
+
+# ── ARM 33b (CONTROL): the same fixture, one literal broken, must still RED ──
+sed 's/unique anchor literal 2-a7c1`$/definitely not in that file 9f20`/' "$TMP/anchors/fixture.md" > "$TMP/anchors/broken.md"
+run_c "$TMP/anchors/broken.md"
+if [ "$rc" -ne 0 ] && grep -q 'ROTTED' <<<"$out"; then
+  ok "ARM 33b CONTROL — the same fixture with one broken literal still reds ROTTED"
+else bad "ARM 33b CONTROL — the same fixture with one broken literal still reds ROTTED" "rc=$rc $out"; fi
+
+# ── ARM 34 (RED): a stdin-draining child in the loop body must be REFUSED ────
+# `^RESULT: PASS`, ANCHORED, and it is load-bearing: the refusal's own prose
+# says "must never print RESULT: PASS in the same words as a complete one", so
+# an unanchored grep matches the REFUSAL and this arm failed on a correct
+# refusal the first time it ran. The verdict line starts at column 0; the
+# refusal's mention of it does not.
+if mut_splice "$CHECK" "$TMP/anchors/drained.sh" anchor-count-identity; then
+  run_c_script "$TMP/anchors/drained.sh" "$TMP/anchors/fixture.md"
+  if [ "$rc" -eq 2 ] && grep -q 'SHORT ANCHOR SWEEP — resolved 1 of 3' <<<"$out" && ! grep -q '^RESULT: PASS' <<<"$out"; then
+    ok "ARM 34 RED — a drained fd 0 refuses naming both numbers (resolved 1 of 3), exit 2, no PASS"
+  else bad "ARM 34 RED — a drained fd 0 refuses naming both numbers (resolved 1 of 3), exit 2, no PASS" "rc=$rc $out"; fi
+else bad "ARM 34 RED — a drained fd 0 is refused" "mut_splice found no MUT-SPLICE: anchor-count-identity marker in $CHECK"; fi
+
+# ── ARM 35 (CUT): without the identity the SAME short read prints PASS ───────
+if mut_cut "$TMP/anchors/drained.sh" "$TMP/anchors/drained-nocount.sh" anchor-count-identity; then
+  run_c_script "$TMP/anchors/drained-nocount.sh" "$TMP/anchors/fixture.md"
+  if [ "$rc" -eq 0 ] && grep -q '^RESULT: PASS' <<<"$out" && ! grep -q 'SHORT ANCHOR SWEEP' <<<"$out"; then
+    ok "ARM 35 CUT — with the identity removed the same short read prints RESULT: PASS at exit 0 (the defect, reproduced)"
+  else bad "ARM 35 CUT — with the identity removed the same short read prints RESULT: PASS at exit 0 (the defect, reproduced)" "rc=$rc $out"; fi
+else bad "ARM 35 CUT — the identity block can be cut" "mut_cut found no MUT-ANCHOR: anchor-count-identity block"; fi
+
+# ── ARM 36 (QUIET): the documented `<path>` placeholder must not red ─────────
+{ printf 'the form is `<path>`@`<literal>`\n'; mk_anchor_fixture "$TMP/anchors"; } > "$TMP/anchors/placeholder.md"
+run_c "$TMP/anchors/placeholder.md"
+if [ "$rc" -eq 0 ] && ! grep -q 'SHORT ANCHOR SWEEP' <<<"$out"; then
+  ok "ARM 36 QUIET — the documented \`<path>\` placeholder is counted, not refused"
+else bad "ARM 36 QUIET — the documented \`<path>\` placeholder is counted, not refused" "rc=$rc $out"; fi
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1

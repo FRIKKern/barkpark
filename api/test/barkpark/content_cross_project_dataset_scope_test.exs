@@ -20,20 +20,27 @@ defmodule Barkpark.ContentCrossProjectDatasetScopeTest do
 
   import Barkpark.TenancyFixtures
 
+  alias Barkpark.Content.{Labels, TagDistribution}
   alias Barkpark.{Content, Repo}
 
   @ds "production"
 
-  # Two projects (across two workspaces) each owning a `"production"` dataset
-  # with distinct docs. Returns {scope_a, scope_b}.
+  # Two projects in ONE workspace, each owning a `"production"` dataset with
+  # distinct docs. Returns {scope_a, scope_b}.
+  #
+  # ONE workspace, deliberately (task-5c1a72db61078040). The prior shape put the
+  # two projects in two WORKSPACES, which let `scope_to_workspace_or_global/3`
+  # drop B's rows before the dataset filter was ever the discriminator — the
+  # fixture could not tell a dataset_id-scoped read from a bare-string one.
+  # Same workspace, different projects is the shape the dataset scope actually
+  # has to survive.
   defp two_projects_with_production do
-    ws_a = create_workspace!()
-    proj_a = create_project!(ws_a)
-    ws_b = create_workspace!()
-    proj_b = create_project!(ws_b)
+    ws = create_workspace!()
+    proj_a = create_project!(ws)
+    proj_b = create_project!(ws)
 
-    scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
-    scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
+    scope_a = [workspace_id: ws.id, project_id: proj_a.id]
+    scope_b = [workspace_id: ws.id, project_id: proj_b.id]
 
     {:ok, _} =
       Content.create_document("post", %{"doc_id" => "a-only", "title" => "A1"}, @ds, scope_a)
@@ -148,5 +155,151 @@ defmodule Barkpark.ContentCrossProjectDatasetScopeTest do
 
     assert a_titles == ["A-rev"]
     assert b_titles == ["B-rev"]
+  end
+
+  # ── The project-PINNED, workspace-unpinned read ─────────────────────────────
+  #
+  # The arms above pass BOTH `:workspace_id` and `:project_id`, and under that
+  # shape `Scope.scope_to_workspace/3` appends `x.project_id == ^project_id` —
+  # which ALREADY excludes the other project's rows on its own. So those arms
+  # cannot tell whether the dataset filter discriminates: delete the whole
+  # `is_nil(x.dataset_id) and` guard from `scope_to_dataset/3` and they stay
+  # green, because project_id, not the dataset clause, is doing the work.
+  #
+  # `Scope.scope_to_workspace_or_global(query, nil, project_id)` matches its
+  # FIRST clause on the nil workspace and returns the query UNTOUCHED — the
+  # `project_id` argument is discarded. A read that pins a project but no
+  # workspace (`BarkparkWeb.Plugs.DatasetCors` builds exactly `[project_id: id]`)
+  # therefore has NOTHING but `scope_to_dataset/3` between it and every other
+  # project's same-named dataset. These arms drive that shape, so the dataset
+  # filter is the only discriminator left and a mutation to it REDS.
+  #
+  # Asserted as ABSENCE of a uniquely-suffixed foreign doc_id, never as a count:
+  # a project-pinned read is globally unscoped, so the shared test database's
+  # other rows are in the result set by construction and a count would flap.
+  defp pinned_pair do
+    n = System.unique_integer([:positive])
+    ws = create_workspace!()
+    proj_a = create_project!(ws)
+    proj_b = create_project!(ws)
+
+    {[workspace_id: ws.id, project_id: proj_a.id], [workspace_id: ws.id, project_id: proj_b.id],
+     [project_id: proj_a.id], n}
+  end
+
+  test "query.ex scope_to_dataset/3: a project-pinned list excludes the sibling project's rows" do
+    {scope_a, scope_b, pinned_a, n} = pinned_pair()
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "xp-a-#{n}", "title" => "A"}, @ds, scope_a)
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "xp-b-#{n}", "title" => "B"}, @ds, scope_b)
+
+    ids = Content.list_documents("post", @ds, pinned_a) |> Enum.map(& &1.doc_id) |> MapSet.new()
+
+    assert MapSet.member?(ids, "drafts.xp-a-#{n}")
+    refute MapSet.member?(ids, "drafts.xp-b-#{n}")
+  end
+
+  test "analytics.ex: a project-pinned recent_activity excludes the sibling project's events" do
+    {scope_a, scope_b, pinned_a, n} = pinned_pair()
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "an-a-#{n}", "title" => "A"}, @ds, scope_a)
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "an-b-#{n}", "title" => "B"}, @ds, scope_b)
+
+    ids =
+      Content.recent_activity(@ds, Keyword.put(pinned_a, :limit, 500))
+      |> Enum.map(& &1.doc_id)
+      |> MapSet.new()
+
+    refute MapSet.member?(ids, "drafts.an-b-#{n}")
+  end
+
+  test "export.ex: a project-pinned export_stream excludes the sibling project's documents" do
+    {scope_a, scope_b, pinned_a, n} = pinned_pair()
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "ex-a-#{n}", "title" => "A"}, @ds, scope_a)
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "ex-b-#{n}", "title" => "B"}, @ds, scope_b)
+
+    ids =
+      Repo.transaction(fn ->
+        Content.export_stream(@ds, pinned_a) |> Enum.map(& &1["_id"])
+      end)
+      |> elem(1)
+      |> MapSet.new()
+
+    assert MapSet.member?(ids, "drafts.ex-a-#{n}")
+    refute MapSet.member?(ids, "drafts.ex-b-#{n}")
+  end
+
+  test "revisions.ex: a project-pinned list_revisions excludes the sibling project's revisions" do
+    {scope_a, scope_b, pinned_a, n} = pinned_pair()
+    doc_id = "rev-shared-#{n}"
+
+    {:ok, _} =
+      Content.upsert_document("post", %{"doc_id" => doc_id, "title" => "A-rev"}, @ds, scope_a)
+
+    {:ok, _} =
+      Content.upsert_document("post", %{"doc_id" => doc_id, "title" => "B-rev"}, @ds, scope_b)
+
+    titles =
+      Content.list_revisions(doc_id, "post", @ds, pinned_a)
+      |> Enum.map(& &1.title)
+      |> Enum.uniq()
+
+    assert titles == ["A-rev"]
+  end
+
+  test "labels.ex: a project-pinned reference_title never resolves the sibling project's title" do
+    {scope_a, scope_b, pinned_a, n} = pinned_pair()
+    doc_id = "lab-#{n}"
+
+    # A must own a row in "production" first, so the dataset STRING RESOLVES to
+    # A's dataset_id. Without it `resolve_read_dataset_id/2` returns nil and
+    # `scope_to_dataset/3` takes its STRING-fallback arm, which is globally
+    # unscoped on this pinned-without-workspace shape — and B's title comes back
+    # on TODAY'S code (measured, see the PR body). That fallback is a DIFFERENT
+    # defect from the guard this test covers; keeping it out of the frame is
+    # what lets this arm measure the guard.
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "lab-a-#{n}", "title" => "A"}, @ds, scope_a)
+
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => doc_id, "title" => "B-TITLE"}, @ds, scope_b)
+
+    # Only B holds the referenced row. A's pinned read must degrade to the raw
+    # id, never surface B's title.
+    assert Labels.reference_title(doc_id, "post", @ds, pinned_a) == doc_id
+  end
+
+  test "tag_distribution.ex: a project-pinned per_type excludes the sibling project's tags" do
+    {scope_a, scope_b, pinned_a, n} = pinned_pair()
+    tag = "xproj-tag-#{n}"
+    doc_id = "tag-b-#{n}"
+
+    # Same reason as the labels arm: A owns a row so its "production" RESOLVES.
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "tag-a-#{n}", "title" => "A"}, @ds, scope_a)
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => doc_id, "title" => "B", "tags" => [tag]},
+        @ds,
+        scope_b
+      )
+
+    {:ok, _} = Content.publish_document(doc_id, "post", @ds, scope_b)
+
+    tags = TagDistribution.per_type("post", @ds, pinned_a) |> Enum.map(& &1.tag)
+
+    refute tag in tags
   end
 end

@@ -4,6 +4,21 @@
 # PR's current head and prints one line per required context with its real status/conclusion.
 #
 # CONTRACT: the verdict line ("MERGEABLE: 4/4 …" / "NOT YET: n/4 …" / "CONFLICTING: 4/4 … DIRTY") is ALWAYS THE LAST LINE. MERGEABLE now also means not DIRTY.
+#
+# EXIT CODES (2026-09-23 — HELD got its own, and it is a THIRD value, not a second):
+#   0  a VERDICT was measured — MERGEABLE / NOT YET / CONFLICTING. RED CHECKS ARE EXIT 0: a
+#      measured 3/4 is a verdict, and it is re-read as CI finishes.
+#   3  an INPUT was unreadable — CANNOT READ / HEAD-READ-FAILED / STALE-PR-OBJECT. Re-run it.
+#   4  HELD — the PR carries the label `hold` or `owner-hold` and a human said no. The last line
+#      is "HELD: <label> since <ts>" and NO checks verdict is printed, because none was read.
+#      NEVER retried and never waited out: the label has to come off first. A caller that only
+#      tests for non-zero must not confuse this with 3 — see the HOLD LABELS block below for the
+#      #18705 merge that cost a revert and a red required gate.
+# The verdict line now carries a VERDICT-AGE annotation AFTER the count — either
+# " [verdict <n> min old, <m> commit(s) behind <base>]" or, when the verdict is stale,
+# " (STALE VERDICT: <n> min old, <m> commits behind - update-branch before merging)". The
+# LEADING TOKEN IS UNCHANGED: merge-sweep.sh (MERGEABLE*), pr-watch.sh (MERGEABLE:*) and
+# merge-check.sh (MERGEABLE*) all prefix-match, so an appended clause is invisible to them.
 # Callers do `| tail -1`. Anything appended after it silently swaps what every wrapper reads
 # (measured 2026-09-02: an EARLY RED section appended here made a lane's watcher report a job
 # name where the verdict should be, and would have stopped the merge sweep merging anything).
@@ -14,7 +29,20 @@
 # disagreeing / stale-head guard SELF-HEALING: REST agrees with the branch, so the script adopts
 # the REST sha and CONTINUES to an ordinary verdict about the BRANCH commit / the fetch refspec
 # CREATING the tracking ref in a repo with NO default refspec / the FORCED refspec surviving a
-# non-fast-forward update, which a non-forced refspec skips the entire guard on) against a stub `gh` on PATH,
+# non-fast-forward update, which a non-forced refspec skips the entire guard on / a STALE
+# verdict / a FRESH verdict that must NOT be annotated stale / a verdict 0 commits behind that
+# must NOT be annotated stale / an unreadable compare that says CANNOT READ instead of zero /
+# a MUTANT with the staleness clause removed, which proves the stale arm is load-bearing / the
+# MIRROR copy under .claude/skills/orchestrate-tasks/helpers/ being byte-identical to this one /
+# a PR labelled `hold` and one labelled `owner-hold` each REFUSING at exit 4 with a timestamp
+# read from the issue's labeled events / a PR carrying BOTH, where owner-hold must win and the
+# output must say so / an unreadable events endpoint still refusing but saying UNKNOWN instead
+# of inventing a date / an UNLABELLED PR and a NEAR-MISS-labelled PR (on-hold/holding/household)
+# still reaching the ordinary verdict at exit 0 — the arms that catch a refusal firing on
+# everything / a MUTANT with the hold refusal disabled, which proves those arms are
+# load-bearing / the three exit codes HELD/red-checks/CANNOT READ being three DISTINCT values /
+# the label read NOT deriving a repo of its own when arg 2 is omitted)
+# against a stub `gh` on PATH,
 # from a cwd that is NOT a git repo, and asserts for each that `| tail -1` reads the verdict or
 # the refusal — never an intermediate line — that no refusal contains the string "0/4", and
 # that an HONEST 0/4 (four required contexts present, all failed) still verdicts at exit 0.
@@ -38,11 +66,47 @@ _selftest_body() {
 #!/usr/bin/env bash
 # Stub gh. GH_STUB_BREAK names the ONE read that fails; everything else answers healthily,
 # so a refusal proves specificity, not a blanket refusal.
+# RAW API SHAPE. The compare endpoint answers a JSON OBJECT, so this stub emits that object and
+# then applies `--jq` to it exactly as real gh does. The arms therefore exercise THIS SCRIPT'S
+# OWN projection of behind_by/ahead_by; a stub that handed back a pre-chewed number would leave
+# the projection — the part that can be wrong — unmeasured.
+_gh_stub_compare() {
+  local j f="" nx=0 x
+  j="{\"status\":\"behind\",\"ahead_by\":${GH_STUB_AHEAD:-1},\"behind_by\":${GH_STUB_BEHIND:-0},\"total_commits\":${GH_STUB_AHEAD:-1}}"
+  for x in "$@"; do
+    [ "$nx" = 1 ] && { f="$x"; break; }
+    [ "$x" = "--jq" ] && nx=1
+  done
+  if [ -n "$f" ]; then printf '%s\n' "$j" | jq -r "$f"; else printf '%s\n' "$j"; fi
+}
 case "$1 $2" in
   "repo view"*) [ "${GH_STUB_BREAK:-}" = repo ] && exit 1; echo "acme/widget"; exit 0;;
   "pr view"*)   [ "${GH_STUB_BREAK:-}" = sha ]  && exit 1; echo "aaaaaaaaaa11112222333344445555666677778888"; exit 0;;
 esac
+# The labels read and the issue-events read answer the RAW API shape and then apply --jq to it
+# exactly as real gh does, so the arms exercise THIS SCRIPT'S OWN jq projection — a stub handing
+# back a pre-chewed label name or timestamp would leave the part that can be wrong unmeasured.
+_gh_stub_jq() { # $1 = raw JSON; rest = the argv gh was called with
+  local j="$1" f="" nx=0 x; shift
+  for x in "$@"; do
+    [ "$nx" = 1 ] && { f="$x"; break; }
+    [ "$x" = "--jq" ] && nx=1
+  done
+  if [ -n "$f" ]; then printf '%s\n' "$j" | jq -r "$f"; else printf '%s\n' "$j"; fi
+}
 if [ "$1" = api ]; then
+  case " $* " in
+    *".labels[].name"*)
+      [ "${GH_STUB_BREAK:-}" = labels ] && exit 1
+      _lj="[]"
+      for _n in ${GH_STUB_LABELS:-}; do
+        [ "$_lj" = "[]" ] && _lj="[{\"name\":\"$_n\"}]" || _lj="${_lj%]},{\"name\":\"$_n\"}]"
+      done
+      _gh_stub_jq "{\"labels\":$_lj}" "$@"; exit 0;;
+    *"/issues/"*"/events"*)
+      [ "${GH_STUB_BREAK:-}" = events ] && exit 1
+      _gh_stub_jq "${GH_STUB_LABEL_EVENTS:-[]}" "$@"; exit 0;;
+  esac
   for a in "$@"; do
     case "$a" in
       */check-runs*)   [ "${GH_STUB_BREAK:-}" = runs ] && exit 1
@@ -52,15 +116,23 @@ if [ "$1" = api ]; then
                        # GH_STUB_ALLRED: the four required contexts EXIST on this head and every
                        # one concluded failure — a real, measured 0/4, not a failed read.
                        c=success; [ "${GH_STUB_ALLRED:-}" = 1 ] && c=failure
+                       # 5th column = .completed_at, the field the verdict-age read projects.
+                       k="${GH_STUB_COMPLETED:-2026-01-01T00:00:00Z}"
                        printf '%s\n' \
-                         "Cloud gate	completed	$c	2026-01-01T00:00:00Z" \
-                         "Console gate	completed	$c	2026-01-01T00:00:00Z" \
-                         "Elixir gate	completed	$c	2026-01-01T00:00:00Z" \
-                         "PR references an active task	completed	$c	2026-01-01T00:00:00Z"
+                         "Cloud gate	completed	$c	2026-01-01T00:00:00Z	$k" \
+                         "Console gate	completed	$c	2026-01-01T00:00:00Z	$k" \
+                         "Elixir gate	completed	$c	2026-01-01T00:00:00Z	$k" \
+                         "PR references an active task	completed	$c	2026-01-01T00:00:00Z	$k"
                        exit 0;;
       */actions/runs*) echo 0; exit 0;;
+      */compare/*)     [ "${GH_STUB_BREAK:-}" = compare ] && exit 1
+                       _gh_stub_compare "$@"; exit 0;;
       */pulls/*)       [ "${GH_STUB_BREAK:-}" = sha ] && exit 1
-                       case " $* " in *" .mergeable_state"*) echo clean;; *) echo "aaaaaaaaaa11112222333344445555666677778888";; esac
+                       case " $* " in
+                         *" .mergeable_state"*) echo clean;;
+                         *" .base.ref"*)        echo "${GH_STUB_BASE:-main}";;
+                         *) echo "aaaaaaaaaa11112222333344445555666677778888";;
+                       esac
                        exit 0;;
     esac
   done
@@ -111,6 +183,213 @@ STUB
   # broken read in the opposite direction.
   ALLRED=1 _arm "genuine 0/4"    "NOT YET: 0/4"    0 ""     42 acme/widget
   unset ALLRED
+  # ---------------------------- arms: THE HOLD REFUSAL, IN BOTH DIRECTIONS (2026-09-23) -------
+  # These arms exist because #18705 was merged past a six-day-old owner hold on a MERGEABLE line
+  # this script printed. Four of them assert the refusal; three assert it does NOT fire -- and the
+  # NON-firing ones are the load-bearing half, because a refusal that fires on everything stops
+  # the whole fleet merging and is indistinguishable from a CI outage.
+  # The events fixture is deliberately adversarial: it holds a SUPERSEDED labeled event for `hold`,
+  # an `unlabeled` event for `hold`, a labeled event for the OTHER label, and a non-label event.
+  # A projection that took the FIRST match, ignored .event, or ignored .label.name would pick a
+  # different timestamp than the one asserted, so these arms measure the script's own jq.
+  HOLD_EVENTS='[{"event":"labeled","label":{"name":"hold"},"created_at":"2026-09-10T01:02:03Z"},{"event":"unlabeled","label":{"name":"hold"},"created_at":"2026-09-11T00:00:00Z"},{"event":"labeled","label":{"name":"hold"},"created_at":"2026-09-16T08:11:00Z"},{"event":"labeled","label":{"name":"owner-hold"},"created_at":"2026-09-16T09:22:33Z"},{"event":"closed","created_at":"2026-09-20T00:00:00Z"}]'
+  _hold_arm() { # label  GH_STUB_LABELS  expected-LAST-line-EXACTLY  [must-contain-somewhere]
+    local lbl="$1" labs="$2" want="$3" also="${4:-}" brk="${5:-}" o r l
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK="$brk" \
+         GH_STUB_LABELS="$labs" GH_STUB_LABEL_EVENTS="$HOLD_EVENTS" \
+         bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    if [ "$r" != 4 ] || [ "$l" != "$want" ]; then
+      printf 'FAIL %-20s exit=%s (want 4) | tail -1: %s (want EXACTLY: %s)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1)); return
+    fi
+    if [ -n "$also" ] && case "$o" in *"$also"*) false;; *) true;; esac; then
+      printf 'FAIL %-20s output does NOT contain: %s\n' "$lbl" "$also"; fails=$((fails+1)); return
+    fi
+    # A refusal must never carry a count it did not measure -- the required set was not even read.
+    case "$o" in *0/4*) printf 'FAIL %-20s the string 0/4 appears in a refusal\n' "$lbl"; fails=$((fails+1)); return;; esac
+    printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
+  }
+  _nohold_arm() { # label  GH_STUB_LABELS
+    local lbl="$1" labs="$2" o r l
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK="" \
+         GH_STUB_LABELS="$labs" GH_STUB_LABEL_EVENTS="$HOLD_EVENTS" \
+         bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    if [ "$r" = 0 ] && case "$l" in MERGEABLE:*) true;; *) false;; esac \
+       && case "$o" in *HELD:*) false;; *) true;; esac; then
+      printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
+    else
+      printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want a MERGEABLE verdict and NO "HELD:" anywhere -- a refusal here fires on PRs nobody held, which stops the whole fleet merging and looks exactly like a CI outage)\n' "$lbl" "$r" "$l"; fails=$((fails+1))
+    fi
+  }
+  _hold_arm  "hold refuses"       "hold"            "HELD: hold since 2026-09-16T08:11:00Z"       "This is NOT a checks verdict"
+  _hold_arm  "owner-hold refuses" "owner-hold"      "HELD: owner-hold since 2026-09-16T09:22:33Z" "This is NOT a checks verdict"
+  # BOTH labels: owner-hold must win, and the output must SAY which won (criterion 1).
+  _hold_arm  "both -> owner wins" "hold owner-hold" "HELD: owner-hold since 2026-09-16T09:22:33Z" "owner-hold WINS"
+  # The timestamp is READ, not invented. With the events endpoint dead the refusal must STILL
+  # refuse -- the label is the fact -- but it must say UNKNOWN rather than print a plausible date.
+  _hold_arm  "ts unreadable"      "hold"            "HELD: hold since UNKNOWN (the labeled event for hold could not be read)" "" events
+  # A CAPITALISED label is still a hold. merge-check.sh folds case (its arm A17g); if this did not,
+  # a `Hold` would be refused by one instrument and waved through by the other, and the lane would
+  # believe whichever it asked. The HELD line reports the CANONICAL lowercase name either way, so
+  # nothing downstream has to fold.
+  _hold_arm  "Hold folds to hold" "Hold"       "HELD: hold since 2026-09-16T08:11:00Z"
+  _hold_arm  "OWNER-HOLD folds"   "OWNER-HOLD" "HELD: owner-hold since 2026-09-16T09:22:33Z"
+  # The SIX specimens task-cbba29645c9c65d9 requires BOTH gates to agree on, completed here:
+  # merge-check.sh's arm A17o drives exactly this set through ITS classifier.
+  _hold_arm  "HOLD folds to hold" "HOLD"       "HELD: hold since 2026-09-16T08:11:00Z"
+  _hold_arm  "Owner-Hold folds"   "Owner-Hold" "HELD: owner-hold since 2026-09-16T09:22:33Z"
+  # THE OTHER DIRECTION -- the half that matters more.
+  _nohold_arm "unlabelled verdicts" ""
+  # Whole-name matching: these are other people's labels and must pass straight through. A
+  # substring or glob match (*hold*) would refuse all three and nobody would notice until the
+  # fleet stopped merging.
+  _nohold_arm "near-miss labels"   "on-hold holding household needs-review"
+  # ---------------------------- THE MUTATION CONTROL for the hold arms ----------------------
+  # The four _hold_arm assertions are only worth something if a build WITHOUT the refusal fails
+  # them. This disables the refusal in a COPY and proves a `hold`+`owner-hold` PR then verdicts
+  # MERGEABLE -- i.e. reproduces the exact #18705 behaviour the block exists to stop. It refuses
+  # if the mutation changed nothing (a stale sed probe) or broke the script (a mutant that cannot
+  # verdict says nothing about the clause).
+  _hold_mutation_arm() {
+    local lbl="mutation reds hold" m o r l
+    m="$d/mutant-hold.sh"
+    sed 's/^if \[ -n "$HELD_LABEL" \]; then$/if false; then/' "$SELF" > "$m" 2>/dev/null
+    if [ ! -s "$m" ] || cmp -s "$m" "$SELF"; then
+      printf 'FAIL %-20s the mutation changed NOTHING -- this control measures nothing; the sed probe is stale\n' "$lbl"; fails=$((fails+1)); return
+    fi
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK="" \
+         GH_STUB_LABELS="hold owner-hold" GH_STUB_LABEL_EVENTS="$HOLD_EVENTS" \
+         bash "$m" 42 acme/widget 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    case "$l" in
+      MERGEABLE:*) printf 'PASS %-20s refusal removed -> a held PR reads MERGEABLE again (the #18705 shape), so the hold arms are load-bearing | mutant tail: %s\n' "$lbl" "$l";;
+      HELD:*)      printf 'FAIL %-20s the mutant STILL refused -- the hold arms pass with the refusal gone, so they are not load-bearing\n' "$lbl"; fails=$((fails+1));;
+      *)           printf 'FAIL %-20s mutant produced no verdict (exit=%s, tail: %s) -- it broke the script, so it says nothing about the refusal\n' "$lbl" "$r" "$l"; fails=$((fails+1));;
+    esac
+  }
+  _hold_mutation_arm
+  # ---------------------------- THE EXIT CODES MUST BE THREE DISTINCT VALUES ------------------
+  # Criterion 4. A caller that only tests for non-zero must not confuse "the owner said no" with
+  # "CI is not finished". The three are measured from RUNS, not read off the header, because a
+  # header is a claim and a run is a fact: held / an honest red / an unreadable input.
+  _exitcode_arm() {
+    local lbl="exit codes distinct" rc_held rc_red rc_cr
+    ( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_LABELS="owner-hold" \
+      GH_STUB_LABEL_EVENTS="$HOLD_EVENTS" bash "$SELF" 42 acme/widget >/dev/null 2>&1 ); rc_held=$?
+    ( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_LABELS="" GH_STUB_ALLRED=1 \
+      bash "$SELF" 42 acme/widget >/dev/null 2>&1 ); rc_red=$?
+    ( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_LABELS="" GH_STUB_BREAK=runs \
+      bash "$SELF" 42 acme/widget >/dev/null 2>&1 ); rc_cr=$?
+    if [ "$rc_held" = 4 ] && [ "$rc_red" = 0 ] && [ "$rc_cr" = 3 ] \
+       && [ "$rc_held" != "$rc_red" ] && [ "$rc_held" != "$rc_cr" ]; then
+      printf 'PASS %-20s HELD=%s, red checks=%s, CANNOT READ=%s -- three distinct values\n' "$lbl" "$rc_held" "$rc_red" "$rc_cr"
+    else
+      printf 'FAIL %-20s HELD=%s (want 4), red checks=%s (want 0), CANNOT READ=%s (want 3) -- a caller testing only non-zero cannot tell a hold from an unfinished read\n' "$lbl" "$rc_held" "$rc_red" "$rc_cr"; fails=$((fails+1))
+    fi
+  }
+  _exitcode_arm
+  # ---------------------------- THE LABEL READ MUST NOT RESOLVE A REPO FROM THE CWD ----------
+  # Criterion 5. The label read sits BELOW the owner/repo refusal and uses the already-resolved
+  # $REPO. With NO repo argument, NO $GH_REPO, `gh repo view` dead and no git remote anywhere, the
+  # script must still print the owner/repo CANNOT READ refusal at exit 3 -- NOT a HELD line, and
+  # NOT a verdict. A label read that called gh with an empty repo would 404 into a silent no-hold.
+  _norepo_hold_arm() {
+    local lbl="hold needs the repo" o r l
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK=repo \
+         GH_STUB_LABELS="owner-hold" GH_STUB_LABEL_EVENTS="$HOLD_EVENTS" \
+         bash "$d/norepo/pr-required.sh" 42 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    if [ "$r" = 3 ] && case "$l" in "CANNOT READ: no owner/repo"*) true;; *) false;; esac; then
+      printf 'PASS %-20s exit=3 | tail -1: %s\n' "$lbl" "$l"
+    else
+      printf 'FAIL %-20s exit=%s (want 3) | tail -1: %s (want the owner/repo CANNOT READ refusal -- the label read must sit BELOW it and must not derive a repo of its own)\n' "$lbl" "$r" "$l"; fails=$((fails+1))
+    fi
+  }
+  _norepo_hold_arm
+  # ------------------------------- arms: VERDICT AGE + COMMITS BEHIND (2026-09-20) ----------
+  # The verdict is a SNAPSHOT; these arms pin that it now says how old a snapshot and how far the
+  # base moved under it, and — the load-bearing half — that it only cries STALE when BOTH the age
+  # AND the distance say so. The stub answers the compare endpoint with the RAW API object and
+  # applies --jq to it as gh does, so the projection under test is this script's own.
+  # completed_at is computed RELATIVE TO NOW, not pinned: a fixed timestamp makes "is this older
+  # than 60 minutes" answer the same from the day it is written until the end of time, i.e. it
+  # would stop measuring the comparison the moment it was committed.
+  _iso_ago() { # $1 = minutes ago; prints an ISO-8601 Z timestamp, GNU date then BSD date
+    date -u -d "-$1 minutes" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null && return 0
+    date -u -v-"$1"M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null && return 0
+    return 1
+  }
+  _age_arm() { # label  minutes-ago  behind_by  GH_STUB_BREAK  must-contain  must-NOT-contain
+    local lbl="$1" mins="$2" beh="$3" brk="$4" must="$5" mustnot="$6" o r l comp
+    if [ "$mins" = "-" ]; then comp="2026-01-01T00:00:00Z"; else
+      comp=$(_iso_ago "$mins") || { printf 'FAIL %-20s date(1) could not build a timestamp %s minutes ago — vacuous arm\n' "$lbl" "$mins"; fails=$((fails+1)); return; }
+    fi
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK="$brk" \
+         GH_STUB_COMPLETED="$comp" GH_STUB_BEHIND="$beh" GH_STUB_AHEAD=2 \
+         bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    if [ "$r" != 0 ] || case "$l" in MERGEABLE:*) false;; *) true;; esac; then
+      printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want a MERGEABLE verdict — the leading token must survive every annotation)\n' "$lbl" "$r" "$l"; fails=$((fails+1)); return
+    fi
+    if case "$l" in *"$must"*) false;; *) true;; esac; then
+      printf 'FAIL %-20s tail -1: %s (does NOT contain: %s)\n' "$lbl" "$l" "$must"; fails=$((fails+1)); return
+    fi
+    if [ -n "$mustnot" ] && case "$l" in *"$mustnot"*) true;; *) false;; esac; then
+      printf 'FAIL %-20s tail -1: %s (must NOT contain: %s)\n' "$lbl" "$l" "$mustnot"; fails=$((fails+1)); return
+    fi
+    printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
+  }
+  # STALE: 120 min old AND 5 commits behind. Exact wording, because pr-watch.sh and bp-merge.sh
+  # read the tail and a lead reads the words.
+  _age_arm "stale verdict"  120 5 "" "commits behind - update-branch before merging)" ""
+  # FRESH: 5 min old but STILL 5 behind — NOT stale. Without this arm, an annotation that fired
+  # on "behind" alone would look correct: every merge candidate in this repo is behind something.
+  _age_arm "fresh not stale"  5 5 "" "commit(s) behind main]" "STALE VERDICT"
+  # UP TO DATE: 120 min old but 0 behind — NOT stale. The other half of the AND.
+  _age_arm "in-sync not stale" 120 0 "" "0 commit(s) behind main]" "STALE VERDICT"
+  # A FAILED COMPARE IS NOT ZERO. The whole point of the block: an unreadable compare must not
+  # render as "0 commits behind", which reads as "nothing moved, go ahead".
+  # The must-NOT needle is the PLAIN annotation's own shape, " commit(s) behind ". Do NOT use the
+  # literal "0 commits behind" here: the honest refusal deliberately contains the words "not 0
+  # commits behind", so that needle reds the very sentence it is meant to protect (measured).
+  _age_arm "compare unreadable" 120 5 compare "CANNOT READ" " commit(s) behind "
+  # ...and the indented detail line must say so too, in its own words.
+  out=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK=compare \
+         GH_STUB_COMPLETED="$(_iso_ago 120)" GH_STUB_BEHIND=5 bash "$SELF" 42 acme/widget 2>/dev/null )
+  if printf '%s\n' "$out" | grep -qE '^  VERDICT AGE: CANNOT READ'; then
+    printf 'PASS %-20s the detail line refuses too, above the verdict\n' "cannot-read detail"
+  else
+    printf 'FAIL %-20s no "  VERDICT AGE: CANNOT READ" line in the output\n' "cannot-read detail"; fails=$((fails+1))
+  fi
+  # ------------------------------- THE MUTATION CONTROL for the stale arm ----------------
+  # "stale verdict" above asserts a string is present. That is only worth something if a build
+  # WITHOUT the clause fails it — otherwise it is an assertion with no subject. This arm removes
+  # the clause from a COPY of this very file and proves the stale fixture then produces a
+  # MERGEABLE line with no STALE VERDICT in it. It also refuses if the mutation changed nothing
+  # (a stale probe) or broke the script outright (a mutant that cannot verdict proves nothing).
+  _mutation_arm() {
+    local lbl="mutation reds stale" m o r l comp
+    m="$d/mutant-pr-required.sh"
+    sed 's/^    STALE_ANN=" (STALE VERDICT:.*$/    STALE_ANN=""/' "$SELF" > "$m" 2>/dev/null
+    if [ ! -s "$m" ] || cmp -s "$m" "$SELF"; then
+      printf 'FAIL %-20s the mutation changed NOTHING — this control measures nothing; the sed probe is stale\n' "$lbl"; fails=$((fails+1)); return
+    fi
+    comp=$(_iso_ago 120) || { printf 'FAIL %-20s date(1) unusable — vacuous arm\n' "$lbl"; fails=$((fails+1)); return; }
+    o=$( cd "$d/norepo" && PATH="$d/bin:$PATH" GH_REPO="" GH_STUB_BREAK="" \
+         GH_STUB_COMPLETED="$comp" GH_STUB_BEHIND=5 GH_STUB_AHEAD=2 \
+         bash "$m" 42 acme/widget 2>/dev/null ); r=$?
+    l=$(printf '%s\n' "$o" | tail -1)
+    case "$l" in
+      *"STALE VERDICT"*)
+        printf 'FAIL %-20s the mutant STILL printed STALE VERDICT — the stale arm passes with the clause gone, so it is not load-bearing\n' "$lbl"; fails=$((fails+1));;
+      MERGEABLE:*)
+        printf 'PASS %-20s clause removed -> stale arm would red | mutant tail: %s\n' "$lbl" "$l";;
+      *)
+        printf 'FAIL %-20s mutant produced no MERGEABLE verdict (exit=%s, tail: %s) — it broke the script, so it says nothing about the clause\n' "$lbl" "$r" "$l"; fails=$((fails+1));;
+    esac
+  }
+  _mutation_arm
   # ---------------------------------------------- arms 8-9: THE STALE-HEAD GUARD, BOTH PATHS ----
   # The v3 guard only runs when `git fetch origin <branch>` SUCCEEDS, so these two arms need a
   # REAL branch: a bare repo with a pushed branch, and a cwd repo whose origin is that bare repo.
@@ -124,7 +403,18 @@ STUB
   # turning every read into a refusal.
   cat > "$d/bin2/gh" <<'STUB2'
 #!/usr/bin/env bash
-# Stub gh for the stale-head arms. Every call is appended to $GH_STUB_LOG, so an arm can PROVE
+# Stub gh for the stale-head arms. It answers the compare endpoint with the RAW API object and
+# applies --jq to it the way gh does (see _gh_stub_compare in the first stub).
+_gh_stub_compare() {
+  local j f="" nx=0 x
+  j="{\"status\":\"behind\",\"ahead_by\":${GH_STUB_AHEAD:-1},\"behind_by\":${GH_STUB_BEHIND:-0},\"total_commits\":${GH_STUB_AHEAD:-1}}"
+  for x in "$@"; do
+    [ "$nx" = 1 ] && { f="$x"; break; }
+    [ "$x" = "--jq" ] && nx=1
+  done
+  if [ -n "$f" ]; then printf '%s\n' "$j" | jq -r "$f"; else printf '%s\n' "$j"; fi
+}
+# Original note: Every call is appended to $GH_STUB_LOG, so an arm can PROVE
 # the stub was actually reached (a fixture that never reaches the code under test is a green with
 # no subject). The .head.sha answers come from a FILE-BACKED counter: the script runs each read
 # inside its own $( ) subshell, so an in-shell counter is always zero and would hand back a
@@ -134,6 +424,8 @@ STUB
 if [ "${1:-} ${2:-}" = "pr view" ]; then printf '%s\n' "${GH_STUB_GQL_SHA:-}"; exit 0; fi
 if [ "${1:-}" = api ]; then
   case " $* " in
+    */compare/*)    _gh_stub_compare "$@"; exit 0;;
+    *" .base.ref"*) printf '%s\n' "${GH_STUB_BASE:-main}"; exit 0;;
     *" .head.ref"*) printf '%s\n' "${GH_STUB_BRANCH:-}"; exit 0;;
     *" .head.sha"*)
       n=0; [ -s "${GH_STUB_CTR:-}" ] && n=$(cat "$GH_STUB_CTR")
@@ -149,10 +441,10 @@ if [ "${1:-}" = api ]; then
       exit 1;;
     *mergeable_state*) echo clean; exit 0;;
     */check-runs*) printf '%s\n' \
-        "Cloud gate	completed	success	2026-01-01T00:00:00Z" \
-        "Console gate	completed	success	2026-01-01T00:00:00Z" \
-        "Elixir gate	completed	success	2026-01-01T00:00:00Z" \
-        "PR references an active task	completed	success	2026-01-01T00:00:00Z"
+        "Cloud gate	completed	success	2026-01-01T00:00:00Z	2026-01-01T00:00:00Z" \
+        "Console gate	completed	success	2026-01-01T00:00:00Z	2026-01-01T00:00:00Z" \
+        "Elixir gate	completed	success	2026-01-01T00:00:00Z	2026-01-01T00:00:00Z" \
+        "PR references an active task	completed	success	2026-01-01T00:00:00Z	2026-01-01T00:00:00Z"
       exit 0;;
   esac
 fi
@@ -235,10 +527,15 @@ STUB2
            GH_STUB_GQL_SHA=bbbbbbbbbb11112222333344445555666677778888 \
            GH_STUB_RESTSHAS="$REALSHA" bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
       l=$(printf '%s\n' "$o" | tail -1)
-      if [ "$r" = 0 ] && [ "$l" = "$want" ]; then
+      # PREFIX, not equality, since 2026-09-20: the verdict line now carries a verdict-age
+      # annotation whose minute count is wall-clock derived. The sha assertion is UNWEAKENED —
+      # "$want" ends in the full 10-char sha prefix, and bbbbbbbbbb cannot match it — and the
+      # second check pins the annotation's own content, so nothing here got looser.
+      if [ "$r" = 0 ] && case "$l" in "$want"*) true;; *) false;; esac \
+         && case "$l" in *"0 commit(s) behind main]"*) true;; *) false;; esac; then
         printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
       else
-        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want exactly: %s — a refusal here means self-heal fell through; the sha bbbbbbbbbb means it adopted the STALE value and is describing a commit that is not the branch)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
+        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want prefix: %s plus a "0 commit(s) behind main]" annotation — a refusal here means self-heal fell through; the sha bbbbbbbbbb means it adopted the STALE value and is describing a commit that is not the branch)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
       fi
       if ! grep -q '\.head\.ref' "$log" || ! grep -q '\.head\.sha' "$log"; then
         printf 'FAIL %-20s self-heal arm never ENTERED the guard (no .head.ref / .head.sha re-read logged) — vacuous arm, its verdict measured nothing\n' "$lbl"; fails=$((fails+1))
@@ -329,10 +626,11 @@ STUB2
            GH_STUB_GQL_SHA="$REALSHA" GH_STUB_RESTSHAS="$REALSHA" \
            bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
       l=$(printf '%s\n' "$o" | tail -1)
-      if [ "$r" = 0 ] && [ "$l" = "$want" ]; then
+      if [ "$r" = 0 ] && case "$l" in "$want"*) true;; *) false;; esac \
+         && case "$l" in *"0 commit(s) behind main]"*) true;; *) false;; esac; then
         printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
       else
-        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want exactly: %s — a STALE-PR-OBJECT here is the FALSE refusal a plain `git fetch origin <branch>` produces when no default refspec creates the tracking ref)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
+        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want prefix: %s plus a "0 commit(s) behind main]" annotation — a STALE-PR-OBJECT here is the FALSE refusal a plain `git fetch origin <branch>` produces when no default refspec creates the tracking ref)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
       fi
       ref=$(git -C "$d/cwdnr" rev-parse refs/remotes/origin/stale-branch 2>/dev/null || true)
       if [ "$ref" != "$REALSHA" ]; then
@@ -379,10 +677,11 @@ STUB2
            GH_STUB_RESTSHAS="$REALSHA" bash "$SELF" 42 acme/widget 2>/dev/null ); r=$?
       l=$(printf '%s\n' "$o" | tail -1)
       post=$(git -C "$d/cwdff" rev-parse refs/remotes/origin/stale-branch 2>/dev/null || true)
-      if [ "$r" = 0 ] && [ "$l" = "$want" ]; then
+      if [ "$r" = 0 ] && case "$l" in "$want"*) true;; *) false;; esac \
+         && case "$l" in *"0 commit(s) behind main]"*) true;; *) false;; esac; then
         printf 'PASS %-20s exit=%s | tail -1: %s\n' "$lbl" "$r" "$l"
       else
-        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want exactly: %s — the stale sha bbbbbbbbbb means the non-forced fetch exited 1 and the guard was SKIPPED, failing OPEN)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
+        printf 'FAIL %-20s exit=%s (want 0) | tail -1: %s (want prefix: %s plus a "0 commit(s) behind main]" annotation — the stale sha bbbbbbbbbb means the non-forced fetch exited 1 and the guard was SKIPPED, failing OPEN)\n' "$lbl" "$r" "$l" "$want"; fails=$((fails+1))
       fi
       if [ "$post" != "$REALSHA" ]; then
         printf 'FAIL %-20s tracking ref did not move across the non-ff update: [%s] -> [%s], want %s — the refspec is missing its leading +\n' "$lbl" "$pre" "$post" "$REALSHA"; fails=$((fails+1))
@@ -392,6 +691,67 @@ STUB2
   else
     printf 'FAIL %-20s could not build the bare-repo/branch fixture — arms 8-9 did not run\n' "stale fixture"; fails=$((fails+1))
   fi
+  # ----------------------------- ARM: THE MIRROR. TWO copies of this file live in this repo ----
+  # scripts/pr-required.sh is CANONICAL — vendored 2026-09-16 (#18469) and the copy merge-check.sh
+  # resolves. .claude/skills/orchestrate-tasks/helpers/pr-required.sh is a MIRROR: pr-watch.sh and
+  # merge-sweep.sh each resolve "pr-required.sh beside this file", so THEY run the mirror. Nothing
+  # compared the two, and the mirror silently lagged from 2026-09-16 to 2026-09-20 — 187 lines
+  # against 543, i.e. it had no stale-head guard AT ALL — so the campaign's own watchers were
+  # running a materially different tool from the one the merge gate ran. Two copies diverge in
+  # BOTH directions the moment nothing measures them. This arm is that measurement.
+  # When this copy is NOT inside a checkout holding both files (the arms run copies out of a temp
+  # dir; leads run a scratchpad copy) it prints NOTE, not PASS: the tally counts only PASS/FAIL
+  # lines, so an un-run comparison cannot inflate the score into a green that measured nothing.
+  _mirror_arm() {
+    local lbl="mirror in sync" top a b
+    top=$(git -C "$SELFDIR" rev-parse --show-toplevel 2>/dev/null || true)
+    a="$top/scripts/pr-required.sh"
+    b="$top/.claude/skills/orchestrate-tasks/helpers/pr-required.sh"
+    if [ -z "$top" ] || [ ! -f "$a" ] || [ ! -f "$b" ]; then
+      printf 'NOTE %-20s NOT RUN: this copy is not inside a checkout holding both copies (toplevel: %s) — the mirror was NOT compared\n' "$lbl" "${top:-none}"
+      return
+    fi
+    if cmp -s "$a" "$b"; then
+      printf 'PASS %-20s the two repo copies are byte-identical\n' "$lbl"
+    else
+      printf 'FAIL %-20s scripts/pr-required.sh and .claude/skills/orchestrate-tasks/helpers/pr-required.sh DIFFER — merge-check.sh and the watchers are running different tools. Re-sync with: cp scripts/pr-required.sh .claude/skills/orchestrate-tasks/helpers/pr-required.sh\n' "$lbl"; fails=$((fails+1))
+    fi
+  }
+  _mirror_arm
+  # ------------------- ARM: THE VOCABULARY LOCK (task-cbba29645c9c65d9, 2026-09-23) -----------
+  # The mirror arm above compares THIS file with its byte-identical helper copy. It says NOTHING
+  # about merge-check.sh, which is a DIFFERENT file with its own hold vocabulary, its own case
+  # handling and its own exit codes. Until this arm existed, `owner-hold` could be added here and
+  # merge-check.sh would keep merging past it with both suites green — which is exactly what had
+  # happened between #19893 and this change. scripts/hold-vocabulary.sh decodes the
+  # `@hold-vocabulary` declaration out of all three files and asserts them term-identical in
+  # order; merge-check.sh's arm A17s runs the SAME checker, so a mutation on EITHER side reds the
+  # OTHER side's suite. A lock only one side checks is half a lock.
+  _vocab_lock_arm() {
+    local lbl="hold vocab locked" top hv out rc mut
+    top=$(git -C "$SELFDIR" rev-parse --show-toplevel 2>/dev/null || true)
+    hv="$top/scripts/hold-vocabulary.sh"
+    if [ -z "$top" ] || [ ! -f "$hv" ]; then
+      printf 'NOTE %-20s NOT RUN: no checkout with scripts/hold-vocabulary.sh (toplevel: %s) — the vocabularies were NOT compared\n' "$lbl" "${top:-none}"
+      return
+    fi
+    out=$(bash "$hv" --check-live 2>&1); rc=$?
+    if [ "$rc" = 0 ]; then
+      printf 'PASS %-20s %s\n' "$lbl" "$out"
+    else
+      printf 'FAIL %-20s rc=%s %s -- merge-check.sh and this file disagree about what a hold label IS; the fleet gets two answers at the merge button\n' "$lbl" "$rc" "$out"; fails=$((fails+1))
+    fi
+    # CONTROL: the checker is not one that always says yes. Mutate a COPY of THIS file's
+    # declaration and watch the same checker refuse it.
+    mut="$d/vocab-mutant.sh"
+    sed 's/^PR_HOLD_LABELS=.*$/PR_HOLD_LABELS="hold" # @hold-vocabulary/' "$SELF" > "$mut"
+    out=$(bash "$hv" --check "$mut" "$top/scripts/merge-check.sh" 2>&1); rc=$?
+    case "$rc:$out" in
+      1:*DIVERGED*) printf 'PASS %-20s a copy of this file with owner-hold dropped DIVERGED from merge-check.sh -- the lock is load-bearing\n' "vocab lock reds" ;;
+      *) printf 'FAIL %-20s rc=%s %s -- the checker cannot tell a dropped member apart, so the lock above means nothing\n' "vocab lock reds" "$rc" "$out"; fails=$((fails+1)) ;;
+    esac
+  }
+  _vocab_lock_arm
   rm -rf "$d"
   return "$fails"
 }
@@ -408,7 +768,7 @@ selftest() {
   total=$(printf '%s\n' "$out" | grep -cE '^(PASS|FAIL) ')
   passed=$(printf '%s\n' "$out" | grep -cE '^PASS ')
   failed=$(printf '%s\n' "$out" | grep -cE '^FAIL ')
-  if [ "$total" -lt 8 ]; then
+  if [ "$total" -lt 22 ]; then
     echo "SELFTEST: CANNOT READ — only $total arm line(s) emitted; the body exited early and this tally measures nothing"
     return 1
   fi
@@ -441,6 +801,88 @@ REPO="${2:-}"
 if [ -z "$REPO" ]; then
   echo "CANNOT READ: no owner/repo — pass it as arg 2 (or set GH_REPO). No git remote at this script's own directory or at the cwd, and gh repo view (GraphQL) failed too. This is NOT a verdict, and NOT a count of zero green."
   exit 3
+fi
+# ---------------------------------------------------- HOLD LABELS: REFUSE, DO NOT VERDICT ----
+# WHY THIS EXISTS, at the source (2026-09-22). This script answered the merge question without
+# ever reading the PR's LABELS, so a PR under a hold read "MERGEABLE: 4/4" -- and MERGEABLE reads
+# as CONSENT. console merged #18705 past a hold the OWNER had placed on 2026-09-16, six days
+# earlier; the owner had to be told after the fact, and the revert (#19851, 0f79f4b1b) then had to
+# be built and landed to get main's required Elixir gate green again. One unreadable label cost a
+# merge, a revert and a red required gate. A merge verdict that ignores a hold is a LYING GATE,
+# and the remedy chosen was to make the INSTRUMENT refuse rather than to add a rule to a brief:
+# a written finding does not fire by itself.
+# Main's HOLD RULE v2 (2026-09-22T15:37Z): owner-hold is the owner's alone and no lane removes it
+# or merges past it; a lane hold is the hold label PLUS a "HELD by <lane> pending <reason>" comment
+# posted within the minute, and a hold label with NO such comment is treated as the owner's and the
+# lane asks main. The auto-merge sweep already skipped both labels. The HAND path -- the one a lead
+# uses when it decides a PR is ready -- did not. This is that path.
+#
+# EXIT CODES ARE THE CONTRACT, and HELD needs ITS OWN. A caller that only tests for non-zero must
+# never confuse "the owner said no" with "CI is not finished": the first is NEVER retried, the
+# second always is.
+#   0  a VERDICT was measured: MERGEABLE / NOT YET / CONFLICTING. Note that RED CHECKS are exit 0
+#      -- a measured 3/4 is a verdict, and it is re-read as CI finishes.
+#   3  CANNOT READ / HEAD-READ-FAILED / STALE-PR-OBJECT -- an INPUT was unreadable. Re-run.
+#   4  HELD -- a human said no. Distinct from BOTH of the above. Never retried, never waited out;
+#      the label has to come off (and for owner-hold, only the owner takes it off) first.
+#
+# TWO THINGS THIS MUST NOT DO. Both are measured failure modes, and both have selftest arms:
+#   - it must not fire on an UNLABELLED PR. A refusal that fires on everything stops the whole
+#     fleet merging and looks exactly like a CI outage. Arms "unlabelled verdicts" and "near-miss
+#     labels" are that control, and "mutation reds hold" proves the refusal is load-bearing.
+#   - it must not reintroduce a CWD-DERIVED repo. This read uses the ALREADY-RESOLVED $REPO and
+#     sits BELOW the refusal above, so arg 2 keeps being required exactly as it was; an empty
+#     $REPO can never reach here. (A cwd-derived repo went empty once and printed 0/4 at exit 0
+#     for PRs that were at 3/4 -- see the RESOLVING owner/repo block above.)
+# Matching is on the WHOLE label name, never a substring: on-hold, holding and household are other
+# people's labels and must pass straight through to an ordinary verdict.
+# THE VOCABULARY IS DECLARED ON ONE LINE AND LOCKED AGAINST merge-check.sh
+# (task-cbba29645c9c65d9, 2026-09-23). Two merge instruments each carrying their own copy of this
+# list, with no shared fixture, is an UNLOCKED MIRROR: change one and BOTH suites stay green while
+# the fleet gets two different answers at the merge button. scripts/hold-vocabulary.sh decodes the
+# `@hold-vocabulary` line out of merge-check.sh, this file and this file's helper mirror and
+# asserts them term-identical IN ORDER; BOTH suites run that check, so a mutation on either side
+# reds the other side. A comment saying "mirrors X" is the tell for hand-maintained — this is not
+# that comment: the loop below MATCHES off this declaration, so the declaration is load-bearing.
+#
+# ORDER IS PRECEDENCE, ASCENDING. The STRONGEST member present on the PR is the one named, so a PR
+# carrying both `hold` and `owner-hold` is refused as owner-hold. A rule, not two branches.
+PR_HOLD_LABELS="hold owner-hold" # @hold-vocabulary
+_LABELS=$(gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' 2>/dev/null || true)
+HELD_LABEL=""; _HELD_RANK=0; _HELD_SEEN=""
+while IFS= read -r _lbl; do
+  # CASE-INSENSITIVE, because scripts/merge-check.sh's hold verdict already is (its arms A17g and
+  # A17o) and the two instruments must not disagree about what a hold IS: a label typed `Hold` that
+  # one tool refuses and the other waves through is worse than neither reading labels at all.
+  # Folded with tr, not `${_lbl,,}` — macOS ships bash 3.2 and the selftest runs this file under it.
+  # The comparison is still on the WHOLE folded name, never a substring.
+  _lbl=$(printf '%s' "$_lbl" | tr '[:upper:]' '[:lower:]')
+  _rank=0
+  for _cand in $PR_HOLD_LABELS; do
+    _rank=$((_rank+1))
+    [ "$_lbl" = "$_cand" ] || continue
+    _HELD_SEEN="${_HELD_SEEN:+$_HELD_SEEN, }$_cand"
+    if [ "$_rank" -gt "$_HELD_RANK" ]; then _HELD_RANK=$_rank; HELD_LABEL="$_cand"; fi
+  done
+done <<LABELS_EOF
+$_LABELS
+LABELS_EOF
+if [ -n "$HELD_LABEL" ]; then
+  # The timestamp is READ, never invented: the ISSUE's `labeled` events carry created_at. Take the
+  # MOST RECENT labeled event for the WINNING label -- a label removed and re-applied is held since
+  # the re-application, not since the first one. If that read fails, say the timestamp is UNKNOWN
+  # rather than printing a plausible one: a made-up "since" is exactly how a six-day-old hold would
+  # read as an hour-old one, which is the mistake this whole block exists to stop.
+  HELD_TS=$(gh api "repos/$REPO/issues/$PR/events?per_page=100" --paginate \
+    --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$HELD_LABEL\") | .created_at] | last // empty" 2>/dev/null || true)
+  [ -n "${HELD_TS:-}" ] || HELD_TS="UNKNOWN (the labeled event for $HELD_LABEL could not be read)"
+  case "$_HELD_SEEN" in
+    *,*) echo "  This PR carries MORE THAN ONE hold label ($_HELD_SEEN). $HELD_LABEL WINS: it is the strongest member of the vocabulary [$PR_HOLD_LABELS], and for owner-hold only the owner applies it, and no lane removes it or merges past it." ;;
+  esac
+  echo "  This is NOT a checks verdict -- the required set was NOT read, and nothing here says anything about CI. Do not re-run waiting for this to clear."
+  echo "  A LANE hold is the label PLUS a 'HELD by <lane> pending <reason>' comment posted within the minute. A hold label with NO such comment is the OWNER's: ask main, do not merge."
+  echo "HELD: $HELD_LABEL since $HELD_TS"
+  exit 4
 fi
 REQ='Elixir gate|PR references an active task|Cloud gate|Console gate'
 # READ THE HEAD SHA, AND REFUSE IF IT CANNOT BE READ (lead-silent, 2026-09-02).
@@ -509,7 +951,7 @@ fi
 # Read mergeable_state over REST (one call) so the LAST LINE never says MERGEABLE for a conflicting branch.
 MSTATE=$(gh api "repos/$REPO/pulls/$PR" --jq '.mergeable_state // "-"' 2>/dev/null || echo "-")
 if ! RUNS=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --paginate \
-  --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "-")\t\(.started_at // "-")"' 2>/dev/null); then
+  --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "-")\t\(.started_at // "-")\t\(.completed_at // "-")"' 2>/dev/null); then
   echo "CANNOT READ: check-runs for $REPO@${SHA:0:10} could not be fetched — this is NOT a verdict, and NOT a count of zero green."
   exit 3
 fi
@@ -518,6 +960,68 @@ fi
 if [ -z "$RUNS" ]; then
   echo "CANNOT READ: $REPO@${SHA:0:10} has NO check runs at all — CI has not started, or the read came back empty. This is NOT a verdict, and NOT a count of zero green."
   exit 3
+fi
+
+# ------------- HOW OLD IS THIS VERDICT, AND HOW FAR HAS THE BASE MOVED UNDER IT? (2026-09-20) --
+# A 4/4 is a SNAPSHOT of the check runs on ONE head. It says nothing about WHEN those runs
+# concluded or how many commits landed on the base underneath them, and "4/4 that is a day old on
+# a head five commits behind main" is exactly the shape that merges something nobody's CI ever
+# evaluated (measured on #19458 and #19505, both 5 behind). Every lead re-derived both numbers by
+# hand before every merge; the instrument that produced the verdict is where they belong.
+# BOTH ARE READ FROM THE API — check-runs `.completed_at`, and the compare endpoint's
+# `.behind_by` — never from a local checkout, whose refs every worktree in this repo shares and
+# which is routinely behind the branch it would be asked about.
+# A FAILED READ IS NOT ZERO. Either half being unreadable prints CANNOT READ and suppresses the
+# staleness test entirely, because "0 commits behind" is precisely the reassuring lie this block
+# exists to stop: it would read as "freshly verified, nothing has moved".
+STALE_MIN="${PR_REQUIRED_STALE_MIN:-60}"
+_epoch_utc() { # $1 = ISO-8601 Z timestamp; prints epoch seconds on stdout, or nothing at exit 1
+  local e
+  e=$(date -u -d "$1" +%s 2>/dev/null) && [ -n "$e" ] && { printf '%s\n' "$e"; return 0; }
+  e=$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null) && [ -n "$e" ] && { printf '%s\n' "$e"; return 0; }
+  return 1
+}
+AGE_MIN=""; AGE_WHY=""; BEHIND=""; AHEAD=""; BEHIND_WHY=""; BASEREF=""
+PLAIN_ANN=""; STALE_ANN=""
+# The NEWEST completed_at among the FOUR REQUIRED contexts — not among all check runs, because an
+# advisory job re-run five minutes ago would otherwise make a day-old required set look fresh.
+NEWEST=$(printf '%s\n' "$RUNS" | grep -E "^($REQ)	" | awk -F'\t' '$5!="-" && $5!=""{print $5}' | sort -r | head -1)
+if [ -z "$NEWEST" ]; then
+  AGE_WHY="no required check run on this head carries a completed_at (still running, or the field was absent)"
+else
+  _T_NEW=$(_epoch_utc "$NEWEST" || true)
+  _T_NOW=$(date -u +%s 2>/dev/null || true)
+  if [ -n "${_T_NEW:-}" ] && [ -n "${_T_NOW:-}" ]; then
+    AGE_MIN=$(( (_T_NOW - _T_NEW) / 60 ))
+  else
+    AGE_WHY="completed_at [$NEWEST] could not be turned into epoch seconds by this host's date(1)"
+  fi
+fi
+BASEREF=$(gh api "repos/$REPO/pulls/$PR" --jq .base.ref 2>/dev/null || true)
+if [ -z "$BASEREF" ]; then
+  BEHIND_WHY="the PR's base ref could not be read over REST"
+else
+  # compare/<base>...<head>: behind_by = commits on the BASE that this head does not have, which
+  # is the number every lead was computing by hand with merge-base + rev-list --count.
+  _CMP=$(gh api "repos/$REPO/compare/$BASEREF...$SHA?per_page=1" \
+           --jq '[(.behind_by|tostring),(.ahead_by|tostring)]|join(" ")' 2>/dev/null || true)
+  case "$_CMP" in
+    [0-9]*" "[0-9]*) BEHIND="${_CMP%% *}"; AHEAD="${_CMP##* }";;
+    *) BEHIND_WHY="compare $BASEREF...${SHA:0:10} returned no usable behind_by/ahead_by";;
+  esac
+fi
+if [ -n "$AGE_MIN" ] && [ -n "$BEHIND" ]; then
+  echo "  VERDICT AGE (read from the API): newest required completed_at=$NEWEST => $AGE_MIN min old; compare $BASEREF...${SHA:0:10} behind_by=$BEHIND ahead_by=$AHEAD (threshold PR_REQUIRED_STALE_MIN=$STALE_MIN)"
+  PLAIN_ANN=" [verdict $AGE_MIN min old, $BEHIND commit(s) behind $BASEREF]"
+  if [ "$BEHIND" -ge 1 ] && [ "$AGE_MIN" -gt "$STALE_MIN" ]; then
+    STALE_ANN=" (STALE VERDICT: $AGE_MIN min old, $BEHIND commits behind - update-branch before merging)"
+  fi
+else
+  _AGE_CR=""
+  [ -z "$AGE_MIN" ] && _AGE_CR="age: ${AGE_WHY:-unknown}"
+  [ -z "$BEHIND" ] && _AGE_CR="${_AGE_CR:+$_AGE_CR; }commits behind: ${BEHIND_WHY:-unknown}"
+  echo "  VERDICT AGE: CANNOT READ — $_AGE_CR. This is NOT '0 min old' and NOT '0 commits behind'; the staleness test did not run."
+  PLAIN_ANN=" [verdict age/commits-behind: CANNOT READ — not 0 min old, not 0 commits behind]"
 fi
 
 # EARLY RED, printed BEFORE the verdict: the aggregate "Elixir gate" context stays QUEUED for
@@ -540,4 +1044,4 @@ if [ -n "$ABSENT" ]; then
   else echo "  ABSENT required context (no check run on this head and nothing running — re-fire with: gh api -X PUT repos/$REPO/pulls/$PR/update-branch): ${ABSENT%; }"; fi
 fi
 printf '%s\n' "$RUNS" | grep -E "^($REQ)	" | sort -t$'\t' -k1,1 -k4,4r | awk -F'\t' '!seen[$1]++' \
-  | awk -F'\t' -v sha="$SHA" -v ms="$MSTATE" -v absent="$ABSENT" 'BEGIN{ok=0;n=0} {n++; printf "%-32s %-12s %s\n",$1,$2,$3; if($3=="success")ok++} END{ if(ok==4 && ms=="dirty") printf "CONFLICTING: 4/4 required green on %s but the branch is DIRTY — rebase before merge\n",substr(sha,1,10); else if(ok<4 && absent!="") printf "NOT YET: %d/4 required green on %s (%d ABSENT — re-fire, do not debug)\n",ok,substr(sha,1,10),4-n; else printf "%s: %d/4 required green on %s\n",(ok==4?"MERGEABLE":"NOT YET"),ok,substr(sha,1,10)}'
+  | awk -F'\t' -v sha="$SHA" -v ms="$MSTATE" -v absent="$ABSENT" -v ann="$PLAIN_ANN" -v stale="$STALE_ANN" 'BEGIN{ok=0;n=0} {n++; printf "%-32s %-12s %s\n",$1,$2,$3; if($3=="success")ok++} END{ a=(ok==4 && stale!="")?stale:ann; if(ok==4 && ms=="dirty") printf "CONFLICTING: 4/4 required green on %s but the branch is DIRTY — rebase before merge%s\n",substr(sha,1,10),ann; else if(ok<4 && absent!="") printf "NOT YET: %d/4 required green on %s (%d ABSENT — re-fire, do not debug)%s\n",ok,substr(sha,1,10),4-n,ann; else printf "%s: %d/4 required green on %s%s\n",(ok==4?"MERGEABLE":"NOT YET"),ok,substr(sha,1,10),a}'

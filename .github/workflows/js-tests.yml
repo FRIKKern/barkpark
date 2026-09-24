@@ -211,6 +211,79 @@ jobs:
       - name: "Changeset changelog selftest (concurrency cap + transport-vs-semantic retry, offline)"
         run: pnpm run selftest:changesets
 
+      # ── THE UNCACHED MIRROR-FRESHNESS GATE ────────────────────────────────────
+      # Deliberately AHEAD of every turbo step, and deliberately not a turbo task.
+      #
+      # packages/react/tests/pd-golden-mirror-parity.test.ts compares the canonical
+      # Elixir mint (api/test/support/fixtures/pd-parity/) against the JS mirror
+      # (packages/react/tests/fixtures/pd-golden/). The `paths:` list above already
+      # DISPATCHES this workflow on the Elixir mirror, and "Decide turbo scope"
+      # already widens such a PR to the FULL graph. Neither is a RUN. turbo's
+      # `test` inputs (js/turbo.json: src/**, tests/**, test/**, templates/**,
+      # vitest*.config.*, wrangler.toml, README.md, CHANGELOG.md,
+      # $TURBO_ROOT$/.changeset/**, $TURBO_ROOT$/test-utils/**) are rooted at
+      # TURBO_ROOT=js/ and cannot name a path under api/ at all. So a PR that
+      # changes ONLY the Elixir mirror leaves every @barkpark/react `test` input
+      # byte-identical, and the Test step is then free to REPLAY a cached green
+      # without the freshness guard executing at all — on the one change it
+      # exists to catch. Whether it does is a property of the CACHE, not of the
+      # change; see the two measurements below.
+      #
+      # MEASURED LOCALLY, warm cache, adding ONE file under
+      # api/test/support/fixtures/pd-parity/ and nothing under js/: @barkpark/react:test
+      # stayed at the SAME hash (26dbb9de8e5296ec), "cache hit, replaying logs",
+      # "40 passed", exit 0 — the guard executed nothing.
+      #
+      # MEASURED ON CI with the same control commit, and it is WORSE than a
+      # permanent dark: the runner computed that identical hash but the restored
+      # actions/cache entry did not carry it, so the task executed and js-tests
+      # went FAILURE at the `Test` step below. Whether this guard judged an
+      # Elixir-only change was therefore decided by CI cache weather, not by the
+      # change. A gate defeatable by a cache hit is not a gate. With THIS step in
+      # place the same control commit reds js-tests HERE (step 12), deterministically,
+      # before Build or Test run at all.
+      #
+      # NOT already covered by "Every declared vitest project actually executed"
+      # below: that step does EXECUTE this file uncached, but it DISCARDS vitest's
+      # pass/fail on purpose (see its closing comment) and only prints a note. It
+      # answers "did it run", never "did it pass". This step is the judgement.
+      #
+      # ZERO-MATCH GUARD, same class as the two @barkpark/core steps below: `pnpm
+      # --filter <name> ...` prints "No projects matched the filters" and EXITS 0
+      # when the filter matches zero workspace packages, so a rename of
+      # @barkpark/react or a typo here would silently delete this proof again, one
+      # layer out from the hole it just closed. MEASURED on this tree:
+      # `pnpm --filter @barkpark/NOSUCHPKG exec vitest run <file>` printed that
+      # literal and exited 0. The check below uses a pipe-free `case` rather than
+      # the `echo "$out" | grep -q` the core steps use: under `pipefail` a `grep
+      # -q` that matches exits early and SIGPIPEs the writer, so the pipeline
+      # returns 141, the `if` reads FALSE and the guard fails OPEN. Same shape,
+      # one fewer way to lie.
+      #
+      # The OTHER vacuous mode is covered by vitest itself: a test path matching
+      # no file exits 1 in single-project mode (MEASURED: exit 1, "include: ...").
+      #
+      # COST: ~2s wall clock on a run where nothing relevant changed (vitest
+      # reports 240-280ms; the rest is pnpm + vitest start-up). It needs no build,
+      # no dist, and no browser, which is why it can sit this early. That is
+      # immaterial against a multi-minute job, so it is UNCONDITIONAL rather than
+      # scoped to the diff: a changed-files condition would be one more place for
+      # this guard to be skipped, which is the exact defect being removed.
+      - name: "pd-golden mirror freshness (UNCACHED — turbo's test inputs cannot name api/, so a cache hit would skip this guard)"
+        run: |
+          set +e
+          out="$(pnpm --filter @barkpark/react exec vitest run tests/pd-golden-mirror-parity.test.ts 2>&1)"
+          status=$?
+          set -e
+          echo "$out"
+          case "$out" in
+            *"No projects matched the filters"*)
+              echo "pd-golden mirror gate FAILED: pnpm --filter matched ZERO packages — @barkpark/react was renamed, moved, or removed and this step silently ran nothing" >&2
+              exit 1
+              ;;
+          esac
+          exit "$status"
+
       - name: Cache turbo task outputs (js/.turbo)
         # turbo 2 replays build/test/lint/typecheck for packages whose inputs did not
         # change; without this cache every PR run started cold. Key on the lockfile +

@@ -696,6 +696,18 @@ git -C "$DR" mv docs/guide.md api/lib/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA" false
 
+# (4) A NEWLINE INSIDE A PATH (cch-bl-nul-native-path-matcher). The case loop
+#     now reads NUL records (`read -d ''`), so `api/li<LF>b/x.ex` reaches the
+#     `api/*` arm WHOLE. Green on the old tr producer too — its `api/li`
+#     fragment still matched — so this pins the new reader rather than
+#     reproducing a skip: `api/*` cannot be skipped by a split.
+git -C "$DR" checkout -q -b nldir "$BASE_SHA"
+mkdir -p "$DR/api/li"$'\n'"b"
+printf 'x\n' >"$DR/api/li"$'\n'"b/x.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nldir >/dev/null 2>&1
+dispatch '(4) a NEWLINE inside the directory of an in-set path (api/li<LF>b/x.ex)' 0 true pull_request "$BASE_SHA" false
+
 # THE FAILURE PATHS — the polarity that makes the shim safe.
 # An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a
 # branch-sync PR nets to nothing and is perfectly legal, and an ::error:: there
@@ -941,13 +953,45 @@ else
 fi
 
 # M2 — one class rots while the total stays right (the half that a bare row
-#      count can never see, and the half that actually drifted this time)
-sed 's/^#\([[:space:]]*\)census: Traversal.FileModule=.*/#\1census: Traversal.FileModule=18/' "$WF" > "$CENSUS_MUT/m2.yml"
-d="$(census_diff "$CENSUS_MUT/m2.yml" "$CENSUS_BL")"
-if has "$d" "Traversal.FileModule"; then
-  ok "MUTANT per-class: a drifted class fires even with the total correct"
+#      count can never see, and the half that actually drifted this time).
+#
+#      THE CLASS IS DERIVED FROM THE TABLE, NEVER TYPED. This arm used to sed
+#      for the literal `Traversal.FileModule`, and when api #19726 emptied that
+#      detector out of api/.sobelow-skips the correcting PR deleted the row --
+#      at which point the sed matched nothing, the mutant was byte-identical to
+#      the original, and the arm could not fire. It was caught only because the
+#      `no` branch reds; a mutation arm that silently matches nothing is the
+#      same vacuous green this whole case exists to prevent. An enumeration is
+#      a snapshot of the roster; the rule is "whatever per-class row is there".
+# NO TRUNCATING READER. The first draft of this ended `| grep -vx 'total' | head -1`,
+# and `head` never reads to EOF: it takes its N lines and CLOSES the pipe, so the
+# upstream `sed` dies of SIGPIPE and the command substitution yields 141 under
+# pipefail — no buffer overrun needed. scripts/pipefail-sigpipe-scan.sh rates a
+# head reader HIGH unless the producer is provably bounded, and this one is not:
+# the census table's length is whatever security.yml declares. That one line took
+# the high-confidence ratchet from its 89 baseline to 90 and reddened main.
+# The fix is the scanner's own preference 1, no pipe to truncate: `grep -v` reads
+# to EOF, and the shell takes the first line with a parameter expansion.
+mut_class_list="$(sed -n 's/^#[[:space:]]*census:[[:space:]]*\([A-Za-z][A-Za-z0-9._]*\)=.*/\1/p' "$WF" \
+  | grep -vx 'total' || true)"
+mut_class="${mut_class_list%%$'\n'*}"
+if [ -z "$mut_class" ]; then
+  no "MUTANT per-class: the table declares no per-class row to mutate — nothing to prove"
 else
-  no "MUTANT per-class: a drifted class did NOT fire"
+  sed "s/^#\([[:space:]]*\)census: ${mut_class}=.*/#\1census: ${mut_class}=18/" "$WF" > "$CENSUS_MUT/m2.yml"
+  # PLANT CHECK: the mutation must actually have changed the file. Without it a
+  # sed that matches nothing yields a mutant equal to the original and the arm
+  # below would be asserting against an unmutated table.
+  if cmp -s "$WF" "$CENSUS_MUT/m2.yml"; then
+    no "MUTANT per-class: the plant did not change the table (class '${mut_class}' did not sed) — the arm would have proven nothing"
+  else
+    d="$(census_diff "$CENSUS_MUT/m2.yml" "$CENSUS_BL")"
+    if has "$d" "$mut_class"; then
+      ok "MUTANT per-class: a drifted class fires even with the total correct (mutated '${mut_class}', derived from the table)"
+    else
+      no "MUTANT per-class: a drifted class did NOT fire (mutated '${mut_class}')"
+    fi
+  fi
 fi
 
 # M3 — the baseline gains a row and nobody updates the table

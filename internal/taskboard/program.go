@@ -43,6 +43,11 @@ type Config struct {
 	// / SaveCachedSnapshot both no-op on ""), so a board with no resolvable config
 	// dir degrades to a plain cold start rather than erroring.
 	CacheDir string
+	// SessionKey / SessionDoc ride the board's task closes as
+	// X-Barkpark-Session / X-Barkpark-Session-Doc (apiclient.Config carries the
+	// contract). Resolved by the CLI; empty sends no header.
+	SessionKey string
+	SessionDoc string
 }
 
 // default live-loop timings. Fields on Model so tests can shrink them.
@@ -125,6 +130,17 @@ type Model struct {
 	details DetailIndex
 	tasks   []Task
 	papers  map[string]PaperState
+	// hydrated is the per-row PROSE overlay the `?view=board` list path cannot
+	// carry, and hydrating is the one-request-in-flight guard. Both are owned by
+	// detail_hydrate.go — read its header before touching either; in particular
+	// applySnapshot must NEVER write hydrated, which is the whole point of it
+	// being a second map.
+	hydrated  map[string]TaskDetail
+	hydrating string
+	// attempted records which REV of which row has already been asked for, so a
+	// server that cannot answer is asked once per row-version rather than once
+	// per keystroke. Cleared for a row by an explicit frame open.
+	attempted map[string]string
 
 	width  int
 	height int
@@ -304,13 +320,13 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		papers:        map[string]PaperState{},
 		cacheDir:      cfg.CacheDir,
 		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset),
-		fetch:         newSnapshotFetcher(),
+		fetch:         newSnapshotFetcher(cfg.CacheDir, cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset)),
 		fetchEvents:   FetchTaskEvents,
 		tick:          tea.Tick,
 		build:         BuildBoard,
 		doClaim:       DoClaim,
 		doClose:       DoCloseRev,
-		now:           time.Now,
+		now:           defaultClock,
 		debounceDelay: defaultDebounceDelay,
 		backstopEvery: defaultBackstopEvery,
 		liveStale:     defaultLiveStale,
@@ -422,6 +438,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if mm, ok := nm.(Model); ok {
 		w, h := mm.boardGeometry()
 		mm.ui.SpineScroll = SpineTopFor(mm.board, mm.ui, w, h, mm.now())
+		// ONE hydration hook, after the reducer and after the viewport settles,
+		// so no navigation path can forget it and none of them has to remember
+		// it. It reads the subject the NEXT paint will render prose for, which
+		// is the only row the `?view=board` list path owes prose for
+		// (detail_hydrate.go).
+		if hc := (&mm).ensureTaskDetail(mm.detailSubject()); hc != nil {
+			return mm, tea.Batch(cmd, hc)
+		}
 		return mm, cmd
 	}
 	return nm, cmd
@@ -476,6 +500,8 @@ func (m Model) reduce(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applySnapshot(msg)
 	case paperLoadedMsg:
 		return m.handlePaperLoaded(msg)
+	case taskDetailLoadedMsg:
+		return m.handleTaskDetailLoaded(msg)
 	case actionResultMsg:
 		return m.handleActionResult(msg)
 	}
@@ -1677,6 +1703,12 @@ func (m *Model) pushFrame(f Frame) tea.Cmd {
 	if f.Kind == FramePaper {
 		return m.ensurePaper(f.Ref)
 	}
+	if f.Kind == FrameTask {
+		// An explicit descent is the one gesture that earns a fresh hydration
+		// attempt after a failed one (detail_hydrate.go). The fetch itself is
+		// queued by Update's hook, which runs right after this.
+		m.forgetHydrationAttempt(f.Ref)
+	}
 	return nil
 }
 
@@ -1747,13 +1779,11 @@ func (m Model) paperDataset() string {
 func (m Model) frameContent(f Frame, width int, now time.Time) ([]string, []Stop) {
 	switch f.Kind {
 	case FrameTask:
-		d, ok := m.details[f.Ref]
+		// detailFor prefers the hydrated prose overlay, falls back to the
+		// snapshot index, and thins to the board row last (detail_hydrate.go).
+		d, ok := m.detailFor(f.Ref)
 		if !ok {
-			t, found := m.taskByID(f.Ref)
-			if !found {
-				return []string{dimStyle.Render(truncate("task not loaded — esc to go back", width))}, nil
-			}
-			d = TaskDetail{Task: t} // thin best-effort from the board row
+			return []string{dimStyle.Render(truncate("task not loaded — esc to go back", width))}, nil
 		}
 		return RenderTaskDetail(d, ChildrenOf(m.tasks, f.Ref), f.Cursor, width, now)
 	case FramePaper:
@@ -1939,7 +1969,7 @@ func (m Model) readingSubjectTask() (Task, bool) {
 	top := m.topFrame()
 	switch top.Kind {
 	case FrameTask:
-		if d, ok := m.details[top.Ref]; ok {
+		if d, ok := m.detailFor(top.Ref); ok {
 			return d.Task, true
 		}
 		return m.taskByID(top.Ref)
@@ -1947,7 +1977,7 @@ func (m Model) readingSubjectTask() (Task, bool) {
 		_, stops := m.frameContent(top, m.readingWidth(), m.now())
 		if top.Cursor >= 0 && top.Cursor < len(stops) && stops[top.Cursor].Kind == FrameTask {
 			ref := stops[top.Cursor].Ref
-			if d, ok := m.details[ref]; ok {
+			if d, ok := m.detailFor(ref); ok {
 				return d.Task, true
 			}
 			return m.taskByID(ref)
@@ -1966,14 +1996,23 @@ func (m Model) readingSubjectTask() (Task, bool) {
 // the honest "syncing…" state; the fetched board swaps in when it lands, and a
 // failed fetch degrades to ConnOffline. A blank screen is never acceptable
 // (charter decision #9).
+// clientConfig maps the board Config onto the apiclient it acts through,
+// including the session headers its closes carry. Split out so a test can pin
+// the mapping without a terminal.
+func clientConfig(cfg Config) apiclient.Config {
+	return apiclient.Config{
+		BaseURL:    cfg.BaseURL,
+		Token:      cfg.Token,
+		Workspace:  cfg.Workspace,
+		Project:    cfg.Project,
+		Dataset:    cfg.Dataset,
+		SessionKey: cfg.SessionKey,
+		SessionDoc: cfg.SessionDoc,
+	}
+}
+
 func Run(cfg Config) error {
-	client := apiclient.New(apiclient.Config{
-		BaseURL:   cfg.BaseURL,
-		Token:     cfg.Token,
-		Workspace: cfg.Workspace,
-		Project:   cfg.Project,
-		Dataset:   cfg.Dataset,
-	})
+	client := apiclient.New(clientConfig(cfg))
 
 	m := newModel(client, cfg.Token, cfg)
 

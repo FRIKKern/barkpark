@@ -120,6 +120,125 @@ defmodule Barkpark.Plugins.Tasks do
     %{before_save: [&quality_gate/1], before_publish: [&portable_brief_gate/1]}
   end
 
+  @doc """
+  The task write fences, in the order `Barkpark.Content.Writer` ran them when
+  it named them directly (task-e5baaaa14ddf2e1c). Each one head-matches on
+  `type == "task"` and passes every other write through as `:ok`; each one's
+  own moduledoc says what it refuses and why. The ORDER is the contract — it
+  decides which refusal a write that trips two fences receives — and
+  `pre_write_fences_test.exs` pins it.
+
+  The two change guards (`Barkpark.Tasks.ChangeGuards`, formerly the writer's
+  own `ensure_task_transition_legal/6` and
+  `ensure_close_reason_lands_with_a_close/6`, task-d91ccf54d43b9800) come
+  FIRST, where the writer ran them: before every other fence, so an illegal
+  lifecycle transition is refused as one before any sibling judges the write.
+
+  The two birth guards (`Barkpark.Tasks.BirthGuards`, formerly the writer's own
+  `ensure_task_born_adjudicated/5` and `ensure_task_surface_declared/5`,
+  task-2978357a0701cd10) sit where the writer ran them: after
+  `CriteriaRequiredFence`, before dedup, so the pure refusals still come
+  before dedup's trigram scan. `Dedup.check_new_task/5` takes no `doc_id`;
+  `dedup_check_new_task/6` adapts it to the uniform fence arity.
+  """
+  @impl Barkpark.Plugin
+  def pre_write_fences do
+    [
+      {Barkpark.Tasks.ChangeGuards, :transition_legal},
+      {Barkpark.Tasks.ChangeGuards, :close_reason_lands_with_a_close},
+      {Barkpark.Tasks.DraftTerminalFence, :check},
+      {Barkpark.Tasks.DatasetTwinFence, :check},
+      {Barkpark.Tasks.TerminalCriteriaFence, :check},
+      {Barkpark.Tasks.CriteriaRequiredFence, :check},
+      {Barkpark.Tasks.BirthGuards, :born_adjudicated},
+      {Barkpark.Tasks.BirthGuards, :surface_declared},
+      {__MODULE__, :dedup_check_new_task}
+    ]
+  end
+
+  @doc false
+  def dedup_check_new_task(type, attrs, dataset, _doc_id, prev_doc, opts),
+    do: Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts)
+
+  @doc """
+  The task gates at the PUBLISH door, formerly named directly in
+  `Barkpark.Content.Lifecycle` (task-8273f2f1b24a6de1), each at the position
+  it held there — see `Barkpark.Tasks.PublishGuards`:
+
+    * `:door` — `door_gate/4`: transition legality, stale claim, the
+      claim-time criteria contract, the criteria regression fence, the
+      terminal-criteria fence and the task-door field fence. Last gate before
+      the authoring wall and the `:before_publish` hooks.
+    * `:in_transaction` — `no_criteria_regression/4`: the criteria and
+      terminal fences re-evaluated on the incumbent row locked `FOR UPDATE`.
+
+  `pre_publish_fences_test.exs` pins the order.
+  """
+  @impl Barkpark.Plugin
+  def pre_publish_fences do
+    [
+      {:door, Barkpark.Tasks.PublishGuards, :door_gate},
+      {:in_transaction, Barkpark.Tasks.PublishGuards, :no_criteria_regression}
+    ]
+  end
+
+  @doc """
+  The two task steps the writer ran over a write's attrs at the end of its
+  attrs pipeline, on both write doors, when it named them directly
+  (task-aed4f02e57d3a760), in the order it ran them:
+
+    * `{:transform, BriefMirror, :maybe_resync_task_brief}` — re-derive the
+      brief's `purpose-copy` / `criteria-list` blocks from `description` and
+      `acceptance_criteria`.
+    * `{:check, Validation, :validate_task_kind}` — the §1 content contract,
+      judged on the re-synced attrs. A `:check` here, not a pre-write fence:
+      the fences run later (after the prev-doc read and, on create, after the
+      label-spine shape gate), so moving it there would change which refusal
+      a write that trips both receives.
+
+  `pre_write_transforms_test.exs` pins the order.
+  """
+  @impl Barkpark.Plugin
+  def pre_write_transforms do
+    [
+      {:transform, Barkpark.Tasks.BriefMirror, :maybe_resync_task_brief},
+      {:check, Barkpark.Tasks.Validation, :validate_task_kind}
+    ]
+  end
+
+  @doc """
+  The module papers read task data through — a task chip's criteria segment
+  and a task query block's rows and aggregates (task-9c59aa555e1e015e). With
+  this plugin out of the load order papers render an explicit "unavailable"
+  placeholder instead; `paper_task_resolver_test.exs` pins both paths.
+  """
+  @impl Barkpark.Plugin
+  def paper_task_resolver, do: Barkpark.Tasks.PaperResolver
+
+  @doc """
+  The task guards of the RAW mutate door (`/v1/data/mutate`), formerly
+  private to `Barkpark.Content.Mutations` (task-b04cbe7823d084a6), each at the
+  position it held there — see `Barkpark.Tasks.MutateGuards`:
+
+    * `:before_rev` — the create family's published-fork fence, before the
+      revision precondition.
+    * `:after_claim` — after the door's close-CAS and claim fences, before the
+      writer: disposition by verb (term, rerun, operating instruction, reopen
+      trigger), adoption adjudicated, disposition owner registered — the order
+      the door's `with` chain named them in.
+
+  `mutate_door_fences_test.exs` pins the order.
+  """
+  @impl Barkpark.Plugin
+  def mutate_door_fences do
+    [
+      {:before_rev, Barkpark.Tasks.MutateGuards, :create_not_forking_published},
+      {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_via_verb},
+      {:after_claim, Barkpark.Tasks.MutateGuards, :adoption_adjudicated},
+      {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_owner_registered}
+    ]
+  end
+
   @tui_block_types ~w(
     heading paragraph list callout divider section code table figure action
     pullquote embed ingress eyebrow byline diagram asciicast image composite
@@ -381,7 +500,7 @@ defmodule Barkpark.Plugins.Tasks do
       list
       |> Enum.with_index()
       |> Enum.filter(fn {entry, _i} ->
-        merge_gate_worded?(entry) and not merge_gate_flagged?(entry)
+        merge_gate_worded?(entry) and not merge_gate_declared?(entry)
       end)
       |> Enum.map(fn {_entry, i} -> i end)
 
@@ -390,7 +509,8 @@ defmodule Barkpark.Plugins.Tasks do
         "acceptance_criteria #{inspect(unflagged)} open with the MERGE-GATED " <>
           "marker but carry no `merge_gate: true` — the close-time autostamp keys on the FLAG, not " <>
           "the wording, so a lead merge will not flip them. Add \"merge_gate\": true to each " <>
-          "gate entry (soft warning, save proceeds)"
+          "gate entry — or \"merge_gate\": false if the criterion merely MENTIONS merge-gating " <>
+          "and is not one (either explicit value silences this) (soft warning, save proceeds)"
 
       # Journal copy (grep-able in prod logs) AND the advisory channel: the
       # Logger line alone let 669 unflagged rows accumulate in silence — its
@@ -413,7 +533,27 @@ defmodule Barkpark.Plugins.Tasks do
     end
   end
 
-  defp merge_gate_flagged?(entry), do: Map.get(entry, "merge_gate") == true
+  # THREE STATES, NOT TWO — and the nag must read PRESENCE, not truth.
+  #
+  # This asked `Map.get(entry, "merge_gate") == true`, which folds an EXPLICIT
+  # `merge_gate: false` into the same bucket as an absent key, so the nag kept
+  # firing after the author had already answered it. `Criteria.merge_gated?/1`
+  # documents `false` as the per-row EXEMPTION DOOR: an author declaring that a
+  # marker-worded criterion merely TALKS about merge-gating (65 of 1853 corpus
+  # matches). The documented fix for a false positive therefore did not silence
+  # the instrument that manufactures them, and the only way to make the nag stop
+  # was to write `true` — converting a mention into a lead-only gate that `met`
+  # has no un-stamp for. MEASURED 2026-09-20 on task-e12850ea45a3d6a0.
+  #
+  #   key ABSENT        -> the author has not answered; nag.
+  #   `merge_gate` false -> answered "not a gate"; silent.
+  #   `merge_gate` true  -> answered "a gate"; silent.
+  #
+  # `fetch/2` (bottom of this file) exists for exactly this distinction: it
+  # returns `:absent` only when the key is missing from the map entirely.
+  # Nothing else changes — this widens no wording rule and halts nothing; it
+  # only stops nagging an author who has already declared an answer.
+  defp merge_gate_declared?(entry), do: fetch(entry, "merge_gate") != :absent
 
   # String-or-atom key fetch that distinguishes an ABSENT key from a present
   # nil/false value (write paths string-key their attrs; the atom fallback is
@@ -540,6 +680,46 @@ defmodule Barkpark.Plugins.Tasks do
     _ -> false
   catch
     _, _ -> false
+  end
+
+  @doc """
+  Plugin-contributed supervision children: one start-only boot check.
+
+  Resolves `Barkpark.Tasks.Judge.endpoint/0` once at boot
+  (task-6325dacb0e233d75), the plugin-side half of the gh-9531 FAIL-CLOSED
+  contract: a configured-but-malformed `ANTHROPIC_API_URL` refuses the node
+  instead of surfacing as a dedup judge that quietly never runs (the judge
+  fails OPEN by design, so nothing else would ever report it).
+
+  It lives HERE, not in `application.ex`, for the reason
+  `Barkpark.Plugins.OnixEdit.register_workers/1` gives: the host must not name
+  a removable plugin on a path that runs while it is disabled (`Barkpark.Plugin`
+  §Fresh-install invariant). With Tasks disabled this callback never runs.
+  The child starts under `Barkpark.Plugins.Supervisor`, which precedes
+  `BarkparkWeb.Endpoint`, so a malformed value still refuses the node before
+  it listens.
+  """
+  @impl Barkpark.Plugin
+  def register_workers(_ctx) do
+    [
+      %{
+        id: :tasks_judge_endpoint_boot_check,
+        start: {__MODULE__, :start_judge_endpoint_check, []},
+        restart: :temporary
+      }
+    ]
+  end
+
+  @doc """
+  Boot-time resolution of the judge endpoint — the child started by
+  `register_workers/1`. Returns `:ignore` on success so no process lingers;
+  `Judge.endpoint/0` RAISES on a malformed value, and a raising child start
+  takes the supervisor, and with it `Barkpark.Application.start/2`, down.
+  """
+  @spec start_judge_endpoint_check() :: :ignore
+  def start_judge_endpoint_check do
+    _ = Barkpark.Tasks.Judge.endpoint()
+    :ignore
   end
 
   @doc """
@@ -1285,7 +1465,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "stamp",
         summary:
-          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES the criterion's exact stored wording, and it must ride a FILE: --criterion-text-file <path> (or `-` for stdin) reads the bytes without a shell ever touching them. Do NOT retype it inline as --criterion-text \"…\" — criterion wording is MARKDOWN, and a backticked code span inside a double-quoted shell argument is COMMAND SUBSTITUTION, so bash/zsh EXECUTE it and bp is handed text that is not the stored wording. The index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated \"<why this stamp is yours to make>\" (the override takes a REASON, and a bare --merge-gated is refused; the reason lands at content.merge_gate_autostamp.stamp_overrides[].reason); a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps to an EXISTING criterion never trip close's work-digest fence — met/evidence/attempts are your progress record, and WorkDigest D5 reduces them away before hashing. A SEED IS THE EXCEPTION, and the refusal is CORRECT: stamping one past the end adds criterion TEXT, text IS work-defining, so your own next DEFAULT-path close is refused 409 doc_changed_since_claim with changed_fields [\"acceptance_criteria\"]. You moved the bar the row will be judged against, so re-read the row and close with --set observed_rev=<the rev you read AFTER the seed>; do not read that 409 as breakage. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text-file) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done.",
+          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES the criterion's exact stored wording, and it must ride a FILE: --criterion-text-file <path> (or `-` for stdin) reads the bytes without a shell ever touching them. Do NOT retype it inline as --criterion-text \"…\" — criterion wording is MARKDOWN, and a backticked code span inside a double-quoted shell argument is COMMAND SUBSTITUTION, so bash/zsh EXECUTE it and bp is handed text that is not the stored wording. The index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated \"<why this stamp is yours to make>\" (the override takes a REASON, and a bare --merge-gated is refused; the reason lands at content.merge_gate_autostamp.stamp_overrides[].reason); a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps to an EXISTING criterion never trip close's work-digest fence — met/evidence/attempts are your progress record, and WorkDigest D5 reduces them away before hashing. A SEED IS THE EXCEPTION, and the refusal is CORRECT: stamping one past the end adds criterion TEXT, text IS work-defining, so your own next DEFAULT-path close is refused 409 doc_changed_since_claim with changed_fields [\"acceptance_criteria\"]. You moved the bar the row will be judged against, so re-read the row and close with --set observed_rev=<the rev you read AFTER the seed>; do not read that 409 as breakage. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text-file) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done. THE AMENDMENT: --amend --amended-criterion-file <path> --note \"<why>\" (with --criterion-text-file) is the verb that CORRECTS A CRITERION'S WORDING when the sentence itself turns out false — e.g. a criterion asserting that code is NOT on origin/main while origin/main carries it, closed \"remains NOT MET\" beside met=true. It replaces acceptance_criteria[N].criterion AND re-derives the brief's criteria-list mirror in ONE rev-fenced write, so both surfaces move or neither does; patching one surface is the half-fix this verb exists to end. It is NEVER a silent rewrite: the superseded sentence is snapshotted onto an UNBOUNDED amendments list with {note,ts,worker,superseded_criterion}. It moves NO lock — met is pinned to its stored value and evidence is untouched — so it can neither fabricate a done nor erase a proof, which is also why a MERGE GATE is amendable with no --merge-gated. Fenced exactly like --withdraw: on an in_progress row holder-only + epoch, on any other row (done/cancelled/blocked/open) --observed-rev <the rev you read> (409 observed_rev_required). The criterion-text CAS is REQUIRED (409 criterion_text_required) — re-wording the wrong neighbour is as much a lie as flipping it. Blank replacement wording is refused (409 amended_criterion_required: emptying a criterion is a DELETION, not a correction), wording identical to the stored text is refused (409 criterion_unchanged), and an amendment can never SEED a criterion one past the end (409 criteria_index_out_of_range).",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stamp"},
         auth_tier: "write",
         args: [
@@ -1358,10 +1538,22 @@ defmodule Barkpark.Plugins.Tasks do
               "WITHDRAW a met criterion that review refuted: met goes to FALSE (criteria_progress drops), the original evidence is LEFT IN PLACE, and a {note,ts,worker,superseded_evidence} record is appended to the criterion's withdrawals list — so the board stops lying without the proof being erased. Requires --note (why) and the criterion's stored wording via --criterion-text-file <path> (or `-` for stdin, so no shell evaluates a backticked code span in it) — the same off-by-one guard --met carries: lowering the wrong neighbour is as much a lie as raising it. Unlike --met/--miss this is allowed on a SEALED row (done/cancelled/released), because a review that refutes a proof normally lands after the close — on an in_progress row it is holder-only + epoch-fenced as usual, and on any other row it requires --observed-rev. Refused with 409 criterion_not_met if the criterion is already met=false."
           },
           %{
+            name: "amend",
+            type: "bool",
+            summary:
+              "AMEND a criterion whose WORDING turned out false — the verb for a criterion sentence that asserts something the tree refutes. The stored text at --criterion N is replaced by --amended-criterion-file's contents, the superseded sentence is APPENDED to the criterion's amendments list as {note,ts,worker,superseded_criterion}, and the brief's criteria-list item at the same index is re-derived in the SAME rev-fenced write — both surfaces or neither, because patching one is the half-fix this verb exists to end. met and evidence are PINNED: an amendment corrects the QUESTION, never the verdict, so it can neither fabricate a done nor erase a proof and needs no --merge-gated even on a merge gate. Requires --note (why) and the criterion's CURRENT stored wording via --criterion-text-file (the same off-by-one CAS --met and --withdraw carry). Like --withdraw it is allowed on a SEALED row — on an in_progress row it is holder-only + epoch-fenced, on any other row it requires --observed-rev. Refused 409 amended_criterion_required on blank replacement wording (emptying a criterion is a DELETION), 409 criterion_unchanged when the replacement equals the stored text, and 409 criteria_index_out_of_range when the index is one past the end (an amendment can never seed)."
+          },
+          %{
+            name: "amended-criterion",
+            type: "string",
+            summary:
+              "The REPLACEMENT wording for --amend. Pass it from a FILE — --amended-criterion-file <path> (or `-` for stdin) — never as an inline shell argument: criterion wording is MARKDOWN and a `backticked code span` inside a double-quoted argument is COMMAND SUBSTITUTION, so bash/zsh EXECUTE it and the criterion is rewritten to something nobody authored. Blank is refused (409 amended_criterion_required) and identical-to-stored is refused (409 criterion_unchanged)."
+          },
+          %{
             name: "observed-rev",
             type: "string",
             summary:
-              "The doc rev you read, from `bp task get <id> -o json` .doc.rev. REQUIRED for a --withdraw on any row that is NOT in_progress (409 observed_rev_required otherwise): such a row has no LIVE lease to fence against — a closed row keeps its claim only as a receipt (closed_at stamped on it) — so the rev is the read-before-write proof instead, the same idea as close's --set observed_rev=<rev>. Ignored on an in_progress row, where the epoch fence applies."
+              "The doc rev you read, from `bp task get <id> -o json` .doc.rev. REQUIRED for a --withdraw or an --amend on any row that is NOT in_progress (409 observed_rev_required otherwise): such a row has no LIVE lease to fence against — a closed row keeps its claim only as a receipt (closed_at stamped on it) — so the rev is the read-before-write proof instead, the same idea as close's --set observed_rev=<rev>. Ignored on an in_progress row, where the epoch fence applies."
           },
           %{
             name: "merge-gated",
@@ -1513,7 +1705,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "rerun",
             type: "string",
             summary:
-              "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/PDS-D336(a)): a SHARED rerun over distinct rows is the honest shape."
+              "PDS wave 28 — THE FOURTH DURABLE KEY: one command an auditor can run to try to prove this reason WRONG. Written to the DURABLE content.disposition_rerun in the SAME CAS update as the rest of the adjudication; the raw /v1/data/mutate door refuses it and names this flag, exactly as it does for content.disposition. OPTIONAL, and that is deliberate: a reason may honestly refuse to be checkable (a licence, a runtime-only probe, a judgment call) and omitting --rerun is a PASS, demoted never rejected. LEGAL SPELLINGS — `git rev-list --count origin/main..<sha> | grep -qx 0`, `git cat-file -e origin/main:<path>`, `git grep -n <token> origin/main -- <path>`; each reports the probe's OWN failure as a non-zero exit. REFUSED SPELLINGS (422 unfalsifiable_rerun, NOTHING written): `git -C` in any spelling (also --git-dir/--work-tree — it retargets the repo the check runs against), a `test`/`[` filesystem predicate (asserts about the local checkout, not origin/main), `$( … )` or backtick command substitution (the exit code becomes the outer command's, swallowing the probe's failure), `git merge-base --is-ancestor` (refused by truth-grip's own screen), a definition-shaped `git grep` pattern ending in a bare identifier (`'defp apply_engagement'` is a PREFIX match that stays green across a suffix rename — terminate it: `'defp apply_engagement('`, `$` or `\\b`; a deliberate family probe takes a character class, `'defp handle_[a-z]'`), and a PIPE-MASKED tail whose last stage merely formats (head/tail/wc/cat/jq/…) — `git show origin/main:<deleted> | head -1` exits 0 while the bare `git show` exits 128. Blank counts as absent. Distinctness is NOT applied to this field (PDS-D391b/PDS-D336(a)): a SHARED rerun over distinct rows is the honest shape."
           },
           %{
             name: "clear-rerun",
@@ -1743,6 +1935,12 @@ defmodule Barkpark.Plugins.Tasks do
             name: "scope",
             type: "string",
             summary: "What the listener works on (repo, area, project)."
+          },
+          %{
+            name: "feed",
+            type: "string",
+            summary:
+              "How this listener learns of new orders: sse | poll. Omitted leaves the stored value as it was (a roster row with none reads unknown); anything else is a 422 (invalid_feed) and nothing is written."
           },
           %{
             name: "capacity",

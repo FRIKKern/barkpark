@@ -300,11 +300,17 @@ defmodule Barkpark.Webhooks.DispatcherTest do
     end
 
     test "HTTP-date resolves to a positive, clamped delay" do
+      # `now` is 2023-11-14T22:13:20Z; the header names 22:14:05Z, exactly 45s later.
       now = 1_700_000_000
-      # 45s in the future relative to `now`.
       date = "Tue, 14 Nov 2023 22:14:05 GMT"
-      ms = Dispatcher.parse_retry_after([{"retry-after", date}], now)
-      assert is_integer(ms) and ms > 0 and ms <= 300_000
+
+      # The EXACT delay, never a range. `> 0` is the floor the code already
+      # applies (`max(_, 0)`) and `<= 300_000` is `@retry_after_max_ms`, the
+      # clamp it already applies — a range spanning both is satisfied by every
+      # wrong-but-positive answer. A one-hour timezone slip (`epoch - now + 3600`)
+      # yields 3_645_000ms, which the clamp launders into exactly 300_000: inside
+      # the old range, and invisible to it.
+      assert Dispatcher.parse_retry_after([{"retry-after", date}], now) == 45_000
     end
 
     test "past HTTP-date floors at 0" do

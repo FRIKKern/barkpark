@@ -83,6 +83,12 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       not the rule set — ABSOLUTE and TRAVERSAL live in `safe_path/2`, on the
       cleaned joined path.
 
+      An applied `size` is run through the per-entry and total caps, and it must
+      not DISAGREE with a non-zero ustar size field (`E_MALFORMED`): an
+      over-declared record swallows the next entry in GNU tar and bsdtar too, and
+      no real writer emits the pair — Go and GNU tar zero the field, bsdtar
+      writes the same value (see `pax_size_agrees/2`).
+
       Why a `path`+`size` allowlist cannot re-open the override path this module
       refuses extension headers for: `type/1` reads **byte 156 of the FILE
       header**, and no standard pax keyword overrides a typeflag — there is no
@@ -129,6 +135,21 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       writer pads there) but they are still BUDGETED — a bomb appended after
       the marker must not ride in free.
 
+    * **ONE gzip member, and NOTHING after it (`E_MALFORMED`).** zlib stops at
+      the end of the first member and, in its default mode, silently discards
+      the rest of the input — so a second member's site content would be
+      dropped without a word (a two-member artifact staged the first member's
+      5 entries and answered `{:ok, ...}`), and whatever follows the member is
+      never inflated, parsed or counted by `max_total_bytes`. The inflater runs
+      in zlib's `:error` end-of-stream mode instead, which raises `data_error`
+      on any byte past the member's CRC32/ISIZE trailer. Every first-party
+      producer writes one member (`archive/tar` behind Go's `gzip.Writer`,
+      `tar -czf`), so the refusal costs a legitimate bundle nothing. Because
+      that raise is the SAME atom a corrupt member raises, a `data_error` is
+      re-read once in `:cut` mode (output discarded, capped at the total
+      budget) to tell the two apart: a member that terminates cleanly there
+      was refused for what came AFTER it, and the message says so.
+
     * **A bundle with nothing to serve is refused (`E_NO_INDEX`).** An archive
       that stages no regular files at all, or stages files but no root
       `index.html`, deploys green and then 404s at the domain. This is the
@@ -144,13 +165,72 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
     * **Extract aside, then swap.** Everything lands in a sibling
       `<dest>.staging-<n>` directory; only a fully-accepted archive is renamed
-      into place, so a refusal leaves NO partial tree. That is the idiom
-      `scripts/fetch-prebuilt.sh` uses (verify → extract aside → swap), this
-      repo's one working precedent.
+      into place. That is the idiom `scripts/fetch-prebuilt.sh` uses (verify →
+      extract aside → swap), this repo's one working precedent.
 
-  Every refusal is a typed code (`E_*`) with a human message. The caller maps it
-  to a 400 — a refused artifact is a CALLER error, never a box error, and never
-  a silent fallback to a box build.
+      **Where "a refusal leaves NO partial tree" holds, and where it does not.**
+      The staging tree is removed in an `after`, so it holds on every exit that
+      UNWINDS the calling process: every typed refusal, `E_SWAP_FAILED`, and a
+      genuine CRASH out of the stream (`:badarg`, `:not_initialized`,
+      `:not_on_controlling_process`, a parser `FunctionClauseError`, anything
+      else). The crash is not caught to get there — it propagates unchanged,
+      kind, reason and stacktrace. It does NOT hold where no code runs at all:
+      the VM is SIGKILLed or halted, the box loses power, or the calling process
+      receives an untrappable `:kill` exit mid-stream (DeployRunner traps exits,
+      so a supervisor `:shutdown` waits for the call — but one that outlasts the
+      shutdown timeout becomes `:kill`). Those leave `<dest>.staging-<n>` on
+      disk BY DESIGN, until DeployRunner's orphan sweep (`prune_orphan_run_files/1`,
+      after `orphan_grace_ms`) removes it. What makes that residue inert in the
+      meantime is the name: `<n>` is 128 random bits (decimal, so the sweep's
+      `.staging-<digits>` pattern still matches it) and `mkdir` is EXCLUSIVE, so no later
+      run can re-enter a dead run's tree and have its files change a verdict —
+      the way a VM-local `unique_integer` name once produced `E_UNSAFE_PARENT`
+      about an archive that named `index.html` once.
+
+    * **Two NAMED zlib error classes are typed; everything else CRASHES, on
+      purpose.** `run_stream/3` runs the whole pass inside one `try`, and its
+      `catch` is an allowlist of ATOMS — never a bare `rescue`. Read it as the
+      answer to "whose fault is a raise from inside the stream?":
+
+      | Raised inside the stream | Answer | Why |
+      |---|---|---|
+      | `:data_error`, `:stream_error`, `:buf_error` | `E_MALFORMED` (400) | zlib's verdict ON THE BYTES: the member is corrupt, cut, or followed by bytes. The caller repacks. |
+      | `:enomem`, `:system_limit` | `E_EXTRACT_EXHAUSTED` (500) | THE BOX could not get the memory to inflate. The bytes may be perfect. |
+      | anything else | **crash** | not a fact about the archive — a fact about a bug. |
+
+      The third row is the load-bearing one and it is a DECISION, not an
+      omission. `:badarg` means this module handed zlib something zlib rejects;
+      `:not_initialized` means the stream was never `inflateInit/2`'d or was
+      already ended; `:not_on_controlling_process` means the stream crossed a
+      process boundary. All three are bugs HERE or in the caller, and a typed
+      refusal would file them under the archive and make them unfindable. Nor is
+      a `{:need_dictionary, _, _}` RETURN given a clause in `drain/3`: gzip has
+      no FDICT bit, so at `@gzip_window_bits` (31, gzip-only) zlib cannot produce
+      one — if it ever does, the window bits changed underneath this module and
+      the resulting `CaseClauseError` is the right, loud answer. The same goes
+      for a `FunctionClauseError` out of the tar state machine: the parser is
+      ours, and a parser bug must never render as "the archive is malformed".
+
+      WIDENING THIS IS A REGRESSION, not a hardening. A `rescue _ -> {:error,
+      "E_MALFORMED", ...}` would make every future bug in the 900 lines below
+      answer 400 "your tarball is bad" about bytes that were fine. The list is
+      the point; add an atom to it deliberately, with a reason, or leave it out.
+
+      MEASURED, not reasoned: before `E_EXTRACT_EXHAUSTED` existed, an `:enomem`
+      raised from `:zlib.safeInflate/2` on the 20th call of a 41-entry archive —
+      9 728 bytes of tar already parsed — left `stage/4` with no return value at
+      all and killed the caller (`drain/3` → `feed_all/3` → `run_stream/3`,
+      exactly the shape a memory-pressured CI run was seen to produce). It also
+      leaked the whole staging tree, because the `rm_rf` then ran only on the
+      RETURN path — as it still did for the three crash classes until that
+      `rm_rf` moved into an `after` (see "Extract aside, then swap").
+      `prebuilt_artifact_stream_fault_test.exs` holds every arm.
+
+  Every refusal is a typed code (`E_*`) with a human message, and the code says
+  WHOSE fault it is: `caller_fault_codes/0` renders 400, `internal_failure_codes/0`
+  renders 5xx. A refused artifact is a caller error and never a silent fallback
+  to a box build; a box that could not stage a valid artifact is the box's
+  problem and must not tell the caller to repack.
 
   ## Caps
 
@@ -195,6 +275,24 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # zlib window bits 31 = 16 + 15 = "gzip only". NOT 47 (auto-detect
   # zlib-or-gzip): the contract says `.tar.gz` and that is what is accepted.
   @gzip_window_bits 31
+
+  # What zlib does with input past the end of the gzip member. `:error` makes it
+  # raise `data_error`; zlib's default (`:cut`) discards it silently — which is
+  # how a second member or appended junk used to stage `{:ok, ...}` unread and
+  # unbudgeted. `:cut` survives only in `member_terminates?/2`, the classifier.
+  @gzip_eos_behavior :error
+
+  # The zlib errors `run_stream/3` TYPES, as two NAMED classes. Everything
+  # absent from both still crashes — see the moduledoc's table for why that is
+  # the design and not a gap. Keep these as atom lists, never a `rescue`.
+  #
+  #   * CORRUPT — zlib's verdict about the BYTES. A caller fault, 400.
+  #   * EXHAUSTED — the allocator refused. A box fault, 5xx: the caller cannot
+  #     repack their way out of this machine's memory pressure, and the caps
+  #     (`E_TOTAL_TOO_LARGE` / `E_ENTRY_TOO_LARGE` / `E_COMPRESSION_RATIO`)
+  #     already own the case where the ARCHIVE is the thing that is too big.
+  @zlib_corrupt_errors [:data_error, :stream_error, :buf_error]
+  @zlib_exhausted_errors [:enomem, :system_limit]
   @inflate_chunk_bytes 64 * 1024
 
   @block 512
@@ -272,7 +370,7 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # own failure class instead of the caller's, and the OPERATOR who clears the
   # disk (or fixes the permissions) is the one who re-fires the deploy. The
   # caller's bytes are untouched and must not be repacked.
-  @internal_failure_codes ~w(E_STAGING_FAILED E_SWAP_FAILED E_WRITE_FAILED)
+  @internal_failure_codes ~w(E_EXTRACT_EXHAUSTED E_STAGING_FAILED E_SWAP_FAILED E_WRITE_FAILED)
 
   @caller_fault_codes ~w(
     E_ABSOLUTE_PATH E_BAD_NAME E_COMPRESSION_RATIO E_DIGEST_MISMATCH
@@ -340,28 +438,22 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # ── extract aside, then swap ──────────────────────────────────────────────
 
   defp extract_aside_and_swap(raw, sha256, dest, opts) do
-    staging = "#{dest}.staging-#{System.unique_integer([:positive])}"
+    staging = staging_path(dest)
 
     case mkdir(staging) do
       :ok ->
-        case run_stream(raw, staging, opts) do
-          {:ok, summary} ->
-            case swap(staging, dest) do
-              :ok ->
-                {:ok, Map.merge(summary, %{dir: dest, sha256: sha256})}
-
-              {:error, reason} ->
-                _ = rm_rf(staging)
-
-                {:error, "E_SWAP_FAILED",
-                 "the artifact validated but could not be swapped into place: #{inspect(reason)}"}
-            end
-
-          {:error, _code, _message} = refusal ->
-            # A refusal leaves NO partial tree — staging aside is what makes
-            # this single rm_rf the whole of the cleanup story.
-            _ = rm_rf(staging)
-            refusal
+        # `after`, not `catch`: the cleanup runs on EVERY exit from the block —
+        # a returned refusal, a swap failure, and a genuine crash — and adds no
+        # clause that could answer for one. An exception raised inside
+        # `run_stream/3` unwinds through here with its ORIGINAL kind, reason and
+        # stacktrace (still naming `drain/3`), so the allowlist in
+        # `run_stream/3` stays the only place a raise becomes a verdict. On
+        # success the tree has already been RENAMED to `dest`, so the `rm_rf`
+        # finds nothing at `staging` and removes nothing.
+        try do
+          stage_into(raw, sha256, staging, dest, opts)
+        after
+          _ = rm_rf(staging)
         end
 
       {:error, reason} ->
@@ -370,12 +462,50 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     end
   end
 
-  # Reachability: `path` is `<dest>.staging-<unique_integer>`, where `dest` is
+  defp stage_into(raw, sha256, staging, dest, opts) do
+    case run_stream(raw, staging, opts) do
+      {:ok, summary} ->
+        case swap(staging, dest) do
+          :ok ->
+            {:ok, Map.merge(summary, %{dir: dest, sha256: sha256})}
+
+          {:error, reason} ->
+            {:error, "E_SWAP_FAILED",
+             "the artifact validated but could not be swapped into place: #{inspect(reason)}"}
+        end
+
+      {:error, _code, _message} = refusal ->
+        refusal
+    end
+  end
+
+  # A name no predecessor can hold. `System.unique_integer/1` is unique only
+  # within ONE VM and restarts in the next, so `<dest>.staging-1762` from a VM
+  # that died mid-stream was handed out AGAIN to the next VM's first stage — and
+  # re-entered, because the tree it found already held that dead run's
+  # `index.html`: a later verdict (`E_UNSAFE_PARENT`) produced by residue, not
+  # by the archive. 128 random bits make a collision a non-event, and `mkdir/1`
+  # is EXCLUSIVE so even that non-event is a refusal rather than an adoption.
+  #
+  # DECIMAL, not hex, on purpose: DeployRunner's orphan sweep recognises a
+  # stranded staging tree by `~r/\.staging-\d+\z/` (`@orphan_staging_rx`), and
+  # a name it cannot match is residue nothing ever removes.
+  defp staging_path(dest) do
+    "#{dest}.staging-#{:crypto.strong_rand_bytes(16) |> :binary.decode_unsigned()}"
+  end
+
+  # Reachability: `path` is `<dest>.staging-<random decimal>`, where `dest` is
   # named by DeployRunner from `run_state_dir()` + a slug already validated
   # against ^[a-z0-9][a-z0-9-]{0,62}$ — no request-supplied path component ever
-  # reaches this argument.
+  # reaches this argument. The PARENT is created as needed; the staging dir
+  # itself must be NEW (`File.mkdir/1` answers `:eexist` for an existing one),
+  # so a leftover tree is never adopted as this run's staging root.
   # sobelow_skip ["Traversal.FileModule"]
-  defp mkdir(path), do: File.mkdir_p(path)
+  defp mkdir(path) do
+    with :ok <- File.mkdir_p(Path.dirname(path)) do
+      File.mkdir(path)
+    end
+  end
 
   # Reachability: the same two module-named paths as `mkdir/1` — the staging dir
   # this module just created and the DeployRunner-named destination. NEVER an
@@ -400,7 +530,7 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     z = :zlib.open()
 
     try do
-      :zlib.inflateInit(z, @gzip_window_bits)
+      :zlib.inflateInit(z, @gzip_window_bits, @gzip_eos_behavior)
 
       case feed_all(z, raw, initial_state(staging, opts)) do
         {:ok, state} ->
@@ -413,18 +543,88 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
           close_io(state, {:error, code, message})
       end
     catch
-      # zlib raises on a corrupt member. Caught NARROWLY (only zlib's own
-      # errors) so a bug in the parser above surfaces as a crash, not as a
-      # misleading "the archive is malformed".
-      :error, %ErlangError{original: original}
-      when original in [:data_error, :stream_error, :buf_error] ->
-        {:error, "E_MALFORMED", "the gzip stream is corrupt (#{original})"}
+      # zlib raises on a corrupt member. Caught NARROWLY (two NAMED atom lists,
+      # never a bare rescue) so a bug in the parser above surfaces as a crash,
+      # not as a misleading "the archive is malformed". The moduledoc's table
+      # says which atoms are here and which are deliberately absent — read it
+      # before adding one.
+      :error, %ErlangError{original: original} when original in @zlib_corrupt_errors ->
+        corrupt_member(original, raw, opts)
 
-      :error, original when original in [:data_error, :stream_error, :buf_error] ->
-        {:error, "E_MALFORMED", "the gzip stream is corrupt (#{original})"}
+      :error, original when original in @zlib_corrupt_errors ->
+        corrupt_member(original, raw, opts)
+
+      # The allocator refused. NOT the caller's fault: the archive may be
+      # perfectly well-formed and within every cap, and this box simply could
+      # not get the memory to inflate it. Typed so the box ANSWERS instead of
+      # dying, and classed INTERNAL so the door renders 5xx and the deploy
+      # ledger files it under the box rather than telling the caller to repack.
+      :error, %ErlangError{original: original} when original in @zlib_exhausted_errors ->
+        extraction_exhausted(original)
+
+      :error, original when original in @zlib_exhausted_errors ->
+        extraction_exhausted(original)
     after
       _ = :zlib.close(z)
     end
+  end
+
+  # `:error` end-of-stream mode raises the SAME `data_error` for "bytes follow the
+  # member" as for "the member is corrupt", and the caller's remedy differs. So a
+  # `data_error` is re-read ONCE in `:cut` mode, which stops at the member's end
+  # and ignores the rest: a member that terminates cleanly there was refused only
+  # for what came after it. Either way the answer is `E_MALFORMED` — the re-read
+  # chooses the MESSAGE, never the verdict.
+  defp corrupt_member(:data_error = original, raw, opts) do
+    if member_terminates?(raw, Keyword.get(opts, :max_total_bytes, @max_total_bytes)) do
+      {:error, "E_MALFORMED",
+       "the artifact carries bytes after its gzip member ends (a second member, or " <>
+         "trailing junk) — they would be neither staged nor budgeted; repack it as ONE " <>
+         "gzip member (#{original})"}
+    else
+      corrupt_member(original)
+    end
+  end
+
+  defp corrupt_member(original, _raw, _opts), do: corrupt_member(original)
+
+  defp corrupt_member(original),
+    do: {:error, "E_MALFORMED", "the gzip stream is corrupt (#{original})"}
+
+  # The classifier's re-read. Output is DISCARDED — never parsed, never written —
+  # and counted against `cap`, so even a member that inflates without end costs
+  # at most one total budget of CPU before this answers `false`. A zlib error of
+  # either named class also answers `false`: the refusal is already decided, and
+  # the classifier must never turn it into a crash or a 5xx.
+  defp member_terminates?(raw, cap) do
+    z = :zlib.open()
+
+    try do
+      :zlib.inflateInit(z, @gzip_window_bits, :cut)
+      discard(z, :zlib.safeInflate(z, raw), 0, cap) and :zlib.inflateEnd(z) == :ok
+    catch
+      :error, %ErlangError{original: o}
+      when o in @zlib_corrupt_errors or o in @zlib_exhausted_errors ->
+        false
+
+      :error, o when o in @zlib_corrupt_errors or o in @zlib_exhausted_errors ->
+        false
+    after
+      _ = :zlib.close(z)
+    end
+  end
+
+  defp discard(z, {:continue, out}, seen, cap) do
+    seen = seen + IO.iodata_length(out)
+    seen <= cap and discard(z, :zlib.safeInflate(z, []), seen, cap)
+  end
+
+  defp discard(_z, {:finished, out}, seen, cap), do: seen + IO.iodata_length(out) <= cap
+
+  defp extraction_exhausted(original) do
+    {:error, "E_EXTRACT_EXHAUSTED",
+     "this box ran out of memory inflating the artifact (#{original}) — the artifact " <>
+       "was NOT rejected and must not be repacked; retry once the box has memory"}
   end
 
   # Did the gzip MEMBER terminate? `inflateEnd/1` is the only thing that answers
@@ -433,18 +633,18 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # of a trailer-cut body still inflates, so the tar underneath looks whole and
   # the truncation is otherwise INVISIBLE.
   #
-  # Called from inside `run_stream/3`'s `try`, so anything outside zlib's own
-  # narrow error set still surfaces through that existing catch rather than being
-  # mistranslated here.
+  # Called from inside `run_stream/3`'s `try`, so anything outside THIS clause's
+  # list still surfaces through that outer catch — an `:enomem` from
+  # `inflateEnd/1` becomes `E_EXTRACT_EXHAUSTED` there, and anything in neither
+  # list crashes — rather than being mistranslated here as a truncation.
   defp stream_complete(z) do
     :zlib.inflateEnd(z)
     :ok
   catch
-    :error, %ErlangError{original: original}
-    when original in [:data_error, :stream_error, :buf_error] ->
+    :error, %ErlangError{original: original} when original in @zlib_corrupt_errors ->
       truncated_in_transit(original)
 
-    :error, original when original in [:data_error, :stream_error, :buf_error] ->
+    :error, original when original in @zlib_corrupt_errors ->
       truncated_in_transit(original)
   end
 
@@ -862,8 +1062,36 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
   defp effective_size(header, :regular, state) do
     case pax_override(state, :size) do
-      nil -> size(header, :regular, state)
-      declared -> check_size(declared, state)
+      nil ->
+        size(header, :regular, state)
+
+      declared ->
+        with :ok <- pax_size_agrees(header, declared), do: check_size(declared, state)
+    end
+  end
+
+  # A pax `size` and a NON-ZERO ustar size field that disagree are two framings of
+  # one body, and whichever is applied, the entries after it are mis-framed: an
+  # over-declared record swallows the next header+body, which GNU tar 1.35 and
+  # bsdtar 3.7.4 also do, silently and exit 0 — so this is a refusal of what the
+  # reference readers accept, taken on purpose. Measured on raw bytes, no real
+  # writer emits the pair: Go archive/tar and GNU tar --format=posix write the
+  # ustar field as ZERO when they emit a pax size, bsdtar writes the SAME value
+  # (as 12 un-terminated octal digits, which `octal/1` reads), and none of the
+  # three can be made to write a disagreeing one. A zero field is the Go/GNU
+  # convention and passes; an unparseable field keeps the pre-existing behaviour
+  # (the record is applied). Pinned by prebuilt_artifact_test.exs "a pax size
+  # that disagrees with a non-zero ustar size".
+  defp pax_size_agrees(<<_::binary-size(124), field::binary-size(12), _::binary>>, declared) do
+    case octal(field) do
+      {:ok, ustar} when ustar != 0 and ustar != declared ->
+        {:error, "E_MALFORMED",
+         "a pax size record (#{declared}) disagrees with the entry's non-zero ustar size " <>
+           "field (#{ustar}) — one of the two framings is a lie, and applying either would " <>
+           "silently swallow or split the entries after it"}
+
+      _ ->
+        :ok
     end
   end
 

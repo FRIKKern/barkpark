@@ -10,6 +10,9 @@
 # The cases that matter are the ones that prove the instruments can FAIL:
 #   * an uncovered repo-root read must red                  (case 3)
 #   * an uncovered read in an UNTRACKED file must red       (case 4)
+#   * an ARGV token that collides with a repo-root filename
+#     must NOT be a read, while the SAME word inside a
+#     join(...) call still is                                (case 4c)
 #   * a neutered scanner must red rather than report clean  (case 5)
 #   * the aggregator must red on every not-a-pass result    (case 9)
 #   * the dispatcher must red rather than emit all-false    (case 10)
@@ -498,6 +501,83 @@ else
   no ".git entered the census — this gate would red locally and pass in CI: $out"
 fi
 rm -f "$FXB/.git"
+echo
+
+# ── case 4c: AN ARGV ARRAY IS NOT A PATH READ ──────────────────────────────
+# The literal-join grep used to be a bare TOKEN PAIR — `(REPO_ROOT|REPO)` then a
+# comma then a quoted string — and that is also the shape of an ARGV ARRAY:
+# `execFileSync('git', ['-C', REPO, 'rev-parse', …])`. Measured on origin/main,
+# __preview__/seal-predicate.mjs and its test fed `rev-parse`, `show`,
+# `merge-base`, `--guard-cmd`, `--successor`, `--epic`, `--ladder-only`, `.git`
+# and `.github` into the literal-join idiom. All harmless — but harmless BY
+# COINCIDENCE: each was dropped by the `[ -f ]` existence filter or by the
+# explicit `.git` exclusion, never by the extractor refusing to see it.
+#
+# THE COINCIDENCE HAS A DEADLINE, and it is the bare-word rule. literal-join is
+# one of the three idioms allowed to admit a literal with no `/`, which is what
+# makes a read of `Makefile` / `README.md` / `mix.lock` representable at all. A
+# git subcommand is spelled exactly like a repo-root filename, so the first argv
+# token that collides with one reds this ratchet on a path NOTHING READS — and
+# the obvious remedy (an exemption) would enshrine a read that does not exist.
+#
+# So: the match must sit inside a `join(...)` CALL. Both arms below run on the
+# SAME fixture and differ in ONE thing — the shape the bare word is written in —
+# so neither arm can pass for a reason foreign to what this case measures.
+echo "case 4c: an argv array is not a path read, a join() of the same word is"
+FXV="$TMPROOT/argv"
+make_fixture "$FXV"
+: >"$FXV/Makefile"   # a REAL repo-root file, so the existence filter admits it
+# ARM 1 — the argv shape. `Makefile` here is the third element of a list, not a
+# path segment under REPO. It must not enter the census at all.
+cat >"$FXV/cloud/priv/static/__preview__/argv-probe.mjs" <<'JS'
+const out = execFileSync('git', ['-C', REPO, 'Makefile'], { encoding: 'utf8' });
+JS
+census_argv="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+if has_line "$census_argv" 'Makefile'; then
+  no "an ARGV token entered the census as a repo-root read — literal-join is matching token pairs, not join() calls"
+else
+  ok "an argv token colliding with a repo-root filename is not a read"
+fi
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "exit 0 — the ratchet does not red on a path nothing reads"
+else
+  no "RED on an argv token (exit $rc) — this is the false red the join() shape exists to prevent: $out"
+fi
+# ARM 2 — THE CONTROL, and it is the half that keeps arm 1 from being vacuous.
+# Same fixture, same bare word, same file: written as a join() it IS a read, so
+# it must enter the census and red as UNCOVERED. If this arm ever goes quiet,
+# arm 1 is passing because bare words died, not because argv stopped matching.
+cat >"$FXV/cloud/priv/static/__preview__/argv-probe.mjs" <<'JS'
+const p = path.join(REPO_ROOT, "Makefile");
+JS
+census_join="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+if has_line "$census_join" 'Makefile'; then
+  ok "CONTROL: the SAME bare word inside join(REPO_ROOT, …) is still a read"
+else
+  no "CONTROL FAILED: join(REPO_ROOT, \"Makefile\") is invisible — the bare-word rule died, and arm 1 proves nothing"
+fi
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "CONTROL: exit $rc (non-zero) — an undeclared bare-word read still reds"
+else
+  no "CONTROL FAILED: PASSED with an uncovered join(REPO_ROOT, \"Makefile\") read"
+fi
+if has "$out" "UNCOVERED repo-root read: Makefile"; then
+  ok "CONTROL: names the uncovered bare-word path"
+else
+  no "CONTROL FAILED: did not name the uncovered bare-word read: $out"
+fi
+# …and the idiom that admitted it is literal-join, not one of the others. The
+# bare-word rule is keyed on the TAG, so a row arriving under a different tag
+# would mean the control passed through a door this case is not measuring.
+tagged_join="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | awk -F'\t' '$1 == "Makefile" { print $3 }' | sort -u)"
+if has_line "$tagged_join" 'literal-join'; then
+  ok "CONTROL: the bare-word read is tagged literal-join"
+else
+  no "CONTROL FAILED: Makefile arrived tagged '$tagged_join', not literal-join"
+fi
+rm -f "$FXV/cloud/priv/static/__preview__/argv-probe.mjs"
 echo
 
 # ── case 5: a neutered scanner reds on the floor, never reports clean ───────
@@ -1810,6 +1890,50 @@ git -C "$DR" mv docs/guide.md cloud/priv/static/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA"
 
+# ── (4) A NEWLINE INSIDE A PATH (cch-bl-nul-native-path-matcher) ────────────
+# `-z` closed quoting, but the old producer's `| tr '\0' '\n'` re-opened ONE
+# class: a path holding a literal NEWLINE was split into two pseudo-paths
+# before the anchored ERE saw it. The dispatcher now hands the NUL records
+# straight to `--match … --null`. MUTATION HOOK: CONSOLE_DISPATCH_WF=<a pre-fix copy
+# of the workflow> drives these same arms through the tr producer.
+# The console set is `dir/**` trees and exact literals only, so NO in-set path
+# can be skipped by a split (the false skip is reachable in elixir's two-ended
+# families, not here). What a split CAN do here is misclassify the other way:
+#   (4b) cloud/priv/static/li<LF>b/x.js — in the set, console=true on both
+#        producers; the TRUE this row asks for.
+#   (4c) cloud/priv/static<LF>foo/x.js is NOT under cloud/priv/static/ (that
+#        directory is `static<LF>foo`), so the true answer is console=false.
+#        The tr producer answered true off its `cloud/priv/static` fragment —
+#        RED on the pre-fix workflow.
+#   (4d) THE --null SKEW: a pinned copy without MATCH-INPUT-NUL would IGNORE
+#        `--null` and read the NUL stream as ONE line (a silent false). This
+#        dispatcher's polarity is to REFUSE out loud.
+git -C "$DR" checkout -q -b nldir "$BASE_SHA"
+mkdir -p "$DR/cloud/priv/static/li"$'\n'"b"
+printf 'x\n' >"$DR/cloud/priv/static/li"$'\n'"b/x.js"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nldir >/dev/null 2>&1
+dispatch '(4b) a NEWLINE inside the directory of an in-set path (cloud/priv/static/li<LF>b/x.js)' 0 true pull_request "$BASE_SHA"
+git -C "$DR" checkout -q -b nltop "$BASE_SHA"
+mkdir -p "$DR/cloud/priv/static"$'\n'"foo"
+printf 'x\n' >"$DR/cloud/priv/static"$'\n'"foo/x.js"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nltop >/dev/null 2>&1
+dispatch '(4c) cloud/priv/static<LF>foo/x.js is NOT under the static tree — one record, not two' 0 false pull_request "$BASE_SHA"
+git -C "$DR" checkout -q -b prenul "$BASE_SHA"
+grep -v MATCH-INPUT-NUL "$HERE/console-path-escape-check.sh" >"$DR/scripts/console-path-escape-check.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm prenul >/dev/null 2>&1
+if grep -q MATCH-INPUT-NUL "$DR/scripts/console-path-escape-check.sh"; then
+  no "(4d) the fixture head still carries MATCH-INPUT-NUL — the skew arm measures nothing"
+else
+  ok "(4d) the fixture head's copy carries no MATCH-INPUT-NUL token"
+fi
+PIN_REF=refs/heads/no-such-merge-ref \
+  dispatch '(4d) a copy that predates --null: refuses out loud, never a silent false' 1 - pull_request "$BASE_SHA"
+gate_says "predates '--match … --null'" "  …and names the --null skew"
+gate_says "dispatcher REFUSED" "  …as a classified REFUSAL"
+
 # ── THE WORKFLOW/SCRIPT VERSION SKEW (task-3a81e68f7027ca98) ───────────────
 # GitHub takes the WORKFLOW FILE for a pull_request run from the MERGE REF while
 # this job checks out the PR HEAD (D34), so main's invocation used to run against
@@ -2021,6 +2145,49 @@ if has "$out" "stub cssom-parity.mjs, exiting 0"; then
   ok "the injected exit code really came from the stub"
 else
   no "the stub never ran — cases (b) measured something else entirely"
+fi
+echo
+
+# ── case NUL: `--match … --null` reads one path per NUL record ─────────────
+# (cch-bl-nul-native-path-matcher) The dispatchers now feed `git diff -z`
+# output straight in. A path holding a NEWLINE must reach the anchored ERE as
+# ONE record, in both directions; newline-mode stdin must keep working for
+# every other caller (scripts/which-gates.sh).
+echo "case NUL: --match console --null reads NUL-terminated records"
+NUL_IN="$TMPROOT/nul-match.in"
+printf '%s\0%s\0' docs/x.md "cloud/priv/static/li"$'\n'"b/x.js" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match console --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: cloud/priv/static/li<LF>b/x.js is IN the set -> true"
+else
+  no "--null: cloud/priv/static/li<LF>b/x.js answered '$nul_out', wanted true"
+fi
+printf '%s\0' docs/x.md "cloud/priv/static"$'\n'"foo/x.js" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match console --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = false ]; then
+  ok "--null: cloud/priv/static<LF>foo/x.js is ONE record, not in the set -> false"
+else
+  no "--null: cloud/priv/static<LF>foo/x.js answered '$nul_out', wanted false — the matcher still splits records"
+fi
+printf '%s\0%s' docs/x.md "cloud/priv/static/li"$'\n'"b/x.js" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match console --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: an unterminated LAST record is still read"
+else
+  no "--null: an unterminated last record was dropped ('$nul_out')"
+fi
+nul_out="$(printf '%s\n%s\n' docs/x.md "cloud/priv/static/li"$'\n'"b/x.js" | bash "$SCRIPT" --match console 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "control: the same bytes read as LINES answer true — newline mode is unchanged"
+else
+  no "control: newline mode answered '$nul_out', wanted true"
+fi
+nul_rc=0
+nul_out="$(bash "$SCRIPT" --match console --nul </dev/null 2>&1)" || nul_rc=$?
+if [ "$nul_rc" -eq 2 ]; then
+  ok "--nul (a typo) is REFUSED with exit 2, never read as newline mode"
+else
+  no "--nul exited $nul_rc ('$nul_out'), wanted 2"
 fi
 echo
 

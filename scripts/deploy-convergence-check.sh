@@ -56,10 +56,21 @@
 #       deploy-relevant commit reachable from `--tip` is absent from `--served`.
 #
 #   adjudicate --stranded true|false [--unchecked true|false]
-#              [--in-flight-source ok|unknown]   # stdin: "run_id sha status" lines
+#              [--in-flight-source ok|unknown]
+#              [--instance-result success|failure|cancelled|skipped]
+#              [--instance-state converged|stranded|unchecked|absent]
+#              [--instance-served SHA] [--instance-tip SHA]
+#              [--strand-since ISO] [--strand-served SHA] [--strand-newest SHA]
+#              [--now ISO] [--deploy-yml PATH]
+#                                                # stdin: "run_id sha status" lines
 #       Turns the per-leg findings into the JOB'S CONCLUSION. Exits 1 — the run
-#       goes red — only for "stranded and no deploy is in flight". See the block
-#       above the mode for why an in-flight deploy is a delay and not a waiver.
+#       goes red — for "stranded and no deploy is in flight", and, since
+#       task-c5955c660c7b9e55, for THIS run's own instance leg having concluded
+#       FAILURE while the box is still behind (or unreadable) afterwards, and,
+#       since task-a077f2e24350d3af, for a strand OLDER than twice the deploy
+#       lock wait (STALLED) whatever is in flight. See the block above the mode
+#       for why an in-flight deploy is a delay and not a waiver, why a failed
+#       ATTEMPT is exempt from that delay, and why the delay now EXPIRES.
 #
 #   --selftest
 #       Hermetic. Builds real git repos in mktemp, reproduces the 2026-07-19
@@ -71,6 +82,12 @@
 #   1  STRANDED / no survivor is safe by ancestry — a real finding
 #   2  HARNESS-UNAVAILABLE — could not look (missing git, unresolvable sha,
 #      unreadable deploy.yml). NEVER 0: "I could not check" is not "it is fine".
+#   3  CANNOT READ (adjudicate only) — a strand is being suppressed as
+#      in-flight but its AGE cannot be established: no/unparseable
+#      --strand-since or --now, a strand start in the future, or the deploy
+#      lock wait could not be read out of the deploy scripts. The suppression
+#      needs an expiry to be honest, and an expiry it cannot compute is not
+#      "age 0" — it fails CLOSED, by its own name.
 #
 # Relevance comes from deploy.yml's own `on.push.paths`, minus any entry marked
 # `deploy-filter-exempt:` and minus any file matched by a `!`-prefixed EXCLUSION
@@ -439,7 +456,7 @@ mode_survivor() {
 # ── mode: converged ──────────────────────────────────────────────────────────
 mode_converged() {
   local served_raw="" tip_raw="" owed_before="" grace="$DEFAULT_GRACE_SECONDS"
-  local yml="$DEPLOY_YML_DEFAULT" label="production" target=""
+  local yml="$DEPLOY_YML_DEFAULT" label="production" target="" emit_strand=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -451,6 +468,7 @@ mode_converged() {
       --repo)           GIT_DIR_ARG="${2:-}"; shift 2 ;;
       --label)          label="${2:-}"; shift 2 ;;
       --target)         target="${2:-}"; shift 2 ;;
+      --emit-strand)    emit_strand="${2:-}"; shift 2 ;;
       *) warn "HARNESS-UNAVAILABLE: unknown argument '$1'"; return 2 ;;
     esac
   done
@@ -514,7 +532,7 @@ mode_converged() {
     return 2
   }
 
-  local stranded="" pending=0 irrelevant=0 gap=0 sha ct relrc
+  local stranded="" newest="" pending=0 irrelevant=0 gap=0 sha ct relrc
   while IFS= read -r sha; do
     [ -n "$sha" ] || continue
     gap=$((gap + 1))
@@ -531,6 +549,10 @@ mode_converged() {
       irrelevant=$((irrelevant + 1))
       continue
     fi
+    # rev-list is newest-first, so the FIRST relevant commit seen is the newest
+    # deploy-relevant commit on the tip — owed or not. It is what the STALLED
+    # red names as "what the box should be serving".
+    [ -n "$newest" ] || newest="$sha"
     ct="$(git -C "$GIT_DIR_ARG" show -s --format=%ct "$sha")" || {
       warn "HARNESS-UNAVAILABLE: git could not read $sha's committer date."
       return 2
@@ -557,10 +579,39 @@ RANGE_EOF
     return 0
   fi
 
+  # THE STRAND START (task-a077f2e24350d3af). The box has been behind since
+  # the OLDEST deploy-relevant commit it lacks reached main: before that
+  # instant the served commit WAS the newest deploy-relevant one. A merge or
+  # squash on main carries the merge instant as its committer date, so %ct of
+  # that commit is when the strand began. adjudicate turns it into STRAND AGE,
+  # which is what lets in-flight suppression expire (see the block above that
+  # mode). Normalised to UTC Z so every reader parses the same shape and a
+  # plain sort orders two legs chronologically.
+  local strand_ct strand_since
+  strand_ct="$(git -C "$GIT_DIR_ARG" show -s --format=%ct "$stranded")" || {
+    warn "HARNESS-UNAVAILABLE: git could not read $stranded's committer date."
+    return 2
+  }
+  strand_since="$(epoch_to_iso "$strand_ct")"
+  if [ -z "$strand_since" ]; then
+    warn "HARNESS-UNAVAILABLE: could not render $stranded's committer date ($strand_ct) as ISO."
+    return 2
+  fi
+  if [ -n "$emit_strand" ]; then
+    # One line: strand_since served newest_relevant oldest_missing. The caller
+    # (deploy.yml's check step) hands the oldest line across legs to adjudicate.
+    printf '%s %s %s %s\n' "$strand_since" "$served" "${newest:-$stranded}" "$stranded" > "$emit_strand" || {
+      warn "HARNESS-UNAVAILABLE: could not write the strand record to $emit_strand."
+      return 2
+    }
+  fi
+
   say ""
   say "STRANDED: $label serves $served, which does NOT contain $stranded —"
   say "          $(git -C "$GIT_DIR_ARG" show -s --format='%h %s' "$stranded")"
   say "          merged $(git -C "$GIT_DIR_ARG" show -s --format=%cI "$stranded"), a deploy-relevant change that reached main and never reached the box."
+  say "STRAND-SINCE: $strand_since   (the box has been behind the newest deploy-relevant commit since then)"
+  say "NEWEST-RELEVANT: ${newest:-$stranded}"
   say ""
   say "This is the silent shape: every run is green, the ledger reports success, and production"
   say "serves older code. It does not self-heal — a docs-only tail after the strand triggers"
@@ -570,6 +621,79 @@ RANGE_EOF
   say "beside — 'Deploy (production)' -> Run workflow -> targets: both. It is the authenticated"
   say "replay path, and it needs no unrelated merge to carry it."
   return 1
+}
+
+# ── the deploy lock wait, READ from the deploy scripts ─────────────────────
+#
+# task-a077f2e24350d3af. The in-flight suppression expires at TWICE the time a
+# queued deploy may wait for the box's deploy lock. That wait is not a constant
+# of this file: it is whatever the deploy scripts that deploy.yml ships to the
+# boxes (its `$SCP deploy/<x>-deploy.sh` lines) pass to queue_for_deploy_lock —
+# a literal (`queue_for_deploy_lock 1800`) or a variable whose default is a
+# literal (`queue_budget="${BARKPARK_DEPLOY_LOCK_QUEUE_SECS:-1800}"`). That
+# helper is the heartbeat-stepped replacement for one long `flock -w <budget>`
+# with the same total (see either script), so the budget IS the flock -w value.
+#
+# The LONGEST wait across the named scripts wins: a queued run on either box
+# may legitimately sit that long. Anything unreadable — no script named, a
+# script missing, no call site, a call site whose budget resolves to no integer
+# — prints nothing and returns 3. NEVER a fallback number: a guessed threshold
+# is a guessed verdict.
+#
+# Prints "<secs> <script>:<secs>[,<script>:<secs>…]".
+lock_wait_secs() {
+  local yml="$1" root scripts script body calls call arg var val max="" src=""
+  if [ ! -f "$yml" ]; then
+    warn "CANNOT READ: $yml is not a file, so the deploy scripts it ships cannot be named."
+    return 3
+  fi
+  root="$(cd "$(dirname "$yml")/../.." 2>/dev/null && pwd)" || root=""
+  if [ -z "$root" ]; then
+    warn "CANNOT READ: could not resolve the repo root above $yml."
+    return 3
+  fi
+  scripts="$(grep -vE '^[[:space:]]*#' "$yml" | grep -oE '\$SCP[[:space:]]+deploy/[A-Za-z0-9_.-]+-deploy\.sh' | sed -E 's/^\$SCP[[:space:]]+//' | sort -u || true)"
+  if [ -z "$scripts" ]; then
+    warn "CANNOT READ: $yml ships no deploy/<x>-deploy.sh via \$SCP — the lock wait has no source."
+    return 3
+  fi
+  while IFS= read -r script; do
+    [ -n "$script" ] || continue
+    if [ ! -f "$root/$script" ]; then
+      warn "CANNOT READ: $yml ships $script, which is not a file under $root."
+      return 3
+    fi
+    body="$(grep -vE '^[[:space:]]*#' "$root/$script" || true)"
+    calls="$(grep -oE 'queue_for_deploy_lock[[:space:]]+("?\$[A-Za-z_][A-Za-z0-9_]*"?|[0-9]+)' <<<"$body" || true)"
+    if [ -z "$calls" ]; then
+      warn "CANNOT READ: no queue_for_deploy_lock call site in $script — the lock wait is not readable."
+      return 3
+    fi
+    while IFS= read -r call; do
+      [ -n "$call" ] || continue
+      arg="$(sed -E 's/^queue_for_deploy_lock[[:space:]]+//; s/"//g' <<<"$call")"
+      case "$arg" in
+        \$*)
+          var="${arg#\$}"
+          val="$(grep -oE "^[[:space:]]*${var}=\"?(\\\$\\{[A-Za-z_][A-Za-z0-9_]*:-)?[0-9]+" <<<"$body" \
+                 | grep -oE '[0-9]+$' | awk 'NR==1' || true)"
+          ;;
+        *) val="$arg" ;;
+      esac
+      case "$val" in
+        ''|*[!0-9]*)
+          warn "CANNOT READ: $script calls '$call' and its budget does not resolve to an integer."
+          return 3 ;;
+      esac
+      src="${src:+$src,}$script:$val"
+      if [ -z "$max" ] || [ "$val" -gt "$max" ]; then max="$val"; fi
+    done <<<"$calls"
+  done <<<"$scripts"
+  if [ -z "$max" ] || [ "$max" -le 0 ]; then
+    warn "CANNOT READ: the lock wait read as '${max}' — not a positive number of seconds."
+    return 3
+  fi
+  printf '%s %s\n' "$max" "$src"
 }
 
 # ── mode: adjudicate ─────────────────────────────────────────────────────────
@@ -613,8 +737,51 @@ RANGE_EOF
 # "I could not look" must not manufacture an outage report any more than it may
 # green one: the issue still files (converged=false is the caller's), only the
 # exit code is withheld. That is the same law as this file's rc=2.
+#
+# ── THE SUPPRESSION EXPIRES ON STRAND AGE (task-a077f2e24350d3af) ──────────
+#
+# What the middle row let through. "A deploy in flight" was satisfied by ANY
+# queued sibling, and a queue behind a held box lock is never empty: deploy.yml
+# gives every push its own concurrency group, each queued run waits up to the
+# lock budget and then exits 15, and every merge adds a fresh queued run. On
+# 2026-09-22 fifteen of sixteen deploy.yml runs with a FAILED instance job
+# (07:27Z-11:58Z) concluded this check SUCCESS. #19859 reds a run whose OWN
+# instance leg failed; a run whose instance leg was skipped, cancelled or
+# succeeded while the box sat stranded still read NOT CONVERGED YET, exit 0,
+# for as long as the queue lasted.
+#
+# A PER-RUN expiry cannot fix that: the in-flight set is ALWAYS young, because
+# the oldest queued run gives up after one lock budget and a newer one replaces
+# it. What grows without bound in a stall is the STRAND: how long the box has
+# served a commit behind the newest deploy-relevant main commit. `converged`
+# measures it from the committer (= merge) date of the oldest deploy-relevant
+# commit the box lacks, and the caller passes it here as --strand-since.
+#
+# THE BOUND is 2 x the deploy lock wait READ from the deploy scripts
+# (lock_wait_secs above; 1800 s today, so 60 min). One budget is the longest a
+# legitimately queued deploy waits for the lock; the second covers the deploy
+# ahead of it plus its own. A strand older than that is not explained by any
+# deploy in flight — something is stuck — so the row reads:
+#
+#   stranded AND a deploy in flight AND strand age <= bound -> 0 GREEN-BECAUSE-WAITING
+#   stranded AND a deploy in flight AND strand age >  bound -> 1 STALLED
+#   stranded AND suppression needed AND age unknowable      -> 3 CANNOT READ
+#
+# The same bound applies to the withheld-conclusion arm (in-flight lookup
+# failed): a strand older than any deploy could take is stalled whether or not
+# the run list could be read.
+#
+# THE COST, stated because this is a boundary and not a bug fix. A deploy
+# chain that is genuinely slow — one budget of queueing plus a long build
+# ahead — reds STALLED past the bound even though it would have landed. That
+# is intended: a box more than an hour behind main is what this check exists
+# to say, and the red is a delay-bounded one, not the every-merge red that got
+# the original middle row designed.
 mode_adjudicate() {
   local stranded="" label="production" source="ok" unchecked="false"
+  local inst_result="" inst_state="absent" inst_served="" inst_tip=""
+  local strand_since="" strand_served="" strand_newest="" now_iso=""
+  local yml="$DEPLOY_YML_DEFAULT"
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -622,6 +789,15 @@ mode_adjudicate() {
       --unchecked)        unchecked="${2:-}"; shift 2 ;;
       --in-flight-source) source="${2:-}"; shift 2 ;;
       --label)            label="${2:-}"; shift 2 ;;
+      --instance-result)  inst_result="${2:-}"; shift 2 ;;
+      --instance-state)   inst_state="${2:-}"; shift 2 ;;
+      --instance-served)  inst_served="${2:-}"; shift 2 ;;
+      --instance-tip)     inst_tip="${2:-}"; shift 2 ;;
+      --strand-since)     strand_since="${2:-}"; shift 2 ;;
+      --strand-served)    strand_served="${2:-}"; shift 2 ;;
+      --strand-newest)    strand_newest="${2:-}"; shift 2 ;;
+      --now)              now_iso="${2:-}"; shift 2 ;;
+      --deploy-yml)       yml="${2:-}"; shift 2 ;;
       *) warn "HARNESS-UNAVAILABLE: unknown argument '$1'"; return 2 ;;
     esac
   done
@@ -637,6 +813,17 @@ mode_adjudicate() {
   esac
   case "$source" in ok|unknown) : ;; *)
     warn "HARNESS-UNAVAILABLE: --in-flight-source must be 'ok' or 'unknown' (got '$source')"; return 2 ;;
+  esac
+  # An unrecognised leg result is a HARNESS fault, never "probably fine". The
+  # empty string is the ONLY permitted silence and it means "the caller did not
+  # wire this leg" — every wired caller passes one of the four Actions results.
+  case "$inst_result" in ''|success|failure|cancelled|skipped) : ;; *)
+    warn "HARNESS-UNAVAILABLE: --instance-result must be one of success|failure|cancelled|skipped (got '$inst_result')"
+    return 2 ;;
+  esac
+  case "$inst_state" in converged|stranded|unchecked|absent) : ;; *)
+    warn "HARNESS-UNAVAILABLE: --instance-state must be one of converged|stranded|unchecked|absent (got '$inst_state')"
+    return 2 ;;
   esac
 
   # stdin is optional and routinely empty — that is the "nothing is coming"
@@ -665,6 +852,83 @@ mode_adjudicate() {
   say "  stranded:          $stranded"
   say "  unchecked legs:    $unchecked"
   say "  deploys in flight: $flight"
+  say "  instance leg:      result=${inst_result:-<not wired>} state=${inst_state}"
+
+  # ── THIS RUN'S OWN INSTANCE LEG: TRIED AND DID NOT MOVE ────────────────────
+  #
+  # task-c5955c660c7b9e55. Everything below this block answers "is the PICTURE
+  # still moving". That question is the right one for a box that is merely
+  # behind, and it is the WRONG one for the shape that produced three
+  # consecutive vacuous greens on 2026-09-22 (runs 35722816309 / 35720835901 /
+  # 35718876385): the `instance` JOB concluded FAILURE, the box kept serving
+  # e02e4296d, and this job concluded SUCCESS every time — because sibling
+  # deploy runs were queued, and the in-flight suppression below has no expiry.
+  # During that window 11 of 12 runs timed out at exit 15, so each failing run
+  # was suppressed by the presence of its equally-failing siblings. A check
+  # whose NAME promises production is current was green for hours while
+  # production was frozen.
+  #
+  # THE PREDICATE, and it is the whole of this row. Two cases have to be told
+  # apart, and only one of them is a defect:
+  #
+  #   TRIED AND DID NOT MOVE   `instance` concluded FAILURE on THIS run and the
+  #                            box is still behind. The deploy was attempted,
+  #                            against this box, and it did not land. No sibling
+  #                            run explains that: another run being queued says
+  #                            nothing about whether THIS run's own attempt
+  #                            worked. -> RED, naming both shas.
+  #
+  #   NEVER GOING TO MOVE IT   `instance` was SKIPPED (the path filter found
+  #                            nothing deploy-relevant for this host), CANCELLED
+  #                            (superseded), or SUCCEEDED (it did its job — a
+  #                            box still behind after that is the ordinary
+  #                            already-covered / in-flight picture). None of
+  #                            these is an attempt that failed, so none of them
+  #                            reds here and the existing rules decide.
+  #
+  # So the discriminator is the instance leg's OWN conclusion on THIS run, not
+  # a comparison of the served sha against the run's head. A superseded,
+  # already-covered or no-op run never reaches this block.
+  #
+  # WHY IT REDS RATHER THAN SKIPS, which the row names as the other wrong fix.
+  # Making the job `needs: instance` and skipping otherwise trades a false green
+  # for a silent one: a SKIPPED liveness check reads as "not applicable" and
+  # vanishes from the one surface meant to tell an operator production is stale.
+  # So when the leg failed and the box could not be READ at all, that is CANNOT
+  # READ and it reds by that name — an unreadable box after a failed deploy is
+  # the least safe moment to assume anything.
+  if [ "$inst_result" = "failure" ]; then
+    case "$inst_state" in
+      stranded)
+        say ""
+        say "VERDICT: THE INSTANCE JOB TRIED AND THE SHA DID NOT MOVE. The \`instance\` leg of THIS"
+        say "run concluded FAILURE, and the content instance is still behind afterwards."
+        say "  served (content instance): ${inst_served:-<unread>}"
+        say "  main snapshot (owed):      ${inst_tip:-<unread>}"
+        say "No other run explains this: a sibling deploy being queued says nothing about whether"
+        say "THIS run's own attempt landed. In-flight suppression does NOT apply to a failed attempt."
+        say ""
+        say "REPAIR: Actions -> Deploy (production) -> Run workflow, against main, targets: both."
+        return 1
+        ;;
+      unchecked|absent)
+        say ""
+        say "VERDICT: CANNOT READ. The \`instance\` leg of THIS run concluded FAILURE and the content"
+        say "instance did not say what it serves (state=${inst_state}), so whether the sha moved is"
+        say "UNKNOWN at the exact moment it is least safe to assume it did."
+        say "  served (content instance): ${inst_served:-<unread>}"
+        say "  main snapshot (owed):      ${inst_tip:-<unread>}"
+        say "This FAILS rather than skipping: a skipped liveness check reads as 'not applicable' and"
+        say "disappears from the one surface meant to tell an operator that production is stale."
+        return 1
+        ;;
+      converged)
+        say ""
+        say "The instance leg FAILED but the box is converged anyway — something else carried the"
+        say "commit. Not this row's defect; the ordinary rules below decide."
+        ;;
+    esac
+  fi
 
   if [ "$stranded" != "true" ]; then
     if [ "$unchecked" = "true" ]; then
@@ -674,7 +938,70 @@ mode_adjudicate() {
     fi
     say ""
     say "VERDICT: CONVERGED — no leg reported a strand. Exit 0."
+    say "GREEN-BECAUSE-SHIPPED: every box serves what main owes it."
     return 0
+  fi
+
+  # ── SUPPRESSION NEEDS AN EXPIRY: establish the strand age ────────────────
+  # Only when a suppression arm is about to withhold the red. Every refusal
+  # below is CANNOT READ, exit 3 — never "age 0", which is the vacuous green.
+  local lw lock_secs="" lock_src="" bound bound_mins="" now_ep since_ep age mins="" lrc=0
+  if [ "$source" = "unknown" ] || [ "$flight" -gt 0 ]; then
+    lw="$(lock_wait_secs "$yml")" || lrc=$?
+    if [ "$lrc" -ne 0 ] || [ -z "$lw" ]; then
+      say ""
+      say "VERDICT: CANNOT READ — the deploy lock wait could not be read from the deploy scripts"
+      say "deploy.yml ships, so the in-flight suppression has no expiry to measure against."
+      say "An unbounded suppression is the vacuous green this arm exists to end; refusing instead."
+      return 3
+    fi
+    lock_secs="${lw%% *}"; lock_src="${lw#* }"
+    bound=$(( 2 * lock_secs ))
+    bound_mins=$(( bound / 60 ))
+    # SHAPE FIRST, then parse. GNU `date -d` reads "yesterday" or "now" as a
+    # date, which would turn a garbled input into a plausible age; only a
+    # literal ISO-8601 instant is an instant.
+    local iso_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:?[0-9]{2})$'
+    now_ep=""; since_ep=""
+    if [ -z "$now_iso" ]; then now_ep="$(date -u +%s)"
+    elif [[ "$now_iso" =~ $iso_re ]]; then now_ep="$(iso_to_epoch "$now_iso")"; fi
+    if [[ "$strand_since" =~ $iso_re ]]; then since_ep="$(iso_to_epoch "$strand_since")"; fi
+    case "$now_ep" in ''|*[!0-9]*) now_ep="" ;; esac
+    case "$since_ep" in ''|*[!0-9]*) since_ep="" ;; esac
+    if [ -z "$now_ep" ] || [ -z "$since_ep" ] || [ "$since_ep" -gt "$now_ep" ]; then
+      say ""
+      say "VERDICT: CANNOT READ — the box is STRANDED and a suppression arm would withhold the red,"
+      say "but the strand age is unknowable (--strand-since '${strand_since:-<none>}', --now '${now_iso:-<clock>}')."
+      say "  served:                  ${strand_served:-<unread>}"
+      say "  newest deploy-relevant:  ${strand_newest:-<unread>}"
+      say "A missing or future strand start is not age 0. Failing closed."
+      return 3
+    fi
+    age=$(( now_ep - since_ep ))
+    mins=$(( age / 60 ))
+    if [ "$age" -gt "$bound" ]; then
+      say ""
+      # The lookup-fails arm names itself on the headline (main ruling
+      # 2026-09-23T19:21Z), so a reader tells it from the queued-sibling case.
+      [ "$source" = "unknown" ] && say "STALLED: in-flight lookup failed, stranded ${mins} min"
+      say "VERDICT: STALLED — production has served ${strand_served:-<unread>} for ${mins} min behind the"
+      say "newest deploy-relevant main commit ${strand_newest:-<unread>} (strand began ${strand_since})."
+      say "  served:                  ${strand_served:-<unread>}"
+      say "  newest deploy-relevant:  ${strand_newest:-<unread>}"
+      say "  strand age:              ${mins} min"
+      say "  bound:                   ${bound_mins} min = 2 x the ${lock_secs}s deploy lock wait (${lock_src})"
+      if [ "$source" = "unknown" ]; then
+        say "  in-flight lookup:        FAILED — irrelevant past the bound"
+      else
+        say "  deploys in flight:       ${flight} — none of them explains a strand this old"
+      fi
+      say "No legitimately queued deploy waits longer than one lock budget, and none takes a second"
+      say "one to land. A queue behind a held lock renews itself every merge; the strand does not."
+      say ""
+      say "REPAIR: find who holds the box's deploy lock (the instance leg logs the holder), then"
+      say "Actions -> Deploy (production) -> Run workflow, against main, targets: both."
+      return 1
+    fi
   fi
 
   if [ "$source" = "unknown" ]; then
@@ -682,6 +1009,8 @@ mode_adjudicate() {
     say "VERDICT: STRANDED, and the in-flight lookup itself failed — the exit code is WITHHELD."
     say "The finding is not: the caller still reports converged=false and the convergence issue"
     say "still files on this run. Only the conclusion waits for a run that could actually look."
+    say "GREEN-BECAUSE-WAITING: stranded ${mins} min of a ${bound_mins} min bound (2 x ${lock_secs}s lock wait)."
+    say "  served ${strand_served:-<unread>}, newest deploy-relevant ${strand_newest:-<unread>}, since ${strand_since}"
     return 0
   fi
 
@@ -692,6 +1021,9 @@ mode_adjudicate() {
     say "case and it stays GREEN, which is what keeps this gate from being waived."
     say "It is NOT silent: converged=false is still emitted, so the convergence issue files on"
     say "this run, and the next run re-asks with those deploys finished. A delay, never a pass."
+    say "GREEN-BECAUSE-WAITING: stranded ${mins} min of a ${bound_mins} min bound (2 x ${lock_secs}s lock wait)."
+    say "  served ${strand_served:-<unread>}, newest deploy-relevant ${strand_newest:-<unread>}, since ${strand_since}"
+    say "  Past the bound this reds STALLED; this is NOT production serving the newest commit."
     return 0
   fi
 
@@ -773,7 +1105,7 @@ YML
   OWED_ALL="$(epoch_to_iso "$(( $(st_git "$repo" show -s --format=%ct "$D") + 1 ))")"
 
   # ── 1. THE RED-FIRST SPEC: the later-STARTED run carries the OLDER commit ──
-  echo "selftest 1/14: supersession must keep the DESCENDANT, not the run that started last"
+  echo "selftest 1/15: supersession must keep the DESCENDANT, not the run that started last"
   set +e
   out="$(printf '%s\n' "31000001 $B 2026-07-19T18:56:00Z" "31000002 $A 2026-07-19T19:01:00Z" \
         | "$0" survivor --repo "$repo" 2>&1)"
@@ -790,7 +1122,7 @@ YML
   fi
 
   # The naive rule, run here so the spec shows it LOSING rather than asserting it does.
-  echo "selftest 2/14: the naive wall-clock rule gets this WRONG — that is the defect"
+  echo "selftest 2/15: the naive wall-clock rule gets this WRONG — that is the defect"
   naive="$(printf '%s\n' "31000001 $B 2026-07-19T18:56:00Z" "31000002 $A 2026-07-19T19:01:00Z" \
           | sort -k3 | tail -1 | awk '{print $1}')"
   if [ "$naive" = "31000002" ]; then
@@ -800,7 +1132,7 @@ YML
   fi
 
   # ── 3. THE INCIDENT, as a convergence verdict ─────────────────────────────
-  echo "selftest 3/14: box on the OLDER commit while main carries a newer api change must be STRANDED"
+  echo "selftest 3/15: box on the OLDER commit while main carries a newer api change must be STRANDED"
   local c3=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$A" --tip "$B" --owed-before "$OWED_ALL" 2>&1)"; c3=$?
@@ -811,7 +1143,7 @@ YML
     echo "SELFTEST FAIL: the incident shape did not red (rc=$c3)" >&2; echo "$out" >&2; rc=1
   fi
 
-  echo "selftest 4/14: the same box, once it serves the newer commit, is CONVERGED"
+  echo "selftest 4/15: the same box, once it serves the newer commit, is CONVERGED"
   local c4=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$B" --tip "$B" --owed-before "$OWED_ALL" 2>&1)"; c4=$?
@@ -820,7 +1152,7 @@ YML
   else echo "SELFTEST FAIL: a current box read as stranded (rc=$c4)" >&2; echo "$out" >&2; rc=1; fi
 
   # ── 5. The docs-only tail: the row's own "4 later commits are docs/tooling" ─
-  echo "selftest 5/14: a docs-only tail past the box must NOT red (it deploys nothing)"
+  echo "selftest 5/15: a docs-only tail past the box must NOT red (it deploys nothing)"
   local c5=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$B" --tip "$D" --owed-before "$OWED_ALL" 2>&1)"; c5=$?
@@ -832,7 +1164,7 @@ YML
   fi
 
   # ── 6/7. The torn-read guard, and the NEGATIVE ARM that it did not blind ──
-  echo "selftest 6/14: a relevant commit too NEW to be owed must not red (the torn-read guard)"
+  echo "selftest 6/15: a relevant commit too NEW to be owed must not red (the torn-read guard)"
   local c6=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$A" --tip "$B" --grace-seconds 86400 2>&1)"; c6=$?
@@ -843,7 +1175,7 @@ YML
     echo "SELFTEST FAIL: the guard did not hold a too-new commit (rc=$c6)" >&2; echo "$out" >&2; rc=1
   fi
 
-  echo "selftest 7/14: NEGATIVE ARM — the guard must not blind the instrument"
+  echo "selftest 7/15: NEGATIVE ARM — the guard must not blind the instrument"
   # Same repo, same pair, cutoff moved past B's commit date: it is owed again.
   local c7=0 owed_at bct
   bct="$(st_git "$repo" show -s --format=%ct "$B")"
@@ -858,7 +1190,7 @@ YML
   fi
 
   # ── 8. Diverged candidates have no safe survivor ──────────────────────────
-  echo "selftest 8/14: diverged candidates must REFUSE, never silently pick one"
+  echo "selftest 8/15: diverged candidates must REFUSE, never silently pick one"
   local c8=0
   st_git "$repo" checkout -q -b side "$A"
   E="$(st_commit "$repo" api/e.ex 'E: a divergent api change')"
@@ -874,7 +1206,7 @@ YML
   fi
 
   # ── 9. Cannot-look is never a pass ────────────────────────────────────────
-  echo "selftest 9/14: an unresolvable sha and an unreadable filter must exit 2, never 0"
+  echo "selftest 9/15: an unresolvable sha and an unreadable filter must exit 2, never 0"
   local c9a=0 c9b=0
   set +e
   "$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served deadbeefdeadbeef --tip "$B" --owed-before "$OWED_ALL" >/dev/null 2>&1; c9a=$?
@@ -887,7 +1219,7 @@ YML
   fi
 
   # ── 10. per-target relevance: an api commit is the instance's debt, not cp's ─
-  echo "selftest 10/14: an api-only commit must strand the INSTANCE and NOT the control plane"
+  echo "selftest 10/15: an api-only commit must strand the INSTANCE and NOT the control plane"
   local c10a=0 c10b=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --target instance \
@@ -909,7 +1241,7 @@ YML
   fi
 
   # ── 11. the filter must come from the `changes` job and nowhere else ───────
-  echo "selftest 11/14: a decoy job's identical grep must not answer for a target"
+  echo "selftest 11/15: a decoy job's identical grep must not answer for a target"
   # The fixture's `decoy` job carries a filter matching api/, cloud/ AND docs/.
   # If the extractor were unscoped it would harvest that one, and the docs tail
   # of case 5 would start reading as a strand. Prove cp's filter is cloud-only.
@@ -932,7 +1264,7 @@ YML
   fi
 
   # ── 12. A BROKEN RELEVANCE TEST MUST REFUSE, NOT CALL EVERYTHING IRRELEVANT ─
-  echo "selftest 12/14: an unusable filter must REFUSE, never resolve to nothing-to-deploy"
+  echo "selftest 12/15: an unusable filter must REFUSE, never resolve to nothing-to-deploy"
   # The direction matters more than the case. commit_is_relevant answers 0 for
   # relevant and 1 for not; ANY other status is the tool failing, and the caller
   # now treats >1 as a refusal rather than as "not relevant". Before that it read
@@ -958,7 +1290,7 @@ YML
   fi
 
   # ── 13. A TOP-LEVEL BLOCK SCALAR MUST NOT ANSWER FOR THE `changes` JOB ─────
-  echo "selftest 13/14: a 2-space block-scalar body must not be read as the changes job"
+  echo "selftest 13/15: a 2-space block-scalar body must not be read as the changes job"
   # THE DEFEAT THIS CLOSES. extract_target_ere used to scan for
   # `/^  [a-zA-Z0-9_-]+:/` — a TEXT rule. `run-name: |` is a top-level block
   # scalar GitHub accepts, and its body is indented two spaces, so every line of
@@ -1017,7 +1349,7 @@ YML
   fi
 
   # ── 14. the api/test exclusion: relevance must SUBTRACT it ────────────────
-  echo "selftest 14/14: an api/test-only commit must NOT strand, while api/lib still does"
+  echo "selftest 14/15: an api/test-only commit must NOT strand, while api/lib still does"
   # Two filter files differing ONLY in the `- "!api/test/**"` line, and the same
   # commits run through both. The no-exclusion copy is the CONTROL: without it a
   # green here could mean the commits never reached the comparison at all.
@@ -1084,6 +1416,38 @@ YML
     echo "$out" >&2; rc=1
   fi
 
+  # ── 15. the strand record: the age input adjudicate expires suppression on ─
+  echo "selftest 15/15: a STRANDED leg writes when the strand began, what it serves, and what is newest"
+  # task-a077f2e24350d3af. Served A, tip G14 (case 14's last commit): the
+  # relevant commits A lacks run from B (oldest) to G14 (newest), with the docs
+  # commits C, D between them. So the strand began at B's committer date, G14
+  # is the newest relevant commit, and B is the oldest missing — three
+  # DIFFERENT answers, so a record that swapped any two fields cannot pass.
+  local c15=0 rec15 want15 b15ct
+  b15ct="$(st_git "$repo" show -s --format=%ct "$B")"
+  want15="$(epoch_to_iso "$b15ct") $A $G14 $B"
+  set +e
+  out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$A" --tip "$G14" \
+         --owed-before "$OWED14" --emit-strand "$tmp/strand.rec" 2>&1)"; c15=$?
+  set -e
+  rec15="$(cat "$tmp/strand.rec" 2>/dev/null || true)"
+  if [ "$c15" -eq 1 ] && [ "$rec15" = "$want15" ] && [[ "$out" == *"STRAND-SINCE: $(epoch_to_iso "$b15ct")"* ]]; then
+    echo "  ok: '$rec15'"
+  else
+    echo "SELFTEST FAIL: strand record '$rec15' (rc=$c15), wanted '$want15'" >&2; echo "$out" >&2; rc=1
+  fi
+  # And a CONVERGED leg writes nothing — an empty record is "no strand here".
+  : > "$tmp/strand2.rec"
+  set +e
+  "$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$B" --tip "$D" \
+       --owed-before "$OWED_ALL" --emit-strand "$tmp/strand2.rec" >/dev/null 2>&1; c15=$?
+  set -e
+  if [ "$c15" -eq 0 ] && [ ! -s "$tmp/strand2.rec" ]; then
+    echo "  ok: a converged leg leaves the record empty"
+  else
+    echo "SELFTEST FAIL: a converged leg wrote a strand record (rc=$c15): $(cat "$tmp/strand2.rec")" >&2; rc=1
+  fi
+
   rm -rf "$tmp"
   echo
   if [ "$rc" -eq 0 ]; then
@@ -1125,6 +1489,17 @@ main() {
       # disappears when the set is empty is indistinguishable from a line the
       # extractor failed to produce.
       say "on.push.paths exclusions: $(extract_exclusion_globs "$fyml" | globs_to_ere)"
+      # The stall bound's input (task-a077f2e24350d3af), read the same way
+      # adjudicate reads it, so a rename in a deploy script reds HERE, on the PR
+      # that does it, instead of as CANNOT READ in the middle of a strand.
+      local lwv lwrc=0
+      lwv="$(lock_wait_secs "$fyml")" || lwrc=$?
+      if [ "$lwrc" -ne 0 ] || [ -z "$lwv" ]; then
+        warn "CANNOT READ: the deploy lock wait is not readable from the scripts $fyml ships"
+        frc=2
+      else
+        say "deploy lock wait: ${lwv%% *}s (${lwv#* }) — stall bound $(( 2 * ${lwv%% *} ))s"
+      fi
       for t in cp instance; do
         re="$(extract_target_ere "$fyml" "$t")"
         if [ -z "$re" ]; then
@@ -1141,6 +1516,11 @@ main() {
       say "       deploy-convergence-check.sh converged --served SHA --tip SHA [--target cp|instance]"
       say "                                             [--owed-before ISO|--grace-seconds N] [--label L]"
       say "       deploy-convergence-check.sh adjudicate --stranded true|false [--unchecked true|false]"
+      say "                                             [--instance-result success|failure|cancelled|skipped]"
+      say "                                             [--instance-state converged|stranded|unchecked|absent]"
+      say "                                             [--instance-served SHA] [--instance-tip SHA]"
+      say "                                             [--strand-since ISO] [--strand-served SHA] [--strand-newest SHA]"
+      say "                                             [--now ISO] [--deploy-yml PATH]"
       say "                                             [--in-flight-source ok|unknown]   # stdin: 'run_id sha status'"
       say "       deploy-convergence-check.sh filters [DEPLOY_YML]   # what it derives, and refuse if nothing"
       say "       deploy-convergence-check.sh --selftest"

@@ -23,21 +23,19 @@ defmodule Barkpark.StudioChat.Recorder do
   require Logger
 
   alias Barkpark.Content.Broadcast
+  alias Barkpark.Plugins.Enablement
   alias Barkpark.{CycleFleet, StudioChat}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
   alias Barkpark.StudioChat.StreamSegments
+  alias Barkpark.StudioChat.TaskLedgerScope
   alias Barkpark.StudioChat.TaskTransition
 
   @registry Barkpark.StudioChat.RecorderRegistry
-  # The dataset the task ledger lives in — PINNED, mirroring the Tasks board
-  # LiveView's own `@dataset "production"`. The Recorder has no dataset of its
-  # own (a chat session is not scoped to one), and resolving it would cost a
-  # query on every turn spawn; the ledger's home is the board's, by definition.
-  @task_dataset "production"
   @supervisor Barkpark.StudioChat.RuntimeSupervisor
   @idle_after_ms 30 * 60 * 1000
+  @tasks_plugin "tasks"
 
   # ── the durable accumulator's per-turn byte cap (charter D169) ──────────────
   #
@@ -273,7 +271,18 @@ defmodule Barkpark.StudioChat.Recorder do
     # `subscribe_documents/2` joins BOTH — the shared layer on the global topic,
     # this surface's own workspace on the keyed one — so every document arrives
     # exactly once, WITH its payload, and no foreign tenant's body ever does.
-    Broadcast.subscribe_documents(@task_dataset, ledger_workspace_id())
+    #
+    # The dataset and workspace come from `TaskLedgerScope.resolve/1` — the ONE
+    # resolver `ChatLive`'s Doing strip subscribes through too, so the two chat
+    # surfaces cannot ride different ledger streams (task-ff3ed7ae0a242160).
+    #
+    # The workspace is this session's OWN (`opts[:workspace_id]`, the store row's
+    # `owner_workspace_id`), the one its agent's task token is minted into, so
+    # the Recorder rides the stream that agent writes on (task-180a07e9d178d6a8).
+    %{dataset: task_dataset, workspace_id: ledger_workspace_id} =
+      TaskLedgerScope.resolve(Map.get(opts, :workspace_id))
+
+    Broadcast.subscribe_documents(task_dataset, ledger_workspace_id)
 
     # A Task holder authorized this managed attempt but is not the Studio
     # process's principal. Never mint or forward Task hands for that process.
@@ -1030,6 +1039,13 @@ defmodule Barkpark.StudioChat.Recorder do
   # no lifecycle_status — and emit a phantom "released" transition. Require a
   # `doc` map so the stripped twin falls through to the catch-all below and
   # only the payload-bearing frame is projected.
+  # PER-WORKSPACE ENABLEMENT (task-b428d724ad80434f). A workspace that switched
+  # Tasks off still WRITES task rows: enablement is the surfaced layer only, so
+  # the plugin's routes and write fences keep running and the claim broadcasts
+  # on this stream as usual. The transition is therefore dropped here, keyed by
+  # the session's own workspace through the same `Enablement` call
+  # `PaperMastersSeam` makes. Checked per projected transition, not cached at
+  # init, so a toggle takes effect on the next frame.
   def handle_info({:document_changed, %{type: "task", doc: doc} = msg}, state)
       when is_map(doc) do
     worker = Runtime.worker_id(state.provider, state.session_id)
@@ -1038,7 +1054,8 @@ defmodule Barkpark.StudioChat.Recorder do
       {:ok, transition, touched} ->
         state = %{state | touched_tasks: touched}
 
-        if MapSet.member?(state.seen_task_events, transition.key) do
+        if MapSet.member?(state.seen_task_events, transition.key) or
+             not tasks_enabled?(state.owner_workspace_id) do
           {:noreply, state}
         else
           broadcast(
@@ -1059,6 +1076,9 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info({:document_changed, _msg}, state), do: {:noreply, state}
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp tasks_enabled?(workspace_id),
+    do: Enablement.enabled?(Enablement.effective(workspace_id), @tasks_plugin)
 
   # The compact wire summary the SSE `event: task` frame carries — the SAME
   # fields Studio renders, so `bp chat` prints the identical `label` string
@@ -2451,17 +2471,5 @@ defmodule Barkpark.StudioChat.Recorder do
       _ ->
         nil
     end
-  end
-
-  # The workspace the ledger this Recorder projects lives in — the default
-  # workspace `bp`'s `/v1/tasks` writes resolve to (AssignDefaultScope), which
-  # is the scope Studio's own Doing strip uses (`hand_task_scope/0`).
-  defp ledger_workspace_id do
-    case Barkpark.Tenancy.get_default_workspace() do
-      %{id: id} when is_binary(id) -> id
-      _ -> nil
-    end
-  rescue
-    _ -> nil
   end
 end

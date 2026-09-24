@@ -90,6 +90,40 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 // the union dedup (mergeInflight) degrades to window-truth, never garbage.
 const inflightFetchPath = "/v1/tasks?lifecycle_status=in_progress&limit=" + taskListLimitToken
 
+// ─── `?view=board` — the projection the LIST/POLL path asks for ──────────
+//
+// boardViewParam is the query fragment appended to every list GET a LIVE board
+// makes (corpusCache.listView; a one-shot CLI verb keeps the default shape —
+// see that method for why the cache's own lifetime is the right discriminator).
+//
+// WHAT IT BUYS, measured 2026-09-23T11:11Z against guerrilla, back-to-back full
+// cursor walks with `&cursor=` spelled EMPTY on the first request (a bare
+// `?limit=N` with no `&cursor=` returns no `next_cursor`, so the walk stops
+// after ONE page and reports a number that is not a walk at all):
+//
+//	default        105,755,961 B over 10 pages
+//	?view=board     13,035,765 B over 10 pages  — 12.33% of default
+//
+// WHAT IT COSTS, and what pays for it. The projection is the full card with
+// `content` DELETED and one bounded key, `content_digest`, put in its place
+// (api .../tasks_controller/params.ex, `render_doc(doc, :board)`). The two
+// things this package reads out of `content` on the ROW path both survive:
+// `criteriaLadder`'s per-rung state comes from `content_digest.criteria_marks`
+// and `completenessBadge`'s three missing rubric inputs from the digest's
+// booleans (decodeContentDigest / criteriaItemsFromMarks above). What does NOT
+// survive is the TaskDetail reading model's prose — description, evidence,
+// code_refs, purpose, the disposition strips — which is why the board hydrates
+// an OPEN detail pane from the always-full row route (FetchTaskDetailByID).
+//
+// `content.design_doc` — the paper slug the paper→tasks inversion reads
+// (`DrivenTasks` / `TaskDetail.PaperRefs`, detail_data.go) over the WHOLE
+// corpus — now ARRIVES on the board card as `content_digest.design_doc`
+// (task-cf0395706361aa2e): the stored slug unchanged, omitted when absent or
+// when it contains whitespace. toDetail reads it where `content` is absent, so
+// a live board's FramePaper lists tasks that name the paper in `design_doc` as
+// well as in `papers` (which is lifted to the top level and always survived).
+const boardViewParam = "&view=board"
+
 // ─── exhaustive keyset paging (task-6c59bff7cb6b36ee) ────────────────────
 //
 // listFetchPath is the board's corpus GET. It is the ONE place the window
@@ -610,6 +644,81 @@ type taskWire struct {
 	// content is a non-object, or whose fields are oddly shaped, degrades to
 	// zero values rather than failing the whole list decode.
 	Content json.RawMessage `json:"content"`
+	// ContentDigest is what `?view=board` sends INSTEAD of Content: the bounded
+	// stand-in for the two things this file reads out of the echo on the ROW
+	// path — the per-criterion ladder states and the completeness booleans.
+	// Absent on the full view (where Content itself is the better source) and
+	// absent from any server too old to emit it, and in both cases the Content
+	// path below is unchanged. RawMessage + a tolerant decode for the same
+	// reason as every field above it: one oddly-shaped digest must never fail
+	// the whole list decode.
+	//
+	// PRODUCER: api/lib/barkpark_web/controllers/tasks_controller/params.ex,
+	// `put_content_digest/2` (read its `:board` header before changing either
+	// side — the two are asserted against each other by
+	// api/test/barkpark_web/contract/tasks_board_view_test.exs).
+	ContentDigest json.RawMessage `json:"content_digest"`
+}
+
+// contentDigest is the decoded `content_digest` object — see taskWire's field.
+type contentDigest struct {
+	CriteriaMarks   string `json:"criteria_marks"`
+	HasDescription  bool   `json:"has_description"`
+	HasDependencies bool   `json:"has_dependencies"`
+	HasPaper        bool   `json:"has_paper"`
+	// DesignDoc is content.design_doc's paper slug, stored spelling (a
+	// "drafts." prefix included — namesPaper/PaperRefs compare on bareID).
+	// Omitted by the producer when absent or not slug-shaped.
+	DesignDoc string `json:"design_doc"`
+}
+
+// decodeContentDigest reads the board projection's content_digest, or nil when
+// the row carries none (the full view, or a pre-digest server). Tolerant like
+// every other decoder in this file: a null, a scalar, a list or an
+// oddly-typed member yields nil rather than an error, so the row keeps every
+// other field and the Content path decides alone.
+func decodeContentDigest(raw json.RawMessage) *contentDigest {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var d contentDigest
+	if json.Unmarshal(raw, &d) != nil {
+		return nil
+	}
+	return &d
+}
+
+// criteriaItemsFromMarks rebuilds the ladder's per-rung state from the board
+// projection's compact `criteria_marks` string — one character per criterion,
+// in checklist order:
+//
+//	"m"  met
+//	"a"  an honest recorded miss (attempts, which the projection does not ship)
+//	"o"  untouched — and so is anything else, because an unknown character from
+//	     a newer server must read as "no claim about this rung", never as a
+//	     seal or a miss.
+//
+// The items carry NO Criterion text, NO Evidence and NO Attempts, because the
+// projection ships none: this is exactly enough for criteriaLadder, which
+// switches on Met/Missed() only, and for the HasCriteria rubric input. A
+// detail pane wanting the text asks for the row (GET /v1/tasks/:doc_id, always
+// full) — the thing the board card's comment used to claim it already did.
+func criteriaItemsFromMarks(marks string) []CriterionItem {
+	if marks == "" {
+		return nil
+	}
+	items := make([]CriterionItem, 0, len(marks))
+	for _, r := range marks {
+		switch r {
+		case 'm':
+			items = append(items, CriterionItem{Met: true})
+		case 'a':
+			items = append(items, CriterionItem{MarkedMissed: true})
+		default:
+			items = append(items, CriterionItem{})
+		}
+	}
+	return items
 }
 
 // claimWire is content.claim. The engine writes the lease timestamp as
@@ -742,14 +851,33 @@ func (w taskWire) toTask() Task {
 	if len(papers) == 0 {
 		papers = strList(rawList(w.Papers))
 	}
+	// THE BOARD PROJECTION'S STAND-IN, read only where the echo is absent.
+	// `?view=board` deletes `content` and sends `content_digest` in its place,
+	// so on that route the two reads below — the per-criterion ladder and the
+	// completeness booleans — have no source unless this runs. Every arm is
+	// additive: with `content` present the digest cannot change an answer, so
+	// the full view decodes exactly as it did before.
+	digest := decodeContentDigest(w.ContentDigest)
+	if len(t.CriteriaItems) == 0 && digest != nil {
+		t.CriteriaItems = criteriaItemsFromMarks(digest.CriteriaMarks)
+	}
+	hasDependencies := t.DependencyCount > 0 || len(strList(m["dependencies"])) > 0
+	hasPaper := strField(m, "design_doc") != "" || len(papers) > 0
+	hasDescription := false
+	if digest != nil {
+		hasDescription = digest.HasDescription
+		hasDependencies = hasDependencies || digest.HasDependencies
+		hasPaper = hasPaper || digest.HasPaper
+	}
 	t.Completeness = ScoreCompleteness(CompletenessInput{
 		Title:           t.Title,
 		Description:     strField(m, "description"),
+		HasDescription:  hasDescription,
 		HasCriteria:     len(t.CriteriaItems) > 0,
 		Placement:       t.ParentID,
 		Priority:        t.Priority,
-		HasDependencies: t.DependencyCount > 0 || len(strList(m["dependencies"])) > 0,
-		HasPaper:        strField(m, "design_doc") != "" || len(papers) > 0,
+		HasDependencies: hasDependencies,
+		HasPaper:        hasPaper,
 	})
 	return t
 }
@@ -943,6 +1071,15 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	d.BriefRaw = rawPortableDoc(m["brief"])
 	d.Design = strField(m, "design")
 	d.DesignDoc = strField(m, "design_doc")
+	if d.DesignDoc == "" {
+		// The board projection deletes `content`; the slug rides the digest
+		// instead. Only read where content has none, so the full view is
+		// unchanged. Stored raw like the content read above — the drafts.
+		// prefix is stripped at comparison (bareID), identically on both views.
+		if digest := decodeContentDigest(w.ContentDigest); digest != nil {
+			d.DesignDoc = digest.DesignDoc
+		}
+	}
 	d.Papers = strList(m["papers"])
 	if len(d.Papers) == 0 {
 		// The server also lifts papers to the envelope top level (live the two

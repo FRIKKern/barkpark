@@ -30,7 +30,16 @@ defmodule BarkparkWeb.Plugs.ApiSecurityHeadersTest do
       )
 
     raw = "sec-headers-token-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "sec headers", @dataset, ["read"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "sec headers",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     raw
   end
 

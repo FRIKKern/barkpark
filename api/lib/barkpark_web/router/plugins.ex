@@ -371,6 +371,11 @@ defmodule BarkparkWeb.Router.Plugins do
   # live_session names must be unique across the whole router, so derive one
   # from the route path + module — two plugins (or two routes) never collide,
   # and the name is stable across recompiles.
+  # The atom is built from a slugified route path plus `:erlang.phash2/1` of the
+  # module — both compile-time router inputs, so the atom set is bounded by the
+  # route table and cannot grow at runtime. Inline rather than a line-pinned
+  # `.sobelow-skips` row: this file is a router registry and gains lines often.
+  # sobelow_skip ["DOS.StringToAtom"]
   defp public_root_session_name(path, mod) do
     slug =
       path

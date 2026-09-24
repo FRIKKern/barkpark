@@ -179,6 +179,9 @@ type Registry struct {
 // forward-compatible document never crashes the reader, unlike render.ex which
 // raises ArgumentError).
 func (r *Registry) Render(b Block, ctx RenderCtx) []string {
+	if taskBlockUnavailable(b) {
+		return boundDisplayLines([]string{taskUnavailableNote(ctx, b.Type)}, ctx.Width)
+	}
 	rend, ok := r.blocks[b.Type]
 	if !ok {
 		rend = r.fallback
@@ -370,6 +373,7 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["action"] = actionRenderer{}
 	r.blocks["pullquote"] = pullquoteRenderer{ir: ir}
 	r.blocks["embed"] = embedRenderer{}
+	r.blocks["master-ref"] = masterRefRenderer{}
 	r.blocks["ingress"] = ingressRenderer{ir: ir}
 	r.blocks["eyebrow"] = eyebrowRenderer{}
 	r.blocks["byline"] = bylineRenderer{}

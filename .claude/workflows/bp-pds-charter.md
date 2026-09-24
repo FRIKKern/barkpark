@@ -16494,3 +16494,71 @@ name unrelated code.
   leg, and replaced five pinned count literals with values derived from the subject's own output.
   This block closes the other half: the thaw is now recorded, so the reporter can go green on the
   record rather than on a threshold.
+
+- **PDS-D762 — THAW RECORD for `f049c8f65`: gate D's per-run descent read `$gh_out` on fd 0 and
+  nothing compared the pairs it built to the runs it was handed.** *Filed by lead-studio-r22
+  (task-eef5466e0b460d03), 2026-09-23. Number minted through
+  `bash scripts/pds-record-parity.sh --allocate-d 1` and reserved in
+  `tooling/pds/d-number-reservations.tsv` in the same commit as this block — never hand-typed
+  (PDS-D725). This is a HISTORICAL thaw record under PDS-D759(i), never a statement of the current
+  freeze (PDS-D732); the live freeze identity stays DERIVED at run time by
+  `scripts/pds-climb-preflight.sh:128` and this block is never compared to it.*
+
+  **THE BLOBS, READ AND NOT TYPED** — `git rev-parse`, never `shasum` (PDS-D154):
+  - pre  `git rev-parse f049c8f65^:scripts/pds-pull-proof.sh` → `9348ea41735f482cd7638977943ba0dc2dba77db`
+  - post `git rev-parse f049c8f65:scripts/pds-pull-proof.sh`  → `f64bdebd2b6059a26802b3ca6ce80767ae667310`
+
+  **THE CHAIN IS INTACT, WHICH IS ITSELF THE EVIDENCE.** This thaw's PRE blob is byte-identical to
+  PDS-D761's POST blob, so `f049c8f65` is the very next thaw after the last recorded one and nothing
+  sits unrecorded between them. Axis F counted 23 harness-moving commits in window, 22 resolving to
+  a record and exactly 1 unrecorded; this block takes that to 23 and 0.
+
+  **WHAT MOVED.** `+72 −17` (`git diff --numstat f049c8f65^..f049c8f65 -- scripts/pds-pull-proof.sh`).
+  The inline per-run descent was EXTRACTED out of `acquire_full_bundle`'s full-export precondition
+  block — where it sat wedged between an ssh memory probe and a `df`, reachable only from a live
+  export against a live box, the exact shape PDS-D31 forbids buying a demonstration with — into a
+  new `gate_d_conditions()`. Its body is otherwise unchanged. The functional addition is a COUNT
+  IDENTITY:
+
+      d_enumerated="$(printf '%s\n' "$gh_out" | awk 'NF { n++ } END { print n+0 }')"
+      ...
+      if [ "${#d_pairs[@]}" -ne "$d_enumerated" ]; then   # MUT-ANCHOR: gate-d-count-identity
+        printf 'UNKNOWN (SHORT RUN SCAN — built %s run/verdict pair(s) from the %s ...)\n' ...
+        return 1
+      fi
+
+  **WHY IT IS A CORRECTION AND NOT A WEAKENING — the merits, since a thaw is sanctioned on them.**
+  `$gh_out` is read on fd 0 as a heredoc and `gh run view` runs in the loop body. Any body child
+  that reads stdin swallows the remaining run ids, the loop ends EARLY with no error and no
+  non-zero status, and `d_pairs` is simply SHORTER than the listing it was built from.
+  `gate_d_verdict` is worst-case over the pairs it is HANDED, so a run it never examined cannot be
+  represented: an in-flight `instance` deploy on run 3 of 3 reads as "every one of them is
+  CONTROL-PLANE ONLY", and a loop that died on iteration 1 of 1 reads as "no deploy.yml run in
+  progress" — the precise false-clear this gate exists to prevent, **in the same words a true clear
+  uses**. The identity is pairs-built == non-empty lines handed in, non-empty on both sides because
+  the body's own `[ -n "$d_run" ] || continue` skips a blank line without appending a pair. It is
+  the same identity `scripts/pds-secret-scan.sh` landed in #19577 over its table list and the
+  deploy.yml anchor loop landed in #19561. The thaw makes the gate strictly harder to clear
+  falsely; it removes no check.
+
+  **WHY THIS RECORD IS LATE, AND WHAT THAT COSTS.** The thaw landed 2026-09-21 in #19633 and was
+  never recorded, so axis F went DIVERGENT and the advisory check `PDS census / parity /
+  scratch-target harnesses` was red on main for roughly 30 hours. It blocks no merge — the context
+  is an S4 paths-filtered exclusion and structurally cannot be required — so no PR surfaced it and
+  no lane's close-out read it. Infra flagged it UNOWNED at 2026-09-22T02:30Z and routed it to
+  studio; it sat unclaimed until 2026-09-23T08:39Z. **The remedy the arm prints was checked against
+  the arm's own moduledoc before it was followed**, because a gate's runtime remedy text is not an
+  instruction: `scripts/pds-record-parity.sh:1816` states the join key is the post-merge blob OID
+  and nothing else, and that a recorded OID is `FREEZE_BLOB_HISTORICAL` — so a retroactive PDS-D is
+  the sanctioned door. The other door the arm names is the one it forbids in the same breath: *"do
+  not widen the grace window to make it green"*. Nothing here widens it — the window floor is a
+  40-hex literal in `scripts/pds-record-parity.sh`, a different file behind a different fence, and
+  it is untouched by this commit.
+
+  **THIS IS THE SECOND SPECIMEN OF THE CLASS, NOT THE FIRST.** task-373ca724b4f37257 recorded the
+  same failure for #17728 (2026-09-13): a sanctioned thaw whose record was left behind because the
+  charter sits outside the fence the thawing PR was reviewed under. A thaw is cheap to record at
+  the time and expensive to reconstruct afterwards — this block needed the commit, both blobs, the
+  numstat and the diff read back from history. **The standing ask that would end the class: make
+  the thaw record a condition of the thawing PR, not a follow-up, so the fence that reviews the
+  harness change also carries its ledger row.**

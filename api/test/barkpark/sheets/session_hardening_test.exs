@@ -123,17 +123,7 @@ defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
   # seam (unset in test config, so Hooks falls back to the Registry; setting
   # it makes our module the sole hook source for the window).
   defp with_failing_persist(fun) do
-    prior = Application.fetch_env(:barkpark, :plugins)
-    Application.put_env(:barkpark, :plugins, [HaltingPersist])
-
-    try do
-      fun.()
-    after
-      case prior do
-        {:ok, v} -> Application.put_env(:barkpark, :plugins, v)
-        :error -> Application.delete_env(:barkpark, :plugins)
-      end
-    end
+    Barkpark.PluginEnv.run_with([HaltingPersist], fun)
   end
 
   # ── 1. flush surfaces a failed persist ─────────────────────────────────────

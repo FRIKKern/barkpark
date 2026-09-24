@@ -14,7 +14,8 @@ defmodule Barkpark.Content.ValuerefResolveTest do
     4. RENDER-THEN-READ redaction: a `visibility: "private"` field does NOT
        resolve for the (default) anonymous caller; an admin caller context
        resolves it — proof the read goes through the redacted envelope, not a
-       caller-less `field_readable?`.
+       bare `field_readable?` name check (which gates the field NAME for
+       filter/order, not the VALUE; a caller-less call fails CLOSED).
     5. Tenant scoping: an out-of-scope `workspace_id` resolves nothing.
     6. Scalar rule: maps/lists/empty strings never resolve (→ fallback);
        dot-path / `content.`-prefixed fields are dropped at collection time.
@@ -140,7 +141,7 @@ defmodule Barkpark.Content.ValuerefResolveTest do
     assert Content.resolve_values_in_blocks(blocks, @dataset) == %{}
 
     # Admin authority sees it — proof the value is read OFF THE ENVELOPE under
-    # the caller's context (never a caller-less field_readable? bypass).
+    # the caller's context, not off a bare field_readable? name check.
     values =
       Content.resolve_values_in_blocks(blocks, @dataset,
         caller_context: %CallerContext{is_admin: true}

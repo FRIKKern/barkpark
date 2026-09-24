@@ -400,13 +400,17 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       # would let a mint through on whichever status the two disagree about.
       root = Path.join([__DIR__, "..", "..", ".."])
       close_src = File.read!(Path.join(root, "lib/barkpark/tasks/close.ex"))
-      writer_src = File.read!(Path.join(root, "lib/barkpark/content/writer.ex"))
+      # The fence moved to `Barkpark.Tasks.ChangeGuards` (task-d91ccf54d43b9800);
+      # its terminal set moved with it.
+      writer_src = File.read!(Path.join(root, "lib/barkpark/tasks/change_guards.ex"))
 
       close_match = Regex.run(~r/@closed_lifecycle_statuses\s+~w\(([^)]+)\)/, close_src)
       assert close_match, "no @closed_lifecycle_statuses in close.ex — re-aim this tripwire"
 
       writer_match = Regex.run(~r/@terminal_lifecycle_statuses\s+~w\(([^)]+)\)/, writer_src)
-      assert writer_match, "no @terminal_lifecycle_statuses in writer.ex — re-aim this tripwire"
+
+      assert writer_match,
+             "no @terminal_lifecycle_statuses in change_guards.ex — re-aim this tripwire"
 
       [_, close_list] = close_match
       [_, writer_list] = writer_match

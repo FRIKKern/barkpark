@@ -2391,7 +2391,21 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
 # workflow landed on 2026-08-09, nine days after both frozen heads. They are
 # listed here ONE NAME AT
 # A TIME, exactly as an operator would type them, so a row that stops being
-# unrenderable reds this file instead of quietly widening a blanket waiver. §14b
+# unrenderable reds this file instead of quietly widening a blanket waiver.
+# The rule cuts both ways: a name the generator CAN re-derive leaves this list.
+# `PR task gate self-test` and `Re-land advisory (already-landed overlap)` did
+# (task-7ac46837d7b03e44): S8 PULL-REQUEST-ONLY now classifies both off the real
+# workflow tree on this very pair (generator --explain: pr-task-gate.yml job
+# 'pr-task-gate-selftest', reland-check.yml job 'reland-check'; §30h/§30j below
+# pin the first), and scripts/required-checks-ack-derive.sh reported both as
+# "did not need" on every run — as a NOTE, exit 0, which is why they sat here
+# until #19991 deleted them by hand. THAT DIRECTION NOW REDS TOO
+# (cch-w57-fu): an ACK_EX name no derived row needs is `EXTRA ACK_EX`, exit 1,
+# with the FILE:LINE to delete, exactly as a missing one is `MISSING ACK_EX`
+# with the line to paste. The list is derived-and-pasted, never auto-applied
+# beyond the generator's own S8 PULL-REQUEST-ONLY class: a paths-filtered row's
+# renderability depends on the paths the frozen heads touched, so auto-acking it
+# would hide a change in the sample. §14g proves both directions. §14b
 # below asserts the refusal that makes this list necessary; every section that
 # wants a successful EMIT passes "$ACK".
 #
@@ -2410,7 +2424,6 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Dispatch (compose-smoke paths)"
         --expect-unrendered "Elixir path-escape ratchet"
         --expect-unrendered "gofmt drift ceiling (blocking)"
-        --expect-unrendered "PR task gate self-test"
         --expect-unrendered "Dependabot PRs carry the standing task trailer"
         --expect-unrendered "Dependabot trailer injector self-test"
         --expect-unrendered "Prod compile gate (Elixir 1.18.1 / OTP 27.0)"
@@ -2462,7 +2475,6 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Renew every open PR's claim (20-min sweep)"
         --expect-unrendered "Report main-push failure to a human"
         --expect-unrendered "gofmt -l (advisory)"
-        --expect-unrendered "Re-land advisory (already-landed overlap)"
         --expect-unrendered "Boundary gate"
         --expect-unrendered "Dispatch (shell-harness paths)"
         --expect-unrendered ".claude/workflows engines load on a machine that is not this one"
@@ -2545,6 +2557,8 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Flagship template bp-command parse"
         --expect-unrendered "Stale verdict watch"
         --expect-unrendered "Stale verdict harness"
+        --expect-unrendered "Report stale-verdict-watch read fault to a human"
+        --expect-unrendered "Report stale-verdict-watch scream to a human"
         --expect-unrendered "Break-glass harness"
         --expect-unrendered "Generate reference"
         # ── 2026-09-09: four rows #17111 (c19d7c7ab) added to .exclusions by hand for
@@ -2717,7 +2731,57 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # touches .github/** or scripts/**. This is the SIXTH place, paid in the same commit.
         # DERIVED, not remembered: scripts/required-checks-ack-derive.sh named exactly
         # this name as MISSING ACK_EX (and nothing else) on this tree.
-        --expect-unrendered "the breaker measurement's preconditions can still be UNMET")
+        --expect-unrendered "the breaker measurement's preconditions can still be UNMET"
+        # studio-scrim-threshold.yml jobs `changes` and `scrim` are CREATED by the
+        # same commit as their .exclusions rows (task scrim-control-uncied-and-
+        # fixture-drift): they postdate the frozen fixture pair, so the pair cannot
+        # render them and the generator reports them LOST. UNLIKE most names here
+        # the cause is NOT a paths filter — that workflow deliberately has none, so
+        # the `scrim` job renders a SKIPPED conclusion on every PR and both names
+        # WILL be renderable on any head sampled after this merge. They are
+        # acknowledged only because the fixture pair is frozen behind them.
+        # DERIVED, not remembered: the job printed exactly these two as
+        # MISSING ACK_EX on run 35553647416 (head 99b11ec52), in this order, with
+        # these two lines to paste.
+        --expect-unrendered "Dispatch (scrim paths)"
+        --expect-unrendered "Studio scrim abolition check"
+        --expect-unrendered "Studio scrim threshold control"
+        # deploy-prod-microblock-staleness.yml jobs `prod-microblock-selftest` (:66),
+        # `prod-microblock-read` (:124) and `prod-microblock-report-scheduled-failure`
+        # (:150). The workflow landed AFTER both `generated_from_shas`, so the frozen
+        # D130 fixture pair (e34031104 / f69cfb1f6) cannot render these names and the
+        # generator reports all three LOST; their .exclusions rows are added by hand in
+        # the same change (task-c102f24f29f9bbc7). LIKE the scrim pair and UNLIKE most
+        # names here the cause is NOT a paths filter — that workflow deliberately
+        # carries no `on: paths:` key, so all three ARE renderable on any head sampled
+        # after the merge (MEASURED on c1947259048d: success / skipped / skipped). They
+        # are acknowledged only because the fixture pair is frozen behind them, and
+        # re-shooting that pair would silently change what sections 14 / 14b / 15 / 16
+        # measure. The names are their JOB IDS: none of the three jobs declares a
+        # `name:` key, so GitHub publishes the id verbatim.
+        # DERIVED, not remembered: scripts/required-checks-ack-derive.sh (exit 1) named
+        # exactly these three as MISSING ACK_EX on this tree, in this order, and printed
+        # these three lines to paste.
+        --expect-unrendered "prod-microblock-read"
+        --expect-unrendered "prod-microblock-report-scheduled-failure"
+        --expect-unrendered "prod-microblock-selftest"
+        # ── 2026-09-23 (task-ef8dd830312c56a9): the console-harness pin leg. Its
+        # .exclusions row lands in the same diff. The NAME is not new — it arrived
+        # with #19567 (7da416496) under slug `console-harness-pin` — but it first
+        # RENDERED on a drift-examined sha when #19951 touched console-harness.yml,
+        # so the gap sat latent until a push-to-main made the dispatcher emit it.
+        --expect-unrendered "console-harness.sh reads CI's pin (it must be able to LOSE)"
+        # Paper parity postdates both frozen registration samples; acknowledge its paths-filtered exclusion.
+        --expect-unrendered "Barkdown parity rows"
+        # ── 2026-09-23 (task-a0abaae6f64c0a9c): absent-context-census.yml. The
+        # census job's name had no row although it renders on main commits (never
+        # on a PR head — no pull_request trigger); the workflow_run leg added in
+        # the same change makes it render there several times an hour, and the new
+        # cadence job renders beside it. Both rows land in the same diff; the frozen
+        # fixture pair predates the workflow. DERIVED by
+        # scripts/required-checks-ack-derive.sh, which named exactly these two.
+        --expect-unrendered "Absent required-context census"
+        --expect-unrendered "Census cadence (hold, re-arm)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
@@ -2811,6 +2875,40 @@ section "14b. EXCLUSION LOSS — the DECISION LEDGER gets the same pair: the mer
 # any future edit to `.exclusions` and cannot go vacuous when a real row's
 # renderability changes. The row names a job no workflow publishes, which is the
 # strongest form of "cannot render": no sampling window anywhere can restore it.
+# ── THE SYNTHETIC AGGREGATOR — §14b/§15/§17's shared specimen ────────────────
+#
+# WHY IT EXISTS (task-53b3a3691f4d608d). §15 and §17 proved the S5→S6 leaf
+# demotion and the S7 hold on `Security gate` and its three REAL `needs:`
+# leaves, and one clause of §14b read the same name. That made
+# .github/workflows/security.yml's `on:` block load-bearing for properties that
+# have nothing to do with security scanning: dropping its `pull_request`
+# trigger — a correct, separately-tracked cost reduction, since sobelow's
+# subject is the whole application AST and mix_audit's is an advisory database
+# fetched at run time, neither of them the diff — reclassifies every one of its
+# contexts to "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD" and DELETES those
+# sections' premise. Measured before this block existed: clean tree 375
+# passed / 1 failed; with only that trigger removed, ELEVEN further assertions
+# named `Security gate` or its leaves.
+#
+# RE-POINTING AT ANOTHER LIVE WORKFLOW IS NOT THE FIX — it reproduces the defect
+# one workflow over, because a fixture anchored on a real workflow is a fixture
+# any future venue edit breaks. So the aggregator is SYNTHETIC, for the same
+# reason §14b's two seed rows and §16's `Probe gate` already are: a three-job
+# workflow that exists only in the copied tree below, whose check runs are
+# written into a DERIVED fixture pair. No `on:` edit anywhere under
+# .github/workflows can move it, in either direction.
+#
+# WHAT THIS DOES NOT CLAIM, and the claim it deliberately hands off. That the
+# REAL `Security gate` is held OUT is still asserted — by the committed spec's
+# own exclusion row, and by §24, which holds the generator's hand-maintained S7
+# constants byte-identical to the rows a regeneration would overwrite. What
+# moved here is the STAGE MECHANISM (S5→S6, and S7 outliving a green fixture),
+# which is the only thing §15 and §17 ever measured. A section that proves a
+# mechanism must not be the section that pins a workflow's venue.
+SYNAGG="Synthetic aggregator gate (blocking)"
+SYNL1="Synthetic aggregator leaf one (blocking)"
+SYNL2="Synthetic aggregator leaf two (blocking)"
+
 SEEDX="$TMP/seeded-base.json"
 SEEDNAME="Ghost ceiling (blocking) — no workflow publishes this name"
 # THE SECOND SEED IS SYNTHETIC FOR THE SAME REASON (hg: §14b was half-synthetic).
@@ -2823,10 +2921,17 @@ SEEDNAME="Ghost ceiling (blocking) — no workflow publishes this name"
 # any trigger edit to any real workflow — exactly the principle already stated
 # for the ghost seed.
 PRSEEDNAME="Seeded PR-only ceiling (blocking) — published against merge refs only"
-jq --arg c "$SEEDNAME" --arg pr "$PRSEEDNAME" \
+# THE THIRD SEED carries an S7-SHAPED reason for the synthetic aggregator, so
+# the "both sides carry a row, the DERIVED reason wins" clause below has a
+# specimen of its own. It used to read `Security gate` — committed S7, derived
+# S5 off the frozen pair — which is exactly the live-workflow anchor this wave
+# is deleting: an S4 reclassification changes the derived half and reds a clause
+# whose subject is the UNION, not security.yml.
+jq --arg c "$SEEDNAME" --arg pr "$PRSEEDNAME" --arg ag "$SYNAGG" \
    '.exclusions += [
       {context: $c,  reason: "SEEDED BY THE TEST SUITE: a hand-added decision row whose name no workflow publishes, so no sample can ever re-derive it"},
-      {context: $pr, reason: "SEEDED BY THE TEST SUITE: a decision row whose job exists only in a synthetic pull_request-only workflow, so it can never render on a branch head"}
+      {context: $pr, reason: "SEEDED BY THE TEST SUITE: a decision row whose job exists only in a synthetic pull_request-only workflow, so it can never render on a branch head"},
+      {context: $ag, reason: "S7 EXCLUDED BY DECISION: SEEDED BY THE TEST SUITE — a committed hold on the synthetic aggregator, so the union below has one context whose BASE reason and DERIVED reason disagree"}
     ]' \
    "$SPEC" > "$SEEDX"
 # The synthetic workflows dir: every real workflow, plus ONE pull_request-only
@@ -2871,7 +2976,82 @@ jobs:
     steps:
       - run: "true"
 EOF
-SEEDARGS=(--workflows "$SEEDWF" --fixture-dir "$FIXP"
+# THE SYNTHETIC AGGREGATOR ITSELF, into the SAME copied tree. Three jobs: two
+# leaves and an aggregator that `needs:` both. It carries a `push:` arm as well
+# as an unfiltered `pull_request:` one so that NO exclusion stage ahead of S5
+# claims it first — S4's paths arm, S4's absolute arm and S8 all key on the
+# `on:` block, and any of them firing would hide the stage under test.
+cat >"$SEEDWF/zz-synthetic-aggregator.yml" <<EOF
+name: zz-synthetic-aggregator
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  synthetic-leaf-one:
+    name: "$SYNL1"
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+  synthetic-leaf-two:
+    name: "$SYNL2"
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+  synthetic-aggregator:
+    name: "$SYNAGG"
+    needs: [synthetic-leaf-one, synthetic-leaf-two]
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+EOF
+# …and the FIXTURE PAIR it renders on, DERIVED from the frozen pair rather than
+# committed, for the reason §17 already wrote down: a derived fixture cannot
+# drift out of agreement with the pair every other section asserts over. Two
+# variants, differing in ONE field — the aggregator's conclusion — because that
+# one field is the whole difference between the S5 premise (§15) and the S7
+# premise (§17). The leaves are green in both: a red leaf would be excluded on
+# its own account and the demotion would prove nothing.
+#
+# The name must appear on BOTH heads or it never reaches the selection at all:
+# stage 2 iterates the INTERSECTION of the sampled windows.
+SYNFIX_RED="$TMP/synth-fixtures-red"
+SYNFIX_GREEN="$TMP/synth-fixtures-green"
+for _syn in "$SYNFIX_RED|failure" "$SYNFIX_GREEN|success"; do
+  _syndir="${_syn%%|*}"; _synconc="${_syn##*|}"
+  mkdir -p "$_syndir"
+  cp "$FIXP/main-shas.txt" "$_syndir/"
+  for _synf in "$FIXP"/checkruns-*.json; do
+    jq --arg a "$SYNAGG" --arg l1 "$SYNL1" --arg l2 "$SYNL2" --arg c "$_synconc" \
+      '.check_runs += [
+         {app:{id:15368}, conclusion:$c,        name:$a,  status:"completed", started_at:"2026-07-31T01:00:00Z"},
+         {app:{id:15368}, conclusion:"success", name:$l1, status:"completed", started_at:"2026-07-31T01:00:00Z"},
+         {app:{id:15368}, conclusion:"success", name:$l2, status:"completed", started_at:"2026-07-31T01:00:00Z"}
+       ]' "$_synf" > "$_syndir/$(basename "$_synf")"
+  done
+done
+# NON-VACUITY OF THE FIXTURE BUILD ITSELF, asserted before any section reads it:
+# a `jq` that errored, a `cp` that did not land or a name that reached only one
+# of the two heads all produce a fixture pair that silently proves nothing.
+SYNFIX_OK=1
+for _syndir in "$SYNFIX_RED" "$SYNFIX_GREEN"; do
+  for _synf in "$_syndir"/checkruns-*.json; do
+    jq -e --arg a "$SYNAGG" --arg l1 "$SYNL1" --arg l2 "$SYNL2" \
+      '[.check_runs[].name] as $n
+       | ($n | index($a)) and ($n | index($l1)) and ($n | index($l2))' "$_synf" >/dev/null 2>&1 \
+      || SYNFIX_OK=0
+  done
+done
+SYNFIX_RED_CONC="$(jq -r --arg a "$SYNAGG" 'first(.check_runs[] | select(.name == $a) | .conclusion)' "$SYNFIX_RED/checkruns-e34031104.json" 2>/dev/null)"
+SYNFIX_GREEN_CONC="$(jq -r --arg a "$SYNAGG" 'first(.check_runs[] | select(.name == $a) | .conclusion)' "$SYNFIX_GREEN/checkruns-e34031104.json" 2>/dev/null)"
+if [ "$SYNFIX_OK" = "1" ] && [ "$SYNFIX_RED_CONC" = "failure" ] && [ "$SYNFIX_GREEN_CONC" = "success" ] \
+   && grep -qF "$SYNAGG" "$SEEDWF/zz-synthetic-aggregator.yml"; then
+  ok "the synthetic aggregator is PLANTED and rendered on BOTH frozen heads in both variants (red conclusion '$SYNFIX_RED_CONC', green '$SYNFIX_GREEN_CONC') — §15 and §17 below are not reading an empty fixture"
+else
+  bad "the synthetic aggregator fixture did not build (all-names-on-both-heads=$SYNFIX_OK, red='$SYNFIX_RED_CONC', green='$SYNFIX_GREEN_CONC') — every clause keyed on it below would be vacuous"
+fi
+
+SEEDARGS=(--workflows "$SEEDWF" --fixture-dir "$SYNFIX_RED"
           --merge-base "$SEEDX" --sha e34031104 --sha f69cfb1f6)
 
 X14_OUT="$(bash "$GEN" "${SEEDARGS[@]}" --expect-unrendered "Elixir gate" \
@@ -2919,15 +3099,19 @@ else
   fail_emit "$(why_emit "rows were dropped: $(jq -c --slurpfile b "$SEEDX" '[$b[0].exclusions[].context] - [.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
 # The union must not FREEZE a row's grounds: where this run restated a reason,
-# the DERIVED one wins. `Security gate` is committed as an S7 decision and the
-# frozen pair reads it red on main, so the emitted reason must be the S5 one.
-if jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
+# the DERIVED one wins. The specimen is the SYNTHETIC aggregator — seeded above
+# with an S7-shaped base reason, and read RED on main by the derived fixture
+# pair, so the emitted reason must be the S5 one. It read `Security gate` until
+# task-53b3a3691f4d608d: a live workflow whose venue another wave is entitled to
+# change, and whose S4 reclassification would have reddened a clause whose
+# subject is the union.
+if jq -e --arg a "$SYNAGG" '[.exclusions[] | select(.context == $a) | .reason]
           | any(startswith("S5 RED ON MAIN"))' "$TMP/seeded-spec.json" >/dev/null 2>&1 \
-   && jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
+   && jq -e --arg a "$SYNAGG" '[.exclusions[] | select(.context == $a) | .reason]
              | any(startswith("S7 EXCLUDED BY DECISION"))' "$SEEDX" >/dev/null 2>&1; then
-  ok "…and where BOTH sides carry a row the DERIVED reason wins ('Security gate': S7 committed → S5 emitted)"
+  ok "…and where BOTH sides carry a row the DERIVED reason wins ('$SYNAGG': S7 committed → S5 emitted)"
 else
-  fail_emit "$(why_emit "the base reason survived the derivation: $(jq -c '[.exclusions[] | select(.context == "Security gate") | .reason[0:40]]' "$TMP/seeded-spec.json" 2>&1)")"
+  fail_emit "$(why_emit "the base reason survived the derivation: $(jq -c --arg a "$SYNAGG" '[.exclusions[] | select(.context == $a) | .reason[0:40]]' "$TMP/seeded-spec.json" 2>&1)")"
 fi
 
 # MUTATION (i): the UNION is load-bearing. Drop the base out of it — the exact
@@ -3297,20 +3481,115 @@ else
   bad "the planted argv argument measured ${RC_MUT_MAX:-nothing} byte(s), not over $RC_CONS_CAP, AND the floor did not refuse by name (exit $RC_MUT_RC, verdict printed=$RC_MUT_VERDICT) — the floor clause above cannot be shown able to fail"
 fi
 
+section "14g. ACK_EX IS A RATCHET IN BOTH DIRECTIONS — a needed name deleted reds, and so does a name no row needs"
+
+# WHY (cch-w57-fu-exclusion-acks-are-typed-by-hand-every-regeneration). The
+# header above ACK_EX says a row that STOPS being unrenderable reds this file.
+# From a33e5ae39 (2026-09-10) that held in one direction only:
+# scripts/required-checks-ack-derive.sh redded a MISSING acknowledgement and
+# printed an EXTRA one as "note: ... (harmless ...)", exit 0. #19991 deleted two
+# such names by hand after they sat unread. The deriver now reds on both; this
+# section proves each direction by mutating a scratch copy of THIS file and
+# re-running the deriver against the set it derived from the real tree.
+#
+# ONE derive (two generator passes over the frozen pair), then three cheap
+# compares via --derived: the mutation arms test the ACK side only, which is
+# the whole subject — the derivation is the deriver's own selftest's job
+# (elixir.yml, `required-checks-ack-derive-selftest`).
+ACKD="$REPO_ROOT/scripts/required-checks-ack-derive.sh"
+ACKD_HARNESS="$REPO_ROOT/scripts/required-checks.test.sh"
+ACKD_DER="$TMP/ackd-derived.txt"
+ACKD_OUT="$(bash "$ACKD" --repo-root "$REPO_ROOT" --dump-derived "$ACKD_DER" 2>&1)" && ACKD_RC=0 || ACKD_RC=$?
+if [ "$ACKD_RC" -eq 0 ] && grep -q "OK  ACK_EX == the derived set" <<<"$ACKD_OUT" \
+   && ! grep -qE "^ +(MISSING|EXTRA) ACK_EX " <<<"$ACKD_OUT"; then
+  ok "the real tree: ACK_EX equals the derived set exactly — 0 MISSING, 0 EXTRA ($(grep -o 'all [0-9]* derived rows' <<<"$ACKD_OUT"))"
+else
+  bad "the real tree's ACK_EX is not the derived set (exit $ACKD_RC): $(grep -m5 -E '^ +(MISSING|EXTRA) ACK_EX |CANNOT READ' <<<"$ACKD_OUT" | tr '\n' '⏎')"
+fi
+if [ -s "$ACKD_DER" ]; then
+  ok "the precondition holds: the derived set was dumped ($(wc -l < "$ACKD_DER" | tr -d ' ') names) for the arms below"
+else
+  bad "the deriver dumped no derived set — every arm below would be vacuous"
+fi
+
+# CONTROL: the untouched harness through the --derived path is GREEN, so a red
+# below is the mutation's and not the path's.
+ACKD_C_OUT="$(bash "$ACKD" --repo-root "$REPO_ROOT" --harness "$ACKD_HARNESS" --derived "$ACKD_DER" 2>&1)" && ACKD_C_RC=0 || ACKD_C_RC=$?
+if [ "$ACKD_C_RC" -eq 0 ]; then
+  ok "control: the untouched harness through --derived is GREEN"
+else
+  bad "control: the untouched harness through --derived is not green (exit $ACKD_C_RC): $(head -3 <<<"$ACKD_C_OUT" | tr '\n' '⏎')"
+fi
+
+# ARM 1 — PLANT an EXTRA. One name no .exclusions row carries, right after the
+# `ACK_EX=(` line of a scratch copy.
+ACKD_PLANT="Planted by §14g — no .exclusions row carries this name"
+ACKD_PSRC="$TMP/ackd-harness-planted.sh"
+ACKD_PLANT="$ACKD_PLANT" awk '{ print }
+  !d && /^ACK_EX=\(/ { printf "        --expect-unrendered \"%s\"\n", ENVIRON["ACKD_PLANT"]; d = 1 }' \
+  "$ACKD_HARNESS" > "$ACKD_PSRC"
+if [ "$(wc -l < "$ACKD_PSRC" | tr -d ' ')" -eq $(( $(wc -l < "$ACKD_HARNESS" | tr -d ' ') + 1 )) ] \
+   && grep -qF -e "--expect-unrendered \"$ACKD_PLANT\"" "$ACKD_PSRC"; then
+  ok "the plant applies: the scratch copy is one ACK_EX line longer and carries the planted name"
+else
+  bad "the plant did not apply — ACK_EX=( moved, so the proof below is vacuous"
+fi
+ACKD_P_OUT="$(bash "$ACKD" --repo-root "$REPO_ROOT" --harness "$ACKD_PSRC" --derived "$ACKD_DER" 2>&1)" && ACKD_P_RC=0 || ACKD_P_RC=$?
+if [ "$ACKD_P_RC" -eq 1 ] && grep -qF "EXTRA ACK_EX  $ACKD_PLANT" <<<"$ACKD_P_OUT" \
+   && grep -qE "^  $ACKD_PSRC:[0-9]+: +--expect-unrendered \"$ACKD_PLANT\"$" <<<"$ACKD_P_OUT" \
+   && ! grep -q "MISSING ACK_EX " <<<"$ACKD_P_OUT"; then
+  ok "an EXTRA ACK_EX name REDS (exit 1), NAMES it, and prints the exact FILE:LINE to delete — and nothing else moved"
+else
+  bad "the planted EXTRA did not red by name with its delete line (exit $ACKD_P_RC): $(grep -m5 -E 'ACK_EX|CANNOT READ|note:' <<<"$ACKD_P_OUT" | tr '\n' '⏎')"
+fi
+
+# ARM 2 — DELETE a needed one. The victim is the first standalone ACK_EX line
+# (not the one carrying `ACK_EX=(`, not the one carrying the closing paren),
+# and it must be in the derived set, or the deletion proves nothing.
+ACKD_VICTIM="$(awk '/^ACK_EX=\(/{f=1; next}
+  f && /^[[:space:]]+--expect-unrendered "[^"$]*"[[:space:]]*$/ {
+    sub(/^[[:space:]]+--expect-unrendered "/, ""); sub(/"[[:space:]]*$/, ""); print; exit }' "$ACKD_HARNESS")"
+if [ -n "$ACKD_VICTIM" ] && grep -qxF "$ACKD_VICTIM" "$ACKD_DER"; then
+  ok "the deletion victim is a derived, acknowledged name: $ACKD_VICTIM"
+else
+  bad "no standalone ACK_EX line names a derived row (victim='$ACKD_VICTIM') — the deletion arm would be vacuous"
+fi
+ACKD_DSRC="$TMP/ackd-harness-deleted.sh"
+ACKD_VICTIM="$ACKD_VICTIM" awk '!d && /--expect-unrendered/ && index($0, "\"" ENVIRON["ACKD_VICTIM"] "\"") { d = 1; next } { print }' \
+  "$ACKD_HARNESS" > "$ACKD_DSRC"
+ACKD_D_OUT="$(bash "$ACKD" --repo-root "$REPO_ROOT" --harness "$ACKD_DSRC" --derived "$ACKD_DER" 2>&1)" && ACKD_D_RC=0 || ACKD_D_RC=$?
+if [ "$ACKD_D_RC" -eq 1 ] && grep -qF "MISSING ACK_EX  $ACKD_VICTIM" <<<"$ACKD_D_OUT" \
+   && ! grep -q "EXTRA ACK_EX " <<<"$ACKD_D_OUT"; then
+  ok "a needed ACK_EX name DELETED reds (exit 1) and NAMES it — and nothing else moved"
+else
+  bad "deleting $ACKD_VICTIM did not red by name (exit $ACKD_D_RC): $(grep -m5 -E 'ACK_EX|CANNOT READ' <<<"$ACKD_D_OUT" | tr '\n' '⏎')"
+fi
+
 section "15. S6 LEAF DEMOTION — an excluded aggregator takes its \`needs\` upstreams DOWN with it, never up"
 
-S6_OUT="$(bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --explain 2>&1 || true)"
-if grep -q "exclude  Security gate  — S5 RED ON MAIN" <<<"$S6_OUT"; then
+# THE FIXTURE IS THE SYNTHETIC AGGREGATOR BUILT IN §14b, not `Security gate` and
+# its three real leaves. The property under test is a RELATION between stages —
+# a name excluded by S5 must take its `needs:` upstreams DOWN through S6 rather
+# than leave them to sail into the spec — and nothing in it is about security
+# scanning. Keyed to a live workflow, this section made .github/workflows/
+# security.yml's `on:` block a load-bearing input to a stage-relation proof:
+# removing its `pull_request` trigger reclassifies the aggregator to S4, the
+# `exclude … S5 RED ON MAIN` line never appears, and all four clauses below red
+# with a message naming neither the workflow nor the edit. See the header over
+# SYNAGG in §14b for the full ground.
+SYNARGS_RED=(--workflows "$SEEDWF" --fixture-dir "$SYNFIX_RED"
+             --merge-base "$SPEC" --sha e34031104 --sha f69cfb1f6)
+S6_OUT="$(bash "$GEN" "${SYNARGS_RED[@]}" "${ACK[@]}" --explain 2>&1 || true)"
+if grep -qF "exclude  $SYNAGG  — S5 RED ON MAIN" <<<"$S6_OUT"; then
   ok "the aggregator itself is excluded S5 RED ON MAIN (the precondition the demotion hangs off)"
 else
-  bad "'Security gate' was not excluded as S5 RED ON MAIN — section 15's premise is gone"
+  bad "'$SYNAGG' was not excluded as S5 RED ON MAIN — section 15's premise is gone: $(grep -m1 -F "$SYNAGG" <<<"$S6_OUT")"
 fi
-for leaf in "Dispatch (security paths)" "Security gate shape ratchet" \
-            "Sobelow baseline does not swallow its own inline waivers (blocking)"; do
-  if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR (Security gate)" <<<"$S6_OUT"; then
+for leaf in "$SYNL1" "$SYNL2"; do
+  if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR ($SYNAGG)" <<<"$S6_OUT"; then
     ok "S6 demotes '$leaf', naming the aggregator that took it down"
   else
-    bad "S6 did not demote '$leaf': $(grep -F "$leaf" <<<"$S6_OUT" | head -1)"
+    bad "S6 did not demote '$leaf': $(grep -m1 -F "$leaf" <<<"$S6_OUT")"
   fi
 done
 
@@ -3319,8 +3598,8 @@ done
 # leaves are subsumed by nothing and sail straight into the spec.
 NOS6="$TMP/gen-nos6.sh"
 sed 's/^  if \[ -n "\$demoted" \]; then$/  if false; then # S6 REMOVED/' "$GEN" > "$NOS6"
-if grep -q 'S6 REMOVED' "$NOS6"; then
-  ok "the S6 mutation applies: a copy of the generator skips the demotion pass"
+if grep -q 'S6 REMOVED' "$NOS6" && ! grep -q '^  if \[ -n "\$demoted" \]; then$' "$NOS6"; then
+  ok "the S6 mutation applies: a copy of the generator skips the demotion pass, and the original guard line is GONE from the copy"
 else
   bad "the S6 mutation did not apply — the pass's guard moved, so the proof below is vacuous"
 fi
@@ -3329,20 +3608,63 @@ fi
 # as a contradiction. Acknowledging it is what lets the assertion below read the
 # emit — and it is also the shape of the accident: the flags name exactly the
 # three contexts a missing demotion pass would have registered.
+# THE ACKNOWLEDGEMENTS ARE DERIVED, NEVER LISTED (and this is the same lesson
+# the fixture itself is here for). The mutant necessarily promotes every leaf of
+# every aggregator the shipped run demotes — today that includes the three real
+# `Security gate` leaves the committed spec holds out, which §14b correctly
+# refuses as a required/excluded CONTRADICTION. Typing those three names here
+# would put the live workflow straight back into this section by the back door:
+# a venue edit changes which real leaves the mutant promotes, and a hard-coded
+# list reds with a message naming neither the workflow nor the edit. So the
+# mutant is run ONCE as a probe and its own `STALE` lines become the flags —
+# whatever they turn out to be, including none at all.
+NOS6_PROBE="$(bash "$NOS6" "${SYNARGS_RED[@]}" "${ACK[@]}" --out "$TMP/nos6-probe.json" 2>&1 || true)"
+NOS6_ACK=()
+while IFS= read -r _nos6n; do
+  [ -n "$_nos6n" ] || continue
+  NOS6_ACK+=(--expect-promoted "$_nos6n")
+done <<EOF
+$(sed -n 's/^  STALE \(.*\)  \[this run SELECTED it as REQUIRED.*$/\1/p' <<<"$NOS6_PROBE")
+EOF
+# …and the derivation is CHECKED, not narrated. Every name it produced must be
+# one the COMMITTED spec actually holds out — that is what `STALE` means — and
+# the flag count must be twice the name count, because a `--expect-promoted`
+# that lost its value would silently acknowledge the WRONG name.
+NOS6_STALE_N="$(sed -n 's/^  STALE \(.*\)  \[this run SELECTED it as REQUIRED.*$/\1/p' <<<"$NOS6_PROBE" | grep -c . || true)"
+NOS6_ACK_BAD=""
+# The array is 0-indexed and alternates flag/value, so the VALUES are the odd
+# slots — reading the even ones would compare "--expect-promoted" to the ledger.
+_nos6i=1
+while [ "$_nos6i" -lt "${#NOS6_ACK[@]}" ]; do
+  _nos6n="${NOS6_ACK[$_nos6i]}"
+  jq -e --arg c "$_nos6n" '[.exclusions[].context] | index($c)' "$SPEC" >/dev/null 2>&1 \
+    || NOS6_ACK_BAD="$NOS6_ACK_BAD [$_nos6n]"
+  _nos6i=$((_nos6i + 2))
+done
+if [ "${#NOS6_ACK[@]}" -eq "$((NOS6_STALE_N * 2))" ] && [ -z "$NOS6_ACK_BAD" ]; then
+  ok "the mutant's own refusal supplies its acknowledgements: $NOS6_STALE_N name(s) read off its \`STALE\` lines, every one of them a context the committed spec holds out, none typed here — a venue edit changes this number instead of reddening the section"
+else
+  bad "the derived acknowledgements do not add up (${#NOS6_ACK[@]} flags for $NOS6_STALE_N name(s); not committed exclusions:${NOS6_ACK_BAD:- none}) — the emit below would acknowledge the wrong names"
+fi
 emit_spec "$TMP/nos6-spec.json" \
-  bash "$NOS6" "${FIXARGS[@]}" "${ACK[@]}" \
-  --expect-promoted "Dispatch (security paths)" \
-  --expect-promoted "Security gate shape ratchet" \
-  --expect-promoted "Sobelow baseline does not swallow its own inline waivers (blocking)" \
+  bash "$NOS6" "${SYNARGS_RED[@]}" "${ACK[@]}" ${NOS6_ACK[@]+"${NOS6_ACK[@]}"} \
   --out "$TMP/nos6-spec.json" || true
-if jq -e '[.protection.required_status_checks.checks[].context] as $c
-          | ($c | index("Dispatch (security paths)"))
-            and ($c | index("Security gate shape ratchet"))
-            and ($c | index("Sobelow baseline does not swallow its own inline waivers (blocking)"))' \
+if jq -e --arg l1 "$SYNL1" --arg l2 "$SYNL2" \
+     '[.protection.required_status_checks.checks[].context] as $c
+      | ($c | index($l1)) and ($c | index($l2))' \
      "$TMP/nos6-spec.json" >/dev/null 2>&1; then
-  ok "…and without S6 the identical fixture PROMOTES all three security leaves into the spec (mutation-proven able to fail)"
+  ok "…and without S6 the identical fixture PROMOTES both synthetic leaves into the spec (mutation-proven able to fail)"
 else
   fail_emit "$(why_emit "the un-demoted spec did not promote the leaves: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos6-spec.json" 2>&1)")"
+fi
+# …and the aggregator itself stays OUT of that mutant spec. Without this the
+# clause above is satisfied by a run that simply required everything, which is
+# the opposite of the inversion S6 exists to prevent.
+if jq -e --arg a "$SYNAGG" '[.protection.required_status_checks.checks[].context] | index($a) | not' \
+     "$TMP/nos6-spec.json" >/dev/null 2>&1; then
+  ok "…while the EXCLUDED aggregator is still absent from it — the mutant re-implements the aggregator at leaf granularity, which is precisely the inversion S6 prevents"
+else
+  fail_emit "$(why_emit "the un-demoted spec required the aggregator too, so the promotion above is not the S6 inversion")"
 fi
 
 section "16. the deadlock sweep's predicate is TWO-SIDED — a PR that is already stuck is not a casualty of the flip"
@@ -3600,7 +3922,7 @@ else
   bad "the identity mutation did not reproduce the vacuous green (applied=$(grep -c 'IDENTITY REFUSAL REMOVED' "$NOID"), exit $NI_RC): $(tail -2 <<<"$NI_OUT")"
 fi
 
-section "17. S7 holds \`Security gate\` OUT once it goes GREEN — the stage that held it is gone, the hold is not"
+section "17. S7 HOLDS AN AGGREGATOR OUT ONCE IT GOES GREEN — the stage that held it is gone, the hold is not"
 
 # WHY THIS SECTION EXISTS, and it is not hypothetical (wave 11 REVIEW).
 # `Security gate` was held out of the flip by S5 RED ON MAIN. Between the build
@@ -3608,69 +3930,96 @@ section "17. S7 holds \`Security gate\` OUT once it goes GREEN — the stage tha
 # name went green on main — so the mechanical ground evaporated and re-running
 # the generator against the post-bump window KEPT it, i.e. the next person to
 # follow the file's own instruction ("regenerate immediately before any flip")
-# would have silently registered it. That is forbidden: its sole blocking
-# upstream is mix-audit, which reads a LIVE advisory database, so a CVE
-# published tomorrow reds it on every open PR with no change to this repo.
+# would have silently registered it. The stage that answers that is S7: a
+# hand-maintained hold that outlives the mechanical ground which produced it.
 #
-# The fixture is DERIVED, not committed: the frozen pair with `Security gate`'s
-# conclusion flipped to success everywhere. Deriving it means it cannot drift
-# out of agreement with the pair §15 asserts over, and it states the premise
-# (green on main) as data rather than as prose.
-S7F="$TMP/postbump-fixtures"
-mkdir -p "$S7F"
-cp "$FIXP/main-shas.txt" "$S7F/"
-for f in "$FIXP"/checkruns-*.json; do
-  jq '.check_runs |= map(if .name == "Security gate" then .conclusion = "success" else . end)' \
-    "$f" > "$S7F/$(basename "$f")"
-done
-S7ARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$S7F"
+# THE SPECIMEN IS SYNTHETIC (task-53b3a3691f4d608d). This section used to prove
+# the property ON `Security gate` and its three real leaves, which made
+# security.yml's `on:` block a load-bearing input: drop its `pull_request`
+# trigger and every context reclassifies to S4, S7 is never reached, and six
+# clauses here red with a message about neither. The specimen is now the
+# synthetic aggregator built in §14b, on the GREEN half of its derived fixture
+# pair — one field different from §15's, which is the whole difference between
+# the S5 premise and this one.
+#
+# A SYNTHETIC NAME CANNOT BE IN A HAND-MAINTAINED LIST, so the subject is a copy
+# of the generator with the synthetic aggregator APPENDED to both S7 arrays.
+# That is an AUGMENTATION, not a weakening: the stage, the ordering and the
+# reason plumbing under test are the shipped ones, and the mutation below is the
+# UN-augmented generator — the real file, unchanged — which promotes the name.
+# The integrity of the REAL entries is not this section's job and never was:
+# §24 holds each shipped S7 constant byte-identical to the committed row a
+# regeneration would overwrite, and the committed spec carries `Security gate`'s
+# hold itself. Insertion is at the array HEAD, on the `=(` line, so it is keyed
+# to the array's SHAPE rather than to whichever name happens to be last — and
+# both arrays get exactly one line, because an off-by-one there pairs every
+# later name with the wrong reason (§24's ARITY clause).
+S7GEN="$TMP/gen-s7-synthetic.sh"
+S7REASON="S7 EXCLUDED BY DECISION: SEEDED BY THE TEST SUITE — a synthetic hold on a synthetic aggregator, so this stage is proven without pinning any real workflow's venue."
+awk -v agg="$SYNAGG" -v rsn="$S7REASON" '
+  { print }
+  /^EXCLUDED_BY_DECISION_NAMES=\($/   { printf "  \"%s\"\n", agg }
+  /^EXCLUDED_BY_DECISION_REASONS=\($/ { printf "  \"%s\"\n", rsn }
+' "$GEN" > "$S7GEN"
+S7GEN_N="$(grep -cxF "  \"$SYNAGG\"" "$S7GEN" || true)"
+S7GEN_R="$(grep -cxF "  \"$S7REASON\"" "$S7GEN" || true)"
+if [ "$S7GEN_N" = "1" ] && [ "$S7GEN_R" = "1" ] && bash -n "$S7GEN" 2>/dev/null; then
+  ok "the S7 augmentation applies: a copy of the generator carries the synthetic aggregator in BOTH decision arrays, one line each, and still parses"
+else
+  bad "the S7 augmentation did not apply (name lines=$S7GEN_N, reason lines=$S7GEN_R) — every clause below would be reading the shipped generator"
+fi
+
+S7ARGS=(--workflows "$SEEDWF" --fixture-dir "$SYNFIX_GREEN"
         --merge-base "$SPEC" --sha e34031104 --sha f69cfb1f6)
 
-S7_OUT="$(bash "$GEN" "${S7ARGS[@]}" "${ACK[@]}" --explain 2>&1 || true)"
-if ! grep -q "exclude  Security gate  — S5 RED ON MAIN" <<<"$S7_OUT"; then
-  ok "the derived fixture really is post-bump: S5 no longer fires on 'Security gate'"
+S7_OUT="$(bash "$S7GEN" "${S7ARGS[@]}" "${ACK[@]}" --explain 2>&1 || true)"
+if ! grep -qF "exclude  $SYNAGG  — S5 RED ON MAIN" <<<"$S7_OUT"; then
+  ok "the green half of the fixture pair really is green: S5 no longer fires on the aggregator"
 else
-  bad "the derived fixture still reads RED on main — the flip did not apply, so this section is vacuous"
+  bad "the green fixture still reads RED on main — the variants did not differ, so this section is vacuous"
 fi
-if grep -q "exclude  Security gate  — S7 EXCLUDED BY DECISION" <<<"$S7_OUT"; then
-  ok "…and S7 holds it out anyway, on a stated forward-looking ground"
+if grep -qF "exclude  $SYNAGG  — S7 EXCLUDED BY DECISION" <<<"$S7_OUT"; then
+  ok "…and S7 holds it out anyway, on a stated ground, with no mechanical stage left to do it"
 else
-  bad "'Security gate' was not held by S7 on a green fixture: $(grep -F 'Security gate  —' <<<"$S7_OUT" | head -1)"
+  bad "the aggregator was not held by S7 on a green fixture: $(grep -m1 -F "$SYNAGG  —" <<<"$S7_OUT")"
 fi
 # S6 must key on the EXCLUSION, not on the stage that produced it: with the hold
-# moved from S5 to S7 the three leaves must still go down, not up.
-for leaf in "Dispatch (security paths)" "Security gate shape ratchet" \
-            "Sobelow baseline does not swallow its own inline waivers (blocking)"; do
-  if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR (Security gate)" <<<"$S7_OUT"; then
+# moved from S5 to S7 the leaves must still go down, not up.
+for leaf in "$SYNL1" "$SYNL2"; do
+  if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR ($SYNAGG)" <<<"$S7_OUT"; then
     ok "S6 still demotes '$leaf' under an S7 hold — the demotion keys on the exclusion, not on S5"
   else
-    bad "S6 did not demote '$leaf' under S7: $(grep -F "$leaf" <<<"$S7_OUT" | head -1)"
+    bad "S6 did not demote '$leaf' under S7: $(grep -m1 -F "$leaf" <<<"$S7_OUT")"
   fi
 done
 
-# MUTATION: drop the S7 entry and the SAME green fixture must PROMOTE the name
-# into required protection — which is precisely what a live regeneration did
-# before this hold existed.
-NOS7="$TMP/gen-nos7.sh"
-sed 's/^  "Security gate"$//' "$GEN" > "$NOS7"
-if ! grep -q '^  "Security gate"$' "$NOS7"; then
-  ok "the S7 mutation applies: a copy of the generator no longer names 'Security gate' in its decision list"
-else
-  bad "the S7 mutation did not apply — the entry moved, so the proof below is vacuous"
-fi
-# `--expect-promoted "Security gate"` for the same reason as §15's three leaves:
-# the mutant registers a name the committed spec holds OUT, and §14b refuses that
-# contradiction rather than emitting one context on both lists.
+# MUTATION: run the SHIPPED generator — the one with no entry for this name — on
+# the identical green fixture, and it must PROMOTE the aggregator into required
+# protection. That is precisely what a live regeneration did to `Security gate`
+# before its hold existed, and it is the whole reason S7 is a stage rather than
+# a comment. The mutant here is the unmodified file, so the clause cannot go
+# vacuous by a sed that failed to match.
 emit_spec "$TMP/nos7-spec.json" \
-  bash "$NOS7" "${S7ARGS[@]}" "${ACK[@]}" --expect-promoted "Security gate" \
+  bash "$GEN" "${S7ARGS[@]}" "${ACK[@]}" \
   --out "$TMP/nos7-spec.json" || true
-if jq -e '[.protection.required_status_checks.checks[].context] | index("Security gate")' \
+if jq -e --arg a "$SYNAGG" '[.protection.required_status_checks.checks[].context] | index($a)' \
      "$TMP/nos7-spec.json" >/dev/null 2>&1; then
-  ok "…and without it the identical green fixture REGISTERS 'Security gate' (mutation-proven able to fail)"
+  ok "…and without the hold the identical green fixture REGISTERS the aggregator (mutation-proven able to fail)"
 else
   fail_emit "$(why_emit "the un-held spec did not promote it: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos7-spec.json" 2>&1)")"
 fi
 
+# THE REAL HOLD, read where it now lives: the committed file. These two clauses
+# are the whole of this section's remaining claim about `Security gate`, and
+# neither one runs the generator or reads a workflow, so no venue edit can move
+# them. §24 supplies the other half — that the generator's constant for it is
+# byte-identical to this row.
+if jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
+          | any(startswith("S7 EXCLUDED BY DECISION"))' "$SPEC" >/dev/null 2>&1; then
+  ok "the committed spec still holds 'Security gate' out BY DECISION — the hold survives this section going synthetic"
+else
+  bad "the committed spec no longer carries an S7 hold for 'Security gate': $(jq -c '[.exclusions[] | select(.context == "Security gate") | .reason[0:40]]' "$SPEC")"
+fi
 # The committed file must not still be teaching the evaporated ground.
 if ! jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
             | any(startswith("S5 RED ON MAIN"))' "$SPEC" >/dev/null 2>&1; then
@@ -3773,6 +4122,20 @@ section "18. no UNPINNED in-repo text still claims this repo's \`main\` is unpro
 # which is not a claim at all. That is exactly why members are PINNED and
 # re-reviewed on edit rather than auto-classified — an edited line loses its pin
 # and comes back for a human reading.
+#
+# THE DECISION ON THAT LIMIT (cchi-bl-protection-claim-paraphrase-escape,
+# 2026-09-24): KEEP THE PINNED CENSUS, and refuse a semantic detector. A prose
+# detector that reds on "the gates are discipline" must also stay green on the
+# dated retractions (class B) and records (class C) that quote the same idea,
+# and the only thing that tells those apart is a reader. A detector that guesses
+# would red truths or be tuned until it cannot fire; either is worse than a
+# census that states its blind spot. The claim it hunts is also now checkable at
+# its source rather than in prose: main requires four contexts under
+# enforce_admins (scripts/required-checks-verify.sh reads live protection), and
+# scripts/merge-authority-claim-check.sh reds the OPPOSITE phantom on a required
+# context. So the escape sentence above stays green on purpose, and the term
+# list widens only by the rule this section already states: a new wording is
+# added together with a hand classification of every member it matches.
 #
 # THE PIN LIST BELOW IS CLASSIFIED, and the classes are the review contract:
 #   B  a CORRECT dated retraction or correction — the line says the claim is now
@@ -5720,6 +6083,15 @@ fi
 # same claim, and a clause in a merge-blocking suite must not red on a re-flow.
 # The rewrap control below proves that rather than asserting it.
 rc21_flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
+rc21_ordinal_word() { # <n> -> the English ORDINAL this page spells
+  case "$1" in
+    1) printf 'first' ;;  2) printf 'second' ;; 3) printf 'third' ;;
+    4) printf 'fourth' ;; 5) printf 'fifth' ;;  6) printf 'sixth' ;;
+    7) printf 'seventh' ;; 8) printf 'eighth' ;; 9) printf 'ninth' ;;
+    10) printf 'tenth' ;;
+    *) printf '%sth' "$1" ;;
+  esac
+}
 rc21_num_word() { # <n> -> the English word this page spells, digits past ten
   case "$1" in
     0) printf 'zero' ;; 1) printf 'one' ;;  2) printf 'two' ;;   3) printf 'three' ;;
@@ -5731,7 +6103,7 @@ rc21_num_word() { # <n> -> the English word this page spells, digits past ten
 # <workflow-dir> <spec-json> <doc> -> one PROSE line per count word that
 # disagrees with the derivation, or UNRESOLVED when a side came back empty.
 rc21_prose_report() {
-  local gates ctxs flat req_total req_emit nonreq_emit want
+  local gates ctxs flat req_total req_emit nonreq_emit want nonemit_req nonemit_n pos
   gates="$(rc21_emitters "$1" | cut -f2 | sort -u)"
   ctxs="$(jq -r '.protection.required_status_checks.checks[].context' "$2" | sort -u)"
   if [ -z "$gates" ] || [ -z "$ctxs" ]; then
@@ -5753,6 +6125,36 @@ rc21_prose_report() {
   want="takes the required set $req_total -> $((req_total + 1))"
   grep -qF -- "$want" <<<"$flat" \
     || printf 'PROSE\t%s\tthe page does not carry this derived transition off a required set of %s\n' "$want" "$req_total"
+  # 4. THE ORDINAL, which the three phrases above do not reach. The sentence
+  # naming the one required context that does NOT emit calls it by its POSITION
+  # among the required rows — `The fourth, \`PR references an active task\`, is
+  # **exempt by construction**`. That is a count word beneath the table with the
+  # same shape as the one dr-w29-s8 repaired by hand: promote a fifth required
+  # context above it and the ordinal is silently wrong, while every clause above
+  # stays green because none of them reads an ordinal. The position is derived
+  # from the roster's own order intersected with the spec, never typed.
+  nonemit_req="$(comm -13 <(printf '%s\n' "$gates") <(printf '%s\n' "$ctxs"))"
+  nonemit_n="$(printf '%s\n' "$nonemit_req" | { grep -c . || true; } | tr -d ' ')"
+  if [ "$nonemit_n" -ne 1 ]; then
+    printf 'PROSE\t(ordinal sentence no longer applies)\tthe page says `The <ordinal>, … is **exempt by construction**`, which assumes exactly ONE required context that does not emit; the sources now derive %s, so that paragraph must be rewritten rather than renumbered\n' "$nonemit_n"
+  else
+    # The position comes from THE SPEC'S OWN ORDER, not from the page's table:
+    # the arms below re-run this report against a 40-column fold of the page,
+    # which destroys every markdown row, so a roster-derived index would red on
+    # a pure re-wrap and make a merge-blocking suite hostile to re-flowing a
+    # doc. required-checks.json lists the contexts in the order the roster
+    # tables them, and clause 3 already forces the two sets to agree.
+    pos="$(jq -r --arg c "$nonemit_req" '
+             [.protection.required_status_checks.checks[].context]
+             | index($c) | if . == null then empty else . + 1 end' "$2")"
+    if [ -z "$pos" ]; then
+      printf 'PROSE\t(ordinal unresolvable)\t`%s` emits nothing and is not in the spec'"'"'s required list — the ordinal sentence cannot be derived\n' "$nonemit_req"
+    else
+      want="The $(rc21_ordinal_word "$pos"), \`$nonemit_req\`, is **exempt by construction**"
+      grep -qF -- "$want" <<<"$flat" \
+        || printf 'PROSE\t%s\tthe page does not carry this derived ordinal: the one non-emitting required context is position %s of the required set\n' "$want" "$pos"
+    fi
+  fi
 }
 RC21_PROSE_OUT="$(rc21_prose_report "$REPO_ROOT/.github/workflows" "$SPEC" "$MERGE_GATES_DOC")"
 if [ -z "$RC21_PROSE_OUT" ]; then
@@ -5791,6 +6193,26 @@ if [ "$(printf '%s\n' "$RC21_PROSE_MUT_OUT" | { grep -c '^PROSE' || true; } | tr
 else
   bad "editing a count word under the roster changed nothing — the prose is still gated by nothing, which is the state this clause exists to end:"
   printf '%s\n' "$RC21_PROSE_MUT_OUT" | sed 's/^/       /' >&2
+fi
+# …and the ORDINAL arm, the same mutation one sentence later: renumbering the
+# exempt row WITHOUT touching the table or any cardinal must red too. Until this
+# landed, `The fourth` was the last count word beneath the roster that nothing
+# read — the three cardinal phrases above all stayed green through it.
+RC21_ORD_MUT="$TMP/rc21-prose-reordinaled.md"
+sed 's/^The fourth, `PR references an active task`,/The fifth, `PR references an active task`,/' \
+  "$MERGE_GATES_DOC" > "$RC21_ORD_MUT"
+if ! cmp -s "$MERGE_GATES_DOC" "$RC21_ORD_MUT"; then
+  ok "…plant confirmed: the ordinal mutation actually edited the scratch page (the arm below is not reading an unmodified copy)"
+else
+  bad "the ordinal mutation changed nothing on the scratch page — the arm below would prove nothing"
+fi
+RC21_ORD_MUT_OUT="$(rc21_prose_report "$REPO_ROOT/.github/workflows" "$SPEC" "$RC21_ORD_MUT")"
+if [ "$(printf '%s\n' "$RC21_ORD_MUT_OUT" | { grep -c '^PROSE' || true; } | tr -d ' ')" -eq 1 ] \
+   && grep -q 'exempt by construction' <<<"$RC21_ORD_MUT_OUT"; then
+  ok "…and changing the ORDINAL alone (fourth -> fifth, every cardinal and the whole table untouched) reds by the phrase — exactly one PROSE line naming the derived sentence, so the position word is gated too"
+else
+  bad "renumbering the exempt row under the roster changed nothing — the ordinal is still the one count word beneath the table that nothing reads:"
+  printf '%s\n' "$RC21_ORD_MUT_OUT" | sed 's/^/       /' >&2
 fi
 # …and THE REFUSAL: a spec with no required contexts leaves one side empty, and
 # an empty side must refuse rather than agree with a page it never read.

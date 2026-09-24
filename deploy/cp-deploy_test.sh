@@ -117,15 +117,33 @@ echo "cp-deploy slot health-check status codes (pds-bl-w49)"
 # at ALL PASS, rc=0. Identical shape to the daemon-reload defect above: a second,
 # untouched occurrence answered for the broken one. Enumerating also means a
 # third probe added later is covered without touching this file.
-code_is_healthy() { echo "$1" | grep -qE "^(${HEALTH_RE})\$"; }  # replays the script's EXACT classification
+# THE SHAPE CHANGED, AND SO DID THIS READER (task-fb55d468c7dea75b). Both probes
+# used to classify with `echo "$code" | grep -qE '^(200|301|302)$'`, which is the
+# pipefail/SIGPIPE hazard scripts/pipefail-sigpipe-scan.sh ratchets: grep -q exits
+# at the first match, echo takes SIGPIPE, pipefail hands back 141, and a HEALTHY
+# code reads as unhealthy — under load, on the deploy's own health gate. They are
+# `case` now, which needs no pipe at all. This extraction follows the code rather
+# than pinning the old shape, and `code_is_healthy` replays a CASE pattern for the
+# same reason it used to replay a regex: the assertion must be the script's own
+# classification, not a second copy of it. (The replay lost its own `echo | grep -q`
+# in the move, which is one fewer site of the very shape this block now guards.)
+# `[[ =~ ]]`, not `case "$1" in ${HEALTH_RE})`: the `|` in a case pattern is
+# CASE SYNTAX, parsed before the expansion, so an alternation arriving inside a
+# variable is one literal string and every arm reds. That draft was written and
+# it failed here, loudly, which is the only reason this comment can be specific.
+# `=~` treats the expansion as an ERE, where `|` is the alternation it looks
+# like — and still no pipe, so the hazard this block now guards is not
+# reintroduced by its own replay.
+code_is_healthy() { [[ "$1" =~ ^(${HEALTH_RE})$ ]]; }
 n_health=0
 while IFS= read -r hl; do
   [ -n "$hl" ] || continue
   n_health=$((n_health + 1))
   lineno="${hl%%:*}"
   body="${hl#*:}"
-  HEALTH_RE="${body#*"grep -qE '^("}"
-  HEALTH_RE="${HEALTH_RE%%")\$'"*}"
+  # `  case "$code" in 200|301|302) ok=1; … ;; esac`  ->  `200|301|302`
+  HEALTH_RE="${body#*in }"
+  HEALTH_RE="${HEALTH_RE%%)*}"
   check "line $lineno: extracted the health-check regex class" "[ -n '$HEALTH_RE' ]"
   check "line $lineno: 200 (OK) classified healthy"                     "code_is_healthy 200"
   check "line $lineno: 301 (redirect) classified healthy"                "code_is_healthy 301"
@@ -134,7 +152,7 @@ while IFS= read -r hl; do
   check "line $lineno: 500 (server error) NOT healthy"                    "! code_is_healthy 500"
   check "line $lineno: 000 (curl failure / connection refused) NOT healthy" "! code_is_healthy 000"
 done <<EOF
-$(grep -n 'echo "\$code" | grep -qE' "$SCRIPT")
+$(grep -n 'case "\$code" in' "$SCRIPT")
 EOF
 # Both probes must still BE there. Deleting one entirely would otherwise leave
 # the survivor passing and this section silently half as strong.
@@ -206,6 +224,17 @@ case "${1:-}" in
         # The serving slot (blue) is spelled GONE on purpose: it LOOKS stale, so
         # only the by-name serving-slot guard can save it. If that guard is ever
         # dropped, this endpoint gets unplugged and the case reds.
+        # WEDGE_ORDER=tail puts the ONLY clearable endpoint LAST. The daemon
+        # imposes no order on `network inspect`, and the count-identity cases
+        # below need a list where a loop that stops early clears NOTHING —
+        # otherwise a short sweep still happens to disconnect the right one and
+        # the defect is invisible.
+        if [ "${WEDGE_ORDER:-head}" = tail ]; then
+          printf '%s\n' "b1000000blueGONE cloud-control_plane_blue-1"
+          printf '%s\n' "f0638a499a14LIVE cloud-db-1"
+          [ "${WEDGE_UNCLEARABLE:-0}" = 1 ] || printf '%s\n' "9a7aab2dba5bGONE cloud-control_plane_green-1"
+          exit 0
+        fi
         [ "${WEDGE_UNCLEARABLE:-0}" = 1 ] || printf '%s\n' "9a7aab2dba5bGONE cloud-control_plane_green-1"
         printf '%s\n' "f0638a499a14LIVE cloud-db-1"
         printf '%s\n' "b1000000blueGONE cloud-control_plane_blue-1"
@@ -1470,6 +1499,86 @@ $_anchors
 EOF
 fi
 
+# ===========================================================================
+# THE ENDPOINT SWEEP'S COUNT IDENTITY (task-fb55d468c7dea75b)
+#
+# `clear_wedged_endpoints` reads the daemon's endpoint list on fd 0
+# (`done <<EOF`), and its body already starts three subprocesses. The next one
+# added that reads stdin — an `ssh`, a `read`, a `docker` subcommand that
+# prompts — swallows the rest of the list and the loop ends early with no error
+# and no non-zero status. `$cleared` is read off that same loop, so a sweep that
+# reached endpoint 1 of 3 leaves the others WEDGED and the caller then logs
+# "none of cloud_default's endpoints is stale" — a false statement about the
+# network, and the exact misdiagnosis that kept the 2026-07-21 blackout running
+# for 48h47m.
+#
+# WEDGE_ORDER=tail puts the only clearable endpoint LAST, so a short sweep
+# clears nothing. All three cases drive the REAL fakes through $RUN_SCRIPT.
+echo
+echo "cp-deploy endpoint sweep count identity (task-fb55d468c7dea75b)"
+
+mut_splice() { # <src> <dst> <marker-name>
+  awk -v m="# MUT-SPLICE: $3" '{ print } index($0, m) { print "cat >/dev/null" }' "$1" > "$2"
+  grep -q '^cat >/dev/null$' "$2"
+}
+mut_cut() { # <src> <dst> <block-name>
+  awk -v a="# MUT-ANCHOR: $3" -v b="# MUT-END: $3" '
+    index($0, a) { skip = 1; cut = 1 }
+    !skip { print }
+    index($0, b) { skip = 0 }
+    END { if (!cut) exit 3 }' "$1" > "$2"
+}
+
+# ---- Case A (CONTROL): the endpoint last in the list is still cleared.
+setup_flip localhost:4100
+rc="$(run_flip WEDGE=1 WEDGE_ORDER=tail)"
+check "sweep control: the LAST endpoint in the list is still cleared, exit 0" "[ '$rc' = '0' ]"
+check "sweep control: exactly one disconnect ran" "[ \"\$(n_disconnect)\" = '1' ]"
+check "sweep control: the identity stayed silent" \
+  "! grep -q 'SHORT ENDPOINT SWEEP' '$FTMP/out.log'"
+
+# ---- Case B (SHORT READ): a stdin-draining child in the loop body.
+# NOT under $FTMP: setup_flip makes a FRESH $FTMP on every call, so a mutant
+# written there is gone by the time the next case runs it (rc=127, which reads
+# like a deploy failure and is really a missing file).
+MUTDIR="$(mktemp -d "${TMPDIR:-/tmp}/cp-deploy-mut.XXXXXX")"
+CP_SHORT="$MUTDIR/cp-deploy-endpoint-short.sh"
+if mut_splice "$SCRIPT" "$CP_SHORT" endpoint-count-identity; then
+  setup_flip localhost:4100
+  rc="$(RUN_SCRIPT="$CP_SHORT" run_flip WEDGE=1 WEDGE_ORDER=tail)"
+  check "sweep short: the identity REFUSES, naming both numbers (1 of 3)" \
+    "grep -q 'SHORT ENDPOINT SWEEP on cloud_default: examined 1 of 3 endpoint(s)' '$FTMP/out.log'"
+  check "sweep short: it says how many were never examined" \
+    "grep -q '2 endpoint(s) were never even examined' '$FTMP/out.log'"
+  check "sweep short: NOTHING was disconnected — the sweep never reached the stale one" \
+    "[ \"\$(n_disconnect)\" = '0' ]"
+  check "sweep short: the deploy still fails honestly (exit 13), it does not mask" "[ '$rc' = '13' ]"
+  check "sweep short: the live blue slot was never stopped" "[ -f '$DSTATE/running.4100' ]"
+else
+  check "sweep short: the MUT-SPLICE marker for the endpoint loop exists in cp-deploy.sh" "false"
+fi
+
+# ---- Case C (CUT): the same short read, with the identity removed.
+# The defect verbatim: the sweep examined one endpoint of three, cleared none,
+# and the deploy's own diagnosis is that NONE of the network's endpoints is
+# stale — while a stale one sits two rows further down the list it stopped
+# reading. Nothing in the log distinguishes this from a network that is genuinely
+# clean, which is what made the blackout take 48 hours.
+CP_CUT="$MUTDIR/cp-deploy-endpoint-cut.sh"
+if mut_cut "$CP_SHORT" "$CP_CUT" endpoint-count-identity; then
+  setup_flip localhost:4100
+  rc="$(RUN_SCRIPT="$CP_CUT" run_flip WEDGE=1 WEDGE_ORDER=tail)"
+  check "sweep cut: no refusal is printed at all" \
+    "! grep -q 'SHORT ENDPOINT SWEEP' '$FTMP/out.log'"
+  check "sweep cut: the deploy reports the network as having NOTHING stale (the false diagnosis)" \
+    "grep -q 'none of cloud_default.*endpoints is stale' '$FTMP/out.log'"
+  check "sweep cut: still nothing disconnected, still exit 13 — but now undiagnosable" \
+    "[ \"\$(n_disconnect)\" = '0' ] && [ '$rc' = '13' ]"
+else
+  check "sweep cut: the MUT-ANCHOR block for the endpoint identity exists in cp-deploy.sh" "false"
+fi
+rm -rf "$MUTDIR"
+
 cleanup_flip
 
 echo
@@ -1478,7 +1587,7 @@ echo
 # bound, never an exact total — checks are added over time and an exact count
 # would red on every addition, which trains people to bump the number instead
 # of reading it.
-MIN_CHECKS=195
+MIN_CHECKS=206
 echo "checks executed: $checks_ran (floor $MIN_CHECKS)"
 if [ "$checks_ran" -lt "$MIN_CHECKS" ]; then
   echo "  FAIL: only $checks_ran checks ran (floor $MIN_CHECKS) — this harness went VACUOUS; a green here would be meaningless"

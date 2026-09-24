@@ -184,6 +184,19 @@ set -euo pipefail
 # enumerated pds rows above, is what makes the corpus and the roster the
 # same set. The enumerated rows stay: they are cheap, and several name
 # inputs (the charter, docs/setup/personal-local.md) the globs do not cover.
+#
+# THE CONSOLE REFUSAL FENCE IS A PREDICATE TOO (task-ea44d7b4a12eaf38), and
+# its four rows are the same shape as axis d's. console-refusal-capture's
+# DERIVED arms enumerate a POPULATION from the tree — FENCE_GLOBS in
+# scripts/console-refusal-capture.mjs (cloud/priv/static/*.mjs,
+# cloud/priv/static/__preview__/*.mjs, scripts/console-*.mjs) plus
+# .github/workflows/*.yml for the EXCLUDED-reachability arms — and red when a
+# member ARRIVES unrostered. With only the harness and the module as rows, that
+# red could never land on the PR that caused it: it landed on main's tip hours
+# after the merge, on a check that is not one of the four required contexts, so
+# it blocked nothing and belonged to nobody. THREE rows closed three instances
+# of it (task-8f0f6512cd9d0055, task-64853e8025db5ab9, task-3f76bb5b8bcc15f8)
+# before anyone dispatched the check at the population it guards.
 roster='
 node-test-floor scripts/node-test-floor.mjs
 node-test-floor scripts/node-test-floor.test.sh
@@ -240,8 +253,15 @@ console-path-ratchet .github/workflows/console-harness.yml
 console-path-ratchet scripts/cloud-console-gate-shape.test.sh
 console-path-ratchet .github/workflows/cloud.yml
 console-path-ratchet .github/workflows/elixir.yml
+console-harness-pin scripts/console-harness.sh
+console-harness-pin scripts/console-harness-pin.test.sh
+console-harness-pin .github/workflows/console-harness.yml
 console-refusal-capture scripts/console-refusal-capture.mjs
 console-refusal-capture scripts/*.test.mjs
+console-refusal-capture cloud/priv/static/*.mjs
+console-refusal-capture cloud/priv/static/__preview__/*.mjs
+console-refusal-capture scripts/console-*.mjs
+console-refusal-capture .github/workflows/*.yml
 weekly-changelog-backfill-guard scripts/weekly-changelog-backfill.test.sh
 weekly-changelog-backfill-guard .github/workflows/weekly-changelog.yml
 pds-harnesses scripts/pds-ledger-census.sh
@@ -476,6 +496,9 @@ mix-test-strict scripts/mix-test-strict.test.sh
 scratchpad-reaper scripts/scratchpad-reaper.sh
 scratchpad-reaper scripts/scratchpad-reaper.test.sh
 scratchpad-reaper scripts/disk-headroom-guard.sh
+echo-json-parse scripts/echo-json-parse-guard.test.sh
+echo-json-parse scripts/fixtures/echo-json-parse-row.json
+echo-json-parse .claude/skills/session/SKILL.md
 '
 self=".github/workflows/shell-harnesses.yml"
 self_script="scripts/shell-harness-dispatch.sh"

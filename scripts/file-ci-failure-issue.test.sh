@@ -429,7 +429,11 @@ if grep -q 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab' "$BODY_FILE"; then bad "
 if grep -q 'eyJhbGciOiJIUzI1NiJ9' "$BODY_FILE"; then bad "redaction: a Bearer value reached the body"; else ok "redaction: Bearer value masked"; fi
 if grep -q 'bp_supersecret_value_123' "$BODY_FILE"; then bad "redaction: BARKPARK_ADMIN_TOKEN value reached the body"; else ok "redaction: *_TOKEN= value masked"; fi
 if grep -q 'hunter22' "$BODY_FILE"; then bad "redaction: DB_PASSWORD value reached the body"; else ok "redaction: *_PASSWORD= value masked"; fi
-if grep -q 'BARKPARK_ADMIN_TOKEN=\[REDACTED\]' "$BODY_FILE" && grep -q 'harmless=keep-me' "$BODY_FILE"; then ok "redaction: the key survives, the value does not, and plain text is untouched"; else bad "redaction: key/plain-text handling wrong: $(grep -o 'BARKPARK_ADMIN_TOKEN[^ ]*' "$BODY_FILE" | head -1) / $(grep -c 'harmless=keep-me' "$BODY_FILE")"; fi
+# The diagnostic bounds the PRODUCER (grep -m1), it does not truncate it with a
+# reader: this file runs under `set -o pipefail`, and `grep … | head -1` hands the
+# producer SIGPIPE the instant it writes a second match — 141 out of a line whose
+# only job is to say what went wrong. See scripts/pipefail-sigpipe-scan.sh.
+if grep -q 'BARKPARK_ADMIN_TOKEN=\[REDACTED\]' "$BODY_FILE" && grep -q 'harmless=keep-me' "$BODY_FILE"; then ok "redaction: the key survives, the value does not, and plain text is untouched"; else bad "redaction: key/plain-text handling wrong: $(grep -o -m1 'BARKPARK_ADMIN_TOKEN[^ ]*' "$BODY_FILE") / $(grep -c 'harmless=keep-me' "$BODY_FILE")"; fi
 # mutation: with redact() disabled the token MUST reach the body (proves the case can fail)
 mut="$work/subject-unredacted.sh"; sed 's/^detail="\$(printf .%s. "\$detail" | redact)"$/: # redaction disarmed for the mutation/' "$SCRIPT" > "$mut"
 if grep -q 'redaction disarmed' "$mut"; then

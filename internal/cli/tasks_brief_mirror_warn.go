@@ -57,27 +57,31 @@ import (
 //     the previous pass's output — so `foo_**_bar` strips to `foobar` where the
 //     composer gives `foo__bar`.
 //
-// task-8ba550b59141bccb reported that, task-b641646addba4bdf carries the
-// server-side remedy, and BOTH ARE STILL OPEN. Measured over the shared corpus
-// testdata/brief_strip_corpus.json: 19 of 1,313 inputs diverge.
+// THAT IS PAST TENSE AS OF task-b641646addba4bdf. The server now strips in ONE
+// pass too — :binary.replace(text, @stripped, "", [:global]) — and agrees with
+// the composer on all 1,313 rows of the shared corpus
+// (testdata/brief_strip_corpus.json), where the reducing form missed 19. The
+// cross-language arm that keeps it that way is the ExUnit half,
+// api/test/barkpark/tasks/brief_mirror_strip_corpus_test.exs, reading THIS
+// SAME FILE.
 //
-// THIS WARNING'S CANONICAL RULE IS THE COMPOSER'S ONE PASS. Three reasons, all
-// argued at length in tasks_brief_strip_parity_test.go: the server declares the
-// composer as its contract and is the side that breaks it; the composer is
-// upstream (CLI writes, server re-derives); and rescanning destroys literal
-// characters that only became adjacent when a delimiter was removed, which a
-// mirror whose whole job is not to rewrite prose must never do.
+// THIS WARNING'S CANONICAL RULE IS THE ONE PASS. Three reasons, all argued at
+// length in tasks_brief_strip_parity_test.go: the server declared the composer
+// as its contract and was the side that broke it; the composer is upstream
+// (CLI writes, server re-derives); and rescanning destroys literal characters
+// that only became adjacent when a delimiter was removed, which a mirror whose
+// whole job is not to rewrite prose must never do.
 //
-// AND THE WARNING TOLERATES THE OTHER RULE RATHER THAN FIRING ON IT. A brief
-// text that fails the one-pass expectation but MATCHES the three-pass one is a
-// faithful mirror written by the server as it behaves TODAY. That is legacy
-// normalisation, not divergence, and warning on it would be the warning lying
-// on exactly the rows that provoked the finding. Measured 2026-09-17 over a
-// 200-row live sample: purpose EXACT(one pass) 147, NO_BLOCK 39, DIVERGENT 13,
-// and EXACT_THREE_PASS_ONLY exactly 1 — task-8ba550b59141bccb ITSELF, the row
-// whose own description quotes the diverging shapes. It stays quiet, and it
-// stays quiet for the right reason: not because the comparator missed it, but
-// because a three-pass-faithful mirror is not a false record.
+// THE LEGACY TOLERANCE IS GONE, deliberately and on the tripwire's own
+// instructions (tasks_brief_strip_server_pin_test.go, now deleted with it).
+// While the server rescanned, a brief matching only the three-pass output was a
+// FAITHFUL mirror and warning on it would have been the warning lying on
+// exactly the rows that provoked the finding. Now nothing produces that text,
+// so a row carrying it is a stale record like any other and says so. Measured
+// 2026-09-17 over all 9,119 published task documents, the class holds exactly
+// ONE row — task-8ba550b59141bccb itself — which is why removing the tolerance
+// costs one newly-warning row and not a channel nobody reads. It is in the
+// fixture below, now asserted LOUD.
 //
 // The verdicts above are a SPLIT, not a total. A uniform verdict across a
 // population is the signature of a broken comparator, and this family has
@@ -110,19 +114,6 @@ var briefMirrorTerminalStatuses = map[string]bool{"done": true, "cancelled": tru
 // correct side, and tasks_brief_strip_parity_test.go for the proof.
 func briefPurposeStripOnePass(s string) string {
 	return strings.TrimSpace(strings.NewReplacer("**", "", "__", "", "`", "").Replace(s))
-}
-
-// briefPurposeStripLegacyThreePass reproduces the SERVER's current shape
-// (brief_mirror.ex strip_markdown/1). It is NEVER an expectation — it exists
-// only so the warning can recognise a mirror that is faithful under the rule
-// the server actually ran, and stay quiet on it. When task-b641646addba4bdf
-// lands the server's single-pass remedy this function becomes a pure
-// no-longer-reachable tolerance, and the rows it covers become EXACT.
-func briefPurposeStripLegacyThreePass(s string) string {
-	for _, pattern := range []string{"**", "__", "`"} {
-		s = strings.ReplaceAll(s, pattern, "")
-	}
-	return strings.TrimSpace(s)
 }
 
 // briefMirrorCriterionTexts is resync_criteria/2's rule, exactly: the criterion
@@ -247,7 +238,7 @@ func briefMirrorDivergenceOf(d briefMirrorDoc) (briefMirrorDivergence, bool) {
 			if want == "" {
 				continue
 			}
-			if got == want || got == briefPurposeStripLegacyThreePass(*d.Description) {
+			if got == want {
 				continue
 			}
 			div.Blocks = append(div.Blocks, "purpose-copy (mirrors `description`)")

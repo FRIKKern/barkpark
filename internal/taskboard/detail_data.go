@@ -17,6 +17,9 @@ package taskboard
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -85,10 +88,17 @@ func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 // successive re-lists from one board can walk only the changed prefix
 // (corpus.go). One cache per fetcher — never a package global — so two boards,
 // or two tests, can never seed each other's corpus.
-func newSnapshotFetcher() func(*apiclient.Client) (Snapshot, DetailIndex, error) {
+//
+// cacheDir/cacheKey address the PERSISTED base (corpus_persist.go): the same bp
+// config dir and scope key the first-paint snapshot cache uses. They are passed
+// in rather than resolved here so a test can point the whole seam at a
+// t.TempDir(), and an empty cacheDir disables persistence entirely — which is
+// what a board with no resolvable config dir gets, and it is byte-identical to
+// the pre-persistence behaviour.
+func newSnapshotFetcher(cacheDir, cacheKey string) func(*apiclient.Client) (Snapshot, DetailIndex, error) {
 	// live:true — this cache outlives one fetch, which is what licenses the brief
 	// prime projection and the rolling event tail (corpus.go primeView).
-	cc := &corpusCache{live: true}
+	cc := &corpusCache{live: true, persistDir: cacheDir, persistKey: cacheKey}
 	return func(c *apiclient.Client) (Snapshot, DetailIndex, error) {
 		return fetchSnapshotWith(c, cc)
 	}
@@ -132,7 +142,7 @@ func fetchSnapshotWith(c *apiclient.Client, cc *corpusCache) (Snapshot, DetailIn
 		// decodeTaskListFull — the filtered response is the same {ok,docs}
 		// envelope, and {"docs":[]} legitimately decodes to zero rows with a
 		// nil error (an empty in-flight population is a fact, not a failure).
-		inflightTasks, inflightDetails, _, inflightErr = fetchTaskPages(ctx, c, inflightFetchPath)
+		inflightTasks, inflightDetails, _, inflightErr = fetchTaskPages(ctx, c, inflightFetchPath+cc.listView())
 	}()
 	wg.Wait()
 	if listErr != nil {
@@ -290,4 +300,53 @@ func (d TaskDetail) PaperRefs() []string {
 		add(p)
 	}
 	return refs
+}
+
+// ─── per-row hydration off the always-full row route ───────────────────────
+
+// taskDetailPath is the single-row GET. The route is ALWAYS the full card —
+// `?view=` is a LIST param and this route does not read it — so one request
+// restores every content field `?view=board` deleted for the one row a reader
+// actually opened.
+const taskDetailPath = "/v1/tasks/"
+
+// FetchTaskDetailByID hydrates ONE task's full TaskDetail from GET
+// /v1/tasks/:doc_id.
+//
+// WHY IT EXISTS. The live board's list/poll path asks for `?view=board`
+// (corpusCache.listView), which deletes `content` — so the DetailIndex the list
+// body hydrates carries the board ROW (identity, lifecycle, claim, the digest-
+// derived ladder and badge) and none of the prose the detail pane draws:
+// description, brief, evidence, code_refs, purpose, the blocked/closed/
+// disposition strips. This is the fetch that pays for exactly the rows a reader
+// opens, which is the trade the projection was cut for: the corpus walk goes
+// from 105,755,961 B to 13,035,765 B and a single opened row costs a few KB.
+//
+// It decodes through the SAME taskWire/toTask/toDetail the list path uses, so
+// there is one decode contract and one tolerance contract, not two. The doc's
+// own board row is rebuilt from the full card here; applying it is the caller's
+// job (Model.applyTaskDetail re-embeds the LIVE snapshot row over it, so a
+// hydration in flight across a re-list can never resurrect a stale lifecycle).
+func FetchTaskDetailByID(c *apiclient.Client, docID string) (TaskDetail, error) {
+	if strings.TrimSpace(docID) == "" {
+		return TaskDetail{}, fmt.Errorf("fetch task detail: empty doc_id")
+	}
+	body, err := getJSON(c, taskDetailPath+url.PathEscape(docID))
+	if err != nil {
+		return TaskDetail{}, err
+	}
+	var env struct {
+		Doc *taskWire `json:"doc"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return TaskDetail{}, fmt.Errorf("decode task detail: %w", err)
+	}
+	// Nil STRICTLY before deref, and an absent `doc` is a refusal rather than a
+	// zero TaskDetail: a blank pane that claims to be the row is the silent lie
+	// this whole seam exists to avoid.
+	if env.Doc == nil {
+		return TaskDetail{}, fmt.Errorf("decode task detail: response carried no %q key%s", "doc", bodyHint(body))
+	}
+	w := *env.Doc
+	return w.toDetail(w.toTask()), nil
 }

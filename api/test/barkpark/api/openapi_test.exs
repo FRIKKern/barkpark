@@ -193,6 +193,66 @@ defmodule Barkpark.Api.OpenApiTest do
     refute Map.has_key?(get_doc, "requestBody")
   end
 
+  # scaffy-backlog-doc-patch-file-flag. request_body/2 retypes a body as an
+  # `application/octet-stream` binary upload when the command declares a
+  # `file`-typed flag. That rule is right for a RAW upload (media bytes,
+  # doc.mutate's NDJSON payload) and wrong for the document mutations, where
+  # the CLI reads the file client-side and folds its JSON into the mutation
+  # envelope. POST /v1/data/mutate/{dataset} accepts JSON and only JSON, so
+  # declaring `--file` on doc.patch must not move its media type.
+  #
+  # Without the `mutation_op` guard in OpenApi.request_body/2 this test reds
+  # the moment doc.patch declares the flag — which is exactly the descriptor
+  # regression it exists to refuse.
+  test "a mutation command's --file does not retype its JSON body as a binary upload",
+       %{spec: spec, manifest: manifest} do
+    patch =
+      manifest["commands"]
+      |> Enum.find(&(&1["id"] == "doc.patch"))
+
+    # Precondition: the subject really does declare a file flag, or this test
+    # asserts nothing.
+    assert Enum.any?(patch["flags"], &(&1["type"] == "file")),
+           "doc.patch declares no file flag — this test would be vacuous"
+
+    assert patch["mutation_op"] == "patch"
+
+    mutate = get_in(spec, ["paths", "/v1/data/mutate/{dataset}", "post"])
+    content = mutate["requestBody"]["content"]
+
+    assert Map.has_key?(content, "application/json"),
+           "POST /v1/data/mutate/{dataset} lost its application/json body: #{inspect(Map.keys(content))}"
+
+    refute Map.has_key?(content, "application/octet-stream")
+    assert content["application/json"]["schema"]["$ref"] == "#/components/schemas/Document"
+
+    # And the declaration moved neither authorization nor the operation.
+    assert mutate["operationId"] == "doc.patch"
+    assert mutate["x-barkpark-scope"] == "write"
+  end
+
+  # The control for the arm above: a command whose `--file` IS the raw wire
+  # body keeps its octet-stream typing. If this ever fails together with the
+  # arm above, the guard was written as a blanket rule rather than a
+  # discriminator.
+  test "a genuine raw-upload file flag still types the body as octet-stream", %{
+    manifest: manifest
+  } do
+    upload =
+      manifest["commands"]
+      |> Enum.find(&(&1["id"] == "doc.mutate"))
+
+    assert upload, "doc.mutate is not in the manifest"
+    assert Enum.any?(upload["flags"], &(&1["type"] == "file"))
+    refute upload["mutation_op"], "doc.mutate gained a mutation_op — this control is now vacuous"
+
+    spec = OpenApi.spec(%{manifest | "commands" => [upload]})
+    post = get_in(spec, ["paths", "/v1/data/mutate/{dataset}", "post"])
+
+    assert Map.has_key?(post["requestBody"]["content"], "application/octet-stream")
+    refute Map.has_key?(post["requestBody"]["content"], "application/json")
+  end
+
   test "scoped commands emit a /w/.../p/... mirror path", %{spec: spec} do
     scoped =
       get_in(spec, [

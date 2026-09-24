@@ -382,6 +382,44 @@ defmodule Barkpark.Tasks.StageTest do
       assert resp.status == 422
       assert Jason.decode!(resp.resp_body)["reason"] == "illegal_transition"
     end
+
+    # THE ARM THAT MEASURES `Transitions.legal?/2` AT THIS DOOR.
+    #
+    # `check_stageable/2` is `(to in @stageable or from == to) and
+    # Transitions.legal?(from, to)`. Every refusal above names a target OUTSIDE
+    # `@stageable` (`done`, `in_progress`, `cancelled`), so the FIRST half
+    # answers and the AND-guard is never consulted: deleting
+    # `and Transitions.legal?(from, to)` from stage.ex left this whole file at
+    # 37 tests, 0 failures.
+    #
+    # `done → considering` is the shape only the AND-guard can refuse: the
+    # target IS stageable, `from != to`, and D7 forbids a terminal row
+    # re-entering thought (transitions_test.exs "done|cancelled → considering|
+    # researching is refused"). The precondition is asserted below so the arm
+    # cannot quietly become another `@stageable` refusal.
+    test "a DONE row staged to considering is a 422 — the target is stageable, the EDGE is not",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-done-to-considering")
+      task = mk_task!(doc_id, scope, %{"lifecycle_status" => "done"})
+
+      # PRECONDITION: the first half of the conjunction PERMITS this call, so a
+      # refusal can only come from Transitions.legal?/2.
+      assert "considering" in Barkpark.Tasks.Stage.stageable_targets()
+      refute Barkpark.Tasks.Transitions.legal?("done", "considering")
+
+      resp = stage(conn, doc_id, %{state: "considering", worker: "cycle-1", object: "research"})
+      assert resp.status == 422
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["reason"] == "illegal_transition"
+      assert payload["from"] == "done"
+      assert payload["to"] == "considering"
+
+      # Nothing moved, and no thought lease was minted on a finished row.
+      row = reload(task)
+      assert row.content["lifecycle_status"] == "done"
+      refute Map.has_key?(row.content, "engagement")
+    end
   end
 
   describe "POST /v1/tasks/:doc_id/stage — terminal-reopen truth (S1)" do
@@ -456,9 +494,17 @@ defmodule Barkpark.Tasks.StageTest do
   #
   # The widening is `to in @stageable or from == to`. These fixtures pin BOTH
   # halves — that the adjudication door opened, and that the MOVEMENT door did
-  # not. Revert the `or from == to` clause and the first test reds with
-  # {:illegal_transition, "done", "done"}; delete the `and Transitions.legal?/2`
-  # AND-guard and the open→done fixtures red instead.
+  # not. Revert the `or from == to` clause and these fixtures red with
+  # {:illegal_transition, "done", "done"} (measured: 37 tests, 4 failures).
+  #
+  # CORRECTED 2026-09-21: this comment used to add "delete the
+  # `and Transitions.legal?/2` AND-guard and the open→done fixtures red
+  # instead". They do NOT. `done` is outside `@stageable` and `open != done`,
+  # so the FIRST half of the conjunction already refuses open→done and the
+  # AND-guard is never reached — deleting it left the whole file green at
+  # 37 tests, 0 failures. The arm that actually measures the AND-guard is
+  # "a DONE row staged to considering is a 422", in the illegal-transitions
+  # block above, where the target IS stageable.
   describe "POST /v1/tasks/:doc_id/stage — terminal same-state adjudication (PDS wave 25)" do
     test "done → done WITH a disposition succeeds, stays done, and leaves the claim byte-identical",
          %{conn: conn, scope: scope} do
@@ -812,6 +858,47 @@ defmodule Barkpark.Tasks.StageTest do
         assert after_row.content == before.content
         refute Map.has_key?(after_row.content, "disposition_rerun")
         assert after_row.content["lifecycle_status"] == "open"
+      end
+    end
+
+    test "a definition-shaped prefix probe is refused with its one-character remedy (PDS-D750)",
+         %{conn: conn, scope: scope} do
+      # `git grep` matches a SUBSTRING: this pattern still hits after a suffix
+      # rename, so it can never red. The refusal must NAME the terminated
+      # spelling and the family-probe remedy, and both must then be accepted —
+      # a refusal whose remedy is itself refused is a lie about its own remedy.
+      doc_id = uniq("stage-rerun-prefix")
+      task = mk_task!(doc_id, scope)
+      before = reload(task)
+
+      resp =
+        stage(conn, doc_id, %{
+          state: "considering",
+          note: "cites defp apply_engagement",
+          rerun:
+            "git grep -n 'defp apply_engagement' origin/main -- api/lib/barkpark/tasks/stage.ex"
+        })
+
+      assert resp.status == 422
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["reason"] == "unfalsifiable_rerun"
+      assert payload["shape"] == "prefix_match_probe"
+      assert payload["message"] =~ "PREFIX match"
+      assert payload["message"] =~ "'defp apply_engagement('"
+      assert payload["message"] =~ "'defp handle_[a-z]'"
+      assert reload(task).content == before.content
+
+      for rerun <- [
+            "git grep -n 'defp apply_engagement(' origin/main -- api/lib/barkpark/tasks/stage.ex",
+            "git grep -n 'defp handle_[a-z]' origin/main -- api/lib/barkpark/tasks/stage.ex",
+            # A REFERENCE ending in an identifier is NOT refused (the arm is narrow).
+            "git grep -n ROSTER_PAGE_LIMIT origin/main -- cloud/priv/static/__preview__/seal-predicate.mjs"
+          ] do
+        ok_id = uniq("stage-rerun-prefix-ok")
+        ok_task = mk_task!(ok_id, scope)
+        ok_resp = stage(conn, ok_id, %{state: "considering", note: "checkable", rerun: rerun})
+        assert ok_resp.status == 200, "#{inspect(rerun)} was REFUSED"
+        assert reload(ok_task).content["disposition_rerun"] == rerun
       end
     end
 

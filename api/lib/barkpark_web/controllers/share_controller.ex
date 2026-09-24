@@ -336,6 +336,16 @@ defmodule BarkparkWeb.ShareController do
   tenant's share — a live tenant has a resolvable workspace and is therefore
   403-confined above. `:require_admin` still gates the verb.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, params) do
     scope = params["scope"]
 
@@ -365,7 +375,7 @@ defmodule BarkparkWeb.ShareController do
   `POST /v1/shares/tokens` — mint a scoped-share EDIT token (P5).
 
   Body/params: `scope` (required), `surfaces` (required, comma list of
-  `docs,media`), `ttl` (optional seconds; default 7d, cap 1y), `label`
+  `docs,media`), `ttl` (optional seconds; default 7d; over 365d → 422 naming the max, never clamped), `label`
   (optional). 201 with the RAW token shown ONCE; 422 if the scope is not
   `:edit`-shared for the surfaces; 403 when the caller is not a workspace
   admin of the SCOPE's workspace (see the tenancy-confinement note above).
@@ -460,6 +470,16 @@ defmodule BarkparkWeb.ShareController do
   existence oracle. `Barkpark.Auth.revoke_token/1` itself stays UNSCOPED — 9 of
   its 12 call sites have no HTTP actor.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def revoke_token(conn, %{"token_id" => token_id}) do
     if revocable_by?(conn, token_id) do
       do_revoke(conn, token_id)
@@ -628,6 +648,12 @@ defmodule BarkparkWeb.ShareController do
   defp describe_token_error(:no_surfaces), do: "no valid surfaces"
   defp describe_token_error(:unknown_scope), do: "the workspace/project does not exist"
   defp describe_token_error(%Ecto.Changeset{}), do: "validation failed"
+
+  # ttl over the share max age: REFUSED naming the max, never clamped
+  # (task-a0f8cfd7f4800236).
+  defp describe_token_error({:expiry_exceeds_max, _, _} = reason),
+    do: Barkpark.Auth.TokenExpiry.message(reason)
+
   defp describe_token_error(other), do: inspect(other)
 
   defp share_json(%Sharing.Share{} = s, source) do

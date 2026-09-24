@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -295,7 +296,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			// on a never-published document, i.e. the guard's --delete-unpublished
 			// semantics (discard_draft_guard.go): here the absence of a twin is not
 			// probed but KNOWN, because this process created the draft.
-			return discardCreatedTaskDraft(out, ctx, draftID, bareID)
+			return discardCreatedTaskDraft(out, ctx, draftID, bareID, publishRefusalCode(pBody))
 		}
 		// PDS wave 48: "published" used to be asserted here off the 2xx alone.
 		// It is now read off the record the publish mutation returned, so a
@@ -399,13 +400,18 @@ func renderTaskCreateResidue(out *writer, class, draftID, bareID string) {
 // Returns the process exit code: non-zero either way (the create --publish did
 // not do what was asked), but the two paths differ in what is left on the
 // server, and both say which.
-func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID string) int {
-	if why := discardCreatedTaskDraftQuiet(ctx, bareID); why != "" {
+func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID, refusalCode string) int {
+	why, byServer := discardCreatedTaskDraftQuiet(ctx, bareID, refusalCode)
+	if why != "" {
 		out.errf("  %s", why)
 		renderTaskCreateResidue(out, residueDiscardFailed, draftID, bareID)
 		return exitGeneric
 	}
-	out.errf("  discarded %s — the refused publish left NO draft behind (nothing to claim, nothing on the queue).", draftID)
+	if byServer {
+		out.errf("  the server already discarded %s when it refused the publish — the refused publish left NO draft behind (nothing to claim, nothing on the queue).", draftID)
+	} else {
+		out.errf("  discarded %s — the refused publish left NO draft behind (nothing to claim, nothing on the queue).", draftID)
+	}
 	out.errf("  nothing was kept: re-file with the refusal above fixed, e.g. bp task create --publish …")
 	return exitGeneric
 }
@@ -416,14 +422,37 @@ func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID 
 // output shapes need the same side effect and DIFFERENT renderings — stderr
 // prose for a human, a `discard_error` key inside one JSON envelope for a
 // script — and doing the discard in two places is how the two drift.
-func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID string) string {
+//
+// ALREADY GONE IS GONE (task-9a97e96c35fba472). On a duplicate_of refusal the
+// SERVER deletes the refused draft itself (Lifecycle.discard_refused_duplicate_draft/5,
+// re-run after the batch rollback by Mutations.compensating_discard/4) and says
+// so in the refusal message, so this discard answers 404 not_found. That 404 is
+// the cleanup having already happened, not a failure of it: the second return
+// is true and no reason is given. The exemption is keyed on BOTH codes — the
+// refusal's duplicate_of and the discard's not_found — so a 404 after any other
+// refusal (where no server-side discard ran) is still residue, as is any other
+// discard failure after a duplicate_of. A duplicate_of refusal on a CLAIMED
+// draft keeps the draft server-side; the discard then finds it, so that path
+// never reaches the exemption.
+func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID, refusalCode string) (string, bool) {
 	op := map[string]any{"discardDraft": map[string]any{"id": bareID, "type": "task"}}
 	status, body, err := sendTaskMutations(ctx, []map[string]any{op}, "")
 	switch {
 	case err != nil:
-		return fmt.Sprintf("the follow-up discard never reached the server (%v)", err)
+		return fmt.Sprintf("the follow-up discard never reached the server (%v)", err), false
+	case refusalCode == "duplicate_of" && status == http.StatusNotFound && classifyErrorBody(status, body).code == "not_found":
+		return "", true
 	case status < 200 || status >= 300:
-		return "the follow-up discard was refused: " + mutateErrorMessage(status, body)
+		return "the follow-up discard was refused: " + mutateErrorMessage(status, body), false
+	}
+	return "", false
+}
+
+// publishRefusalCode is the server's error.code on a refused publish ("" when
+// the body carries no canonical envelope).
+func publishRefusalCode(body []byte) string {
+	if env, ok := apierr.Parse(body); ok {
+		return env.Code
 	}
 	return ""
 }
@@ -445,7 +474,7 @@ func renderCreatePublishRefusalEnvelope(out *writer, ctx manifest.Context, statu
 		return 0, false
 	}
 	ae := classifyError(status, body)
-	discardErr := discardCreatedTaskDraftQuiet(ctx, bareID)
+	discardErr, _ := discardCreatedTaskDraftQuiet(ctx, bareID, publishRefusalCode(body))
 
 	payload := map[string]any{
 		"draft_id":        draftID,

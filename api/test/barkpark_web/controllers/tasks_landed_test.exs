@@ -199,8 +199,56 @@ defmodule BarkparkWeb.TasksLandedTest do
       assert body["message"] =~ "merge-shaped"
       assert body["message"] =~ "merge_gate"
 
+      # THE FLAGLESS DOOR keeps its original sentence, and it is TRUE here:
+      # this row carries no `merge_gate` key and its text really does say
+      # nothing merge-shaped.
+      assert body["message"] =~ "its wording says nothing about being merge-gated"
+
       # Nothing was written — the digest did not sneak in behind the refusal.
       # (The flip and the digest ride ONE CAS.)
+      fresh = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+      assert fresh.status == 200
+      refute Map.has_key?(Jason.decode!(fresh.resp_body)["doc"]["content"], "landed")
+    end
+
+    # THE VETOED DOOR ON THE WIRE (task-c5ca82cb0a49ab53). This is the test that
+    # reds if the false clause comes back. The row's wording is emphatically
+    # merge-shaped — "MERGE-GATED … PR merged to main" — and the ONLY thing
+    # refusing it is the author's explicit `"merge_gate": false`, which
+    # short-circuits `merge_shaped?/1` before the prose is read. Re-measured
+    # 2026-09-22 over the live corpus: 29 criteria are shaped exactly like this
+    # one, and every one of them used to be told its wording was silent.
+    test "an EXPLICIT merge_gate:false is refused for the FLAG, and the message says so",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(scope, %{
+          "acceptance_criteria" => [
+            %{
+              "criterion" =>
+                "MERGE-GATED (the LEAD closes this): the PR merged to main, sha recorded here.",
+              "met" => false,
+              "merge_gate" => false
+            }
+          ]
+        })
+
+      assert {409, body} = mark(conn, task, %{commit: "aaa", note: "merged", criterion: 0})
+
+      # The WIRE TOKEN is unchanged — the bp CLI and every caller match on it.
+      assert body["ok"] == false
+      assert body["reason"] == "criterion_not_merge_shaped"
+
+      # The message names the FIELD as the cause and the wording as irrelevant.
+      assert body["message"] =~ ~s|declared "merge_gate": false|
+      assert body["message"] =~ "VETOES the wording"
+
+      # THE REGRESSION GUARD: the false clause must not be reachable on this
+      # door. It is the sentence that sent readers to rewrite a criterion whose
+      # text was never consulted.
+      refute body["message"] =~ "its wording says nothing about being merge-gated"
+      refute body["message"] =~ "wording says nothing"
+
+      # Nothing was written.
       fresh = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
       assert fresh.status == 200
       refute Map.has_key?(Jason.decode!(fresh.resp_body)["doc"]["content"], "landed")

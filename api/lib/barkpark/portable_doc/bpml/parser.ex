@@ -825,29 +825,6 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  # Body rows arrive as lists of cells, a spanning cell as {:span, nodes, colspan, rowspan}.
-  defp table_split_spans(rows) do
-    {rows, spans} =
-      rows
-      |> Enum.with_index()
-      |> Enum.map_reduce([], fn {cells, r}, acc ->
-        {plain, acc} =
-          cells
-          |> Enum.with_index()
-          |> Enum.map_reduce(acc, fn
-            {{:span, nodes, cs, rs}, c}, acc ->
-              {nodes, [%{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} | acc]}
-
-            {nodes, _c}, acc ->
-              {nodes, acc}
-          end)
-
-        {plain, acc}
-      end)
-
-    {rows, Enum.reverse(spans)}
-  end
-
   defp build_block("section", attrs, sc, cur) do
     if sc do
       {:ok,
@@ -1728,5 +1705,28 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   defp advance_one({<<_::utf8, rest::binary>>, ln}), do: {rest, ln}
   defp advance_one(cur), do: cur
 
+  # Body rows arrive as lists of cells, a spanning cell as {:span, nodes, colspan, rowspan}.
   defp err(code, message, line, hint), do: %{code: code, message: message, line: line, hint: hint}
+
+  defp table_split_spans(rows) do
+    {rows, spans} =
+      rows
+      |> Enum.with_index()
+      |> Enum.map_reduce([], fn {cells, r}, acc ->
+        {plain, acc} =
+          cells
+          |> Enum.with_index()
+          |> Enum.map_reduce(acc, fn
+            {{:span, nodes, cs, rs}, c}, acc ->
+              {nodes, [%{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} | acc]}
+
+            {nodes, _c}, acc ->
+              {nodes, acc}
+          end)
+
+        {plain, acc}
+      end)
+
+    {rows, Enum.reverse(spans)}
+  end
 end

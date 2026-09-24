@@ -156,11 +156,63 @@ defmodule BarkparkWeb.TasksController.Params do
   # ─── Render / shape ─────────────────────────────────────────────────────
 
   # axi-s1 (R1): parse the optional `?view=` request param into a render view.
-  # ONLY the exact string "brief" opts in; absent, unknown, or non-string
-  # values (Phoenix array/map params) all fall back to :full — the server
-  # default STAYS full so SDK/Studio/taskboard consumers are untouched.
+  # ONLY the exact strings "brief" and "board" opt in; absent, unknown, or
+  # non-string values (Phoenix array/map params) all fall back to :full — the
+  # server default STAYS full so SDK/Studio/taskboard consumers are untouched.
+  #
+  # THE THREE VIEWS, and what each one is FOR:
+  #
+  #   * `full` (default) — the bd-compatible card with the whole `content`
+  #     echo. `bp task get` and every consumer that reads a task's prose.
+  #   * `brief` — the AXI brief card v2: a different KEY SET (criteria_met /
+  #     criteria_total, no `type`, no `dependency_count`), a deliberate diet
+  #     for agent list reads.
+  #   * `board` — the FULL card with the `content` echo REMOVED and ONE key
+  #     added in its place: `content_digest`, the bounded per-criterion state
+  #     sequence + completeness booleans the board reads on the ROW path and
+  #     cannot rebuild from the fraction. See `render_doc/2`'s `:board` clause
+  #     for why this is a subtraction and not a third key set, and for what
+  #     the digest carries.
+  @views ~w(full brief board)
+
   def parse_view("brief"), do: :brief
+  def parse_view("board"), do: :board
   def parse_view(_), do: :full
+
+  @doc """
+  The declared `?view=` value set, in manifest order. ONE owner, read by the
+  index route's strict parser below and by the contract tests that pin the
+  accepted set — so a fourth view cannot be added at the renderer and stay
+  invisible to the refusal.
+  """
+  def views, do: @views
+
+  @doc """
+  STRICT `?view=` for `GET /v1/tasks` only: an undeclared value is
+  `{:error, {:unknown_view, value}}` (a named 400 at the controller), never a
+  silent fall back to `:full`.
+
+  WHY THE INDEX AND NOT EVERY ROUTE. A typo'd view on THIS route is the
+  expensive mistake: `?view=boad` silently serves the full corpus echo —
+  measured at ~11 MB per page on the live ledger, which is the exact defect
+  `board` exists to remove — and the caller reads a 200 it cannot tell from a
+  cheap one. It is also the only route where `reject_unknown_flat_params/2`
+  already closed the FLAT namespace, so a strict value check is the same door's
+  other half rather than a new rule.
+
+  `/v1/tasks/ready` and `/v1/tasks/prime` keep the lenient fallback ON PURPOSE:
+  `tasks_controller_test.exs`, "absent and unknown view both return the full
+  shape unchanged", pins `ready?view=bogus` → full today. Flipping that is a
+  wider contract decision (it can break a live CLI), not something to smuggle
+  in beside a projection. The asymmetry is stated here so the next reader finds
+  a decision, not an oversight.
+  """
+  def parse_index_view(%{"view" => v}) when is_binary(v) do
+    if v in @views, do: {:ok, parse_view(v)}, else: {:error, {:unknown_view, v}}
+  end
+
+  def parse_index_view(%{"view" => v}), do: {:error, {:unknown_view, inspect(v)}}
+  def parse_index_view(_), do: {:ok, :full}
 
   # Render a Document into the bd-compatible shape the `bp task` CLI consumes.
   # Keep the field set tight enough that it still maps cleanly onto the
@@ -297,6 +349,125 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_criteria_progress(content)
   end
 
+  # ─── `?view=board` — the FULL card MINUS the content echo ───────────────
+  #
+  # task-1ca34359dc0805df. `bp tasks` re-lists the whole corpus whenever the
+  # ledger moves, and the ledger never stops moving; measured on guerrilla, one
+  # exhaustive walk is ~100 MB over ~10 pages. Almost all of it is ONE key:
+  # `content`, which carries `description`, `operating_instruction` and the
+  # `acceptance_criteria` array with its `evidence` blocks and up-to-five
+  # `attempts` notes per criterion — multi-kilobyte prose per row that the
+  # BOARD does not render. The board draws a row from `doc_id`, `rev`, `title`,
+  # `lifecycle_status`, `kind`, `parent_id`, `priority`, `labels`, `claim`,
+  # `criteria_progress`, `dependency_count`/`dependent_count` and the two
+  # timestamps (`internal/taskboard/fetch.go`, `taskWire`).
+  #
+  # WHAT THE BOARD READS OUT OF `content`, ON THE ROW PATH, FOR EVERY ROW.
+  # An earlier revision of this comment said the board "fetches a row's prose
+  # separately when a pane opens". THAT SENTENCE WAS FALSE, and it was the
+  # justification this whole subtraction was designed against. The truth, and
+  # the Go side has said so in writing at `fetch.go`'s `Content` field the
+  # entire time ("Content is the full render_doc content map. The board reads
+  # content.acceptance_criteria out of it"):
+  #
+  #   * `internal/taskboard/fetch.go`, `taskWire.toTask` —
+  #     `t.CriteriaItems = decodeAcceptanceCriteria(w.Content)`, per LIST row;
+  #     `internal/taskboard/components.go`, `criteriaLadder` draws ONE RUNG per
+  #     decoded item off that item's own `Met`/`Missed()`. `criteria_progress`
+  #     cannot rebuild it — `Barkpark.Tasks.Criteria.progress/1` is a FRACTION
+  #     with no per-item state.
+  #   * `internal/taskboard/fetch.go`, `taskWire.toTask` —
+  #     `t.Completeness = ScoreCompleteness(...)` reads `content.description`,
+  #     `content.dependencies` and `content.design_doc` out of the same map,
+  #     per LIST row, for the completeness badge.
+  #
+  # So `:board` as a bare subtraction was NOT ADOPTABLE by its only intended
+  # consumer: it collapsed every row's ladder to a bare fraction and silently
+  # degraded every completeness badge to a lower, plausible-looking score.
+  # `content_digest` below is the fix — the two quantities the board actually
+  # needs, without the prose they are derived from.
+  #
+  # WHY A SUBTRACTION AND NOT A THIRD KEY SET. `:brief` already exists and is a
+  # DIFFERENT SHAPE — it renames the criteria pair to `criteria_met` /
+  # `criteria_total`, drops `type`, `rev`, `kind` and both dependency counts,
+  # and caps `title` at 96 graphemes. A board built on it would be a client
+  # rewrite plus a truncation-honesty problem, which is why the earlier ruling
+  # on this row (lead-cli-r19, 2026-09-15) recorded that `?view=brief` "is the
+  # two-level-board redesign, not a param flip". `:board` is defined as
+  # `:full` with `content` deleted, so EVERY OTHER KEY IS BYTE-IDENTICAL to the
+  # default card, key for key and value for value: the existing `taskWire`
+  # decode reads it unchanged, and its `Content` field simply arrives absent
+  # (a zero `json.RawMessage`, which `toDetail` already degrades over).
+  #
+  # WHAT IS LOST, SAID OUT LOUD: `content` and everything a caller reads out of
+  # it — `description`, `acceptance_criteria` (texts, evidence, attempts),
+  # `operating_instruction`, `tags`, `engagement`, `disposition`, and any
+  # content field this card does not already promote to the top level. `labels`,
+  # `papers`, `sessions`, `kind`, `lifecycle_status`, `priority`, `assignee`,
+  # `parent_id`, `execution_policy`, `queue_gate`, `execution_class` and
+  # `claim` ARE promoted by `render_doc/2` :full, so they survive. A caller that
+  # needs the prose asks for the row: `GET /v1/tasks/:doc_id`, which is always
+  # full.
+  #
+  # ── `content_digest` — THE ONE KEY THE BOARD CARD ADDS ────────────────
+  #
+  # task-9289217dc43ad78f. The board needs two quantities out of the deleted
+  # echo, and both are small and BOUNDED — no criterion text, no evidence, no
+  # attempt notes, nothing that scales with prose:
+  #
+  #   `criteria_marks`    one character per acceptance criterion, in checklist
+  #                       order: "m" met / "a" an honest recorded miss /
+  #                       "o" untouched. Owned by `Barkpark.Tasks.Criteria`
+  #                       (`marks/1`), the SAME module that owns the fraction,
+  #                       so one place decides what "met" and "attempted" mean.
+  #                       One byte per criterion — a 6-criterion row pays 6.
+  #   `has_description`   } the booleans `ScoreCompleteness`
+  #   `has_dependencies`  } (`internal/taskboard/completeness.go`) consumes,
+  #   `has_paper`         } NEVER the prose they are derived from.
+  #   `design_doc`        the paper SLUG itself, task-cf0395706361aa2e: the
+  #                       Go paper->tasks inversion (`DrivenTasks`,
+  #                       detail_data.go) runs corpus-wide and matches on it,
+  #                       so the bit in `has_paper` cannot stand in. Verbatim
+  #                       (the Go side applies `bareID` to the full view's
+  #                       copy; both views must hand it the same string).
+  #                       Omitted unless the value is slug-shaped: non-empty,
+  #                       no whitespace, <= 255 B (the doc_id cap).
+  #
+  # WHY THOSE THREE AND NOT SEVEN. The rubric takes seven inputs. `title`,
+  # `placement` (`parent_id`) and `priority` are already top-level on this
+  # card, and `criteria` is recoverable from `criteria_progress.total`. The
+  # other three are the ones the deletion actually took, and two of them are
+  # only PARTLY recoverable, which is exactly the shape of a silent wrong
+  # answer: `dependency_count` counts UNMET blockers, so a row whose blockers
+  # have all been met reads `has_dependencies: false` off the counts alone;
+  # and `papers` is top-level but `content.design_doc` — the other half of the
+  # consumer's `HasPaper` — is not. A board scoring off the survivors would
+  # not go blank, it would render a LOWER score that looks like a real one.
+  #
+  # OMISSION LAW (wire §4). `criteria_marks` follows `criteria_progress`
+  # exactly: omitted when the row has no criteria, never an empty string;
+  # `design_doc` likewise — absent, never "" or null.
+  # `content_digest` ITSELF is emitted on every board card, including the
+  # all-false one, and that is the same law read correctly rather than an
+  # exception to it: the law forbids an AMBIGUOUS segment ("0/0" cannot be
+  # told from "no criteria"). Three booleans reading false is unambiguous —
+  # it says "this row carries none of the three". An ABSENT `content_digest`
+  # is the ambiguous shape, because the consumer could not tell "a bare row"
+  # from "a server too old to emit it" and would fall back to a `content` that
+  # is not there. Emitting it always is what makes the absence meaningful.
+  #
+  # NOT THE DEFAULT, and not proposed as one. The default view is a contract a
+  # great many readers depend on; this is an opt-in the caller that knows it
+  # renders a board asks for by name.
+  def render_doc(%Document{} = doc, :board) do
+    content = doc.content || %{}
+
+    doc
+    |> render_doc(:full)
+    |> Map.delete(:content)
+    |> put_content_digest(content)
+  end
+
   # axi-w2-s2 (charter decisions 15+16): brief card v2 — the nine measured
   # cuts, ENTIRELY inside the brief path (:full untouched):
   #
@@ -342,6 +513,7 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_brief_engagement(content)
     |> put_brief_disposition(content)
     |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
+    |> put_brief_claim_residue(content)
     |> prune_nils()
   end
 
@@ -408,6 +580,59 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   defp brief_claim(_), do: nil
+
+  # ── WHAT THE SUPPRESSION ABOVE COSTS, AND THE SUPPORTED WAY TO ASK ───────
+  #
+  # THE TRAP (task-4fe00055375680bb). `brief_claim/1` returning nil for a
+  # worker-less claim is right for the CARD and stays — but this view is what
+  # `bp task ready` serves, so the suppression also blinds every BOARD-WIDE
+  # SWEEP built on it. A full ready walk filtered for a claim object with a
+  # null worker cannot return anything but ZERO, on any board, forever, and
+  # the sweep cannot tell that zero from a clean board. Measured on the live
+  # board 2026-09-23 over a complete two-page walk of 724 ready rows: the
+  # lapsed filter returned 0 while its positive control (`claim.worker` NOT
+  # null) returned 19, and a per-row `bp task get` over the same 724 ids found
+  # 183 rows carrying a claim map with a null worker.
+  #
+  # DO NOT FIX THAT BY PUTTING THE BLOCK BACK. Ask on `claim_residue` instead
+  # — `put_brief_claim_residue/2` below, an additive key that says only WHAT
+  # KIND of residue is there ("expired" | "released" | "unheld") and never
+  # names a holder, because a residue row has none. The sweep is then one list
+  # read:
+  #
+  #     bp task ready --limit 400 --offset N -o json \
+  #       | jq '[.docs[] | select(.claim_residue == "expired")] | length'
+  #
+  # `claim.worker` is still the ONE ownership signal on this card, and
+  # `claim_residue` is never emitted for a row that has one.
+  defp put_brief_claim_residue(map, content) do
+    case Map.get(content, "claim") do
+      %{} = claim ->
+        case Map.get(claim, "worker") do
+          nil -> Map.put(map, :claim_residue, residue_kind(claim))
+          _worker -> map
+        end
+
+      _ ->
+        map
+    end
+  end
+
+  # EXPIRED vs RELEASED is not cosmetic and a boolean would destroy it. On the
+  # 2026-09-23 census the 183 residues split 53 swept / 130 released: a
+  # release is ordinary, correct lane behaviour, while a TTL reap is the
+  # silent return-to-ready the pulse loop exists to catch. A sweep that cannot
+  # separate them gets a 183-row haystack for a 53-row question. `expired_at`
+  # wins a tie because a row that was released and LATER reaped is, now, a
+  # reap. "unheld" is the honest third answer: a claim map with no holder and
+  # no marker — hand-written, or pre-dating both fields.
+  defp residue_kind(claim) do
+    cond do
+      is_binary(Map.get(claim, "expired_at")) -> "expired"
+      is_binary(Map.get(claim, "released_at")) -> "released"
+      true -> "unheld"
+    end
+  end
 
   # The now-line rides the card with its text capped (cut d) and its timestamp
   # trimmed to seconds (cut f); `criterion` (a small int) survives untouched.
@@ -502,8 +727,84 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # Cut (g)/(h): keep the key only when the value differs from the steady
   # state the reader already assumes; nil stays nil for prune_nils/1.
+  # ── THE BRIEF REGION ENDS AT THE `put_unless/4` PAIR BELOW ───────────
+  #
+  # `tasks_controller_test.exs` does NOT hand-type the content keys the brief
+  # card reads — it DERIVES them by reading THIS FILE: from the `:brief`
+  # clause head of `render_doc/2` down to the first `put_unless/4` clause
+  # below, scanning that region for `content` reads. Every key it finds must
+  # be populated by the brief byte tripwire's fixture, or the run reds BY NAME
+  # so a card cannot start reading prose the tripwire never weighs.
+  #
+  # TWO CONSEQUENCES FOR ANYONE EDITING THIS FILE, both measured rather than
+  # theorised (PR #19825):
+  #
+  #   1. A private helper's POSITION here is SEMANTIC. `put_content_digest/2`
+  #      — the BOARD card's digest, which the brief card never calls — was
+  #      parked under the `:board` clause, then moved down to stop it splitting
+  #      `render_doc/2`'s clauses, and landed INSIDE the region. The guard
+  #      correctly reported four content keys the brief fixture never
+  #      populates. The card's output never changed; its SOURCE POSITION did.
+  #      A content reader that is not the brief card's goes BELOW this line.
+  #   2. Do not quote the region's end anchor verbatim in a comment above it.
+  #      The derivation takes lines until one CONTAINS that text, and a comment
+  #      quoting it ends the region early — silently shrinking the derived key
+  #      set, which is the vacuous-pass failure the derivation exists to end.
+  #      (Its non-vacuity floor would catch a large truncation; a small one is
+  #      exactly the kind that would not announce itself.)
+  #
   defp put_unless(map, _key, steady, steady), do: map
   defp put_unless(map, key, value, _steady), do: Map.put(map, key, value)
+
+  # The board card's stand-in for the deleted `content` echo — see the
+  # `content_digest` block in the `:board` header above for what each key is
+  # for and why the set is exactly this size.
+  #
+  # BOARD-ONLY ON PURPOSE. The full card still carries `content`, so a full
+  # reader derives every one of these from the source rather than from a
+  # summary; adding the digest there would be a SECOND copy of the same facts
+  # on the one card that does not need it, and two copies of a fact are two
+  # things to drift.
+  defp put_content_digest(map, content) do
+    digest =
+      %{
+        has_description: present_text?(Map.get(content, "description")),
+        has_dependencies: present_list?(Map.get(content, "dependencies")),
+        has_paper:
+          present_text?(Map.get(content, "design_doc")) or
+            present_list?(Map.get(content, "papers"))
+      }
+      |> put_criteria_marks(content)
+      |> put_design_doc_slug(Map.get(content, "design_doc"))
+
+    Map.put(map, :content_digest, digest)
+  end
+
+  # Bounded to a SLUG: `design_doc` is validated only as "a string", so a
+  # sentence is storable. A paper id never contains whitespace and never
+  # exceeds the doc_id cap (Content.Document, max 255), so anything else is
+  # not an id and the card carries no key rather than prose.
+  @design_doc_slug_max_bytes 255
+  defp put_design_doc_slug(digest, slug)
+       when is_binary(slug) and slug != "" and byte_size(slug) <= @design_doc_slug_max_bytes do
+    if String.match?(slug, ~r/\s/u), do: digest, else: Map.put(digest, :design_doc, slug)
+  end
+
+  defp put_design_doc_slug(digest, _), do: digest
+
+  # Same omission law as put_criteria_progress/2: no criteria, no key.
+  defp put_criteria_marks(digest, content) do
+    case Criteria.marks(content) do
+      marks when is_binary(marks) and marks != "" -> Map.put(digest, :criteria_marks, marks)
+      _ -> digest
+    end
+  end
+
+  defp present_text?(v) when is_binary(v), do: String.trim(v) != ""
+  defp present_text?(_), do: false
+
+  defp present_list?(v) when is_list(v), do: v != []
+  defp present_list?(_), do: false
 
   # Cut (a): a nil value IS absence — drop the key instead of shipping
   # `"assignee":null` fifty times per page.
@@ -543,8 +844,42 @@ defmodule BarkparkWeb.TasksController.Params do
     doc
     |> render_doc(:brief)
     |> Map.put(:child_count, total)
+    |> put_brief_marker(content)
     |> put_brief_dispatch(total, live_child_counts, key)
     |> put_brief_upstream(content, live_parents)
+  end
+
+  # ── THE AUTHOR-WRITTEN HALF OF THE SAME KEY (task-46e82dc40c385ed2) ──────
+  #
+  # `put_brief_dispatch/4` and `put_brief_upstream/3` below both INFER a
+  # verdict from an edge. This one reads an imperative the row's author wrote
+  # AT a dispatcher — "DO NOT commission a builder for c0", "OWNER-GATED" —
+  # which until now lived only under `content.*` and was therefore invisible to
+  # every lead triaging off `bp task ready`, whose projection carries no
+  # `content` at all. That is the whole defect: 9 of 22 unclaimed ready rows on
+  # one fence carried such a marker, and a builder was dispatched at one of
+  # them and had to refuse.
+  #
+  # FIRST IN THE CHAIN, AND IT OUTRANKS BOTH EDGE RULES. An author's explicit
+  # refusal is a stronger statement than an inferred `delegated`, and the two
+  # functions below now both no-op on a card that already carries the key, so
+  # one card is one verdict. `Barkpark.Tasks.Dispatchability` owns the rule and
+  # the vocabulary lives in ONE file (`api/priv/tasks/dispatch_markers.json`),
+  # read at compile time there and byte-pinned to the Go copy from the CLI
+  # side — this function only decides whether the key rides.
+  #
+  # ADDITIVE, and that is the negative arm: `classify_markers/1` answers nil
+  # for every row with no marker (136 of 150 open rows measured 2026-09-22), so
+  # those cards stay byte-identical. The hostile 50-card byte tripwire below is
+  # untouched in the WORST CASE too: the key is shared, so a card can still
+  # carry exactly one dispatch value, and `"forbidden"` is the same 9
+  # characters as the `"delegated"` that tripwire already prices (`"deferred"`
+  # is 8, one shorter than that).
+  defp put_brief_marker(map, content) do
+    case Dispatchability.classify_markers(content) do
+      nil -> map
+      class -> Map.put(map, :dispatch, class)
+    end
   end
 
   # THE UMBRELLA MARKER (task-52f4f3aff99c64d5), additive and pruned, same law
@@ -574,6 +909,11 @@ defmodule BarkparkWeb.TasksController.Params do
   # not measure. nil means UNMEASURED and omits the key entirely — a caller
   # that has not paid for the live query says nothing rather than something
   # false.
+  # task-46e82dc40c385ed2: an author-written marker already on the card WINS —
+  # `put_brief_marker/2` ran first and its verdict is not an inference. Same
+  # law `put_brief_upstream/3` already carries one clause down.
+  defp put_brief_dispatch(%{dispatch: _} = map, _total, _live_child_counts, _key), do: map
+
   defp put_brief_dispatch(map, _total, nil, _key), do: map
 
   defp put_brief_dispatch(map, total, live_child_counts, key) do
@@ -690,7 +1030,11 @@ defmodule BarkparkWeb.TasksController.Params do
     }
   end
 
-  def maybe_put_brief_truncation_help(base, _docs, :full), do: base
+  # `:board` joins `:full` here: it truncates NOTHING (it is the full card with
+  # one key removed), so charter law 2's honesty line would point at a cut the
+  # reader cannot find. The clause is explicit rather than a catch-all so a
+  # fourth view has to decide.
+  def maybe_put_brief_truncation_help(base, _docs, view) when view in [:full, :board], do: base
 
   def maybe_put_brief_truncation_help(base, docs, :brief) do
     if Enum.any?(docs, &brief_truncated?/1),
@@ -1002,6 +1346,21 @@ defmodule BarkparkWeb.TasksController.Params do
     |> Map.put(:dependent_count, dependent_count)
     |> Map.put(:comment_count, 0)
     |> Map.put(:child_count, Map.get(child_counts, strip_draft_prefix(doc.doc_id), 0))
+  end
+
+  # The `?view=board` LIST card: `render_doc_with_counts/3` — the SAME function
+  # the default view uses, so `dependency_count`, `dependent_count`,
+  # `comment_count` and `child_count` are computed by one owner — with the
+  # `content` echo removed and `content_digest` put in its place. Defined as a
+  # wrapper rather than a forked builder precisely so a future key added to the
+  # full card reaches the board card for free; the ONLY differences between the
+  # two are the deleted `content` and the added `content_digest`, and
+  # `tasks_board_view_test.exs`'s no-drift arm asserts exactly that pair.
+  def render_board_with_counts(%Document{} = doc, counts, child_counts \\ %{}) do
+    doc
+    |> render_doc_with_counts(counts, child_counts)
+    |> Map.delete(:content)
+    |> put_content_digest(doc.content || %{})
   end
 
   # C2: a lightweight child summary — just enough to render the rail without
@@ -1790,6 +2149,14 @@ defmodule BarkparkWeb.TasksController.Params do
     do: "acknowledgement_unposted:#{issue || "?"}"
 
   def reason_to_string({:sentinel_worker_id, worker}), do: "sentinel_worker_id:#{worker}"
+
+  # The landing mark's not-merge-shaped refusal carries WHICH DOOR it came
+  # through (`Tasks.Landed.not_merge_shaped_reason/1`) so the hint below can say
+  # two different true things. The WIRE token must not move: the bp CLI
+  # (`landedCriterionGuard`) and every existing caller string-match
+  # `criterion_not_merge_shaped`, and this refusal's identity did not change —
+  # only its explanation did.
+  def reason_to_string({:criterion_not_merge_shaped, _door}), do: "criterion_not_merge_shaped"
   def reason_to_string(other), do: inspect(other)
 
   # ─── Criteria-conflict hints (D56 — the guard must TEACH, not just refuse) ──
@@ -1853,7 +2220,7 @@ defmodule BarkparkWeb.TasksController.Params do
   def criteria_hint(:observed_rev_required, :stamp),
     do:
       ~s|this row carries no live claim (it is closed, cancelled or released), so there is no epoch to fence | <>
-        ~s|a withdrawal or a post-close --miss against. Pin the rev you read instead: re-read with | <>
+        ~s|a withdrawal, an amendment or a post-close --miss against. Pin the rev you read instead: re-read with | <>
         ~s|`bp task get <id> -o json`, take .doc.rev, and re-run with --observed-rev <rev>. Nothing was | <>
         ~s|written. Neither verb touches the seal, the close_reason or the original evidence: a withdrawal | <>
         ~s|lowers the met flag and appends a signed record naming who withdrew it and why, and a --miss | <>
@@ -1895,6 +2262,25 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|Re-claim it — `bp task claim <id> <worker>` — and use the epoch THAT returns for the next | <>
         ~s|stamp/close. If your loop treated the earlier pulses as proof the claim was held, they were not.|
 
+  # THE AMENDMENT HINTS (task-a1df012e89b1e289). Both are reachable by a
+  # reviewer doing the right thing, so each names the next command.
+  def criteria_hint(:amended_criterion_required, :stamp),
+    do:
+      ~s|--amend needs REPLACEMENT wording with words in it. Nothing was written. Emptying a | <>
+        ~s|criterion is a DELETION, not a correction: the row would keep its index and its met flag | <>
+        ~s|and stop saying what was proven. Write the corrected sentence to a file and pass | <>
+        ~s|--amended-criterion-file <path> (or `-` for stdin) — never inline, because criterion | <>
+        ~s|wording is MARKDOWN and a backticked code span inside a double-quoted shell argument is | <>
+        ~s|COMMAND SUBSTITUTION.|
+
+  def criteria_hint(:criterion_unchanged, :stamp),
+    do:
+      ~s|the replacement wording is byte-identical to the stored criterion, so there is nothing to | <>
+        ~s|correct and nothing was written — an amendments record asserting a correction that never | <>
+        ~s|happened would only mislead the next reader. If you meant a DIFFERENT criterion, check the | <>
+        ~s|index: --criterion N is 0-BASED, so the first criterion is 0. If you meant to lower a met | <>
+        ~s|flag rather than fix the sentence, that is --withdraw --note "…".|
+
   def criteria_hint(:criterion_not_met, :stamp),
     do:
       ~s|this criterion is already met=false, so there is no stamped proof to withdraw and nothing was | <>
@@ -1909,6 +2295,36 @@ defmodule BarkparkWeb.TasksController.Params do
   # messages therefore have to name the STRUCTURAL fix, not just the wall:
   # `merge_gate: true` on the row is what makes a landing mark able to seal it,
   # and a human stamp is what a non-merge row still needs.
+  # THE VETOED DOOR (task-c5ca82cb0a49ab53). `merge_shaped?/1` short-circuits on
+  # an explicit `"merge_gate": false` and NEVER reads the prose, so the flagless
+  # message below — "its wording says nothing about being merge-gated" —
+  # described an arm this refusal did not take, and was FALSE for every row using
+  # the documented exemption door: the wording there usually says a great deal
+  # about being merge-gated, which is exactly WHY its author wrote the `false`.
+  # Re-measured 2026-09-22 over the live corpus (9,463 published task rows /
+  # 39,394 criteria): 29 criteria carry an explicit `false` TOGETHER WITH marker
+  # wording, so 29 rows were told a lie about their own text. The remedy differs
+  # too — here it is the FIELD, not a rewrite — which is why this is a separate
+  # sentence rather than a hedge bolted onto the one below.
+  def criteria_hint({:criterion_not_merge_shaped, :vetoed}, :landed),
+    do:
+      ~s|`landed` may only flip a merge-shaped criterion — one the lead seals when the PR merges. | <>
+        ~s|That row is not, and its WORDING IS NOT WHY: its author declared "merge_gate": false on this criterion, | <>
+        ~s|and that declaration VETOES the wording outright — the guard never reads the text when the flag is there, | <>
+        ~s|so whatever the criterion says about being merge-gated or about a PR merging to main was not consulted | <>
+        ~s|and rewriting it will change nothing. Nothing was written (the flip and the landing sentence ride one CAS). | <>
+        ~s|A criterion proven by WORK is stamped by whoever did the work — `bp task stamp <id> <worker> <epoch> | <>
+        ~s|--criterion N --criterion-text-file <file holding the exact wording> --met --evidence "…"` | <>
+        ~s|(the wording rides a FILE, never an inline shell argument — a `backticked code span` in it would be | <>
+        ~s|COMMAND SUBSTITUTION). If the `false` is wrong and this row really is the lead's merge gate, | <>
+        ~s|change that flag to "merge_gate": true and the landing mark will seal it. | <>
+        ~s|Re-run without --criterion to record the landing sentence alone.|
+
+  # THE FLAGLESS DOOR — unchanged, and deliberately so. Here there is no explicit
+  # `merge_gate` key at all and the stored text genuinely carries no marker, so
+  # the sentence about the wording is TRUE and the remedy IS to mark the row.
+  # Collapsing this into the vetoed message above would tell half these callers
+  # to go looking for a flag that is not on their row.
   def criteria_hint(:criterion_not_merge_shaped, :landed),
     do:
       ~s|`landed` may only flip a merge-shaped criterion — one the lead seals when the PR merges. | <>
@@ -2463,12 +2879,15 @@ defmodule BarkparkWeb.TasksController.Params do
     met = stamp_flag?(Map.get(params, "met"))
     miss = stamp_flag?(Map.get(params, "miss"))
     withdraw = stamp_flag?(Map.get(params, "withdraw"))
+    amend = stamp_flag?(Map.get(params, "amend"))
     criterion_text = stamp_criterion_text(params)
+    amended_criterion = stamp_amended_criterion(params)
 
     with {:ok, index} <- parse_stamp_index(Map.get(params, "criterion")) do
       cond do
-        Enum.count([met, miss, withdraw], & &1) > 1 ->
-          {:error, :invalid_stamp, "pass exactly one of --met / --miss / --withdraw, not two"}
+        Enum.count([met, miss, withdraw, amend], & &1) > 1 ->
+          {:error, :invalid_stamp,
+           "pass exactly one of --met / --miss / --withdraw / --amend, not two"}
 
         met ->
           case Map.get(params, "evidence") do
@@ -2492,14 +2911,46 @@ defmodule BarkparkWeb.TasksController.Params do
                "--withdraw requires non-empty --note (why it was withdrawn)"}
           end
 
+        # THE AMENDMENT (task-a1df012e89b1e289). Two mandatory halves, two
+        # SEPARATE refusals: "you forgot the replacement wording" and "you
+        # forgot to say why" are different mistakes, and one message covering
+        # both sends half the callers to the wrong fix. Both are SHAPE checks —
+        # whether the wording differs from the stored row, and whether the
+        # caller may write this row at all, are state questions the stamp
+        # transaction answers under its lock.
+        amend ->
+          note = Map.get(params, "note")
+
+          cond do
+            not (is_binary(amended_criterion) and String.trim(amended_criterion) != "") ->
+              {:error, :invalid_stamp,
+               "--amend requires the REPLACEMENT wording. Pass it from a FILE — " <>
+                 "--amended-criterion-file <path> (or `-` for stdin) — never as an inline " <>
+                 "shell argument: criterion wording is MARKDOWN, and a backticked code span " <>
+                 "inside a double-quoted argument is COMMAND SUBSTITUTION. Blank wording is " <>
+                 "refused because emptying a criterion is a DELETION, not a correction."}
+
+            not (is_binary(note) and note != "") ->
+              {:error, :invalid_stamp,
+               "--amend requires non-empty --note (why the stored wording is being corrected). " <>
+                 "It is persisted on the amendments record beside the superseded sentence and " <>
+                 "is the only place the why survives."}
+
+            true ->
+              {:ok, index, {:amend, {amended_criterion, note}}, criterion_text}
+          end
+
         # A body that carries `met=false` and nothing else names no verb at
         # all. Say so with the withdrawal in the sentence, because "met: false"
         # is precisely what a caller reaches for when they mean to withdraw.
         true ->
           {:error, :invalid_stamp,
-           "pass one of --met (with --evidence), --miss (with --note) or --withdraw (with --note). " <>
+           "pass one of --met (with --evidence), --miss (with --note), --withdraw (with --note) " <>
+             "or --amend (with --amended-criterion-file and --note). " <>
              "A met:true -> met:false patch is NOT accepted here: --withdraw is the verb that lowers " <>
-             "a met flag, and it signs the correction instead of erasing the proof."}
+             "a met flag, and it signs the correction instead of erasing the proof. A criterion-TEXT " <>
+             "patch is not accepted here either: --amend is the verb that corrects wording, and it " <>
+             "preserves the sentence it replaces."}
       end
     end
   end
@@ -2782,6 +3233,17 @@ defmodule BarkparkWeb.TasksController.Params do
   # blank value is treated as absent (nil) — the permissive index-only path.
   defp stamp_criterion_text(params) do
     case Map.get(params, "criterion_text") || Map.get(params, "criterion-text") do
+      s when is_binary(s) and s != "" -> s
+      _ -> nil
+    end
+  end
+
+  # The amendment's REPLACEMENT wording, from either wire shape
+  # (task-a1df012e89b1e289). Blank / non-string reads as absent, and
+  # `parse_stamp/1` then refuses with the file recipe rather than letting an
+  # empty string reach the store and blank a criterion.
+  defp stamp_amended_criterion(params) do
+    case Map.get(params, "amended_criterion") || Map.get(params, "amended-criterion") do
       s when is_binary(s) and s != "" -> s
       _ -> nil
     end

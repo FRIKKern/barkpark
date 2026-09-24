@@ -449,6 +449,16 @@ defmodule BarkparkWeb.ShareLinkController do
   end
 
   @doc "DELETE /v1/shares/links/:id — revoke one link."
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def revoke(conn, %{"id" => id}) do
     case revoke_scoped(conn, id) do
       # RECEIPT LAW (pds w39): `Links.revoke/1` returns the UPDATED link
@@ -660,8 +670,9 @@ defmodule BarkparkWeb.ShareLinkController do
 
   defp paper_body_html(_paper, _link), do: {:error, :not_found}
 
-  defp paper_article?(%{content: content}),
-    do: Map.get(content || %{}, "style") in ["article", "article-wide"]
+  # The SAME chrome decision as BulldocsLive's `@article?` (article, or no
+  # style at all — the web default); one predicate so the doors cannot drift.
+  defp paper_article?(paper), do: BarkparkWeb.PaperReaderStyle.article?(paper)
 
   # Canonical v1 error envelope (code + request_id) for the JSON API paths — the
   # same contract as the content endpoints; was a bare `%{error: msg}` with

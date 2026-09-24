@@ -99,6 +99,7 @@
 #   go-path-escape-check.sh --list-reads     # print the resolved census
 #   go-path-escape-check.sh --print-set      # print the declared globs
 #   go-path-escape-check.sh --match          # changed paths on stdin -> true|false
+#   go-path-escape-check.sh --match --null   # …NUL-separated (`git diff -z`)
 #   go-path-escape-check.sh --selftest       # prove the scanner is not neutered
 #
 # Env, for proof runs only (neither can weaken a real run):
@@ -256,11 +257,50 @@ list_reads() {
 # ---------------------------------------------------------------------------
 # modes
 # ---------------------------------------------------------------------------
+# ── --null: one path per NUL-terminated record (cch-bl-nul-native-path-matcher)
+# `git diff -z` ends every path with a NUL, and a path may hold a literal
+# NEWLINE. A LINE reader splits that path into two pseudo-paths before the
+# anchored ERE sees it: for a glob anchored at BOTH ends (`docs/cards/*.md`),
+# `docs/cards/a<LF>b.md` becomes `docs/cards/a` and `b.md`, neither matches,
+# and a path IN the set answers false. That was the dispatchers' old
+# `git diff -z … | tr '\0' '\n'`. Under --null each record stays ONE line: an
+# embedded newline is rewritten to \037 (US), a byte no declared glob names and
+# one that `.` and `[^/]` match exactly as they match a newline — so the
+# declared EREs are UNCHANGED and `^…$` anchors the WHOLE path. Without --null
+# stdin is newline-separated, as every other caller (scripts/which-gates.sh,
+# the harness's line fixtures) still writes it.
+#
+# MATCH-INPUT-NUL — the dispatchers grep for this token: a copy that predates
+# --null IGNORES the flag and reads the NUL stream as ONE line (a silent
+# false), so a pinned copy without it is refused, never trusted.
+match_input() {
+  local rec
+  if [ "$1" = null ]; then
+    while IFS= read -r -d '' rec || [ -n "$rec" ]; do
+      printf '%s\n' "${rec//$'\n'/$'\037'}"
+    done
+  else
+    cat
+  fi
+}
+
 mode="${1:---check}"
 
 case "$mode" in
   --print-set) declared_globs; exit 0 ;;
   --match)
+    case "${2:-}" in
+      '') m_input=lines ;;
+      --null) m_input=null ;;
+      *)
+        echo "go-path-escape-check: unknown flag '${2}' (want --null)" >&2
+        exit 2
+        ;;
+    esac
+    if [ "$#" -gt 2 ]; then
+      echo "go-path-escape-check: unexpected argument '${3}' after --match" >&2
+      exit 2
+    fi
     # Changed paths on stdin -> `true` if ANY of them is in the declared set.
     # This is the DISPATCHER's decision, computed by this script's copy of the
     # same parser and the same glob translator — it exists so a dry run (e.g.
@@ -274,7 +314,7 @@ case "$mode" in
       echo "::error::go-path-escape-check --match: the declared set translated to an EMPTY pattern, which matches everything. Refusing to answer." >&2
       exit 2
     fi
-    m_changed="$(cat)"
+    m_changed="$(match_input "$m_input")"
     if grep -Eq -- "$m_ere" <<<"$m_changed"; then echo true; else echo false; fi
     exit 0
     ;;
@@ -287,7 +327,7 @@ case "$mode" in
   --check) ;;
   *)
     echo "go-path-escape-check: unknown argument '$mode'" >&2
-    echo "usage: $0 [--check|--selftest|--list-reads|--print-set|--match]" >&2
+    echo "usage: $0 [--check|--selftest|--list-reads|--print-set|--match [--null]]" >&2
     exit 2
     ;;
 esac
@@ -365,11 +405,51 @@ GO
   if [ "$n_globs" -ge 10 ]; then pass=$((pass+1)); else
     fail=$((fail+1)); echo "FAIL [declared-set parse]: parsed only $n_globs glob(s) from $WORKFLOW"; fi
 
+  # THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817).
+  # Every case above grades list_reads / declared_globs IN PROCESS; none
+  # executes the --check tail that turns a non-empty $uncovered into the
+  # PROCESS exit, so flipping its `exit 1` to `exit 0` kept this selftest green
+  # while the required check certified an undeclared read. Same idiom as PR
+  # #13405 / #20180: RE-EXEC THE WHOLE PROGRAM on a synthetic root through the
+  # EXISTING GO_PATH_ESCAPE_ROOT / GO_PATH_ESCAPE_WORKFLOW proof-run overrides
+  # and assert the PROCESS exit. The root is built just above both floors
+  # ($GO_ESCAPE_MIN reads, 10 globs), so the plant alone moves the verdict;
+  # the real-run path is not touched.
+  e2e="$tmp/e2e"
+  mkdir -p "$e2e/internal/e2e" "$e2e/docs/e2e"
+  i=0
+  {
+    echo 'package e2e'
+    while [ "$i" -lt "$GO_ESCAPE_MIN" ]; do
+      : >"$e2e/docs/e2e/f$i.md"
+      echo "var v$i = \"../../docs/e2e/f$i.md\""
+      i=$((i+1))
+    done
+  } >"$e2e/internal/e2e/a_test.go"
+  e2e_wf() { # e2e_wf <glob covering docs/e2e> -> a go-tests.yml with 10 push paths
+    printf 'on:\n  push:\n    paths:\n      - "**/*.go"\n      - "go.mod"\n      - "go.sum"\n'
+    for g in a b c d e f; do printf '      - "e2e-%s/**"\n' "$g"; done
+    printf '      - "%s"\n' "$1"
+  }
+  e2e_wf "docs/other/**" >"$tmp/e2e-planted.yml"
+  e2e_wf "docs/e2e/**" >"$tmp/e2e-removed.yml"
+  e2e_run() { GO_PATH_ESCAPE_ROOT="$1" GO_PATH_ESCAPE_WORKFLOW="$2" bash "${BASH_SOURCE[0]}" --check >"$tmp/e2e.out" 2>&1; }
+  if e2e_run "$e2e" "$tmp/e2e-planted.yml"; then rc=0; else rc=$?; fi
+  if [ "$rc" -eq 1 ] && grep -qF "docs/e2e/f0.md" "$tmp/e2e.out"; then pass=$((pass+1)); else
+    fail=$((fail+1)); echo "FAIL [whole program, planted]: $GO_ESCAPE_MIN undeclared reads must exit 1 naming them, got rc=$rc"; sed 's/^/  | /' "$tmp/e2e.out"; fi
+  if e2e_run "$e2e" "$tmp/e2e-removed.yml"; then rc=0; else rc=$?; fi
+  if [ "$rc" -eq 0 ]; then pass=$((pass+1)); else
+    fail=$((fail+1)); echo "FAIL [whole program, plant removed]: every read declared must exit 0, got rc=$rc"; sed 's/^/  | /' "$tmp/e2e.out"; fi
+  mkdir -p "$tmp/e2e-empty/internal"
+  if e2e_run "$tmp/e2e-empty" "$tmp/e2e-removed.yml"; then rc=0; else rc=$?; fi
+  if [ "$rc" -ne 0 ]; then pass=$((pass+1)); else
+    fail=$((fail+1)); echo "FAIL [whole program, empty root]: a root with zero reads exited 0 — a green over nothing"; fi
+
   echo "go-path-escape-check --selftest: $pass passed, $fail failed"
   # COUNT FLOOR. Zero assertions executed is a pass in every runner; say the
   # number out loud and refuse a run that produced fewer than the cases above.
-  if [ "$pass" -lt 8 ] && [ "$fail" -eq 0 ]; then
-    echo "::error::go-path-escape-check --selftest: only $pass assertion(s) ran, expected at least 8. The harness itself is broken." >&2
+  if [ "$pass" -lt 11 ] && [ "$fail" -eq 0 ]; then
+    echo "::error::go-path-escape-check --selftest: only $pass assertion(s) ran, expected at least 11. The harness itself is broken." >&2
     exit 1
   fi
   [ "$fail" -eq 0 ] || exit 1

@@ -334,8 +334,8 @@ function parseArgs(argv) {
   // not free, and the desk-row census needs none of it. An unknown letter is a
   // GUARD, never a silently narrower run.
   opts.legs = String(opts.legs).toLowerCase().replace(/[\s,]/g, "");
-  if (!/^[abc]+$/.test(opts.legs) || new Set(opts.legs).size !== opts.legs.length) {
-    throw new Error(`--legs wants some subset of "abc", each letter at most once (got "${opts.legs}")`);
+  if (!/^[abcd]+$/.test(opts.legs) || new Set(opts.legs).size !== opts.legs.length) {
+    throw new Error(`--legs wants some subset of "abcd", each letter at most once (got "${opts.legs}")`);
   }
   if (opts.selfTestSite && !["good", "rot"].includes(opts.selfTestSite)) {
     throw new Error(`--self-test-site must be good or rot (got ${opts.selfTestSite})`);
@@ -361,13 +361,19 @@ const USAGE = `journey — browser proof that a person can ADD A THING in the St
   --keep              do NOT delete the document LEG A created (default: it
                       self-cleans, so a re-run never litters the dataset)
   --dataset <ds>      dataset to drive (default ${DATASET})
-  --legs <abc>        run only these legs (default abc). \`--legs c\` is the
+  --legs <abcd>       run only these legs (default abc — LEG D is OPT-IN). \`--legs c\` is the
                       desk-row census ALONE: it never creates a document, so it
                       is the mode for a shared/production host. When a runs, it
                       establishes the session; when it does not, a minimal AUTH
                       beat mints the same ticket and asserts the same admin
                       discriminator first — a census of an anonymous desk is not
-                      a census of the desk.
+                      a census of the desk. \`--legs d\` is the COLD-LOAD PRESS
+                      FLOOR: ten consecutive cold loads, one deliberately-early
+                      press each, plus the ref-src second-press probe. It is NOT
+                      in the default because it costs ten full navigations, and
+                      because it REFUSES to publish a latency on a host whose
+                      load average is at or above 0.20 per core — printing the
+                      load it refused at. That refusal is a RESULT, not an error.
 
   exit 0 clean · 1 a LEG A product failure · 2 environment/usage guard
 `;
@@ -827,29 +833,105 @@ function draftQueryUrl(ctx, type, id) {
   return `${ctx.base}/v1/data/query/${encodeURIComponent(ctx.dataset)}/${encodeURIComponent(type)}?${q}`;
 }
 
-/** Every draft of `type` created at or after `sinceIso`, newest first.
- *  THIS EXISTS BECAUSE THE "+" CAN CREATE WITHOUT NAVIGATING. Measured on
- *  guerrilla 4f046cce1: pressing "+" inserted a real `Untitled` draft and the URL
- *  never moved to it, so the URL-derived id was null while documents piled up —
- *  three per run, once clickUntil started retrying. An instrument that leaks a
- *  draft on every failed run is worse than no instrument, so cleanup is keyed off
- *  what the DATASET gained during the leg, not off what the URL admitted to.
+/** ─────────────────────────────────────────────────────────────────────────
+ *  THE SWEEP PREDICATE — provenance first, shape second.
+ *  ─────────────────────────────────────────────────────────────────────────
  *
- *  BOUNDED BY SHAPE, NOT ONLY BY TIME (review, spd-w18). The window is a real
- *  dataset on a real host, so "everything created since I pressed +" can in
- *  principle name a document a HUMAN created in the same seconds — and this
- *  function's caller DELETES what it returns. So a candidate must also still
- *  look like the thing the "+" makes and nobody has touched: no title of its
- *  own, and no more blocks than the seeded template (`tpl-title` + `tpl-body`).
- *  A document with a title or with authored content is NEVER a sweep candidate,
- *  whatever its timestamp says. The typed document is added by the caller from
- *  `run.created_doc_id`, so narrowing here cannot orphan the run's own paper.
- *  Residual risk, stated rather than hidden: an empty untitled draft created by
- *  someone else inside the same few seconds would still be swept. Use `--keep`
- *  on a busy host. */
+ *  WHAT THE OLD PREDICATE WAS AND WHY IT COULD NOT WORK (task-d582be9d064f35dc).
+ *  It was: "a draft, created inside THIS run's window, whose title is empty or
+ *  `Untitled`, with no more blocks than the seeded template". Every clause is
+ *  defensible on its own and the conjunction is a trap, because the TYPE beat of
+ *  this very harness writes text into the title-role block and the server then
+ *  derives a title from it. Measured on guerrilla 2026-09-22, the six drafts a
+ *  night of killed runs left behind carry titles like
+ *  `journey paragraph MUCA9FZ6` and
+ *  `journey paragraph MUCA8WHGJOURNEY HEADING MUCA8WHGjourney paragraph MUCA8WHG`.
+ *  So a run that dies AFTER TYPE and before its own cleanup leaves a document
+ *  the title clause rejects — on that run and on every future one.
+ *
+ *  AND THE TIME CLAUSE ALONE IS ALREADY FATAL, which the row's mechanism did not
+ *  say. `since` is always "two seconds before THIS run pressed +", so a leftover
+ *  is out of every later run's window no matter what its title is. The sixth
+ *  catalogued draft, `drafts.paper-8be087501234ae2d`, proves it: title `null`,
+ *  two blocks — it satisfies the title clause and the shape clause and it is
+ *  still permanent debris. A longer title vocabulary would not have reclaimed it.
+ *
+ *  THE REPLACEMENT. The harness STAMPS every document it creates, over the API,
+ *  the moment it learns the id and BEFORE it types anything:
+ *
+ *      journeyRun: { harness: "<this file's path>", run_id, host, stamped_at }
+ *
+ *  and the sweep selects on that stamp. Two arms, and they are deliberately not
+ *  symmetric:
+ *
+ *    ARM 1 — STAMPED (a rule). Any draft carrying `journeyRun.harness ===
+ *      HARNESS_MARK` is this harness's document, whatever its title, its content
+ *      or its age. No time bound: that is the point, because reclaiming a DEAD
+ *      run's debris is the whole defect. Bounded instead by OWNERSHIP — this
+ *      run's own run_id, or a stamped draft older than STALE_DEBRIS_MS, which no
+ *      live run can be (every cap in this file is tens of seconds; see the
+ *      constant). A concurrent run's in-flight document is therefore never
+ *      selected, which a bare "delete everything stamped" would get wrong.
+ *
+ *    ARM 2 — UNSTAMPED, WINDOW + SHAPE (unchanged, and still necessary). There
+ *      is exactly one document class the stamp cannot cover: the "+" that
+ *      CREATES WITHOUT NAVIGATING (guerrilla 4f046cce1), whose id the run never
+ *      learns and therefore cannot patch. Those are untitled, two-block, and
+ *      inside this run's own window, so the old predicate still catches them and
+ *      it stays exactly as it was. It is a snapshot, and it is used only where
+ *      the run's own seconds bound it.
+ *
+ *  WHY THE STAMP CANNOT BE DEFEATED THE WAY THE TITLE WAS. The title is written
+ *  by a BEAT OF THE JOURNEY — the harness attacks its own predicate every run,
+ *  and a human typing in the Studio writes the same field by the same route. The
+ *  stamp is written by NO beat and by no Studio affordance: `journeyRun` is not a
+ *  field the paper editor, the "+" handler or the template seeder ever sets, so a
+ *  document carries it if and only if this file PUT it there over
+ *  /v1/data/mutate. TYPE, autosave and reload rewrite `blocks`, `title`,
+ *  `body_html` and `preview`; they do not touch it — asserted live, not assumed,
+ *  and the killed-run evidence under tooling/studio-journey/evidence-sweep/ is a
+ *  document that was typed into, autosaved, and still carries its stamp.
+ *  The key is also a PREDICATE the server can evaluate:
+ *  `filter[journeyRun.harness][eq]=…` returns the stamped set directly, so the
+ *  sweep is no longer a 50-row recency scan that older debris falls out of.
+ *
+ *  Residual risk, stated rather than hidden: ARM 2 would still sweep an empty
+ *  untitled draft somebody else created inside the same few seconds. `--keep`
+ *  opts out on a busy host. ARM 1 carries no such risk — nothing but this file
+ *  writes the field it reads. */
 const SEEDED_TEMPLATE_BLOCKS = 2;
 
-function sweepCandidate(d, since) {
+/** The stamp's field and value. The value is this file's repo path, so the mark
+ *  NAMES its writer: a stamped document found by a human leads back here. */
+const STAMP_FIELD = "journeyRun";
+const HARNESS_MARK = "tooling/studio-journey/journey.mjs";
+
+/** How old a stamped draft from ANOTHER run must be before this run will reclaim
+ *  it. A journey run is bounded by its own caps (SETTLE_CAP, HYDRATE_CAP,
+ *  PERSIST_CAP, LEG_C_BUDGET) and the slowest observed guerrilla run is under two
+ *  minutes; 30 minutes is two orders of magnitude of headroom. Anything stamped
+ *  and older than this belongs to a process that is not coming back. This is the
+ *  ONLY guard between arm 1 and a concurrent run's live document, so it is a
+ *  named constant and not an inline number. */
+const STALE_DEBRIS_MS = 30 * 60 * 1000;
+
+/** THE PROVENANCE READ. `d.journeyRun.harness` and nothing else — not the title,
+ *  not the block count, not the id. */
+function harnessStamped(d) {
+  return typeof d?.[STAMP_FIELD]?.harness === "string" && d[STAMP_FIELD].harness === HARNESS_MARK;
+}
+
+/** ARM 1's ownership rule: MY run, or a run that is provably dead. */
+function stampedAndReclaimable(d, { runId = null, now = Date.now() } = {}) {
+  if (!harnessStamped(d)) return false;
+  if (runId && d[STAMP_FIELD].run_id === runId) return true;
+  const born = Date.parse(d._createdAt || 0);
+  return Number.isFinite(born) && now - born >= STALE_DEBRIS_MS;
+}
+
+/** ARM 2: the old predicate, unchanged, for the documents the stamp cannot
+ *  reach. Kept as its own named function so the self-test can red ONE arm. */
+function untitledTemplateShape(d, since) {
   if (!d?._draft || Date.parse(d._createdAt || 0) < since) return false;
   const title = (d.title ?? "").trim();
   if (title !== "" && title.toLowerCase() !== "untitled") return false;
@@ -857,14 +939,81 @@ function sweepCandidate(d, since) {
   return Array.isArray(blocks) && blocks.length <= SEEDED_TEMPLATE_BLOCKS;
 }
 
+function sweepCandidate(d, since, opts = {}) {
+  if (!d?._draft) return false;
+  if (harnessStamped(d)) return stampedAndReclaimable(d, opts);
+  return untitledTemplateShape(d, since);
+}
+
+/** Write the stamp. Called the instant the run learns the document's id and
+ *  BEFORE the TYPE beat — the ordering is the whole contract, because every
+ *  document the old predicate could not reclaim was killed between those two
+ *  points. A failed stamp is REPORTED and never fatal: the run's own cleanup
+ *  still deletes by id, and arm 2 still covers the untouched case. What is lost
+ *  on a failed stamp is only the ability of a LATER run to reclaim this one. */
+async function stampRun(ctx, type, id, mark) {
+  const r = await api(
+    ctx,
+    `${ctx.base}/v1/data/mutate/${encodeURIComponent(ctx.dataset)}`,
+    { method: "POST", body: JSON.stringify({ mutations: [{ patch: { id, type, set: { [STAMP_FIELD]: mark } } }] }) },
+    { attempts: 2 },
+  );
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
+/** ARM 1's query. A server-side filter on the stamp, NOT a recency page — the
+ *  50-row `_createdAt:desc` window is exactly how debris from an old run becomes
+ *  invisible once fifty documents are newer than it. Proven non-vacuous the same
+ *  way the id oracle is: `filter[journeyRun.harness][eq]=<a value nothing
+ *  carries>` returns count 0 against guerrilla, so a non-empty answer here is
+ *  documents and not the endpoint ignoring the filter. */
+async function stampedDrafts(ctx, type) {
+  const q = new URLSearchParams({ perspective: "drafts", limit: "50", order: "_createdAt:desc" });
+  q.set(`filter[${STAMP_FIELD}.harness][eq]`, HARNESS_MARK);
+  const r = await api(ctx, `${ctx.base}/v1/data/query/${encodeURIComponent(ctx.dataset)}/${encodeURIComponent(type)}?${q}`, { method: "GET" });
+  if (!r.ok) return { ok: false, error: r.error, docs: [] };
+  return { ok: true, docs: r.body?.result?.documents || [] };
+}
+
+/** ARM 2's query. Every draft of `type` created at or after `sinceIso`, newest
+ *  first. THIS EXISTS BECAUSE THE "+" CAN CREATE WITHOUT NAVIGATING. Measured on
+ *  guerrilla 4f046cce1: pressing "+" inserted a real `Untitled` draft and the URL
+ *  never moved to it, so the URL-derived id was null while documents piled up —
+ *  three per run, once clickUntil started retrying. An instrument that leaks a
+ *  draft on every failed run is worse than no instrument, so cleanup is keyed off
+ *  what the DATASET gained during the leg, not off what the URL admitted to. */
 async function draftsCreatedSince(ctx, type, sinceIso) {
   const q = new URLSearchParams({ perspective: "drafts", limit: "50", order: "_createdAt:desc" });
   const r = await api(ctx, `${ctx.base}/v1/data/query/${encodeURIComponent(ctx.dataset)}/${encodeURIComponent(type)}?${q}`, { method: "GET" });
   if (!r.ok) return { ok: false, error: r.error, ids: [] };
   const docs = r.body?.result?.documents || [];
   const since = Date.parse(sinceIso);
-  const ids = docs.filter((d) => sweepCandidate(d, since)).map((d) => d._id);
+  const ids = docs.filter((d) => untitledTemplateShape(d, since)).map((d) => d._id);
   return { ok: true, ids };
+}
+
+/** THE UNION, and it is what the self-clean calls. Returns BOTH arms separately
+ *  so the run report can say which rule claimed which document — "deleted 3" that
+ *  cannot say why is the shape of report that hid this defect for a night. */
+async function sweepTargets(ctx, type, sinceIso, { runId = null, now = Date.now() } = {}) {
+  const stamped = await stampedDrafts(ctx, type);
+  const recent = await draftsCreatedSince(ctx, type, sinceIso);
+  // Through sweepCandidate, not through stampedAndReclaimable directly, so the
+  // live path and the exported predicate are the SAME function — a sweep whose
+  // production code takes a different route from its tests is untested. `since`
+  // is Infinity here on purpose: this query already returned only stamped
+  // documents, so arm 2 must be unreachable and the stamp must be the only
+  // thing that can select one.
+  const byStamp = stamped.docs.filter((d) => sweepCandidate(d, Infinity, { runId, now })).map((d) => d._id);
+  const byShape = recent.ids.filter((id) => !byStamp.includes(id));
+  return {
+    ok: stamped.ok && recent.ok,
+    errors: [stamped.ok ? null : `stamped query: ${stamped.error}`, recent.ok ? null : `recent query: ${recent.error}`].filter(Boolean),
+    by_stamp: byStamp,
+    by_shape: byShape,
+    ids: [...byStamp, ...byShape],
+    stamped_seen: stamped.docs.map((d) => ({ id: d._id, run_id: d[STAMP_FIELD]?.run_id ?? null, created_at: d._createdAt, title: d.title ?? null })),
+  };
 }
 
 async function readDraft(ctx, type, id) {
@@ -1031,6 +1180,11 @@ async function legA(page, ctx, ledger, run) {
   const headingText = `JOURNEY HEADING ${stamp}`;
   const paraText = `journey paragraph ${stamp}`;
   run.markers = { heading: headingText, paragraph: paraText };
+  // The run's identity, written INTO the documents it creates. `run_id` is what
+  // arm 1 of the sweep uses to tell THIS run's in-flight document from a
+  // concurrent run's — see stampedAndReclaimable.
+  run.run_id = stamp;
+  run.run_mark = { harness: HARNESS_MARK, run_id: stamp, host: ctx.base, stamped_at: new Date().toISOString() };
 
   // ── AUTH ───────────────────────────────────────────────────────────────────
   // A degraded (anonymous) session renders a login page or an unprivileged
@@ -1202,6 +1356,20 @@ async function legA(page, ctx, ledger, run) {
     const clickedAdd = nav.clicked;
     docId = nav.value;
     run.created_doc_id = docId;
+    // ── THE PROVENANCE STAMP, AND ITS PLACEMENT IS THE FIX ────────────────
+    // Written HERE: after the id is known, before HYDRATE and before TYPE. Every
+    // document the old title-keyed sweep could never reclaim was killed between
+    // those two points, so a stamp written any later would miss exactly the
+    // class it exists for. Non-fatal by design — see stampRun's header. The
+    // failure is recorded on the run object and printed with the self-clean
+    // line, because a stamp that silently did not land is a run that has just
+    // manufactured the debris this predicate was built to prevent.
+    if (docId) {
+      const stamped = await stampRun(ctx, "paper", `drafts.${docId}`, run.run_mark);
+      run.stamp = { id: `drafts.${docId}`, mark: run.run_mark, ...stamped };
+    } else {
+      run.stamp = { id: null, mark: run.run_mark, ok: false, error: 'the "+" never produced an id — nothing to stamp (arm 2 covers this case)' };
+    }
     // What the screen says when the "+" did NOT produce a document. A flash is
     // the difference between "the server refused and told the user" and the
     // owner's actual complaint, which was silence.
@@ -2193,6 +2361,621 @@ async function pressCensusRow(page, rec, deadline) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  LEG D — THE COLD-LOAD PRESS FLOOR (report-only, and it REFUSES under load)
+// ─────────────────────────────────────────────────────────────────────────────
+//  spd-b19-lane4-quiet-host-floor. Three waves filed this leg and none of them
+//  ran it, for one reason: THE HOST WAS NEVER QUIET. Wave 19's verify round
+//  never saw load fall below 8.05 on 10 cores and watched it peak at 40.81, and
+//  it REFUSED to publish any number it took there. This leg makes that refusal
+//  MECHANICAL instead of editorial — the instrument itself declines to name a
+//  latency it cannot stand behind, and prints the load it declined at.
+//
+//  WHAT THE LEG MEASURES
+//    1. THE FLOOR. Ten CONSECUTIVE COLD LOADS, one press each on a Structure
+//       row, every latency quoted. The press is EARLY BY CONSTRUCTION: the
+//       moment the row is dispatchable the leg presses, with no socket gate and
+//       no settle. Prior runs measured 9/10, 9/10, 9/10 and 5/6 and failed
+//       DETERMINISTICALLY ON THE EARLIEST PRESS EVERY TIME (11–48ms after
+//       load) — so a harness that lets iteration 1 be the only fast one is
+//       measuring its own warm-up, not the seam. Here every iteration is fast.
+//    2. THE UNATTRIBUTED GAP. `readyState === "complete"` → the row being
+//       dispatchable was measured at 5056–5067ms, 28 times, with an 11ms spread
+//       that load jitter does not explain, while in-page truth said the row was
+//       present the whole time. If it survives on a quiet host it is a THIRD
+//       failure mode — a main-thread freeze in which clicks are QUEUED rather
+//       than dropped — and it is absent from wave 18's ledger of five. The leg
+//       re-takes it and quotes the spread either way.
+//    3. THE REF-SRC NO-OP (c3). See `refSrcProbe`.
+//
+//  THE FRAME-COUNT TRAP, STATED IN THE CODE BECAUSE THE ROW REQUIRES IT
+//  (spd-b19-lane4-quiet-host-floor c4). THE ORACLE FOR "WAS THIS PRESS SENT"
+//  MATCHES `"type":"click"` AND NEVER COUNTS FRAMES. `phx_join`, the heartbeat
+//  and WidthBucket's own hook push all ride the same `/live/websocket`, so a
+//  DISCARDED press reads as TWO FRAMES while sending no click — a frame count
+//  is confounded by construction and would report a dropped press as sent. The
+//  match lives in `Page.open`'s `Network.webSocketFrameSent` subscription
+//  (`data.indexOf('"type":"click"') === -1` → not a press) and the verdict lives
+//  in `wireVerdict`, whose `frames` field counts ONLY frames that already
+//  matched. Nothing in this leg reads a raw frame total, and nothing may.
+//
+//  WHAT IS ALREADY PURCHASED AND IS NOT RE-DERIVED HERE. A discarded press puts
+//  ZERO `"type":"click"` frames on the socket — 4/4, against a same-run positive
+//  control of 32/32 answered presses that DID emit one; the source-level reason
+//  is `pushWithReply`'s reject before any channel push; and the drop is SILENT.
+//  `phx-connected` is REFUTED as the discriminator IN BOTH DIRECTIONS (31/31
+//  presses landed while `connected === false` and 29 of them were honoured; the
+//  one probe that carried `phx-loading` is the one that was dropped) because the
+//  class is applied post-mount-diff at view.js:618. So this leg does not gate on
+//  the class and does not re-litigate the frame question — it presses early,
+//  reads the typed oracle, and reports.
+//
+//  THE REFUSAL IS PER-FIELD, AND THE DIRECTION IS WHY. It would be tidier to
+//  withhold everything a loaded host touched, and that tidiness would be wrong.
+//  Load is MONOTONE UPWARD on a wait. So:
+//
+//    · `latency_ms` is a PRODUCT number. Load inflates it, so a number published
+//      under load misleads IN THE DIRECTION OF THE CLAIM — the press reads
+//      slower than the code is. WITHHELD. This is the leg's whole reason to
+//      exist and it does not bend.
+//
+//    · `gap_ms` is a claim that a 5-SECOND PHENOMENON IS ABSENT. Load can only
+//      make it BIGGER, so a 2ms reading at load 10.1 is A FORTIORI — STRONGER
+//      than the same 2ms on an idle box, not weaker. Withholding it would
+//      discard good evidence in the one direction where load cannot hurt the
+//      conclusion. PUBLISHED OVER ALL ITERATIONS, load attached to each.
+//
+//  A uniform rule is easier to trust when the fields are alike. These are not:
+//  one measures the system, the other measures an absence. The difference is
+//  written down AT THE FIELD, with this argument, so the next reader checks the
+//  reasoning instead of inheriting a rule.
+//
+//  AND EVERY NULL SAYS WHICH NULL IT IS. `gap_spread: null` once meant either
+//  "withheld by design" or "nothing was measured" — indistinguishable by
+//  inspection, and that ambiguity is exactly what let a hand-computed figure be
+//  read as an instrument reading. Every spread now ships a `_status` string, and
+//  `floor.disclosure` indexes the policy of each field in one line.
+//
+//  REPORT-ONLY. Like LEG B and LEG C this leg never moves the exit code: it is a
+//  measurement of an open defect on a shared host, and converting a slow host
+//  into a product FAIL is the exact fabrication this epic exists to stop.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  WHAT THIS LEG MEASURED — FOUR RUNS, ALL AGAINST
+//  https://guerrilla.barkpark.cloud, each with its own PRE/POST served-commit
+//  stamp that MATCHED:
+//
+//    3431a82a0 (0.2.26.4036) 13:26Z cold · load 4.62→4.84 on 10 cores
+//    3431a82a0               13:28Z warm · load 4.87→4.65
+//    fe1ef0aaf (0.2.26.4041) 13:49Z cold · load 8.72→10.10
+//    fe1ef0aaf               13:51Z warm · load 8.54→9.32
+//
+//  THE LATENCIES BELOW ARE NOT PUBLISHED AS THE FLOOR — the host was loaded on
+//  all four and the leg refused every time, exactly as designed. They are
+//  quoted ONLY to carry the verdicts that survive a loaded host BY DIRECTION.
+//
+//  READ THE PROVENANCE STAMP, NOT A CURL YOU TYPED. The first write-up of these
+//  runs reported the served commit as `ca4534461` and the status as
+//  `operational` with no `codelists` component — and then reported BOTH as
+//  corrections to a brief that had said `3431a82a0` and `degraded (codelists)`.
+//  The brief was right. `ca4534461` is PROD's sha (89.167.28.206), read from a
+//  hand-typed curl at the micro-block IP, while every one of these runs drove
+//  guerrilla and stamped `3431a82a0` PRE and POST in its own `run.provenance`.
+//  Two "findings" that resolved to one cause: a number taken two commands from
+//  the source, reported over the instrument's own reading. The harness already
+//  had the answer in the file it wrote.
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE ~5.06s GAP IS REFUTED, AND NOT AS A LOAD ARTEFACT. Measured
+//  readyState=complete → a dispatchable press: 0–2ms, FORTY iterations out of
+//  forty, across both arms and BOTH SERVED BUILDS, at load 4.6 through 10.1.
+//  The prior observation was 5056–5067ms, 28 times, with an ELEVEN MILLISECOND
+//  SPREAD.
+//
+//  The refutation is load-proof because load is MONOTONE UPWARD on a wait: a
+//  gap that reads 2ms at load 10.1 cannot read 5056ms at load 2.0. A quiet host
+//  could only make it smaller, and it is already 2ms. So this verdict does not
+//  need the quiet window the FLOOR number needs — and it now holds across a
+//  build boundary as well, which no single-commit reading could have shown.
+//
+//  AND THE THIRD READING IS THE RIGHT ONE. The row framed this as a binary — a
+//  real third failure mode, or a load artefact — and it is NEITHER. An 11ms
+//  spread on a 5056ms value is the signature of a CONSTANT, not of a
+//  measurement: host load produces spreads in the hundreds of milliseconds (see
+//  the answer latencies below, 455–761ms on the same runs), and 5056–5067ms is
+//  ~5000ms of something fixed plus ~60ms of work. The gap was an artefact of
+//  the PRIOR INSTRUMENT — a ~5s constant in the harness that observed it — and
+//  in-page truth already said so at the time: the row was present the whole
+//  time (row:true at 851ms) and `[data-phx-main].className` was empty. There is
+//  no third failure mode here, and nothing queues.
+//
+//  THE EARLY-PRESS DROP DID NOT REPRODUCE ON EITHER BUILD. 40/40 presses
+//  ANSWERED, every one of them wire=SENT — so on both served commits the socket
+//  has joined before the row is hit-testable, and `pushWithReply` never gets the
+//  chance to reject. Answer latency 455–1071ms; press placed 229–537ms (cold)
+//  and 139–270ms (warm) into the load. This is 40/40 at loads from 4.6 to 10.1,
+//  and the same monotone argument applies to the RELIABILITY claim (a quiet host
+//  cannot answer fewer presses than a loaded one) — but NOT to the latency
+//  numbers, which stay unpublished.
+//
+//  THE 11–48ms FAILING PRESS IS UNREACHABLE FROM HERE. The earliest press this
+//  leg can physically place is ~139ms (warm) / ~229ms (cold), because before
+//  that the row has no hit box. A press recorded at 11ms was therefore pressing
+//  something not yet laid out — which is a fact about THAT harness, not about
+//  the seam. See FLOOR_COLD.
+//
+//  THE REF-SRC NO-OP REPRODUCES, NATURALLY, ON THE DEPLOYED STUDIO. The probe
+//  caught `data-phx-ref-src` still on the element from the control press (arm
+//  source NATURAL, ALL FOUR runs, both builds), and the second press read NOT SENT against a
+//  same-run control that read SENT. Signature: wire NOT SENT · 0 exceptions ·
+//  the DOM deltas are the CONTROL press's answer landing late and are printed
+//  as context, never as the verdict.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// THE QUIET FLOOR. "under ~2.0 on 10 cores" is the row's own wording, so the
+// threshold is expressed as a FRACTION OF CORES and rendered back into the 10-core
+// number: 2.0/10 cores = 0.20 runnable per core. A 10-core desk therefore refuses
+// above 2.0 exactly as written, and the same constant means the same thing on a
+// 4-core CI runner instead of silently becoming 5x stricter there.
+const QUIET_LOAD_PER_CORE = Number(process.env.QUIET_LOAD_PER_CORE || 0.20);
+const FLOOR_ITERATIONS = Number(process.env.FLOOR_ITERATIONS || 10);
+const FLOOR_PRESS_CAP = Number(process.env.FLOOR_PRESS_CAP_MS || 15000); // a press's effect
+const FLOOR_READY_CAP = Number(process.env.FLOOR_READY_CAP_MS || 30000); // readyState + row
+
+// COLD AND EARLY PULL IN OPPOSITE DIRECTIONS, and that is a finding rather than
+// a knob. MEASURED against guerrilla (served 3431a82a0 and fe1ef0aaf,
+// 2026-09-22, PRE/POST stamped and matched on every run): with the cache
+// DISABLED the row is not hit-testable until 229–537ms, so the earliest press
+// this leg can physically place is ~230ms into the load. The presses that
+// failed deterministically in the prior runs landed at 11–48ms — which is only
+// REACHABLE ON A WARM LOAD, where the desk's JS and CSS come out of the memory
+// cache and the row paints before the socket has any chance to join. So "press
+// early" and "load cold" are not the same axis: FLOOR_COLD=1 measures the
+// cold-load floor and FLOOR_COLD=0 measures the 11–48ms window the drops were
+// observed in. Both arms are needed and neither subsumes the other.
+const FLOOR_COLD = process.env.FLOOR_COLD !== "0";
+
+/** The host reading, taken from the clock rather than remembered. `quiet` is the
+ *  ONE field callers may branch on; `load1` and `cores` are printed so a refusal
+ *  names the number it refused at, which is what makes the refusal a result. */
+function hostLoad() {
+  const cores = os.cpus().length || 1;
+  const [load1, load5, load15] = os.loadavg();
+  const ceiling = QUIET_LOAD_PER_CORE * cores;
+  return {
+    at: new Date().toISOString(),
+    cores, load1, load5, load15,
+    ceiling: Number(ceiling.toFixed(2)),
+    per_core: Number((load1 / cores).toFixed(3)),
+    quiet: load1 < ceiling,
+  };
+}
+
+const loadLine = (l) =>
+  `load ${l.load1.toFixed(2)} / ${l.load5.toFixed(2)} / ${l.load15.toFixed(2)} on ${l.cores} cores ` +
+  `(${l.per_core.toFixed(3)}/core; the quiet ceiling is ${l.ceiling.toFixed(2)}) — ${l.quiet ? "QUIET" : "LOADED"}`;
+
+const FLOOR_ROW = "#item-paper";
+
+/** Was the press ANSWERED, by this row's own identity? `aria-current` on THIS
+ *  element, or the URL newly carrying THIS row's id. Never a count — LEG C's
+ *  `#item-counts-decoy` exists because a pane count credited a dead row with its
+ *  neighbour's answer 900ms later. */
+const FLOOR_ANSWERED = `(function(){
+  var el = document.querySelector(${JSON.stringify(FLOOR_ROW)});
+  var owned = !!(el && el.hasAttribute("aria-current"));
+  var urled = location.pathname.indexOf("/studio/paper") !== -1;
+  return owned || urled;
+})()`;
+
+/** Is the row DISPATCHABLE — present, laid out, and hit-testable at its centre?
+ *  Presence alone is not dispatchability: a row with a zero box cannot receive a
+ *  synthetic mouse event, and the 5.06s gap is precisely a claim about the
+ *  distance between "present" (in-page truth said `row:true` at 851ms) and
+ *  "pressable". So this predicate is the one the gap is measured against, and it
+ *  reports WHICH of the two conditions is missing rather than a bare false. */
+const FLOOR_DISPATCHABLE = `(function(){
+  var el = document.querySelector(${JSON.stringify(FLOOR_ROW)});
+  if (!el) return { present:false, boxed:false, hit:false };
+  var r = el.getBoundingClientRect();
+  var boxed = r.width > 0 && r.height > 0;
+  if (!boxed) return { present:true, boxed:false, hit:false };
+  var t = document.elementFromPoint(r.left + r.width/2, r.top + r.height/2);
+  return { present:true, boxed:true, hit: !!(t && (t === el || el.contains(t))) };
+})()`;
+
+/** ONE COLD LOAD, pressed early on purpose. Returns a record that is decidable
+ *  either way — a press that was never possible says so rather than reading as a
+ *  zero. */
+async function floorIteration(page, ctx, i, pressCap) {
+  const rec = { i, load_before: hostLoad(), load_after: null, discarded: null };
+  // COLD MEANS COLD. Without this the second iteration serves the desk's JS and
+  // CSS out of the memory cache and measures a warm parse, which is exactly the
+  // "iteration 1 was the fast one" artefact this leg was written to remove.
+  rec.cold = FLOOR_COLD;
+  try { await page.cdp.send("Network.setCacheDisabled", { cacheDisabled: FLOOR_COLD }, page.sid); } catch { /* the leg still runs warm-ish */ }
+
+  const t0 = Date.now();
+  await page.goto(ctx.base + DESK_PATH);
+  rec.nav_ms = Date.now() - t0;
+  rec.doc_status = page.lastDocument?.status ?? null;
+
+  const ready = await poll(async () => (await page.evaluate('document.readyState')) === "complete" || null, FLOOR_READY_CAP, "readyState complete");
+  rec.ready_ms = ready.value ? Date.now() - t0 : null;
+  const tReady = Date.now();
+
+  const disp = await poll(async () => {
+    const d = await page.evaluate(FLOOR_DISPATCHABLE);
+    rec.last_dispatch_probe = d && !d.__throw ? d : null;
+    return d && !d.__throw && d.present && d.boxed && d.hit ? d : null;
+  }, FLOOR_READY_CAP, "the Structure row became dispatchable");
+  rec.dispatchable_ms = disp.value ? Date.now() - t0 : null;
+  // THE NUMBER THE ROW ASKED FOR: readyState=complete → a dispatchable press.
+  rec.gap_ms = ready.value && disp.value ? Date.now() - tReady : null;
+
+  if (!disp.value) {
+    rec.outcome = "NO ROW";
+    rec.detail = `the Structure row never became dispatchable within ${ms(FLOOR_READY_CAP)} (last probe ${JSON.stringify(rec.last_dispatch_probe)})`;
+    rec.load_after = hostLoad();
+    return rec;
+  }
+
+  // PRESS NOW. No socket gate, no settle, no "let the mount land" — the early
+  // press IS the measurement.
+  const mark = page.wireMark();
+  const exMark = page.exceptionMark();
+  rec.press_at_ms = Date.now() - t0;
+  const hit = await page.click(FLOOR_ROW);
+  rec.click_timing = page.clickTiming || null;
+  const tPress = Date.now();
+  if (!hit) {
+    rec.outcome = "NOT PRESSED";
+    rec.detail = "the row had no hit box at press time";
+    rec.load_after = hostLoad();
+    return rec;
+  }
+
+  const answered = await poll(async () => (await page.evaluate(FLOOR_ANSWERED)) === true || null, pressCap, "the press was answered");
+  rec.latency_ms = answered.value ? Date.now() - tPress : null;
+  rec.wire = page.wireVerdict(mark);
+  rec.exceptions = page.exceptionsSince(exMark);
+  rec.outcome = answered.value ? "ANSWERED" : "UNANSWERED";
+  rec.detail = answered.value
+    ? `answered ${rec.latency_ms}ms after a press placed ${rec.press_at_ms}ms into the load · ${rec.wire.verdict}`
+    : `NO answer within ${ms(pressCap)} of a press placed ${rec.press_at_ms}ms into the load · ${rec.wire.detail}`;
+  rec.load_after = hostLoad();
+  return rec;
+}
+
+/** The spread, over the iterations that are ALLOWED to contribute. An iteration
+ *  whose load crossed the ceiling while it ran is DISCARDED BY NAME rather than
+ *  averaged through — averaging a loaded sample into a quiet set is how a
+ *  refusal becomes a number. */
+function spread(values) {
+  const xs = values.filter((v) => typeof v === "number").sort((a, b) => a - b);
+  if (!xs.length) return null;
+  const mid = Math.floor(xs.length / 2);
+  return {
+    n: xs.length,
+    min: xs[0],
+    max: xs[xs.length - 1],
+    median: xs.length % 2 ? xs[mid] : Math.round((xs[mid - 1] + xs[mid]) / 2),
+    range: xs[xs.length - 1] - xs[0],
+    all: xs,
+  };
+}
+
+/** THE PHX_REF_SRC SECOND-PRESS NO-OP (c3), as its own probe, with a CONTROL.
+ *
+ *  LiveView stamps `data-phx-ref-src` on an element while its event is in
+ *  flight, `syncPendingAttrs` CARRIES IT ACROSS a re-render, and `bindClick`
+ *  ends `!r.hasAttribute(N) && this.debounce(…)` with N = "data-phx-ref-src".
+ *  So a second press on a row whose first press is still outstanding is
+ *  discarded IN THE CLIENT: no frame, no exception, no flash, no server trace.
+ *  The digest says this shape ALONE reproduces the owner's report, and it had
+ *  never been exercised as its own probe.
+ *
+ *  TWO ARMS, AND THE CONTROL IS THE POINT. An instrument that only ever sees the
+ *  stamped press cannot tell "the press was suppressed" from "the tap is dead":
+ *    ARM CONTROL  press the row with NO ref-src → the oracle must say SENT.
+ *    ARM STAMPED  press the SAME row with ref-src present → NOT SENT.
+ *  A run in which both arms agree has measured nothing and says so.
+ *
+ *  NATURAL vs SYNTHETIC, LABELLED. The probe first tries to catch the attribute
+ *  in its natural in-flight window. That window can close faster than a CDP
+ *  round trip, so when it does the probe stamps the attribute itself — which is
+ *  what LiveView writes, byte for byte — and RECORDS WHICH ARM IT GOT. A
+ *  synthetic stamp proves the client's early return; it does not prove the
+ *  window is reachable by hand, and the record never claims it does. */
+async function refSrcProbe(page, ctx) {
+  const out = { row: FLOOR_ROW, control: null, stamped: null, natural_window: null, source: null };
+
+  await page.goto(ctx.base + DESK_PATH);
+  await poll(async () => {
+    const d = await page.evaluate(FLOOR_DISPATCHABLE);
+    return d && !d.__throw && d.hit ? d : null;
+  }, FLOOR_READY_CAP, "the row became dispatchable");
+  // Let the socket join before the CONTROL arm: the control's job is to prove
+  // the tap CAN say SENT, and a control that races the join would refute itself
+  // for the OTHER reason (`pushWithReply`'s no-connection reject) and read as a
+  // ref-src suppression. This is the one press in this file that is deliberately
+  // NOT early.
+  await poll(async () => {
+    const s = await page.evaluate(`(function(){var m=document.querySelector("[data-phx-main]");return m&&m.classList.contains("phx-connected")?"y":null;})()`);
+    return s || null;
+  }, SETTLE_CAP, "the socket joined");
+
+  // ── ARM CONTROL ────────────────────────────────────────────────────────────
+  const cMark = page.wireMark();
+  await page.click(FLOOR_ROW);
+  // The natural window, read IMMEDIATELY after the press and before any poll:
+  // whether LiveView's own stamp is observable from here at all is itself a
+  // finding, and a probe that looked for it later would answer "no" for the
+  // wrong reason.
+  out.natural_window = await page.evaluate(
+    `(function(){var el=document.querySelector(${JSON.stringify(FLOOR_ROW)});` +
+      `return el?{present:true,ref_src:el.getAttribute("data-phx-ref-src"),ref:el.getAttribute("data-phx-ref"),cls:el.className}:{present:false};})()`,
+  );
+  await pause(POLL_TICK);
+  out.control = page.wireVerdict(cMark);
+
+  // ── ARM STAMPED ────────────────────────────────────────────────────────────
+  const natural = !!(out.natural_window && out.natural_window.ref_src);
+  if (!natural) {
+    const wrote = await page.evaluate(
+      `(function(){var el=document.querySelector(${JSON.stringify(FLOOR_ROW)});if(!el)return false;` +
+        `el.setAttribute("data-phx-ref-src", el.closest("[data-phx-main]")?el.closest("[data-phx-main]").id:"phx-synthetic");return true;})()`,
+    );
+    out.source = wrote === true ? "SYNTHETIC — the natural in-flight window had already closed when the probe looked, so the probe wrote the attribute LiveView writes and pressed again" : "UNAVAILABLE";
+  } else {
+    out.source = "NATURAL — the attribute was still on the element from the control press";
+  }
+  const sMark = page.wireMark();
+  const sExMark = page.exceptionMark();
+  const before = await page.evaluate(
+    `(function(){var el=document.querySelector(${JSON.stringify(FLOOR_ROW)});` +
+      `return {aria:el?el.getAttribute("aria-current"):null,href:location.href,cls:el?el.className:null};})()`,
+  );
+  await page.click(FLOOR_ROW);
+  await pause(POLL_TICK * 3);
+  out.stamped = page.wireVerdict(sMark);
+  const after = await page.evaluate(
+    `(function(){var el=document.querySelector(${JSON.stringify(FLOOR_ROW)});` +
+      `return {aria:el?el.getAttribute("aria-current"):null,href:location.href,cls:el?el.className:null};})()`,
+  );
+  out.exceptions = page.exceptionsSince(sExMark);
+  out.dom_before = before;
+  out.dom_after = after;
+  // THE OBSERVABLE SIGNATURE, spelled out rather than left to a reader to infer
+  // from two verdict strings.
+  //
+  // AND THE DOM FIELDS ARE THE WEAK ONES, WHICH THIS RUN DEMONSTRATED. On the
+  // /good/ fixture the second-press window reads "aria-current changed · URL
+  // changed" — and neither change is the second press's. They are the CONTROL
+  // press's answer landing late (the fixture patches the URL at 400ms and grows
+  // the pane at 900ms, modelling the 2.4s measured on guerrilla). A probe that
+  // read the DOM delta as the suppressed press's effect would report the exact
+  // opposite of the truth. THE LOAD-BEARING FIELD IS THE WIRE — did a
+  // `"type":"click"` frame leave the socket — and the DOM fields are printed as
+  // CONTEXT, never as the verdict. That is the same rule LEG C's
+  // `#item-counts-decoy` enforces one level up: an effect that does not NAME the
+  // press cannot be credited to it.
+  out.signature =
+    `second press on a row carrying data-phx-ref-src: wire=${out.stamped?.verdict} · ` +
+    `exceptions=${(out.exceptions || []).length} · ` +
+    `className ${before?.cls === after?.cls ? "UNCHANGED" : "changed"} · ` +
+    `aria-current ${before?.aria === after?.aria ? "UNCHANGED" : "changed"} · ` +
+    `URL ${before?.href === after?.href ? "UNCHANGED" : "changed"} · ` +
+    `control arm (same row, no ref-src) = ${out.control?.verdict} ` +
+    `[the three DOM fields are CONTEXT, not the verdict: the control press's answer lands inside ` +
+    `this window, so a "changed" there is usually the FIRST press arriving late]`;
+  return out;
+}
+
+async function legD(page, ctx, ledger, run, opts) {
+  // The fixture narrows both of these. Ten iterations at a 15s answer cap is
+  // 150s of self-test when every early press is (correctly) dropped, and a
+  // self-test nobody will sit through is a self-test that stops being run.
+  const iters = Number(opts?.floorIterations ?? FLOOR_ITERATIONS);
+  const pressCap = Number(opts?.floorPressCap ?? FLOOR_PRESS_CAP);
+  const before = hostLoad();
+  process.stdout.write(`>> LEG D  uptime BEFORE: ${loadLine(before)}\n`);
+
+  const iterations = [];
+  for (let i = 1; i <= iters; i++) {
+    const rec = await floorIteration(page, ctx, i, pressCap);
+    // THE DISCARD RULE, applied per iteration and NAMED. An iteration that began
+    // or ended above the ceiling contributes to NOTHING — not the spread, not the
+    // median, not a sentence. It is kept in the record so the discard is visible.
+    if (!rec.load_before.quiet || !(rec.load_after && rec.load_after.quiet)) {
+      rec.discarded = `DISCARDED — host load crossed the quiet ceiling during this iteration ` +
+        `(before ${rec.load_before.load1.toFixed(2)}, after ${rec.load_after ? rec.load_after.load1.toFixed(2) : "n/a"}, ceiling ${before.ceiling.toFixed(2)})`;
+    }
+    iterations.push(rec);
+    process.stdout.write(
+      `   D${String(i).padStart(2, "0")} ${(rec.outcome || "?").padEnd(10)} ` +
+      `nav ${String(rec.nav_ms ?? "-").padStart(6)}ms · ready ${String(rec.ready_ms ?? "-").padStart(6)}ms · ` +
+      `gap ${String(rec.gap_ms ?? "-").padStart(6)}ms · press@${String(rec.press_at_ms ?? "-").padStart(6)}ms · ` +
+      `answer ${String(rec.latency_ms ?? "-").padStart(6)}ms · wire ${(rec.wire?.verdict || "-")}` +
+      `${rec.discarded ? "  [DISCARDED: load]" : ""}\n`,
+    );
+  }
+
+  const refsrc = await refSrcProbe(page, ctx);
+  const after = hostLoad();
+  process.stdout.write(`>> LEG D  uptime AFTER:  ${loadLine(after)}\n`);
+
+  // EVERY ITERATION MUST BE DECIDABLE. This — not the answer rate — is what the
+  // FLOOR beat's status is about, and the distinction is load-bearing: the
+  // answer rate is a PRODUCT number this leg refuses to publish on a loaded
+  // host, so hanging the beat's verdict on it would make the beat mean one
+  // thing when the host is quiet and another when it is not. "NO ROW" and "NOT
+  // PRESSED" are the instrument failing to measure; UNANSWERED is a measurement.
+  const undecidable = iterations.filter((r) => r.outcome !== "ANSWERED" && r.outcome !== "UNANSWERED");
+  const kept = iterations.filter((r) => !r.discarded);
+  const answered = kept.filter((r) => r.outcome === "ANSWERED");
+  const quietThroughout = before.quiet && after.quiet && iterations.every((r) => !r.discarded);
+
+  // ── WHICH FIELDS THE LOAD RULE GOVERNS, AND WHY THEY DIFFER ────────────────
+  //
+  // THE DISCARD RULE IS NOT UNIFORM ACROSS THESE THREE FIELDS, DELIBERATELY. A
+  // uniform rule is easier to trust when the fields are alike, and these are
+  // not: one measures the system under test, the others measure the ABSENCE of
+  // something. Treating them the same is the kind of uniformity that LOOKS
+  // principled while quietly discarding good evidence.
+  //
+  //   latency_ms      A PRODUCT NUMBER. A loaded host inflates it, so publishing
+  //                   it under load misleads IN THE DIRECTION OF THE CLAIM —
+  //                   the press looks slower than the code is. WITHHELD under
+  //                   load, which is the whole point of this leg.
+  //
+  //   gap_ms          A CLAIM THAT A 5-SECOND PHENOMENON IS ABSENT. Load is
+  //                   MONOTONE UPWARD on a wait, so it can only make this
+  //                   number BIGGER. A 2ms gap read at load 10.1 is therefore
+  //                   A FORTIORI — it is STRONGER evidence than the same 2ms at
+  //                   load 2.0, not weaker. Discarding it under load would
+  //                   withhold evidence in the one direction where load cannot
+  //                   hurt the conclusion. PUBLISHED OVER ALL ITERATIONS, with
+  //                   each iteration's load attached in `iterations[]`.
+  //
+  //   press_at_ms     The same shape: "how early could a press be placed". Load
+  //                   can only make it LATER, so an early press under load is a
+  //                   fortiori early. PUBLISHED OVER ALL ITERATIONS.
+  //
+  // AND A NULL MUST SAY WHICH NULL IT IS. `gap_spread: null` previously meant
+  // either "withheld by design" or "nothing was measured", and the two are
+  // indistinguishable by inspection — that ambiguity is what let a reader take a
+  // hand-computed figure for an instrument reading. Every spread now ships a
+  // `_status` string naming its policy and, when null, WHICH null it is.
+  const gapSpread = spread(iterations.map((r) => r.gap_ms));
+  const pressSpread = spread(iterations.map((r) => r.press_at_ms));
+  const latencySpread = quietThroughout ? spread(answered.map((r) => r.latency_ms)) : null;
+  const crossed = iterations.length - kept.length;
+
+  const floor = {
+    cold: FLOOR_COLD,
+    quiet_ceiling: before.ceiling,
+    load_before: before, load_after: after,
+    quiet_throughout: quietThroughout,
+    iterations,
+    kept: kept.length, discarded: crossed,
+    answered: answered.length,
+
+    latency_spread: latencySpread,
+    latency_spread_status: quietThroughout
+      ? `PUBLISHED — the host stayed under ${before.ceiling.toFixed(2)} throughout, over ${answered.length} answered iteration(s)`
+      : `WITHHELD BY THE LOAD RULE — ${crossed} of ${iterations.length} iteration(s) crossed the quiet ceiling ` +
+        `(${before.ceiling.toFixed(2)} on ${before.cores} cores). THIS NULL MEANS WITHHELD, NOT UNMEASURED: press ` +
+        `latency is a PRODUCT number a loaded host inflates, so publishing it here would mislead in the direction ` +
+        `of the claim. The per-iteration values are in floor.iterations[].latency_ms with each iteration's own load.`,
+
+    gap_spread: gapSpread,
+    gap_spread_status: gapSpread
+      ? `PUBLISHED OVER ALL ${iterations.length} ITERATIONS, INCLUDING THE ${crossed} THE LOAD RULE DISCARDED FOR ` +
+        `LATENCY — and that is not an inconsistency. Load is MONOTONE UPWARD on a wait, so it can only make this ` +
+        `number bigger: a ${gapSpread.max}ms gap read at load ${before.load1.toFixed(2)} is A FORTIORI evidence ` +
+        `that the ~5.06s readyState-to-dispatchable gap is not there. Each iteration carries its own load in ` +
+        `floor.iterations[].load_before/load_after.`
+      : `NOT MEASURED — no iteration produced a gap_ms at all (the row never became dispatchable, or readyState ` +
+        `never completed). THIS NULL MEANS UNMEASURED, NOT WITHHELD.`,
+
+    press_offset_spread: pressSpread,
+    press_offset_spread_status: pressSpread
+      ? `PUBLISHED OVER ALL ${iterations.length} ITERATIONS. Same direction as gap_spread: load can only make a ` +
+        `press LATER, so an early press under load is a fortiori early.`
+      : `NOT MEASURED — no iteration placed a press. THIS NULL MEANS UNMEASURED, NOT WITHHELD.`,
+
+    // The one-line index, so nobody has to infer a policy from a null.
+    disclosure: {
+      latency_spread: quietThroughout ? "LOAD-PUBLISHED (host was quiet)" : "LOAD-WITHHELD (product number; load inflates it)",
+      gap_spread: "LOAD-PUBLISHED ALWAYS (absence claim; load is monotone upward, so a reading under load is a fortiori)",
+      press_offset_spread: "LOAD-PUBLISHED ALWAYS (same direction as gap_spread)",
+      refsrc: "LOAD-INDEPENDENT (a frame either left the socket or it did not)",
+      "iterations[]": "ALWAYS RECORDED IN FULL, discarded or not, each with its own load_before/load_after",
+    },
+    refsrc,
+    frame_oracle:
+      "MATCHES \"type\":\"click\" AND NEVER COUNTS FRAMES — phx_join, the heartbeat and the " +
+      "WidthBucket hook push share /live/websocket, so a frame TOTAL reads two frames for a " +
+      "press that sent no click. See Page.open's webSocketFrameSent subscription.",
+  };
+  run.floor = floor;
+
+  // ── THE VERDICT, AND THE REFUSAL IS ONE ────────────────────────────────────
+  // A number taken above the ceiling is the load, not the code. Three waves have
+  // now declined to publish one; this is the first time the instrument declines
+  // on its own, with the observed load attached. A refusal is a COMPLETE result
+  // for this leg — it is not a PENDING and it is not a FAIL, because nothing
+  // about the product was learned or impugned.
+  if (!floor.quiet_throughout) {
+    floor.verdict = "REFUSED";
+    ledger.add(
+      "FLOOR", undecidable.length === 0 ? PASS : FAIL,
+      `REFUSED, and the refusal is the result. The quiet floor is ${before.ceiling.toFixed(2)} on ` +
+        `${before.cores} cores (${QUIET_LOAD_PER_CORE}/core); this host read ${before.load1.toFixed(2)} before and ` +
+        `${after.load1.toFixed(2)} after, with ${iterations.length - kept.length} of ${iterations.length} iterations ` +
+        `crossing the ceiling WHILE THEY RAN. THE PRESS LATENCY IS WITHHELD — per measure-on-a-quiet-host a press ` +
+        `latency taken here is the host's, not the code's, and publishing it would mislead in the direction of the ` +
+        `claim. Re-run with the host idle for THAT number. · BUT THE GAP IS PUBLISHED, over all ${iterations.length} ` +
+        `iterations: ${floor.gap_spread ? `${floor.gap_spread.min}–${floor.gap_spread.max}ms (median ${floor.gap_spread.median}, n=${floor.gap_spread.n})` : "not measured"}. ` +
+        `Load is MONOTONE UPWARD on a wait, so it can only make a gap BIGGER — a reading taken here is A FORTIORI, ` +
+        `not tainted, and discarding it would withhold evidence in the one direction load cannot hurt. · The ` +
+        `MECHANISM beats — the wire oracle and the ref-src probe — are load-independent and DO stand: a frame ` +
+        `either left the socket or it did not.`,
+      [
+        check("uptime BEFORE", PASS, loadLine(before)),
+        check("uptime AFTER", PASS, loadLine(after)),
+        check("iterations run", PASS, `${iterations.length} · ${kept.length} kept · ${iterations.length - kept.length} DISCARDED by the load rule`),
+        check("every iteration decidable", undecidable.length === 0 ? PASS : FAIL, `${iterations.length - undecidable.length}/${iterations.length} produced ANSWERED or UNANSWERED`),
+        check("the ~5.06s gap", PASS, floor.gap_spread
+          ? `PUBLISHED over all ${iterations.length} iterations (${floor.gap_spread.min}–${floor.gap_spread.max}ms, range ${floor.gap_spread.range}ms) — a fortiori under load`
+          : "not measured"),
+        check("latency PUBLISHED", PENDING, `WITHHELD by the load rule — ${floor.latency_spread_status}`),
+      ],
+      { gating: false },
+    );
+  } else {
+    floor.verdict = "MEASURED";
+    const ls = floor.latency_spread, gs = floor.gap_spread;
+    ledger.add(
+      "FLOOR", undecidable.length === 0 && kept.length > 0 ? PASS : FAIL,
+      `MEASURED on a quiet host: ${answered.length}/${kept.length} early presses answered · ` +
+        `answer latency ${ls ? `${ls.min}–${ls.max}ms (median ${ls.median})` : "n/a"} · ` +
+        `readyState→dispatchable gap ${gs ? `${gs.min}–${gs.max}ms (median ${gs.median}, range ${gs.range})` : "n/a"} · ` +
+        `presses placed ${floor.press_offset_spread ? `${floor.press_offset_spread.min}–${floor.press_offset_spread.max}ms` : "n/a"} into the load`,
+      [
+        check("uptime BEFORE", PASS, loadLine(before)),
+        check("uptime AFTER", PASS, loadLine(after)),
+        check("every iteration decidable", undecidable.length === 0 ? PASS : FAIL, `${iterations.length - undecidable.length}/${iterations.length} produced ANSWERED or UNANSWERED`),
+        check("early presses answered", PASS, `${answered.length}/${kept.length} — REPORTED, NOT GATED: an early press being dropped is the DEFECT under measurement, so reddening on it would make this leg red on exactly the finding it exists to record`),
+        check("the ~5.06s gap", PASS, gs ? `re-taken: ${gs.min}–${gs.max}ms over all ${gs.n} iterations (range ${gs.range}ms)` : "no iteration produced one"),
+      ],
+      { gating: false },
+    );
+  }
+
+  // The ref-src probe stands on its own and is NOT load-gated: "did a frame
+  // leave the socket" is a binary the host's load cannot move.
+  const armsDiffer = refsrc.control?.verdict === "SENT" && refsrc.stamped?.verdict === "NOT SENT";
+  const readable = refsrc.control?.verdict !== "CANNOT READ" && refsrc.stamped?.verdict !== "CANNOT READ";
+  ledger.add(
+    "REFSRC",
+    !readable ? FAIL : armsDiffer ? PASS : FAIL,
+    !readable
+      ? `the wire tap had NO READING for at least one arm, so this probe measured nothing: ${refsrc.control?.detail || ""} / ${refsrc.stamped?.detail || ""}`
+      : armsDiffer
+        ? `${refsrc.signature} · arm source: ${refsrc.source}`
+        : `THE TWO ARMS AGREE (${refsrc.control?.verdict} / ${refsrc.stamped?.verdict}), so this run cannot tell a suppressed press from a dead tap — that is an INSTRUMENT verdict, not a product one. ${refsrc.signature}`,
+    [
+      check("control arm (no ref-src) SENT", refsrc.control?.verdict === "SENT" ? PASS : FAIL, refsrc.control?.detail || "(none)"),
+      check("stamped arm NOT SENT", refsrc.stamped?.verdict === "NOT SENT" ? PASS : FAIL, refsrc.stamped?.detail || "(none)"),
+      check("silent (no exception)", (refsrc.exceptions || []).length === 0 ? PASS : FAIL, `${(refsrc.exceptions || []).length} exception(s)`),
+      check("arm source", PASS, refsrc.source || "(unknown)"),
+    ],
+    { gating: false },
+  );
+  return floor;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  the fixture (--self-test) — a miniature Barkpark, zero dependencies
 // ─────────────────────────────────────────────────────────────────────────────
 // It serves BOTH honest sites from one process. `/good/` hydrates its canvas
@@ -2646,6 +3429,30 @@ function fixtureEditorHtml(site, id, doc) {
 </script></body>`;
 }
 
+/** The first text a block set carries, which is what the fixture's save uses as
+ *  the document's title. Shallow on purpose: the real derivation lives on the
+ *  server and this only has to produce the PROPERTY "non-empty, not Untitled". */
+function blockText(blocks) {
+  for (const b of blocks || []) {
+    const t = (b?.text ?? (b?.content || []).map((c) => c?.text || "").join("")).trim();
+    if (t) return t;
+  }
+  return "";
+}
+
+/** The four pre-seeded sweep specimens, named ONCE so the fixture and the
+ *  assertions cannot drift apart. Their expected fates are in SWEEP_EXPECT. */
+const SWEEP_SPECIMENS = {
+  dead_run: "drafts.paper-fx-deadrun",
+  live_sibling: "drafts.paper-fx-sibling",
+  human: "drafts.paper-fx-human",
+  pre_stamp: "drafts.paper-fx-prestamp",
+};
+/** true = the run must DELETE it; false = the run must LEAVE it. Both directions
+ *  on purpose: a sweep asserted only on what it removes is one edit away from
+ *  removing everything and still passing. */
+const SWEEP_EXPECT = { dead_run: true, live_sibling: false, human: false, pre_stamp: false };
+
 function startFixture() {
   // One store per site so /good/ and /rot/ can never read each other's writes.
   const store = { good: new Map(), rot: new Map() };
@@ -2663,6 +3470,54 @@ function startFixture() {
         _createdAt: at, _updatedAt: at, title: "Untitled", blocks: [],
       });
     }
+    // ── THE FOUR SWEEP SPECIMENS (task-d582be9d064f35dc) ──────────────────
+    // The run's OWN document can never test the sweep: the self-clean adds
+    // `run.created_doc_id` by hand, so a fixture run that completes deletes its
+    // paper whatever the predicate says. The class this row is about is a
+    // document left by a run that DIED, and only a pre-seeded one can stand in
+    // for it. All four are asserted, in both directions, in selfTest().
+    const long_ago = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+    const moments_ago = new Date(Date.now() - 5 * 1000).toISOString();
+    const typed = [
+      { id: "tpl-title", type: "heading", level: 1, role: "title", locked: true, text: "JOURNEY HEADING DEADRUN" },
+      { id: "tpl-body", type: "paragraph", content: [{ text: "journey paragraph DEADRUN" }] },
+    ];
+    // 1. MUST BE SWEPT. A dead run's leftover: stamped, TITLED by its own TYPE
+    //    beat, far older than STALE_DEBRIS_MS. The old title-keyed predicate
+    //    cannot select it — delete the stamp arm and the residue assertion reds.
+    store[site].set(SWEEP_SPECIMENS.dead_run, {
+      _id: SWEEP_SPECIMENS.dead_run, _publishedId: SWEEP_SPECIMENS.dead_run.slice(7), _type: "paper", _draft: true,
+      _createdAt: long_ago, _updatedAt: long_ago, title: "journey paragraph DEADRUN", blocks: typed,
+      [STAMP_FIELD]: { harness: HARNESS_MARK, run_id: "DEADRUN", host: "fixture", stamped_at: long_ago },
+    });
+    // 2. MUST SURVIVE. A CONCURRENT run's live document — stamped, titled, five
+    //    seconds old. This is the only thing standing between arm 1 and a
+    //    sibling run's in-flight paper, so it is asserted, not trusted.
+    store[site].set(SWEEP_SPECIMENS.live_sibling, {
+      _id: SWEEP_SPECIMENS.live_sibling, _publishedId: SWEEP_SPECIMENS.live_sibling.slice(7), _type: "paper", _draft: true,
+      _createdAt: moments_ago, _updatedAt: moments_ago, title: "journey paragraph SIBLING", blocks: typed,
+      [STAMP_FIELD]: { harness: HARNESS_MARK, run_id: "SIBLING", host: "fixture", stamped_at: moments_ago },
+    });
+    // 3. MUST SURVIVE. A HUMAN's paper: no stamp, a real title, old. Nothing may
+    //    ever select this, and it is what makes the sweep safe to run on a host
+    //    other people use.
+    store[site].set(SWEEP_SPECIMENS.human, {
+      _id: SWEEP_SPECIMENS.human, _publishedId: SWEEP_SPECIMENS.human.slice(7), _type: "paper", _draft: true,
+      _createdAt: long_ago, _updatedAt: long_ago, title: "Q3 board notes", blocks: typed,
+    });
+    // 4. MUST SURVIVE, AND IT IS A DELIBERATE LIMIT, not an oversight. This is
+    //    the live shape of drafts.paper-8be087501234ae2d: untitled, two blocks,
+    //    UNSTAMPED, and old. It is almost certainly harness debris from before
+    //    the stamp existed — and "almost certainly" is not a licence to delete a
+    //    document on a live host off a predicate that cannot tell it from an
+    //    empty draft a human opened and walked away from. Arm 2 stays bounded by
+    //    the run's own window; pre-stamp debris is DISPOSED OF BY HAND, WITH
+    //    AUTHORISATION, never by a sweep.
+    store[site].set(SWEEP_SPECIMENS.pre_stamp, {
+      _id: SWEEP_SPECIMENS.pre_stamp, _publishedId: SWEEP_SPECIMENS.pre_stamp.slice(7), _type: "paper", _draft: true,
+      _createdAt: long_ago, _updatedAt: long_ago, title: null,
+      blocks: [{ id: "tpl-title", type: "heading", level: 1, role: "title", locked: true, text: "" }, { id: "tpl-body", type: "paragraph", content: [] }],
+    });
   }
 
   const server = http.createServer((req, res) => {
@@ -2717,17 +3572,40 @@ function startFixture() {
       // The unfiltered, _createdAt:desc list — what the litter sweep reads. The
       // fixture must serve it or the sweep is untested, and an untested sweep is
       // how the leak got here.
-      const all = [...docs.values()].sort((a, b) => Date.parse(b._createdAt) - Date.parse(a._createdAt));
+      let all = [...docs.values()].sort((a, b) => Date.parse(b._createdAt) - Date.parse(a._createdAt));
+      // ARM 1's server-side filter, served here so the stamped query is
+      // EXERCISED offline rather than assumed. Guerrilla answers
+      // `filter[journeyRun.harness][eq]=<value nothing carries>` with count 0;
+      // this branch reproduces that, so a fixture run cannot go green off an
+      // endpoint that ignored the filter and handed back everything.
+      const wantMark = url.searchParams.get(`filter[${STAMP_FIELD}.harness][eq]`);
+      if (wantMark !== null) all = all.filter((d) => d?.[STAMP_FIELD]?.harness === wantMark);
       return json(200, { result: { perspective: "drafts", limit: 50, offset: 0, count: all.length, documents: all } });
     }
     if (rest.startsWith("/v1/data/mutate/") && req.method === "POST") {
       let body = "";
       req.on("data", (c) => { body += c; });
       req.on("end", () => {
-        let ids = [];
-        try { ids = (JSON.parse(body).mutations || []).map((x) => x.delete?.id).filter(Boolean); } catch { /* report below */ }
+        let muts = [];
+        try { muts = JSON.parse(body).mutations || []; } catch { /* report below */ }
+        const ids = muts.map((x) => x.delete?.id).filter(Boolean);
         for (const id of ids) { docs.delete(id); docs.delete(`drafts.${id}`); }
-        json(200, { results: ids.map((id) => ({ id, operation: "delete" })) });
+        // THE PROVENANCE STAMP'S WRITE PATH. `patch.set` only, which is all the
+        // harness sends; guerrilla refuses a patch with no `type` (422
+        // validation_failed, measured 2026-09-22) and so does this, or the
+        // fixture would green a request the deployment rejects.
+        const patched = [];
+        for (const m of muts) {
+          const pt = m.patch;
+          if (!pt) continue;
+          if (!pt.id || !pt.type) continue; // refuse, exactly as guerrilla does
+          const doc = docs.get(pt.id);
+          if (!doc) continue;
+          Object.assign(doc, pt.set || {});
+          doc._updatedAt = new Date().toISOString();
+          patched.push(pt.id);
+        }
+        json(200, { results: [...ids.map((id) => ({ id, operation: "delete" })), ...patched.map((id) => ({ id, operation: "update" }))] });
       });
       return;
     }
@@ -2754,6 +3632,18 @@ function startFixture() {
         const doc = docs.get(key);
         if (doc) {
           try { doc.blocks = JSON.parse(body).blocks; } catch { /* leave it */ }
+          // ── THE FIXTURE GIVES THE DOCUMENT A TITLE, AND THAT IS THE POINT ──
+          // Without this the fixture could NEVER reproduce
+          // task-d582be9d064f35dc: the harness's own drafts stayed title-less
+          // offline, so the title-keyed sweep swept them, so the residue
+          // assertion below was green on a predicate that leaves permanent
+          // debris on the deployment. The fixture reproduces the PROPERTY
+          // measured on guerrilla — after TYPE, the draft has a non-empty title
+          // that is not "Untitled" (live: `journey paragraph MUCA9FZ6`,
+          // `journey paragraph MUCA8WHGJOURNEY HEADING MUCA8WHG…`) — not the
+          // server's exact derivation, which concatenates block text in an order
+          // this fixture makes no claim about.
+          doc.title = blockText(doc.blocks) || doc.title || null;
           doc._updatedAt = new Date().toISOString();
         }
         json(200, { ok: true });
@@ -2945,6 +3835,10 @@ async function journeyOne(cdp, ctx, opts) {
     // it back. It presses nothing that creates a document, so the litter sweep
     // below still holds after it.
     if (legs.has("c")) await legC(page, ctx, ledger, run);
+    // LEG D LAST, for the same reason LEG C is late and one more: it NAVIGATES
+    // TEN TIMES, so anything it ran before would have its page torn out from
+    // under it. It creates nothing, so the litter sweep below still holds.
+    if (legs.has("d")) await legD(page, ctx, ledger, run, opts);
   } catch (err) {
     if (err instanceof Guard) throw err;
     // A harness-side throw must still produce a ledger: the beats that already
@@ -2964,9 +3858,14 @@ async function journeyOne(cdp, ctx, opts) {
   // and clickUntil retrying a "+" that creates every time. `--keep` opts out for
   // a human who wants to open the document afterwards.
   if (run.create_pressed_at) {
-    const swept = await draftsCreatedSince(ctx, "paper", run.create_pressed_at);
+    // BOTH ARMS. The stamped arm reclaims what a DEAD run left — the class the
+    // title-keyed predicate could never select, on this run or any other. The
+    // shape arm still covers the "+"-without-navigating orphans this run itself
+    // could not stamp because it never learned their ids.
+    const swept = await sweepTargets(ctx, "paper", run.create_pressed_at, { runId: run.run_id ?? null });
     const ids = new Set(swept.ids);
     if (run.created_doc_id) ids.add(`drafts.${run.created_doc_id}`);
+    run.sweep = { by_stamp: swept.by_stamp, by_shape: swept.by_shape, stamped_seen: swept.stamped_seen, errors: swept.errors };
     run.cleanup = { docs: [...ids], deleted: [], failed: [], skipped: opts.keep ? "--keep" : null };
     if (!opts.keep) {
       for (const id of ids) {
@@ -2992,9 +3891,18 @@ const FOSSIL_BEATS = FOSSILS.map((f) => `FOSSIL/${f.docId.slice(-8)}`);
 const withFossils = (base, verdict) =>
   Object.assign({}, base, Object.fromEntries(FOSSIL_BEATS.map((b) => [b, verdict])));
 
+// LEG D's TWO BEATS ARE THE SAME ON BOTH SITES, and that is deliberate rather
+// than lazy. FLOOR's status asks ONLY "was every iteration decidable" — the
+// answer rate is reported and never gated (see legD) — so it is PASS wherever
+// the row exists, and on the fixture that is both sites. REFSRC is a pure
+// CLIENT-side fact: the control press (no ref-src, socket joined) must put a
+// `"type":"click"` frame on the wire and the stamped press must not, and the
+// fixture transcribes both of the shipped client's drop gates, so both arms
+// fire offline on every run regardless of which site is serving. A site-shaped
+// expectation here would be a coincidence dressed as coverage.
 const SELF_TEST_EXPECT = {
-  good: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: PASS, TYPE: PASS, PERSIST: PASS, RELOAD: PASS, CENSUS: PASS }, PASS),
-  rot: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: FAIL, TYPE: PENDING, PERSIST: PENDING, RELOAD: PENDING, CENSUS: FAIL }, FAIL),
+  good: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: PASS, TYPE: PASS, PERSIST: PASS, RELOAD: PASS, CENSUS: PASS, FLOOR: PASS, REFSRC: PASS }, PASS),
+  rot: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: FAIL, TYPE: PENDING, PERSIST: PENDING, RELOAD: PENDING, CENSUS: FAIL, FLOOR: PASS, REFSRC: PASS }, FAIL),
 };
 
 // ── THE CENSUS, ROW BY ROW ───────────────────────────────────────────────────
@@ -3091,7 +3999,7 @@ const SELF_TEST_REFSTUCK_KEY = "pane_item#item-sheet|Sheets";
 // it, so nothing legitimate is lost by making the hard floor the minimum: the
 // env var is honoured only where it makes the check STRICTER. A caller who wants
 // a weaker floor has to edit HARD_ASSERTION_FLOOR here, in the diff, in review.
-const HARD_ASSERTION_FLOOR = 40;
+const HARD_ASSERTION_FLOOR = 48;
 const SELF_TEST_ASSERTION_FLOOR = (() => {
   const raw = process.env.SELF_TEST_ASSERTION_FLOOR;
   if (raw === undefined || raw === '') return HARD_ASSERTION_FLOOR;
@@ -3113,14 +4021,22 @@ const SELF_TEST_ASSERTION_FLOOR = (() => {
 
 async function selfTest(opts) {
   const { server, port, store } = await startFixture();
-  const results = {}, exits = {}, residue = {}, censuses = {};
+  const results = {}, exits = {}, residue = {}, censuses = {}, survivors = {};
   const sites = opts.selfTestSite ? [opts.selfTestSite] : Object.keys(SELF_TEST_EXPECT);
   try {
     await withChrome(async (cdp) => {
       for (const site of sites) {
         const base = `http://127.0.0.1:${port}/${site}`;
         const ctx = { base, token: FIXTURE_TOKEN, dataset: opts.dataset };
-        const r = await journeyOne(cdp, ctx, opts);
+        // LEG D IS FORCED ON OFFLINE, and that is the only way it is asserted at
+        // all: it is opt-in against a deployment (ten navigations), so a fixture
+        // run that inherited the default `abc` would leave FLOOR and REFSRC
+        // unproduced — and the coverage guard below only reds on a beat that IS
+        // produced and unnamed, never on a leg that quietly stopped running.
+        // Narrowed to 3 iterations at a 3s answer cap: the fixture drops every
+        // early press ON PURPOSE (its socket joins at 700ms), so a 15s cap would
+        // spend 150s proving what 9s proves.
+        const r = await journeyOne(cdp, ctx, { ...opts, legs: opts.legs + (opts.legs.includes("d") ? "" : "d"), floorIterations: 3, floorPressCap: 3000 });
         process.stdout.write(report(r.ledger, { base, mode: `FIXTURE/${site}`, wall: r.wall, pre: r.pre, post: r.post }));
         results[site] = r.ledger.statuses();
         censuses[site] = r.run.census || null;
@@ -3131,7 +4047,14 @@ async function selfTest(opts) {
         // and /rot/ is the interesting one — its "+" creates and its canvas never
         // hydrates, which is precisely the shape that was leaking a draft per
         // press against the deployment.
-        residue[site] = [...store[site].keys()].filter((k) => !FOSSILS.some((f) => f.draftId === k));
+        // The four sweep specimens have their OWN expectations (SWEEP_EXPECT),
+        // so they are excluded here and asserted by name below — folding them
+        // into "residue" would make one of them indistinguishable from a leak.
+        const named = new Set([...FOSSILS.map((f) => f.draftId), ...Object.values(SWEEP_SPECIMENS)]);
+        residue[site] = [...store[site].keys()].filter((k) => !named.has(k));
+        survivors[site] = Object.fromEntries(
+          Object.entries(SWEEP_SPECIMENS).map(([name, id]) => [name, store[site].has(id)]),
+        );
       }
     });
   } finally {
@@ -3258,6 +4181,33 @@ async function selfTest(opts) {
     check(left.length === 0, `${site}: the run LEFT LITTER on the dataset — ${left.join(", ")} (the self-clean sweep did not remove what the "+" created)`);
   }
 
+  // ── THE SWEEP PREDICATE, BOTH DIRECTIONS (task-d582be9d064f35dc) ───────────
+  // The run's own document proves nothing about the sweep: the self-clean adds
+  // it by id whatever the predicate says. These four specimens are the ones that
+  // only the predicate can decide, and they are asserted as a PAIR of directions
+  // per site — one that must be gone, three that must still be there.
+  //
+  // MUTATION-PROVEN, both ways, on this tree: delete the `harnessStamped` arm
+  // from sweepCandidate and `dead_run` survives and this reds; drop the
+  // STALE_DEBRIS_MS guard from stampedAndReclaimable and `live_sibling`
+  // disappears and this reds. Neither mutation moves any other assertion, so a
+  // green here is about the predicate and not about the fixture.
+  for (const site of Object.keys(SELF_TEST_EXPECT)) {
+    const seen = survivors[site] || {};
+    for (const [name, mustBeSwept] of Object.entries(SWEEP_EXPECT)) {
+      const stillThere = seen[name];
+      check(
+        stillThere === !mustBeSwept,
+        mustBeSwept
+          ? `${site}: the sweep LEFT ${name} (${SWEEP_SPECIMENS[name]}) — a stamped draft from a run that died ${
+              Math.round(STALE_DEBRIS_MS / 60000)}+ minutes ago is the permanent debris this predicate exists to reclaim. ` +
+            `A title-keyed sweep cannot select it, which is exactly the defect.`
+          : `${site}: the sweep DELETED ${name} (${SWEEP_SPECIMENS[name]}) — it must NOT have. ` +
+            `This is a document on a dataset other people use, and a sweep that takes it is worse than no sweep.`,
+      );
+    }
+  }
+
   // THE FLOOR ITSELF. A run that compared almost nothing must not be allowed to
   // print PASS — that is the whole shape this workflow's scheduled lane had for
   // six weeks. This is the LAST check, so the number it guards is final.
@@ -3313,6 +4263,25 @@ async function main() {
     const ctx = { ...srv, dataset: opts.dataset };
     const { ledger, run, wall, pre, post } = await withChrome((cdp) => journeyOne(cdp, ctx, opts));
     process.stdout.write(report(ledger, { base: ctx.base, mode: opts.report ? "REPORT" : "STRICT", wall, pre, post, legs: opts.legs }));
+    // THE STAMP, SAID OUT LOUD. A run whose stamp did not land has just created
+    // the exact document class task-d582be9d064f35dc exists for, and that must
+    // never be a silent fact buried in --json.
+    if (run.stamp) {
+      process.stdout.write(
+        run.stamp.ok
+          ? `   provenance stamp: ${STAMP_FIELD}.run_id=${run.stamp.mark.run_id} written to ${run.stamp.id}\n`
+          : `   provenance stamp: NOT WRITTEN to ${run.stamp.id ?? "(no id)"} — ${run.stamp.error}. A later run cannot reclaim this document by stamp.\n`,
+      );
+    }
+    if (run.sweep) {
+      const sw = run.sweep;
+      process.stdout.write(
+        `   sweep: ${sw.by_stamp.length} by STAMP${sw.by_stamp.length ? ` [${sw.by_stamp.join(", ")}]` : ""}` +
+          ` · ${sw.by_shape.length} by SHAPE+WINDOW${sw.by_shape.length ? ` [${sw.by_shape.join(", ")}]` : ""}` +
+          ` · ${sw.stamped_seen.length} stamped draft(s) seen on the host` +
+          `${sw.errors.length ? ` · QUERY ERRORS: ${sw.errors.join("; ")}` : ""}\n`,
+      );
+    }
     if (run.cleanup) {
       const c = run.cleanup;
       process.stdout.write(
@@ -3372,5 +4341,11 @@ async function main() {
 // is checkable) WITHOUT running the journey. `main()` fires only when this file
 // is the entry point — an unconditional call would make any import spawn Chrome.
 export { Cdp, Page, findChrome, withChrome, readServer, mintTicket, servedCommit, readDraft, poll, DESK_PATH, CANVAS_STATE, EDITOR_SHAPE };
+// The sweep predicate and its parts, exported so
+// tooling/studio-journey/sweep-predicate.test.mjs can drive BOTH arms in BOTH
+// directions offline, against the real shapes measured on guerrilla. A
+// predicate that deletes documents on a live host and is asserted only by the
+// browser self-test is asserted only where a browser is available.
+export { sweepCandidate, harnessStamped, stampedAndReclaimable, untitledTemplateShape, STAMP_FIELD, HARNESS_MARK, STALE_DEBRIS_MS, SEEDED_TEMPLATE_BLOCKS };
 
 if (import.meta.url === `file://${process.argv[1]}`) main();

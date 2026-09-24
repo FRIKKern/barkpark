@@ -222,12 +222,10 @@ add its context to `.github/required-checks.json` and apply — never hand-PUT.
 
 ### A pull request runs the IMPACTED ExUnit set; main runs all of it
 
-`Test (Elixir …)` no longer runs all 1,458 ExUnit files on a pull request. A
+`Test (Elixir …)` may run less than the whole suite on a pull request. A
 step before it, `Which tests does this pull request need?`, computes the
 impacted subset with `scripts/elixir-impacted-tests.sh`; the `Test` step reads
-that answer from a file and runs either the list or the whole suite. Replayed
-over the last 40 api/-touching commits on main: 12 select everything, the rest a
-median of ~200 files.
+that answer from a file and runs either the list or the whole suite.
 
 **Nothing about a push to main changed.** The dispatcher already emits every path
 set `true` on a non-pull_request event, and the selection step returns `ALL` on
@@ -242,8 +240,10 @@ along with an empty diff, an unresolvable `HEAD^1`, a failed `mix xref`, a lib
 file with no module in it, and a missing or empty selection file. Nothing is
 enumerated, so a new kind of path can only ever make this run more. Since an
 empty `xref` graph is legitimate for a leaf and catastrophic from a broken
-instrument, a positive control over `lib/barkpark/repo.ex` runs first: no
-dependents there and the whole run falls back to `ALL`.
+instrument, a probe runs first: a hub (`lib/barkpark/plugin.ex`) and a leaf
+(`lib/barkpark/tasks/landed.ex`) must get different closures, or the run logs
+`narrowing unavailable: running ALL`. On today's toolchain they do not (#20217),
+so an `api/lib` PR runs everything until a direct-edge closure lands (#20219).
 
 **The ALWAYS set** rides every narrowed selection — the tests a compile closure
 structurally cannot reach. Source-scanning censuses are DERIVED from the tree on
@@ -318,7 +318,12 @@ is harmless:
   GENERATED from names observed on sampled heads, so **every paths-filtered
   workflow is invisible to that census by construction**, and the same mechanism
   drops rows the other way with no report. Read an absence from that file as
-  "the sample did not see it", never as "no such gate exists". History, with the
+  "the sample did not see it", never as "no such gate exists". That concession
+  no longer covers a name that can BLOCK a merge: `scripts/blocking-name-census.py`
+  (a step of `Elixir path-escape ratchet`, so it reds `Elixir gate`) walks each
+  required aggregator's `needs:` closure statically and reds on any job in it
+  that neither list names. Its output is the only source for census counts; `--at
+  <rev>` re-derives the wave-56 residue recipe at any commit. History, with the
   four names it lost and the regeneration that now carries this row:
   [merge-gates-history.md](merge-gates-history.md#the-generator-merge-that-lost-25-exclusion-rows).
 - **ADDING A BLOCKING JOB TO `security.yml` COSTS A SIXTH PLACE, and forgetting
@@ -736,7 +741,7 @@ gate scripts themselves and to the workflow file.
 ### The doc-gates roster (it is not two scripts)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **29 steps labelled `(fails this job)`** plus the
+undersells it: it runs **30 steps labelled `(fails this job)`** plus the
 `(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
 PR touching one `.ex` file runs all of them.
 
@@ -805,6 +810,7 @@ so its verdict is unaffected.) In workflow order:
 | 27 | Doc drift — links, routes, placeholders, runnable examples | `scripts/doc-drift-check.sh` (+ its `(tripwire)` self-test step; diff-scoped, landed by #18707 — see *When your PR touches a doc* below) |
 | 28 | Charter-corpus marker hygiene | `scripts/charter-corpus-hygiene-check.sh` (`--selftest`, then the check) over the `.claude/workflows/*-charter.md` corpus |
 | 29 | Charter adoption census | `deploy/charter-adoption-check.sh` (`--selftest`, then the check; the deploy-reliability charter's declared adoption set vs the set derived from `.github/workflows/`, red in both directions — D620) |
+| 30 | bp-command doc parse over docs/cli | `node tooling/doc-truth/verify-bp-commands.mjs` (`--selftest`, then the gate over `docs/cli/*.md`; the step carries its own glob FLOOR of 3 files, so a glob that expands to nothing FAILS and can never read as a pass) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s

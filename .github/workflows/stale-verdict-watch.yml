@@ -39,6 +39,17 @@
 # true. A LEVEL trigger is the only shape that can see it, so this asks every 30
 # minutes and keeps asking.
 #
+# THE SCHEDULE IS ALSO WHAT ENFORCES THE AGING BOUND (task-87f845f92d7884c8).
+# A CONFLICTING pull request that no pin covers and that has gone unrebased
+# for more than 6 hours reds rc 10 AGED CONFLICT, with its age; a younger one
+# is printed and does not red. A PR ages while NOTHING happens, so the */30
+# cron leg is the trigger that catches a PR crossing 6h (within ~30-45 min);
+# the push-to-main leg only adds reads when main moves. The bound is passed
+# explicitly below (`--max-conflict-age-hours 6`) so it is read here, not
+# inferred from a script default. What the age measures — the head's own
+# timestamp, an UPPER bound on how long it has conflicted — is in the header
+# of scripts/stale-verdict-watch.sh under THE AGING BOUND.
+#
 # THE RESIDUALS, IN NUMBERS
 #
 #   * a ~30-45 minute observation window (GitHub queues cron under load)
@@ -168,7 +179,7 @@ jobs:
         run: |
           set -uo pipefail
           rc=0
-          bash scripts/stale-verdict-watch.sh --repo "${{ github.repository }}" || rc=$?
+          bash scripts/stale-verdict-watch.sh --repo "${{ github.repository }}" --max-conflict-age-hours 6 || rc=$?
           # Published BEFORE the routing call: the sibling job must learn the rc
           # even when this step is about to red on it.
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
@@ -211,12 +222,133 @@ jobs:
         uses: actions/checkout@v4
 
       # Interpretation only — the read itself happened once, in the sibling job.
-      # rc 0 clean, rc 1 scream, rc 2 PARTIAL warning, rc 8 BASELINE DRIFT. A
-      # read-fault rc cannot arrive here — the job `if:` above excludes every one
-      # — and the router reds as a ROUTING ERROR if the wiring ever drifts.
+      # rc 0 clean, rc 1 scream, rc 2 PARTIAL warning, rc 8 BASELINE DRIFT,
+      # rc 10 AGED CONFLICT. A read-fault rc cannot arrive here — the job `if:`
+      # above excludes every one — and the router reds as a ROUTING ERROR if
+      # the wiring ever drifts.
+      #
+      # THIS JOB GOING GREEN IS rc 0 OR rc 2, AND THE CHECK RUN SAYS WHICH. The
+      # router emits exactly one annotation titled `stale-verdict-watch rc=N`:
+      # a NOTICE for rc 0, a WARNING for rc 2 ("this green is NOT rc 0"), an
+      # ERROR for 1/8/10 — and heads this job's summary with the same rc. Read
+      # it from the run page or `gh api .../check-runs/<id>/annotations`; the
+      # log is no longer the only place rc 2 can be told from rc 0.
       - name: Does the population carry a stale green?
         run: bash scripts/stale-verdict-watch-route.sh verdict "${{ needs.stale-verdict-watch-fault.outputs.rc }}"
 
+  # ══ EGRESS: A RED HERE MUST REACH A HUMAN ══════════════════════════════════
+  #
+  # dr-w33-bl-carrier-less-watches-get-a-carrier-or-go. The header of this file
+  # says "A scream nobody is paged for is not a scream" — and until these two
+  # jobs it invoked no notifier. Its only reader was R2: the `push:` arm enrols
+  # it in main-red-owner.yml, which files ONE issue for main's whole red SET
+  # after a red has stood for >2h. That is a reader of "main is red", not of
+  # "PR #N is asserting a stale green", and it names no key of this file's own.
+  # Measured 2026-09-23 over the last 100 runs: 19 push failures, 0 carried to
+  # an issue under a key of this file's own.
+  #
+  # Same shape as main-gate-watch.yml's reporters: one job per failing OUTCOME,
+  # each with a DISTINCT CI_FAILURE_KEY (file-ci-failure-issue.sh dedupes per
+  # key, so a scream that starts while a fault is open gets its own thread
+  # rather than disappearing into the fault's), job-level `issues: write` only
+  # (the watch jobs above stay read-only), and a ref guard so neither a
+  # pull_request run nor a topic-branch workflow_dispatch mints a public issue.
+  #
+  # THE GUARD IS `failure() || cancelled()` FROM THE START, unlike the older
+  # main-gate-watch reporters: `failure()` is FALSE on a cancelled run, and a
+  # watch that was cancelled mid-read looks exactly like one that read clean
+  # (dr-w33-s4-alarm-reaches-a-human widened five older alert steps for this).
+  #
+  #   stale-verdict-watch-fault  -> CI failure: stale-verdict-watch-fault
+  #   stale-verdict-watch        -> CI failure: stale-verdict-watch-main
+  report-stale-verdict-watch-fault:
+    name: Report stale-verdict-watch read fault to a human
+    # `stale-verdict-watch-fault` has no ancestors, so `failure()` here can only
+    # mean that job (a read fault, rc 3/4/5/6/7/9, or its tripwire) failed. But
+    # `cancelled()` is RUN-level, not ancestor-level: a run cancelled while the
+    # VERDICT job was running is cancelled() here too, with this job's only
+    # ancestor green. The `!= 'success'` conjunct keeps that case on the scream
+    # key alone rather than filing a read fault for a read that succeeded.
+    needs: [stale-verdict-watch-fault]
+    if: (failure() || cancelled()) && github.ref == 'refs/heads/main' && needs.stale-verdict-watch-fault.result != 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: File the read fault to a human
+        env:
+          # The filer reads GITHUB_TOKEN, never GH_TOKEN.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: stale-verdict-watch-fault
+          CI_FAILURE_DETAIL: |
+            **stale-verdict-watch could not LOOK.** The job `Stale verdict watch
+            read fault` failed (or was cancelled), which means this run
+            adjudicated no pull request at all — it says nothing about whether a
+            conflicted PR is asserting a stale green.
+
+            The rc is in the run log of that job, and
+            `scripts/stale-verdict-watch-route.sh` is the table: 3 could not
+            read the spec or the PR list, 4 read the payload and could not
+            compute from it, 5 classified not one row, 6 never read the list
+            (UNREACHABLE), 7 read the list but not main's history, 9 refused
+            before issuing a rollup budget it could not afford; any other rc is
+            a fault of the instrument itself. A red on the first step means the
+            harness (`stale-verdict-watch.test.sh`) can no longer fail — the
+            watch is decoration until that is fixed.
+
+            Idempotent per key: an ongoing fault appends a comment. CLOSE IT
+            once the watch can read again; the next fault opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh
+
+  report-stale-verdict-watch-scream:
+    name: Report stale-verdict-watch scream to a human
+    # BOTH jobs are in `needs:` so the fault-job conjunct can be read. Bare
+    # `failure()` is TRUE whenever ANY ancestor failed, so a read fault (which
+    # SKIPS the verdict job) would otherwise fire this reporter too and file the
+    # scream key for a run that judged no pull request. Requiring the fault job
+    # to have SUCCEEDED leaves the verdict job as the only ancestor that can
+    # have failed or been cancelled.
+    needs: [stale-verdict-watch-fault, stale-verdict-watch]
+    if: (failure() || cancelled()) && github.ref == 'refs/heads/main' && needs.stale-verdict-watch-fault.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: File the stale-green scream to a human
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: stale-verdict-watch-main
+          CI_FAILURE_DETAIL: |
+            **A CONFLICTING pull request is still asserting a green required
+            verdict it can no longer earn.** A conflicted PR re-dispatches
+            nothing, so the checks next to its merge button describe a tree
+            that no longer exists, and will until somebody pushes.
+
+            The run log of `Stale verdict watch` names each PR and how many
+            main commits its verdict is behind. Remedy: rebase it, or close it.
+
+            rc 10 (AGED CONFLICT) lands here too: a CONFLICTING pull request
+            no pin covers has sat unrebased for more than 6 hours (or its age
+            could not be read, which fails closed). The log prints each
+            CONFLICTING row with its age. Remedy: rebase it, or close it.
+
+            rc 8 (BASELINE DRIFT) also lands here, with the OPPOSITE remedy:
+            no PR needs touching — a pinned entry in
+            `scripts/stale-verdict-watch.baseline` healed and the committed
+            file did not; delete that line. The log names which. A CANCELLED
+            verdict job files here too: a verdict that never finished is not
+            a clean one.
+
+            Idempotent per key: a standing condition appends a comment rather
+            than opening an issue per tick. CLOSE IT once no PR carries a stale
+            green; the next scream opens a fresh one.
+        run: bash scripts/file-ci-failure-issue.sh
 
   stale-verdict-harness:
     name: Stale verdict harness

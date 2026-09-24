@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       barkdown_ref:
-        description: Barkdown branch or commit (default codex/electron-prototype)
+        description: Barkdown branch or commit (default main)
         required: false
       rows:
         description: Comma-separated rows (default all)
@@ -66,7 +66,7 @@ jobs:
         if: steps.token.outputs.present == 'true'
         with:
           repository: FRIKKern/barkdown
-          ref: ${{ github.event.inputs.barkdown_ref || 'codex/electron-prototype' }}
+          ref: ${{ github.event.inputs.barkdown_ref || 'main' }}
           token: ${{ secrets.BARKDOWN_READ_TOKEN }}
           path: barkdown
       - uses: erlef/setup-beam@v1

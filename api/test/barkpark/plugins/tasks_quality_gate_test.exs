@@ -26,7 +26,7 @@ defmodule Barkpark.Plugins.TasksQualityGateTest do
   @dataset "tasks_quality_gate_test"
 
   setup do
-    Application.put_env(:barkpark, :plugins, [Barkpark.Plugins.Tasks])
+    Barkpark.PluginEnv.put!([Barkpark.Plugins.Tasks])
     # RegistryCase + DataCase both restore the env baseline on exit.
     :ok
   end

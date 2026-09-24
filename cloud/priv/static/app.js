@@ -1113,7 +1113,7 @@
         state.consequences.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") +
         "</ul>" +
         '<div class="field cm-typed-field">' +
-          '<label class="label" for="cm-typed">Type <span class="cm-name">' + esc(state.resourceName) + "</span> to confirm</label>" +
+          '<label class="label" for="cm-typed">Type <span class="cm-name"><bdi>' + esc(state.resourceName) + "</bdi></span> to confirm</label>" +
           '<input class="form-input" id="cm-typed" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />' +
         "</div>";
     } else if (state.consequences.length) {
@@ -1353,7 +1353,7 @@
       '<div class="am-identity">' +
         '<span class="am-face" aria-hidden="true">' + esc(initial) + "</span>" +
         '<div class="am-who">' +
-          '<div class="am-name">' + esc(name) + "</div>" +
+          '<div class="am-name"><bdi>' + esc(name) + "</bdi></div>" +
           '<div class="am-line">' + esc(accountIdentityLine(model)) + "</div>" +
         "</div>" +
         '<button class="btn-link am-link" type="button" id="am-pw-toggle" ' +
@@ -2361,18 +2361,38 @@
   // =========================================================== PROVIDER FLOW
   // Forge-style picker → branded credential subform, both in the modal.
   // Only Hetzner is wired to the API; the rest are shown disabled ("Soon").
+  //
+  // TWO AXES, NOT ONE (console-w28). `available` is PROVISIONABLE — can this
+  // kind be a box source? It gates the launch hosting picker, the launch flow's
+  // default kind and the resurrect sheet, all of which fetch
+  // `/v1/providers/<kind>/catalog`. `connectable` is CAN A CREDENTIAL BE
+  // STORED, and it gates the providers page's connect card ONLY. The server
+  // keeps exactly this split — router.ex `@neutral_kinds ~w(hetzner azure)` is
+  // the catalog set, `@connectable_kinds ~w(hetzner azure cloudflare)` is a
+  // strict superset — and the console mirrored only half of it, which is why
+  // Cloudflare (connectable since D899, with a stored account_id the server
+  // already serves) had no row on this page at all. Putting it under
+  // `available` instead would have offered Cloudflare as a place to launch a
+  // Barkpark, which it cannot be: it has no `build_provider_catalog` clause and
+  // `/v1/providers/cloudflare/catalog` 404s unknown_kind.
   var PROVIDERS = [
     { kind: "hetzner", name: "Hetzner Cloud", sub: "Deploy on your own Hetzner account",
-      mark: "H", cls: "brand-hetzner", available: true, fields: "token",
+      mark: "H", cls: "brand-hetzner", available: true, connectable: true, fields: "token",
       console: "https://console.hetzner.cloud/",
       blurb: "Connect to your Hetzner Cloud account to deploy instances." },
     { kind: "azure", name: "Microsoft Azure", sub: "Deploy on your own Azure subscription",
-      mark: "Az", cls: "brand-azure", available: true, fields: "azure",
+      mark: "Az", cls: "brand-azure", available: true, connectable: true, fields: "azure",
       console: "https://portal.azure.com/",
       blurb: "Connect an Azure service principal so Barkpark can provision on your subscription." },
-    { kind: "digitalocean", name: "DigitalOcean", sub: "Coming soon", mark: "DO", cls: "brand-do", available: false },
-    { kind: "aws", name: "AWS", sub: "Coming soon", mark: "aws", cls: "brand-aws", available: false },
-    { kind: "vultr", name: "Vultr", sub: "Coming soon", mark: "V", cls: "brand-vultr", available: false }
+    // Cloudflare is an EDGE provider (DNS/TLS/CDN), never a box source: connectable,
+    // deliberately not available.
+    { kind: "cloudflare", name: "Cloudflare", sub: "DNS, TLS and CDN for your domains",
+      mark: "CF", cls: "brand-cloudflare", available: false, connectable: true, fields: "cloudflare",
+      console: "https://dash.cloudflare.com/profile/api-tokens",
+      blurb: "Connect a Cloudflare API token so Barkpark can manage DNS and certificates for your domains." },
+    { kind: "digitalocean", name: "DigitalOcean", sub: "Coming soon", mark: "DO", cls: "brand-do", available: false, connectable: false },
+    { kind: "aws", name: "AWS", sub: "Coming soon", mark: "aws", cls: "brand-aws", available: false, connectable: false },
+    { kind: "vultr", name: "Vultr", sub: "Coming soon", mark: "V", cls: "brand-vultr", available: false, connectable: false }
   ];
 
   // Azure's service-principal is a four-tuple (Decision 4 — the single
@@ -2385,6 +2405,28 @@
     { key: "client_id", label: "Application (client) ID", secret: false, placeholder: "00000000-0000-0000-0000-000000000000" },
     { key: "client_secret", label: "Client secret", secret: true, placeholder: "••••••••••••••••" },
     { key: "subscription_id", label: "Subscription ID", secret: false, placeholder: "00000000-0000-0000-0000-000000000000" }
+  ];
+
+  // Cloudflare's credential blob is a THREE-tuple and the router keeps exactly
+  // these three keys — `cloudflare_credential_blob/1` builds
+  // `%{"api_token" => …}` and then `maybe_put_field`s "account_id" and
+  // "zone_id", dropping either when blank. So api_token is REQUIRED (the
+  // Provider changeset refuses a blob without it) and the other two are
+  // genuinely optional; the form says so rather than demanding all three.
+  //
+  // `account_id` is the field this whole card exists for: it is the ONLY thing
+  // that can ever name which Cloudflare account a connection points at.
+  // Cloudflare.Client declares five callbacks — verify_token,
+  // upsert_dns_record, delete_dns_record, ensure_zone_proxied,
+  // create_origin_ca_cert — and none of them names an account, so a stored
+  // account_id is an ECHO of what was typed here and nothing more.
+  var CLOUDFLARE_FIELDS = [
+    { key: "api_token", label: "API token", secret: true, required: true,
+      placeholder: "••••••••••••••••" },
+    { key: "account_id", label: "Account ID", secret: false, required: false,
+      placeholder: "0123456789abcdef0123456789abcdef" },
+    { key: "zone_id", label: "Zone ID", secret: false, required: false,
+      placeholder: "0123456789abcdef0123456789abcdef" }
   ];
 
   // ---- provider/launch pure helpers (S7) — every one is exported through the
@@ -2477,6 +2519,43 @@
   function lifecyclePill(bp) {
     var state = lifecyclePillState(bp);
     return { state: state, label: LIFECYCLE_PILL_LABEL[state] || "Unknown", cls: instanceLifecycleClass(state) };
+  }
+
+  // cch-r21l: THE LIFECYCLE STATE CHIP IS A statusMeta ROLE, NOT ITS OWN FAMILY.
+  // RULING (task-c74cf3120f6bca69): `.inst-life-pill` was a STATE chip — the same
+  // idea the fleet row already paints through statusMetaPill — wearing a second
+  // vocabulary. Its base rule was a clone of `.status-pill`'s box (same
+  // inline-flex/gap/height/padding/border/radius metrics, only font-weight
+  // differed), it was hand-emitted in lifecycleActionRowHtml and then RE-CLASSED
+  // imperatively in runDecommission, so the one-emitter predicate decision 24
+  // bought (E13 arm (f)) could never see it. It is absorbed here.
+  //
+  // The role per state is READ OFF the S4 token, never invented: app.css paints
+  // `.bp-inst--provisioning { color: var(--info) }`, `--live { var(--ok) }`,
+  // `--degraded { var(--warn) }`, `--stopped { var(--muted-text) }`,
+  // `--decommissioned { var(--danger) }`. Suspended additionally takes the
+  // `stopped` VARIANT (dim + dashed hairline), which is what the ladder already
+  // says for "a thing that was deliberately halted".
+  //
+  // The DOMAIN is held against LIFECYCLE_PILL_LABEL by the harness, so a sixth
+  // lifecycle state cannot arrive with a label and no role.
+  var LIFECYCLE_PILL_ROLE = {
+    provisioning:   { role: "info" },
+    live:           { role: "ok" },
+    degraded:       { role: "warn" },
+    stopped:        { role: "neutral", variant: "stopped" },
+    decommissioned: { role: "danger" }
+  };
+
+  // The ONE lifecycle-state chip emitter. Both the pure render and the optimistic
+  // decommission repaint go through it, so the chip has exactly one author.
+  // An unplaceable state degrades to a neutral chip labelled "Unknown" — never a
+  // fabricated hue.
+  function lifecycleStatePillHtml(state) {
+    var r = LIFECYCLE_PILL_ROLE[state] || { role: "neutral" };
+    return statusMetaPill(
+      { role: r.role, variant: r.variant || "", label: LIFECYCLE_PILL_LABEL[state] || "Unknown" },
+      instanceLifecycleClass(state));
   }
 
   // Region · size meta for a fleet row (blank-tolerant — pre-S6 rows carry null
@@ -2818,12 +2897,10 @@
   // no test pins and nothing keeps in step.
   function lifecycleActionRowHtml(model) {
     if (!model) return "";
-    // The label sits in its own span so it stays neutral (--text) while the dot
-    // carries the S4 state hue (the model.pill.cls bp-inst--<state> tints color,
-    // the dot reads it through currentColor) — mirrors .status-pill.
-    var pill = '<span class="inst-life-pill ' + model.pill.cls + '">' +
-      '<span class="inst-life-dot" aria-hidden="true"></span>' +
-      '<span class="inst-life-label">' + esc(model.pill.label) + "</span></span>";
+    // cch-r21l: the state chip IS a statusMeta pill now (see lifecycleStatePillHtml
+    // for the ruling). It used to open its own span on the retired inst-life-pill
+    // family here; that hand-built chip is exactly the shape E13 arm (f) refuses.
+    var pill = lifecycleStatePillHtml(model.pill.state);
 
     // cch-w38-s1 — an UNKNOWN authority reuses the shipped checking grammar
     // verbatim (no new copy, no new CSS): while /v1/me is in flight or failed
@@ -2924,6 +3001,15 @@
   // unknown arm omits too: resurrect stands up (and bills) a real box, so an
   // unanswered /v1/me fails CLOSED. The copy-paste CLI chip is untouched in
   // every arm — it teaches the command, it does not fire a write.
+  //
+  // cch-w47-rv-bl QUALIFIED THAT LAST SENTENCE WITHOUT MOVING THE CHIP. The chip
+  // still renders in every arm, byte for byte. What the sentence left out is that
+  // the CLI reaches the SAME resurrect/1 gate and collects the SAME 403 — so on
+  // the REFUSE arm the chip was the member's only remaining affordance and still
+  // read as an offer the system cannot honour. archivesPanelHtml now prints ONE
+  // line above the list on that arm alone (forbiddenEvidenceCopy's own answer to
+  // `{required:"admin", scope:"team"}`, never new copy), which turns the chip
+  // from an invitation into a reference. Grant and unknown are unchanged.
   //
   // Every rule is a node-pinned pure function; the DOM mount (loadArchives) is
   // browser-verified.
@@ -3193,7 +3279,42 @@
     // authority argument, and any index but 0 is truthy, so every row past the
     // first would render its live Resurrect regardless of the answer.
     var authority = model.authority || "grant";
-    return '<div class="archive-list">' +
+    // cch-w47-rv-bl — THE REFUSE ARM NAMES THE AUTHORITY THE CHIP NEEDS.
+    //
+    // cch-w47-s3 omitted the live Resurrect for a refused member and left the
+    // copy-paste CLI chip standing in every arm, on the ruling that the chip
+    // TEACHES rather than writes. True — but the CLI hits the SAME route, and
+    // router.ex's resurrect/1 refuses every non-team-admin with
+    // `Auth.forbidden(required: "admin", scope: "team")`. So for a refused
+    // member the chip was the last affordance on the row and it still read as
+    // an invitation the system cannot honour: one layer quieter, not one layer
+    // more honest.
+    //
+    // THE RULING IS (a) — KEEP THE CHIP, SAY SO. Omitting it (option (c)) costs
+    // every member the ability to learn the command and hand it to someone who
+    // can run it; a per-row "needs admin" affix (option (b)) writes new copy on
+    // every row. One line, once, above the list, turns the chip from an offer
+    // into a reference.
+    //
+    // THE SENTENCE IS NOT AUTHORED HERE. It is forbiddenEvidenceCopy's answer to
+    // the EXACT payload that route sends — the same reader the members screen,
+    // the delivery log and the site-delete sheet already render a 403 through.
+    // Inventing a sentence here is how this epic got "Only the team owner can
+    // manage billing." onto the Activity screen (D448); reusing the reader means
+    // the console says what the server would say and nothing more. If the gate
+    // ever moves to `owner`, the literal below is the one line to change and the
+    // sentence follows from the map.
+    //
+    // REFUSE ONLY. "grant" and "unknown" render byte-identically to what shipped:
+    // "grant" is offered the live button and needs no apology, and "unknown" is
+    // an UNANSWERED /v1/me — asserting a role requirement there would state as
+    // fact something the console never read.
+    var refusalNote = authority === "refuse"
+      ? '<div class="archives-note"><p>' +
+          esc(forbiddenEvidenceCopy({ error: "forbidden", required: "admin", scope: "team" }) || "") +
+        "</p></div>"
+      : "";
+    return '<div class="archive-list">' + refusalNote +
       model.rows.map(function (row) { return archiveRowHtml(row, authority); }).join("") + "</div>";
   }
 
@@ -3208,10 +3329,41 @@
     return true;
   }
 
-  // The POST /v1/providers body, per kind (router.ex:5572-5583): hetzner sends
-  // {kind, token}; azure sends {kind, credentials:{tenant_id,…}}. label is added
-  // only when the operator typed one. Trims each value so trailing paste
-  // whitespace never reaches the vault.
+  // Cloudflare validator: only `api_token` is required. The router's
+  // `cloudflare_credential_blob/1` drops a blank account_id/zone_id, so demanding
+  // them here would be the console inventing a rule the server does not have.
+  function cloudflareFieldsValid(fields) {
+    if (!fields || typeof fields !== "object") return false;
+    var t = fields.api_token;
+    return typeof t === "string" && t.trim() !== "";
+  }
+
+  // The shape gate for whichever subform is on screen, and the sentence that
+  // names what is missing. ONE three-way branch, read by both submit paths (the
+  // launch dialog and the providers-page card) — they used to carry the same
+  // two-way ternary twice, so a third kind meant two edits and a silent
+  // "An API key is required." for a form with no `token` field at all.
+  function credentialFieldsValid(p, fields) {
+    if (p && p.fields === "azure") return azureFieldsValid(fields);
+    if (p && p.fields === "cloudflare") return cloudflareFieldsValid(fields);
+    return !!((fields && fields.token) || "").trim();
+  }
+
+  function credentialFieldsInvalidTitle(p) {
+    if (p && p.fields === "azure") return "All four fields are required.";
+    if (p && p.fields === "cloudflare") return "An API token is required.";
+    return "An API key is required.";
+  }
+
+  // The POST /v1/providers body, per kind (router.ex `provider_credential/2`):
+  // hetzner sends {kind, token}; azure sends {kind, credentials:{tenant_id,…}};
+  // cloudflare sends {kind, credentials:{api_token, account_id?, zone_id?}} — the
+  // BLOB form, never the bare-token form, because the bare token names no
+  // account and this card's whole point is that it can. label is added only when
+  // the operator typed one. Trims each value so trailing paste whitespace never
+  // reaches the vault, and OMITS a blank optional entirely (the server's
+  // maybe_put_field would drop it anyway; sending "" would only make the wire
+  // shape disagree with the stored one).
   function providerCredBody(kind, fields, label) {
     var body = { kind: kind };
     if (kind === "azure") {
@@ -3221,6 +3373,14 @@
         creds[k] = ((fields && fields[k]) || "").trim();
       }
       body.credentials = creds;
+    } else if (kind === "cloudflare") {
+      var cf = {};
+      for (var j = 0; j < CLOUDFLARE_FIELDS.length; j++) {
+        var f = CLOUDFLARE_FIELDS[j];
+        var v = ((fields && fields[f.key]) || "").trim();
+        if (f.required || v) cf[f.key] = v;
+      }
+      body.credentials = cf;
     } else {
       body.token = ((fields && fields.token) || "").trim();
     }
@@ -3391,6 +3551,31 @@
             '<input class="form-input" id="' + id + '" type="text" autocomplete="off" spellcheck="false" placeholder="' + esc(f.placeholder) + '" /></div>';
         }).join("");
     }
+    if (p.fields === "cloudflare") {
+      return '<p class="field-hint dim" style="margin:0 0 10px">Create an API token in the ' +
+        '<a href="' + esc(p.console || "#") + '" target="_blank" rel="noopener">Cloudflare dashboard</a> ' +
+        "(My Profile → API Tokens). Encrypted at rest, never shown again.</p>" +
+        CLOUDFLARE_FIELDS.map(function (f) {
+          var id = "cred-cf-" + f.key;
+          var optional = f.required ? "" : ' <span class="dim">(optional)</span>';
+          // The Account ID hint is the ONE place the person learns why this
+          // field matters: without it nothing can ever name the account, because
+          // no Cloudflare call this tree makes returns one.
+          var hint = f.key === "account_id"
+            ? '<p class="field-hint dim" style="margin:0 0 6px">Shown on your Cloudflare dashboard overview. ' +
+              "We store it so we can show you which account this connection points at — we never look it up.</p>"
+            : "";
+          if (f.secret) {
+            return '<div class="field"><label class="label" for="' + id + '">' + esc(f.label) + optional + "</label>" + hint +
+              '<div class="input-affix">' +
+                '<input class="form-input" id="' + id + '" type="password" autocomplete="off" placeholder="' + esc(f.placeholder) + '" />' +
+                '<button class="affix-btn" id="cred-cf-eye" type="button" tabindex="-1" aria-label="Show token">' + EYE_SVG + "</button>" +
+              "</div></div>";
+          }
+          return '<div class="field"><label class="label" for="' + id + '">' + esc(f.label) + optional + "</label>" + hint +
+            '<input class="form-input" id="' + id + '" type="text" autocomplete="off" spellcheck="false" placeholder="' + esc(f.placeholder) + '" /></div>';
+        }).join("");
+    }
     return '<div class="field"><label class="label" for="cred-token">API key</label>' +
       '<p class="field-hint dim" style="margin:0 0 6px">Create a key in the ' +
         '<a href="' + esc(p.console || "#") + '" target="_blank" rel="noopener">' + esc(p.name) + " console</a>. " +
@@ -3442,9 +3627,12 @@
     var azEye = body.querySelector("#cred-az-eye");
     var azSecret = body.querySelector("#cred-az-client_secret");
     if (azEye) azEye.addEventListener("click", function () { toggleEye(azSecret, azEye); });
+    var cfEye = body.querySelector("#cred-cf-eye");
+    var cfSecret = body.querySelector("#cred-cf-api_token");
+    if (cfEye) cfEye.addEventListener("click", function () { toggleEye(cfSecret, cfEye); });
     var submit = body.querySelector("#cred-submit");
     if (submit) submit.addEventListener("click", function () { submitProviderCred(kind); });
-    var first = token || body.querySelector("#cred-az-tenant_id");
+    var first = token || body.querySelector("#cred-az-tenant_id") || body.querySelector("#cred-cf-api_token");
     if (first) first.focus();
   }
 
@@ -3457,6 +3645,14 @@
         f[af.key] = el ? el.value : "";
       });
       return f;
+    }
+    if (p.fields === "cloudflare") {
+      var cf = {};
+      CLOUDFLARE_FIELDS.forEach(function (ff) {
+        var el = credQ("#cred-cf-" + ff.key);
+        cf[ff.key] = el ? el.value : "";
+      });
+      return cf;
     }
     var t = credQ("#cred-token");
     return { token: t ? t.value : "" };
@@ -3552,9 +3748,8 @@
     var labelEl = credQ("#cred-label");
     var label = ((labelEl && labelEl.value) || "").trim();
 
-    var valid = p.fields === "azure" ? azureFieldsValid(fields) : !!(fields.token || "").trim();
-    if (!valid) {
-      toast({ kind: "error", title: p.fields === "azure" ? "All four fields are required." : "An API key is required." });
+    if (!credentialFieldsValid(p, fields)) {
+      toast({ kind: "error", title: credentialFieldsInvalidTitle(p) });
       return;
     }
 
@@ -3680,6 +3875,20 @@
             (rotated ? '<span class="prov-row-when" data-prov-rotated>credential updated ' +
               esc(rotated) + "</span>" : "") + "</span>" +
         "</span>" +
+        // gr-r21m-defect-jk (DEFECT-K, screen `providers-connected`). RULED:
+        // `.btn .btn-ghost .btn-sm` IS the console's sanctioned secondary tier
+        // (50+ sites), NOT a missing class. The re-review's "no button chrome"
+        // is a RESTING-STATE reading: `.btn-ghost` zeroes only background and
+        // border-color, so the control keeps `.btn`'s 28px box, its padding, its
+        // `:hover { background: var(--muted-surface) }` and the house
+        // `.btn:focus-visible` ring. Promoting this one to a filled tier would
+        // make it the loudest thing on the providers screen and leave 50 ghost
+        // siblings inconsistent. Destructiveness is carried where it belongs —
+        // `canDisconnect` gates it, and the click opens the TYPED-confirm
+        // (`grep -n 'function confirmDisconnectProvider' app.js`), which is the
+        // affordance that actually protects the account. If the resting ghost
+        // tier is ever re-decided, it is re-decided for `.btn-ghost` in app.css,
+        // once, not for three buttons the matrix happened to photograph.
         (canDisconnect
           ? '<button class="btn btn-ghost btn-sm" type="button" data-prov-disconnect data-prov-kind="' +
             esc(p.kind || "") + '">Disconnect&hellip;</button>'
@@ -3709,7 +3918,10 @@
   function providerConnectModel(list) {
     var connected = {};
     (Array.isArray(list) ? list : []).forEach(function (p) { if (p && p.kind) connected[p.kind] = true; });
-    var options = PROVIDERS.filter(function (p) { return p.available; }).map(function (p) {
+    // CONNECTABLE, not available (console-w28): this picker offers credentials,
+    // not hosting. Cloudflare is connectable and NOT provisionable, so reading
+    // `available` here kept it off the only page that can store its token.
+    var options = PROVIDERS.filter(function (p) { return p.connectable; }).map(function (p) {
       return { kind: p.kind, name: p.name, connected: !!connected[p.kind] };
     });
     var firstOpen = options.filter(function (o) { return !o.connected; })[0] || null;
@@ -3788,10 +4000,33 @@
   //                                 own reason when it sent one (Hetzner reports
   //                                 no project identity at all, so that is the
   //                                 permanent shape of its row).
+  // The `unavailable` state's sentences, keyed by the server's own error word.
+  // `fetch_failed` is the console's own fallback for a request that produced no
+  // answer at all (a transport failure, or a status with no error word).
+  var IDENTITY_UNREADABLE_REASONS = {
+    fetch_failed: "We couldn’t read which account this connection points at just now.",
+    credential_unreadable: "We couldn’t read this connection’s stored credential, so we can’t say which account it points at."
+  };
+
   function providerIdentityModel(payload) {
     if (payload === undefined) return { state: "loading" };
     if (!payload || typeof payload !== "object") {
-      return { state: "unavailable", reason: "We couldn’t read which account this connection points at just now." };
+      return { state: "unavailable", reason: IDENTITY_UNREADABLE_REASONS.fetch_failed };
+    }
+    // AN ERROR ENVELOPE IS UNREADABLE, NEVER ABSENT (console-w28). The route
+    // answers 502 {error:"credential_unreadable"} when it cannot DECRYPT the
+    // stored credential, and that is a different sentence from "your credential
+    // does not name an account" — the router says so in its own comment above
+    // `stored_provider_identity/2` and refuses to collapse them server-side.
+    // Without this arm the collapse happens HERE instead: an error body is a
+    // plain object with no `provider` key, so it would fall through to the
+    // legacy-control-plane branch below and paint "Account: not known", telling
+    // the person their credential names no account when in fact we never read
+    // it. Same four states — this is the `unavailable` one, with the reason the
+    // server's code actually names.
+    if (typeof payload.error === "string" && payload.error) {
+      return { state: "unavailable",
+        reason: IDENTITY_UNREADABLE_REASONS[payload.error] || IDENTITY_UNREADABLE_REASONS.fetch_failed };
     }
     var prov = payload.provider && typeof payload.provider === "object" ? payload.provider : null;
     var id = prov && prov.identity && typeof prov.identity === "object" ? prov.identity : null;
@@ -4000,20 +4235,35 @@
     if (slot) loadProviderIdentity(slot, slot.getAttribute("data-prov-identity-kind"));
   }
 
-  // Fill the identity slot from GET /v1/providers/:kind/overview — the same
-  // already-decrypted credential the catalog is built from, no extra decrypt and
-  // no new route. Auth.require_user only: a plain member reads it too. A failed
-  // or degraded read paints the honest "we couldn’t read it" state, never a
-  // blank and never a guess.
+  // Fill the identity slot from GET /v1/providers/:kind/identity — the
+  // purpose-built route (D899), which reads @connectable_kinds and makes ZERO
+  // upstream calls: decrypt, read a field, answer. Auth.require_user only: a
+  // plain member reads it too.
+  //
+  // IT USED TO READ /overview, AND THAT WAS WRONG IN TWO DIRECTIONS
+  // (console-w28). /overview is a CATALOG route: its kind gate is
+  // @neutral_kinds, so `cloudflare` — connectable, with a stored account_id
+  // the server already serves — could only ever get 404 unknown_kind from it;
+  // and its failure mode is 502 catalog_unavailable, so an upstream hiccup
+  // blanked an identity that was sitting in the stored blob needing no network
+  // at all. Both routes emit the same `provider.identity` shape off the same
+  // `provider_identity/2`, so this is the same fact read from the door built
+  // for it.
+  //
+  // A failed or degraded read paints the honest "we couldn’t read it" state,
+  // never a blank and never a guess — and an ERROR BODY is handed to the model
+  // rather than flattened to null, so a 502 credential_unreadable keeps its own
+  // sentence instead of being rounded off to the generic one.
   function loadProviderIdentity(slot, kind) {
     if (!slot || !kind) return;
     slot.innerHTML = providerIdentityHtml(providerIdentityModel(undefined));
-    api("GET", "/v1/providers/" + encodeURIComponent(kind) + "/overview").then(function (r) {
+    api("GET", "/v1/providers/" + encodeURIComponent(kind) + "/identity").then(function (r) {
       // The operator may have armed another kind (repainting the card) while
       // this was in flight — only paint into a slot still mounted and still
       // asking for THIS kind.
       if (slot.isConnected === false || slot.getAttribute("data-prov-identity-kind") !== kind) return;
-      slot.innerHTML = providerIdentityHtml(providerIdentityModel(r.ok && r.data ? r.data : null));
+      var d = r.data && typeof r.data === "object" ? r.data : null;
+      slot.innerHTML = providerIdentityHtml(providerIdentityModel(r.ok ? d : (d && d.error ? d : null)));
     });
   }
 
@@ -4032,7 +4282,9 @@
         // The card's OWN field, not the document's: the credential dialog
         // renders #cred-token too, and a singular lookup here would focus the
         // dialog's copy (or, with none open, be right only by source order).
-        var f = connect.querySelector("#cred-token") || connect.querySelector("#cred-az-tenant_id");
+        var f = connect.querySelector("#cred-token") ||
+          connect.querySelector("#cred-az-tenant_id") ||
+          connect.querySelector("#cred-cf-api_token");
         if (f && f.focus) f.focus();
       });
     });
@@ -4042,6 +4294,9 @@
     var azEye = connect.querySelector("#cred-az-eye");
     var azSecret = connect.querySelector("#cred-az-client_secret");
     if (azEye) azEye.addEventListener("click", function () { toggleEye(azSecret, azEye); });
+    var cfEye = connect.querySelector("#cred-cf-eye");
+    var cfSecret = connect.querySelector("#cred-cf-api_token");
+    if (cfEye) cfEye.addEventListener("click", function () { toggleEye(cfSecret, cfEye); });
     var submit = connect.querySelector("[data-connect-submit]");
     if (submit) submit.addEventListener("click", function () { submitInlineProviderCred(armed, list); });
   }
@@ -4060,9 +4315,8 @@
     var verb = rotating ? "Verify & replace" : "Verify & connect";
     var fields = readCredentialFields(p);
     var label = ((credQ("#cred-label") || {}).value || "").trim();
-    var valid = p.fields === "azure" ? azureFieldsValid(fields) : !!(fields.token || "").trim();
-    if (!valid) {
-      toast({ kind: "error", title: p.fields === "azure" ? "All four fields are required." : "An API key is required." });
+    if (!credentialFieldsValid(p, fields)) {
+      toast({ kind: "error", title: credentialFieldsInvalidTitle(p) });
       return;
     }
     var rem = credRemediationBox(); // the same box the paint below targets
@@ -4819,6 +5073,10 @@
   function notifDeliveryTone(d) {
     d = d || {};
     if (String(d.status || "").toLowerCase() === "suppressed") return "muted";
+    // ccpca-bl: a lost response is not a verdict, so it is not "danger". It is
+    // checked BEFORE http_status for the same reason `suppressed` is: neither
+    // row got a status line off the wire.
+    if (String(d.status || "").toLowerCase() === "unconfirmed") return "info";
     if (d.http_status != null) {
       var code = Number(d.http_status);
       if (code >= 200 && code < 300) return "ok";
@@ -4837,6 +5095,10 @@
   function notifDeliveryStatusLabel(d) {
     d = d || {};
     if (String(d.status || "").toLowerCase() === "suppressed") return "Withheld";
+    // ccpca-bl: WITHOUT this clause the catch-all below renders an unconfirmed
+    // row as "Pending", which is a different and wrong claim — pending means we
+    // have not sent yet, unconfirmed means we sent and heard nothing.
+    if (String(d.status || "").toLowerCase() === "unconfirmed") return "Unconfirmed";
     if (d.http_status != null) {
       var n = Number(d.http_status);
       return (n >= 200 && n < 300) ? n + " OK" : "HTTP " + n;
@@ -5273,7 +5535,8 @@
     { value: "sent", label: "Sent" },
     { value: "failed", label: "Failed" },
     { value: "pending", label: "Pending" },
-    { value: "suppressed", label: "Withheld" }
+    { value: "suppressed", label: "Withheld" },
+    { value: "unconfirmed", label: "Unconfirmed" }
   ];
   var notifDeliveryFilter = { channel: null, status: null, event: null };
   var notifDeliveryRows = null; // the accumulated FILTERED page list
@@ -5504,6 +5767,10 @@
     notifDeliverySelfScoped = !canManage;
     if (notifDeliverySelfScoped) notifDeliveryFilter.channel = null;
     box.innerHTML = notifPageHtml(s, { canManage: canManage, state: meSt });
+    // The `.set-matrix` this paint just created is a fresh element: in a
+    // no-timeline engine its cue is a measured class, so it has to be measured
+    // HERE. Ahead of every role branch below, each of which returns early.
+    edgeCueSync();
 
     // cch-w39-s1 — the unknown arm's own wiring, ahead of every role branch
     // below. The header's test-email action is a MUTATION, so it stays hidden
@@ -5963,7 +6230,7 @@
 
     return '<div class="token-row' + (revoked ? " is-revoked" : "") + '">' +
       '<div class="fleet-main">' +
-        '<div class="fleet-name">' + esc(t.name) + "</div>" +
+        '<div class="fleet-name"><bdi>' + esc(t.name) + "</bdi></div>" +
         '<div class="token-meta dim">' + abilities +
           dot + esc(lastUsed) +
           dot + esc(expiry) +
@@ -6176,7 +6443,7 @@
   // <code> text node, one esc()d off-screen copy buffer, and the closure below.
   function tokenRevealHtml(plaintext, pat, opts) {
     opts = opts || {};
-    var label = (pat && pat.name) ? esc(pat.name) : "Your new token";
+    var label = (pat && pat.name) ? "<bdi>" + esc(pat.name) + "</bdi>" : "Your new token";
     var title = opts.title ? esc(opts.title) : "Token created";
     var notice = opts.notice
       ? esc(opts.notice)
@@ -6267,7 +6534,7 @@
   function confirmRevokeToken(id, name) {
     openModal(
       '<h2 class="modal-title" id="modal-title">Revoke token?</h2>' +
-      '<p class="modal-sub">Revoking <b>' + esc(name || "this token") + "</b> immediately stops it from authenticating. This cannot be undone.</p>" +
+      '<p class="modal-sub">Revoking <b><bdi>' + esc(name || "this token") + "</bdi></b> immediately stops it from authenticating. This cannot be undone.</p>" +
       '<div class="modal-actions">' +
         '<button class="btn" type="button" data-close>Cancel</button>' +
         '<button class="btn btn-danger" id="token-revoke-go" type="button">Revoke</button>' +
@@ -6756,10 +7023,27 @@
   // C4/C5 instance-API proxy spine). #instance/<id> (the legacy-stable hash
   // `bp cloud open` mints, D14) maps to "overview" forever; an unknown/stale tab
   // suffix degrades to overview rather than 404ing a bookmark.
-  var INSTANCE_TABS = ["overview", "timeline", "webhooks", "usage", "metrics"];
+  var INSTANCE_TABS = ["overview", "timeline", "webhooks", "usage", "metrics", "group"];
   var INSTANCE_TAB_DEFAULT = "overview";
   function instanceTabOf(tab) {
     return INSTANCE_TABS.indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
+  }
+
+  // WHICH TABS A GIVEN BOX HAS — ONE decider, because a second one drifts.
+  // `instanceTabOf` above is the ROUTER's parse and knows only the string; it
+  // cannot know whose screen it is. "Group" is about a MAIN and the supports
+  // filed under it, and a support has no group of its own, so it is the one
+  // registered tab that is not offered everywhere. Everything that renders a
+  // tab list (the strip, the sidebar morph) and everything that resolves WHICH
+  // panel to paint goes through these two, so a support deep-linked to
+  // `#instance/<id>/group` degrades to Overview exactly the way an unknown tab
+  // suffix does (D49/D14: never 404 a bookmark).
+  function instanceTabsFor(bp) {
+    if (!isSupportBp(bp)) return INSTANCE_TABS.slice();
+    return INSTANCE_TABS.filter(function (t) { return t !== "group"; });
+  }
+  function instanceTabFor(bp, tab) {
+    return instanceTabsFor(bp).indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
   }
 
   // Charter decisions 6 + 14: the IA moved, but no deep link may ever break.
@@ -6965,9 +7249,9 @@
       var sep = '<span class="crumb-sep" aria-hidden="true">/</span>';
       if (i === crumbs.length - 1) {
         return sep + '<span class="crumb-cur"><span class="org-avatar" aria-hidden="true">' +
-          esc((String(cr.label)[0] || "B").toUpperCase()) + "</span><span>" + esc(cr.label) + "</span></span>";
+          esc((String(cr.label)[0] || "B").toUpperCase()) + "</span><span><bdi>" + esc(cr.label) + "</bdi></span></span>";
       }
-      return sep + (cr.href ? '<a href="' + esc(cr.href) + '">' + esc(cr.label) + "</a>" : "<span>" + esc(cr.label) + "</span>");
+      return sep + (cr.href ? '<a href="' + esc(cr.href) + '"><bdi>' + esc(cr.label) + "</bdi></a>" : "<span><bdi>" + esc(cr.label) + "</bdi></span>");
     }).join("");
   }
 
@@ -7127,6 +7411,76 @@
     sb.classList.toggle("is-nav-clipped", below > 1);
   }
 
+  // ── THE NO-TIMELINE ENGINES' EDGE CUE (cch-bl-scroll-driven-cue-firefox-
+  //    fallback) ───────────────────────────────────────────────────────────────
+  // Three horizontal scrollers carry a scroll-driven edge fade — `.set-matrix`
+  // (W12, `--set-matrix-fade`), `.archive-resurrect .cli-chip-code` (W15-S2,
+  // `--archive-cli-fade`) and `.inst-tabs` (ba31, `--inst-tabs-fade`). In Chrome and Safari that idiom is right and stays:
+  // with nothing to scroll the timeline is inactive, so the cue is 0px BY
+  // CONSTRUCTION rather than by a class somebody has to remember to toggle.
+  //
+  // FIREFOX DOES NOT SHIP SCROLL-DRIVEN ANIMATIONS, AND THIS WAS DRIVEN, NOT
+  // READ OFF A RELEASE NOTE. Firefox 156.0.1, WebDriver BiDi, the committed
+  // preview fixtures: `--set-matrix-fade` computes **0px** at 768/430/390 in
+  // both themes while the matrix is genuinely clipped (scrollWidth 520 vs
+  // clientWidth 446/356/316), and `--archive-cli-fade` computes **0px** at
+  // 390/430 while the chip is clipped (367 vs 290/330). The SAME instrument on
+  // the SAME page with `layout.css.scroll-driven-animations.enabled=true` reads
+  // 48px and 32px — so the 0px is the engine, not the probe.
+  //
+  // AND THE OBVIOUS FALLBACK IS A DEAD RULE. The failure is not "the property
+  // keeps its initial value": Gecko DROPS the unsupported `animation-timeline`
+  // declaration, so the animation attaches to the DOCUMENT timeline instead,
+  // runs to `finished`, and `animation-fill-mode: both` PINS the property to the
+  // `to` keyframe — which is 0px. An animation's effect value outranks a plain
+  // declaration in the cascade, so a bare `@supports not (animation-timeline:
+  // scroll()) { --set-matrix-fade: 48px }` computes **0px** and paints nothing.
+  // Measured in that same Firefox, in one evaluation: plain declaration -> 0px,
+  // the same declaration plus `animation-name: none` -> 48px. app.css's
+  // `@supports` block carries that cancellation; this function supplies the
+  // STATE it keys on.
+  //
+  // MEASURED, NOT INFERRED — navStripCue's ruling, same predicate, same 1px
+  // floor, for the same reason: both surfaces are painted by JS after load.
+  // PLURAL BY CONSTRUCTION: an archives panel renders one chip PER ARCHIVED ROW,
+  // so this walks `querySelectorAll` and cues each row on its own geometry. A
+  // singleton read here would cue row one and leave every other row silent.
+  var EDGE_CUES = [
+    { sel: ".set-matrix", cls: "is-matrix-clipped" },
+    { sel: ".archive-resurrect .cli-chip-code", cls: "is-cli-clipped" },
+    // The instance tab strip (ba31, `--inst-tabs-fade`): at 721px its six tabs
+    // run 15px past a 441px strip. Singular per screen, but the plural walk
+    // costs nothing and needs no special case.
+    { sel: ".inst-tabs", cls: "is-tabs-clipped" },
+  ];
+
+  function edgeCueSync() {
+    if (!document.querySelectorAll) return;
+    for (var i = 0; i < EDGE_CUES.length; i++) {
+      var els = document.querySelectorAll(EDGE_CUES[i].sel);
+      for (var j = 0; j < els.length; j++) {
+        var el = els[j];
+        if (!el.classList || typeof el.classList.toggle !== "function") continue;
+        // scrollWidth - clientWidth - scrollLeft, with navStripCue's 1px floor:
+        // sub-pixel layout leaves a fraction beyond the edge on a scroller that
+        // is visibly at its end, and a fade that never retracts is a promise of
+        // more that is not kept.
+        el.classList.toggle(EDGE_CUES[i].cls, el.scrollWidth - el.clientWidth - el.scrollLeft > 1);
+      }
+    }
+  }
+
+  function wireEdgeCues() {
+    if (typeof document.addEventListener !== "function") return;
+    // CAPTURE PHASE. `scroll` does not bubble, so a delegated listener only sees
+    // a descendant scroller during capture — and capture is what makes ONE
+    // listener survive every repaint of both surfaces, which a per-element
+    // listener wired at paint time would not.
+    document.addEventListener("scroll", edgeCueSync, true);
+    if (typeof window.addEventListener === "function") window.addEventListener("resize", edgeCueSync);
+    edgeCueSync();
+  }
+
   function wireNavStripCue() {
     var sb = document.querySelector && document.querySelector(".sidebar");
     if (!sb || typeof sb.addEventListener !== "function") return;
@@ -7171,7 +7525,12 @@
   function paintInstanceSections(id, activeTab) {
     var box = $("#nav-instance-sections");
     if (!box) return;
-    box.innerHTML = INSTANCE_TABS.map(function (tab) {
+    // Same decider the strip takes (instanceTabsFor): the morph must not offer
+    // a support a Group link that resolves back to Overview. `fleetLookup` can
+    // answer null on frame 1 (the fleet is still in flight), and a null bp is
+    // not a support — so the unknown case offers the full set, which is the
+    // pre-existing behaviour rather than a new hidden-tab bug.
+    box.innerHTML = instanceTabsFor(fleetLookup(id)).map(function (tab) {
       var href = "#instance/" + encodeURIComponent(id) + (tab === INSTANCE_TAB_DEFAULT ? "" : "/" + tab);
       var on = instanceTabOf(activeTab) === tab;
       return '<a class="nav-link nav-sub' + (on ? " is-active" : "") + '" href="' + esc(href) + '"' +
@@ -7224,7 +7583,7 @@
     var rows = (fleetCache || []).map(function (bp) {
       return '<a class="scope-item" href="#instance/' + esc(bp.id) + '">' +
         '<span class="scope-dot" style="background:' + ctxDotColor(classifyBp(bp)) + '"></span>' +
-        '<span class="scope-name">' + esc(bp.name || bp.slug || bp.id) + "</span></a>";
+        '<span class="scope-name"><bdi>' + esc(bp.name || bp.slug || bp.id) + "</bdi></span></a>";
     }).join("");
     // cch-w47-s1 — the THIRD launch door, and the one that is on every authed
     // screen: this footer row is emitted unconditionally, so it outlives the
@@ -7274,7 +7633,7 @@
         var on = t.id === activeId;
         return '<button type="button" class="team-item" role="menuitem" data-team="' + esc(t.id) + '">' +
           '<span class="team-avatar" aria-hidden="true">' + esc(String(t.name || "?").slice(0, 1).toUpperCase()) + "</span>" +
-          '<span class="team-name">' + esc(t.name || t.slug || t.id) + "</span>" +
+          '<span class="team-name"><bdi>' + esc(t.name || t.slug || t.id) + "</bdi></span>" +
           '<span class="team-role">' + esc(t.role || "") + "</span>" +
           (on ? '<span class="team-check" aria-label="Current team">\u2713</span>' : "") +
           "</button>";
@@ -8491,7 +8850,7 @@
       // the fixed lead column via the existing .status-pill rules (never edited).
       '<div class="fleet-status">' + pill + "</div>" +
       '<div class="fleet-main">' +
-        '<div class="fleet-name">' + esc(bp.name) +
+        '<div class="fleet-name"><bdi>' + esc(bp.name) + "</bdi>" +
           (asSupport ? '<span class="fleet-role-chip">support</span>' : "") + "</div>" +
         urlHtml +
         // The mono metadata line: region · size · version · channel · autoupdate,
@@ -8746,6 +9105,9 @@
       // narrow its residue sentence with.
       archiveStore = archiveStoreFromModel(model);
       panel.innerHTML = archivesPanelHtml(model);
+      // Every `.cli-chip-code` in this panel is new DOM; in a no-timeline
+      // engine its cue is a measured class. See edgeCueSync.
+      edgeCueSync();
       var retry = panel.querySelector("[data-archives-retry]");
       if (retry) retry.addEventListener("click", loadArchives);
       wireArchiveResurrect(panel, model);
@@ -8872,7 +9234,7 @@
     return '<div class="attention-row" data-id="' + esc(bp.id) + '">' +
       statusPill(bp) +
       '<div class="attention-main">' +
-        '<a class="attention-name" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" +
+        '<a class="attention-name" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>" +
         '<span class="attention-reason">' + esc(attentionReason(bp)) + "</span>" +
       "</div>" +
       '<div class="attention-acts">' +
@@ -8968,7 +9330,7 @@
     return '<div class="instance-card instance-card--' + esc(role) + '" data-id="' + esc(bp.id) + '">' +
       banner +
       '<div class="instance-card-head">' +
-        '<a class="instance-card-name" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" +
+        '<a class="instance-card-name" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>" +
         providerChipHtml(bp.provider) + statusPill(bp) +
       "</div>" +
       fleetInfraLine(bp) +
@@ -9017,10 +9379,25 @@
   // hint is retracted to what is true: this step does not tick itself, and the
   // "Open Studio →" action stays, because publishing is still the real next move.
   // Pinned in __app.test.mjs (the old sentence was asserted by NOTHING).
+  //
+  // cch-w55-bl — THE ACK CONTROL NOW EXISTS, AND IT IS THE WHOLE FIX (charter
+  // D902, ending 1 of the three the row named). The server half was already
+  // built and already routed: `Accounts.ack_onboarding_step/2` ticks the step,
+  // `POST /v1/onboarding {action:"ack", step:"published_doc"}` reaches it, and
+  // `onboarding_status/1` ORs the ack with the never-written `content` event.
+  // Only the console was missing — {action:"skip"} was the one onboarding
+  // action this file POSTed, so the plane's own "reachable via the user-ack
+  // path" prose (accounts.ex, agent_event.ex) described a path no customer had.
+  // A pending published_doc step now renders "Mark as done" beside the Studio
+  // nudge, gated on canManage for the SAME reason the Dismiss button is: the
+  // route is owner/admin-only, so a member would get a silent 403. Still no
+  // producer, deliberately — ticking a checkbox you ticked yourself is an
+  // honest self-report; inventing an agent endpoint to observe it is the
+  // "build the actor before deciding the effect" trap this wave refuses.
   var RUNWAY_STEPS = [
     { key: "subscription", label: "Start your trial", hint: "14 days, no card needed" },
     { key: "instance", label: "Launch your first Barkpark" },
-    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →" },
+    { key: "published_doc", label: "Publish your first document", hint: "We can't see this from here — the step won't tick itself", action: "Open Studio →", ack: "Mark as done" },
   ];
   // Pure: the render model for the runway steps. done marks render a mint check,
   // pending steps render their ordinal digit. The instance-step hint carries the
@@ -9046,6 +9423,14 @@
         // The Open Studio nudge shows only while the published_doc step is still
         // open (and only when there is a live box to open it on).
         action: (!isDone && spec.action && spec.key === "published_doc" && opts.studioId) ? spec.action : "",
+        // The ack control (cch-w55-bl): the ONLY path a customer has to this
+        // step, since no producer writes the `content` event it would otherwise
+        // derive from. Pending only (acking a done step is a no-op the server
+        // would accept and the card would not change), and canManage only —
+        // POST /v1/onboarding is owner/admin-gated, so a member's click would be
+        // a silent 403. Unlike the Studio nudge it does NOT need a live box: the
+        // user may well have published on an instance this console can't link.
+        ack: (!isDone && spec.ack && opts.canManage) ? spec.ack : "",
       };
     });
   }
@@ -9068,6 +9453,14 @@
         (st.action
           ? '<button class="btn-link runway-step-action" type="button" data-runway-studio="' +
               esc(opts.studioId) + '">' + esc(st.action) + "</button>"
+          : "") +
+        // Styled by the SAME .runway-step-action rule as the Studio nudge (no
+        // new class: E12 requires every emitted class to have an app.css rule,
+        // and this button wants that rule's exact look). The click hook is the
+        // data attribute, which E12 does not govern.
+        (st.ack
+          ? '<button class="btn-link runway-step-action" type="button" data-runway-ack="' +
+              esc(st.key) + '">' + esc(st.ack) + "</button>"
           : "") +
       "</div>";
     }).join("");
@@ -9446,6 +9839,26 @@
     slot.querySelectorAll("[data-runway-studio]").forEach(function (b) {
       b.addEventListener("click", function () { openStudio(b.getAttribute("data-runway-studio"), null); });
     });
+    slot.querySelectorAll("[data-runway-ack]").forEach(function (b) {
+      b.addEventListener("click", function () { ackRunwayStep(b, b.getAttribute("data-runway-ack")); });
+    });
+  }
+
+  // cch-w55-bl — tick a step the control plane cannot observe. POST
+  // /v1/onboarding {action:"ack", step} appends the step to onboarding_state.acked
+  // (Accounts.ack_onboarding_step/2); onboarding_status/1 then ORs that ack with
+  // the agent-derived signal, so the step stays done across reloads and tabs.
+  // Owner/admin only (the button is hidden otherwise — same rule as Dismiss), so
+  // a 403 is not expected; any non-2xx re-enables the button and toasts, and the
+  // card is NOT optimistically ticked — the next read is the truth.
+  function ackRunwayStep(btn, step) {
+    if (!step) return;
+    if (btn) btn.disabled = true;
+    api("POST", "/v1/onboarding", { action: "ack", step: step }).then(function (r) {
+      if (r.ok) { loadOverview(); return; }
+      if (btn) btn.disabled = false;
+      toast({ kind: "error", title: "Couldn't mark that step done", body: friendly(r.data, "Please try again.") });
+    });
   }
 
   // Dismiss the runway — POST /v1/onboarding {action:"skip"} stamps completed_at
@@ -9554,6 +9967,9 @@
       // admin-only writes it offers (Attach domain, Roll back) are decided here,
       // at OFFER time, instead of by the server after the click.
       box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady }, instanceAdminAuthority());
+      // The `.inst-tabs` strip this paint just created is fresh DOM; in a
+      // no-timeline engine its cue is a measured class. See edgeCueSync.
+      edgeCueSync();
       // cch-w46-rv: remember WHAT was painted with WHICH authority, so a /v1/me
       // that answers after this line can repaint the header strip and the
       // Updates panel from the bp already held — no second read of anything.
@@ -9630,7 +10046,7 @@
   // decides — the lifecycleActionsModel precedent, and the only shape the node
   // harness can drive without a meCache.
   function instanceDetailHtml(bp, tab, opts, authority) {
-    tab = instanceTabOf(tab);
+    tab = instanceTabFor(bp, tab);
     authority = authority || "grant";
     // S11b + GR24: the lifecycle surface between the header and the tabs is now
     // the collapsible "bp CLI" card (screens/02), disclosed by the header's
@@ -9647,6 +10063,7 @@
       instanceTabStripHtml(bp, tab) +
       '<div id="instance-tabpanel" class="inst-tabpanel" data-inst="' + esc(bp.id) + '">' +
         (tab === "overview" ? instanceOverviewHtml(bp, opts, authority) : "") +
+        (tab === "group" ? instanceGroupPanelHtml(bp) : "") +
       "</div>";
   }
 
@@ -9654,10 +10071,10 @@
   // Back/deep-links/copy work, the active one carrying aria-current="page"; the
   // house focus-visible ring is applied in app.css.
   function instanceTabStripHtml(bp, tab) {
-    tab = instanceTabOf(tab);
-    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks", usage: "Usage", metrics: "Metrics" };
+    tab = instanceTabFor(bp, tab);
+    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks", usage: "Usage", metrics: "Metrics", group: "Group" };
     return '<nav class="inst-tabs" aria-label="Instance sections">' +
-      INSTANCE_TABS.map(function (t) {
+      instanceTabsFor(bp).map(function (t) {
         var on = t === tab;
         return '<a class="inst-tab' + (on ? " is-active" : "") + '" href="#instance/' +
           esc(bp.id) + "/" + t + '"' + (on ? ' aria-current="page"' : "") + ">" +
@@ -9985,17 +10402,40 @@
     // affordance for an up box; the in-flight / failed states keep their
     // honest chips (the SSE fast path in loadInstance patches
     // .fleet-url.provisioning in place — that class stays load-bearing).
+    var addressHtml = '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
+      '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
+      '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+
+    // cch DEFECT-D — THE ADDRESS SLOT IS NOT A SECOND PLACE TO SAY "FAILED".
+    // The two failed arms used to print a bare "— removal failed" / "—
+    // provisioning failed" in the slot under the H1. That em-dash lead is a
+    // FLEET-LIST idiom: in fleetRow the fragment hangs off the box name one
+    // line above it, so it reads as a continuation. Under a detail H1 that
+    // already carries the lifecycle pill ("Removal failed · <server error>")
+    // and, one block lower, the failure banner, it is an ORPHAN — an em dash
+    // with no antecedent, red, in the slot a reader scans for the address.
+    // Measured on instance-remove-failed: the same sentence three times inside
+    // ~130px, and the box's host was KNOWN the whole time (the Identity card
+    // prints it two columns to the right).
+    //
+    // A FAILED TEARDOWN DOES NOT REMOVE AN ADDRESS — it is failed precisely
+    // because the server is still there. So removeFailed now renders the real
+    // address whenever bp.host is set, exactly like a live box. The genuinely
+    // address-less states (a failed provision never gets a host; a teardown
+    // that failed after the host column was cleared) keep a red slot, but a
+    // LABELLED one: it leads with what the ADDRESS is, not with a third copy
+    // of the failure.
     var url = lc.removing
       ? '<div class="fleet-url provisioning">&mdash; removing</div>'
       : lc.removeFailed
-        ? '<div class="fleet-url failed">&mdash; removal failed</div>'
+        ? (bp.host
+            ? addressHtml
+            : '<div class="fleet-url failed">No address — removal failed</div>')
         : lc.failed
-          ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
+          ? '<div class="fleet-url failed">No address — provisioning failed</div>'
           : lc.provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
-            : '<div class="detail-url"><span class="detail-url-text">' + esc(publicUrl(bp)) + "</span>" +
-              '<button class="copy-btn" type="button" data-copy="' + esc(publicUrl(bp)) +
-              '" aria-label="Copy address">' + COPY_SVG + "</button></div>";
+            : addressHtml;
 
     // GR24 (screens/02): ONE two-axis compound pill beside the H1 — statusPill
     // already carries label + detail ("Degraded · Health down"); its rules are
@@ -10020,7 +10460,7 @@
           : "";
 
     return '<div class="detail-head detail-head--inst"><div class="detail-head-main">' +
-      '<div class="detail-title-row"><h1>' + esc(bp.name) + "</h1>" + pill + "</div>" + url + "</div>" +
+      '<div class="detail-title-row"><h1><bdi>' + esc(bp.name) + "</bdi></h1>" + pill + "</div>" + url + "</div>" +
       // cch-w46-rv: the id is the REPAINT SEAM's target, not decoration —
       // repaintInstanceAuthority re-renders instanceHeaderActionsHtml into it.
       // Still conditional: the arms that emit "" carry no authority-decided
@@ -10196,6 +10636,9 @@
     if (!isSupportBp(bp)) wireOffloadActions(bp, supportsOf(fleetCache, bp.id));
     // PDF-D94: each live support's paste-a-key delivery form.
     if (!isSupportBp(bp)) wireAgentKeyForms(bp, supportsOf(fleetCache, bp.id));
+    // PDF-D11: the group tab's roster read. DOM-gated (the panel only exists on
+    // that tab) AND data-gated (a support has no group), like its siblings.
+    wireGroupView(bp);
   }
 
   // cch-w46-s3 — WHAT THE MOUNTED RAIL IS MADE OF: {bp, caps} for the instance
@@ -10507,12 +10950,13 @@
   // The live decommission with an optimistic pill + rollback (mirrors the pure
   // lifecycleOptimistic reducer). Same DELETE the Remove button issued.
   function runDecommission(bp, ctl) {
-    var pill = $("#inst-lifecycle-actions .inst-life-pill");
+    // cch-r21l: the optimistic repaint goes through the SAME emitter as the pure
+    // render (lifecycleStatePillHtml). It used to rewrite `className` and
+    // `innerHTML` by hand — a second author for the chip that no static check
+    // could see, because it never spelled a class attribute at all.
+    var pill = $("#inst-lifecycle-actions .inst-life-head .status-pill");
     var prev = pill ? pill.outerHTML : null;
-    if (pill) {
-      pill.className = "inst-life-pill " + instanceLifecycleClass("decommissioned");
-      pill.innerHTML = '<span class="inst-life-dot" aria-hidden="true"></span>' + esc(LIFECYCLE_PILL_LABEL.decommissioned);
-    }
+    if (pill) pill.outerHTML = lifecycleStatePillHtml("decommissioned");
     api("DELETE", "/v1/barkparks/" + encodeURIComponent(bp.id)).then(function (r) {
       if (r.status === 200 || r.status === 202) {
         fleetCache = null;
@@ -10536,7 +10980,7 @@
       // SHAPE: DELETE /v1/barkparks/:id refuses FLAT ({error:"forbidden",required,
       // scope} / {error:"no_team"}), NOT the nested {error:{code}} rollbackInstance
       // reads; the dual-shape read below covers both so neither can be misclassified.
-      var back = $("#inst-lifecycle-actions .inst-life-pill");
+      var back = $("#inst-lifecycle-actions .inst-life-head .status-pill");
       if (back && prev) back.outerHTML = prev;
       var derr = (r.data && r.data.error) || {};
       var dcode = typeof derr === "string" ? derr : derr.code;
@@ -10596,7 +11040,7 @@
   function confirmUpdateInstance(bp) {
     var latest = vRel(bp.update_latest_release);
     openModal(
-      '<h2 class="modal-title" id="modal-title">Update ' + esc(bp.name) + "?</h2>" +
+      '<h2 class="modal-title" id="modal-title">Update <bdi>' + esc(bp.name) + "</bdi>?</h2>" +
       '<p class="modal-sub">Update this instance to ' + esc(latest) + "? It will rebuild and restart.</p>" +
       '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
         '<button class="btn btn-primary" type="button" id="update-go">Update</button></div>'
@@ -10730,7 +11174,7 @@
   // carries custom_host once it's persisted.
   function openAttachDomainModal(bp) {
     openModal(
-      '<h2 class="modal-title" id="modal-title">Attach a domain to ' + esc(bp.name) + "</h2>" +
+      '<h2 class="modal-title" id="modal-title">Attach a domain to <bdi>' + esc(bp.name) + "</bdi></h2>" +
       '<p class="modal-sub">Point a <b>barkpark.cloud</b> subdomain at this instance &mdash; DNS and TLS are set up for you.</p>' +
       '<form id="domain-form">' +
         '<label class="label" for="domain-input">Domain</label>' +
@@ -11204,7 +11648,7 @@
     var lc = instanceLifecycle(bp);
     var head =
       '<div class="fleet-support-row-head">' +
-        '<a class="fleet-support-name" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" +
+        '<a class="fleet-support-name" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>" +
         '<span class="fleet-support-slot" data-support-presence="' + esc(bp.id) + '">' +
           (lc.live
             ? '<span class="fleet-presence fleet-presence--unknown">Checking&hellip;</span>'
@@ -11285,6 +11729,328 @@
     "</section>";
   }
 
+  // ── The GROUP VIEW (PDF-D11: the 7-state catalogue) ────────────────────────
+  // A dedicated surface for ONE main plus its supports: a per-support row with
+  // status, capacity (both stored shapes) and the age of its last beat, under a
+  // single GROUP state drawn from PDF-D11's catalogue —
+  //   empty / roster-conflict / blocked / offline / provisioning / cap-hit / working.
+  //
+  // THE ONE SOURCE OF TRUTH FOR "ONLINE" IS `presenceChip`, AND THIS SURFACE
+  // ADDS NO SECOND ONE. Staleness is computed SERVER-SIDE (Barkpark.Tasks.Fleet
+  // `roster/2`: "a row whose `last_seen` is missing, unparsable, or older than
+  // its OWN `ttl_s` reads `offline`"), so the roster's `status` IS the
+  // staleness-derived status and the console's only job is to render it. The
+  // beat age below is rendered as an OBSERVATION for the operator — it is never
+  // read by any predicate here, because a console that re-derived offline from
+  // `last_seen` would be a second authority disagreeing with the server the
+  // moment the two clocks drift, and would silently overrule a `ttl_s` the box
+  // itself declared. `groupViewState` reaches `chip.online` and nothing else.
+  //
+  // THE ROUTE: `#instance/<main-id>/group`, the "group" tab of a MAIN's instance
+  // workspace (`instanceGroupPanelHtml` paints it, `wireGroupView` fills it from
+  // `readFleetRoster` — the SAME read `loadSupportPresence` takes). It is still
+  // a pure renderer: the mount hands it `documents` off the wire and holds none
+  // of it.
+  //
+  // WHAT THIS SURFACE STILL DOES NOT DO: order history, named in the backlog
+  // row's prose and in neither of its criteria. It is deliberately not built —
+  // whether an order log belongs on this surface at all is a product question,
+  // and the follow-up row says so in as many words.
+
+  // THE catalogue, in PRECEDENCE order — the first predicate that holds names
+  // the group's state. This array is the ONE enumeration: the render, the copy
+  // table and the preview scenarios are all keyed off it, so an eighth state
+  // cannot be added in one place and forgotten in another (the pins walk this
+  // list and refuse a state with no painted class, no copy, or no scenario).
+  // THE TOKEN IS `roster-conflict`, NOT `conflict`, AND THAT IS FORCED.
+  // console_reader_census_test.exs's Side B "counts a slug quoted ANYWHERE in
+  // app.js as read" — its own moduledoc names this as the false-read it cannot
+  // see. `conflict` is a CLASSIFIED wire code (seven `/v1/internal/*`
+  // provisioner settle routes whose 409 no console reader consumes), so
+  // spelling this state `conflict` made the census's rot arm report a reader
+  // that does not exist, and clearing it that way would have meant deleting
+  // seven TRUE rows on a string coincidence. The longer token is also the more
+  // accurate one: this is a roster identity collision, never an HTTP 409.
+  var GROUP_VIEW_STATES = ["empty", "roster-conflict", "blocked", "offline", "provisioning", "cap-hit", "working"];
+
+  // Milliseconds since a roster row's `last_seen`, or null when there is no
+  // parsable stamp. Total over junk. PURE — and deliberately NOT consulted by
+  // `groupViewState`: see the header. Negative ages (a box's clock ahead of the
+  // browser's) clamp to 0 rather than rendering "in 4s".
+  function rosterBeatAgeMs(row, now) {
+    var seen = row && row.last_seen;
+    if (typeof seen !== "string" || !seen) return null;
+    var t = Date.parse(seen);
+    if (isNaN(t)) return null;
+    var n = (typeof now === "number") ? now : Date.now();
+    return n - t < 0 ? 0 : n - t;
+  }
+
+  // The operator-facing staleness sentence for one row. Says the SERVER's own
+  // budget (`ttl_s`) beside the age so the two can be compared by eye — which is
+  // the whole reason to show an age the console refuses to act on. PURE.
+  function rosterStalenessText(row, now) {
+    var age = rosterBeatAgeMs(row, now);
+    if (age == null) return "No beat recorded";
+    var s = Math.floor(age / 1000);
+    var text = s < 60 ? s + "s ago" : (s < 3600 ? Math.floor(s / 60) + "m ago" : Math.floor(s / 3600) + "h ago");
+    var ttl = row && row.ttl_s;
+    return typeof ttl === "number" ? "Beat " + text + " (budget " + ttl + "s)" : "Beat " + text;
+  }
+
+  // Free slots off the VALIDATED capacity object (PDF-D34). The legacy free-text
+  // shape carries no number, so it answers null — "unknown", never 0, because a
+  // fabricated 0 would make a legacy box read as cap-hit. PURE.
+  function rosterSlotsFree(capacity) {
+    if (!capacity || typeof capacity !== "object") return null;
+    return typeof capacity.slots_free === "number" ? capacity.slots_free : null;
+  }
+
+  // One support's cells, folded from the TWO planes it actually has: the fleet
+  // payload (lifecycle) and the roster read (everything live). `chip` is the
+  // shipped `presenceChip` — this function makes no online decision of its own.
+  // PURE.
+  function groupSupportCell(support, rosterDocs, now) {
+    var s = support || {};
+    var row = rosterRowFor(rosterDocs, s);
+    var chip = presenceChip(row);
+    return {
+      id: s.id,
+      name: s.name,
+      live: instanceLifecycle(s).live,
+      failed: instanceLifecycle(s).failed,
+      worker: row && row.worker != null ? String(row.worker) : null,
+      chip: chip,
+      online: chip.online,
+      capacityText: rosterCapacityText(row && row.capacity),
+      slotsFree: rosterSlotsFree(row && row.capacity),
+      stalenessText: rosterStalenessText(row, now),
+      task: (row && row.task && row.task.title) ? String(row.task.title) : null,
+      row: row,
+    };
+  }
+
+  function groupSupportCells(supports, rosterDocs, now) {
+    now = (typeof now === "number") ? now : Date.now();
+    return (supports || []).map(function (s) { return groupSupportCell(s, rosterDocs, now); });
+  }
+
+  // TWO supports resolving to the SAME roster row is the conflict this surface
+  // names: the roster registers a listener under one worker identity, so a
+  // collision means neither box's status nor capacity is attributable and every
+  // verdict below would be assigned to an arbitrary one of them. Detected
+  // purely from the matched rows — no second read. PURE.
+  function groupRosterConflicts(cells) {
+    var seen = {};
+    var dupes = [];
+    (cells || []).forEach(function (c) {
+      if (!c || c.worker == null) return;
+      if (seen[c.worker]) { if (dupes.indexOf(c.worker) === -1) dupes.push(c.worker); }
+      else seen[c.worker] = true;
+    });
+    return dupes;
+  }
+
+  // ── THE OTHER TWO COLLISION SHAPES, AND WHY NEITHER IS A CATALOGUE STATE ───
+  // `roster-conflict` above classifies ONE fleet-payload/roster disagreement
+  // (two supports, one roster identity). The follow-up row named two more and
+  // asked for each to be classified or ruled out with a reason HERE. Both are
+  // ruled out of the catalogue, for different reasons, and the first is
+  // surfaced as an OBSERVATION instead.
+  //
+  // (a) A ROSTER ROW THAT MATCHES NO SUPPORT is not a fault, so it must not be
+  //     a state. The roster is not a list of supports: `Barkpark.Tasks.Fleet`'s
+  //     own moduledoc defines its subject as "a listener (a dev-server/agent
+  //     session running the fleet-listener protocol)", and `roster/2` returns
+  //     "every listener in `dataset` THE CALLER'S WORKSPACE OWNS". A developer's
+  //     own laptop session running the listener protocol registers there under
+  //     its own worker name, beside the provisioned supports. Ranking that as a
+  //     group state would put a healthy group into a non-working state because
+  //     somebody opened a listener on their machine — a false alarm built in by
+  //     design. It IS worth saying out loud (until now these rows were silently
+  //     dropped, so the surface claimed to show "the group" while rendering only
+  //     the part of it the control plane minted), so `groupOtherListeners` names
+  //     them under the table and NOTHING reads it as a predicate.
+  //
+  // (b) A SUPPORT WHOSE `dataset` DIFFERS FROM THE ROSTER'S SCOPE cannot be
+  //     detected from this payload at all, and the reason is structural rather
+  //     than a gap worth filling later. `Fleet.to_row/3` serializes exactly
+  //     worker / agent / scope / status / capacity / last_seen / ttl_s / task —
+  //     there is NO `dataset` key on the wire — and `load_listeners/2` selects
+  //     `where: d.dataset == ^dataset`, so every row this console receives is in
+  //     the queried dataset BY CONSTRUCTION. A support beating into a different
+  //     dataset is therefore not a divergent row; it is an ABSENT one, and an
+  //     absent row is already `presenceChip`'s honest "No heartbeat yet" — the
+  //     same answer as a box registered but never beat, which is the truth
+  //     available to a reader that cannot tell those two apart. Classifying it
+  //     would mean inventing a distinction the payload does not carry. Giving
+  //     the console a way to tell them apart is a SERVER change (a `dataset` on
+  //     the row, or a per-support scope echo), not a console one.
+  //     WHERE THE TRIPWIRE FOR THIS BELONGS, and why it is not here: the pin
+  //     that proves it used to read `to_row/3` out of the api tree from
+  //     `__app.test.mjs`, and the console path-escape ratchet refused it —
+  //     correctly. That read would put a hot api file in CONSOLE_PATHS and bill
+  //     every PR touching fleet presence for a browser-heavy console run to
+  //     guard THIS COMMENT. The api half is checkable in one grep beside the
+  //     function itself (`grep -n "defp to_row" api/lib/barkpark/tasks/fleet.ex`
+  //     — eight string keys, no `dataset`); the CONSOLE half, which is the
+  //     operative one, is pinned in `__app.test.mjs` without leaving this tree:
+  //     a support that never beat and a support beating into another dataset
+  //     render the SAME BYTES here, so there is no distinction to classify.
+  //
+  // Roster rows whose `worker` matches no support in this group. PURE, and
+  // deliberately NOT consulted by `groupViewState`.
+  function groupOtherListeners(cells, rosterDocs) {
+    if (!rosterDocs) return []; // a read that never landed knows of no listeners
+    var claimed = {};
+    (cells || []).forEach(function (c) { if (c && c.worker != null) claimed[String(c.worker)] = true; });
+    return rosterDocs.filter(function (row) {
+      return row && row.worker != null && !claimed[String(row.worker)];
+    });
+  }
+
+  // The observation sentence for those rows. Never a verdict — it says what
+  // they are (listener sessions), so the count does not read as an alarm.
+  function groupOtherListenersHtml(others) {
+    if (!others || !others.length) return "";
+    var names = others.map(function (r) { return String(r.worker); });
+    return '<p class="group-others">Also on this roster: ' +
+      esc(names.join(", ")) +
+      " &mdash; " + (names.length === 1 ? "a listener session" : "listener sessions") +
+      " beating into this workspace that no support of this server accounts for." +
+    "</p>";
+  }
+
+  // THE STATE. First predicate in `GROUP_VIEW_STATES` order that holds. Every
+  // reach for liveness goes through `cell.online`, which is `presenceChip`'s
+  // answer and nothing else. Total: the last rung has no predicate. PURE.
+  function groupViewState(cells) {
+    cells = cells || [];
+    if (!cells.length) return "empty";
+    if (groupRosterConflicts(cells).length) return "roster-conflict";
+    var blocked = cells.filter(function (c) { return c.chip.state === "blocked"; });
+    if (blocked.length) return "blocked";
+    var liveCells = cells.filter(function (c) { return c.live; });
+    var onlineCells = liveCells.filter(function (c) { return c.online; });
+    if (liveCells.length && !onlineCells.length) return "offline";
+    if (!liveCells.length) return "provisioning";
+    var atCap = onlineCells.filter(function (c) { return c.slotsFree === 0; });
+    if (atCap.length === onlineCells.length) return "cap-hit";
+    return "working";
+  }
+
+  // The copy for each catalogue state. Keyed by the same strings
+  // `GROUP_VIEW_STATES` holds; a state with no entry is a pinned refusal, not a
+  // silent blank. PURE.
+  var GROUP_VIEW_STATE_COPY = {
+    "empty": { label: "No supports", detail: "This server has no support boxes yet." },
+    "roster-conflict": { label: "Roster conflict", detail: "Two supports registered under the same worker name — status and capacity can't be attributed until one is renamed." },
+    "blocked": { label: "Blocked", detail: "A support is blocked and needs attention before it takes more work." },
+    "offline": { label: "Offline", detail: "No live support is beating — orders filed now would sit unclaimed." },
+    "provisioning": { label: "Provisioning", detail: "Supports are still coming up." },
+    "cap-hit": { label: "At capacity", detail: "Every online support reports zero free slots — new orders will queue." },
+    "working": { label: "Working", detail: "Supports are online and taking work." },
+  };
+
+  function groupViewStateCopy(state) {
+    return GROUP_VIEW_STATE_COPY[state] || { label: "Unknown", detail: "" };
+  }
+
+  // Full static class literals per branch (__css_check E2/E3 — a composed
+  // modifier is refused by the checker, so the seven arms are written out
+  // rather than built from `state`. That is the CONSTRAINT, not a preference:
+  // the pins below walk GROUP_VIEW_STATES and assert each one reaches a branch
+  // carrying its own token, so a state added to the catalogue without a branch
+  // here reds by name instead of falling silently through the else.)
+  function groupStateBadgeHtml(state) {
+    var copy = groupViewStateCopy(state);
+    var label = esc(copy.label);
+    if (state === "empty") return '<span class="group-state group-state--empty">' + label + "</span>";
+    if (state === "roster-conflict") return '<span class="group-state group-state--roster-conflict">' + label + "</span>";
+    if (state === "blocked") return '<span class="group-state group-state--blocked">' + label + "</span>";
+    if (state === "offline") return '<span class="group-state group-state--offline">' + label + "</span>";
+    if (state === "provisioning") return '<span class="group-state group-state--provisioning">' + label + "</span>";
+    if (state === "cap-hit") return '<span class="group-state group-state--cap-hit">' + label + "</span>";
+    if (state === "working") return '<span class="group-state group-state--working">' + label + "</span>";
+    return '<span class="group-state group-state--unknown">' + label + "</span>";
+  }
+
+  // One support's row on the group surface. The status cell is the SHIPPED
+  // `presenceChipHtml` — the group view paints no chip of its own, so a change
+  // to the presence vocabulary reaches both surfaces at once. PURE.
+  function groupSupportRowHtml(cell) {
+    var c = cell || {};
+    var cap = c.capacityText ? esc(c.capacityText) : "&mdash;";
+    var task = c.task ? esc(c.task) : "&mdash;";
+    return '<div class="group-row" data-group-support="' + esc(c.id) + '">' +
+      '<a class="group-cell group-cell--name" href="#instance/' + esc(c.id) + '"><bdi>' + esc(c.name) + "</bdi></a>" +
+      '<span class="group-cell group-cell--status">' + presenceChipHtml(c.row) + "</span>" +
+      '<span class="group-cell group-cell--cap">' + cap + "</span>" +
+      '<span class="group-cell group-cell--beat">' + esc(c.stalenessText) + "</span>" +
+      '<span class="group-cell group-cell--task">' + task + "</span>" +
+    "</div>";
+  }
+
+  // The surface. `rosterDocs` is the app-token-direct roster read's `documents`
+  // (null = the read itself never landed — the cells then carry presenceChip's
+  // honest "no heartbeat yet" rather than a fabricated Offline). PURE.
+  function groupViewHtml(main, supports, rosterDocs, now) {
+    var bp = main || {};
+    var cells = groupSupportCells(supports, rosterDocs, now);
+    var state = groupViewState(cells);
+    var copy = groupViewStateCopy(state);
+    var body;
+    if (state === "empty") {
+      body = '<p class="group-empty">' + esc(copy.detail) + "</p>";
+    } else {
+      body =
+        '<div class="group-table" role="table" aria-label="Support servers in this group">' +
+          '<div class="group-row group-row--head" role="row">' +
+            '<span class="group-cell group-cell--name">Support</span>' +
+            '<span class="group-cell group-cell--status">Status</span>' +
+            '<span class="group-cell group-cell--cap">Capacity</span>' +
+            '<span class="group-cell group-cell--beat">Last beat</span>' +
+            '<span class="group-cell group-cell--task">Current task</span>' +
+          "</div>" +
+          cells.map(groupSupportRowHtml).join("") +
+        "</div>";
+    }
+    body += groupOtherListenersHtml(groupOtherListeners(cells, rosterDocs));
+    return '<section class="card group-view" data-group-state="' + esc(state) + '">' +
+      '<div class="group-head">' +
+        '<h2 class="group-title"><bdi>' + esc(bp.name || "Group") + "</bdi></h2>" +
+        groupStateBadgeHtml(state) +
+      "</div>" +
+      '<p class="group-detail">' + esc(copy.detail) + "</p>" +
+      body +
+    "</section>";
+  }
+
+  // ── THE ROUTE (#instance/<main-id>/group) ──────────────────────────────────
+  // What `groupViewHtml` was missing: a way in. The surface is the "group" tab
+  // of a MAIN's instance workspace, which is the screen that already owns this
+  // main and its supports, so the tab strip and the back stack come for free
+  // and no new detail view has to be invented.
+  //
+  // FRAME 1 IS NOT `groupViewHtml(bp, supports, null, now)`. A null roster is
+  // the shape of a read that FAILED — the `roster-unreachable` control pins
+  // exactly that, and it resolves the GROUP to `offline`. This read has not
+  // been ISSUED yet, so painting "Offline — no live support is beating" before
+  // asking would be a fabricated verdict about boxes nobody has questioned:
+  // the same lie, one frame earlier, that the control exists to forbid. The
+  // panel says it is reading, and `wireGroupView` replaces it with the derived
+  // surface once the roster answers (including when it answers with a failure,
+  // which IS the null-roster shape and IS honestly offline).
+  function instanceGroupPanelHtml(bp) {
+    var b = bp || {};
+    return '<div id="instance-group-view" data-group-bp="' + esc(b.id) + '">' +
+      '<section class="card group-view">' +
+        '<div class="group-head"><h2 class="group-title"><bdi>' + esc(b.name || "Group") + "</bdi></h2></div>" +
+        '<p class="group-detail">Reading the roster&hellip;</p>' +
+      "</section>" +
+    "</div>";
+  }
+
   // ── Add-support flow (PDF-D83: the CP provisions server-side) ───────────────
   // The pure state machine (launchFlowReducer shape, container-agnostic):
   //   name --submit--> submitting --202/201--> submitted
@@ -11332,7 +12098,7 @@
 
   function openAddSupportModal(bp) {
     openModal(
-      '<h2 class="modal-title" id="modal-title">Add a support server to ' + esc(bp.name) + "</h2>" +
+      '<h2 class="modal-title" id="modal-title">Add a support server to <bdi>' + esc(bp.name) + "</bdi></h2>" +
       '<p class="modal-sub">We create and configure the box for you &mdash; server-side, no Hetzner token needed. It joins this Barkpark’s fleet and listens for work.</p>' +
       '<form id="support-form">' +
         '<label class="label" for="support-name-input">Name</label>' +
@@ -11419,11 +12185,43 @@
     }).catch(function () { return { status: 0, documents: null }; });
   }
 
-  // Paint every live support's presence slot from ONE roster read. A 401 (the
-  // cached token expired) drops the cache and retries the mint exactly once.
-  function loadSupportPresence(mainBp, supports, retried) {
+  // THE ROSTER READ, named once. Mint the app token (401 = the cached one
+  // expired: drop it and re-mint EXACTLY once), read the main's roster
+  // browser-direct, hand the caller `documents` — or null, which means the read
+  // itself never landed and must never be rendered as a box that answered.
+  //
+  // This was inlined in `loadSupportPresence` until the group route needed the
+  // same answer. It is extracted rather than copied for the reason PDF-D11's
+  // criterion [1] is about: a second roster read is a second place where a
+  // liveness answer gets cached, compared or aged, and the surface's one rule
+  // is that liveness comes from the plane it is handed. Both consumers now pass
+  // the SAME `documents` array straight into the shipped derivations.
+  function readFleetRoster(mainBp, then, retried) {
+    if (!mainBp || !mainBp.url) { then(null); return; }
+    mintAppToken(mainBp.id).then(function (token) {
+      if (!token) { then(null); return; }
+      fetchFleetRoster(mainBp.url, token).then(function (r) {
+        if (r.status === 401 && !retried) {
+          delete appTokenCache[mainBp.id];
+          readFleetRoster(mainBp, then, true);
+          return;
+        }
+        then(r.documents);
+      });
+    });
+  }
+
+  // Paint every live support's presence slot from ONE roster read.
+  function loadSupportPresence(mainBp, supports) {
     var targets = (supports || []).filter(function (s) { return instanceLifecycle(s).live; });
     if (!targets.length || !mainBp || !mainBp.url) return;
+    // DOM-gated as well as data-gated. wireInstanceActions runs on EVERY tab,
+    // and the presence slots this paints live in the Overview panel's fleet
+    // card — so off Overview this used to mint a token and read the roster to
+    // paint nothing. Harmless until the group tab started reading the same
+    // roster for its own render, at which point the group screen issued TWO
+    // reads of one endpoint. No slot on screen, no read.
+    if (!document.querySelectorAll("[data-support-presence]").length) return;
     var paint = function (documents) {
       targets.forEach(function (s) {
         // Attribute-scan rather than an interpolated selector: an exotic id
@@ -11437,16 +12235,33 @@
         if (slot) slot.innerHTML = presenceSlotHtml(documents, s);
       });
     };
-    mintAppToken(mainBp.id).then(function (token) {
-      if (!token) { paint(null); return; }
-      fetchFleetRoster(mainBp.url, token).then(function (r) {
-        if (r.status === 401 && !retried) {
-          delete appTokenCache[mainBp.id];
-          loadSupportPresence(mainBp, supports, true);
-          return;
-        }
-        paint(r.documents);
-      });
+    readFleetRoster(mainBp, paint);
+  }
+
+  // The group tab's ONE mount. Same read, same derivations, no cache of its
+  // own: `documents` goes straight from the wire into `groupViewHtml`, which
+  // rebuilds every cell through `presenceChip`. Nothing here remembers, ages or
+  // re-decides "online" — that is criterion [1] surviving the routing, and the
+  // absence is what the mutation pin measures.
+  // WHOSE group panel is on screen. The lifecycleRail / instanceAuthorityMount
+  // precedent: module state rather than an attribute read, because the answer
+  // has to survive the panel's own re-renders and be readable the instant the
+  // read lands. Rewritten on EVERY loadInstance paint (wireInstanceActions
+  // re-enters), and nulled the moment the panel is not mounted — so a
+  // drill-down to another instance, or a move to another tab, invalidates an
+  // in-flight read instead of letting it paint the previous main's group.
+  var groupViewMount = null;
+
+  function wireGroupView(bp) {
+    var box = $("#instance-group-view");
+    groupViewMount = (box && bp && !isSupportBp(bp)) ? String(bp.id) : null;
+    if (!groupViewMount) return;
+    var supports = supportsOf(fleetCache, bp.id);
+    readFleetRoster(bp, function (documents) {
+      if (groupViewMount !== String(bp.id)) return;
+      var live = $("#instance-group-view");
+      if (!live) return;
+      live.innerHTML = groupViewHtml(bp, supports, documents, Date.now());
     });
   }
 
@@ -12098,7 +12913,7 @@
   function openPinModal(bp) {
     var current = bp.update_running_release || bp.version || "";
     openModal(
-      '<h2 class="modal-title" id="modal-title">Pin ' + esc(bp.name) + " to a version</h2>" +
+      '<h2 class="modal-title" id="modal-title">Pin <bdi>' + esc(bp.name) + "</bdi> to a version</h2>" +
       '<p class="modal-sub">Freeze this instance so autoupdate holds it in place. ' +
         "Pinning holds an instance at or above its current version &mdash; it does not roll back.</p>" +
       '<form id="pin-form">' +
@@ -12532,7 +13347,7 @@
       var idTail = bp.id ? String(bp.id).slice(0, 8) : "—";
       return '<div class="set-row">' +
         '<div class="set-row-main">' +
-          '<div class="set-row-name">' + esc(bp.name || "Unnamed instance") + "</div>" +
+          '<div class="set-row-name"><bdi>' + esc(bp.name || "Unnamed instance") + "</bdi></div>" +
           '<div class="set-row-meta">' + esc(bp.channel || "prod") + " &middot; " + esc(idTail) + "</div>" +
           (st.note ? '<div class="set-row-note">' + esc(st.note) + "</div>" : "") +
           (armNote ? '<div class="set-row-note">' + esc(armNote) + "</div>" : "") +
@@ -13424,7 +14239,7 @@
     // deploy would 422 instance_not_live), with an honest caption saying why.
     var canDeploy = instanceCanDeploy(bp);
     openModal(
-      '<h2 class="modal-title" id="modal-title">New site on ' + esc(bp.name || bp.slug || "this instance") + "</h2>" +
+      '<h2 class="modal-title" id="modal-title">New site on <bdi>' + esc(bp.name || bp.slug || "this instance") + "</bdi></h2>" +
       '<p class="modal-sub">Spawned next to Phoenix on the box, built from a shipped starter through the six-stage engine (health-gated, instant rollback).</p>' +
       '<div class="field"><label class="label" for="site-nc-name">Name</label>' +
         '<input class="form-input" id="site-nc-name" type="text" autocomplete="off" spellcheck="false" placeholder="my-search" /></div>' +
@@ -13822,7 +14637,7 @@
     return '<div class="wh-card" data-wh="' + esc(wh.id) + '">' +
       '<div class="wh-card-head">' +
         '<div class="wh-card-id">' +
-          (wh.name ? '<div class="wh-name">' + esc(wh.name) + "</div>" : "") +
+          (wh.name ? '<div class="wh-name"><bdi>' + esc(wh.name) + "</bdi></div>" : "") +
           '<div class="wh-url">' + esc(wh.url) + "</div>" +
           webhookEventsHtml(wh) +
         "</div>" + pill +
@@ -13853,6 +14668,12 @@
       : '<p class="dim">' + esc(FORBIDDEN_ROLE_COPY.admin) + "</p>") +
       '<div class="wh-cli">' +
         cliChipHtml(webhookCliChip("show", instance, dataset)) +
+        // The Edit button's twin. `bp cloud webhook edit <instance> <webhook-id>
+        // [--name/--url/--events/--types]` is a real dispatched verb
+        // (internal/cli/cloud_webhook_cmd.go, `case "edit", "update":`), so the
+        // chip is truthful; the operator appends the id and the field(s), the
+        // same way every chip here leaves the id to the paste site.
+        cliChipHtml(webhookCliChip("edit", instance, dataset)) +
         cliChipHtml(webhookCliChip("toggle", instance, dataset)) +
         cliChipHtml(webhookCliChip("rotate", instance, dataset)) +
         // The twin of the `Send test` button above. The verb spelling is the
@@ -16074,14 +16895,14 @@
     var m = freshnessModel(s);
     var updated = m ? m.when : relTime(s.updated_at);
     var instSeg = bp
-      ? 'on <a class="site-inst-link" href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>"
+      ? 'on <a class="site-inst-link" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>"
       : fleetDown
         ? 'on <span class="dim" title="We couldn\'t load your instances just now, so this row can\'t name the instance it runs on.">(unavailable)</span>'
         : "on —";
     return '<div class="site-row site-row--global" data-id="' + esc(s.id) + '" role="button" tabindex="0">' +
       '<div class="site-status">' + siteStatusPill(s) + "</div>" +
       '<div class="site-main">' +
-        '<div class="site-name">' + esc(name) + "</div>" +
+        '<div class="site-name"><bdi>' + esc(name) + "</bdi></div>" +
         '<div class="site-host">' + esc(host) + "</div>" +
         // cch-w23-s3: the count of domains this row does NOT show, on the same
         // meta line and in the same grammar as the compact siteRow above.
@@ -16422,7 +17243,7 @@
       : "—";
     var sub = (site.framework ? esc(site.framework) : "site") +
       (bp
-        ? ' &middot; on <a href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>"
+        ? ' &middot; on <a href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>"
         : instFault
           ? ' &middot; <span class="dim" title="' +
             esc("We couldn't load your instances — " + faultCopy(instFault.status, instFault.data,
@@ -16652,7 +17473,7 @@
   function envModalBodyHtml(site) {
     var name = (site && (site.name || site.slug)) || "this site";
     return '<h2 class="modal-title" id="modal-title">Edit environment</h2>' +
-      '<p class="modal-sub">Environment variables for ' + esc(name) + ", applied on the next deploy.</p>" +
+      '<p class="modal-sub">Environment variables for <bdi>' + esc(name) + "</bdi>, applied on the next deploy.</p>" +
       '<div class="notice notice-warn env-warn" role="note">' +
         "Saving replaces the whole set — values are write-only, so anything you leave out is removed. " +
         "Current values can’t be read back." +
@@ -17456,6 +18277,22 @@
   // highlighted; the honest "Rolled back" completion pill + a link to the now-serving
   // URL read here instead. The "restored" branch shows nothing here (its cue is the
   // marked row). `url` is server data → escaped. Pure.
+  //
+  // cch-r21l RULING (task-c74cf3120f6bca69) — `.deploys-rollback-pill` STAYS ITS
+  // OWN COMPONENT; it is deliberately NOT absorbed into the .status-pill ladder,
+  // and this comment is the reason so the next sweep does not re-open it.
+  // The ladder is a STATE vocabulary: every `.status-pill` names what a thing IS
+  // right now (a deploy is building, a box is live) and carries a dot whose hue
+  // is that state's role. This marker names an EVENT that has already finished,
+  // it labels no entity, it has no state to be in, and it is one flex child of a
+  // composite banner (`.deploys-rollback-note`) — 20px tall, dotless, --text-xs,
+  // tinted to the BANNER's info wash rather than to a role. Giving it a role
+  // would assert a semantic it does not have ("this deploy's status is Rolled
+  // back" is false — `current_deployment_id` is UNCHANGED on this branch, which
+  // is exactly why no row is highlighted and this banner reads instead), and
+  // giving it a dot would make a settled completion look like a live state.
+  // A distinct affordance keeping its own component is not a second grammar; a
+  // second way to say the SAME thing is, and that is what .inst-life-pill was.
   function deployRollbackBannerHtml(flashView) {
     if (!flashView || flashView.kind !== "previous") return "";
     var link = flashView.url
@@ -18922,7 +19759,7 @@
   function inviteStateHtml(state, ctx) {
     ctx = ctx || {};
     var team = ctx.team ? String(ctx.team) : "this team";
-    var teamB = "<b>" + esc(team) + "</b>";
+    var teamB = "<b><bdi>" + esc(team) + "</bdi></b>";
     function card(ico, title, copyHtml, actionsHtml) {
       return '<div class="invite-wrap"><div class="invite-card card">' + ico +
         '<h1 class="invite-title">' + esc(title) + "</h1>" +
@@ -18969,8 +19806,8 @@
     }
     if (state === "wrong_account") {
       return card(ICO_INFO, "This invitation is for a different email",
-        (ctx.email ? "It was sent to <b>" + esc(String(ctx.email)) + "</b>" : "It was sent to a different address") +
-          (ctx.meEmail ? ", but you're signed in as <b>" + esc(String(ctx.meEmail)) + "</b>." : ".") +
+        (ctx.email ? "It was sent to <b><bdi>" + esc(String(ctx.email)) + "</bdi></b>" : "It was sent to a different address") +
+          (ctx.meEmail ? ", but you're signed in as <b><bdi>" + esc(String(ctx.meEmail)) + "</bdi></b>." : ".") +
           " Sign in with the invited address to accept it.",
         act("switch", "Switch account"));
     }
@@ -18991,7 +19828,7 @@
       return card(ICO_MAIL, "Join " + team + "?",
         "You've been invited to join " + teamB +
           (ctx.role ? " as " + esc(String(ctx.role)) : "") + "." +
-          (ctx.email ? " This invitation was sent to <b>" + esc(String(ctx.email)) + "</b>." : ""),
+          (ctx.email ? " This invitation was sent to <b><bdi>" + esc(String(ctx.email)) + "</bdi></b>." : ""),
         act("join", "Join " + team) +
           '<a class="invite-skip" href="#overview">Not now</a>');
     }
@@ -19159,9 +19996,9 @@
     api("GET", "/v1/invitations/" + encodeURIComponent(token), null, { noAuth: true }).then(function (r) {
       if (!document.getElementById("auth-invite")) return;
       if (r.ok && r.data && r.data.team) {
-        slot.innerHTML = '<span class="auth-invite-title">You\'ve been invited to join ' +
-          esc(r.data.team.name) + ".</span> Log in — or create an account — with " +
-          '<span class="auth-invite-email">' + esc(r.data.email) + "</span> to accept.";
+        slot.innerHTML = '<span class="auth-invite-title">You\'ve been invited to join <bdi>' +
+          esc(r.data.team.name) + "</bdi>.</span> Log in — or create an account — with " +
+          '<span class="auth-invite-email"><bdi>' + esc(r.data.email) + "</bdi></span> to accept.";
       } else if (r.status === 404 || r.ok) {
         // The server's own determinate answer (404, or a 200 with no team —
         // the same claim by another route): the link is dead. Consuming the
@@ -19568,6 +20405,12 @@
         : "Connect a " + name + " account to provision here. Until then we launch a fully-managed instance for you.";
       return '<div class="launch-catalog-empty">' +
         '<p class="dim">' + lead + "</p>" +
+        // gr-r21m-defect-jk (DEFECT-K, screen `empty`). RULED as the ghost tier
+        // BY DESIGN — same ruling as `providerRosterHtml`'s Disconnect above.
+        // It is also NOT this screen's primary action: the lead sentence right
+        // above says a managed instance launches anyway, so the screen's primary
+        // is the launch submit and this is the secondary BYO detour. A filled
+        // tier here would out-shout the door that actually works.
         '<button class="btn btn-ghost btn-sm launch-connect-provider" type="button" data-kind="' + esc(kind) + '">Connect ' + name + "</button></div>";
     }
     if (vs.state === "unavailable") {
@@ -20066,8 +20909,8 @@
       ? '<span class="new-eyebrow">One more step</span><h2 class="runway-title">' + esc(title) + "</h2>"
       : '<h2 class="modal-title" id="modal-title">' + esc(title) + "</h2>";
     var lead = authority === "blocked"
-      ? "Your free trial isn't available, so launching " + esc(name) + " needs a paid plan."
-      : "Your free trial isn't available — pick a plan to launch " + esc(name) + ". Cancel anytime.";
+      ? "Your free trial isn't available, so launching <bdi>" + esc(name) + "</bdi> needs a paid plan."
+      : "Your free trial isn't available — pick a plan to launch <bdi>" + esc(name) + "</bdi>. Cancel anytime.";
     var inner = hero +
       '<p class="dim launch-plan-lead">' + lead + "</p>" +
       launchPlanGridHtml(authority, { billing_capability: capCache }) +
@@ -20884,7 +21727,14 @@
         // an ACTION section carries the action (never a save-row, never a button
         // buried in a status card). "See all plans" stays: it toggles the grid,
         // a read affordance the card owns.
-        '<a class="plan-more" id="plan-more">See all plans</a>' +
+        // gr-r21m-defect-jk (DEFECT-K, screen `billing-cancelling`) — RULED a
+        // read/disclosure affordance by the GR33 note directly above, not an
+        // action tier, so "the primary action renders as plain body text"
+        // mis-reads it. The real residual it hid — a bare `<a>` with no href, no
+        // role and no tabindex, i.e. the one control this card owns was not
+        // keyboard reachable — IS fixed: it is a real button now, boxed
+        // identically by `.plan-more` in app.css and in the shared focus ring.
+        '<button class="plan-more" id="plan-more" type="button">See all plans</button>' +
       "</div>";
   }
 
@@ -22057,14 +22907,24 @@
   // (3-item glance, loadOverviewDigest) renders through this. The full #activity
   // feed does NOT: it coalesces through the grammar below. A 3-item preview has
   // nothing to fold, so it keeps the terse fleet-row shape.
+  //
+  // The two user-authored strings in .fleet-name (the actor email and the
+  // metadata name) each ride in their own <bdi> (cch-rtl-script-neutral-
+  // borrowing). esc() already drops the explicit bidi controls; what it cannot
+  // touch is IMPLICIT direction: an email written in Arabic or Hebrew letters is
+  // strong-RTL by script, and a neutral at its edge (a trailing "." or "-") was
+  // resolved against the LTR paragraph around it, so it painted on the far side
+  // of the RTL run from where the string itself puts it. <bdi> gives the string
+  // its own direction (dir=auto) and makes it one neutral unit in the row.
+  // Measured in headless Chrome by __preview__/bidi-isolation.mjs.
   function activityRow(e) {
     var who = (e.actor && e.actor.email) || "system";
     var when = e.inserted_at ? new Date(e.inserted_at).toLocaleString() : "";
-    var meta = e.metadata && e.metadata.name ? " &middot; " + esc(String(e.metadata.name)) : "";
+    var meta = e.metadata && e.metadata.name ? " &middot; <bdi>" + esc(String(e.metadata.name)) + "</bdi>" : "";
     var target = e.target_type ? '<span class="badge"><span class="dot unknown"></span>' + esc(e.target_type) + "</span>" : "";
     return '<div class="fleet-row activity-row">' +
       '<div class="fleet-main">' +
-        '<div class="fleet-name">' + esc(who) + " " + esc(humanAction(e.action)) + meta + "</div>" +
+        '<div class="fleet-name"><bdi>' + esc(who) + "</bdi> " + esc(humanAction(e.action)) + meta + "</div>" +
         '<div class="fleet-url dim">' + esc(when) + "</div>" +
       "</div>" +
       '<div class="fleet-badges">' + target + "</div>" +
@@ -25455,7 +26315,7 @@
         : "";
     return '<div class="new-ready">' +
       '<span class="new-eyebrow ok">Live</span>' +
-      "<" + tag + ' class="new-title">' + esc(bp.name) + " is ready</" + tag + ">" +
+      "<" + tag + ' class="new-title"><bdi>' + esc(bp.name) + "</bdi> is ready</" + tag + ">" +
       '<p class="new-desc">Your managed Barkpark is up' + (bp.url ? ' at <span class="mono">' + esc(bp.url) + "</span>" : "") + ".</p>" +
       '<div class="new-actions">' +
         studioBtn +
@@ -26383,11 +27243,33 @@
   // Pure: the headline sentence per state. "unknown" is deliberately NOT worded
   // as reassurance — reading absence as health is the exact failure this block
   // exists to end.
+  //
+  // console-r21m DEFECT-F/H/I — THE UNKNOWN ARM SAID "No vitals to judge" AND
+  // THE VITALS WERE ON SCREEN. The banner has exactly ONE call site
+  // (metricsPanelHtml, `grep -n 'pressureBannerHtml(' app.js` → 1 render
+  // site + 1 hooks export), and that call site RETURNS EARLY on
+  // `model.absent`: a box that has never reported a beat gets the "Waiting
+  // for the first beat" empty state and no banner at all. So every render of
+  // the unknown arm that can exist sits directly above `.metrics-grid`.
+  // Measured on origin/main d5bea4de9, `?scen=metrics-stale#instance/…a1/
+  // metrics`, light/1440: "No vitals to judge" painted 96px above CPU 58%,
+  // Memory 57%, Disk 74%, Load 1.1 — four populated cards. The copy was not
+  // merely misleading in one fixture; it was false at every site it could
+  // reach.
+  // WHAT IS ACTUALLY ABSENT IS THE VERDICT, NOT THE VITALS. The `pressure`
+  // block is a SEPARATE key on the /metrics envelope from `series`
+  // (metricsSeries reads `payload.pressure` and `payload.series`
+  // independently), and pressureModel is TOTAL over a missing one — an older
+  // control plane sends readings and no pressure block at all. So the
+  // headline now names the thing that is missing. The `unknown`-means-never-
+  // calm contract is untouched: this is a rewording of ONE headline, not a
+  // new state, and the `pressure--unknown` class, the tone and every arm
+  // beside it are byte-identical.
   var PRESSURE_HEADLINES = {
     struggling: "This box is struggling",
     watch: "This box is under pressure",
     calm: "No resource pressure",
-    unknown: "No vitals to judge",
+    unknown: "No pressure verdict",
   };
 
   // Pure: a human byte size. null/absent → the honest em-dash, never "0 B".
@@ -26493,7 +27375,12 @@
     if (model.state === "struggling" || model.state === "watch") {
       detail = model.firing.map(function (x) { return x.text; }).join(" · ");
     } else if (model.state === "unknown") {
-      detail = "This box has not reported the numbers this verdict is made of.";
+      // console-r21m DEFECT-H, the second half of the same contradiction.
+      // "has not reported the numbers" reads as "there are no numbers" while
+      // the numbers are painted immediately below. It names the PRESSURE
+      // SIGNALS — the `pressure.signals` array this banner is made of — and
+      // then points at the readings that DID land, so the two boxes agree.
+      detail = "The last beat carried no pressure signals, so there is nothing to judge — the readings below are what the box did report.";
     }
 
     // The confidence line. It appears whenever the verdict was made on an
@@ -27255,7 +28142,9 @@
     }
     return '<div class="set-row">' +
       '<span class="set-ava" aria-hidden="true">' + esc(memberInitials(m.email)) + "</span>" +
-      '<div class="set-row-main"><div class="set-row-name">' + esc(m.email) +
+      // The email rides in its own <bdi>, apart from the system's "(you)" — the
+      // same isolation, and the same reason, as activityRow's .fleet-name.
+      '<div class="set-row-main"><div class="set-row-name"><bdi>' + esc(m.email) + "</bdi>" +
         (isSelf ? ' <span class="dim">(you)</span>' : "") + "</div>" +
         '<div class="set-row-meta">joined ' + esc(relTime(m.joined_at)) + "</div></div>" +
       // THE CHIP READS `targetRole`, NOT `m.role`
@@ -27283,7 +28172,7 @@
       : "";
     return '<div class="set-row">' +
       '<span class="set-ava" aria-hidden="true">' + esc(memberInitials(inv.email)) + "</span>" +
-      '<div class="set-row-main"><div class="set-row-name">' + esc(inv.email) + "</div>" +
+      '<div class="set-row-main"><div class="set-row-name"><bdi>' + esc(inv.email) + "</bdi></div>" +
         '<div class="set-row-meta">invited as ' + esc(ROLE_LABELS[inv.role] || inv.role) +
           " &middot; expires " + esc(fmtTokenDate(inv.expires_at)) + "</div></div>" +
       '<div class="set-row-side"><span class="set-chip">Pending</span>' + action + "</div></div>";
@@ -27598,7 +28487,7 @@
   function revealInvite(url, email) {
     openModal(
       '<h2 class="modal-title" id="modal-title">Invitation sent</h2>' +
-      '<p class="modal-sub">We emailed <b>' + esc(email) + "</b> an invitation. You can also share this link — it works <b>once</b> and expires in <b>7 days</b>:</p>" +
+      '<p class="modal-sub">We emailed <b><bdi>' + esc(email) + "</bdi></b> an invitation. You can also share this link — it works <b>once</b> and expires in <b>7 days</b>:</p>" +
       '<div class="field"><input class="form-input" id="invite-link" type="text" readonly value="' + esc(url || "") + '" /></div>' +
       '<p class="set-row-note">This is the only time we\'ll show the link here. If the email doesn\'t arrive, share it directly.</p>' +
       '<div class="modal-actions">' +
@@ -27698,7 +28587,7 @@
     var opts = roleModalOptionsHtml(auth.actorRole, auth.targetRole);
     openModal(
       '<h2 class="modal-title" id="modal-title">Change role</h2>' +
-      '<p class="modal-sub">Set the team role for <b>' + esc(email || "this member") + "</b>.</p>" +
+      '<p class="modal-sub">Set the team role for <b><bdi>' + esc(email || "this member") + "</bdi></b>.</p>" +
       '<div class="field"><label class="label" for="role-select">Role</label>' +
         '<select class="form-input" id="role-select">' + opts + "</select></div>" +
       '<div class="modal-actions">' +
@@ -27794,7 +28683,7 @@
   function confirmRevokeInvite(ctx, invId, email) {
     openModal(
       '<h2 class="modal-title" id="modal-title">Revoke invitation?</h2>' +
-      '<p class="modal-sub">The invitation for <b>' + esc(email || "this address") + "</b> will stop working.</p>" +
+      '<p class="modal-sub">The invitation for <b><bdi>' + esc(email || "this address") + "</bdi></b> will stop working.</p>" +
       '<div class="modal-actions">' +
         '<button class="btn" type="button" data-close>Cancel</button>' +
         '<button class="btn btn-danger" id="invite-revoke-go" type="button">Revoke</button>' +
@@ -28537,7 +29426,7 @@
       var active = i === index;
       return '<div class="cmdk-row' + (active ? " is-active" : "") + '" role="option"' +
         ' id="cmdk-row-' + i + '" data-i="' + i + '"' + (active ? ' aria-selected="true"' : "") + ">" +
-        '<span class="cmdk-row-label">' + esc(it.label) + "</span>" +
+        '<span class="cmdk-row-label"><bdi>' + esc(it.label) + "</bdi></span>" +
         '<span class="cmdk-row-meta">' +
           (it.hint ? '<span class="cmdk-row-hint">' + esc(it.hint) + "</span>" : "") +
           '<span class="cmdk-row-group">' + esc(it.group || "") + "</span>" +
@@ -28733,6 +29622,7 @@
       else if (foldMq.addListener) foldMq.addListener(onFold);
     }
     wireNavStripCue();
+    wireEdgeCues();
     $("#fleet-refresh").addEventListener("click", function () { loadFleet(parseHash().filter || null); });
     $("#sites-refresh").addEventListener("click", loadSites);
     $("#activity-refresh").addEventListener("click", loadActivity);
@@ -29582,9 +30472,9 @@
 
   function openOffloadModal(mainBp, support, token) {
     openModal(
-      '<h2 class="modal-title" id="modal-title">Offload a task to ' + esc(support.name) + "</h2>" +
-      '<p class="modal-sub">File an order on this Barkpark. <b>' + esc(offloadWorkerName(support)) +
-        "</b> claims it, works it on the box, and you watch it here.</p>" +
+      '<h2 class="modal-title" id="modal-title">Offload a task to <bdi>' + esc(support.name) + "</bdi></h2>" +
+      '<p class="modal-sub">File an order on this Barkpark. <b><bdi>' + esc(offloadWorkerName(support)) +
+        "</bdi></b> claims it, works it on the box, and you watch it here.</p>" +
       '<form id="offload-form">' +
         '<label class="label" for="offload-title">Title</label>' +
         '<input class="form-input" id="offload-title" placeholder="Summarise the release notes" required autocomplete="off">' +
@@ -29821,6 +30711,17 @@
       // pure function; the DOM mount (mountLaunchCatalog) is browser-verified.
       providerChipHtml: providerChipHtml, instanceLifecycleClass: instanceLifecycleClass,
       azureFieldsValid: azureFieldsValid, providerCredBody: providerCredBody,
+      // console-w28 — the cloudflare connect subform. The field KEYS are the
+      // assertion surface (they must equal what cloudflare_credential_blob/1
+      // keeps), the validator is the only kind-specific rule, and
+      // credentialFieldsHtml is exported so the rendered form can be read
+      // without a DOM.
+      cloudflareFieldKeys: CLOUDFLARE_FIELDS.map(function (f) { return f.key; }),
+      cloudflareFieldsValid: cloudflareFieldsValid,
+      credentialFieldsValid: credentialFieldsValid,
+      credentialFieldsInvalidTitle: credentialFieldsInvalidTitle,
+      credentialFieldsHtml: credentialFieldsHtml, providerMeta: providerMeta,
+      connectableProviderKinds: PROVIDERS.filter(function (p) { return p.connectable; }).map(function (p) { return p.kind; }),
       // friendly is exported so the harness can PROVE it drops .remediation (the
       // connect sheet must never route the server copy through it).
       remediationCopy: remediationCopy, friendly: friendly, formatMonthlyPrice: formatMonthlyPrice,
@@ -29877,6 +30778,7 @@
       // cch wave 13 — WHICH cloud account a connection points at, shown before a
       // rotation is committed. Pure; loadProviderIdentity's fetch is the mount.
       providerIdentityModel: providerIdentityModel, providerIdentityHtml: providerIdentityHtml,
+      loadProviderIdentity: loadProviderIdentity,
       capabilityMatrixModel: capabilityMatrixModel, capabilityMatrixHtml: capabilityMatrixHtml,
       capabilityVerbs: CAPABILITY_VERBS.map(function (v) { return v.key; }),
       // S11b (azure-hetzner hosting): the console lifecycle action-row pure
@@ -30039,6 +30941,7 @@
       instanceTimelineHtml: instanceTimelineHtml, mountInstanceTimeline: mountInstanceTimeline,
       // C6 instance-workspace tabs + the Webhooks tab (charter D49/D46/D51/D18/D5).
       instanceTabOf: instanceTabOf, instanceTabs: INSTANCE_TABS.slice(),
+      instanceTabsFor: instanceTabsFor, instanceTabFor: instanceTabFor,
       instanceDetailHtml: instanceDetailHtml, instanceTabStripHtml: instanceTabStripHtml,
       webhookCliChip: webhookCliChip, cliChipHtml: cliChipHtml,
       webhookEventsHtml: webhookEventsHtml, webhookBannerHtml: webhookBannerHtml,
@@ -30778,6 +31681,17 @@
       supportKeyCommand: supportKeyCommand, supportKeyStepHtml: supportKeyStepHtml,
       agentKeyShapeValid: agentKeyShapeValid, agentKeyStatusCopy: agentKeyStatusCopy,
       fleetNest: fleetNest, fleetNestedRowsHtml: fleetNestedRowsHtml,
+      // PDF-D11 group view (pdf-bl-fleet-group-view): the 7-state catalogue,
+      // its derivation and its pure renderer. `groupViewState` is the ONLY
+      // state decision and it reaches liveness through presenceChip alone.
+      GROUP_VIEW_STATES: GROUP_VIEW_STATES, groupViewState: groupViewState,
+      groupViewStateCopy: groupViewStateCopy, groupStateBadgeHtml: groupStateBadgeHtml,
+      groupSupportCell: groupSupportCell, groupSupportCells: groupSupportCells,
+      groupRosterConflicts: groupRosterConflicts, groupSupportRowHtml: groupSupportRowHtml,
+      groupOtherListeners: groupOtherListeners, groupOtherListenersHtml: groupOtherListenersHtml,
+      instanceGroupPanelHtml: instanceGroupPanelHtml,
+      groupViewHtml: groupViewHtml, rosterBeatAgeMs: rosterBeatAgeMs,
+      rosterStalenessText: rosterStalenessText, rosterSlotsFree: rosterSlotsFree,
       // MVP-0 offload (PDF-D87/D92, pdf-mvp0-offload-spa): the order-doc
       // builder + tag-seed contingency, the eligibility gate, the watch
       // reducer/rows/panel, and the browser-direct URL join. DOM mounts

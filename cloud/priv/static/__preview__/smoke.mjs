@@ -34,6 +34,11 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
+// THE BROWSER-SIDE HARNESS (task-5ffdec2b609404bc). This runner boots app.js
+// in a vm and never loads mock.js, so the two `modal`-declaring scenarios below
+// cannot be checked by RENDERING their dialog here — what they can be checked
+// for is that the seam they declare EXISTS on the other side.
+const MOCK_JS = fs.readFileSync(path.join(HERE, "mock.js"), "utf8");
 
 // ── index.html's shipped `hidden` (cch-w43-s6) ───────────────────────────────
 // The shim used to default EVERY element to hidden:false, and never read
@@ -773,10 +778,22 @@ function bootScenario(name, opts) {
     const method = (init && init.method) || "GET";
     const p = String(url);
     calls.push({ method, path: p.split("?")[0] });
+    // cch-w23-bl-real-hetzner-remediation-scenario — the POSTED BYTES reach
+    // route()'s optional 5th arg, the browser twin of the same parse in
+    // mock.js. Without it this stub could not drive a per-KIND fixture and the
+    // corpus would still be able to answer only one remediation per scenario.
+    // Unreadable JSON is passed as UNDEFINED rather than guessed at.
+    let sentBody;
+    const rawBody = (init && init.body) || null;
+    if (typeof rawBody === "string") {
+      try { sentBody = JSON.parse(rawBody); } catch (e) { sentBody = undefined; }
+    } else if (rawBody && typeof rawBody === "object") {
+      sentBody = rawBody;
+    }
     // Routed at LANDING time, not at call time, so a deferred response still
     // reflects whatever the fixture state is when it actually answers.
     const answer = () => {
-      const res = route(name, method, p, fixtureState) || { status: 404, body: { error: "not_found" } };
+      const res = route(name, method, p, fixtureState, sentBody) || { status: 404, body: { error: "not_found" } };
       // extraMembership (cch-w43-s6), smoke-only and defaulting OFF: APPEND one
       // further membership to the teams[] a 200 /v1/me already answers with.
       //
@@ -799,6 +816,19 @@ function bootScenario(name, opts) {
         body = Object.assign({}, body, {
           teams: ((body && body.teams) || []).concat([opts.extraMembership]),
         });
+      }
+      // cch-bl-preview-selector-residue — /v1/me IS SNAPSHOT, as mock.js
+      // snapshots every body and as a real fetch does (each response.json() is
+      // a fresh parse). This shim hands route()'s body over BY REFERENCE, and
+      // for /v1/me that body is the MODULE-LEVEL fixture: app.js's local 2FA
+      // echo writes `meCache.user.two_factor_enabled`, so one Turn-off click
+      // rewrote SCENARIOS["account-modal-2fa-on"] for every later reader in
+      // this process. Scoped to /v1/me on purpose: measured, a snapshot of
+      // EVERY body reds panel-overview, whose custom-host leg writes a field
+      // on the state-bag row the rail closed over — a documented by-reference
+      // seam this change must not silently remove.
+      if (res.status === 200 && body && p.split("?")[0].endsWith("/v1/me")) {
+        body = JSON.parse(JSON.stringify(body));
       }
       return {
         ok: res.status >= 200 && res.status < 300,
@@ -1390,6 +1420,7 @@ const EXPECTATIONS = {
   //                                cloud/priv/static/app.js  → two hits.
   //   the webhook DELETE         → webhooks-panel
   //   /v1/sites/:id/github       → rollback
+  //   /v1/account/two-factor     → account-modal-2fa-on (cch-bl-preview-selector-residue)
   //
   // WHAT THIS LIST GOT WRONG WHEN IT WAS WRITTEN, recorded rather than quietly
   // fixed: it counted the two /v1/barkparks/:id hits as "six remaining" while
@@ -1481,7 +1512,9 @@ const EXPECTATIONS = {
       // actually painted. FIXTURE_SHAPE_PINS pins the same fact one layer up and
       // refuses BEFORE any scenario boots; this line is the second, independent
       // witness, and it is the one that would still red if the pin were deleted.
-      const amName = ((reg.get("modal-body").innerHTML || "").match(/class="am-name">([^<]*)</) || [])[1];
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      const amName = ((reg.get("modal-body").innerHTML || "").match(/class="am-name"><bdi>([^<]*)<\/bdi></) || [])[1];
       assert.ok(amName !== undefined,
         "no `.am-name` in the account modal openAccountModal just painted — the identity of the person " +
         "signing devices out is absent, and every assertion below is about a modal with no owner");
@@ -1783,7 +1816,9 @@ const EXPECTATIONS = {
         "rule and not by a name rule (User has no :name field at all)");
       hooks.openModal(hooks.accountModalHtml(model));
       const html = reg.get("modal-body").innerHTML || "";
-      const painted = (html.match(/class="am-name">([^<]*)</) || [])[1];
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      const painted = (html.match(/class="am-name"><bdi>([^<]*)<\/bdi></) || [])[1];
       assert.equal(painted, local,
         "the 158-character local part did not reach `.am-name` whole; got " + JSON.stringify(String(painted).slice(0, 32)) +
         "… (" + String(painted).length + " characters). A truncation on the way to the element hides the overflow " +
@@ -1821,8 +1856,8 @@ const EXPECTATIONS = {
     },
   },
   "account-modal-2fa-on": {
-    what: "2FA already ON — the on-row with regenerate + turn-off, derived from /v1/me alone (zero extra fetches)",
-    check(reg, hooks) {
+    what: "2FA already ON — the on-row with regenerate + turn-off, derived from /v1/me alone (zero extra fetches) — and Turn off is CLICKED: its danger confirm, one DELETE /v1/account/two-factor, the SERVER flag off, and the badge repaints Off with setup offered again",
+    async check(reg, hooks, ctx) {
       const model = hooks.accountModel({ team_id: "team_abc" }, SCENARIOS["account-modal-2fa-on"].data.me);
       assert.equal(model.twoFactorEnabled, true, "the on-state must come from /v1/me's two_factor_enabled");
       hooks.openModal(hooks.accountModalHtml(model));
@@ -1831,6 +1866,70 @@ const EXPECTATIONS = {
       assert.ok(html.includes('id="a2f-regen"'), "the on-row must offer regenerate");
       assert.ok(html.includes('id="a2f-disable"'), "the on-row must offer turn-off");
       assert.ok(!html.includes('id="a2f-start"'), "an enrolled account is never offered setup again");
+
+      // ── cch-bl-preview-selector-residue · TURN OFF — DELETE /v1/account/two-factor
+      // The fourth FLAG-SHAPED verb, and the only one with no click-driven
+      // oracle until this leg. Flag-shaped means there is no list to shrink:
+      // the verb flips ONE boolean (/v1/me's user.two_factor_enabled), so the
+      // oracle reads that boolean on BOTH sides of the wire — never a count of
+      // rows nobody fabricated. Re-derive the handler by symbol:
+      //   grep -n 'api("DELETE", "/v1/account/two-factor"' cloud/priv/static/app.js
+      // — one hit, the onConfirm of the #a2f-disable listener in a2fWire.
+      //
+      // Everything above rendered through hooks.openModal, which wires NOTHING
+      // (a2fWire runs only inside openAccountModal). So the modal is opened
+      // again here the way a user opens it, through #acct-btn.
+      const acct = reg.get("acct-btn");
+      assert.ok(acct, "#acct-btn was never touched — init() did not wire the shell");
+      assert.equal(acct.click(), 1, "#acct-btn must have exactly one click handler (it opens the account modal)");
+      await ctx.settle();
+      const opened = reg.get("modal-body").innerHTML || "";
+      // THE RENDER HALF: byId auto-creates a registry node for any id the app
+      // asks for, so the click below would pass on a phantom without this.
+      assert.ok(opened.includes('id="a2f-disable"') && opened.includes('id="a2f-badge"'),
+        "the REAL account modal must paint the on-row's Turn off control; got: " + opened.slice(0, 300));
+      assert.ok(/id="a2f-badge"[^>]*>On</.test(opened), "…and its badge must read On before the click");
+
+      // ─ the trigger only opens the sheet (danger tier: armed, no typed echo) ─
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/two-factor"), 0, "nothing turned off before the click");
+      assert.equal(reg.get("a2f-disable").click(), 1, "Turn off dispatched no click handler — it is DEAD");
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/two-factor"), 0,
+        "Turn off fired its DELETE on the FIRST click — the confirm gate is gone");
+      const sheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(sheet.includes('id="cm-confirm"') && sheet.includes("Turn off two-factor authentication?"),
+        "the confirm sheet did not mount, or does not name the act; got: " + sheet.slice(0, 200));
+      const parsed = parsedConfirmButton(reg);
+      assert.ok(parsed && parsed.disabled === false, "a DANGER-tier Confirm ships ARMED");
+      assert.equal(reg.get("cm-confirm").click(), 1, "the sheet's Confirm must be wired for \"click\"");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/two-factor"), 1,
+        "exactly one DELETE /v1/account/two-factor must reach the wire; got " +
+        ctx.countCalls("DELETE", "/v1/account/two-factor"));
+
+      // ─ THE SERVER FLAG. Until this row the DELETE arm answered 200 {ok:true}
+      // and flipped nothing, so /v1/me kept saying two_factor_enabled: true —
+      // a disable indistinguishable from a no-op on every read after it.
+      assert.equal(ctx.state.twoFactorEnabled, false,
+        "DELETE /v1/account/two-factor did not turn anything off that the fixture can observe");
+      const meAfter = route("account-modal-2fa-on", "GET", "/v1/me", ctx.state);
+      assert.equal(meAfter.status, 200, "the account is still signed in after turning 2FA off");
+      assert.equal(meAfter.body.user.two_factor_enabled, false,
+        "/v1/me still reports two_factor_enabled: true after a successful disable");
+      assert.equal(SCENARIOS["account-modal-2fa-on"].data.me.user.two_factor_enabled, true,
+        "the disable leaked into the MODULE fixture — the next boot of this scenario would start Off");
+
+      // ─ THE UI FLAG. The success arm echoes the flag locally and re-opens the
+      // account screen; the badge it repaints is the operator's only view of it.
+      const reborn = reg.get("modal-body").innerHTML || "";
+      assert.ok(reborn.includes(">Your account<") && reborn.includes('id="a2f-badge"'),
+        "the success arm must return to the WHOLE account screen; got: " + reborn.slice(0, 200));
+      assert.ok(/id="a2f-badge"[^>]*>Off</.test(reborn),
+        "the two-factor badge must repaint Off after a successful disable; got: " +
+        (reborn.match(/id="a2f-badge"[^>]*>[^<]*</) || ["<no badge>"])[0]);
+      assert.ok(!reborn.includes('id="a2f-disable"') && !reborn.includes('id="a2f-regen"'),
+        "the account screen still offers Turn off / regenerate for a factor that is already gone");
+      assert.ok(reborn.includes('id="a2f-start"'),
+        "a disabled account must be offered setup again — the way back in");
     },
   },
   // cch-w39-s2-fu — THE UNKNOWN ARM, at rest. The browser half of this state
@@ -3146,7 +3245,9 @@ const EXPECTATIONS = {
     check(reg) {
       const body = reg.get("new-body").innerHTML || "";
       assert.ok(body.includes("new-ready"), "the shared ready hero must render");
-      assert.ok(body.includes("Hugin is ready"), "the hero names the live instance");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("<bdi>Hugin</bdi> is ready"), "the hero names the live instance");
       assert.ok(body.includes('id="new-open-studio"'), "Open Studio is the primary action");
       assert.ok(body.includes("hugin-5b2c1e.barkpark.cloud"), "the live URL renders");
       assert.ok(body.includes(">View instance<"), "the secondary View-instance affordance renders");
@@ -3179,6 +3280,43 @@ const EXPECTATIONS = {
     },
   },
 
+  // task-679663d0bee42b15 — THE LAUNCH PRESS'S TWO 403s, DRIVEN AND READ. Both
+  // bodies are go_live's own (quoted beside the fixtures in scenarios.mjs). The
+  // shared driver asserts every precondition that would otherwise let the
+  // toast assertions pass on a page where nothing was pressed: the form is
+  // rendered, its submit handler is wired, exactly ONE POST /v1/launch reached
+  // the wire, and a toast actually mounted. Each expectation then reads the
+  // arm-specific bytes, so a swapped or broken slug branch in
+  // newLaunchRefusalToast reds the scenario that owns it.
+  "new-launch-limit-reached": {
+    what: "/new Launch → POST /v1/launch 403 limit_reached: the plan-limit toast WITH the billing action, never the authority sentence",
+    async check(reg, hooks, ctx) {
+      const t = await driveLaunchRefusal(reg, ctx);
+      assert.ok(t.includes('<div class="toast-title">Plan limit reached</div>'),
+        "a 403 limit_reached must title the toast \"Plan limit reached\"; toast stack: " + t.slice(0, 400));
+      assert.ok(t.includes("You&#39;re at your plan&#39;s instance limit.") || t.includes("You're at your plan's instance limit."),
+        "the quota body must render; toast stack: " + t.slice(0, 400));
+      assert.equal(countMatches(t, '<button class="btn btn-sm toast-action">Open dashboard</button>'), 1,
+        "a quota refusal carries exactly ONE billing action (Open dashboard); toast stack: " + t.slice(0, 400));
+      assert.ok(!t.includes("can&#39;t launch for this team") && !t.includes("role on this team"),
+        "a quota refusal must not borrow the authority copy; toast stack: " + t.slice(0, 400));
+    },
+  },
+  "new-launch-forbidden": {
+    what: "/new Launch → POST /v1/launch 403 forbidden {required: admin, scope: team}: the authority toast naming admin, and NO billing action",
+    async check(reg, hooks, ctx) {
+      const t = await driveLaunchRefusal(reg, ctx);
+      assert.ok(t.includes('<div class="toast-title">You can&#39;t launch for this team</div>'),
+        "a 403 forbidden must title the toast with the authority sentence; toast stack: " + t.slice(0, 400));
+      assert.ok(t.includes("Launching needs the admin role on this team. Ask a team admin to launch it, or to give you that role."),
+        "the toast must name the role the SERVER required (admin); toast stack: " + t.slice(0, 400));
+      assert.ok(!t.includes("toast-action"),
+        "an authority refusal offers no billing action — paying does not grant a role; toast stack: " + t.slice(0, 400));
+      assert.ok(!t.includes("Plan limit reached"),
+        "an authority refusal must not read as a plan ceiling; toast stack: " + t.slice(0, 400));
+    },
+  },
+
   // ── cch-r16-w11: the launch wizard's own elevated writes, BOTH WAYS ─────────
   // The three rows this pair and `theater-failed-member` retire from
   // __binding_census.mjs's UNPREDICATED list. Each member assertion is an
@@ -3189,7 +3327,9 @@ const EXPECTATIONS = {
     what: "the /new ready hero with GitHub connected, as the OWNER — #new-gh-create is LIVE (the grant arm keeps its shipped btn-primary bytes)",
     check(reg) {
       const body = reg.get("new-body").innerHTML || "";
-      assert.ok(body.includes("Hugin is ready"), "the hero names the live instance");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("<bdi>Hugin</bdi> is ready"), "the hero names the live instance");
       assert.ok(body.includes('<button class="btn btn-primary" type="button" id="new-gh-create">Create GitHub repo</button>'),
         "the owner gets the live create button, byte for byte the class list it shipped with");
       assert.ok(body.includes('id="new-gh-name" type="text"'), "the repo-name field is live beside it");
@@ -3200,7 +3340,9 @@ const EXPECTATIONS = {
     what: "the same screen as a plain MEMBER — no live #new-gh-create anywhere in the bytes, the disabled-and-explained arm and a disabled name field instead",
     check(reg) {
       const body = reg.get("new-body").innerHTML || "";
-      assert.ok(body.includes("Hugin is ready"), "the member still reaches the ready screen — only the elevated write is withheld");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("<bdi>Hugin</bdi> is ready"), "the member still reaches the ready screen — only the elevated write is withheld");
       assert.ok(!body.includes('id="new-gh-create"'),
         "adminWriteControlHtml's refusal arm DROPS liveAttrs: there must be no mount hook at all");
       assert.ok(body.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Create GitHub repo</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
@@ -3243,7 +3385,9 @@ const EXPECTATIONS = {
       const body = (reg.get("overview-body") || {}).innerHTML || "";
       assert.ok(body.includes("Needs attention"), "the attention section heading renders");
       assert.ok(body.includes("attention-row"), "an attention row renders");
-      assert.ok(body.includes(">Reporting</a>"), "the degraded box is named + linked");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("><bdi>Reporting</bdi></a>"), "the degraded box is named + linked");
       // cch-w18-bl: the EXACT sentence, not an OR over two halves. The old
       // disjunction was satisfied by "Agent offline" ALONE, so it held this
       // fixture to nothing at all about its health word — and the word it
@@ -3280,7 +3424,9 @@ const EXPECTATIONS = {
       const NAME = "Reporting — EU customer analytics, billing reconciliation and retention";
       assert.equal(NAME.length, 71, "the fixture name is the 71 characters this expectation is written about");
       assert.ok(body.includes("attention-row"), "an attention row renders");
-      assert.ok(body.includes(">" + NAME + "</a>"), "the whole name is the link's text — never truncated in the markup");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("><bdi>" + NAME + "</bdi></a>"), "the whole name is the link's text — never truncated in the markup");
       assert.ok(!body.includes("…"), "no ellipsis CHARACTER is written into the markup; the ellipsis is CSS");
       assert.ok(
         body.includes("Health unknown · Agent offline"),
@@ -3349,9 +3495,31 @@ const EXPECTATIONS = {
         "the suspended card names the day the plane stamped, and nothing else");
       assert.ok(!grid.includes("The server is stopped"), "the console never paints a stop it does not perform");
       assert.ok(!grid.includes("suspended — not deleted"), "trial-expiry copy never leaks onto the suspended card");
-      // The pill beside it moved with the copy: the WORD is Suspended, and the
-      // `bp-inst--stopped` S4 token (the hue) is deliberately unchanged.
-      assert.ok(!/inst-life-label">Stopped</.test(grid), "no pill paints the literal word Stopped");
+      // The pill beside it moved with the copy: the WORD is Suspended.
+      //
+      // task-b579afe77276b4f8 — this negative used to search a retired lifecycle
+      // label class for the word Stopped.
+      // PR #19569 retired that class; nothing in app.js emits it, so the
+      // negative could never red again. The pill on this card is statusOf()'s
+      // `suspended` arm rendered by statusMetaPill (THE ONE EMITTER), whose label
+      // bytes are `<span class="status-pill-label">WORD</span>`. The lifecycle
+      // ladder (lifecycleStatePillHtml) does not render on the overview grid, so
+      // it is not what this scenario pins.
+      //
+      // Anti-vacuity control FIRST, on the same span shape the negative reads:
+      // if the label bytes stop matching, the list is empty and the negative
+      // would be vacuous again — this reds instead. Then the negative, then the
+      // positive pin on the suspended card's own pill. Checked RED by painting
+      // "Stopped" in statusOf's suspended arm (the negative fires); the old
+      // regex stayed green under the same mutation.
+      const pillLabels = [...grid.matchAll(/<span class="status-pill-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+      assert.ok(pillLabels.length >= 2,
+        `the grid's pill labels are read at all (want the Healthy and suspended boxes' pills, got ${JSON.stringify(pillLabels)})`);
+      assert.ok(!pillLabels.some((l) => /\bStopped\b/i.test(l)),
+        `no pill paints the literal word Stopped (labels: ${JSON.stringify(pillLabels)})`);
+      assert.ok(
+        /suspended-card-banner[\s\S]*?<span class="status-pill status-pill--danger"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Suspended<\/span>/.test(grid),
+        "the suspended card's own pill is the danger pill labelled Suspended");
     },
   },
   // ── gr-p3 D-01: the v4 Fleet list + Archives (screens/01) ──────────────────
@@ -3483,6 +3651,71 @@ const EXPECTATIONS = {
       // The CLI command is NOT authority-gated — it teaches, it does not write.
       assert.ok(arch.includes("bp cloud instance resurrect"), "every reader keeps the copy-paste CLI affordance");
       assert.ok(!arch.includes("archives-note--unconfigured"), "a configured store never shows the unconfigured state");
+    },
+  },
+  // ── cch-w47-rv-bl: the REFUSE arm of the same panel, end to end ────────────
+  //
+  // The twin above boots the default OWNER. This one boots the SAME two bundles
+  // for an actor whose own GET /v1/me answers role "member" — the first member x
+  // archives scenario in the corpus. Until it existed, the refuse arm was proven
+  // only where __app.test.mjs hands the pure helper the string "refuse" by hand:
+  // a helper that is right and never reached is the vacuous green this epic keeps
+  // finding, and nothing anywhere proved that instanceAdminAuthority's answer
+  // travels from the loadArchives render site into these helpers at all.
+  //
+  // EVERY EXPECTED STRING IS DERIVED, NOT TYPED. The role sentence comes out of
+  // the shipped reader (hooks.friendly on the exact payload router.ex's
+  // resurrect/1 sends), and the refuse-arm bytes come out of the shipped pure
+  // pair called on this scenario's OWN fixture. So a copy edit in app.js moves
+  // both sides together and this expectation cannot go stale into a false green;
+  // what it pins is the RELATION — mount bytes == refuse render, and refuse !=
+  // grant — which is exactly the thing a regression breaks.
+  "fleet-archives-member": {
+    what: "the Archives panel refused: no live Resurrect, the CLI chip kept, and ONE server-owned line saying which role the command needs",
+    check(reg, hooks) {
+      const arch = (reg.get("archives-body") || {}).innerHTML || "";
+      // THE PRECONDITION, ASSERTED — not assumed. Both assertions below are
+      // about what a REFUSED member sees; measured against an owner they would
+      // pass or fail for reasons that have nothing to do with authority.
+      assert.equal(hooks.meState(), "loaded",
+        "fleet-archives-member must boot with /v1/me ANSWERED — got " + hooks.meState() +
+        ", and an unanswered read takes the 'unknown' arm, so nothing below measures the refuse arm");
+      assert.equal(hooks.meFlags().role, "member",
+        "fleet-archives-member must boot a plain member — got " + JSON.stringify(hooks.meFlags().role));
+      // The panel really rendered the list (an empty/error arm would pass the
+      // absence assertions below for free).
+      assert.ok(arch.includes("archive-list"), "the populated archive list renders for a member too");
+      assert.ok(countMatches(arch, 'class="archive-row"') >= 2, "one row per bundle, unchanged by authority");
+      // THE REFUSAL LINE, in the server's own words. `friendly` is the shipped
+      // 403 reader; this is the payload router.ex's resurrect/1 really sends
+      // (`Auth.forbidden(required: "admin", scope: "team")`).
+      const roleSentence = hooks.friendly({ error: "forbidden", required: "admin", scope: "team" });
+      assert.ok(roleSentence && roleSentence.includes("admin role"),
+        "the shipped 403 reader must answer this payload with the admin-role sentence; got: " + roleSentence);
+      assert.ok(arch.includes(roleSentence),
+        "the refuse arm prints the server's own role sentence above the list; got: " + arch.slice(0, 600));
+      // The live write stays OMITTED (cch-w47-s3's ruling, unweakened) …
+      assert.ok(!arch.includes("archive-resurrect-btn"),
+        "a member the route refuses is offered no live Resurrect");
+      // … and the CLI chip stays on EVERY row (cch-w47-rv-bl ruled (a), not (c):
+      // a member must still be able to learn the command and hand it on).
+      assert.ok(countMatches(arch, "bp cloud instance resurrect") >= 2,
+        "the copy-paste CLI chip is kept on every row — the ruling labels it, it does not delete it");
+      // THE MOUNT IS WIRED TO THE HELPER, and the two arms really differ. Both
+      // sides are computed from this scenario's own fixture through the shipped
+      // pure pair, so this is a diff of rendered BYTES, not of two hand-written
+      // strings.
+      const payload = SCENARIOS["fleet-archives-member"].data.archives.body;
+      const refused = hooks.archivesPanelHtml(hooks.archivesModel(payload, "refuse"));
+      const granted = hooks.archivesPanelHtml(hooks.archivesModel(payload, "grant"));
+      assert.equal(arch, refused,
+        "the DOM mount must render exactly the pure refuse arm — if these differ, instanceAdminAuthority's answer is not reaching the helpers");
+      assert.notEqual(refused, granted,
+        "the refused member's rendered bytes must differ from the granted ones");
+      assert.ok(!granted.includes(roleSentence),
+        "the grant arm never carries the role sentence — it is offered the button and has nothing to apologise for");
+      assert.ok(granted.includes("archive-resurrect-btn"),
+        "the grant arm still offers the live Resurrect (this is the control: the refuse assertions above could otherwise pass on a panel that offers it to nobody)");
     },
   },
 
@@ -4405,12 +4638,13 @@ const EXPECTATIONS = {
   // connect card + the 9-verb capability matrix (dev-tier filtered, server-owned
   // gap reasons, bare dash where the server owns no reason).
   "providers-connected": {
-    what: "the roster (2 kinds, Disconnect…), the ROTATION state, the honest matrix — AND a real Disconnect click that arms the typed gate and shrinks the SERVER roster 2→1",
+    what: "the roster (3 kinds, Disconnect…), the ROTATION state, the honest matrix, the Cloudflare identity slot — AND a real Disconnect click that arms the typed gate and shrinks the SERVER roster 3→2",
     async check(reg, hooks, ctx) {
       const roster = (reg.get("provider-roster") || {}).innerHTML || "";
       assert.ok(roster.includes("set-section"), "the roster rides the .set-* anatomy");
       assert.ok(roster.includes("prov-roster") && roster.includes("prov-row"), "roster rows render");
-      assert.ok(roster.includes("Hetzner") && roster.includes("Azure"), "both connected kinds render");
+      assert.ok(roster.includes("Hetzner") && roster.includes("Azure") && roster.includes("Cloudflare"),
+        "all three connected kinds render");
       assert.ok(roster.includes("connected "), "each row shows a connected-at (never a validity badge)");
       assert.ok(!/\bConnected<\/span>/.test(roster), "the roster never implies live validity");
       assert.ok(roster.includes("data-prov-disconnect"), "an admin roster carries the typed-confirm Disconnect");
@@ -4427,6 +4661,67 @@ const EXPECTATIONS = {
       assert.ok(connect.includes("Verify &amp; replace"), "the verb reads replace, not connect");
       assert.ok(!connect.includes("Disconnect one above"), "the destroy-first instruction is gone");
       assert.ok(!/data-connect-kind="[a-z]+"[^>]*disabled/.test(connect), "no connected kind is a disabled ghost");
+      assert.ok(connect.includes('data-connect-kind="cloudflare"'),
+        "console-w28: the connect picker offers cloudflare — it is CONNECTABLE (@connectable_kinds), even though it is not a place to launch");
+
+      // ── console-w28: THE CLOUDFLARE CONNECT CARD, ARMED FOR REAL ──────────
+      // Arm the cloudflare segment with a real click and read what the card
+      // paints. The three fields must be the three the router keeps, and the
+      // identity slot must be MOUNTED and honest.
+      //
+      // WHAT THIS LEG CANNOT SEE, SAID OUT LOUD. `loadProviderIdentity` finds
+      // its slot with `connect.querySelector("[data-prov-identity-kind]")`, and
+      // that slot is a DIV. This shim parses only PARSED_TAGS (button|a) leaves
+      // plus the class-allowlisted card groups, under a committed prohibition
+      // against widening PARSED_TAGS to containers (the mountUsageTab
+      // detached-stub hazard, stated at the top of this file). So the lookup
+      // answers null here, the fetch never goes on the wire, and the slot stays
+      // in its LOADING paint — for hetzner exactly as for cloudflare; this leg
+      // has never reached that fetch for any kind. Asserting a KNOWN paint here
+      // would therefore be asserting something this instrument cannot produce.
+      // The driven proof lives in cloud/priv/static/__app.test.mjs
+      // ("console-w28: the identity slot reads /v1/providers/:kind/identity —
+      // the route built for it, DRIVEN not grepped" and its 502 sibling), which
+      // calls loadProviderIdentity with a recording fetch and reads the URL, the
+      // known paint, the unreadable paint and the transport paint off it.
+      const cfSeg = reg.get("provider-connect")
+        .querySelectorAll('[data-connect-kind="cloudflare"]')[0];
+      assert.ok(cfSeg, "the cloudflare segment must be in the picker");
+      assert.equal(cfSeg.click(), 1, "the cloudflare segment is DEAD — nothing handled its click");
+      await ctx.settle();
+      const cfCard = (reg.get("provider-connect") || {}).innerHTML || "";
+      // The three fields the router's cloudflare_credential_blob/1 keeps, and no fourth.
+      for (const f of ["api_token", "account_id", "zone_id"]) {
+        assert.ok(cfCard.includes('id="cred-cf-' + f + '"'), "the cloudflare form renders " + f);
+      }
+      assert.ok(!cfCard.includes('id="cred-token"'),
+        "cloudflare must NOT fall back to the bare-token form — a bare token names no account");
+      // The slot is mounted, armed on cloudflare, and never a blank box.
+      assert.ok(cfCard.includes('data-prov-identity-kind="cloudflare"'),
+        "the identity slot must be mounted and armed on the kind the card is showing");
+      assert.ok(cfCard.includes('data-prov-identity="loading"'),
+        "an unfilled slot states that it is checking — never an empty box that looks known");
+      // NOTHING IN THE IDENTITY SLOT may claim the account was verified.
+      // Cloudflare.Client declares five callbacks — verify_token,
+      // upsert_dns_record, delete_dns_record, ensure_zone_proxied,
+      // create_origin_ca_cert — and not one of them names an account, so a
+      // verification claim about the ACCOUNT is unsupportable by the code.
+      //
+      // SCOPED TO THE SLOT, and the scope is the point: the card's own purpose
+      // line ("We verify the credential before saving it") is a TRUE claim about
+      // a different thing — preflight_provider authenticates the credential
+      // before the row is written. The lie this criterion forbids is about WHOSE
+      // ACCOUNT it is, so the assertion is read over the slot's bytes, not the
+      // card's, or it would red on an honest sentence.
+      const cfSlotAt = cfCard.indexOf('class="prov-identity-slot"');
+      assert.ok(cfSlotAt >= 0, "the identity slot must be findable in the card bytes");
+      const cfSlot = cfCard.slice(cfSlotAt, cfCard.indexOf("</div>", cfSlotAt) + 6);
+      assert.ok(cfSlot.includes("prov-identity"), "the slot slice must contain the identity line");
+      assert.ok(!/verified/i.test(cfSlot) && !/\bconfirmed\b/i.test(cfSlot) && !/\bchecked\b/i.test(cfSlot),
+        "the identity slot must never claim a verified/checked account; got: " + cfSlot);
+      // Re-arm hetzner so the Disconnect leg below runs on the card shape it always has.
+      reg.get("provider-connect").querySelectorAll('[data-connect-kind="hetzner"]')[0].click();
+      await ctx.settle();
 
       const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
       assert.ok(matrix.includes("cap-matrix"), "the capability matrix renders");
@@ -4453,8 +4748,8 @@ const EXPECTATIONS = {
       // loop ran over nothing, and a loop over nothing passes.
       const rosterEl = reg.get("provider-roster");
       const disconnects = rosterEl.querySelectorAll("[data-prov-disconnect]");
-      assert.equal(disconnects.length, 2,
-        "both roster rows must carry a wired Disconnect; got " + disconnects.length +
+      assert.equal(disconnects.length, 3,
+        "every roster row must carry a wired Disconnect; got " + disconnects.length +
         " — if this is 0 the shim's attribute selector regressed and nothing below proves anything");
       const kind = disconnects[0].getAttribute("data-prov-kind");
       assert.equal(kind, "hetzner", "the first row is the Hetzner credential");
@@ -4483,14 +4778,14 @@ const EXPECTATIONS = {
       // THE SHRINK, read off the SERVER's own list — the assertion a stateless
       // fixture cannot pass, because it answers a byte-identical roster whether
       // or not the DELETE ever arrived (D39).
-      assert.equal(ctx.state.providers.length, 1,
-        "the server roster must shrink by exactly one (2 → 1); got " + ctx.state.providers.length);
+      assert.equal(ctx.state.providers.length, 2,
+        "the server roster must shrink by exactly one (3 → 2); got " + ctx.state.providers.length);
       assert.ok(!ctx.state.providers.some((x) => x.kind === kind), "and the disconnected kind is the one gone");
       // …and the UI refetched, so the operator sees the truth rather than a
       // stale row they could click again.
       const repainted = reg.get("provider-roster").innerHTML || "";
-      assert.ok(repainted.includes("Azure") && !repainted.includes("Hetzner"),
-        "the roster must repaint from the refetch (Azure alone survives); got: " + repainted.slice(0, 200));
+      assert.ok(repainted.includes("Azure") && repainted.includes("Cloudflare") && !repainted.includes("Hetzner"),
+        "the roster must repaint from the refetch (Azure + Cloudflare survive); got: " + repainted.slice(0, 200));
       const provToast = (reg.get("toast-stack") || {}).innerHTML || "";
       assert.ok(provToast.includes("Hetzner Cloud disconnected"),
         "a successful disconnect must say so; toast stack: " + provToast.slice(0, 200));
@@ -4587,7 +4882,7 @@ const EXPECTATIONS = {
     },
   },
   "providers-unverified": {
-    what: "the connect card's remediation slot + the server-owned remediation copy verbatim (node-pinned)",
+    what: "the connect card's remediation slot + the server-owned remediation copy verbatim, PER KIND (node-pinned): hetzner, azure and the no-kind fallback are three DIFFERENT server sentences off one fixture",
     check(reg, hooks) {
       const connect = (reg.get("provider-connect") || {}).innerHTML || "";
       assert.ok(connect.includes("cred-remediation"), "the connect card carries the remediation slot (filled on submit)");
@@ -4595,12 +4890,41 @@ const EXPECTATIONS = {
       // node-pinned: the scenario's POST returns the single provider_unverified
       // + a remediation string, and remediationCopy() extracts it verbatim (never
       // routed through friendly(), which drops .remediation).
-      const res = route("providers-unverified", "POST", "/v1/providers");
+      //
+      // cch-w23-bl-real-hetzner-remediation-scenario — THE KIND IS SENT NOW.
+      // This call used to pass no body, because route() had no 5th argument, so
+      // one scenario could answer exactly one string and the corpus's "hetzner"
+      // remediation was a paraphrase nothing on the server emits. The kind now
+      // rides the POST body and the fixture answers per kind; the three arms
+      // below must be three DIFFERENT sentences, or the per-kind seam is
+      // decoration.
+      const res = route("providers-unverified", "POST", "/v1/providers", null, { kind: "hetzner" });
       assert.equal(res.status, 422, "connect preflight fails");
       assert.equal(res.body.error, "provider_unverified", "all causes collapse to one provider_unverified");
       const copy = hooks.remediationCopy(res.body);
-      assert.ok(copy && copy.includes("Hetzner Cloud console"), "the server remediation names the exact console fix, verbatim");
+      // CASING IS EVIDENCE, and this line is where the paraphrase showed. The
+      // probe read "Hetzner Cloud console" — lower-case c — which is what the
+      // corpus's INVENTED sentence spelled. The server's own clause says
+      // "Hetzner Cloud Console" (a product name), so the moment the real string
+      // landed this assertion reddened: the guard had been pinned to the
+      // paraphrase's wording, not the server's.
+      assert.ok(copy && copy.includes("Hetzner Cloud Console"), "the server remediation names the exact console fix, verbatim");
       assert.equal(hooks.friendly(res.body, "fallback").indexOf(copy), -1, "friendly() provably drops the remediation");
+
+      const azure = route("providers-unverified", "POST", "/v1/providers", null, { kind: "azure" });
+      assert.equal(azure.status, 422, "the azure arm fails preflight too");
+      const azureCopy = hooks.remediationCopy(azure.body);
+      assert.ok(azureCopy && azureCopy.includes("Azure Portal"),
+        "the azure kind gets the AZURE clause — a per-kind map that answered one sentence for every kind would be the limit this seam removed, still in place");
+
+      // NO KIND → the provider-agnostic clause, never a silent 201 and never
+      // one of the named sentences. This is also the control that proves the
+      // three arms above were selected BY THE BODY and not by the scenario.
+      const anon = route("providers-unverified", "POST", "/v1/providers");
+      assert.equal(anon.status, 422, "a body-less POST still fails preflight — the fallback is a REMEDIATION, not a success");
+      const anonCopy = hooks.remediationCopy(anon.body);
+      assert.equal(new Set([copy, azureCopy, anonCopy]).size, 3,
+        "hetzner / azure / fallback did not resolve to three distinct server sentences — the per-kind arm is not selecting on the body");
     },
   },
   "providers-member": {
@@ -4933,6 +5257,187 @@ const EXPECTATIONS = {
       );
     },
   },
+  // ── THE MODAL SEAM'S TWO NEW SCREENS (task-5ffdec2b609404bc) ──────────────
+  // WHAT THESE CAN AND CANNOT ASSERT HERE, stated so a reader does not mistake
+  // the scope. This runner is a node:vm shim: it boots app.js and NEVER loads
+  // mock.js, so the dialog these two exist to photograph does not open in this
+  // process and no assertion here may pretend it does. The shot IS the evidence
+  // for the dialog (shoot.sh + the `modal` field), and modal-oracle.mjs is the
+  // evidence for its geometry.
+  //
+  // What this file OWNS is the half neither of those can see: that the scenario
+  // is its HOST's fixture plus one field (so any difference between the two
+  // shots is the dialog and nothing else), and that the driver it names is a
+  // real entry in mock.js's table rather than a string that silently shoots the
+  // bare shell. Both are exactly the failure the old `account-modal*` NAME
+  // CONVENTION made unrefusable.
+  "tokens-revoke-confirm": {
+    what: "the revoke CONFIRM SHEET's scenario: `tokens-revoke`'s fixture byte-for-byte, plus a declared `modal` driver that mock.js answers",
+    async check(reg, hooks, ctx) {
+      // 1 — the HOST screen still renders. The dialog is shot over THIS.
+      const box = reg.get("token-list");
+      assert.equal(countMatches(box.innerHTML || "", 'class="token-row'), 4,
+        "the host screen must still render its four tokens — the dialog is shot OVER this list");
+
+      // 2 — the fixture is the host's, with nothing else moved. Deep equality,
+      //     not a spot check: if these ever diverge, a shot-hash difference
+      //     stops meaning "the dialog" and starts meaning "some other byte".
+      assert.deepEqual(
+        SCENARIOS["tokens-revoke-confirm"].data, SCENARIOS["tokens-revoke"].data,
+        "tokens-revoke-confirm must stay tokens-revoke's fixture exactly — that identity is " +
+        "what makes the two shots' difference attributable to the dialog alone");
+
+      // 3 — the declared driver EXISTS on the browser side. A typo'd name would
+      //     otherwise shoot the bare list under a filename promising a sheet.
+      assert.equal(SCENARIOS["tokens-revoke-confirm"].modal, "revoke-token");
+      assert.match(MOCK_JS, /"revoke-token": driveRevokeTokenSheet/,
+        "mock.js has no MODAL_DRIVERS entry named \"revoke-token\"");
+
+      // 4 — and the driver's own two selectors are the REAL ones app.js paints
+      //     (the `tokens-revoke` expectation above walks this same chain by
+      //     clicking it, which is what makes these two strings load-bearing).
+      assert.match(MOCK_JS, /whenPresent\("\.token-revoke\[data-id\]"/);
+      assert.match(MOCK_JS, /whenPresent\("#token-revoke-go", freezeShotSurface\)/);
+    },
+  },
+  "cmdk-palette": {
+    what: "the command palette's scenario: `mixed-fleet`'s fixture byte-for-byte, plus a declared `modal` driver that fires a REAL Cmd+K",
+    async check(reg, hooks, ctx) {
+      // 1 — the HOST screen still renders one row per fixture instance.
+      const rows = countMatches(reg.get("fleet-body").innerHTML || "", "fleet-row");
+      assert.ok(rows >= SCENARIOS["cmdk-palette"].data.barkparks.length,
+        "the host fleet table must still render — the palette is shot OVER it");
+
+      // 2 — same identity argument as above.
+      assert.deepEqual(
+        SCENARIOS["cmdk-palette"].data, SCENARIOS["mixed-fleet"].data,
+        "cmdk-palette must stay mixed-fleet's fixture exactly");
+
+      // 3 — the driver exists, and it reaches the palette the way a PERSON does:
+      //     a dispatched keydown through app.js's own listener, which is what
+      //     puts the shot through that handler's four no-op guards instead of
+      //     around them. `openCommandPalette()` called directly would skip all
+      //     four and photograph a state no key press is proven to reach.
+      assert.equal(SCENARIOS["cmdk-palette"].modal, "cmdk");
+      assert.match(MOCK_JS, /cmdk: driveCommandPalette/,
+        "mock.js has no MODAL_DRIVERS entry named \"cmdk\"");
+      assert.match(MOCK_JS, /new KeyboardEvent\("keydown", \{\s*key: "k", metaKey: true/,
+        "the palette driver no longer dispatches a real Cmd+K keydown");
+      assert.match(APP_JS, /id="cmdk-input"/,
+        "the selector the driver waits for is gone from app.js");
+    },
+  },
+  // ── THE TWO CALL SITES THAT HAD NO SCENARIO (task-499cab525e65018b) ───────
+  // SAME SCOPE RULE as the two above, and it is worth restating because these
+  // two are the ones the enumeration in #19581 filed as GAPS: this runner never
+  // loads mock.js, so neither dialog opens in this process. The SHOT is the
+  // evidence that the dialog renders and modal-oracle.mjs is the evidence for
+  // its geometry. What is asserted here is the half those two cannot see — the
+  // fixture identity, the declared driver's existence, and, for the conflict,
+  // the REFUSAL ITSELF: route() is called and its answer is pushed through
+  // app.js's own classifier, in-process, so "the 409 reaches the pinned branch"
+  // is measured rather than asserted about a string.
+  "instance-pin-version": {
+    what: "the PIN VERSION form's scenario: `instance-behind`'s fixture byte-for-byte, plus a declared `modal` driver that clicks the panel's own live Pin control",
+    async check(reg, hooks, ctx) {
+      // 1 — the HOST screen still renders, and it still OFFERS the control the
+      //     driver clicks. The live `data-au` mount hook, never the label: the
+      //     refused arm paints the same words on a disabled button, so a
+      //     label-only check cannot tell an offered verb from a withheld one.
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.includes('data-au="pin"'),
+        "the host Updates panel must paint the LIVE Pin version control — that click is the whole drive");
+      assert.ok(!body.includes("inst-life-disabled"),
+        "this fixture's actor is an owner; a disable-and-explain wrapper here means it lost its authority and the driver would click nothing");
+
+      // 2 — and the panel offers Pin for a REASON this fixture owns: the box is
+      //     unpinned, so autoupdateActions' showPin arm is the live one. A
+      //     fixture that gained a pinned_release would render Unpin instead and
+      //     this scenario would silently shoot a panel with no pin dialog
+      //     behind any button.
+      const acts = hooks.autoupdateActions(
+        SCENARIOS["instance-pin-version"].data.barkparks.find((b) => b.id === SCEN_IDS.behindInstance));
+      assert.equal(acts.showPin, true, "the fixture's box must be UNPINNED — showPin is what puts [data-au=pin] on screen");
+      assert.equal(acts.showUnpin, false);
+
+      // 3 — the fixture is the host's, with nothing else moved. Deep equality,
+      //     not a spot check: that identity is the entire reason a shot-hash
+      //     difference against `instance-behind` means "the dialog".
+      assert.deepEqual(
+        SCENARIOS["instance-pin-version"].data, SCENARIOS["instance-behind"].data,
+        "instance-pin-version must stay instance-behind's fixture exactly");
+
+      // 4 — the declared driver EXISTS on the browser side, and the two
+      //     selectors it waits for are the ones app.js paints. A typo'd driver
+      //     name would shoot the bare instance screen under a filename
+      //     promising a form — the precise lie the deleted `account-modal*`
+      //     name convention made unrefusable.
+      assert.equal(SCENARIOS["instance-pin-version"].modal, "pin-version");
+      assert.match(MOCK_JS, /"pin-version": drivePinVersionForm/,
+        "mock.js has no MODAL_DRIVERS entry named \"pin-version\"");
+      assert.match(MOCK_JS, /whenPresent\('\[data-au="pin"\]'/);
+      assert.match(MOCK_JS, /whenPresent\("#pin-go", freezeShotSurface\)/);
+      assert.match(APP_JS, /id="pin-go"/, "the selector the driver waits for is gone from app.js");
+    },
+  },
+  "instance-update-conflict": {
+    what: "the PIN-CONFLICT sheet's scenario: `instance-behind`'s fixture plus ONE key — a 409 pinned on POST /v1/barkparks/:id/self-update — which is the only branch that reaches openUpdateConflictModal",
+    async check(reg, hooks, ctx) {
+      // 1 — the HOST screen still renders the CTA the drive's first click needs.
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.includes('id="inst-update"'),
+        "the host screen must still paint the live #inst-update CTA — it is the first of the drive's two clicks");
+
+      // 2 — the fixture is the host's plus EXACTLY ONE key, and it is named.
+      //     The pre-click bytes therefore cannot have moved: `instanceSelfUpdate`
+      //     answers a POST no scenario issues until someone presses Update.
+      const mine = { ...SCENARIOS["instance-update-conflict"].data };
+      const refusal = mine.instanceSelfUpdate;
+      delete mine.instanceSelfUpdate;
+      assert.deepEqual(mine, SCENARIOS["instance-behind"].data,
+        "instance-update-conflict must be instance-behind's fixture plus instanceSelfUpdate and nothing else");
+      assert.ok(refusal, "the refusal key is what this scenario exists for");
+
+      // 3 — THE REFUSAL, MEASURED END TO END IN THIS PROCESS. route() is asked
+      //     the question the click asks, and its answer is handed to app.js's
+      //     own classifier. Two failure modes this closes that a string check
+      //     cannot: a route arm that never matches the path (the arm was added
+      //     by this same change), and an envelope shape updateConflict() reads
+      //     as some OTHER kind — `other`, `not_found` — every one of which
+      //     dies into a toast and opens no dialog at all.
+      const served = route("instance-update-conflict", "POST",
+        "/v1/barkparks/" + SCEN_IDS.behindInstance + "/self-update");
+      assert.equal(served.status, 409, "the arm must answer the conflict, not fall through to the terminal /v1/ 200");
+      const c = hooks.updateConflict(served.body);
+      assert.equal(c.kind, "pinned",
+        "only kind 'pinned' on a NON-forced call reaches openUpdateConflictModal — every other kind toasts");
+      assert.equal(c.pin, "v0.8.4", "the sheet names the freeze, so the tag must survive the classifier");
+      // …and the copy it renders carries a forceLabel, which is what puts
+      // #update-force in the sheet at all — the selector the driver waits for
+      // and the one that tells this sheet from the confirm it replaced.
+      assert.ok(hooks.updateConflictCopy(c, served.body).forceLabel,
+        "no forceLabel means openUpdateConflictModal renders Cancel alone and #update-force never exists");
+
+      // 4 — the CONTROL for assertion 3: the default arm is NOT a refusal, so
+      //     the 409 above is this fixture's own doing and not something route()
+      //     answers everybody. `instance-behind` is the host itself.
+      const plain = route("instance-behind", "POST",
+        "/v1/barkparks/" + SCEN_IDS.behindInstance + "/self-update");
+      assert.equal(plain.status, 202,
+        "the host fixture must take the happy path — otherwise the conflict is route()'s default and this scenario measures nothing");
+
+      // 5 — the declared driver exists, and it reaches the sheet through TWO
+      //     real clicks rather than by calling the opener with a hand-built
+      //     copy object.
+      assert.equal(SCENARIOS["instance-update-conflict"].modal, "update-conflict");
+      assert.match(MOCK_JS, /"update-conflict": driveUpdateConflictSheet/,
+        "mock.js has no MODAL_DRIVERS entry named \"update-conflict\"");
+      assert.match(MOCK_JS, /whenPresent\("#inst-update"/);
+      assert.match(MOCK_JS, /whenPresent\("#update-go"/);
+      assert.match(MOCK_JS, /whenPresent\("#update-force", freezeShotSurface\)/);
+      assert.match(APP_JS, /id="update-force"/, "the selector the driver waits for is gone from app.js");
+    },
+  },
   "tokens-reveal": {
     what: "the plaintext-once reveal — amber only-time banner + the mono token on its own wrapping line (copy + show/hide), with the input-affix demoted to an off-screen copy buffer",
     check(reg, hooks) {
@@ -4964,7 +5469,10 @@ const EXPECTATIONS = {
       // body.includes(email) is satisfiable by markup a person cannot read —
       // measured: truncating the name render to 40 chars left that weaker
       // needle GREEN. The needle below pins the text node a person sees.
-      assert.ok(body.includes('set-row-name">' + cruel.email + "<"),
+      // (cch-rtl-script-neutral-borrowing: the email text node now sits inside
+      // the row's <bdi>, so the needle names the isolate — still the visible
+      // text node, still the WHOLE address up to the closing tag.)
+      assert.ok(body.includes('set-row-name"><bdi>' + cruel.email + "</bdi>"),
         "the 160-char email must render WHOLE as the row's visible name — CSS may clip it, the DOM must carry it");
       const rows = SCENARIOS["members-cruel-content"].data.members.length;
       assert.equal(rows, 4, "the roster is teamMembers.concat(one cruel member) — the three committed rows stay byte-for-byte unmoved");
@@ -5102,9 +5610,12 @@ const EXPECTATIONS = {
       // moved with the id — a corpus that shipped ada's email under lin's id
       // would tag the wrong row "(you)" and every predicate below would be a
       // coincidence.
-      assert.ok(body.includes("lin@acme.com <span class=\"dim\">(you)</span>"),
+      // (cch-rtl-script-neutral-borrowing: the email closes its <bdi> before the
+      // system's "(you)". The NEGATIVE needle below moves with it — left on the
+      // old markup it could never match again and would pass vacuously.)
+      assert.ok(body.includes("lin@acme.com</bdi> <span class=\"dim\">(you)</span>"),
         "lin's row must be the self row — the actor identity, not just the actor rank; got: " + body.slice(0, 400));
-      assert.ok(!body.includes("ada@acme.com <span class=\"dim\">(you)</span>"),
+      assert.ok(!body.includes("ada@acme.com</bdi> <span class=\"dim\">(you)</span>"),
         "ada must NOT be self-tagged when the acting principal is lin");
       const emailsFor = (attr) =>
         panel.querySelectorAll("[" + attr + "]").map((b) => b.getAttribute("data-email")).sort();
@@ -5136,7 +5647,7 @@ const EXPECTATIONS = {
       const panel = reg.get("members-body");
       const body = panel.innerHTML || "";
       assert.ok(body.includes("ozz@acme.com"), "the peer owner renders on the roster");
-      assert.ok(body.includes("ada@acme.com <span class=\"dim\">(you)</span>"),
+      assert.ok(body.includes("ada@acme.com</bdi> <span class=\"dim\">(you)</span>"),
         "the acting owner is still ada — this scenario moves the ROSTER, never the default actor");
       const emailsFor = (attr) =>
         panel.querySelectorAll("[" + attr + "]").map((b) => b.getAttribute("data-email")).sort();
@@ -5619,6 +6130,58 @@ const EXPECTATIONS = {
     includes: ["fleet-support-card", "No support servers yet", 'id="fleet-add-support-cta"'],
     excludes: ["fleet-support-row"],
   },
+  // ── PDF-D11 GROUP VIEW — the ROUTE (#instance/<main>/group) ───────────────
+  // The parent slice's surface was a pure renderer nothing could navigate to.
+  // This is the only scenario in the corpus that reaches it, and it reaches it
+  // the way a person does: a hash, the console's own loader, and the roster off
+  // the wire. Nothing here folds a fixture module through the hooks to fake a
+  // render — the assertions read the PAINTED panel.
+  "fleet-group-view": {
+    what: "the Group tab reached by hash — the panel renders from the LIVE roster read, under ONE group state, with the unmatched listener session named and not counted",
+    check(reg, hooks, ctx) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      // 1. THE ROUTE EXISTS. The tab strip offers it and it is the active tab.
+      assert.ok(body.includes('href="#instance/' + SCENARIOS["fleet-group-view"].data.barkparks[0].id + '/group"'),
+        "the instance workspace offers no Group tab — the surface is unreachable again");
+      assert.ok(/class="inst-tab is-active" href="[^"]*\/group"/.test(body),
+        "the Group tab is not the active one on its own hash");
+      assert.ok(body.includes('id="instance-group-view"'), "the group panel did not mount");
+
+      // 2. THE READ HAPPENED, BROWSER-DIRECT AND EXACTLY ONCE. Two reads of one
+      // endpoint on one screen is the shape of a second cache being born.
+      const rosterCalls = ctx.calls.filter((c) => /\/v1\/fleet\/roster$/.test(c.path));
+      assert.equal(rosterCalls.length, 1,
+        "the group screen read the roster " + rosterCalls.length + " time(s) — it must take exactly one");
+      assert.ok(/^https?:\/\//.test(rosterCalls[0].path), "the roster read must be browser-direct against the MAIN's absolute url");
+      assert.ok(ctx.calls.some((c) => c.method === "POST" && /\/app-token$/.test(c.path)),
+        "the app token must be minted for the direct read");
+
+      // 3. THE PANEL IS PAINTED FROM THAT READ, not from frame 1. Frame 1
+      // carries NO state at all (a null roster is the shape of a read that
+      // FAILED, which resolves to offline — announcing that before asking would
+      // be a fabricated verdict), so a state attribute here proves the answer
+      // arrived and was rendered.
+      const gv = (reg.get("instance-group-view") || {}).innerHTML || "";
+      assert.ok(!gv.includes("Reading the roster"), "the panel is still on frame 1 — the roster read never painted");
+      assert.ok(gv.includes('data-group-state="working"'),
+        "the routed panel did not derive `working` from the live roster plane");
+      assert.ok(gv.includes("group-state--working") && gv.includes(">Working<"));
+      // The support's row is the SHIPPED presence chip and the validated
+      // capacity object, off the same read.
+      assert.ok(gv.includes("fleet-presence--working"), "the group row paints no presence chip of its own vocabulary");
+      assert.ok(gv.includes("heavy · 2/4 slots free · $20 budget"), "the validated capacity object did not render");
+      assert.ok(gv.includes("Reindex 400k ONIX records"), "the joined current task did not render");
+
+      // 4. THE UNMATCHED ROSTER ROW IS NAMED AND DECIDES NOTHING. `pelle-laptop`
+      // is a listener session, not a support of this main; Fleet's roster is
+      // every LISTENER the workspace owns, so ranking it as a group state would
+      // let somebody's laptop take a working group out of `working`.
+      assert.ok(gv.includes("group-others") && gv.includes("pelle-laptop"),
+        "the roster row matching no support was silently dropped — the panel claims to show the group and does not");
+      assert.ok(gv.includes('data-group-state="working"'),
+        "the unmatched listener moved the group's state — it is an observation, not a predicate");
+    },
+  },
   // ── MVP-0 OFFLOAD (pdf-mvp0-offload-spa): the order watch ladder ───────────
   // The offload button renders on the ONLINE support row (static, observable in
   // #instance-body). The watch panel itself mounts AFTER a click+submit, which
@@ -6056,6 +6619,29 @@ const EXPECTATIONS = {
       const bodyEl = reg.get("instance-body");
       const before = (bodyEl || {}).innerHTML || "";
       assert.ok(before.length > 0, "#instance-body rendered empty");
+      // task-6878caa08b065f78 — THE LIFECYCLE LADDER'S STOPPED-STATE WORD.
+      // This is a committed scenario where lifecycleStatePillHtml renders
+      // in the `stopped` state: the suspended box's bp CLI card mounts in
+      // #inst-lifecycle-actions and its head carries the ladder's chip. The
+      // overview-past-due pin (#19998) covers statusOf's suspended arm on the
+      // grid, where the ladder does not render, so a "Stopped" painted into
+      // LIFECYCLE_PILL_LABEL.stopped left every scenario green. The word is
+      // Suspended for the same reason the suspended card's is: the console
+      // never paints a stop it does not perform.
+      //
+      // Anti-vacuity control FIRST, on the same span shape the negative reads:
+      // if the card stops rendering or the label bytes change shape, the list
+      // is empty and the negative would pass on nothing — this reds instead.
+      // Then the negative, then the exact bytes the ladder emits (class chain +
+      // label). Checked RED by painting "Stopped" in LIFECYCLE_PILL_LABEL.stopped.
+      const lifeCard = (reg.get("inst-lifecycle-actions") || {}).innerHTML || "";
+      const lifeLabels = [...lifeCard.matchAll(/<span class="status-pill-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+      assert.ok(lifeLabels.length >= 1,
+        `the lifecycle card's pill labels are read at all (want the ladder's stopped chip, got ${JSON.stringify(lifeLabels)} from ${JSON.stringify(lifeCard.slice(0, 300))})`);
+      assert.ok(!lifeLabels.some((l) => /\bStopped\b/i.test(l)),
+        `the lifecycle ladder paints the literal word Stopped (labels: ${JSON.stringify(lifeLabels)})`);
+      assert.ok(lifeCard.includes('<span class="status-pill status-pill--neutral status-pill--stopped bp-inst--stopped"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Suspended</span></span>'),
+        `the ladder's stopped chip is the neutral stopped-variant pill labelled Suspended (labels: ${JSON.stringify(lifeLabels)})`);
       // 1. The precondition: the unknown arm really is on screen.
       assert.ok(before.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-update-actions-reason">Roll back&hellip;</button></div>'),
         "the Roll back offer is not in the unknown arm — there is no still-checking state here to need an exit");
@@ -6267,6 +6853,30 @@ function countMatches(hay, needle) {
   return hay.split(needle).length - 1;
 }
 
+// task-679663d0bee42b15 — press Launch on the /new step and return the toast
+// stack's markup, after proving the press really happened. Every assertion
+// here is a precondition: without them "the toast says X" could be read off a
+// form that never rendered, a submit nobody listened to, or a request that
+// never left.
+async function driveLaunchRefusal(reg, ctx) {
+  assert.equal(reg.get("new-screen").hidden, false, "the /new screen must be visible");
+  const body = reg.get("new-body").innerHTML || "";
+  assert.ok(body.includes('id="new-launch-form"') && body.includes('id="new-launch-btn"'),
+    "the launch step never rendered its form, so no press can be driven; #new-body: " + body.slice(0, 200));
+  const before = (reg.get("toast-stack") || {}).innerHTML || "";
+  assert.equal(before, "", "a toast was already mounted before the press — the assertions below could read it");
+  assert.equal(ctx.byId("new-launch-form").dispatchEvent({ type: "submit" }), 1,
+    "#new-launch-form has no \"submit\" handler — newLaunch was never wired, so nothing was pressed");
+  await ctx.settle();
+  assert.equal(ctx.countCalls("POST", "/v1/launch"), 1, "exactly one POST /v1/launch must reach the wire");
+  const btn = reg.get("new-launch-btn");
+  assert.equal(btn.disabled, false, "a refused launch must hand the button back");
+  assert.equal(btn.textContent, "Launch", "…and restore its label");
+  const t = (reg.get("toast-stack") || {}).innerHTML || "";
+  assert.ok(t.includes("toast-error"), "the refusal mounted no error toast at all; toast stack: " + JSON.stringify(t.slice(0, 200)));
+  return t;
+}
+
 // ── cch-w10: the destroy-tier confirm sheet, driven as an operator drives it ──
 // The typed echo is the gate: openConfirmModal's click handler bails at
 // `if (!confirmModalArmed(state)) return;`, so an UNARMED Confirm is a real,
@@ -6418,7 +7028,10 @@ function assertCensus() {
 // own bytes a thousand lines away from the edit that caused it.
 //
 // WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT. It is NOT a port of
-// `SCENARIO_RESIDUE` (overflow-guard.mjs) and NOT a file-level census over
+// `SCENARIO_RESIDUE` (breakpoint-sweep.mjs — NOT overflow-guard.mjs, which is
+// where this sentence cited it from cch-w22 until cchi-w27-bl-w22s7; re-derive:
+// grep -ln 'export const SCENARIO_RESIDUE' cloud/priv/static/__preview__/*.mjs)
+// and NOT a file-level census over
 // readers — see the written refusal below. It is the shape that is ALREADY
 // SHIPPED and already working in this file: the three `assert.equal` calls that
 // pin a fixture's CONTENT and name the reader's assumption in the message
@@ -6895,12 +7508,121 @@ async function assertBillingPaintsOncePerFact() {
   }
 }
 
+// ── DEFECT-E · THE SHELL-INSTANCE TWIN GUARD (task-7bd507ea989ef248) ─────────
+// Nine scenarios shot BYTE-IDENTICAL to shell-instance in all 20 accent x theme
+// x width cells — four independent runs, one sha256 across all ten names. A
+// full-count green matrix certified them anyway, because a shot count says
+// "N files exist", never "N DISTINCT screens exist". This is that missing
+// predicate. It is an assertion over a CLASSIFICATION, not a flat "they must
+// differ", because the nine have TWO causes and a guard that cannot tell them
+// apart would have to accept the weaker one for all nine:
+//
+//   fold  — the scenario paints its own state; the identity was purely a
+//           SHOOTING artifact (fleetSupportCardHtml mounts at the tail of the
+//           Overview column, under shoot.sh's 1000px fold). It must declare a
+//           `shotHeight`, and #instance-body must differ from shell-instance's.
+//   click — the state the label names is behind a click (pollOffloadWatch,
+//           runVerifyNow), so the pre-click DOM legitimately IS
+//           shell-instance's. The DRIVE is what gets asserted: it must exist,
+//           and its FIRST selector must resolve in the painted DOM — a drive
+//           whose entry control is not on screen cannot start.
+//   both  — offload-*: click-gated AND the mounted ladder is below the fold.
+//
+// fleet-support-empty is the one honest "fold" entry whose DOM is shell-
+// instance's (an empty support card is shell-instance's own default render), so
+// it is classified "fold-only": shotHeight required, DOM equality allowed. Its
+// tall shot is the only image in the corpus showing the add-a-support CTA.
+//
+// MUTATION-PROVED in both directions — see the PR body.
+const SHELL_INSTANCE_TWINS = {
+  "fleet-support-provisioning": { fold: true, dom: true },
+  "fleet-support-online": { fold: true, dom: true },
+  "fleet-support-failed": { fold: true, dom: true },
+  "fleet-support-empty": { fold: true, dom: false },
+  "offload-filing": { fold: true, click: true },
+  "offload-working": { fold: true, click: true },
+  "offload-done": { fold: true, click: true },
+  "offload-blocked": { fold: true, click: true },
+  "verify-no-credentials": { click: true },
+};
+
+// The selector a drive step names, whichever verb it uses.
+function driveStepSelector(step) {
+  return (step && (step.click || step.fill || step.await)) || "";
+}
+
+// Does `sel` resolve in the painted body? The shim is a string DOM, so this is
+// a SHAPE match over the selector forms the drives use — an attribute selector
+// and an id — and it THROWS on anything else rather than answering "true" for a
+// form it cannot actually check.
+function selectorPaints(html, sel) {
+  const attr = sel.match(/^\[([a-z-]+)\]$/);
+  if (attr) return html.includes(attr[1] + "=") || html.includes(" " + attr[1] + ">") || html.includes(" " + attr[1] + " ");
+  const id = sel.match(/^#([a-z0-9-]+)$/i);
+  if (id) return html.includes('id="' + id[1] + '"');
+  throw new Error("selectorPaints cannot check " + JSON.stringify(sel) + " — teach it that form");
+}
+
+async function assertDefectEScenariosAreNotShellInstance() {
+  const baseBoot = bootScenario("shell-instance");
+  await flush();
+  const baseline = (baseBoot.registry.get("instance-body") || {}).innerHTML || "";
+  assert.ok(baseline.length > 0, "shell-instance must paint #instance-body — the whole guard is relative to it");
+  assert.ok(!SCENARIOS["shell-instance"].shotHeight,
+    "shell-instance is the REFERENCE shot and must keep the default fold — a shotHeight here moves the baseline under all nine");
+
+  const problems = [];
+  for (const name of Object.keys(SHELL_INSTANCE_TWINS)) {
+    const want = SHELL_INSTANCE_TWINS[name];
+    const scen = SCENARIOS[name];
+    if (!scen) { problems.push(name + ": listed here but absent from SCENARIOS"); continue; }
+    const boot = bootScenario(name);
+    await flush();
+    const html = (boot.registry.get("instance-body") || {}).innerHTML || "";
+    // The DOM comparison is #instance-body — the container shell-instance and
+    // all nine share. The SELECTOR check needs more: this shim's innerHTML is a
+    // per-element STRING, so a slot filled later by its own id (#instance-verify
+    // is filled async by loadInstanceVerify) never appears inside the parent's
+    // bytes. Sweep every element the boot touched, or [data-vf-run] reads as
+    // "does not paint" when it painted perfectly one element down.
+    const painted = [...boot.registry.values()].map((el) => (el && el.innerHTML) || "").join("\n");
+
+    if (want.fold && !(scen.shotHeight > 1000)) {
+      problems.push(name + ": its subject mounts below shoot.sh's 1000px fold and it declares no taller shotHeight");
+    }
+    if (want.click) {
+      const drive = scen.drive;
+      if (!Array.isArray(drive) || drive.length === 0) {
+        problems.push(name + ": click-gated with no `drive` — its shot collapses back onto shell-instance");
+      } else {
+        const entry = driveStepSelector(drive[0]);
+        if (!entry) problems.push(name + ": drive step 0 names no selector");
+        else if (!selectorPaints(painted, entry)) {
+          problems.push(name + ": drive entry " + JSON.stringify(entry) + " does not paint — the drive cannot start");
+        }
+      }
+    }
+    if (want.dom && html === baseline) {
+      problems.push(name + ": #instance-body is BYTE-IDENTICAL to shell-instance — its own state never painted");
+    }
+    if (!/\[(click-gated|below the fold)/.test(scen.label)) {
+      problems.push(name + ": its label must say how the shot is separated (below the fold / click-gated)");
+    }
+  }
+  if (problems.length) {
+    process.stdout.write("\nshell-instance twin guard FAILED:\n" + problems.map((p) => "  - " + p).join("\n") + "\n");
+    assert.fail(problems.length + " DEFECT-E scenario(s) cannot be told apart from shell-instance");
+  }
+  process.stdout.write("  ok   shell-instance twins — 9 scenario(s): 8 shot past the fold, 5 drive a real click, 3 also differ in DOM\n");
+}
+
 async function main() {
   await assertLateMeRepaintsTheRail();
   await assertLateMeRepaintsTheInstanceScreen();
   await assertBillingStatesNoNumeralItCannotSupport();
   await assertBillingPaintsOncePerFact();
   await assertTeamSwitcherListsTheTeamsTheEnvelopeNames();
+  await assertDefectEScenariosAreNotShellInstance();
   if (!assertCensus()) {
     process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");
     process.exit(1);

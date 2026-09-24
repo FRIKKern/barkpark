@@ -24,7 +24,13 @@ defmodule BarkparkWeb.MutateSearchableTextCapTest do
   @tsvector_limit_bytes 1_048_575
 
   setup do
-    Barkpark.Auth.create_token("bp-tsvec-token", "tsvec", "test", ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "bp-tsvec-token",
+      "tsvec",
+      "test",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     Content.upsert_schema(
       %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},

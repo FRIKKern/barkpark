@@ -409,7 +409,10 @@ defmodule Barkpark.Tasks.Internal do
   #     `withdrawals` list, snapshotting the evidence it supersedes. See the
   #     WITHDRAWAL block below.
   #
-  # The stored `criterion` text is never touched. The `"criterion"` guard is a
+  # The stored `criterion` text is touched by exactly ONE update kind — the
+  # AMENDMENT (`"amendment"` + `"amended_criterion"`, task-a1df012e89b1e289) —
+  # and that one preserves what it replaces. Every other update leaves the
+  # wording alone. The `"criterion"` guard is a
   # CAS at criteria grain: it must equal the stored text at that index or the
   # whole write aborts with :criteria_mismatch (the caller's view of the list is
   # stale — rows reordered/edited since read, or the index is off by one).
@@ -585,6 +588,14 @@ defmodule Barkpark.Tasks.Internal do
       withdraws?(update) ->
         {:error, :criteria_index_out_of_range}
 
+      # AN AMENDMENT CANNOT SEED (task-a1df012e89b1e289). There is no wording
+      # to supersede on a row that does not exist, so an amendment one past the
+      # end is a caller whose index is wrong — not a caller inventing a
+      # criterion. Same verdict as a withdrawal, for the same reason: a failed
+      # read must never be spelled the same way as a successful append.
+      amends?(update) ->
+        {:error, :criteria_index_out_of_range}
+
       not guarded?(text) ->
         {:error, :criteria_index_out_of_range}
 
@@ -668,6 +679,34 @@ defmodule Barkpark.Tasks.Internal do
           withdraws?(update) and Map.get(entry, "met") != true ->
             {:error, :criterion_not_met}
 
+          # ── THE AMENDMENT'S THREE GUARDS (task-a1df012e89b1e289) ──────────
+          #
+          # An amendment REWRITES the criterion text, which is the one field
+          # every other update path leaves alone, so it answers to the same CAS
+          # the met-flip and the withdrawal do — and to two of its own.
+          #
+          # UNGUARDED INDEX. Re-wording the wrong neighbour is as much a lie as
+          # flipping it, and worse in one respect: a flipped neighbour is
+          # visible as a wrong `met`, while a re-worded one silently becomes a
+          # criterion nobody ever wrote. Same error, one definition, all three
+          # directions.
+          amends?(update) and not guarded?(guard) ->
+            {:error, :criterion_text_required}
+
+          # BLANK REPLACEMENT. Emptying a criterion is a DELETION wearing a
+          # correction's clothes: the row keeps its index and its met flag and
+          # stops saying what was proven. Refused with its own name so the
+          # caller is not told to pass a guard they already passed.
+          not amended_text?(update) and amends?(update) ->
+            {:error, :amended_criterion_required}
+
+          # A NO-OP. The guard already proved the stored text equals `guard`,
+          # so a replacement equal to it changes nothing and would mint an
+          # amendments record asserting a correction that never happened —
+          # the record's own discriminating power, spent on noise.
+          amends?(update) and Map.get(update, "amended_criterion") == Map.get(entry, "criterion") ->
+            {:error, :criterion_unchanged}
+
           true ->
             with {:ok, entry} <- apply_entry_update(entry, update) do
               {:ok, List.replace_at(list, index, entry), seeded}
@@ -702,6 +741,9 @@ defmodule Barkpark.Tasks.Internal do
   # back-compat default), so an index+evidence update flips too.
   defp flips_met_true?(%{"attempt" => %{}}), do: false
   defp flips_met_true?(%{"withdrawal" => %{}}), do: false
+  # An amendment PINS met to its stored value (see apply_entry_update below), so
+  # it flips nothing in either direction and cannot fabricate a done.
+  defp flips_met_true?(%{"amendment" => %{}}), do: false
   defp flips_met_true?(update), do: Map.get(update, "met", true) == true
 
   # A withdrawal is discriminated by its `"withdrawal"` record, never by the
@@ -709,6 +751,23 @@ defmodule Barkpark.Tasks.Internal do
   # not a withdrawal.
   defp withdraws?(%{"withdrawal" => %{}}), do: true
   defp withdraws?(_update), do: false
+
+  # An amendment is discriminated by its `"amendment"` RECORD, never by the
+  # presence of `"amended_criterion"` — the record is what makes the correction
+  # signed, and an update carrying replacement text with no record is not an
+  # amendment, it is a malformed one.
+  defp amends?(%{"amendment" => %{}}), do: true
+  defp amends?(_update), do: false
+
+  # Replacement wording only counts when it has words. `nil`, a non-string and
+  # a whitespace-only string are all "no wording", so none of them can reach the
+  # write and blank a criterion.
+  defp amended_text?(update) do
+    case Map.get(update, "amended_criterion") do
+      text when is_binary(text) -> String.trim(text) != ""
+      _ -> false
+    end
+  end
 
   # Miss path: append the attempt, bound the list, PIN met explicitly to its
   # current stored value (normalized to a boolean — only a stored `true` is
@@ -746,6 +805,43 @@ defmodule Barkpark.Tasks.Internal do
      entry
      |> Map.put("met", false)
      |> Map.put("withdrawals", withdrawals ++ [record])}
+  end
+
+  # AMENDMENT PATH (task-a1df012e89b1e289): correct a criterion's TEXT and
+  # PRESERVE the sentence it replaces. Ordered before the met/evidence clause so
+  # an amendment never falls through to it.
+  #
+  # Three properties, each the reason a silent rewrite was refused for so long:
+  #
+  #   * the superseded wording is snapshotted onto the record, so the sentence
+  #     a reader was once shown stays readable even after a second amendment;
+  #   * `met` is PINNED to its stored value — written explicitly, never
+  #     inherited from the met→true default, which is exactly the lock-flipping
+  #     footgun D8 names — and `evidence` is not touched at all. An amendment
+  #     corrects the QUESTION, never the verdict;
+  #   * the list is UNBOUNDED, like `withdrawals` and unlike `attempts`. A
+  #     bound is a silent drop, and a silent drop of a correction is the whole
+  #     defect this verb exists to end.
+  #
+  # The SECOND SURFACE rides `fenced_content_write/4` above, which re-derives
+  # `brief.blocks[criteria-list]` in the same rev-fenced statement: one write,
+  # both surfaces or neither. Patching one is the half-fix this was found by.
+  defp apply_entry_update(entry, %{"amendment" => %{} = record, "amended_criterion" => new_text})
+       when is_binary(new_text) do
+    amendments =
+      case Map.get(entry, "amendments") do
+        list when is_list(list) -> list
+        _ -> []
+      end
+
+    record =
+      Map.put(record, "superseded_criterion", to_string(Map.get(entry, "criterion") || ""))
+
+    {:ok,
+     entry
+     |> Map.put("met", Map.get(entry, "met") == true)
+     |> Map.put("criterion", new_text)
+     |> Map.put("amendments", amendments ++ [record])}
   end
 
   # Met/evidence path (close-time semantics — see merge_criteria/2 above).

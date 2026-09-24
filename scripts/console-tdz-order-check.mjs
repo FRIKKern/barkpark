@@ -148,7 +148,9 @@
 //     · 3 refused to measure (the lexer lost the file: brackets do not balance).
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -1228,10 +1230,6 @@ function selftest() {
     `crossing: ${lexHealthLine(full.lex)} → exit ${exitCodeFor(full)}; clean: exit ${exitCodeFor(cleanR)}`
   );
 
-  if (bad) {
-    console.error(`::error::console-tdz-order-check: SELF-TEST FAILED (${bad} of ${total} assertion(s)) — the lexer no longer sees what it claims to.`);
-    return 1;
-  }
   // ── cchi-w61: the anchor assertion, graded on the CAUSE ──────────────────
   // The pair is the proof. Both fixtures have ZERO crossings, so only the
   // anchor's position can separate them — and it does, in both directions.
@@ -1260,6 +1258,45 @@ function selftest() {
     zoneAnchor("x\n// MARK:zone-console-tests\ny\n// MARK:zone-console-tests\n", [1]).reason === "ambiguous"
   );
 
+  // ── the VERDICT WIRING, graded on the whole program (task-362f02ac6403a169) ─
+  // Every arm above grades `analyze()` / `exitCodeFor()` IN PROCESS. None of
+  // them executes the CLI tail that turns `run()`'s answer into the process
+  // exit code, so a disarmed `code = run(files[0], opts)` (or an inverted one)
+  // kept this whole selftest green while the real CI step certified a planted
+  // crossing. Same family as never-cancel-main-check.sh (PR #13405): these arms
+  // RE-EXEC THIS FILE on a temp copy and assert the PROCESS exit code.
+  const e2eDir = fs.mkdtempSync(path.join(os.tmpdir(), "tdz-order-e2e-"));
+  try {
+    const self = fileURLToPath(import.meta.url);
+    const exec = (file) => spawnSync(process.execPath, [self, file], { encoding: "utf8" }).status;
+    const BOUNDARY = "// ── the module boundary";
+    const PLANT = 'test("planted crossing", () => {\n  assert.ok(LATE_ONLY);\n});\n\n';
+    const planted = clean.replace(BOUNDARY, PLANT + BOUNDARY);
+    const target = path.join(e2eDir, "harness.mjs");
+
+    check(
+      "E2E: the crossing plant APPLIES (a no-op replace would make the next arm vacuous)",
+      planted !== clean && planted.includes('test("planted crossing"')
+    );
+    fs.writeFileSync(target, planted);
+    const rcPlanted = exec(target);
+    check("E2E: the whole program exits 1 on a file carrying a planted crossing", rcPlanted === 1, `exit ${rcPlanted}`);
+    fs.writeFileSync(target, clean);
+    const rcRemoved = exec(target);
+    check("E2E: …and exits 0 on the same file with the plant removed", rcRemoved === 0, `exit ${rcRemoved}`);
+    const rcMissing = exec(path.join(e2eDir, "does-not-exist.mjs"));
+    check("E2E: an unreadable file is a REFUSAL (exit 2), never a green", rcMissing === 2, `exit ${rcMissing}`);
+  } finally {
+    fs.rmSync(e2eDir, { recursive: true, force: true });
+  }
+
+  // ONE verdict, after EVERY arm. This return used to sit ABOVE the anchor and
+  // E2E arms, so a failure in any of them was printed as FAIL and then answered
+  // with exit 0.
+  if (bad) {
+    console.error(`::error::console-tdz-order-check: SELF-TEST FAILED (${bad} of ${total} assertion(s)) — the lexer no longer sees what it claims to.`);
+    return 1;
+  }
   console.log(`  self-test: ${total}/${total} — the guard can still lose, and can still refuse.`);
   return 0;
 }

@@ -50,7 +50,7 @@
 // a live regression. Both arms name the arrival AND the departure by call site.
 //
 // KEYING BY CALL SITE IS THE WHOLE POINT, and it is not a style preference.
-// The 84 write call sites collapse to 73 route keys; 10 of those keys are
+// The 85 write call sites collapse to 73 route keys; 11 of those keys are
 // multi-site. The decisive case is POST /v1/providers:
 //
 //   submitProviderCred()        — reached from the launch wizard's
@@ -105,14 +105,14 @@
 //     is NOT among them: openSiteEnvModal's guard is `with_team_site(conn, fn)`,
 //     tenancy with no ability term at all, so promoting it would need a
 //     different mistake than this one. A builder who counts `require_ability`
-//     as elevated gets 56, not 49 — those 6 plus the 1 row whose whole
+//     as elevated gets 57, not 50 — those 6 plus the 1 row whose whole
 //     authority lives below the router in Accounts.pat_abilities_allowed?/2,
 //     submitToken (see (c)).
 //
 // (b) THE VACUITY FLOOR ASSERTS "RESOLVED TO A ROUTE", NEVER "SEEN". A literal
-//     path extractor cannot read 15 of the 84 — they build their path from a
+//     path extractor cannot read 15 of the 85 — they build their path from a
 //     variable or a helper — and a census that counted only what it read
-//     literally would call that 69-of-69 and go green over a hole. Two of those
+//     literally would call that 70-of-70 and go green over a hole. Two of those
 //     15 are the console's HIGHEST-privilege writes (fleetRolloutAction and
 //     operatorConfirmBrake, the operator autoupdate brake). Worse, one of them
 //     does not drop at all: submitActivateDecision builds
@@ -172,7 +172,7 @@
 //   `fence`, removing the predicate around the call site IS now reachable —
 //   deleting the band read, neutering the decision, or dropping the fence pin
 //   itself each exit 2. The narrowing is exactly as wide as the fence pins go,
-//   and today that is 10 bands over 40 of the 48 predicated rows. Every other
+//   and today that is 10 bands over 41 of the 49 predicated rows. Every other
 //   predicated row is still LIMIT 1.
 //
 //   LIMIT 1b — (2i-4)'s ACCOUNTING IS OVER READ SITES, NOT OVER ROWS. It walks
@@ -202,12 +202,14 @@
 //   The overlay also PRINTS a `router.ex:NNNN` per route, and those numbers
 //   are DERIVED by the same two regexes at run time — nothing compares them to
 //   anything, so they cannot red and cannot go stale. What IS pinned is the 6
-//   ROUTE NAMES, and the print pairs name to line BY SOURCE ORDER. So the one
-//   thing this print can still get wrong is a router that REORDERS these 6
-//   while keeping the count at 6: the lines stay right and the names slide.
-//   On any count change the pairing is dropped and the derived lines print
-//   UNLABELED, because a mis-labelled failure message is a new false statement
-//   of exactly the kind this census exists to remove.
+//   ROUTE NAMES — and which name sits beside which number is DERIVED too
+//   (cchi-w47-bl): overlayLabel() scans back from each site to its enclosing
+//   route macro or def/defp and names the recorded row that encloser belongs
+//   to. It used to pair name to line BY SOURCE ORDER, so a router that
+//   REORDERS these 6 while keeping the count at 6 kept every line right and
+//   slid every name one place, all green. A site whose encloser names no
+//   recorded row prints UNLABELED with the encloser's own text. The lookup
+//   chooses a label and nothing else: it is not a comparison and cannot red.
 //
 // Exit codes:
 //   0 — the derived call-site set EQUALS the pin, and every invariant holds
@@ -319,7 +321,7 @@ const LABEL = APP === path.join(here, "app.js") ? "cloud/priv/static/app.js" : A
 const src = fs.readFileSync(APP, "utf8");
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE PIN — 84 write call sites, keyed by `fn|VERB route`.
+// THE PIN — 85 write call sites, keyed by `fn|VERB route`.
 //
 // A PIN ROW CARRIES NO LINE NUMBER, and adding one back is a regression. Every
 // `app.js:NNNN` this census prints is DERIVED from the live file at run time
@@ -544,6 +546,7 @@ const PIN = [
   // ── studio / onboarding
   { fn: "openStudio", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
   { fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: ONBOARDING_BAND, fence: F_ONBOARD(), auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
+  { fn: "ackRunwayStep", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: ONBOARDING_BAND, fence: F_ONBOARD(), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w55-bl: the published-doc step ack; same runway, same canManage gate as dismissRunway" },
 
   // ── instance detail — the console's densest unpredicated cluster
   { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["wireLifecycleActions", "repaintLifecycleAuthority"], "decommissionAction"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: decommissionAction answers mode:\"disabled\" for refuse and for unknown, and the rail emits the LIVE arm's `data-life-name` companion only on that arm — the same disabled-ghost shape rows rollbackInstance/attachDomain are already pinned on (D428). cch-w46-bl RE-POINTED THE HOOK: the refused arm now carries the same `data-life-verb` as the live one (one verb, ONE identity, offered or refused), so bare `data-life-verb` stopped discriminating the two arms and the probe below moved to `data-life-verb=\"decommission\" data-life-name=`, which lifecycleActionHtml writes in the mode===\"live\" branch alone; paintLifecycleActions also binds only a non-disabled control now. Read twice, on purpose: the rail is mounted by wireLifecycleActions and re-offered by repaintLifecycleAuthority when /v1/me answers late" },
@@ -712,6 +715,52 @@ const LOCAL_FORM = /admin\?\s*=\s*Accounts\.team_admin\?\(user, team\)/;
 // One entry PER OCCURRENCE (a line carrying the form twice yields it twice), so
 // the derived array's LENGTH is exactly the occurrence count check (2f) tests —
 // deriving the lines must not quietly change what the check counts.
+// THE LABEL IS DERIVED FROM THE SITE, NOT FROM ITS INDEX (cchi-w47-bl).
+// enclosingAnchor() walks back from a derived line to the nearest route macro
+// (`get|post|put|patch|delete "/path"`) or `def`/`defp` head. overlayLabel()
+// names the INLINE_COND_ROUTES row that anchor belongs to: a route macro by its
+// normalised route key against the row's `VERB /route` parts, a def/defp by the
+// row's `(name/arity)` gloss. No match returns null and the print says so with
+// the encloser's own text. This is a label lookup, never a check — it adds no
+// comparison, no exit path, and on the clean tree it names exactly what the
+// old positional pairing named.
+const ROUTE_MACRO = /^\s*(get|post|put|patch|delete)\s+"([^"]+)"/;
+const DEF_HEAD = /^\s*defp?\s+([a-z_][A-Za-z0-9_]*[?!]?)/;
+function enclosingAnchor(sourceLines, line) {
+  for (let i = line - 1; i >= 0; i--) {
+    const text = sourceLines[i];
+    let m = ROUTE_MACRO.exec(text);
+    if (m) return { line: i + 1, text: text.trim(), key: routeKey(m[1], m[2]) };
+    m = DEF_HEAD.exec(text);
+    if (m) return { line: i + 1, text: text.trim(), fn: m[1] };
+  }
+  return null;
+}
+const overlayRowKeys = (row) =>
+  row
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .split("+")
+    .map((part) => /^([A-Z]+)\s+(\/\S*)$/.exec(part.trim()))
+    .filter(Boolean)
+    .map((m) => routeKey(m[1], m[2]));
+function overlayLabel(anchor) {
+  if (!anchor) return null;
+  const hit = anchor.fn
+    ? (row) => new RegExp("\\(" + anchor.fn.replace(/[?!]/g, "\\$&") + "/\\d+\\)\\s*$").test(row)
+    : (row) => overlayRowKeys(row).includes(anchor.key);
+  return INLINE_COND_ROUTES.find(hit) ?? null;
+}
+// One printed row per derived site: its line, then the derived label — or,
+// when the encloser names no recorded row, the encloser's own text.
+function overlaySiteRow(sourceLines, l, indent) {
+  const anchor = enclosingAnchor(sourceLines, l);
+  const label = overlayLabel(anchor);
+  return `${indent}router.ex:${pad(String(l), 8)}` + (label ??
+    (anchor
+      ? `UNLABELED — enclosed by \`${anchor.text}\` at router.ex:${anchor.line}, which names no recorded overlay route`
+      : "UNLABELED — no enclosing route macro or def/defp above it"));
+}
+
 function siteLines(source, re) {
   const g = new RegExp(re.source, "g");
   const out = [];
@@ -1705,7 +1754,7 @@ if (unresolved.length) {
 // which is the arm working exactly as designed. RE-DERIVED by RUNNING this
 // census on this tree and reading the `found` line it PRINTED (84/49/48/1),
 // never by arithmetic over two branches' numbers.
-const EXPECT = { total: 84, elevated: 49, predicated: 48, unpredicated: 1 };
+const EXPECT = { total: 85, elevated: 50, predicated: 49, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
@@ -2188,6 +2237,7 @@ if (dupes.length) {
   }
   const refusalLines = siteLines(router, REFUSAL_FORM);
   const localLines = siteLines(router, LOCAL_FORM);
+  const routerLines = router.split("\n");
   const refusals = refusalLines.length;
   const locals = localLines.length;
   const paired = refusals === INLINE_COND_ROUTES.length;
@@ -2210,18 +2260,14 @@ if (dupes.length) {
       "  Recorded overlay ROUTES (the pinned half — line numbers are never recorded here):",
       ...INLINE_COND_ROUTES.map((r) => `    ${r}`),
       "",
-      // TRAP (iii): pairing derived lines to route names POSITIONALLY is only
-      // meaningful when there are as many lines as names. On an ADD there are
-      // more, and pairing would print 8 lines against 6 names — the gate's own
-      // failure text would become a NEW false statement, which is the exact
-      // defect class this instrument exists to close. Unlabeled instead.
-      paired
-        ? "  Derived refusal-form lines in router.ex, paired to those routes by source order:"
-        : "  Derived refusal-form lines in router.ex, UNLABELED — there are " + refusals + " of them and " +
-          INLINE_COND_ROUTES.length + " recorded routes,\n  so naming them positionally would mis-label every site after the change:",
-      ...(paired
-        ? refusalLines.map((l, i) => `    router.ex:${pad(String(l), 8)}${INLINE_COND_ROUTES[i]}`)
-        : refusalLines.map((l) => `    router.ex:${l}`)),
+      // TRAP (iii): pairing derived lines to route names POSITIONALLY mis-labels
+      // every site the moment the count or the order changes — and a failure
+      // message naming the wrong route is a NEW false statement, the exact
+      // defect class this instrument exists to close. Each label is derived
+      // from the site's own encloser instead, so it holds at any count; a
+      // site whose encloser is not a recorded route prints UNLABELED.
+      "  Derived refusal-form lines in router.ex, each labelled by its enclosing route or def/defp:",
+      ...refusalLines.map((l) => overlaySiteRow(routerLines, l, "    ")),
       locals === 1
         ? `    EXCLUDED router.ex:${localLines[0]} — ${INLINE_COND_EXCLUDED.why}`
         : `    EXCLUDED local-binding form: ${locals} site(s)${locals ? " at router.ex:" + localLines.join(", router.ex:") : ""} — expected exactly 1, ${INLINE_COND_EXCLUDED.why}`,
@@ -2229,17 +2275,15 @@ if (dupes.length) {
   }
 
   // THE DERIVED PRINT SITS HERE, BEHIND THE CHECK — never in front of it.
-  // Reaching this line means the content-matched check already agreed that the
-  // overlay is the six routes it records, so pairing line to route by source
-  // order is sound. Put a drift check FIRST and a real elevation — a seventh
+  // Reaching this line means the content-matched check already agreed on the
+  // COUNT; it says nothing about ORDER, which is why each label is derived from
+  // the site's encloser and never from its index. Put a drift check FIRST and a real elevation — a seventh
   // inline-cond refusal — gets reported as "line numbers are stale", which is
   // the misdiagnosis this ordering exists to prevent.
   console.log("");
   console.log("inline-cond overlay (charter D421): " + INLINE_COND_ROUTES.length + " router routes refuse non-admins inside a `cond`");
-  console.log("  (every line below DERIVED from the live router.ex just now, paired by source order):");
-  for (let i = 0; i < INLINE_COND_ROUTES.length; i++) {
-    console.log(`  router.ex:${pad(String(refusalLines[i]), 8)}${INLINE_COND_ROUTES[i]}`);
-  }
+  console.log("  (every line below DERIVED from the live router.ex just now, labelled by its enclosing route or def/defp):");
+  for (const l of refusalLines) console.log(overlaySiteRow(routerLines, l, "  "));
   console.log(`  EXCLUDED  router.ex:${localLines[0]} — ${INLINE_COND_EXCLUDED.why}`);
 }
 

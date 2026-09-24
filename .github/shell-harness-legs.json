@@ -372,6 +372,25 @@
     ]
   },
   {
+    "slug": "console-harness-pin",
+    "name": "console-harness.sh reads CI's pin (it must be able to LOSE)",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "console-harness-pin.test.sh syntax check",
+        "run": "sh -n scripts/console-harness-pin.test.sh",
+        "env": {}
+      },
+      {
+        "name": "the local gate's pin is READ from console-harness.yml, and arm 3 points it at a fixture carrying a DIFFERENT pin so a derivation that always answers one number LOSES",
+        "run": "sh scripts/console-harness-pin.test.sh",
+        "env": {}
+      }
+    ]
+  },
+  {
     "slug": "console-refusal-capture",
     "name": "console-refusal-capture.mjs controls",
     "timeout": 10,
@@ -483,12 +502,12 @@
       },
       {
         "name": "mktemp portability guard — selftest (6 controls incl. a planted RED), tree scan, and the personal-local doc-anchor tally asserted NON-ZERO",
-        "run": "set -uo pipefail\n\n# WHY THIS ARM EXISTS, and why it runs on THIS runner and not a Mac.\n# `mktemp -t NAME` with a template carrying fewer than three consecutive X is a\n# BSD/macOS-only form. GNU coreutils — this ubuntu runner — refuses it:\n#     mktemp: too few X's in template 'NAME'\n# The LOUD sites red their arm. The SILENT ones do not: a failing command\n# substitution inside an assignment does NOT trip `set -e`, so the variable\n# becomes the EMPTY string and the script runs on, redirecting into \"\".\n# scripts/pds-personal-local-smoke_test.sh did exactly that — run 35435212884\n# printed `0 of  doc anchor(s) resolved` and its leg still reported SUCCESS.\n# A guard whose own home is a Mac would never have seen it.\n\necho \"── 1. the guard proves it can SEE (positive control) ──\"\nbash scripts/mktemp-portability-check.sh --selftest\n\necho \"── 2. the guard over the tracked tree ──\"\nbash scripts/mktemp-portability-check.sh\n\n# 3. THE ORIGINAL VACUOUS GREEN, asserted by its NUMBER and not by an exit code.\n# The regression's signature was a PASSING run that measured nothing, so the\n# only honest assertion is that the count is non-zero.\necho \"── 3. personal-local --dry-run resolves a NON-ZERO number of doc anchors ──\"\nout=\"$(bash scripts/pds-personal-local-smoke_test.sh --dry-run 2>&1)\" || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: pds-personal-local-smoke_test.sh --dry-run exited non-zero\" >&2\n  exit 1\n}\nprintf '%s\\n' \"$out\" | grep -E 'doc anchor\\(s\\) resolved' || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: the run printed no doc-anchor tally at all\" >&2\n  exit 1\n}\nn=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) of \\([0-9][0-9]*\\) doc anchor(s) resolved.*/\\1/p' | tail -1)\"\ntot=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) of \\([0-9][0-9]*\\) doc anchor(s) resolved.*/\\2/p' | tail -1)\"\n[ -n \"${n:-}\" ] && [ -n \"${tot:-}\" ] || {\n  echo \"RED: could not parse the tally; a 0-of-EMPTY denominator is exactly the bug\" >&2\n  exit 1\n}\necho \"  parsed: $n of $tot doc anchor(s) resolved\"\n[ \"$tot\" -gt 0 ] || { echo \"RED: denominator is 0 — the plan file was never written\" >&2; exit 1; }\n[ \"$n\" -gt 0 ]   || { echo \"RED: 0 anchors resolved — a green that measured nothing\" >&2; exit 1; }\n",
+        "run": "set -uo pipefail\n\n# WHY THIS ARM EXISTS, and why it runs on THIS runner and not a Mac.\n# `mktemp -t NAME` with a template carrying fewer than three consecutive X is a\n# BSD/macOS-only form. GNU coreutils — this ubuntu runner — refuses it:\n#     mktemp: too few X's in template 'NAME'\n# The LOUD sites red their arm. The SILENT ones do not: a failing command\n# substitution inside an assignment does NOT trip `set -e`, so the variable\n# becomes the EMPTY string and the script runs on, redirecting into \"\".\n# scripts/pds-personal-local-smoke_test.sh did exactly that — run 35435212884\n# printed `0 of  doc anchor(s) resolved` and its leg still reported SUCCESS.\n# A guard whose own home is a Mac would never have seen it.\n\necho \"── 1. the guard proves it can SEE (positive control) ──\"\n# task-92a213f01ca30817: this arm runs WITHOUT errexit, so the guard's selftest and tree\n# scan below were NOT its last command and their exit codes were discarded -- a red\n# guard printed FAIL and the arm still exited on section 3 alone. Each now ORs into rc.\nrc=0\nbash scripts/mktemp-portability-check.sh --selftest || rc=1\n\necho \"── 2. the guard over the tracked tree ──\"\nbash scripts/mktemp-portability-check.sh || rc=1\n\n# 3. THE ORIGINAL VACUOUS GREEN, asserted by its NUMBER and not by an exit code.\n# The regression's signature was a PASSING run that measured nothing, so the\n# only honest assertion is that the count is non-zero.\necho \"── 3. personal-local --dry-run resolves a NON-ZERO number of doc anchors ──\"\nout=\"$(bash scripts/pds-personal-local-smoke_test.sh --dry-run 2>&1)\" || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: pds-personal-local-smoke_test.sh --dry-run exited non-zero\" >&2\n  exit 1\n}\nprintf '%s\\n' \"$out\" | grep -E 'doc anchor\\(s\\) resolved' || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: the run printed no doc-anchor tally at all\" >&2\n  exit 1\n}\nn=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) of \\([0-9][0-9]*\\) doc anchor(s) resolved.*/\\1/p' | tail -1)\"\ntot=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) of \\([0-9][0-9]*\\) doc anchor(s) resolved.*/\\2/p' | tail -1)\"\n[ -n \"${n:-}\" ] && [ -n \"${tot:-}\" ] || {\n  echo \"RED: could not parse the tally; a 0-of-EMPTY denominator is exactly the bug\" >&2\n  exit 1\n}\necho \"  parsed: $n of $tot doc anchor(s) resolved\"\n[ \"$tot\" -gt 0 ] || { echo \"RED: denominator is 0 — the plan file was never written\" >&2; exit 1; }\n[ \"$n\" -gt 0 ]   || { echo \"RED: 0 anchors resolved — a green that measured nothing\" >&2; exit 1; }\nexit \"$rc\"\n",
         "env": {}
       },
       {
         "name": "stat portability guard — selftest (8 controls incl. a planted RED), tree scan, and the pds-artifact-retention arm tally asserted BY NUMBER",
-        "run": "set -uo pipefail\n\n# WHY THIS ARM EXISTS, and why only this runner can prove it.\n# `-f` means OPPOSITE things in the two stats:\n#     BSD / macOS    stat -f FORMAT path   \"render path with this FORMAT\"\n#     GNU coreutils  stat -f path          \"print FILE SYSTEM status\" (format is -c)\n# So the common defensive idiom, written BSD-first:\n#     mtime=\"$(stat -f %m \"$p\" 2>/dev/null || stat -c %Y \"$p\")\"\n# does NOT skip the fallback. The first command POLLUTES STDOUT with a\n# filesystem report and only then fails, so the fallback appends the RIGHT\n# number to the WRONG text and every comparison downstream is against garbage.\n# Nothing reports an error. Measured: run 35504059438 / job 106061128225 —\n# scripts/pds-artifact-retention.test.sh was 24 passed / 11 FAILED on ubuntu\n# while the identical tree was 35/0 on macOS.\n#\n# That harness could not run here AT ALL until #19419 (a GNU mktemp refusal\n# killed it at startup, exit 99), so those eleven failures had never been seen.\n# A guard whose own home is a Mac cannot see either defect.\n\necho \"-- 1. the guard proves it can SEE (positive control) --\"\nbash scripts/stat-portability-check.sh --selftest\n\necho \"-- 2. the guard over the tracked tree --\"\nbash scripts/stat-portability-check.sh\n\n# 3. THE SUBJECT, asserted by its NUMBERS and not by an exit code.\n# This regression's signature is a harness that runs and quietly measures the\n# wrong thing, so the honest assertion names the pass and failure counts.\necho \"-- 3. pds-artifact-retention.test.sh arm tally, asserted by number --\"\nout=\"$(bash scripts/pds-artifact-retention.test.sh 2>&1)\" || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: pds-artifact-retention.test.sh exited non-zero\" >&2\n  exit 1\n}\nprintf '%s\\n' \"$out\" | grep -E '[0-9]+ pass\\(es\\), [0-9]+ failure\\(s\\)' >/dev/null || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: the run printed no arm tally at all -- it never reached its summary\" >&2\n  exit 1\n}\np=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) pass(es), \\([0-9][0-9]*\\) failure(s).*/\\1/p' | tail -1)\"\nf=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) pass(es), \\([0-9][0-9]*\\) failure(s).*/\\2/p' | tail -1)\"\n[ -n \"${p:-}\" ] && [ -n \"${f:-}\" ] || {\n  echo \"RED: could not parse the tally; an EMPTY count is exactly this bug's shape\" >&2\n  exit 1\n}\necho \"  parsed: $p pass(es), $f failure(s)\"\n[ \"$f\" -eq 0 ] || { printf '%s\\n' \"$out\"; echo \"RED: $f arm(s) failed\" >&2; exit 1; }\n[ \"$p\" -gt 0 ] || { echo \"RED: 0 arms passed -- a green that measured nothing\" >&2; exit 1; }\n",
+        "run": "set -uo pipefail\n\n# WHY THIS ARM EXISTS, and why only this runner can prove it.\n# `-f` means OPPOSITE things in the two stats:\n#     BSD / macOS    stat -f FORMAT path   \"render path with this FORMAT\"\n#     GNU coreutils  stat -f path          \"print FILE SYSTEM status\" (format is -c)\n# So the common defensive idiom, written BSD-first:\n#     mtime=\"$(stat -f %m \"$p\" 2>/dev/null || stat -c %Y \"$p\")\"\n# does NOT skip the fallback. The first command POLLUTES STDOUT with a\n# filesystem report and only then fails, so the fallback appends the RIGHT\n# number to the WRONG text and every comparison downstream is against garbage.\n# Nothing reports an error. Measured: run 35504059438 / job 106061128225 —\n# scripts/pds-artifact-retention.test.sh was 24 passed / 11 FAILED on ubuntu\n# while the identical tree was 35/0 on macOS.\n#\n# That harness could not run here AT ALL until #19419 (a GNU mktemp refusal\n# killed it at startup, exit 99), so those eleven failures had never been seen.\n# A guard whose own home is a Mac cannot see either defect.\n\necho \"-- 1. the guard proves it can SEE (positive control) --\"\n# task-92a213f01ca30817: this arm runs WITHOUT errexit, so the guard's selftest and tree\n# scan below were NOT its last command and their exit codes were discarded -- a red\n# guard printed FAIL and the arm still exited on section 3 alone. Each now ORs into rc.\nrc=0\nbash scripts/stat-portability-check.sh --selftest || rc=1\n\necho \"-- 2. the guard over the tracked tree --\"\nbash scripts/stat-portability-check.sh || rc=1\n\n# 3. THE SUBJECT, asserted by its NUMBERS and not by an exit code.\n# This regression's signature is a harness that runs and quietly measures the\n# wrong thing, so the honest assertion names the pass and failure counts.\necho \"-- 3. pds-artifact-retention.test.sh arm tally, asserted by number --\"\nout=\"$(bash scripts/pds-artifact-retention.test.sh 2>&1)\" || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: pds-artifact-retention.test.sh exited non-zero\" >&2\n  exit 1\n}\nprintf '%s\\n' \"$out\" | grep -E '[0-9]+ pass\\(es\\), [0-9]+ failure\\(s\\)' >/dev/null || {\n  printf '%s\\n' \"$out\"\n  echo \"RED: the run printed no arm tally at all -- it never reached its summary\" >&2\n  exit 1\n}\np=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) pass(es), \\([0-9][0-9]*\\) failure(s).*/\\1/p' | tail -1)\"\nf=\"$(printf '%s\\n' \"$out\" | sed -n 's/^ *\\([0-9][0-9]*\\) pass(es), \\([0-9][0-9]*\\) failure(s).*/\\2/p' | tail -1)\"\n[ -n \"${p:-}\" ] && [ -n \"${f:-}\" ] || {\n  echo \"RED: could not parse the tally; an EMPTY count is exactly this bug's shape\" >&2\n  exit 1\n}\necho \"  parsed: $p pass(es), $f failure(s)\"\n[ \"$f\" -eq 0 ] || { printf '%s\\n' \"$out\"; echo \"RED: $f arm(s) failed\" >&2; exit 1; }\n[ \"$p\" -gt 0 ] || { echo \"RED: 0 arms passed -- a green that measured nothing\" >&2; exit 1; }\nexit \"$rc\"\n",
         "env": {}
       },
       {
@@ -1692,6 +1711,25 @@
       {
         "name": "orchestrate-launch-recipe.test.sh (21 assertions incl. the env-var mutation)",
         "run": "bash scripts/orchestrate-launch-recipe.test.sh",
+        "env": {}
+      }
+    ]
+    },
+  {
+    "slug": "echo-json-parse",
+    "name": "echo-into-jq corruption + the session-skill recipe guard",
+    "timeout": 10,
+    "fetch_depth": 1,
+    "node": "",
+    "arms": [
+      {
+        "name": "echo-json-parse-guard.test.sh syntax check",
+        "run": "bash -n scripts/echo-json-parse-guard.test.sh",
+        "env": {}
+      },
+      {
+        "name": "echo vs printf over a frozen captured bp row, per shell (hermetic, no bp, no network)",
+        "run": "bash scripts/echo-json-parse-guard.test.sh",
         "env": {}
       }
     ]

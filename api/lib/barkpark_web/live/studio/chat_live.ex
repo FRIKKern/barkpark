@@ -38,16 +38,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.AgentTaskJoin
   alias Barkpark.StudioChat.Attachments
   alias Barkpark.StudioChat.ContextIdentity
   alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.StudioChat.QuestionAnswer
-  alias Barkpark.Tasks
   alias Barkpark.Tenancy
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.StreamTail
   alias Barkpark.StudioChat.TaskTransition
+  alias Barkpark.StudioChat.TaskLedgerScope
+  alias BarkparkWeb.Studio.ChatTaskSeam
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
   alias BarkparkWeb.Studio.StudioLive.Paths
@@ -164,7 +166,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
        socket
        |> assign(
          page_title: "chat",
-         nav_section: :chat,
+         # The task reader (task-ed873c9ae56685b7): every ledger read this view
+         # makes goes through `ChatTaskSeam`, resolved ONCE for the viewer's
+         # workspace. nil = the tasks plugin is off for this workspace (or not
+         # loaded): no Doing strip, no ready picker, no picker toggle.
+         task_reader: ChatTaskSeam.resolve(ledger_workspace_id(socket)),
          dataset: default_dataset(),
          # The dataset the URL SCOPE names, as distinct from the one above.
          # No chat route carries a `:dataset` segment today, so this is nil and
@@ -335,12 +341,24 @@ defmodule BarkparkWeb.Studio.ChatLive do
          workflow: %{},
          workflow_summaries: %{},
          epic_goals: %{},
+         # The listed rows' TRUE owners, re-read by `clamp_list_to_tenancy/2`
+         # (the list projection's own `owner_workspace_id` is always nil — see
+         # there). `epic_fold_permitted?/2` is the only reader; empty on the
+         # flat mount, where the gate it feeds is off anyway.
+         listed_session_owners: %{},
          # The hand-task surface (chat ⇄ ledger): every bp-task claim THIS
          # session's provider-scoped worker id currently holds, keyed by
          # published doc id — fed live off the dataset's task-document
          # broadcasts and hydrated from the ledger on session open. Renders as
          # the Doing strip above the composer.
          hand_tasks: %{},
+         # The EPIC half of the same fold (task-ba42f986bb0d4594): every
+         # published sibling under an epic this session's claims point at, in
+         # any lifecycle, keyed by doc id. Epic subagents claim under their own
+         # `epic-builder-<slug>` workers, so the exact-worker fold above can
+         # never see them; the Doing strip joins the rail's agent labels
+         # against these rows (StudioChat.AgentTaskJoin).
+         hand_epic: empty_hand_epic(),
          # Live task transitions (tlv-bl-chat-live-transition-stream). The
          # STICKY set of published task ids this session has touched — grown
          # from the session worker's claims (see StudioChat.TaskTransition's
@@ -592,10 +610,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # Toggle the ready-task picker (hand-task surface). Open loads the ready
   # head FRESH from the queue — the panel is a window, never a cache.
+  # With tasks unavailable for the workspace there is no picker to open: the
+  # event is a no-op, never an empty panel that reads as "nothing is ready".
+  def handle_event("toggle-task-picker", _params, %{assigns: %{task_reader: nil}} = socket),
+    do: {:noreply, assign(socket, task_picker: nil)}
+
   def handle_event("toggle-task-picker", _params, socket) do
     case socket.assigns.task_picker do
       nil ->
-        rows = Tasks.ready([limit: 8] ++ hand_task_scope()) |> Enum.map(&hand_ready_row/1)
+        rows =
+          case hand_task_scope(socket) do
+            [workspace_id: nil, project_id: _] ->
+              []
+
+            scope ->
+              socket.assigns.task_reader
+              |> ChatTaskSeam.ready([limit: 8] ++ scope)
+              |> Enum.map(&hand_ready_row/1)
+          end
+
         {:noreply, assign(socket, task_picker: rows)}
 
       _open ->
@@ -606,6 +639,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Hand a ready task to the agent: close the picker and ride the NORMAL send
   # path with the claim-first work prompt — the echo, queueing, persistence,
   # and status flip all behave exactly like a typed message.
+  def handle_event("hand_task", _params, %{assigns: %{task_reader: nil}} = socket),
+    do: {:noreply, socket}
+
   def handle_event("hand_task", %{"id" => id}, socket) do
     handle_event("send", %{"message" => task_work_prompt(id)}, assign(socket, task_picker: nil))
   end
@@ -2106,7 +2142,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       when is_map(doc) do
     id = msg.doc_id
 
-    if String.starts_with?(id, "drafts.") do
+    # Tasks unavailable for this workspace: no subscription is taken, and a
+    # stray frame folds nothing either (task-ed873c9ae56685b7).
+    if is_nil(socket.assigns.task_reader) or String.starts_with?(id, "drafts.") do
       {:noreply, socket}
     else
       # SIBLING step (wsc charter D9): a mutation of a held hand-task's PARENT
@@ -2134,6 +2172,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       {:noreply,
        socket
        |> assign(hand_tasks: hand_tasks)
+       |> fold_hand_epic(id, msg.doc.title, content)
        |> fold_task_transition(msg, worker)}
     end
   end
@@ -2176,8 +2215,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
           s ->
             assign(socket,
-              epic_goals:
-                Map.put(socket.assigns.epic_goals, sid, StudioChat.epic_goal(s.provider, s.id))
+              epic_goals: Map.put(socket.assigns.epic_goals, sid, epic_goal_in_tenancy(socket, s))
             )
         end
       end
@@ -3576,6 +3614,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           +{map_size(@hand_tasks) - 3} more claims
         </div>
       </div>
+      <.hand_agent_tasks rail={@rail} hand_epic={@hand_epic} hand_tasks={@hand_tasks} />
 
       <%!-- Ready-task picker (hand-task surface): the queue head, loaded fresh
             on every open. Hand to Claude rides the normal send path with the
@@ -3902,6 +3941,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     ready-queue head above the composer; each row hands its
                     task to the agent as a claim-first work prompt. --%>
               <button
+                :if={@task_reader != nil}
                 type="button"
                 class="bp-iconbtn"
                 phx-click="toggle-task-picker"
@@ -4329,6 +4369,46 @@ defmodule BarkparkWeb.Studio.ChatLive do
           entry={@entry}
           agent_detail_expanded={@agent_detail_expanded}
         />
+      </div>
+    </div>
+    """
+  end
+
+  # The Doing strip's agent↔task lines (task-ba42f986bb0d4594): one per rail
+  # agent whose label joins to exactly one in_progress epic sibling. The text is
+  # `StudioChat.AgentTaskJoin.summary_parts/2` — segment for segment the TUI's
+  # `taskboard.AgentTaskSummary` (doc_id · met/total criteria · ▸ now-line (age)
+  # · deep link) — with the last segment made a real link to the row.
+  attr :rail, :map, required: true
+  attr :hand_epic, :map, required: true
+  attr :hand_tasks, :map, required: true
+
+  defp hand_agent_tasks(assigns) do
+    now = DateTime.utc_now()
+
+    lines =
+      for j <- hand_agent_lines(assigns.rail, assigns.hand_epic, assigns.hand_tasks) do
+        parts = AgentTaskJoin.summary_parts(j, now)
+        %{label: j.label, id: j.row.doc_id, text: Enum.drop(parts, -1), link: j.deep_link}
+      end
+
+    assigns = assign(assigns, lines: lines)
+
+    ~H"""
+    <div :if={@lines != []} style="flex: none; padding: 0 16px;">
+      <div
+        :for={l <- @lines}
+        class="text-xs text-dim"
+        data-role="chat-agent-task"
+        data-task-id={l.id}
+        style="font-family: var(--font-mono); display: flex; align-items: center; gap: 8px; padding: 2px 0; min-width: 0;"
+      >
+        <span aria-hidden="true" style="color: var(--primary);">⚒</span>
+        <span style="flex: none; opacity: 0.7;">{l.label}</span>
+        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          {Enum.join(l.text, " · ")}
+        </span>
+        <a href={l.link} data-role="chat-agent-task-link" style="flex: none;">{l.link}</a>
       </div>
     </div>
     """
@@ -5141,6 +5221,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       session_id: nil,
       # No session → no worker → no held claims; the picker is per-view UI.
       hand_tasks: %{},
+      hand_epic: empty_hand_epic(),
       # A new chat is a new conversation: it has touched no task and rendered
       # no transition, so BOTH the scope set and the idempotency set reset.
       touched_tasks: MapSet.new(),
@@ -5224,7 +5305,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # `epic_goals` (which queries the task ledger per row) and
     # `pending_ask_roles` all derive from this list, so a row filtered here can
     # never reach a per-tenant count rendered into the page.
-    sessions =
+    {sessions, listed_owners} =
       [archived: socket.assigns[:show_archived] == true]
       |> StudioChat.list_sessions(:global)
       |> clamp_list_to_tenancy(socket)
@@ -5241,7 +5322,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # a sidebar of plain chats never queries the ledger.
     epic_goals =
       for s <- sessions, Map.has_key?(workflow_summaries, s.id), into: %{} do
-        {s.id, StudioChat.epic_goal(s.provider, s.id)}
+        {s.id, epic_goal_in_tenancy(socket, s, listed_owners)}
       end
 
     sessions = Enum.map(sessions, &%{&1 | rail_snapshot: nil})
@@ -5255,6 +5336,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     assign(socket,
       sessions: sessions,
+      listed_session_owners: listed_owners,
       workflow_summaries: workflow_summaries,
       epic_goals: epic_goals,
       pending_ask_roles: StudioChat.pending_ask_roles(pending_ids)
@@ -5273,7 +5355,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     goals =
       for s <- socket.assigns.sessions, MapSet.member?(ids, s.id), into: %{} do
-        {s.id, StudioChat.epic_goal(s.provider, s.id)}
+        {s.id, epic_goal_in_tenancy(socket, s)}
       end
 
     assign(socket, epic_goals: goals)
@@ -5298,9 +5380,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # acting principal's. It deliberately does NOT narrow to that workspace
   # wholesale — a NULL `owner_workspace_id` is a legacy / pre-tenancy row and
   # stays reachable, which is what the admin sidebar has always shown. Note that
-  # `Auth.create_token/5` defaults an omitted workspace to the Default
-  # workspace, so almost every token IS bound; narrowing on the binding alone
-  # would have made every legacy row unmanageable.
+  # almost every token IS bound — the HTTP mints resolve a workspace upstream
+  # (`AssignDefaultScope`), and every token minted before
+  # task-e0e6454b8b2045ae inherited one from `Auth.create_token/5`'s own
+  # Default fallback, which that task removed — so narrowing on the binding
+  # alone would have made every legacy row unmanageable.
   #
   # ONE BINDING PER MOUNT, SHARED WITH THE LOAD SEAM (task-787766c0cf6604f1).
   # This used to ask `principal_permits_owner?/2` on BOTH mounts, i.e. the acting
@@ -5376,9 +5460,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `owner_workspace_id == ^ws` equality (documented in `studio_chat.ex`, with
   # `StudioChat.scope_match?/2` as its term twin), so a NULL owner never matches
   # and every pre-tenancy session would VANISH the moment these loaders stopped
-  # saying `:global`. `Auth.create_token/5` defaults an omitted workspace to the
-  # seeded Default, so nearly every token IS bound and that vanishing would be
-  # the common case, not the edge. The store has no "mine-or-unowned" scope to
+  # saying `:global`. Nearly every token IS bound — the HTTP mints resolve a
+  # workspace upstream, and rows minted before task-e0e6454b8b2045ae inherited
+  # one from `Auth.create_token/5`'s since-removed Default fallback — so that
+  # vanishing would be the common case, not the edge. The store has no "mine-or-unowned" scope to
   # ask for, so the clamp is made HERE.
   defp owner_in_tenancy?(socket, owner) do
     case read_workspace_id(socket) do
@@ -5466,13 +5551,65 @@ defmodule BarkparkWeb.Studio.ChatLive do
   #
   # A `nil` read scope (the flat superuser mount) short-circuits before the extra
   # query, so that path pays nothing.
+  # Returns `{permitted_rows, owners}` — the owner map is the byproduct the
+  # extra query already paid for, and `epic_fold_permitted?/2` is its consumer
+  # (the rows themselves cannot answer, per the select trap above). The flat
+  # mount short-circuits to an EMPTY map, which is correct rather than merely
+  # cheap: nothing downstream may read an owner it did not measure.
   defp clamp_list_to_tenancy(sessions, socket) do
     if is_nil(read_workspace_id(socket)) do
-      sessions
+      {sessions, %{}}
     else
       owners = session_owners(Enum.map(sessions, & &1.id))
-      Enum.filter(sessions, &owner_in_tenancy?(socket, Map.get(owners, &1.id)))
+      {Enum.filter(sessions, &owner_in_tenancy?(socket, Map.get(owners, &1.id))), owners}
     end
+  end
+
+  # ── The epic-goal fold's OWN tenancy gate (task-95902fb0528c2370) ─────────
+  #
+  # GREEN APART, RED TOGETHER. Two halves, each defensible where it is written:
+  #
+  #   * `owner_in_tenancy?/2` above ADMITS a NULL-owned session into a SCOPED
+  #     viewer's sidebar, deliberately — a NULL `owner_workspace_id` is a
+  #     legacy / pre-tenancy row and blanking those is a regression, not a fix.
+  #   * `StudioChat.epic_goal/2` derives ITS scope from the SESSION's
+  #     `owner_workspace_id`, so a NULL-owned session's three ledger hops run
+  #     UNSCOPED — also deliberate, because on the FLAT instance-admin mount
+  #     that global fold is the CORRECT answer for an operator surface.
+  #
+  # Composed, a workspace-B-scoped viewer folds a NULL-owned session and the
+  # epic line it renders is read from the WHOLE task ledger, workspace A
+  # included. Demonstrated end to end before this gate existed, against a ws-B
+  # admin mounting `/w/:ws/p/:proj/studio/chat` —
+  # `test/barkpark_web/live/studio/chat_live_null_owner_epic_fold_test.exs`.
+  #
+  # WHY HERE AND NOT IN `epic_goal/2`. That function is handed a session id and
+  # nothing else, so it cannot tell the flat instance-admin mount (global fold
+  # correct) from the scoped mount (global fold is a cross-tenant read). The
+  # VIEWER is knowable only on this side, which is why narrowing the store read
+  # is not the answer and the store's NULL passthrough is not inherited here.
+  #
+  # WHY NOT FAIL THE CLAMP CLOSED INSTEAD. Which SESSIONS a scoped admin may
+  # SEE is a different question, already answered above and not reopened: the
+  # leak is in what the fold READS, not in which row is listed. Suppressing the
+  # derived line costs a scoped viewer one cosmetic line on a legacy row and
+  # costs the flat mount nothing; dropping the row would make every
+  # pre-tenancy session unreachable, and no count of how many such rows exist
+  # was obtainable to bound that blast radius.
+  defp epic_goal_in_tenancy(socket, s),
+    do: epic_goal_in_tenancy(socket, s, socket.assigns[:listed_session_owners] || %{})
+
+  defp epic_goal_in_tenancy(socket, s, owners) do
+    if epic_fold_permitted?(socket, Map.get(owners, s.id)) do
+      ChatTaskSeam.epic_goal(socket.assigns[:task_reader], s.provider, s.id)
+    end
+  end
+
+  # `nil` read scope is the flat instance-admin mount — the global fold stands.
+  # On a scoped mount only a row whose owner was MEASURED to be a workspace may
+  # fold; a NULL owner (and an id the owner map never covered) fails CLOSED.
+  defp epic_fold_permitted?(socket, owner) do
+    is_nil(read_workspace_id(socket)) or is_binary(owner)
   end
 
   defp session_owners([]), do: %{}
@@ -6247,8 +6384,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # One-substrate law (chat-task-hands D1): the surface only PROMPTS — every
   # ledger write still goes through the agent's own bp/MCP hands.
 
-  # The dataset's document stream — the Doing strip folds task mutations out of
-  # it. Same topics the SSE listener serves; cheap to filter.
+  # The task LEDGER's document stream — the Doing strip folds task mutations
+  # out of it. Same topics the SSE listener serves; cheap to filter.
+  #
+  # The DATASET is the ledger's, never `socket.assigns.dataset`
+  # (task-ff3ed7ae0a242160). That assign is `default_dataset/0` — the FIRST of
+  # the SORTED `Content.list_datasets/0` — so on any install holding a dataset
+  # that sorts before "production" ("archive", "blog", a leaked test dataset)
+  # the strip joined a stream no task write lands on and never saw a claim,
+  # pulse or release frame. Task rows broadcast on the dataset they live in;
+  # `TaskLedgerScope.resolve/1` is the one place that names it.
   defp subscribe_hand_tasks(socket) do
     # The document-list stream, tenant-fenced (task-5d0615ee60143cc8). The bare
     # `documents:<dataset>` topic fans every tenant's frame out to every
@@ -6258,27 +6403,56 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # this surface's own workspace on the keyed one — so every document arrives
     # exactly once, WITH its payload, and no foreign tenant's body ever does.
     #
-    # The workspace is `hand_task_scope/0`'s — the SAME scope the picker and
-    # the agent's own bp hands write in, so the strip folds the rows it can act
-    # on.
-    if connected?(socket) do
-      Broadcast.subscribe_documents(
-        socket.assigns.dataset,
-        Keyword.get(hand_task_scope(), :workspace_id)
-      )
+    # The workspace AND dataset are `TaskLedgerScope.resolve/1`'s — the SAME
+    # scope the picker and the agent's own bp hands write in, so the strip folds
+    # the rows it can act on.
+    #
+    # No workspace -> no subscription at all, not the global topic alone: the
+    # strip of a viewer acting in no workspace is empty, live as on hydrate.
+    %{dataset: dataset, workspace_id: workspace_id} =
+      TaskLedgerScope.resolve(ledger_workspace_id(socket))
+
+    if connected?(socket) and is_binary(workspace_id) and
+         ChatTaskSeam.available?(socket.assigns.task_reader) do
+      Broadcast.subscribe_documents(dataset, workspace_id)
     end
 
     socket
   end
 
-  # The scope the agent's own task hands work in: the flat /v1/tasks routes
-  # resolve to the seeded defaults via AssignDefaultScope, so the surface reads
-  # the SAME board the agent writes. (Tasks.ready is fail-closed on a nil
-  # workspace — passing no scope would render the picker permanently empty.)
-  defp hand_task_scope do
-    ws = Barkpark.Tenancy.get_default_workspace()
-    proj = Barkpark.Tenancy.get_default_project()
-    [workspace_id: ws && ws.id, project_id: proj && proj.id]
+  # The scope the agent's own task hands work in, as `Tasks` read opts: the
+  # workspace/project half of `TaskLedgerScope.resolve/1`, so the picker, the
+  # hydrate and the live subscription cannot name different scopes. (Tasks.ready
+  # is fail-closed on a nil workspace — passing no scope would render the picker
+  # permanently empty.) No `:dataset` here on purpose: `Tasks.ready/1` and
+  # `Tasks.prime/1` span every dataset of the scope when none is named, which is
+  # what they did before the resolver existed.
+  defp hand_task_scope(socket) do
+    %{workspace_id: workspace_id, project_id: project_id} =
+      TaskLedgerScope.resolve(ledger_workspace_id(socket))
+
+    [workspace_id: workspace_id, project_id: project_id]
+  end
+
+  # The workspace the VIEWER acts in, for the task ledger (task-180a07e9d178d6a8).
+  # `:current_workspace` on BOTH mounts: `LiveScope.:resolve` pins the
+  # authorized URL workspace on the scoped mount, and StudioChrome pins the
+  # principal's own workspace (else the Default, only when authorized there) on
+  # the flat one. It is the very assign `ensure_session/1` stamps a new
+  # session's `owner_workspace_id` from, and the agent's task token is minted
+  # into that workspace, so the strip reads the scope the agent WRITES in. It
+  # used to be the instance Default for every viewer, which on the scoped mount
+  # showed an admin of workspace A the Default workspace's queue and claims.
+  # No workspace resolved -> nil -> NO read and NO subscription, never a Default
+  # fallback and never a global read. The three consumers short-circuit on nil
+  # themselves rather than trusting each callee's nil semantics: `Tasks.Queue`'s
+  # own comment calls a nil workspace "the explicit-global read" even though its
+  # outer `scope_to_workspace/3` happens to close it today.
+  defp ledger_workspace_id(socket) do
+    case socket.assigns[:current_workspace] do
+      %{id: ws_id} when is_binary(ws_id) -> ws_id
+      _ -> nil
+    end
   end
 
   # ── live task transitions in the transcript (tlv) ─────────────────────────
@@ -6334,11 +6508,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
     worker = Runtime.worker_id(socket.assigns.provider, socket.assigns.store_session_id)
 
     rows =
-      Tasks.prime([worker: worker, limit: 10] ++ hand_task_scope())
-      |> Map.get(:in_progress, [])
-      |> Map.new(fn d ->
-        {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
-      end)
+      case hand_task_scope(socket) do
+        [workspace_id: nil, project_id: _] ->
+          %{}
+
+        scope ->
+          socket.assigns.task_reader
+          |> ChatTaskSeam.held_claims(worker, scope)
+          |> Map.new(fn d ->
+            {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
+          end)
+      end
 
     # SEED the transition scope off the SAME read (tlv, no second query): every
     # claim this worker already holds is a task this session has touched, so a
@@ -6346,17 +6526,126 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # claim.worker to match on — still renders as a transition.
     socket
     |> assign(hand_tasks: rows)
+    |> hydrate_hand_epic()
     |> update(:touched_tasks, fn set ->
       Enum.reduce(Map.keys(rows), set, &MapSet.put(&2, &1))
     end)
   end
+
+  # ── the epic-scoped half of the hand-task fold (task-ba42f986bb0d4594) ────
+  #
+  # The fold above is exact-worker: a row is ours while THIS session's worker
+  # holds its claim. An epic cycle's builders claim under their own
+  # `epic-builder-<slug>` workers, so that fold surfaced nothing for them. The
+  # key they share with the session is the epic PARENT: the epic ids are the
+  # parent_ids of the claims this session holds (it runs a slice) plus the
+  # held ids themselves (it holds the epic). Every published sibling under
+  # those ids — ANY lifecycle, so a colliding done/open sibling still makes a
+  # label ambiguous — is the candidate set the Doing strip joins the rail's
+  # agent labels against. Both feeding paths below mirror the exact-worker
+  # fold's: `hydrate_hand_epic/1` reads the ledger once on open (beside the
+  # prime read), `fold_hand_epic/4` rides the SAME `{:document_changed, …}`
+  # frame on the SAME dataset subscription — no new PubSub topic.
+  defp empty_hand_epic, do: %{ids: MapSet.new(), rows: %{}}
+
+  defp hand_epic_ids(hand_tasks) do
+    Enum.reduce(hand_tasks, MapSet.new(), fn {id, row}, acc ->
+      acc = MapSet.put(acc, id)
+      if is_binary(row.parent_id), do: MapSet.put(acc, row.parent_id), else: acc
+    end)
+  end
+
+  defp hydrate_hand_epic(socket) do
+    ids = hand_epic_ids(socket.assigns.hand_tasks)
+
+    rows =
+      ChatTaskSeam.epic_children(
+        socket.assigns.task_reader,
+        MapSet.to_list(ids),
+        Keyword.get(hand_task_scope(socket), :workspace_id)
+      )
+      |> Map.new(fn d -> {d.doc_id, hand_epic_row(socket, d.doc_id, d.title, d.content)} end)
+
+    assign(socket, hand_epic: %{ids: ids, rows: rows})
+  end
+
+  # One task frame into the epic index. A change to the EPIC SET (a new claim
+  # under a new parent, the last claim under one dropped) re-reads the whole
+  # set once; otherwise a row under a tracked epic is upserted in place and a
+  # row that left one (re-parented) is dropped.
+  defp fold_hand_epic(socket, id, title, content) do
+    ids = hand_epic_ids(socket.assigns.hand_tasks)
+    %{ids: held, rows: rows} = socket.assigns.hand_epic
+
+    cond do
+      ids != held ->
+        hydrate_hand_epic(socket)
+
+      MapSet.member?(ids, content["parent_id"]) ->
+        assign(socket,
+          hand_epic: %{
+            ids: ids,
+            rows: Map.put(rows, id, hand_epic_row(socket, id, title, content))
+          }
+        )
+
+      Map.has_key?(rows, id) ->
+        assign(socket, hand_epic: %{ids: ids, rows: Map.delete(rows, id)})
+
+      true ->
+        socket
+    end
+  end
+
+  # A candidate row in the shape `StudioChat.AgentTaskJoin` indexes and
+  # summarises: the pulse is decoded (content.claim.now is a
+  # `{"text","ts"}` MAP, never a string) and the criteria meter is the
+  # server's own `criteria_progress` (nil when the row carries none).
+  defp hand_epic_row(socket, doc_id, title, content) when is_map(content) do
+    %{
+      doc_id: doc_id,
+      title: title || content["title"],
+      lifecycle_status: content["lifecycle_status"],
+      criteria: ChatTaskSeam.criteria_progress(socket.assigns.task_reader, content),
+      pulse: AgentTaskJoin.decode_pulse(get_in(content, ["claim", "now"]))
+    }
+  end
+
+  defp hand_epic_row(_socket, doc_id, title, _content),
+    do: %{doc_id: doc_id, title: title, lifecycle_status: nil, criteria: nil, pulse: nil}
+
+  # The Doing strip's agent lines: every rail agent label that resolves to
+  # EXACTLY ONE epic sibling which is in_progress and not already one of this
+  # session's own strip rows. An ambiguous, absent or non-slug label yields no
+  # line at all (AgentTaskJoin.join/2 returns :none) — never a best guess.
+  defp hand_agent_lines(rail, %{rows: rows}, hand_tasks) when map_size(rows) > 0 do
+    index = rows |> Map.values() |> AgentTaskJoin.index()
+
+    rail
+    |> AgentTaskJoin.rail_agent_labels()
+    |> Enum.flat_map(fn label ->
+      case AgentTaskJoin.join(index, label) do
+        {:ok, %{row: %{lifecycle_status: "in_progress", doc_id: id}} = j} ->
+          if Map.has_key?(hand_tasks, id), do: [], else: [Map.put(j, :label, label)]
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.uniq_by(& &1.row.doc_id)
+  end
+
+  defp hand_agent_lines(_rail, _hand_epic, _hand_tasks), do: []
 
   defp hand_task_row(title, content) when is_map(content) do
     criteria = List.wrap(content["acceptance_criteria"])
 
     %{
       title: title || content["title"] || "untitled task",
-      now: get_in(content, ["claim", "now"]),
+      # content.claim.now is the `{"text","ts","criterion"?}` MAP
+      # `Tasks.Pulse` writes — interpolating it raw crashed the render on the
+      # first real pulse (Phoenix.HTML.Safe has no Map impl). Render its text.
+      now: hand_task_now(get_in(content, ["claim", "now"])),
       met: Enum.count(criteria, fn c -> is_map(c) and c["met"] == true end),
       total: length(criteria),
       # The one-hop epic pointer (wsc charter D9): both feeding paths (ledger
@@ -6368,6 +6657,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp hand_task_row(title, _content),
     do: %{title: title || "untitled task", now: nil, met: 0, total: 0, parent_id: nil}
+
+  defp hand_task_now(now) when is_binary(now), do: now
+
+  defp hand_task_now(now) do
+    case AgentTaskJoin.decode_pulse(now) do
+      %{text: text} -> text
+      nil -> nil
+    end
+  end
 
   # A ready-queue Document as a lean picker row.
   defp hand_ready_row(doc) do

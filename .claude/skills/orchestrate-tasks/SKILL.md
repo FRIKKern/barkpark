@@ -71,10 +71,16 @@ FIRST read $ORCH/LEAD-BRIEF.md in full — it is your operating manual and is bi
 Your lane: <one sentence>.
 Your fence (paths you may edit): <list>.
 Seed rows (verify before trusting): <ids + one-line titles>.
-Repo root (read-only reference, on origin/main): <path>. Your worktrees go under $ORCH/wt/.
+Repo root: <path> — a SHARED checkout that may be hundreds of commits behind `origin/main`, and
+is NOT a reference for what the code says. Never `cat`/`grep` it to orient: those reads succeed
+and return a consistent older snapshot with no error. Orient with `git fetch origin main` then
+`git show origin/main:<path>`, or from a worktree. Your worktrees go under $ORCH/wt/.
 $ORCH = <absolute path>. Your SESSION id: <lane>-s<N> — it is yours alone, never
 another session's of this lane. Open your files FIRST and use only what it prints:
   bash .claude/skills/orchestrate-tasks/helpers/session-files.sh open $ORCH/lead-<lane> s<N>
+If it prints INHERITED and a predecessor's status file is older than the last line of its pulse
+log, your NEXT command is:
+  bash .claude/skills/orchestrate-tasks/helpers/lane-state.sh <lane> FRIKKern/barkpark
 ```
 
 Six leads run concurrently. Do not do lane work yourself while they run.
@@ -328,7 +334,8 @@ Measured 2026-09-02 02:10Z: all 17 leads hit the Opus 5-hour limit within one mi
   `gh pr checks` renders cancelled/queued as fail. A `CANNOT READ` last line is a REFUSAL, not a
   verdict and not a zero — never fold it into a not-yet count.
 - **Write `$ORCH/RESUME.md`** the moment the fleet drops: per lane, the live concerns and the relaunch
-  prompt (`lead-<lane>-r`: read brief → status → decisions → merge-sweep.log; RE-CLAIM rows first, the
+  prompt (`lead-<lane>-r`: read brief → status — and when status is older than the predecessor's last
+  pulse line, run `helpers/lane-state.sh <lane> FRIKKern/barkpark` FIRST → decisions → merge-sweep.log; RE-CLAIM rows first, the
   leases lapsed; stamp + close what the sweep merged; continue). A relaunch gets a NEW session id and
   its OWN files: it READS its predecessor's `status.<session>.md` and APPENDS its own, never rewrites
   one. Quiet is not dead — on 2026-09-07 the death inference was wrong three times out of three, every

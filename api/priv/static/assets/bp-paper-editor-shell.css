@@ -926,11 +926,14 @@
        The bundled ProseMirror base CSS kills ligatures + onum with
        `font-variant-ligatures: none` / `font-feature-settings: "liga" 0`;
        this higher-specificity rule (`.bp-paper-surface .ProseMirror`) wins it
-       back so `1234567890` renders as old-style numerals, matching surface. */
+       back so `1234567890` renders as old-style numerals, matching surface.
+       The feature list is the surface's own, and there is deliberately NO
+       `font-variant-numeric`: the reader has none, and `oldstyle-nums` here gave
+       every editable element a computed style the reader lacks for the same
+       glyphs (editor_control_island_parity_test). */
     .bp-paper-surface .ProseMirror {
       font-variant-ligatures: normal;
       -webkit-font-variant-ligatures: normal;
-      font-variant-numeric: oldstyle-nums;
       font-feature-settings: "kern", "liga", "onum";
     }
     .bp-paper-editor-body code {
@@ -973,6 +976,8 @@
       font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
       white-space: pre; overflow-wrap: normal;
       background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
+      letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+      font-feature-settings: inherit; font-variant-ligatures: inherit;
     }
     /* loop-epic/parity-callout: `bp-canvas-callout` is a thin edit-only layout
        hook; the tone card (padding/border-left/background/color) rides the
@@ -1156,6 +1161,8 @@
       color: var(--paper-ink-soft, #6a6a6a);
       font-size: 0.9rem; line-height: 1.45;
       font-family: var(--paper-font-serif, 'Iowan Old Style', Palatino, Georgia, serif);
+      letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+      font-feature-settings: inherit; font-variant-ligatures: inherit;
     }
     .bp-canvas-figure-caption-input:focus { outline: none; }
     /* live-data task-list: the bpTaskList widget wears "bp-canvas-readonly
@@ -1207,13 +1214,13 @@
        to the --paper- and --st- token vocabulary. Keep BYTE-IDENTICAL with
        assets/paper-editor/src/styles.css (mirror-check). */
     .bp-canvas-term { position: relative; }
-    .bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; }
+    .bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; }
     .bp-canvas-term__title-input::placeholder { color: var(--paper-ink-faint); }
     .bp-canvas-term__live-toggle, .bp-canvas-term__add-foot { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 1px 7px; cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
     .bp-canvas-term__live-toggle { margin-left: auto; }
     .bp-canvas-term__live-toggle.is-on { color: var(--st-ok); border-color: var(--st-ok); }
     .bp-canvas-term:hover .bp-canvas-term__live-toggle, .bp-canvas-term:focus-within .bp-canvas-term__live-toggle, .bp-canvas-term:hover .bp-canvas-term__add-foot, .bp-canvas-term:focus-within .bp-canvas-term__add-foot { opacity: 1; }
-    .bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; }
+    .bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; }
     .bp-canvas-term__foot-input::placeholder { color: var(--paper-ink-faint); }
     .bp-canvas-term__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
     /* Featured-image placeholder (t13) — the calm evergreen ghost frame an
@@ -1687,31 +1694,6 @@
 
     /* The link hover card (canvas/link-preview.js): the bubble's chrome, laid out as a small card
        under the hovered link — title (or host), address, an excerpt for a wikilink, Open / Edit. */
-    html[data-theme="light"] .bp-link-preview,
-    .bp-link-preview {
-      --paper-bg:          #fbfaf6;
-      --paper-bg-deep:     #f5f2e9;
-      --paper-ink:         #1f1a14;
-      --paper-ink-soft:    #5b524a;
-      --paper-rule:        rgba(31, 26, 20, 0.08);
-      --paper-accent:      #a23925;
-      --paper-accent-soft: rgba(162, 57, 37, 0.10);
-      --paper-chrome-bg:   #fefdf9;
-      --paper-chrome-border: rgba(31, 26, 20, 0.12);
-      --paper-font-sans:   var(--font);
-      --paper-font-mono:   var(--font-mono);
-    }
-    html[data-theme="dark"] .bp-link-preview {
-      --paper-bg:          #1b1815;
-      --paper-bg-deep:     #241f1b;
-      --paper-ink:         #efe7dc;
-      --paper-ink-soft:    #b8ada0;
-      --paper-rule:        rgba(239, 231, 220, 0.10);
-      --paper-accent:      #e07a5f;
-      --paper-accent-soft: rgba(224, 122, 95, 0.16);
-      --paper-chrome-bg:   #211d19;
-      --paper-chrome-border: rgba(239, 231, 220, 0.14);
-    }
     .bp-link-preview {
       position: fixed; z-index: 200;
       width: 320px; max-width: calc(100vw - 16px);
@@ -1720,17 +1702,17 @@
       border: 1px solid var(--paper-chrome-border);
       border-radius: 5px;
       box-shadow: 0 4px 14px hsl(var(--bp-shadow-hsl) / 0.10);
-      font-family: var(--paper-font-sans); color: var(--paper-ink);
-      animation: bp-paper-format-fade 0.12s ease-out;
+      font-family: var(--paper-font-sans, var(--font)); color: var(--paper-ink);
+      animation: bp-paper-format-fade var(--dur-1) ease-out;
     }
-    .bp-link-preview__title { font-size: 13px; font-weight: 600; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .bp-link-preview__addr { font-family: var(--paper-font-mono); font-size: 11px; color: var(--paper-ink-soft); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .bp-link-preview__excerpt { font-size: 12px; line-height: 1.4; color: var(--paper-ink-soft); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .bp-link-preview__title { font-size: var(--text-sm); font-weight: 600; line-height: var(--text-sm-lh); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__addr { font-family: var(--paper-font-mono); font-size: var(--text-2xs); color: var(--paper-ink-soft); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__excerpt { font-size: var(--text-xs); line-height: var(--text-xs-lh); color: var(--paper-ink-soft); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     .bp-link-preview__actions { display: flex; gap: 6px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--paper-rule); }
     .bp-link-preview__btn {
       height: 22px; border: 1px solid var(--paper-chrome-border); background: transparent;
       border-radius: 3px; padding: 0 8px;
-      font-family: var(--paper-font-sans); font-size: 11.5px;
+      font-family: var(--paper-font-sans); font-size: var(--text-xs);
       color: var(--paper-ink-soft); cursor: pointer;
     }
     .bp-link-preview__btn:hover { color: var(--paper-accent); border-color: var(--paper-accent); }
@@ -1890,7 +1872,7 @@
 .bp-paper-figure-caption-paint {
   display: block; width: 100%; padding: 0; margin: 0; border: 0;
   background: transparent; color: inherit; font: inherit; text-align: inherit;
-  letter-spacing: inherit; word-spacing: inherit;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
   white-space: normal; cursor: text;
 }
 .bp-paper-figure-caption-paint:focus-visible {
@@ -1909,6 +1891,7 @@ textarea.bp-paper-figure-caption-input {
   display: block; width: 100%; min-width: 0; box-sizing: border-box;
   margin: 0; padding: 0; border: 0; border-radius: 0;
   background: transparent; color: inherit; font: inherit;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
   resize: none; overflow: hidden; outline-offset: 3px;
 }
 textarea.bp-paper-figure-caption-input:focus-visible {
@@ -1993,6 +1976,7 @@ textarea.bp-paper-inline-text.bp-paper-card-action-label-input {
   margin: 0; padding: 0; border: 0; border-radius: 0;
   background: transparent; color: inherit; font: inherit; font-weight: inherit;
   text-align: inherit; letter-spacing: inherit; word-spacing: inherit;
+  text-rendering: inherit;
   white-space: normal; overflow-wrap: anywhere; cursor: text;
 }
 .bp-paper-section-title-paint:focus-visible,
@@ -2008,7 +1992,8 @@ textarea.bp-paper-inline-text.bp-paper-section-title-input {
   box-sizing: border-box; margin: 0; padding: 0;
   border: 0; border-radius: 0; background: transparent;
   color: inherit; font: inherit; font-weight: inherit; text-align: inherit;
-  letter-spacing: inherit; resize: none; overflow: hidden;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+  resize: none; overflow: hidden;
   overflow-wrap: anywhere;
 }
 [data-paper-section-title-empty="true"]:not(:focus-within) {
@@ -2266,6 +2251,8 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-description-input {
   font: inherit;
   color: inherit;
   letter-spacing: inherit;
+  word-spacing: inherit;
+  text-rendering: inherit;
   resize: none;
   overflow: hidden;
   outline-offset: 3px;
@@ -2379,3 +2366,57 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-description-input {
   color: var(--paper-ink); background: var(--paper-bg-deep); font-size: 12px; line-height: 1.5;
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
+
+/* Canvas block controls: keep in lockstep with the standalone editor. */
+/* The expandable container in the canvas: the reader's <details class="bp-expandable"> shape, always open,
+   with the summary as an editable island. */
+/* The canvas wrapper is a div, not <details>, so the reader's `> summary` rules are restated on the island. */
+.bp-canvas-expandable { position: relative; }
+.bp-canvas-expandable::before { content: "▾"; position: absolute; left: 15px; top: 10px; color: var(--paper-ink-soft); pointer-events: none; }
+.bp-canvas-expandable > .bp-expandable__summary { display: block; width: 100%; box-sizing: border-box; padding: 10px 15px 10px 34px; margin: 0; border: 0; background: transparent; font: inherit; font-weight: 700; color: var(--paper-ink); cursor: text; outline: none; }
+.bp-canvas-expandable > .bp-expandable__summary::placeholder { color: var(--paper-ink-faint); font-weight: 400; }
+.ProseMirror-selectednode.bp-canvas-expandable { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
+/* steps / tabs in the canvas: the reader's markup with a title input per row, a remove button and an add
+   button as edit-only chrome. */
+.bp-canvas-row__head { display: flex; align-items: center; gap: 6px; }
+.bp-canvas-row__head > input.bp-canvas-row__title { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; font: inherit; color: var(--paper-ink); outline: none; padding: 0; }
+.bp-canvas-row__head > input.bp-canvas-row__title::placeholder { color: var(--paper-ink-faint); font-weight: 400; }
+.bp-canvas-row__remove, .bp-canvas-rows__add { appearance: none; border: 1px solid var(--paper-chrome-border); background: var(--paper-chrome-bg); color: var(--paper-ink-soft); border-radius: 4px; font: 12px/1 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 7px; cursor: pointer; }
+.bp-canvas-row__remove { opacity: 0; }
+.bp-canvas-row:hover > .bp-canvas-row__head > .bp-canvas-row__remove, .bp-canvas-row:focus-within > .bp-canvas-row__head > .bp-canvas-row__remove { opacity: 1; }
+.bp-canvas-rows__foot { margin: 0.3rem 0 1rem; }
+.bp-canvas-steps > .bp-canvas-row > .bp-canvas-row__head > input.bp-steps__title { font-weight: 700; }
+.bp-canvas-tabs > .bp-canvas-row { padding: 0; }
+.bp-canvas-tabs > .bp-canvas-row > .bp-canvas-row__head { padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
+.bp-canvas-tabs > .bp-canvas-row > .bp-canvas-row__head > input.bp-tabs__tab { font-weight: 700; color: var(--paper-ink); border-bottom: var(--bp-rule-hairline) solid var(--paper-accent); padding: 6px 12px; }
+.bp-canvas-tabs > .bp-canvas-row + .bp-canvas-row { border-top: 1px solid var(--paper-chrome-border); }
+/* find matches (canvas/find-replace.js): the host's bar drives them. */
+.bp-find-match { background: hsl(var(--warn-hsl) / 0.28); border-radius: 2px; box-decoration-break: clone; }
+.bp-find-match--active { background: hsl(var(--warn-hsl) / 0.55); outline: 1px solid var(--paper-accent); }
+/* island atoms (equation / footnotes / contents / video): a preview in the reader's classes over a fields
+   row that hides at rest once the block has data. */
+.bp-canvas-island { position: relative; margin: 1rem 0 0; }
+.bp-canvas-island__empty { padding: 1rem; border: 1px dashed var(--paper-rule); border-radius: 6px; color: var(--paper-ink-soft); font: 0.9rem/1.45 var(--paper-font-sans, system-ui, sans-serif); text-align: center; }
+.bp-canvas-island__fields { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 0.5rem 0 0; }
+.bp-canvas-island__field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 220px; min-width: 0; font: 0.8rem/1.4 var(--paper-font-sans, system-ui, sans-serif); color: var(--paper-ink-soft); }
+.bp-canvas-island__field--bool { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; }
+.bp-canvas-island__input { border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; min-width: 0; }
+.bp-canvas-island__input:focus { outline: none; border-color: var(--paper-accent); }
+textarea.bp-canvas-island__input { resize: vertical; }
+.bp-canvas-island__mono, .bp-canvas-equation__tex { font-family: var(--paper-font-mono, ui-monospace, monospace); }
+.bp-canvas-video video { max-width: 100%; border-radius: 6px; }
+.ProseMirror-selectednode.bp-canvas-island { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
+/* editable-image: the bpImage atom — the picture, or an empty frame, over an alt + url row. */
+.bp-canvas-image { margin: var(--bp-air-figure, 1.6rem) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); max-width: none; box-sizing: border-box; position: relative; }
+.bp-canvas-image-frame { position: relative; }
+.bp-canvas-image-img { display: block; max-width: 100%; height: auto; border-radius: 4px; }
+.bp-canvas-image-empty { display: none; padding: 1.4rem 1rem; border: 1px dashed var(--paper-rule); border-radius: 6px; color: var(--paper-ink-soft); font: 0.9rem/1.45 var(--paper-font-sans, system-ui, sans-serif); text-align: center; }
+.bp-canvas-image--empty .bp-canvas-image-empty { display: block; }
+.bp-canvas-image-chrome { display: flex; gap: 8px; margin: 0.5rem 0 0; }
+.bp-canvas-image-chrome input { flex: 1 1 0; min-width: 0; border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; }
+.bp-canvas-image-chrome input:focus { outline: none; border-color: var(--paper-accent); color: var(--paper-ink); }
+.bp-canvas-image-chrome .bp-canvas-image-src { flex: 2 1 0; }
+.bp-canvas-image-chrome .bp-canvas-image-width { flex: 0 0 90px; }
+.bp-canvas-image-badge { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 4px; background: var(--paper-chrome-bg); border: 1px solid var(--paper-chrome-border); color: var(--paper-ink-soft); font: 0.75rem/1.4 var(--paper-font-sans, system-ui, sans-serif); }
+.bp-canvas-image-badge--error { color: var(--bp-tone-danger-fg); border-color: var(--bp-tone-danger-fg); }
+.ProseMirror-selectednode.bp-canvas-image { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }

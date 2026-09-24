@@ -164,8 +164,21 @@ var codeExit = map[string]int{
 	"criteria_mismatch":           exitValidation,
 	"criteria_index_out_of_range": exitValidation,
 	"criterion_text_required":     exitValidation,
-	"note_required":               exitValidation,
-	"illegal_transition":          exitValidation,
+	// A sealed-row criterion-TEXT amendment (`bp task stamp --amend`, #19930)
+	// that arrives without its replacement wording. VALIDATION, not conflict,
+	// by this table's own rule two blocks down and not by the gate's printed
+	// remedy: NOTHING moved under the caller — no lease, no rev, no lifecycle —
+	// and re-sending the identical request can never succeed, because the
+	// missing thing is a field the caller must supply. Its nearest sibling is
+	// `criterion_text_required` directly above: same family, same shape, same
+	// bucket. Absent from this table it fell through to exit 2 (usage), so a
+	// caller could not tell "you typed the command wrong" from "the server
+	// refused your well-formed request" — the exact confusion the 5/6 split
+	// exists to remove, and TestCodeExitCoversCloseRefusalVocabulary is the
+	// ratchet that caught it.
+	"amended_criterion_required": exitValidation,
+	"note_required":              exitValidation,
+	"illegal_transition":         exitValidation,
 	// The four the D371 split MISSED, every one measured at exit 2 before this
 	// block (probe through the real `bp task close` dispatch, 2026-08-24) — the
 	// SAME code as a malformed command line, which is the exact confusion the
@@ -364,6 +377,11 @@ var codeExit = map[string]int{
 	"workspace_slug_conflict":     exitConflict, // 409, workspace_controller.ex:513
 	"import_constraint_violation": exitConflict, // 409, workspace_controller.ex:651
 	"blob_path_conflict":          exitConflict, // 409, workspace_controller.ex:592
+	// Reversible workspace archive (task-55474a106554e65a): the workspace is in
+	// a state that refuses the request; the remedy is a restore, not a retry
+	// of the same call — but it IS the world's state, not the payload's.
+	"workspace_archived":               exitConflict, // 409, errors.ex:465
+	"default_workspace_not_archivable": exitConflict, // 409, errors.ex:475
 
 	// 5xx → server. The box failed, not the request: the ONE class where a
 	// retry is the right reflex, and the class exit 1 made indistinguishable

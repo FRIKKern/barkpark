@@ -1259,6 +1259,256 @@ fi
 unset -f drive_label label_row
 unset PR_NUMBER
 
+# ── 88-100. THE pipefail SIGPIPE SCAN PRE-FLIGHT ────────────────────────────
+#
+# DRIVEN THROUGH THE REAL preflight_sigpipe(). `gh` is stubbed so both of its
+# reads — the PR's file list and the head's check runs — return what this file
+# chooses, and NOTHING here touches the network.
+#
+# EVERY ARM BELOW HAS ITS OPPOSITE IN THIS SAME RUN. A guard that refused
+# everything would pass the RED rows and fail the CLEAR ones; a guard that
+# refused nothing would pass the CLEAR rows and fail the RED ones. Neither
+# direction is evidence without the other, and that is the whole reason the
+# NOT-APPLICABLE and success rows are here at all.
+#
+# preflight_sigpipe exits rather than returning, so every row runs it in a
+# SUBSHELL and reads the exit code on the very next line.
+SIG_TMP="$(mktemp -d)"
+SIG_FILES=""
+SIG_CHECKS=""
+
+gh() {
+  case "$1" in
+    pr)  case "${2:-}" in
+           view) printf '%s\n' "$SIG_FILES" ;;
+           *)    printf 'sigpipe stub: unexpected `gh pr %s`\n' "${2:-}" >&2; return 1 ;;
+         esac ;;
+    api) printf '%s' "$SIG_CHECKS" ;;
+    *)   printf 'sigpipe stub: unexpected `gh %s`\n' "$1" >&2; return 1 ;;
+  esac
+}
+
+PR_NUMBER=321
+HEAD_SHA=cafebabecafebabecafebabecafebabecafebabe
+REPO_ROOT="$ROOT"
+SIGPIPE_SCRIPT="$ROOT/scripts/pipefail-sigpipe-scan.sh"
+
+sig_has() { case "$1" in *"$2"*) return 0 ;; *) return 1 ;; esac; }
+
+drive_sig() { # files checks -> SIG_RC, SIG_OUT
+  SIG_FILES="$1"; SIG_CHECKS="$2"; SIG_RC=0
+  SIG_OUT="$( preflight_sigpipe 2>&1 )" || SIG_RC=$?
+}
+
+sig_row() { # label want_rc needle...
+  local label="$1" want="$2"; shift 2
+  local bad="" n
+  [ "$SIG_RC" = "$want" ] || bad="exit $SIG_RC (wanted $want)"
+  for n in "$@"; do
+    sig_has "$SIG_OUT" "$n" || bad="$bad; missing '$n'"
+  done
+  if [ -z "$bad" ]; then
+    pass=$((pass + 1)); echo "  ok   $label (exit $SIG_RC)"
+  else
+    fail=$((fail + 1)); echo "  FAIL $label: $bad" >&2
+    printf '%s\n' "$SIG_OUT" | sed 's/^/       /' >&2
+  fi
+}
+
+# A check-run row is completed_at \t status \t conclusion \t url, exactly the
+# shape read_sigpipe_check's --jq emits.
+sig_check() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "${4:-https://example/run/1}"; }
+# TWO rows under the SAME name, joined by a REAL newline. `$(a)$(b)` glues
+# them into one line, because $() strips the trailing newline — and a glued
+# fixture makes the ordering rows below pass while measuring nothing. That is
+# not hypothetical: it happened to row 99c on the first run of this section.
+sig_pair() { printf '%s\n%s\n' "$(sig_check "$1" "$2" "$3")" "$(sig_check "$4" "$5" "$6")"; }
+
+echo
+echo "── 88-100. pipefail SIGPIPE scan pre-flight ──"
+
+# 88. THE ROOTS ARE DERIVED FROM THE SCANNER, NOT ENUMERATED HERE. This is the
+# arm a hard-coded `scripts|.github|deploy` list CANNOT pass: the fixture
+# scanner declares a FOURTH root that exists nowhere in this repo, and the
+# reader must follow it. Its opposite is row 89b, where the same reader must
+# still say NO to a path under none of them.
+cat > "$SIG_TMP/fake-scan.sh" <<'FAKE'
+#!/usr/bin/env bash
+targets=("$ROOT/scripts" "$ROOT/.github" "$ROOT/deploy" "$ROOT/zzz-fourth")
+FAKE
+_got="$( SIGPIPE_SCRIPT="$SIG_TMP/fake-scan.sh" sigpipe_roots | tr '\n' ' ' )"
+if [ "$_got" = "scripts .github deploy zzz-fourth " ]; then
+  pass=$((pass + 1)); echo "  ok   88 the scanned roots are DERIVED from the scanner (followed a 4th root)"
+else
+  fail=$((fail + 1)); echo "  FAIL 88 sigpipe_roots did not follow the scanner: got '$_got'" >&2
+fi
+
+# 88b. AND AN UNPARSEABLE SCANNER IS 2, NEVER 1. "I could not find the roots"
+# must never be folded into "this PR touches none of them" — that fold is the
+# fail-open door this whole block exists to close.
+_rc=0; SIGPIPE_SCRIPT=/dev/null sigpipe_touches "scripts/x.sh" || _rc=$?
+SIGPIPE_SCRIPT="$ROOT/scripts/pipefail-sigpipe-scan.sh"
+if [ "$_rc" = "2" ]; then
+  pass=$((pass + 1)); echo "  ok   88b an underivable root set is 2 (unanswered), never 1 (not applicable)"
+else
+  fail=$((fail + 1)); echo "  FAIL 88b underivable roots returned $_rc, wanted 2" >&2
+fi
+
+# 89. NOT APPLICABLE — a PR under none of the roots passes without ever reading
+# a check run. The stub would ERROR on `gh api`, so this row also proves the
+# reader is not consulted.
+drive_sig "api/lib/barkpark/x.ex
+web/app/page.tsx" "SHOULD-NOT-BE-READ"
+sig_row "89 a PR touching no scanned root is NOT APPLICABLE" 0 "NOT APPLICABLE"
+
+# 89b. AND THE DOT IS ESCAPED. `.githubfoo/` is not `.github/`; an unescaped
+# regex dot makes the guard claim a PR touches a root it does not.
+drive_sig ".githubfoo/x.yml" "SHOULD-NOT-BE-READ"
+sig_row "89b .githubfoo/ is NOT .github/ (the dot is escaped)" 0 "NOT APPLICABLE"
+
+# 90. GREEN — a touching PR whose scan succeeded merges. Without this row the
+# refusal rows below prove only that something always refuses.
+drive_sig "scripts/bp-merge.sh" "$(sig_check 2026-09-22T10:00:00Z completed success)"
+sig_row "90 a touching PR with a SUCCESS verdict passes" 0 "concluded success"
+
+# 91. RED — and it NAMES THE FILE AND THE LINE. The path fed in is not a
+# literal: it is read from a LIVE scan of this repo, so the row cannot go
+# vacuous the day that site is repaired, and it cannot pass on a refusal that
+# merely says "the ratchet broke".
+# The candidate list is read into an ARRAY, never `grep -rl … | head`: this
+# harness must not host the defect it tests, and a truncating reader here would
+# be flagged by the very scanner it drives. Each candidate is confirmed with a
+# SINGLE-FILE scan (0.1s) rather than a whole-tree one (36.9s measured).
+_sitepath=""; _sitefile=""
+# A TEMP FILE, not `< <(…)`: process substitution is a bashism, and under `sh`
+# the redirect is a parse error that leaves the loop comparing NOTHING — the
+# vacuous green scripts/.posix-vacuous-green-census exists to refuse. (It
+# refused this very line on head 07bcc0eae, which is the census doing its job.)
+_cands=()
+grep -rlE '\|[[:space:]]*head[[:space:]]' "$ROOT/scripts" > "$SIG_TMP/cands.txt" 2>/dev/null || true
+while IFS= read -r _c; do [ -n "$_c" ] && _cands+=("$_c"); done < "$SIG_TMP/cands.txt"
+for _c in "${_cands[@]}"; do
+  _o="$(bash "$ROOT/scripts/pipefail-sigpipe-scan.sh" --min-confidence high "$_c" 2>/dev/null || true)"
+  _sitepath="$(grep -m1 -oE "^$ROOT/[^:]+:[0-9]+:" <<<"$_o" || true)"
+  [ -n "$_sitepath" ] && break
+done
+_sitefile="${_sitepath#$ROOT/}"; _sitefile="${_sitefile%%:*}"
+if [ -z "$_sitefile" ]; then
+  fail=$((fail + 1)); echo "  FAIL 91 PRECONDITION: a live scan of this repo reported NO high finding, so the naming arm would measure nothing" >&2
+else
+  drive_sig "$_sitefile" "$(sig_check 2026-09-22T10:00:00Z completed failure https://example/run/red)"
+  sig_row "91 a RED verdict refuses and names the site in this PR's own files" 9 \
+    "SIGPIPE SCAN RED" "HIGH-confidence site(s)" "${_sitepath%:}" "https://example/run/red" "grep -m1"
+fi
+
+# 92. RED with NO site in this PR's own files — the honest wording. The ratchet
+# is a whole-tree count, so this red may be inherited; the refusal must say so
+# rather than accuse the author of a line they did not write.
+drive_sig ".github/workflows/nonexistent-for-this-test.yml" "$(sig_check 2026-09-22T10:00:00Z completed failure)"
+sig_row "92 a RED with no site in the PR's own files says it may be INHERITED" 9 \
+  "SIGPIPE SCAN RED" "may be INHERITED from main" "--verify-against-origin-main"
+
+# 93. THE DOOR OPENS ONLY WITH BOTH HALVES, and it prints them.
+SIG_FILES="scripts/bp-merge.sh"; SIG_CHECKS="$(sig_check 2026-09-22T10:00:00Z completed failure)"
+SIG_RC=0
+SIG_OUT="$( BP_MERGE_SIGPIPE_OVERRIDE_WHO="lead-infra-r21o" BP_MERGE_SIGPIPE_OVERRIDE_WHY="inherited from main, see #1" \
+            preflight_sigpipe 2>&1 )" || SIG_RC=$?
+sig_row "93 a COMPLETE override merges and records who and why" 0 \
+  "SIGPIPE SCAN OVERRIDE" "lead-infra-r21o" "inherited from main, see #1"
+
+# 93b. AND HALF A DOOR IS NO DOOR. A single variable is a shrug; the pair is a
+# sentence someone wrote.
+SIG_RC=0
+SIG_OUT="$( BP_MERGE_SIGPIPE_OVERRIDE_WHO="lead-infra-r21o" preflight_sigpipe 2>&1 )" || SIG_RC=$?
+sig_row "93b a PARTIAL override refuses and names the missing half" 9 \
+  "OVERRIDE INCOMPLETE" "BP_MERGE_SIGPIPE_OVERRIDE_WHY" "MISSING"
+
+# 94. NOT CONCLUDED is not green. An advisory still running has measured
+# nothing yet, and merging on it is merging on an absence.
+#
+# AND IT MUST NAME THE STATUS IT READ. This row used to assert only the words
+# "NOT CONCLUDED" and exit 9, and it PASSED over a two-field shift that made
+# the refusal quote a URL where it meant to quote a status — caught only by a
+# live run against head dd6d77d10, never by this harness. The reassuring word
+# was the true one; the field beside it was the false one. So the row now pins
+# the field: the reader emits "-" for a value GitHub did not send, and a queued
+# row must still come back as the STATUS.
+drive_sig "scripts/bp-merge.sh" "$(sig_check - in_progress -)"
+sig_row "94 an UNCONCLUDED verdict refuses (an absence is not a pass)" 9 \
+  "NOT CONCLUDED" "is 'in_progress'"
+
+# 94b. THE SAME ROW WITH THE QUEUED SHAPE, and a url that must NOT be read as a
+# status. This is the exact specimen that shifted.
+drive_sig "scripts/bp-merge.sh" "$(sig_check - queued - https://example/run/queued)"
+sig_row "94b a QUEUED row names the status, never the url" 9 \
+  "is 'queued'" "RUN: https://example/run/queued"
+
+# 95. CANCELLED measured nothing — 10, not 9 and never 0. A superseded run is
+# neither a red nor a green, and folding it into either is a lie in one
+# direction or the other.
+drive_sig "scripts/bp-merge.sh" "$(sig_check 2026-09-22T10:00:00Z completed cancelled)"
+sig_row "95 a CANCELLED verdict is CANNOT READ (10), not a pass and not a red" 10 "CANNOT READ" "MEASURED NOTHING"
+
+# 96. AN UNKNOWN CONCLUSION IS NEVER FOLDED INTO A PASS. This is the row the
+# whole file exists for, one class down: a parser that assumes green on a
+# string it does not know is the vacuous pass this epic abolishes.
+drive_sig "scripts/bp-merge.sh" "$(sig_check 2026-09-22T10:00:00Z completed some_future_conclusion)"
+sig_row "96 an UNKNOWN conclusion refuses, never passes" 10 "not a conclusion this block classifies"
+
+# 97. ABSENT is not clean. The workflow carries no workflow-level `paths:`, so
+# on a touching head the name MUST render; nothing rendering means the read
+# failed or the wiring broke, and either way nothing was measured.
+drive_sig "scripts/bp-merge.sh" ""
+sig_row "97 an ABSENT check run on a touching head is CANNOT READ, not clean" 10 "ABSENT verdict is not a clean one"
+
+# 98. A ZERO-FILE PR IS A FAILED READ. `gh pr view --json files` returning
+# nothing is not a PR that changed nothing; NOT APPLICABLE off zero paths
+# asserts nothing at all.
+drive_sig "" ""
+sig_row "98 a ZERO-file PR is a failed read, never NOT APPLICABLE" 10 "ZERO changed files"
+
+# 99. LATEST-BY-completed_at, BOTH DIRECTIONS, over the SAME two rows. A re-run
+# publishes a second row under the same name; a reader that takes the first row
+# it sees, or orders by started_at, gets this backwards. Only the pair proves
+# the ordering — one direction alone passes on a reader that always takes row 1
+# or always takes row 2.
+drive_sig "scripts/bp-merge.sh" "$(sig_pair 2026-09-22T09:00:00Z completed failure 2026-09-22T11:00:00Z completed success)"
+sig_row "99 old RED then new GREEN -> the GREEN wins" 0 "concluded success"
+drive_sig "scripts/bp-merge.sh" "$(sig_pair 2026-09-22T09:00:00Z completed success 2026-09-22T11:00:00Z completed failure)"
+sig_row "99b old GREEN then new RED -> the RED wins" 9 "SIGPIPE SCAN RED"
+
+# 99c. AND THE ORDER THE API HAPPENS TO RETURN THEM IN MUST NOT MATTER. Same
+# two rows as 99, emitted newest-first: a reader that trusted arrival order
+# would flip here and nowhere else.
+drive_sig "scripts/bp-merge.sh" "$(sig_pair 2026-09-22T11:00:00Z completed success 2026-09-22T09:00:00Z completed failure)"
+sig_row "99c arrival order does not decide it — completed_at does" 0 "concluded success"
+
+# 100. WIRED INTO main(), AFTER the two holds (which are free) and BEFORE the
+# pre-flight that spends API reads on the required set. A guard that runs only
+# after the expensive checks agree is a guard that usually does not run.
+if awk '/^  preflight_hold$/ {seen=1} /^  preflight_sigpipe$/ {print (seen ? "OK" : "EARLY"); exit}' \
+     "$ROOT/scripts/bp-merge.sh" | grep -q OK \
+   && awk '/^  preflight_sigpipe$/ {seen=1} /^  preflight$/ {print (seen ? "OK" : "LATE"); exit}' \
+        "$ROOT/scripts/bp-merge.sh" | grep -q OK; then
+  pass=$((pass + 1)); echo "  ok   100 main() runs preflight_sigpipe after the holds and before preflight"
+else
+  fail=$((fail + 1)); echo "  FAIL 100 preflight_sigpipe is not wired between preflight_hold and preflight" >&2
+fi
+
+# 100b. THE EXIT CODES ARE DISTINCT FROM EVERY OTHER CLAIM, and --help says so.
+# Folding this onto 1 or 5 means the operator cannot tell which claim they just
+# answered — the same rule rows 86 and 87 hold for the two holds.
+_sigdoc="$(bash "$ROOT/scripts/bp-merge.sh" --help 2>&1)"
+if sig_has "$_sigdoc" "9 SIGPIPE SCAN RED" && sig_has "$_sigdoc" "10 SIGPIPE SCAN CANNOT READ"; then
+  pass=$((pass + 1)); echo "  ok   100b --help documents exit 9 and exit 10"
+else
+  fail=$((fail + 1)); echo "  FAIL 100b --help does not document the sigpipe exit codes" >&2
+fi
+
+unset -f sig_has sig_row drive_sig sig_check sig_pair
+unset SIG_FILES SIG_CHECKS SIG_RC SIG_OUT
+rm -rf "$SIG_TMP"
+
 unset -f gh hold_has hold_row drive_hold drive_hold_ov
 rm -rf "$HOLD_TMP"
 

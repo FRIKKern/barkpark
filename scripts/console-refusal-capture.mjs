@@ -196,6 +196,22 @@ export const CONFORMING = [
     name: "HASHCHANGE WIRING",
     sample: "!! HASHCHANGE WIRING (exit 2): REFUSED TO MEASURE",
   },
+  // adjacency-guard.mjs is the `run:` step of the `adjacency-guard` job added by
+  // #19336 and refuses under TWO names: the roster pre-flight (`!! ROSTER GUARD
+  // (exit 2) — refusing to boot Chrome:`) and every measurement refusal after it
+  // (`!! GUARD (exit 2): REFUSED TO MEASURE — …`, the no-Chrome line, the empty
+  // population, the stale server, the font pin). Both shapes were already spoken;
+  // nothing named them here, so the DERIVED fence test reddened on main's tip.
+  {
+    file: "cloud/priv/static/__preview__/adjacency-guard.mjs",
+    name: "ROSTER GUARD",
+    sample: "!! ROSTER GUARD (exit 2) — refusing to boot Chrome:",
+  },
+  {
+    file: "cloud/priv/static/__preview__/adjacency-guard.mjs",
+    name: "GUARD",
+    sample: "!! GUARD (exit 2): REFUSED TO MEASURE — the source population is EMPTY.",
+  },
   // pin-race.mjs is a `run:` step of its own job and refuses through ONE funnel
   // (`const refuse = async (why)`), which sets `process.exitCode = 2` rather
   // than calling process.exit(2) — the reason a reader keyed on the call shape
@@ -204,6 +220,30 @@ export const CONFORMING = [
     file: "cloud/priv/static/__preview__/pin-race.mjs",
     name: "PIN RACE",
     sample: "!! PIN RACE (exit 2): REFUSED TO MEASURE — no Chrome/Chromium found.",
+  },
+  // accent-role-separation.mjs is the `run:` step of the `accent-role-separation`
+  // job (console-harness.yml, `node cloud/priv/static/__preview__/accent-role-separation.mjs`)
+  // and arrived with #19654 — AFTER #19643 registered adjacency-guard.mjs, which is
+  // why the DERIVED fence test went red again on a tree where the previous fix was
+  // intact and still passing. It refuses under ONE name, through four paths: the
+  // missing global WebSocket, the two no-Chrome paths, and the `refuse()` funnel
+  // that every measurement refusal goes through. All four already speak the shape.
+  {
+    file: "cloud/priv/static/__preview__/accent-role-separation.mjs",
+    name: "ACCENT ROLE SEPARATION",
+    sample: "!! ACCENT ROLE SEPARATION (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
+  },
+  // bidi-isolation.mjs is the `run:` step of the `bidi-isolation` job
+  // (console-harness.yml, `node cloud/priv/static/__preview__/bidi-isolation.mjs`)
+  // and arrived with #20054/#20071. Its vocabulary is 0 clean / 1 defect / 2 refusal
+  // / 3 broken or blind, and its ONE exit-2 path is the no-usable-Chrome refusal in
+  // main(), which already speaks the shape under the name GUARD (two texts: CHROME
+  // set but not executable, or no Chrome at all). Its exit codes are unchanged here;
+  // nothing named it, so the DERIVED fence test was red on main's tip (2026-09-24).
+  {
+    file: "cloud/priv/static/__preview__/bidi-isolation.mjs",
+    name: "GUARD",
+    sample: "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
   },
 ];
 

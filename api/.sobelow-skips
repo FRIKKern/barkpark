@@ -1,24 +1,10 @@
 
-Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/tickets/attachments.ex:259,31F6FE7
-DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/sync/pusher.ex:210,104F576
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:421,5A4B56B
 XSS.Raw: XSS,lib/barkpark_web/layouts/quiz.html.heex:21,47A091E
-XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/onixedit/web/export_controller.ex:52,64EB26D
-Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/codelists/editeur.ex:298,227D73E
-DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/studio_chat/runtime.ex:554,49C06AE
-Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/plugins/tickets/attachments.ex:292,29A982E
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:215,474B23A
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/manifest.ex:90,6A0A6D5
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:480,76E1390
-Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/media/probe.ex:27,2C782D6
-DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark_web/router/plugins.ex:380,34B949D
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:930,49EB1CC
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:861,5D94F51
-DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github.ex:192,15B2898
-Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:221,2A61EA
 Config.HTTPS: HTTPS Not Enabled,config/prod.exs:0,2B5C077
-Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:237,39D2F51
-Traversal.FileModule: Directory Traversal in `File.stream!`,lib/barkpark/codelists/editeur.ex:122,107C442
 XSS.Raw: XSS,lib/barkpark_web/layouts/bulldocs.html.heex:95,ADA708
-XSS.Raw: XSS,lib/barkpark_web/controllers/error_html.ex:25,6380E04
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:793,2DCF187

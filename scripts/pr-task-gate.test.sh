@@ -1449,6 +1449,405 @@ else
   pass=$((pass+1)); printf 'ok   %-40s (no false accusation)\n' "outage is not a PR fault"
 fi
 
+# ════════════════════════════════════════════════════════════════════════════
+# THE LANDING-TRAILER ARMS (task-ee5b82efaee0fb0b)
+#
+# The gate reads the PR BODY. The commit message that squashes onto main is a
+# SEPARATE text — this repo's squash setting is COMMIT_MESSAGES — and nothing
+# read it. Specimen, measured 2026-09-20: PR #19417 merged as 9f931a6f8 whose
+# landed message ends `Task: task-PENDING-nightly` (not_found) while its body
+# named task-f902a5f2f6e3bcb3 (real). The gate went green, correctly by its own
+# contract, and main now carries a commit whose only durable ledger pointer is
+# dead.
+#
+# The specimen is reproduced here in SHAPE against the local fixture server:
+# `active` stands for the real body row, `ghost` (no fixture file → HTTP 404)
+# for task-PENDING-nightly.
+# ════════════════════════════════════════════════════════════════════════════
+SPECIMEN_BODY="$(printf 'fix(cli): brief fixtures (#19417)\n\nTask: active\n')"
+
+# ONE DIRECTORY PER SCENARIO, one <nnn>-<sha>.msg file per commit — the shape
+# the collect step writes. The sha rides the FILENAME, which is the whole point
+# of the input format: a refusal that cannot name the commit sends the author
+# of a ten-commit branch to bisect their own branch.
+landing_dir() { # landing_dir <name> [<sha> <message>]...
+  local name="$1"; shift
+  local d="$fixtures/landing-$name" n=0
+  rm -rf "$d"; mkdir -p "$d"
+  while [ "$#" -gt 0 ]; do
+    n=$((n + 1))
+    printf '%s' "$2" > "$d/$(printf '%04d' "$n")-$1.msg"
+    shift 2
+  done
+  printf '%s' "$d"
+}
+# The specimen: PR #19417's branch, reproduced in shape. `ghost` has no fixture
+# file, so the local server 404s it exactly as the live ledger 404s
+# task-PENDING-nightly.
+SPECIMEN_SHA="9f931a6f83ffb2183cd7bac583d06b5ddf2f7b90"
+DIR_SPECIMEN="$(landing_dir specimen "$SPECIMEN_SHA" "$(printf 'test(tasks): the last 7 briefless publish fixtures\n\nTask: ghost\n')")"
+# shellcheck disable=SC2034  # DIR_* are read by name inside MODE_ENV, which mode_check evals
+DIR_BOTH_OK="$(landing_dir bothok \
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1 "$(printf 'fix(a): one\n\nTask: active\n')" \
+  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2 "$(printf 'fix(b): two\n\nTask: doneclosed\n')")"
+# shellcheck disable=SC2034  # read by name inside MODE_ENV
+DIR_NONE="$(landing_dir none \
+  ccccccccccccccccccccccccccccccccccccccc3 "$(printf 'chore: no trailer anywhere\n\njust prose\n')")"
+# THE SAME DEAD ID IN TWO COMMITS. A rebase that fixed one and missed the other
+# must not read as fixed, so every commit naming it is listed — not just the
+# first one the scan happened to reach.
+# shellcheck disable=SC2034  # read by name inside MODE_ENV
+DIR_TWICE="$(landing_dir twice \
+  ddddddddddddddddddddddddddddddddddddddd4 "$(printf 'fix(c): three\n\nTask: ghost\n')" \
+  eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee5 "$(printf 'fix(d): four\n\nTask: ghost\n')")"
+
+mode_check() { # mode_check <label> <expected_exit> <substring|-> <script> <args...> ; env via MODE_ENV
+  local label="$1" want="$2" sub="$3" script="$4"; shift 4
+  local out="$fixtures/mode.out" got
+  ( eval "LEDGER_BASE=\"$BASE\" ${MODE_ENV:-} bash \"$script\" $*" ) > "$out" 2>&1
+  got=$?
+  if [ "$got" != "$want" ]; then
+    fail=$((fail+1)); printf 'FAIL %-46s want exit %s got %s\n' "$label" "$want" "$got"
+    sed -e 's/^/       | /' "$out" | tail -6; return
+  fi
+  if [ "$sub" != "-" ] && ! grep -qF -- "$sub" "$out"; then
+    fail=$((fail+1)); printf 'FAIL %-46s exit %s ok, output lacks [%s]\n' "$label" "$got" "$sub"
+    sed -e 's/^/       | /' "$out" | tail -6; return
+  fi
+  pass=$((pass+1)); printf 'ok   %-46s (exit %s)\n' "$label" "$got"
+}
+
+# ── c0 — THE HOLE, on the specimen shape, as the gate behaves WITHOUT the new
+# step. Two facts, and it is their CONJUNCTION that is the defect:
+#   (1) the body-only decision path — every byte of the gate the workflow ran
+#       before this change — PASSES this PR, and
+#   (2) the text that will actually land names an id the ledger 404s.
+# Neither alone is a finding. Together they are a green required check over a
+# commit whose durable pointer is dead.
+: > "$fixtures/mode.out"
+body_id="$(PR_BODY="$SPECIMEN_BODY" bash "$GATE" --extract-task-id 2>/dev/null)"
+commit_id="$(PR_BODY="$(cat "$DIR_SPECIMEN"/*.msg)" bash "$GATE" --extract-task-id 2>/dev/null)"
+( TASK_ID="$body_id" LEDGER_BASE="$BASE" LEDGER_TOKEN=harness-token bash "$GATE" ) >/dev/null 2>&1
+body_rc=$?
+( TASK_ID="$commit_id" LEDGER_BASE="$BASE" LEDGER_TOKEN=harness-token bash "$GATE" ) >/dev/null 2>&1
+commit_rc=$?
+if [ "$body_id" = "active" ] && [ "$commit_id" = "ghost" ] && [ "$body_rc" = "0" ] && [ "$commit_rc" = "1" ]; then
+  pass=$((pass+1)); printf 'ok   %-46s (body=%s passes rc0; landing=%s is rc1 and was never read)\n' "c0: the body-only gate passes the specimen" "$body_id" "$commit_id"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s body_id=%s(rc %s) commit_id=%s(rc %s) — want active/0 and ghost/1\n' "c0: the body-only gate passes the specimen" "$body_id" "$body_rc" "$commit_id" "$commit_rc"
+fi
+
+# ── c1 — the same shape is now REFUSED, and the refusal names the COMMIT, the
+# unresolved id, and what the ledger answered. Five separate assertions,
+# because an exit code alone cannot tell this refusal from any other exit 1 and
+# the WORDS are the deliverable: an author told only "a task does not exist"
+# goes and edits the PR body, which is the trailer that is fine, and an author
+# told only the id has to bisect their own branch to find the line.
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_SPECIMEN\""
+mode_check "c1: dead landing trailer is REFUSED"    1 "ghost"                          "$GATE" --check-landing-trailers
+mode_check "c1: refusal names the COMMIT SHA"       1 "9f931a6f83 \"test(tasks): the last 7 briefless publish fixtures\" names ghost" "$GATE" --check-landing-trailers
+mode_check "c1: refusal names the commit, not body" 1 "COMMIT MESSAGE that will squash" "$GATE" --check-landing-trailers
+mode_check "c1: refusal quotes what was READ"       1 "does not exist on the ledger"    "$GATE" --check-landing-trailers
+mode_check "c1: refusal names the body's own id"    1 "the body names 'active'"         "$GATE" --check-landing-trailers
+# Every commit naming the dead id, not just the first: a rebase that fixed one
+# of two and missed the other must not read as fixed.
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_TWICE\""
+mode_check "c1: both offending commits are named"   1 "dddddddddd \"fix(c): three\" names ghost"  "$GATE" --check-landing-trailers
+mode_check "c1: ...including the second one"        1 "eeeeeeeeee \"fix(d): four\" names ghost"  "$GATE" --check-landing-trailers
+
+# ── c2 — THE POSITIVE CONTROL, and the vacuity guard on it. "every landing
+# trailer resolves" is satisfied by a scan that read ZERO of them, so the
+# control asserts the SCAN SIZE as well as the exit code. Without the second
+# assertion this row would stay green with the extractor deleted.
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_BOTH_OK\""
+mode_check "c2: both landing trailers resolve"     0 "scanned 2 distinct"              "$GATE" --check-landing-trailers
+mode_check "c2: and it counts the commits it read" 0 "read 2 commit message(s)"        "$GATE" --check-landing-trailers
+mode_check "c2: and it says every one resolved"    0 "every one of the 2 Task: trailer" "$GATE" --check-landing-trailers
+# A branch whose commits name no task is SILENT, not refused — that is the
+# measured choice (38 of 52 open PRs on 2026-09-20 are this shape, every
+# dependabot PR among them) and it is why the rule is "every landing trailer
+# resolves" and not "the landing trailers must include the body's id".
+MODE_ENV="LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_NONE\""
+mode_check "c2: no landing trailer is silent"      0 "scanned 0 distinct"              "$GATE" --check-landing-trailers
+
+# An input that is not there is a REFUSAL, never an empty scan — an unreadable
+# input reading as "no trailers" is this gate going green having looked at
+# nothing, which is the whole defect reintroduced one level up.
+MODE_ENV="LEDGER_TOKEN=harness-token LANDING_COMMITS_DIR=$fixtures/nope-dir"
+mode_check "landing: missing input dir REFUSES"    1 "were NOT read"                   "$GATE" --check-landing-trailers
+MODE_ENV="LEDGER_TOKEN=harness-token"
+mode_check "landing: no input at all REFUSES"      1 "given no LANDING_COMMITS_DIR"     "$GATE" --check-landing-trailers
+
+# The ledger's OWN failure modes must survive the recursion: an outage on a
+# landing trailer is exit 2 (UNCHECKED), never a false accusation against the PR.
+MODE_ENV="LEDGER_TOKEN=harness-token LANDING_COMMITS_DIR=\"\$DIR_BOTH_OK\" LEDGER_BASE=http://127.0.0.1:1 PR_TASK_GATE_RETRIES=1"
+mode_check "landing: ledger outage is UNCHECKED"   2 "-"                               "$GATE" --check-landing-trailers
+# EXISTENCE, NOT ACTIVE CLAIM. `openone` is open and never claimed: the main
+# gate reds it (proven above) and --resolve-only must NOT, because a landed
+# commit legitimately points at a row that is not being worked right now.
+MODE_ENV="LEDGER_TOKEN=harness-token TASK_ID=openone"
+mode_check "resolve-only: existence, not claim"    0 "RESOLVED"                        "$GATE" --resolve-only
+MODE_ENV="LEDGER_TOKEN=harness-token TASK_ID=ghost"
+mode_check "resolve-only: a 404 is still rc 1"     1 "does not exist"                  "$GATE" --resolve-only
+
+# ── MUTATION PROOF ──────────────────────────────────────────────────────────
+# A fixture nobody has seen fail is not evidence. Two mutants, each reverting
+# ONE half of the change, each expected to turn a specific arm above green-when-
+# it-should-be-red. PR_TASK_GATE_TRAILER_LIB is why the mutant can live in a
+# temp directory without losing the grammar.
+MUTANT="$fixtures/mutant-gate.sh"
+sed -e 's/^  if \[ -n "\$landing_bad" \]; then$/  if false; then/' "$GATE" > "$MUTANT"
+if ! grep -q 'if false; then' "$MUTANT"; then
+  fail=$((fail+1)); printf 'FAIL %-46s the mutation did not apply — the refusal guard was renamed\n' "mutation: refusal removed reds c1"
+else
+  MODE_ENV="PR_TASK_GATE_TRAILER_LIB=scripts/lib/task-trailers.sh LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_SPECIMEN\""
+  ( eval "LEDGER_BASE=\"$BASE\" $MODE_ENV bash \"$MUTANT\" --check-landing-trailers" ) >/dev/null 2>&1
+  mut_rc=$?
+  if [ "$mut_rc" = "0" ]; then
+    pass=$((pass+1)); printf 'ok   %-46s (mutant passes the dead trailer: the c1 arms are what catch it)\n' "mutation: refusal removed reds c1"
+  else
+    fail=$((fail+1)); printf 'FAIL %-46s mutant exited %s, so c1 is NOT what refuses — something else is, and c1 proves nothing\n' "mutation: refusal removed reds c1" "$mut_rc"
+  fi
+fi
+
+# Mutant 2 — a BLIND SCAN. The grammar is redefined to see nothing, which is
+# how a positive control goes vacuous: the exit code stays 0 while the gate
+# reads no trailers at all. The c2 arm must be the thing that notices, and it
+# notices via the SCAN SIZE, not the exit code.
+BLIND="$fixtures/blind-lib.sh"
+cp scripts/lib/task-trailers.sh "$BLIND"
+printf '\ntask_trailer_ids() { :; }\ntask_trailer_count() { printf 0; }\n' >> "$BLIND"
+blind_out="$( eval "LEDGER_BASE=\"$BASE\" PR_TASK_GATE_TRAILER_LIB=\"$BLIND\" LEDGER_TOKEN=harness-token LANDING_COMMITS_DIR=\"\$DIR_BOTH_OK\" bash \"$GATE\" --check-landing-trailers" 2>&1 )"
+blind_rc=$?
+# NO PIPE INTO `grep -q` HERE. grep -q exits on its first match and the writer
+# takes SIGPIPE; under a caller's pipefail that pipeline returns 141, which is
+# neither "found" nor "not found" — a test that decides on it is a coin flip
+# under load. Shell substring removal answers the same question with no pipe.
+if [ "$blind_rc" = "0" ] && [ "${blind_out#*scanned 2 distinct}" = "$blind_out" ]; then
+  pass=$((pass+1)); printf 'ok   %-46s (blind scan still exits 0 — only the scan-size assertion sees it)\n' "mutation: blind scan reds c2"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s blind rc=%s; the vacuity guard is not doing the work\n' "mutation: blind scan reds c2" "$blind_rc"
+fi
+
+# Mutant 3 — THE SHA DROPPED FROM THE REFUSAL. This is the one the exit code
+# cannot see: the mutant still REFUSES, still names the id, still quotes the
+# ledger, and is still exit 1. Only `c1: refusal names the COMMIT SHA` notices,
+# which is the whole reason that arm asserts the rendered sentence and not a
+# code. Without this mutant, "the refusal names the commit" is a claim nobody
+# has ever watched fail.
+SHALESS="$fixtures/shaless-gate.sh"
+sed -e 's/${bad_sha:0:10} \\"${bad_subject}\\" names //' "$GATE" > "$SHALESS"
+if ! grep -q 'landing_bad:+; }${landing_id} (the ledger answered' "$SHALESS"; then
+  fail=$((fail+1)); printf 'FAIL %-46s the mutation did not apply — the refusal sentence was reworded\n' "mutation: sha dropped reds c1"
+else
+  shaless_out="$( eval "LEDGER_BASE=\"$BASE\" PR_TASK_GATE_TRAILER_LIB=scripts/lib/task-trailers.sh LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"$DIR_SPECIMEN\" bash \"$SHALESS\" --check-landing-trailers" 2>&1 )"
+  shaless_rc=$?
+  # Still refuses (exit 1) and still names the id — and has lost the sha. No
+  # pipe into `grep -q`: that pipeline returns 141 on SIGPIPE under pipefail,
+  # which is neither found nor not-found.
+  if [ "$shaless_rc" = "1" ] \
+     && [ "${shaless_out#*ghost}" != "$shaless_out" ] \
+     && [ "${shaless_out#*9f931a6f83}" = "$shaless_out" ]; then
+    pass=$((pass+1)); printf 'ok   %-46s (still exit 1, still names ghost, sha GONE — only the sha arm sees it)\n' "mutation: sha dropped reds c1"
+  else
+    fail=$((fail+1)); printf 'FAIL %-46s rc=%s; the sha assertion is not doing the work\n' "mutation: sha dropped reds c1" "$shaless_rc"
+  fi
+fi
+
+# ════════════════════════════════════════════════════════════════════════════
+# THE COUNT-IDENTITY ARMS (task-f97a161b35aa2041)
+#
+# `landing_n` is the number of ids the SCAN handed the loop. The PASS sentence
+# is written over that number. The loop, however, is fed by a HERE-DOC (fd 0)
+# and its body runs a CHILD — `bash "$0" --resolve-only` — which inherits fd 0.
+# One stdin read anywhere in the resolve path eats the remaining ids, the loop
+# ends after ONE iteration at exit 0, and the gate announces a verdict over
+# five trailers having read one.
+#
+# The remedy under test is a COUNT IDENTITY: reached == handed in, asserted
+# before any verdict. These arms prove it by MUTATING THE CHILD, not the gate:
+# the only child in the resolve path is `curl`, so a stub curl first on PATH
+# that begins `cat > /dev/null` is a faithful stand-in for the future `gh`,
+# `jq -` or `python3 -` that this check exists to catch. The two stubs differ
+# by exactly that one line, and both forward to the real curl, so the ledger
+# answers identically in both arms.
+# ════════════════════════════════════════════════════════════════════════════
+REAL_CURL="$(command -v curl || true)"
+if [ -z "$REAL_CURL" ]; then
+  fail=$((fail+1)); printf 'FAIL %-46s no curl on PATH to forward to\n' "identity: stub harness is runnable"
+else
+  # FIVE distinct ids, five commits, every one of them resolvable — so the ONLY
+  # thing that can red these arms is the count, never a dead trailer.
+  # shellcheck disable=SC2034  # read by name inside MODE_ENV, which mode_check evals
+  DIR_FIVE="$(landing_dir five \
+    1111111111111111111111111111111111111111 "$(printf 'fix(a): one\n\nTask: active\n')" \
+    2222222222222222222222222222222222222222 "$(printf 'fix(b): two\n\nTask: doneclosed\n')" \
+    3333333333333333333333333333333333333333 "$(printf 'fix(c): three\n\nTask: openone\n')" \
+    4444444444444444444444444444444444444444 "$(printf 'fix(d): four\n\nTask: spacey\n')" \
+    5555555555555555555555555555555555555555 "$(printf 'fix(e): five\n\nTask: spaceclosed\n')")"
+
+  # Each stub TALLIES its own invocations, so "how many ledger reads were
+  # actually issued" is measured rather than inferred from the verdict — the
+  # inference is the very thing that was broken.
+  READS_A="$fixtures/reads-a.txt"; READS_B="$fixtures/reads-b.txt"
+  STUB_A="$fixtures/stub-a"; STUB_B="$fixtures/stub-b"
+  mkdir -p "$STUB_A" "$STUB_B"
+  # STUB A — reads stdin. One line different from STUB B.
+  cat > "$STUB_A/curl" <<STUBA
+#!/usr/bin/env bash
+cat > /dev/null
+echo read >> "$READS_A"
+exec "$REAL_CURL" "\$@"
+STUBA
+  # STUB B — the control: identical, minus the stdin read.
+  cat > "$STUB_B/curl" <<STUBB
+#!/usr/bin/env bash
+echo read >> "$READS_B"
+exec "$REAL_CURL" "\$@"
+STUBB
+  chmod +x "$STUB_A/curl" "$STUB_B/curl"
+  : > "$READS_A"; : > "$READS_B"
+
+  # ── i1 — THE MUTATION. A stdin-reading child truncates the loop to one
+  # iteration; the gate must REFUSE, and the refusal must state BOTH numbers.
+  MODE_ENV="PATH=\"$STUB_A:\$PATH\" LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_FIVE\""
+  mode_check "i1: stdin-reading child is REFUSED"     1 "resolved 1 of the 5"            "$GATE" --check-landing-trailers
+  mode_check "i1: refusal is not a PR accusation"     1 "not a finding about the PR"     "$GATE" --check-landing-trailers
+  mode_check "i1: refusal names the stdin mechanism"  1 "READS STDIN"                    "$GATE" --check-landing-trailers
+  mode_check "i1: refusal forbids deleting the count" 1 "Do NOT satisfy this by deleting the count check" "$GATE" --check-landing-trailers
+
+  # ── i2 — THE POSITIVE CONTROL. Same gate, same fixture, same stub minus the
+  # one stdin line: the loop reaches all five and the PASS says so. Without
+  # this arm "the identity refuses" would be indistinguishable from "the
+  # identity refuses everything".
+  MODE_ENV="PATH=\"$STUB_B:\$PATH\" LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"\$DIR_FIVE\""
+  mode_check "i2: control stub PASSES 5 of 5"        0 "resolved 5 of the 5 handed in"  "$GATE" --check-landing-trailers
+  mode_check "i2: control scanned all five"          0 "scanned 5 distinct"             "$GATE" --check-landing-trailers
+
+  # ── i3 — THE READS ACTUALLY ISSUED. The verdict is one instrument; the child
+  # invocation tally is a second, independent one. Arm A must show ONE ledger
+  # read against five ids and arm B five — that gap IS the defect, measured.
+  # The counters are RESET and each arm run exactly once here, so these are
+  # per-run absolutes (1 and 5) and not a ratio that a repeated arm could fake.
+  : > "$READS_A"; : > "$READS_B"
+  ( eval "LEDGER_BASE=\"$BASE\" PATH=\"$STUB_A:\$PATH\" LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"$DIR_FIVE\" bash \"$GATE\" --check-landing-trailers" ) >/dev/null 2>&1
+  ( eval "LEDGER_BASE=\"$BASE\" PATH=\"$STUB_B:\$PATH\" LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"$DIR_FIVE\" bash \"$GATE\" --check-landing-trailers" ) >/dev/null 2>&1
+  reads_a="$(grep -c . "$READS_A" || true)"; reads_b="$(grep -c . "$READS_B" || true)"
+  if [ "$reads_a" = "1" ] && [ "$reads_b" = "5" ]; then
+    pass=$((pass+1)); printf 'ok   %-46s (stdin-reading child issued %s read(s) for 5 ids; control issued %s)\n' "i3: the truncation is visible in read counts" "$reads_a" "$reads_b"
+  else
+    fail=$((fail+1)); printf 'FAIL %-46s stdin-stub reads=%s (want 1) control reads=%s (want 5)\n' "i3: the truncation is visible in read counts" "$reads_a" "$reads_b"
+  fi
+
+  # ── i4 — MUTANT: the identity check removed. Same stdin-reading stub, same
+  # five-trailer fixture. The mutant must go GREEN and print its PASS over all
+  # five, which is precisely the pre-fix behaviour — so i1 is the arm doing the
+  # work, and it is not riding on some other refusal.
+  NOCOUNT="$fixtures/nocount-gate.sh"
+  # shellcheck disable=SC2016  # the $-names are the GATE's text to match, not ours to expand
+  sed -e 's/^  if \[ "\$landing_reached" != "\$landing_n" \]; then$/  if false; then/' "$GATE" > "$NOCOUNT"
+  if ! grep -q 'if false; then' "$NOCOUNT"; then
+    fail=$((fail+1)); printf 'FAIL %-46s the mutation did not apply — the identity guard was reworded\n' "mutation: identity removed reds i1"
+  else
+    nocount_out="$( eval "LEDGER_BASE=\"$BASE\" PATH=\"$STUB_A:\$PATH\" PR_TASK_GATE_TRAILER_LIB=scripts/lib/task-trailers.sh LEDGER_TOKEN=harness-token BODY_TASK_ID=active LANDING_COMMITS_DIR=\"$DIR_FIVE\" bash \"$NOCOUNT\" --check-landing-trailers" 2>&1 )"
+    nocount_rc=$?
+    # No pipe into `grep -q`: under pipefail a SIGPIPE'd writer returns 141,
+    # which is neither found nor not-found. Substring removal, same question.
+    if [ "$nocount_rc" = "0" ] && [ "${nocount_out#*every one of the 5 Task: trailer}" != "$nocount_out" ]; then
+      pass=$((pass+1)); printf 'ok   %-46s (mutant PASSES over 5 having resolved 1 — only the count sees it)\n' "mutation: identity removed reds i1"
+    else
+      fail=$((fail+1)); printf 'FAIL %-46s mutant rc=%s; i1 is NOT what refuses, so it proves nothing\n' "mutation: identity removed reds i1" "$nocount_rc"
+    fi
+  fi
+  MODE_ENV=""
+fi
+
+# ── THE SHARED RESOLVER'S OWN SELFTEST ──────────────────────────────────────
+# scripts/lib/task-trailers.sh is the ONE grammar both pr-task-gate.sh and
+# scripts/landed-mark.sh read through. It runs here, inside the `PR task gate
+# self-test` job, which has NO paths filter — so it is covered on every PR,
+# including the ones that edit it, without a shell-harnesses.yml row.
+if bash scripts/lib/task-trailers.sh --selftest >"$fixtures/lib.out" 2>&1; then
+  pass=$((pass+1)); printf 'ok   %-46s (%s)\n' "shared trailer resolver selftest" "$(tail -1 "$fixtures/lib.out")"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s\n' "shared trailer resolver selftest"
+  sed -e 's/^/       | /' "$fixtures/lib.out"
+fi
+# THE GRAMMAR IS NOT DUPLICATED. The regex lives in exactly one file; a copy in
+# either reader is how #5290 went red on a correct trailer.
+dupes="$(grep -l "\\^task:\\[\\[:space:\\]\\]\\*" scripts/pr-task-gate.sh scripts/landed-mark.sh 2>/dev/null | tr '\n' ' ')"
+if [ -z "$dupes" ]; then
+  pass=$((pass+1)); printf 'ok   %-46s (neither reader carries a second copy)\n' "one grammar, one file"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s the trailer regex reappeared in: %s\n' "one grammar, one file" "$dupes"
+fi
+MODE_ENV=""
+
+# ── THE WORKFLOW MUST ACTUALLY CALL THE NEW MODE ────────────────────────────
+# Every arm above proves the SCRIPT refuses. None of them proves the gate runs
+# it: delete the two steps from the YAML and this whole section stays green
+# while the required check is back to reading only the PR body. These assert
+# the plumbing, against $WORKFLOW (overridable, so the same fixtures can be
+# pointed at a PRE-FIX copy and shown red).
+wf_want() { # wf_want <label> <substring>
+  if grep -qF -- "$2" "$WORKFLOW"; then
+    pass=$((pass+1)); printf 'ok   %-46s\n' "$1"
+  else
+    fail=$((fail+1)); printf 'FAIL %-46s %s lacks [%s]\n' "$1" "$WORKFLOW" "$2"
+  fi
+}
+wf_want "workflow runs --check-landing-trailers" "--check-landing-trailers"
+wf_want "workflow feeds it the commit messages"  "LANDING_COMMITS_DIR:"
+wf_want "workflow passes the body id for naming" "BODY_TASK_ID:"
+wf_want "workflow reads BASE..HEAD, no merges"   'git rev-list --no-merges --reverse "${BASE_SHA}..${HEAD_SHA}"'
+# The sha must ride the FILENAME. Concatenated messages resolve the same ids
+# and then cannot name the commit; this is the line that keeps them apart.
+wf_want "workflow names each file by its sha"    'git log -1 --format=%B "$sha" > "$out/$(printf'
+# The `|| rc=$?` form, for the same reason the verify step needs it: GitHub
+# runs step bodies under `bash -e {0}`, which `set -uo pipefail` does not
+# clear, so a bare call would abort the step and make every handler dead code.
+wf_want "landing step is -e-safe"                'bash scripts/pr-task-gate.sh --check-landing-trailers 2>"$err" || rc=$?'
+# An unresolvable sha must be UNKNOWN, never an empty file — an empty file
+# reads as "no trailers", which passes, which is this gate green having looked
+# at nothing.
+wf_want "landing step fails closed on a bad sha" "could not read what this PR will land"
+
+
+# -- The concurrency group is PER HEAD (task-60c3164ece5ab5eb) -----------------
+# A per-REF group let an `edited` run carrying the pre-push head evict the new
+# head's PENDING run (PR #16709), so the newest head never rendered this
+# required context. The group must name the head sha, and cancel-in-progress
+# must stay the literal false. The mutation below puts the old key back and
+# must red, so this arm cannot pass vacuously.
+conc_verdict() { # conc_verdict <workflow file> -> prints PER-HEAD, PER-REF or NO-GROUP
+  python3 - "$1" <<'PY'
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+c = d.get("concurrency") or {}
+g = c.get("group") if isinstance(c, dict) else None
+if not isinstance(g, str):
+    print("NO-GROUP")
+elif "pull_request.head.sha" in g and c.get("cancel-in-progress") is False:
+    print("PER-HEAD")
+else:
+    print("PER-REF")
+PY
+}
+cv="$(conc_verdict "$WORKFLOW")"
+if [ "$cv" = "PER-HEAD" ]; then
+  pass=$((pass+1)); printf 'ok   %-46s\n' "concurrency group is per head sha"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s got %s\n' "concurrency group is per head sha" "$cv"
+fi
+conc_mut="$(mktemp)"
+sed 's/pr-task-gate-${{ github.event.pull_request.head.sha || github.ref }}/pr-task-gate-${{ github.ref }}/' "$WORKFLOW" > "$conc_mut"
+cm="$(conc_verdict "$conc_mut")"; rm -f "$conc_mut"
+if [ "$cm" = "PER-REF" ]; then
+  pass=$((pass+1)); printf 'ok   %-46s\n' "mutation: a per-ref group reds this arm"
+else
+  fail=$((fail+1)); printf 'FAIL %-46s got %s\n' "mutation: a per-ref group reds this arm" "$cm"
+fi
+
 echo "---"
 echo "passed: $pass  failed: $fail"
 [ "$fail" = 0 ]

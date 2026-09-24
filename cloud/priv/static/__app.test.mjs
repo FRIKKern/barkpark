@@ -1065,7 +1065,12 @@ for (const [scen, n] of [["account-modal", 2], ["account-modal-revoke", 4]]) {
 
 test("mock.js WIRING TRIPWIRE: the browser preview hands route() a per-boot state bag (red on a 3-arg revert)", () => {
   const args = callArgs(MOCK_JS_SRC, ".route(");
-  assert.equal(args.length, 4, `mock.js called route() with ${args.length} args — a 3-arg call gets no state bag, so every DELETE is a stateless no-op that still answers 200`);
+  // 5 since cch-w23-bl-real-hetzner-remediation-scenario: route() gained an
+  // optional `body` (the parsed POST payload) so a fixture can answer per
+  // provider KIND. The state bag is still the 4th, and that is what the arms
+  // below pin; this count stays EXACT in both directions so a revert to 3 (no
+  // bag) or a drop to 4 (no body) reds by name.
+  assert.equal(args.length, 5, `mock.js called route() with ${args.length} args — a 3-arg call gets no state bag, so every DELETE is a stateless no-op that still answers 200; a 4-arg call drops the parsed request body, so a per-kind fixture answers its _default for every kind`);
 
   // The 4th arg is a bare identifier (not an inline `{}`, which would be a FRESH
   // bag per request and therefore still stateless across the refetch).
@@ -7885,8 +7890,9 @@ test("C6: the tab codec + webhook builders + mount seam are exported", () => {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
   // C8 registered the Timeline tab between Overview and Webhooks; C10 appended
-  // Usage; S12 (azure-hetzner hosting) appended Metrics.
-  assert.deepEqual([...hooks.instanceTabs], ["overview", "timeline", "webhooks", "usage", "metrics"]);
+  // Usage; S12 (azure-hetzner hosting) appended Metrics; PDF-D11's follow-up
+  // appended Group — the route the group surface was missing.
+  assert.deepEqual([...hooks.instanceTabs], ["overview", "timeline", "webhooks", "usage", "metrics", "group"]);
 });
 
 // ── parseHash tab codec (D49/D14): #instance/<id>/<tab>, legacy hash → overview ─
@@ -8043,9 +8049,96 @@ test("webhookCardHtml reflects active state (Active pill + Disable) and carries 
   assert.match(html, /data-wh-rotate/);
   assert.match(html, /data-wh-deliveries/);
   assert.match(html, /data-wh-delete/);
-  for (const verb of ["show", "toggle", "rotate", "test-send", "deliveries", "rm"]) {
+  for (const verb of ["show", "edit", "toggle", "rotate", "test-send", "deliveries", "rm"]) {
     assert.match(html, new RegExp("bp cloud webhook " + verb + " abc"));
   }
+});
+
+// ── the chip-completeness PREDICATE over the action bar ─────────────────────
+//
+// The loop above is an ENUMERATION: a snapshot of the verbs that had chips the
+// day it was written. It passes unchanged the moment a seventh action button is
+// added with no CLI twin — which is exactly how the `Send test` button shipped
+// chipless and stayed that way. What follows is the RULE instead: the expected
+// set is DERIVED from the buttons webhookCardHtml actually renders inside
+// .wh-actions, so a new action reds this test by itself, without anyone
+// remembering to come back and extend a list.
+//
+// WH_ACTION_VERB is the only hand-written thing here, and it is a TRANSLATION
+// (the DOM hook's spelling → the CLI verb's spelling), not a scope list: an
+// action missing from it is a FAILURE, never a skip. Every verb below is one
+// internal/cli/cloud_webhook_cmd.go dispatches (`case "edit", "update":`,
+// `case "rm", "delete", "del":`, `case "test-send", "test":`, …).
+const WH_ACTION_VERB = {
+  edit: "edit",
+  toggle: "toggle",
+  rotate: "rotate",
+  test: "test-send",
+  deliveries: "deliveries",
+  delete: "rm",
+};
+
+// Pure: every reason the given action bar is not chip-complete against the given
+// .wh-cli row. Empty = complete. Applied to the REAL card below, and to two
+// synthetic bars as CONTROLS so the emptiness above is known to mean something.
+function whChipGaps(actionsHtml, cliHtml, instance) {
+  const gaps = [];
+  for (const m of actionsHtml.matchAll(/<button\b[^>]*\sdata-wh-([a-z]+(?:-[a-z]+)*)[\s>]/g)) {
+    const action = m[1];
+    const verb = WH_ACTION_VERB[action];
+    if (!verb) {
+      gaps.push("data-wh-" + action + ": the action bar renders this button and no CLI verb is mapped for it — " +
+        "give it a chip in the .wh-cli row and a WH_ACTION_VERB entry (or, if `bp cloud webhook` genuinely " +
+        "cannot do it, say so here deliberately rather than deleting this arm)");
+      continue;
+    }
+    if (!cliHtml.includes('data-copy="bp cloud webhook ' + verb + " " + instance + '"')) {
+      gaps.push("data-wh-" + action + ": .wh-cli carries no copyable `bp cloud webhook " + verb + "` chip");
+    }
+  }
+  return gaps;
+}
+
+const whSection = (html, cls) => html.split('<div class="' + cls + '">')[1].split("</div>")[0];
+
+test("webhookCardHtml: EVERY button in .wh-actions has a copyable CLI twin in .wh-cli — a predicate over the rendered bar, not a hand-listed set", () => {
+  const html = hooks.webhookCardHtml(
+    { id: "wh1", name: "Prod hook", url: "https://x/h", active: true }, "abc", "production");
+  const actions = whSection(html, "wh-actions");
+  const cli = whSection(html, "wh-cli");
+
+  // Precondition: the bar was actually PARSED. Without this a regex that matched
+  // nothing would report "0 gaps" and this whole test would be vacuous.
+  const parsed = [...actions.matchAll(/<button\b[^>]*\sdata-wh-([a-z]+(?:-[a-z]+)*)[\s>]/g)].map((m) => m[1]);
+  assert.ok(parsed.length >= 6,
+    "precondition: only parsed " + parsed.length + " action button(s) out of the bar: " + actions);
+  assert.ok(parsed.includes("test"), "precondition: the Send test button is not in the parsed bar: " + parsed);
+
+  assert.deepEqual(whChipGaps(actions, cli, "abc"), [],
+    "the webhook card's action bar is not chip-complete");
+
+  // CONTROL A — a SEVENTH action with no mapping reds. This is the case the
+  // enumeration above cannot see, proven mechanically instead of by memory.
+  const withNewAction = actions +
+    '<button class="btn btn-sm" type="button" data-wh-nonesuch>Nonesuch</button>';
+  const gapsA = whChipGaps(withNewAction, cli, "abc");
+  assert.equal(gapsA.length, 1, "an unmapped action must produce exactly one gap: " + gapsA);
+  assert.match(gapsA[0], /data-wh-nonesuch/);
+
+  // CONTROL B — a MAPPED action whose chip is missing from the row reds too, so
+  // the predicate is measuring the .wh-cli row and not just the map's key set.
+  const cliWithoutTestSend = cli.split("bp cloud webhook test-send abc").join("bp cloud webhook XX abc");
+  assert.notEqual(cliWithoutTestSend, cli, "control B did not actually remove the test-send chip");
+  const gapsB = whChipGaps(actions, cliWithoutTestSend, "abc");
+  assert.equal(gapsB.length, 1, "removing one chip must produce exactly one gap: " + gapsB);
+  assert.match(gapsB[0], /data-wh-test: .*test-send/);
+
+  // Off-default dataset: the derived set holds there too — every chip carries
+  // the `--dataset <ds>` suffix, so a staging card copies staging commands.
+  const staging = hooks.webhookCardHtml({ id: "wh1", url: "https://x/h", active: true }, "abc", "staging");
+  assert.deepEqual(
+    whChipGaps(whSection(staging, "wh-actions"), whSection(staging, "wh-cli"), "abc --dataset staging"), [],
+    "the staging card's action bar is not chip-complete for the off-default dataset");
 });
 
 // The `Send test` button's copy-as-CLI twin. This is the pair the card used to
@@ -8358,7 +8451,8 @@ test("readyHeroHtml renders the shared core and parametrises the studio/view wir
     { name: "Prod", id: "abc", url: "prod.example.com" },
     { studioBtnId: "inst-ready-studio", viewBtnId: "inst-ready-dismiss", viewLabel: "View details", demoteHeading: true },
   );
-  assert.match(fold, /<h2 class="new-title">Prod is ready<\/h2>/);
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.match(fold, /<h2 class="new-title"><bdi>Prod<\/bdi> is ready<\/h2>/);
   assert.match(fold, /id="inst-ready-studio"[^>]*>Open Studio</);
   assert.match(fold, /id="inst-ready-dismiss"[^>]*>View details</);
   assert.match(fold, /prod\.example\.com/);
@@ -8371,7 +8465,7 @@ test("readyHeroHtml renders the shared core and parametrises the studio/view wir
       extra: '<a class="btn btn-block btn-vercel" id="new-vercel" href="#">Deploy</a>', tail: '<div class="new-env"></div>' },
   );
   assert.match(neu, /id="new-open-studio"/);
-  assert.match(neu, /<h1 class="new-title">Site is ready<\/h1>/); // /new is a standalone page: keeps the h1
+  assert.match(neu, /<h1 class="new-title"><bdi>Site<\/bdi> is ready<\/h1>/); // /new is a standalone page: keeps the h1
   assert.match(neu, /btn-vercel/);
   assert.match(neu, /href="\/#instance\/def"/);
   assert.match(neu, /new-env/); // tail rendered after the actions
@@ -10568,8 +10662,21 @@ test("coherence: tokenRows reads live and flags unresolved tokens as gaps", () =
 });
 
 test("coherence: fixtureToHtml paints role words + hex chips and stays escape-safe", () => {
-  const golden = fs.readFileSync(LIFECYCLE_FIXTURE, "utf8");
-  const html = hooks.coherenceFixtureToHtml(golden);
+  // THE PAINT ASSERTIONS RUN ON A LOCAL PROBE, NOT ON THE GOLDEN. They used to
+  // read LIFECYCLE_FIXTURE and then pin `#2563eb` — a token VALUE owned by
+  // design/tokens.json and regenerated by the TUI lane. That made a legitimate,
+  // wholly foreign token regeneration red this console test on the next
+  // unrelated cloud PR, which is the defect gr-backlog-coherence-fixture-durable
+  // exists to remove. What this test owns is the TRANSFORM; the golden's
+  // contents are not its subject. A real-golden arm follows, and it asserts only
+  // properties no regeneration can move.
+  const probe = [
+    "state         glyph  ascii  role   light      dark",
+    "in_progress   ~      ~      info   #2563eb    #60a5fa",
+    "blocked       !      !      warn   #d97706    #fbbf24",
+    "done          v      v      ok     #0d9488    #2dd4bf",
+  ].join("\n");
+  const html = hooks.coherenceFixtureToHtml(probe);
   // Emitted lifecycle roles are wrapped in the shared token classes.
   assert.match(html, /<span class="bp-lc-info">info<\/span>/);
   assert.match(html, /<span class="bp-lc-warn">warn<\/span>/);
@@ -10585,6 +10692,22 @@ test("coherence: fixtureToHtml paints role words + hex chips and stays escape-sa
   assert.match(evil, /<span class="bp-lc-ok">ok<\/span>/);
   // No false positive: a substring like "workshop" is NOT a role word.
   assert.ok(!hooks.coherenceFixtureToHtml("workshop broker").includes("bp-lc-"));
+
+  // THE REAL-SHAPE ARM. A probe-only test can pass over a transform that
+  // explodes on the bytes the page actually renders, so the committed golden is
+  // still fed through it — but only for properties that are true of ANY
+  // regenerated golden: it produces output, and nothing in it can break out of
+  // the <pre>. No assertion here names a token value, a role word or a row, so
+  // regenerating internal/taskboard/testdata/styleguide_lifecycle.txt cannot
+  // red this test.
+  const goldenHtml = hooks.coherenceFixtureToHtml(
+    fs.readFileSync(LIFECYCLE_FIXTURE, "utf8"),
+  );
+  assert.ok(goldenHtml.length > 0, "the real golden must still transform to something");
+  assert.ok(
+    !/<(?!\/?span\b)/.test(goldenHtml),
+    "the transform emits only <span> — anything else means golden bytes reached the DOM unescaped",
+  );
 });
 
 // cch-w26-s5. The test above pins PRESENCE — the four role words it names all
@@ -10650,25 +10773,106 @@ test("coherence: the helper block is byte-identical in app.js and coherence.html
   );
 });
 
-test("coherence: the embedded TUI fixtures are byte-identical to the committed goldens", () => {
+// gr-backlog-coherence-fixture-durable. THE DRIFT TEST IS GONE BECAUSE THE
+// DRIFT IS GONE. coherence.html used to embed a byte-copy of each Go golden in
+// a <script type="text/plain"> block and this slot asserted byte-identity
+// against the committed file. That assertion was correct and still catastrophic
+// in ownership: the TUI/design lane regenerates those goldens as a matter of
+// course (it did exactly that in #4393), and the very next CLOUD pull request —
+// touching nothing the TUI owns — inherited the red, with "re-embed
+// styleguide_lifecycle.txt verbatim" as its only repair. A path-filter widening
+// (gr-p5-coherence-fixture, #4432) made the break visible sooner; it could not
+// remove the second copy.
+//
+// So the second copy is removed. The page FETCHES each golden from
+// /__fixtures__/…, __preview__/serve.mjs maps those routes to the canonical
+// files, and the two tests below pin the read-through instead of the copy.
+// NEITHER READS GOLDEN CONTENT — they read the page, the server's route table,
+// and the goldens' EXISTENCE — so a regenerated golden cannot red the console
+// harness. The one thing that still can is DELETING or RENAMING a golden, which
+// genuinely breaks this page and belongs to the PR that does it.
+
+test("coherence: the TUI goldens are READ, never embedded — no byte-copy survives", () => {
   const pageSrc = fs.readFileSync(COHERENCE_HTML, "utf8");
-  const embed = (id) => {
-    const m = pageSrc.match(
-      new RegExp('<script type="text/plain" id="' + id + '">([\\s\\S]*?)</script>'),
+  assert.ok(
+    !/<script[^>]*type="text\/plain"[^>]*id="co-fixture-/.test(pageSrc),
+    "coherence.html embeds a golden byte-copy again — the whole point is that it " +
+      "fetches from /__fixtures__/ instead; a copy re-introduces the cross-lane red",
+  );
+  // Stronger than "no such tag": no golden BYTES at all, anywhere in the page.
+  // The probe is DERIVED from each golden's own first line, so it cannot go
+  // stale — and it can only ever fail by the page containing those bytes, which
+  // is the defect. Regenerating a golden moves the probe, never the verdict.
+  for (const [label, file] of [["lifecycle", LIFECYCLE_FIXTURE], ["tokens", TOKENS_FIXTURE]]) {
+    assert.ok(fs.existsSync(file), label + " golden is missing: " + file);
+    const head = fs.readFileSync(file, "utf8").split("\n")[0];
+    assert.ok(head.length > 10, label + " golden's first line is too short to be a probe");
+    assert.ok(
+      !pageSrc.includes(head),
+      "coherence.html carries the " + label + " golden's first line verbatim — it is " +
+        "copying the fixture again instead of reading it",
     );
-    assert.ok(m, "coherence.html must embed the " + id + " fixture");
-    return m[1];
-  };
-  assert.equal(
-    embed("co-fixture-lifecycle"),
-    fs.readFileSync(LIFECYCLE_FIXTURE, "utf8"),
-    "lifecycle fixture drifted — re-embed styleguide_lifecycle.txt verbatim",
+  }
+});
+
+test("coherence: serve.mjs routes every fixture URL the page fetches to a real golden", () => {
+  const pageSrc = fs.readFileSync(COHERENCE_HTML, "utf8");
+  const serveSrc = fs.readFileSync(
+    new URL("./__preview__/serve.mjs", import.meta.url), "utf8",
   );
-  assert.equal(
-    embed("co-fixture-tokens"),
-    fs.readFileSync(TOKENS_FIXTURE, "utf8"),
-    "tokens fixture drifted — re-embed styleguide_tokens.txt verbatim",
+  // The route table, read out of serve.mjs rather than restated here — a second
+  // hand-kept list of paths is the very thing this slice deleted.
+  const table = serveSrc.match(/const FIXTURE_ROUTES = \{([\s\S]*?)\n\};/);
+  assert.ok(table, "serve.mjs must declare FIXTURE_ROUTES");
+  const routes = [...table[1].matchAll(
+    /"(\/__fixtures__\/[^"]+)":\s*path\.join\(\s*REPO_ROOT,\s*"([^"]+)"\)/g,
+  )].map((m) => ({ url: m[1], rel: m[2] }));
+  assert.equal(routes.length, 2, "expected exactly the two TUI goldens, got " + routes.length);
+
+  // Every URL the page fetches is served, and every served URL is fetched —
+  // both directions, so neither a dead route nor a 404-in-the-browser can hide.
+  const fetched = [...pageSrc.matchAll(/"(\/__fixtures__\/[^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(
+    [...new Set(fetched)].sort(),
+    routes.map((r) => r.url).sort(),
+    "coherence.html's fetched fixture URLs and serve.mjs's routes disagree",
   );
+
+  // The routes resolve to the canonical goldens, and those files exist.
+  // EXISTENCE ONLY — never contents.
+  assert.deepEqual(
+    routes.map((r) => r.rel).sort(),
+    [
+      "internal/pdrender/testdata/styleguide_tokens.txt",
+      "internal/taskboard/testdata/styleguide_lifecycle.txt",
+    ],
+    "the fixture routes no longer point at the canonical Go goldens",
+  );
+  for (const r of routes) {
+    assert.ok(
+      fs.existsSync(path.join(REPO_ROOT, r.rel)),
+      r.url + " routes to " + r.rel + ", which does not exist — the page would 404",
+    );
+  }
+  // AND serve.mjs's OWN ROOT RESOLVES TO THE REPO ROOT. Measured, not assumed:
+  // the first cut of this route wrote `path.resolve(HERE, "../../..")` —
+  // correct for __app.test.mjs, one level short for a file in __preview__ — and
+  // every assertion above passed while a live fetch of the route 404'd. A test
+  // that only compares STRINGS cannot see a resolution bug, so recompute it.
+  const rootLit = serveSrc.match(/const REPO_ROOT = path\.resolve\(HERE, "([^"]+)"\)/);
+  assert.ok(rootLit, "serve.mjs must derive REPO_ROOT from HERE");
+  assert.equal(
+    path.resolve(path.join(REPO_ROOT, "cloud/priv/static/__preview__"), rootLit[1]),
+    REPO_ROOT,
+    "serve.mjs's REPO_ROOT does not resolve to the repo root — /__fixtures__/ would 404",
+  );
+
+  // Both are declared in the console dispatcher's path set, so the harness
+  // re-runs when one is deleted or renamed (the only change that can red this).
+  const decl = fs.readFileSync(path.join(REPO_ROOT, "scripts/console-path-escape-check.sh"), "utf8");
+  for (const r of routes) {
+    assert.ok(decl.includes("\n" + r.rel + "\n"), r.rel + " is not declared in CONSOLE_PATHS");
+  }
 });
 
 // ── C10: Usage sub-tab + Members settings panel ─────────────────────────────
@@ -12424,8 +12628,15 @@ test("S11b: JS never invents a reason — a false verb with no gap and no defaul
 test("S11b: lifecycleActionRowHtml renders the pill class, CLI chip, disabled reason, and danger decommission", () => {
   const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "hetzner", host: "h", name: "web" });
   const html = hooks.lifecycleActionRowHtml(m);
-  assert.match(html, /inst-life-pill bp-inst--live/); // S4 token consumed on the pill
-  assert.match(html, /Live/);
+  // cch-r21l: the lifecycle chip is a statusMeta pill now — `.inst-life-pill` was a
+  // second grammar for the state the fleet row already paints, and is retired. The
+  // pin is the WHOLE chip, so the absorption cannot be half-reverted: the family,
+  // the ROLE the state maps to (live -> ok, read off `.bp-inst--live { var(--ok) }`),
+  // the S4 token still riding as the identity class, and the shared dot/label parts.
+  assert.match(html, /<span class="status-pill status-pill--ok bp-inst--live">/);
+  assert.match(html, /<span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Live<\/span>/);
+  assert.ok(!/inst-life-pill|inst-life-dot|inst-life-label/.test(html),
+    "the retired .inst-life-pill chip family must not be emitted — one state grammar");
   assert.match(html, /bp cloud instance archive web/); // CLI affordance verbatim
   assert.match(html, /via the bp CLI/);
   assert.ok(html.includes(hooks.esc(HETZNER_PAUSE_GAP)), // server-owned reason, escaped as the SPA escapes it
@@ -12953,16 +13164,18 @@ test("cch-w48-s3: the disconnect refusal renders friendly()'s sentence, never th
 test("gr-p4/GR44: a connected kind stays SELECTABLE — a second connect is a rotation, never a duplicate", () => {
   const empty = hooks.providerConnectModel([]);
   assert.equal(empty.allConnected, false);
-  assert.equal(empty.selectable, "hetzner"); // first available kind armed
-  assert.deepEqual(plain(empty.options.map((o) => o.kind)), ["hetzner", "azure"]);
+  assert.equal(empty.selectable, "hetzner"); // first connectable kind armed
+  // console-w28: THREE connectable kinds — the picker mirrors the server's
+  // @connectable_kinds (hetzner azure cloudflare), not its @neutral_kinds.
+  assert.deepEqual(plain(empty.options.map((o) => o.kind)), ["hetzner", "azure", "cloudflare"]);
   assert.ok(empty.options.every((o) => !o.connected));
   const partial = hooks.providerConnectModel([{ kind: "hetzner" }]);
   assert.equal(partial.selectable, "azure"); // an OPEN kind is still preferred by default
   assert.equal(partial.options.find((o) => o.kind === "hetzner").connected, true);
   // …but a connected kind is never dropped from the picker.
-  assert.deepEqual(plain(partial.options.map((o) => o.kind)), ["hetzner", "azure"]);
+  assert.deepEqual(plain(partial.options.map((o) => o.kind)), ["hetzner", "azure", "cloudflare"]);
   // All connected is a ROTATION state, not a dead end: a kind is still armed.
-  const full = hooks.providerConnectModel([{ kind: "hetzner" }, { kind: "azure" }]);
+  const full = hooks.providerConnectModel([{ kind: "hetzner" }, { kind: "azure" }, { kind: "cloudflare" }]);
   assert.equal(full.allConnected, true);
   assert.equal(full.selectable, "hetzner");
   assert.ok(full.options.every((o) => o.connected));
@@ -12978,7 +13191,8 @@ test("gr-p4/GR44: connect card is the GR33 hybrid, and an armed connected kind r
   assert.match(card, /data-connect-kind="hetzner"/);
   assert.ok(!/data-connect-kind="hetzner"[^>]*disabled/.test(card), "a connected kind is never a disabled ghost");
   assert.match(card, /data-connect-kind="azure"/);
-  assert.match(card, /aria-pressed="true"/); // azure armed (the open kind is the default)
+  assert.match(card, /data-connect-kind="cloudflare"/); // console-w28
+  assert.match(card, /data-connect-kind="azure"[^>]*aria-pressed="true"/); // the FIRST open kind is the default
   assert.match(card, /set-save-row/); // verify+save in a save-row
   assert.match(card, /data-connect-submit/);
   assert.match(card, /cred-remediation/); // the in-card remediation slot
@@ -12995,7 +13209,8 @@ test("gr-p4/GR44: connect card is the GR33 hybrid, and an armed connected kind r
   assert.match(armedConnected, /Verify &amp; replace/);
 
   // All connected → still a working form, and NEVER the destroy-first copy.
-  const replace = hooks.providerConnectCardHtml([{ kind: "hetzner" }, { kind: "azure" }], null);
+  const replace = hooks.providerConnectCardHtml(
+    [{ kind: "hetzner" }, { kind: "azure" }, { kind: "cloudflare" }], null);
   assert.match(replace, /data-connect-submit/);
   assert.match(replace, /Verify &amp; replace/);
   assert.match(replace, /data-connect-rotating/);
@@ -13096,6 +13311,250 @@ test("cch-w13: the identity slot rides the ROTATION card only, and names the arm
   // A first connect has no stored credential to name — no slot, no empty box.
   const fresh = hooks.providerConnectCardHtml([], "hetzner");
   assert.ok(fresh.indexOf("data-prov-identity-kind") === -1);
+});
+
+// ── console-w28 · THE CLOUDFLARE CONNECTION, AND WHO IT POINTS AT ───────────
+// The server half shipped as D899: GET /v1/providers/:kind/identity reads
+// @connectable_kinds (hetzner azure cloudflare), makes zero upstream calls, and
+// emits cloudflare's stored account_id with source:"stored". NOTHING on this
+// client read it — `grep -n Cloudflare cloud/priv/static/app.js` at
+// origin/main c9e5a9a5f returned ONE hit, an activity-feed string, and the
+// PROVIDERS list had no cloudflare entry at all, so the providers page could
+// not draw a Cloudflare row and the echo was served to no one.
+
+// The three keys router.ex's `cloudflare_credential_blob/1` keeps, in its own
+// order: it builds %{"api_token" => …} and then maybe_put_fields "account_id"
+// and "zone_id". Restated here as the EXPECTATION so a drift on either side
+// reds rather than passing by agreeing with itself.
+const CF_BLOB_KEYS = ["api_token", "account_id", "zone_id"];
+
+test("console-w28: cloudflare is CONNECTABLE and not provisionable — the two axes the server keeps separate", () => {
+  // @connectable_kinds ~w(hetzner azure cloudflare)
+  assert.deepEqual(plain(hooks.connectableProviderKinds), ["hetzner", "azure", "cloudflare"]);
+  // @neutral_kinds ~w(hetzner azure) — cloudflare has no build_provider_catalog
+  // clause, so offering it as a place to LAUNCH would be a dead menu.
+  assert.deepEqual(plain(hooks.availableProviderKinds), ["hetzner", "azure"]);
+  // …and the launch picker is byte-unchanged by this wave.
+  const tabs = hooks.launchProviderTabsHtml("hetzner");
+  assert.ok(tabs.indexOf("cloudflare") === -1, "cloudflare must never appear in the hosting picker");
+
+  // The connect card DOES offer it.
+  const card = hooks.providerConnectCardHtml([], "cloudflare");
+  assert.match(card, /data-connect-kind="cloudflare"/);
+  const model = hooks.providerConnectModel([]);
+  assert.deepEqual(plain(model.options.map((o) => o.kind)), ["hetzner", "azure", "cloudflare"]);
+});
+
+test("console-w28: the cloudflare connect fields are EXACTLY the three the router keeps — api_token required, account_id and zone_id optional", () => {
+  assert.deepEqual(plain(hooks.cloudflareFieldKeys), CF_BLOB_KEYS);
+
+  const p = hooks.providerMeta("cloudflare");
+  assert.equal(p.fields, "cloudflare");
+  const form = hooks.credentialFieldsHtml(p);
+  for (const k of CF_BLOB_KEYS) assert.match(form, new RegExp('id="cred-cf-' + k + '"'));
+  // No fourth input smuggled in: every cred-cf-* id in the form is one of the three.
+  const ids = (form.match(/id="cred-cf-[a-z_]+"/g) || [])
+    .map((m) => m.slice('id="cred-cf-'.length, -1))
+    .filter((k) => k !== "eye");
+  assert.deepEqual(ids.slice().sort(), CF_BLOB_KEYS.slice().sort());
+  // The optional two SAY they are optional; the required one does not.
+  assert.ok(/Account ID <span class="dim">\(optional\)<\/span>/.test(form));
+  assert.ok(/Zone ID <span class="dim">\(optional\)<\/span>/.test(form));
+  assert.ok(!/API token <span class="dim">\(optional\)/.test(form));
+
+  // The VALIDATOR agrees with the changeset: only api_token is demanded.
+  assert.equal(hooks.cloudflareFieldsValid({ api_token: "t" }), true);
+  assert.equal(hooks.cloudflareFieldsValid({ api_token: "t", account_id: "", zone_id: "" }), true);
+  assert.equal(hooks.cloudflareFieldsValid({ api_token: "   ", account_id: "a" }), false);
+  assert.equal(hooks.cloudflareFieldsValid({ account_id: "a", zone_id: "z" }), false);
+  assert.equal(hooks.credentialFieldsValid(p, { api_token: "t" }), true);
+  assert.equal(hooks.credentialFieldsInvalidTitle(p), "An API token is required.");
+  // …and the other two kinds keep their own sentences (the shared gate did not
+  // flatten them).
+  assert.equal(hooks.credentialFieldsInvalidTitle(hooks.providerMeta("azure")), "All four fields are required.");
+  assert.equal(hooks.credentialFieldsInvalidTitle(hooks.providerMeta("hetzner")), "An API key is required.");
+
+  // The POST body is the BLOB form (never the bare token, which names no
+  // account), trimmed, with a blank optional OMITTED rather than sent as "".
+  const full = hooks.providerCredBody("cloudflare", { api_token: " t ", account_id: " a ", zone_id: " z " }, " main ");
+  assert.deepEqual(plain(full), { kind: "cloudflare", credentials: { api_token: "t", account_id: "a", zone_id: "z" }, label: "main" });
+  const bare = hooks.providerCredBody("cloudflare", { api_token: "t", account_id: "", zone_id: "  " }, "");
+  assert.deepEqual(plain(bare), { kind: "cloudflare", credentials: { api_token: "t" } });
+  assert.ok(!("token" in plain(bare)), "cloudflare must not also send the bare-token shape");
+});
+
+// The four payloads the identity slot can be handed, one per client state.
+const CF_IDENTITY_KNOWN = { provider: { kind: "cloudflare", label: "edge",
+  identity: { label: "Account", value: "abc123", source: "stored", reason: null } } };
+const CF_IDENTITY_ABSENT = { provider: { kind: "cloudflare", label: "edge",
+  identity: { label: "Account", value: null, source: "unavailable",
+    reason: "This connection didn't store an account ID." } } };
+const CF_UNREADABLE = { error: "credential_unreadable" };
+
+test("console-w28: the cloudflare identity slot reuses the wave-13 four states — loading, known, absent, unavailable", () => {
+  // The slot rides the ROTATION card, exactly as hetzner's does — same one rule,
+  // no second vocabulary.
+  const rotating = hooks.providerConnectCardHtml([{ kind: "cloudflare" }], "cloudflare");
+  assert.match(rotating, /data-prov-identity-kind="cloudflare"/);
+  assert.match(rotating, /id="prov-identity"/);
+  assert.match(rotating, /data-prov-identity="loading"/);
+  assert.ok(rotating.indexOf("prov-identity") < rotating.indexOf("data-connect-submit"));
+
+  const states = {
+    loading: hooks.providerIdentityModel(undefined),
+    known: hooks.providerIdentityModel(CF_IDENTITY_KNOWN),
+    absent: hooks.providerIdentityModel(CF_IDENTITY_ABSENT),
+    unavailable: hooks.providerIdentityModel(CF_UNREADABLE),
+  };
+  // The state NAMES are the wave-13 four and nothing else.
+  assert.deepEqual(Object.keys(states).map((k) => states[k].state).slice().sort(),
+    ["absent", "known", "loading", "unavailable"]);
+  for (const name of Object.keys(states)) {
+    assert.equal(states[name].state, name, name + " must be its own state");
+    const out = hooks.providerIdentityHtml(states[name]);
+    assert.match(out, new RegExp('data-prov-identity="' + name + '"'));
+    assert.ok(out.replace(/<[^>]*>/g, "").trim().length > 0, name + " must never render empty markup");
+  }
+  assert.equal(states.known.label, "Account");
+  assert.equal(states.known.value, "abc123");
+  assert.equal(states.known.stored, true);
+  assert.match(hooks.providerIdentityHtml(states.known), /abc123/);
+});
+
+test("console-w28: 502 credential_unreadable is NOT an identity whose value is nil — two sentences, and a control that reds if they are collapsed", () => {
+  const unreadable = hooks.providerIdentityHtml(hooks.providerIdentityModel(CF_UNREADABLE));
+  const nilValue = hooks.providerIdentityHtml(hooks.providerIdentityModel(CF_IDENTITY_ABSENT));
+
+  // THE TWO STRINGS, PINNED. "we could not read your credential" and "your
+  // credential does not name an account" — the router refuses to collapse them
+  // server-side (stored_provider_identity/2 returns {:error, :unreadable} for
+  // one and an identity with value: nil for the other), and this is the reading
+  // half of that refusal.
+  assert.match(unreadable, /We couldn’t read this connection’s stored credential, so we can’t say which account it points at\./);
+  assert.match(nilValue, /This connection didn&#39;t store an account ID\./);
+  assert.match(nilValue, /not known/);
+  assert.notEqual(unreadable, nilValue);
+  // And they are not even the same STATE: an error envelope must never be read
+  // as "we asked and the answer was: no account".
+  assert.equal(hooks.providerIdentityModel(CF_UNREADABLE).state, "unavailable");
+  assert.equal(hooks.providerIdentityModel(CF_IDENTITY_ABSENT).state, "absent");
+  assert.ok(unreadable.indexOf("not known") === -1,
+    "an unreadable credential must not borrow the absent state's words");
+  // A 502 with no error word at all still lands in `unavailable`, never absent.
+  assert.equal(hooks.providerIdentityModel({}).state, "absent"); // a BODY-SHAPED payload is the legacy arm…
+  assert.equal(hooks.providerIdentityModel({ error: "catalog_unavailable" }).state, "unavailable"); // …an ERROR one is not
+
+  // CONTROL, INSIDE THE MEASUREMENT. Delete the error-envelope arm from the
+  // shipped source — the exact edit that COLLAPSES the two — and watch this
+  // suite's own distinction die. Through replaceUnique (the file's own import),
+  // never a bare `.replace`: a bare needle takes the first match anywhere and
+  // is SILENT when it drifts, so a control that mutated nothing would look
+  // exactly like one that passed.
+  const ARM = '    if (typeof payload.error === "string" && payload.error) {\n' +
+    '      return { state: "unavailable",\n' +
+    '        reason: IDENTITY_UNREADABLE_REASONS[payload.error] || IDENTITY_UNREADABLE_REASONS.fetch_failed };\n' +
+    '    }\n';
+  const collapsed = replaceUnique(APP_SRC_FOR_MUTATION, ARM, "",
+    { what: "console-w28 CONTROL: collapse credential_unreadable into the absent arm" });
+  assert.notEqual(collapsed, APP_SRC_FOR_MUTATION, "the control must actually mutate the source");
+  const mutant = evalApp(collapsed).hooks;
+  // The mutant proves the defect is REAL and this test is what catches it: the
+  // 502 now reads as "Account: not known", telling the person their credential
+  // names no account when in truth it was never read.
+  assert.equal(mutant.providerIdentityModel(CF_UNREADABLE).state, "absent");
+  assert.match(mutant.providerIdentityHtml(mutant.providerIdentityModel(CF_UNREADABLE)), /not known/);
+  // BYTE-IDENTICAL to a payload that genuinely carries no identity: without the
+  // arm, "we could not read your credential" and "this control plane reports no
+  // account" are the SAME markup. That is the collapse this test forbids.
+  assert.equal(
+    mutant.providerIdentityHtml(mutant.providerIdentityModel(CF_UNREADABLE)),
+    mutant.providerIdentityHtml(mutant.providerIdentityModel({ provider: { kind: "cloudflare" } })),
+    "CONTROL: without the arm a 502 renders identically to a no-identity payload");
+  // …and the shipped code does NOT do that — the same pair, on the real hooks.
+  assert.notEqual(
+    hooks.providerIdentityHtml(hooks.providerIdentityModel(CF_UNREADABLE)),
+    hooks.providerIdentityHtml(hooks.providerIdentityModel({ provider: { kind: "cloudflare" } })));
+});
+
+test("console-w28: the echo is labelled as the account you CONNECTED — never verified, never checked", () => {
+  const known = hooks.providerIdentityHtml(hooks.providerIdentityModel(CF_IDENTITY_KNOWN));
+  // The provenance sentence, in the person's words.
+  assert.match(known, /the account you connected/);
+  assert.match(known, /we don’t re-check it with the provider/);
+  // NOTHING on this line may claim a check. Cloudflare.Client declares exactly
+  // five callbacks — verify_token, upsert_dns_record, delete_dns_record,
+  // ensure_zone_proxied, create_origin_ca_cert — and verify_token/1 answers
+  // GET /user/tokens/verify with %{status: …}, a token-LIVENESS answer that
+  // names no account. So no account this console shows can ever have been
+  // verified, and saying otherwise would be an assertion the code cannot make.
+  for (const word of [/verified/i, /\bchecked\b/i, /confirmed/i, /validated/i]) {
+    assert.ok(!word.test(known.replace(/we don’t re-check it with the provider/, "")),
+      "the stored echo must never read as a verification: " + word);
+  }
+  // The same rule over EVERY state, not just the happy one.
+  for (const payload of [undefined, null, CF_IDENTITY_KNOWN, CF_IDENTITY_ABSENT, CF_UNREADABLE]) {
+    const out = hooks.providerIdentityHtml(hooks.providerIdentityModel(payload));
+    assert.ok(!/verified/i.test(out) && !/\bconfirmed\b/i.test(out),
+      "no identity state may claim verification");
+  }
+});
+
+test("console-w28: the identity slot reads /v1/providers/:kind/identity — the route built for it, DRIVEN not grepped", () => {
+  // /overview was the wrong door in two directions: its kind gate is
+  // @neutral_kinds, so cloudflare could only ever get 404 unknown_kind from it,
+  // and its failure mode is 502 catalog_unavailable, so an upstream hiccup
+  // blanked an identity sitting in the stored blob needing no network at all.
+  const seen = [];
+  const { hooks: h, sandbox: sb } = evalApp();
+  sb.fetch = (path) => {
+    seen.push(path);
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(CF_IDENTITY_KNOWN),
+      text: () => Promise.resolve(""),
+    });
+  };
+  const slot = { innerHTML: "", isConnected: true, getAttribute: () => "cloudflare" };
+  h.loadProviderIdentity(slot, "cloudflare");
+  // The loading paint is synchronous — the slot is never blank, not even for a tick.
+  assert.match(slot.innerHTML, /data-prov-identity="loading"/);
+  assert.deepEqual(plain(seen), ["/v1/providers/cloudflare/identity"]);
+  return new Promise((resolve) => setTimeout(resolve, 0)).then(() => {
+    assert.match(slot.innerHTML, /data-prov-identity="known"/);
+    assert.match(slot.innerHTML, /abc123/);
+  });
+});
+
+test("console-w28: a 502 credential_unreadable body reaches the model — the loader does not flatten it to null", () => {
+  const { hooks: h, sandbox: sb } = evalApp();
+  sb.fetch = () => Promise.resolve({
+    ok: false, status: 502,
+    headers: { get: () => "application/json" },
+    json: () => Promise.resolve(CF_UNREADABLE),
+    text: () => Promise.resolve(""),
+  });
+  const slot = { innerHTML: "", isConnected: true, getAttribute: () => "cloudflare" };
+  h.loadProviderIdentity(slot, "cloudflare");
+  return new Promise((resolve) => setTimeout(resolve, 0)).then(() => {
+    assert.match(slot.innerHTML, /data-prov-identity="unavailable"/);
+    // The 502's OWN sentence, not the generic "just now" one a null would give.
+    assert.match(slot.innerHTML, /stored credential, so we can’t say which account/);
+    assert.ok(slot.innerHTML.indexOf("just now") === -1);
+  });
+});
+
+test("console-w28: a transport failure still paints the generic unavailable sentence", () => {
+  const { hooks: h, sandbox: sb } = evalApp();
+  sb.fetch = () => Promise.reject(new TypeError("Failed to fetch"));
+  const slot = { innerHTML: "", isConnected: true, getAttribute: () => "cloudflare" };
+  h.loadProviderIdentity(slot, "cloudflare");
+  return new Promise((resolve) => setTimeout(resolve, 0)).then(() => {
+    // api() turns a rejection into {status:0, data:{error:"network_error"}} —
+    // an error word with no entry in the table, so the fallback fires.
+    assert.match(slot.innerHTML, /data-prov-identity="unavailable"/);
+    assert.match(slot.innerHTML, /We couldn’t read which account this connection points at just now\./);
+  });
 });
 
 test("gr-p4: capability matrix — 9 verbs, prod columns only, server-owned gaps, NO invented reason, NO padded cell", () => {
@@ -13862,7 +14321,11 @@ test("diagnosis: nothing measured reads UNKNOWN, never calm — silence is not h
       { key: "disk", state: "unknown", value: null },
     ],
   }));
-  assert.match(html, /No vitals to judge/);
+  // console-r21m DEFECT-H: the headline moved from "No vitals to judge" to
+  // "No pressure verdict". THE CONTRACT THIS TEST GUARDS IS UNCHANGED — the
+  // unknown state must never be dressed as calm — and both assertions below
+  // still carry it.
+  assert.match(html, /No pressure verdict/);
   assert.match(html, /pressure--unknown/);
   assert.doesNotMatch(html, /pressure--ok/);
   assert.doesNotMatch(html, /No resource pressure/);
@@ -13872,6 +14335,47 @@ test("diagnosis: nothing measured reads UNKNOWN, never calm — silence is not h
   const legacy = hooks.metricsSeries({ ok: true, beat: { status: "live" }, series: {} });
   assert.equal(legacy.pressure.state, "unknown");
   assert.doesNotMatch(hooks.pressureBannerHtml(legacy.pressure), /No resource pressure/);
+});
+
+test("diagnosis: the unknown verdict never claims there are no vitals ABOVE the vitals (console-r21m DEFECT-H)", () => {
+  // THE WHOLE PANEL, not the banner alone — the contradiction is between two
+  // boxes and no assertion on one of them can see it. This is the
+  // `metrics-stale` fixture's exact shape: a stale beat, four populated
+  // series, and NO `pressure` key (an older control plane, or a beat that
+  // carried readings but no signals), which is what pressureModel folds to
+  // the unknown state.
+  const model = hooks.metricsSeries({
+    ok: true,
+    beat: { status: "stale", age_seconds: 480 },
+    series: {
+      cpu: [{ value: 58 }], mem: [{ value: 57 }],
+      disk: [{ value: 74 }], load: [{ value: 1.1 }],
+    },
+  });
+  assert.equal(model.pressure.state, "unknown");
+  const html = hooks.metricsPanelHtml(model);
+
+  // PRECONDITION, ASSERTED: the readings are on the page. Without this the
+  // copy assertion below is a statement about an empty panel — and
+  // metricsPanelHtml returns the "Waiting for the first beat" empty state
+  // (no banner at all) whenever the beat is absent, so a fixture that drifted
+  // into `absent` would make every line under it vacuous.
+  assert.match(html, /metrics-grid/);
+  assert.match(html, /58%/);
+  assert.match(html, /57%/);
+  assert.match(html, /74%/);
+  assert.match(html, /pressure--unknown/);
+
+  // REDS ON PRE-FIX BYTES. origin/main d5bea4de9 rendered
+  // "No vitals to judge" + "This box has not reported the numbers this
+  // verdict is made of." directly above those four cards.
+  assert.doesNotMatch(html, /No vitals/);
+  assert.doesNotMatch(html, /has not reported the numbers/);
+
+  // And the state's own contract is still carried: absence is never dressed
+  // as calm.
+  assert.doesNotMatch(html, /No resource pressure/);
+  assert.match(html, /No pressure verdict/);
 });
 
 test("diagnosis: a PARTIAL verdict says so — even a calm one", () => {
@@ -14522,8 +15026,32 @@ test("cch-w47-s3: an UNKNOWN /v1/me fails CLOSED — resurrect bills a real box,
   const unknown = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "unknown"));
   assert.ok(unknown.indexOf("archive-resurrect-btn") === -1, "an unanswered role authorises nothing");
   assert.equal((unknown.match(/class="archive-row"/g) || []).length, 2);
-  // Every non-grant answer renders the same way — one rule, not a per-value fork.
-  assert.equal(unknown, hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse")));
+  // cch-w47-rv-bl SPLIT THIS ASSERTION, and the split is the point of the slice.
+  //
+  // It used to read `assert.equal(unknown, refuse)` under the words "every
+  // non-grant answer renders the same way — one rule, not a per-value fork".
+  // That was true of the OFFER and was being asserted of the whole PANEL, so it
+  // quietly forbade the one sentence a refusal can carry and silence cannot.
+  // The shared rule survives intact below (neither arm draws the button); what
+  // is no longer shared is the EXPLANATION, because "unknown" means /v1/me was
+  // never answered — there is no `required` role to name and claiming one would
+  // state as fact a thing the console never read.
+  const refuseArm = hooks.archivesPanelHtml(hooks.archivesModel(CCH_W47_S3_PAYLOAD, "refuse"));
+  assert.ok(refuseArm.indexOf("archive-resurrect-btn") === -1, "a refusal authorises nothing either");
+  const roleSentence = hooks.friendly({ error: "forbidden", required: "admin", scope: "team" });
+  assert.ok(roleSentence.indexOf("admin role") !== -1,
+    "the shipped 403 reader must answer resurrect/1's payload with the admin-role sentence; got: " + roleSentence);
+  assert.ok(refuseArm.indexOf(roleSentence) !== -1, "the refuse arm names the role the CLI chip needs");
+  assert.ok(unknown.indexOf(roleSentence) === -1, "an unanswered /v1/me names no role");
+  // And the two arms differ by EXACTLY that line — nothing else moved.
+  // Through replaceUnique (the file's own import), never a bare `.replace`: a bare
+  // string needle takes the FIRST match and says nothing when it matches twice, so a
+  // panel that grew a second archives-note would subtract only one and still pass.
+  // replaceUnique REFUSES both drift and ambiguity instead.
+  assert.equal(
+    replaceUnique(refuseArm, '<div class="archives-note"><p>' + roleSentence + "</p></div>", "",
+      { what: "cch-w47-rv-bl: subtract the refuse arm's one role line" }),
+    unknown);
 });
 
 test("cch-w47-s3: the authority reaches EVERY row, not just the first — .map's index argument cannot leak in", () => {
@@ -17415,7 +17943,8 @@ test("E-01 globalSiteRow: real fields only, v4 anatomy, no invented kind taxonom
   assert.ok(html.includes('class="site-host"') && html.includes("acme.com"), "the live host");
   assert.ok(html.includes("nextjs"), "the framework");
   assert.ok(html.includes('class="site-inst-link" href="#instance/bp-1"'), "on <instance> is a real link");
-  assert.ok(html.includes(">Production</a>"), "the instance name renders in the link");
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.ok(html.includes("><bdi>Production</bdi></a>"), "the instance name renders in the link");
   assert.ok(html.includes("updated "), "the recency segment");
   assert.ok(html.includes("Auto-deploy"), "the auto-deploy capability chip");
   // GR28: the invented Marketing/Docs/Blank kind taxonomy has no field, so a
@@ -18374,7 +18903,8 @@ test("attentionCanStudio: live boxes only (host set, not suspended, not tearing 
 test("attentionRowHtml: pill + linked name + reason + View instance + (live) Open Studio", () => {
   const html = hooks.attentionRowHtml({ id: "b1", name: "Reporting", host: "h", health_status: "down", agent_status: "offline", provision_status: "succeeded" });
   assert.match(html, /status-pill/);
-  assert.match(html, /href="#instance\/b1"[^>]*>Reporting<\/a>/);
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.match(html, /href="#instance\/b1"[^>]*><bdi>Reporting<\/bdi><\/a>/);
   assert.match(html, /attention-reason/);
   assert.match(html, />View instance</);
   assert.match(html, /fleet-open-studio[^>]*data-id="b1"/);
@@ -18403,7 +18933,8 @@ test("instanceCardHtml: v4 anatomy — status accent, mono url, sparkline frame,
   const live = { id: "b1", name: "Production", host: "prod.barkpark.cloud", url: "prod.barkpark.cloud", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "current", version: "0.9.2", provision_status: "succeeded" };
   const html = hooks.instanceCardHtml(live, { stats: hooks.instanceCardStats(null) });
   assert.match(html, /instance-card instance-card--ok/);
-  assert.match(html, /instance-card-name[^>]*>Production</);
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.match(html, /instance-card-name[^>]*><bdi>Production<\/bdi></);
   assert.match(html, /instance-card-spark spark--ok/);
   assert.match(html, /class="spark"/); // the honest (empty) sparkline frame
   assert.match(html, /fleet-open-studio/);
@@ -18436,14 +18967,21 @@ test("runwayStepModel: check marks vs digits, real instance-name hint, Open Stud
 // and every __preview__/*.mjs returned zero before this test existed, so the
 // string could be changed, or re-added, with no exit code anywhere).
 //
-// `Accounts.published_doc?/1` (accounts.ex:2764) derives the step from an
-// `AgentEvent` of type "content" with `payload->>'published_count' > 0`. The
-// four `record_event/3` call sites in cloud/lib write "health" (router.ex:1378),
-// "space" (router.ex:1423), "verify" (router.ex:2627) and "status"
-// (health/staleness_worker.ex:91) — never "content" — and the agent's HTTP
+// `Accounts.published_doc?/1` derives the step from an `AgentEvent` of type
+// "content" with `payload->>'published_count' > 0`. The four `record_event/3`
+// call sites in cloud/lib write "health" and "space" (the agent-report and
+// agent-space handlers in web/router.ex), "verify" (the verify-run handler) and
+// "status" (`Health.StalenessWorker`) — never "content" — and the agent's HTTP
 // surface has no content endpoint, so no producer exists and none was built
-// here. The manual ack (`ack_onboarding_step/2`, router.ex:1701) is unreachable
-// too: {action:"skip"} is the only onboarding action app.js POSTs.
+// here. That is still true after cch-w55-bl (charter D902) and is pinned
+// server-side by `agent_event_producer_census_test.exs`.
+//
+// cch-w55-bl — the SECOND half of the sentence above has since been fixed: the
+// manual ack (`Accounts.ack_onboarding_step/2`, via POST /v1/onboarding
+// {action:"ack"}) used to be unreachable because {action:"skip"} was the only
+// onboarding action app.js POSTed. It is now reachable — see the ack-control
+// tests below. The hint stays retracted: an ack is the USER saying so, which
+// is not the plane noticing.
 test("cch-w55-s3: the published-document step never promises the plane will notice", () => {
   const ob = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
   const step = [...hooks.runwayStepModel(ob, { instanceName: "Production", studioId: "b1" })][2];
@@ -18456,6 +18994,44 @@ test("cch-w55-s3: the published-document step never promises the plane will noti
   // …and the whole runway carries the retraction, not just the model row.
   const card = hooks.runwayCardHtml(ob, { canManage: true, instanceName: "Production", studioId: "b1" });
   assert.ok(!/notice automatically/i.test(card), "the rendered runway makes no detection promise either");
+});
+
+// cch-w55-bl — THE STEP HAD NO PRODUCER **AND NO CONTROL**, so it was a
+// checkbox no customer could tick except by dismissing the whole runway.
+// Charter D902 ships ending 1: the ack control the server half has backed since
+// C-02. These tests pin the control's EXISTENCE, its two gates, and the fact
+// that it is the published_doc step alone that carries it.
+test("cch-w55-bl: the pending published-document step carries an ack control for an owner/admin", () => {
+  const ob = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  const model = [...hooks.runwayStepModel(ob, { canManage: true, instanceName: "Production", studioId: "b1" })];
+  assert.equal(model[2].ack, "Mark as done");
+  // ONLY the third step — subscription and instance are server-observable and
+  // must never offer a self-report that could contradict Billing or Registry.
+  assert.equal(model[0].ack, "");
+  assert.equal(model[1].ack, "");
+  // The ack does NOT need a live box (the user may have published on an
+  // instance this console cannot link), unlike the Studio nudge which does.
+  const noBox = [...hooks.runwayStepModel(ob, { canManage: true, studioId: "" })];
+  assert.equal(noBox[2].ack, "Mark as done");
+  assert.equal(noBox[2].action, "");
+  // Rendered, with the hook the click wiring reads.
+  const card = hooks.runwayCardHtml(ob, { canManage: true, instanceName: "Production", studioId: "b1" });
+  assert.match(card, /data-runway-ack="published_doc"/);
+  assert.match(card, /Mark as done/);
+});
+
+test("cch-w55-bl: the ack control is hidden for a member and for an already-done step", () => {
+  const pending = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: false }] };
+  // POST /v1/onboarding is owner/admin-only (Auth.require_current_team_admin),
+  // so a member's button would be a silent 403 — the same rule as Dismiss.
+  const member = [...hooks.runwayStepModel(pending, { canManage: false, studioId: "b1" })];
+  assert.equal(member[2].ack, "");
+  assert.doesNotMatch(hooks.runwayCardHtml(pending, { canManage: false }), /data-runway-ack/);
+  // Done — nothing left to self-report, whether it went done by ack or (one
+  // day) by an agent-reported content event.
+  const done = { steps: [{ key: "subscription", done: true }, { key: "instance", done: true }, { key: "published_doc", done: true }] };
+  assert.equal([...hooks.runwayStepModel(done, { canManage: true, studioId: "b1" })][2].ack, "");
+  assert.doesNotMatch(hooks.runwayCardHtml(done, { canManage: true, studioId: "b1" }), /data-runway-ack/);
 });
 
 test("runwayProgressText / runwayCardHtml: 'N of 3 done' + role-gated dismiss", () => {
@@ -18728,7 +19304,8 @@ test("gr-p3: fleetRow — v4 anatomy: leading pill column, mono meta, badges, ch
   const html = hooks.fleetRow(fleetBp());
   assert.match(html, /class="fleet-row" data-id="i1"/);
   assert.match(html, /<div class="fleet-status"><span class="status-pill status-pill--ok/);
-  assert.match(html, /class="fleet-name">Production/);
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.match(html, /class="fleet-name"><bdi>Production<\/bdi>/);
   assert.match(html, /class="fleet-meta"/);
   assert.match(html, /provider-chip--hetzner/);
   assert.match(html, /fleet-open-studio/); // live → Open Studio
@@ -20713,11 +21290,11 @@ test("W32-S2 the delivery status vocabulary is pinned by EQUALITY, so drift in E
   // grows a status the console cannot render AND when the console invents one
   // the server would reject. Equality is the only shape that loses both ways.
   assert.deepEqual([...hooks.notifDeliveryStatusValues].sort(),
-    ["failed", "pending", "sent", "suppressed"],
+    ["failed", "pending", "sent", "suppressed", "unconfirmed"],
     "the filter axis must be EXACTLY the server's Delivery.@statuses — no more, no less");
   // Chip order is a reading order, not the contract; the labels are, because a
   // chip whose word differs from the pill's reads as a different concept.
-  assert.deepEqual([...hooks.notifDeliveryStatusValues], ["sent", "failed", "pending", "suppressed"]);
+  assert.deepEqual([...hooks.notifDeliveryStatusValues], ["sent", "failed", "pending", "suppressed", "unconfirmed"]);
 });
 
 test("G-04 notifDeliveryRowHtml: recipient + toned pill + meta + verbatim error", () => {
@@ -22776,7 +23353,9 @@ test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no lo
   });
   assert.ok(!row.includes(RLO), "no bidi control survives into the markup");
   // The verb the RECORD carries is the verb the row now spells, uninterrupted.
-  assert.match(row, /class="fleet-name">ops@acme\.com\u00A0etis\u00A0a\u00A0detaerc deleted a site/);
+  // (cch-rtl-script-neutral-borrowing: the email now rides in its own <bdi>, so
+  // the markup gains the tag — the verb after it is unchanged.)
+  assert.match(row, /class="fleet-name"><bdi>ops@acme\.com\u00A0etis\u00A0a\u00A0detaerc<\/bdi> deleted a site/);
   // The pre-reversed decoy text is still THERE (nothing is censored) — it just
   // cannot reorder the system's words around it any more.
   assert.ok(row.includes("etis" + NB + "a" + NB + "detaerc"), "the attacker's own letters are not laundered away");
@@ -22788,7 +23367,7 @@ test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no lo
     { role: "admin", userId: "u1" },
   );
   assert.ok(!self.includes(RLO), "the roster row carries no override either");
-  assert.match(self, /class="set-row-name">mallory@evil\.com <span class="dim">\(you\)<\/span>/);
+  assert.match(self, /class="set-row-name"><bdi>mallory@evil\.com<\/bdi> <span class="dim">\(you\)<\/span>/);
 
   // All TWELVE UAX#9 bidi formatting characters are neutralised, not just the
   // RLO: the nine explicit ones (LRE/RLE/LRO/RLO/PDF, LRI/RLI/FSI/PDI) and the
@@ -22807,6 +23386,128 @@ test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no lo
   // The strip runs BEFORE the escape, so an entity's letters can never be
   // re-read as text (the ssw8 esc-then-strip lesson, above).
   assert.equal(hooks.esc("a&" + RLO + "b"), "a&amp;b");
+});
+
+// ── cch-rtl-script-neutral-borrowing: user text rides in its own <bdi> ─────
+// esc() drops the explicit bidi controls; it cannot change IMPLICIT direction.
+// An email in Arabic or Hebrew letters is strong-RTL by script, and a neutral at
+// its edge ("." "-" "!") was resolved against the LTR paragraph around it, so it
+// painted on the far side of the RTL run. The geometry is measured in headless
+// Chrome by __preview__/bidi-isolation.mjs; this pins the markup that measurement
+// depends on — EACH user-authored span in its own <bdi>, and nothing system-
+// authored inside one.
+test("cch-rtl-script-neutral-borrowing: both hosts isolate every user-authored span, and only those", () => {
+  const email = "\u0645\u062F\u064A\u0631@\u0634\u0631\u0643\u0629.\u0645\u0635\u0631."; // Arabic IDN + trailing "."
+  const name = "\u05D0\u05EA\u05E8!"; // Hebrew + trailing "!"
+  const act = hooks.activityRow({
+    actor: { email }, action: "site.deleted", inserted_at: "2026-08-02T00:00:00Z", metadata: { name },
+  });
+  const fleetName = /<div class="fleet-name">(.*?)<\/div>/.exec(act)[1];
+  assert.equal(fleetName, "<bdi>" + email + "</bdi> deleted a site &middot; <bdi>" + name + "</bdi>");
+  // no metadata name → no second isolate, and no dangling separator
+  const bare = hooks.activityRow({ actor: { email }, action: "site.deleted" });
+  assert.equal(/<div class="fleet-name">(.*?)<\/div>/.exec(bare)[1], "<bdi>" + email + "</bdi> deleted a site");
+
+  const self = hooks.memberRowHtml(
+    { user_id: "u1", email, role: "member", joined_at: "2026-01-01T00:00:00Z" },
+    { role: "admin", userId: "u1" },
+  );
+  assert.equal(/<div class="set-row-name">(.*?)<\/div>/.exec(self)[1],
+    "<bdi>" + email + '</bdi> <span class="dim">(you)</span>');
+  const peer = hooks.memberRowHtml(
+    { user_id: "u9", email, role: "member", joined_at: "2026-01-01T00:00:00Z" },
+    { role: "admin", userId: "u1" },
+  );
+  assert.equal(/<div class="set-row-name">(.*?)<\/div>/.exec(peer)[1], "<bdi>" + email + "</bdi>");
+  // The isolate does not replace the escape: markup inside the email is still inert.
+  const hostile = hooks.memberRowHtml(
+    { user_id: "u9", email: "<b>x</b>@y.io", role: "member" }, { role: "admin", userId: "u1" },
+  );
+  assert.ok(hostile.includes("<bdi>&lt;b&gt;x&lt;/b&gt;@y.io</bdi>"));
+});
+
+// ── task-1614ac4ba29eec9b: every derived user-text host isolates in <bdi> ──
+// #20054 isolated two hosts; its own measurement showed the defect is the user
+// string's EDGE neutral resolving against the LTR paragraph, so every host that
+// renders a user-authored name or email is affected. The host set was derived
+// from app.js (esc() calls whose argument is user-authored, in element content).
+// Two layers pin it:
+//   RENDERED — the hooked, pure hosts are called here and must wrap the name in
+//     its own <bdi>. __preview__/bidi-isolation.mjs measures the same hosts'
+//     painted glyph order in headless Chrome (CI: the modal-oracle job).
+//   SOURCE — the hosts that open a modal or write the DOM themselves cannot be
+//     mounted by that harness, so their markup is pinned here by the exact
+//     isolated source text, each paired with its un-isolated twin, which must be
+//     ABSENT (dropping a <bdi> turns the first red and the second would see it).
+const BIDI_SOURCE_PINS = [
+  ["confirmRevokeToken", "Revoking <b><bdi>' + esc(name || \"this token\") + \"</bdi></b>"],
+  ["setBreadcrumb (current)", "\"</span><span><bdi>\" + esc(cr.label) + \"</bdi></span></span>\""],
+  ["setBreadcrumb (link)", "'\"><bdi>' + esc(cr.label) + \"</bdi></a>\""],
+  ["setBreadcrumb (plain)", "\"<span><bdi>\" + esc(cr.label) + \"</bdi></span>\""],
+  ["renderScopeMenu", "<span class=\"scope-name\"><bdi>' + esc(bp.name || bp.slug || bp.id) + \"</bdi></span>"],
+  ["renderTeamMenu", "<span class=\"team-name\"><bdi>' + esc(t.name || t.slug || t.id) + \"</bdi></span>"],
+  ["confirmUpdateInstance", ">Update <bdi>' + esc(bp.name) + \"</bdi>?</h2>"],
+  ["openAttachDomainModal", ">Attach a domain to <bdi>' + esc(bp.name) + \"</bdi></h2>"],
+  ["openAddSupportModal", ">Add a support server to <bdi>' + esc(bp.name) + \"</bdi></h2>"],
+  ["openPinModal", ">Pin <bdi>' + esc(bp.name) + \"</bdi> to a version</h2>"],
+  ["openCreateSiteModal", ">New site on <bdi>' + esc(bp.name || bp.slug || \"this instance\") + \"</bdi></h2>"],
+  ["siteDetailHtml (on <instance>)", "' &middot; on <a href=\"#instance/' + esc(bp.id) + '\"><bdi>' + esc(bp.name) + \"</bdi></a>\""],
+  ["showAuthInviteBanner (team)", "join <bdi>' +\n          esc(r.data.team.name) + \"</bdi>.</span>"],
+  ["showAuthInviteBanner (email)", "<span class=\"auth-invite-email\"><bdi>' + esc(r.data.email) + \"</bdi></span> to accept."],
+  ["renderLaunchPlan (blocked)", "so launching <bdi>\" + esc(name) + \"</bdi> needs a paid plan."],
+  ["renderLaunchPlan (plan)", "pick a plan to launch <bdi>\" + esc(name) + \"</bdi>. Cancel anytime."],
+  ["revealInvite", "We emailed <b><bdi>' + esc(email) + \"</bdi></b> an invitation."],
+  ["openRoleModal", "Set the team role for <b><bdi>' + esc(email || \"this member\") + \"</bdi></b>.</p>"],
+  ["confirmRevokeInvite", "The invitation for <b><bdi>' + esc(email || \"this address\") + \"</bdi></b> will stop working."],
+  ["paletteRowsHtml", "<span class=\"cmdk-row-label\"><bdi>' + esc(it.label) + \"</bdi></span>"],
+  ["openOffloadModal (title)", ">Offload a task to <bdi>' + esc(support.name) + \"</bdi></h2>"],
+  ["openOffloadModal (worker)", "File an order on this Barkpark. <b><bdi>' + esc(offloadWorkerName(support)) +\n        \"</bdi></b>"],
+];
+
+test("task-1614ac4ba29eec9b: every derived user-text host wraps the user string in its own <bdi>", () => {
+  const NAME = "\u05D0\u05EA\u05E8!"; // Hebrew + trailing "!" — the edge the borrowing is about
+  const EMAIL = "\u0645\u062F\u064A\u0631@\u0634\u0631\u0643\u0629.\u0645\u0635\u0631."; // Arabic IDN + trailing "."
+  const iso = (s) => "<bdi>" + s + "</bdi>";
+  const bp = { id: "b1", name: NAME, slug: "b1", host: "h", url: "h", provision_status: "succeeded", health_status: "up", agent_status: "online" };
+  const rendered = {
+    fleetRow: hooks.fleetRow(bp),
+    attentionRowHtml: hooks.attentionRowHtml(bp),
+    instanceCardHtml: hooks.instanceCardHtml(bp),
+    instanceHeaderHtml: hooks.instanceHeaderHtml(bp, "grant"),
+    supportRowHtml: hooks.supportRowHtml(bp),
+    groupSupportRowHtml: hooks.groupSupportRowHtml({ id: "b2", name: NAME }),
+    instanceGroupPanelHtml: hooks.instanceGroupPanelHtml({ id: "b1", name: NAME }),
+    readyHeroHtml: hooks.readyHeroHtml(bp, { studioBtnId: "x" }),
+    operatorCanaryCardHtml: hooks.operatorCanaryCardHtml({ barkparks: [bp] }, Date.now()),
+    "globalSiteRow (name)": hooks.globalSiteRow({ id: "s1", name: NAME, slug: "s1", domains: [] }, null),
+    "globalSiteRow (on <instance>)": hooks.globalSiteRow({ id: "s1", name: "s", slug: "s1", domains: [] }, bp),
+    envModalBodyHtml: hooks.envModalBodyHtml({ name: NAME }),
+    webhookCardHtml: hooks.webhookCardHtml({ id: "w1", name: NAME, url: "https://e.x/h", events: [] }, bp, "production", "grant"),
+    tokenRow: hooks.tokenRow({ id: "t1", name: NAME, abilities: [] }),
+    tokenRevealHtml: hooks.tokenRevealHtml("bp_x", { name: NAME }),
+    confirmModalHtml: hooks.confirmModalHtml({ title: "t", tier: "destroy", resourceName: NAME, confirmLabel: "Go", consequences: ["c"] }),
+    "inviteStateHtml (confirm)": hooks.inviteStateHtml("confirm", { team: NAME }),
+  };
+  for (const [host, html] of Object.entries(rendered)) {
+    assert.ok(html.includes(iso(NAME)), host + " must render the user-authored name inside its own <bdi>; got " + html.slice(0, 300));
+  }
+  // The email hosts: the invitation row (#20054's probe), the wrong-account
+  // invite card (both addresses), the account modal's local part.
+  const inv = hooks.invitationRowHtml({ id: "i1", email: EMAIL, role: "member", expires_at: "2026-12-01T00:00:00Z" }, { role: "admin" });
+  assert.equal(/<div class="set-row-name">(.*?)<\/div>/.exec(inv)[1], iso(EMAIL));
+  const wrong = hooks.inviteStateHtml("wrong_account", { email: EMAIL, meEmail: "ops@acme.com" });
+  assert.ok(wrong.includes("sent to <b>" + iso(EMAIL) + "</b>") && wrong.includes("signed in as <b>" + iso("ops@acme.com") + "</b>."));
+  const acct = hooks.accountModalHtml({ name: "\u0645\u062F\u064A\u0631.", email: EMAIL });
+  assert.ok(acct.includes('class="am-name">' + iso("\u0645\u062F\u064A\u0631.") + "</div>"));
+  // The isolate never replaces the escape.
+  assert.ok(hooks.tokenRow({ id: "t", name: "<b>x</b>", abilities: [] }).includes(iso("&lt;b&gt;x&lt;/b&gt;")));
+
+  for (const [host, snip] of BIDI_SOURCE_PINS) {
+    assert.ok(APP_SRC.includes(snip), host + ": the isolated markup is gone from app.js — " + JSON.stringify(snip));
+    const bare = snip.replace(/<\/?bdi>/g, "");
+    assert.ok(!APP_SRC.includes(bare), host + ": an UN-isolated copy of this markup is in app.js — " + JSON.stringify(bare));
+  }
+  assert.equal(BIDI_SOURCE_PINS.length, 22, "the source-pinned roster is the 22 derived unmountable sites");
 });
 
 test("cch-w22-s5 (B): relTime — a future timestamp is never 'just now', and the past is byte-identical", () => {
@@ -33418,7 +34119,8 @@ test("stw2 c1a: the dialog is LABELLED — index.html's card and the modal's own
   const raw = r.doc._reg.get("modal-body").innerHTML;
   assert.match(raw, /id="modal-title"/,
     "the create-site body must render the element index.html's aria-labelledby names");
-  assert.match(raw, /New site on Acme prod/, "…and that element must carry the dialog's actual name");
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.match(raw, /New site on <bdi>Acme prod<\/bdi>/, "…and that element must carry the dialog's actual name");
   // Every control the modal renders is reachable by its label.
   for (const id of ["site-nc-name", "site-nc-framework", "site-nc-template", "site-nc-dataset", "site-nc-doctype"]) {
     assert.ok(raw.includes('for="' + id + '"'), "control " + id + " must have a <label for>");
@@ -35080,4 +35782,578 @@ test("cch-r21-w16: the webhooks tab keeps its member-tier reads and drops only t
     "the shell's default authority stopped being 'grant'");
   assert.equal(hooks.webhooksTabShellHtml({ id: "bp1" }, "production", "unknown"), grant,
     "an unanswered /v1/me was treated as a determinate refusal in the shell");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// cch-r21m DEFECT-D — THE ADDRESS SLOT UNDER THE INSTANCE H1.
+//
+// Found by the 2760-shot accent matrix (gr-backlog-accent-matrix-rereview,
+// 2026-09-20) on instance-remove-failed, instance-remove-failed-member and
+// instance-failed-member, at all 5 accents, both themes, 1440: a bare red
+// italic "— removal failed" / "— provisioning failed" sat where the address
+// belongs. Accent-independent, so it was never a token bug.
+//
+// The em-dash lead is a FLEET-LIST idiom — in fleetRow it hangs off the box
+// name printed one line above. Under a detail H1 it has no antecedent, and the
+// lifecycle pill on that same line plus the banner one block down already say
+// the failure, so instance-remove-failed printed it THREE times in ~130px.
+// Worse, removeFailedInstance carries a host: the console suppressed a known
+// address to repeat a failure. A failed teardown is failed BECAUSE the server
+// is still there.
+//
+// These two pin the corrected bytes. Both RED on the pre-fix app.js: the first
+// because the slot rendered no `detail-url-text` at all, the second on the
+// leading em dash. Tail-append (OC9).
+// ════════════════════════════════════════════════════════════════════════════
+
+const CCH_R21M_REMOVE_FAILED = {
+  id: "b-rf", name: "Retired", slug: "retired",
+  url: "https://retired-5b2c1e.barkpark.cloud", host: "retired-5b2c1e.barkpark.cloud",
+  provision_status: "succeeded", deprovision_status: "failed",
+  deprovision_error: "hcloud: server delete returned 409 (a volume is still attached)",
+};
+
+test("cch-r21m DEFECT-D: a FAILED TEARDOWN still shows the address it never removed", () => {
+  const html = hooks.instanceHeaderHtml(CCH_R21M_REMOVE_FAILED);
+  // The slot renders the host, with the same copy affordance a live box gets.
+  assert.match(html, /detail-url-text">https:\/\/retired-5b2c1e\.barkpark\.cloud</,
+    "BEFORE: the address slot printed a bare '— removal failed' and hid a host the Identity card was printing two columns away");
+  assert.match(html, /data-copy="https:\/\/retired-5b2c1e\.barkpark\.cloud"/);
+  // …and the ORPHAN fragment is gone from the whole header: no em-dash-led
+  // failure sentence anywhere. The banner keeps the failure, once.
+  assert.doesNotMatch(html, /&mdash; removal failed/,
+    "BEFORE: the orphan em-dash fragment rendered in the address slot");
+  assert.match(html, /<b>Removal failed\.<\/b>/,
+    "the banner is the header's ONE home for the failure sentence");
+
+  // A teardown that failed AFTER the host column was cleared has no address to
+  // show — it keeps a red slot, but a LABELLED one that leads with the address.
+  const hostless = { ...CCH_R21M_REMOVE_FAILED, url: null, host: null };
+  const hl = hooks.instanceHeaderHtml(hostless);
+  assert.match(hl, /fleet-url failed">No address — removal failed</,
+    "BEFORE: the address-less teardown printed an orphan em dash instead of naming the slot");
+});
+
+test("cch-r21m DEFECT-D: a FAILED PROVISION labels its empty address slot, never an orphan em dash", () => {
+  const html = hooks.instanceHeaderHtml({ id: "b-fp", name: "Reporting", provision_status: "failed" });
+  assert.match(html, /fleet-url failed">No address — provisioning failed</,
+    "BEFORE: the slot read '— provisioning failed' — an em dash with nothing in front of it");
+  assert.doesNotMatch(html, /&mdash; provisioning failed/);
+
+  // THE SHAPE, not the two literals: no arm of this header may open the
+  // address slot with an em dash. `removing` is the remaining in-flight arm
+  // and is deliberately excluded here — it is out of DEFECT-D's scope and
+  // still ships its chip — so this predicate is scoped to the failed class.
+  for (const bp of [CCH_R21M_REMOVE_FAILED, { ...CCH_R21M_REMOVE_FAILED, url: null, host: null },
+                    { id: "b-fp", name: "Reporting", provision_status: "failed" }]) {
+    assert.doesNotMatch(hooks.instanceHeaderHtml(bp), /class="fleet-url failed">\s*(&mdash;|—)/,
+      "a failed-state address slot opened with an em dash again");
+  }
+});
+
+// ═══ PDF-D11 GROUP VIEW (pdf-bl-fleet-group-view) ═══════════════════════════
+// The 7-state catalogue, one preview scenario per state, and the criterion the
+// surface exists to honour: "no second source of truth for online".
+//
+// THE PIN ROSTER IS DERIVED, NOT TYPED TWICE. Every per-state assertion below
+// walks `groupAxis(hooks)`, whose axis IS `hooks.GROUP_VIEW_STATES` — app.js's
+// own enumeration — and which throws rather than narrowing when a state has no
+// scenario, a scenario names no state, or a scenario has stopped producing the
+// state it is filed under. An eighth state added to app.js therefore reds HERE
+// (no scenario) instead of quietly going unmeasured, which is the only thing
+// that makes a per-state test more than decoration.
+import {
+  groupAxis as GV_AXIS, groupControls as GV_CONTROLS,
+  GROUP_FIXTURE as GV_FIXTURE, GROUP_NOW_MS as GV_NOW, GROUP_MAIN as GV_MAIN,
+} from "./__preview__/group-view-scenarios.mjs";
+
+test("PDF-D11: GROUP_VIEW_STATES is the 7-state catalogue, in precedence order", () => {
+  assert.deepEqual([...hooks.GROUP_VIEW_STATES],
+    ["empty", "roster-conflict", "blocked", "offline", "provisioning", "cap-hit", "working"]);
+});
+
+test("PDF-D11 c[0]: every catalogue state has a preview scenario that PRODUCES it — the axis refuses, it does not narrow", () => {
+  const axis = GV_AXIS(hooks);
+  // The axis covers the catalogue exactly, in its order — asserted against the
+  // shipped array rather than a copy of it, so the two cannot drift apart.
+  // Both sides re-realmed with a spread: `hooks.GROUP_VIEW_STATES` is a vm
+  // sandbox array, so a raw deepEqual fails on the PROTOTYPE while the values
+  // match — the file's standing idiom.
+  assert.deepEqual([...axis.map((s) => s.state)], [...hooks.GROUP_VIEW_STATES]);
+  assert.equal(axis.length, 7, "the D11 catalogue is seven states");
+
+  // …and the refusal is REAL. A hook bag carrying one extra state has no
+  // scenario for it, and groupAxis must throw rather than return the six it
+  // can cover. Without this arm "the axis refuses" is a claim about a branch
+  // nothing has ever taken.
+  assert.throws(
+    () => GV_AXIS({ ...hooks, GROUP_VIEW_STATES: [...hooks.GROUP_VIEW_STATES, "zz_uncovered"] }),
+    /catalogue states with no preview scenario: zz_uncovered/,
+    "groupAxis accepted a catalogue state it had no scenario for");
+  assert.throws(
+    () => GV_AXIS({ ...hooks, GROUP_VIEW_STATES: ["working"] }),
+    /preview scenarios naming no catalogue state/,
+    "groupAxis accepted a corpus wider than the catalogue");
+  assert.throws(
+    () => GV_AXIS({ ...hooks, GROUP_VIEW_STATES: [] }),
+    /no subject/, "groupAxis accepted an empty axis, which is the vacuous green it exists to forbid");
+});
+
+test("PDF-D11 c[0]: each state's scenario renders ITS state — the data attribute, the badge class and the copy", () => {
+  for (const sc of GV_AXIS(hooks)) {
+    const html = hooks.groupViewHtml(sc.main, sc.supports, sc.roster, sc.now);
+    assert.ok(html.includes('data-group-state="' + sc.state + '"'),
+      `scenario ${sc.key} did not render data-group-state="${sc.state}"`);
+    assert.ok(html.includes("group-state--" + sc.state),
+      `scenario ${sc.key} reached no painted badge class for "${sc.state}"`);
+    assert.ok(!html.includes("group-state--unknown"),
+      `scenario ${sc.key} fell through to the unknown badge — a catalogue state with no branch`);
+    const label = hooks.groupViewStateCopy(sc.state).label;
+    assert.ok(html.includes(">" + label + "<"),
+      `scenario ${sc.key} did not print its own label "${label}"`);
+  }
+});
+
+test("PDF-D11 c[0]: every catalogue state reaches its OWN badge branch — a state added without one reds by name", () => {
+  // groupStateBadgeHtml's seven arms are written out rather than composed from
+  // the state string, because __css_check E3 refuses a concatenated modifier
+  // (`"group-state group-state--" + state`) — that difference is FORCED by the
+  // checker, not chosen. This walk is what keeps the forced duplication honest.
+  for (const state of hooks.GROUP_VIEW_STATES) {
+    const badge = hooks.groupStateBadgeHtml(state);
+    assert.ok(badge.includes('class="group-state group-state--' + state + '"'),
+      `GROUP_VIEW_STATES carries "${state}" but groupStateBadgeHtml has no branch for it`);
+  }
+  // The control: the else arm exists and is distinguishable, so the walk above
+  // is measuring branch COVERAGE and not just "the function returns a string".
+  assert.ok(hooks.groupStateBadgeHtml("zz_not_a_state").includes("group-state--unknown"));
+});
+
+// ── Criterion [1]: ONE source of truth for "online" ─────────────────────────
+
+test("PDF-D11 c[1] CONTROL: a beat 47 minutes past its OWN ttl_s still reads WORKING — the server owns staleness, not this page", () => {
+  const ctl = GV_CONTROLS(hooks).find((c) => c.key === "working-stale-beat");
+  assert.ok(ctl, "the working-stale-beat control is missing from the corpus");
+
+  // The precondition, asserted rather than assumed: the beat really is past the
+  // budget. Without this the test below is a verdict about a row it never
+  // measured — it would pass just as happily on a FRESH beat.
+  const row = ctl.roster.find((r) => r.worker === "muscle-1");
+  const ageMs = hooks.rosterBeatAgeMs(row, ctl.now);
+  assert.ok(ageMs > row.ttl_s * 1000 * 10,
+    `the control's beat is only ${Math.round(ageMs / 1000)}s old against a ${row.ttl_s}s budget — it is not stale enough to discriminate`);
+  assert.equal(row.status, "working", "the control's STORED status must be a live one, or nothing is being overruled");
+
+  // The verdict: the group reads what the SERVER wrote, not what the clock
+  // suggests. A console that grew a second deriver off last_seen says "offline".
+  assert.equal(hooks.groupViewState(hooks.groupSupportCells(ctl.supports, ctl.roster, ctl.now)), "working");
+
+  // And the age is still SHOWN — the point is that it is rendered as an
+  // observation and obeyed by nothing, not that it is hidden.
+  const html = hooks.groupViewHtml(ctl.main, ctl.supports, ctl.roster, ctl.now);
+  assert.match(html, /Beat 47m ago \(budget 120s\)/,
+    "the operator can no longer SEE the stale beat beside the budget it blew");
+});
+
+test("PDF-D11 c[1] MUTATION: break presenceChip's online derivation and the group surface breaks WITH it — there is no second decider", () => {
+  // The only way to prove a second source of truth is ABSENT is to break the
+  // first one and watch everything downstream move. If groupViewState had its
+  // own liveness opinion, these states would survive the mutation.
+  const ANCHOR = '      online: s !== "offline", // PDF-D89: online is DERIVED, never stored';
+  const MUTANT = '      online: false, // MUTANT';
+  // replaceUnique, not a bare `.replace` (the anchored-replace ratchet, and the
+  // reason for it): a bare string needle that has DRIFTED silently matches
+  // nothing, the "mutant" is byte-identical to the source, and the test passes
+  // having mutated NOTHING — a green with no subject. replaceUnique refuses a
+  // drifted or ambiguous needle instead of answering one.
+  const mutatedSrc = replaceUnique(APP_SRC_FOR_MUTATION, ANCHOR, MUTANT,
+    { what: "presenceChip's online derivation (the single decider under test)" });
+  assert.notEqual(mutatedSrc, APP_SRC_FOR_MUTATION, "the mutation must actually change the source");
+  const mutant = evalApp(mutatedSrc).hooks;
+
+  // The mutation LANDED (the one-decider check itself).
+  assert.equal(mutant.presenceChip({ status: "working" }).online, false);
+  assert.equal(hooks.presenceChip({ status: "working" }).online, true);
+
+  // Every state whose derivation reaches liveness moves. `empty`, `roster-conflict`
+  // and `blocked` are named EXEMPT: they are decided before any online read
+  // (no supports / an unattributable roster / a box asking for attention), so
+  // their survival is the derivation's precedence order holding, not a second
+  // source hiding.
+  const EXEMPT = new Set(["empty", "roster-conflict", "blocked"]);
+  const moved = [];
+  for (const sc of GV_AXIS(hooks)) {
+    const after = mutant.groupViewState(mutant.groupSupportCells(sc.supports, sc.roster, sc.now));
+    if (EXEMPT.has(sc.state)) {
+      assert.equal(after, sc.state, `${sc.state} is decided above the online read and must not move`);
+      continue;
+    }
+    if (after !== sc.state) moved.push(`${sc.state}->${after}`);
+  }
+  // offline and provisioning are already the no-online states; working and
+  // cap-hit are the two that can only be reached THROUGH presenceChip, and both
+  // must collapse to offline.
+  assert.deepEqual(moved.sort(), ["cap-hit->offline", "working->offline"],
+    "a liveness-bearing state survived presenceChip being broken — something else is deciding online");
+});
+
+test("PDF-D11 c[1]: capacity renders BOTH stored shapes, and the legacy string never counts as zero free slots", () => {
+  const working = GV_AXIS(hooks).find((s) => s.state === "working");
+  const html = hooks.groupViewHtml(working.main, working.supports, working.roster, working.now);
+  assert.match(html, /heavy · 2\/4 slots free · \$20 budget/, "the validated capacity object did not render");
+  assert.match(html, /1 task/, "the legacy free-text capacity did not render");
+
+  // The legacy shape carries no number, so it answers null — a fabricated 0
+  // would drag a legacy box into cap-hit and tell the operator the group is
+  // saturated when nobody said so.
+  assert.equal(hooks.rosterSlotsFree("1 task"), null);
+  assert.equal(hooks.rosterSlotsFree({ slots_free: 0, slots_total: 1 }), 0);
+  assert.equal(hooks.rosterSlotsFree({ size_class: "light" }), null);
+  assert.equal(hooks.rosterSlotsFree(null), null);
+});
+
+test("PDF-D11 c[1]: a roster read that never landed says so — never a fabricated Offline per box", () => {
+  const ctl = GV_CONTROLS(hooks).find((c) => c.key === "roster-unreachable");
+  assert.equal(ctl.roster, null, "the control must carry a FAILED read, not an empty one");
+  const html = hooks.groupViewHtml(ctl.main, ctl.supports, ctl.roster, ctl.now);
+  assert.match(html, /No heartbeat yet/, "a failed roster read painted something other than the honest unknown");
+  assert.doesNotMatch(html, /fleet-presence--offline/,
+    "a read that never landed was rendered as a box that answered Offline");
+  // The GROUP is still honestly offline: nothing can be claimed.
+  assert.equal(hooks.groupViewState(hooks.groupSupportCells(ctl.supports, ctl.roster, ctl.now)), "offline");
+});
+
+test("PDF-D11: two supports on one roster identity is a CONFLICT, and the collision is named", () => {
+  const sc = GV_AXIS(hooks).find((s) => s.state === "roster-conflict");
+  const cells = hooks.groupSupportCells(sc.supports, sc.roster, sc.now);
+  assert.deepEqual([...hooks.groupRosterConflicts(cells)], ["muscle-1"]);
+  // Two boxes, ONE roster row — the collision, not a missing row.
+  assert.equal(sc.supports.length, 2);
+  assert.equal(sc.roster.length, 1);
+  // A support that matches no row is NOT a conflict — it is the honest unknown.
+  const lone = hooks.groupSupportCells([sc.supports[0]], [], sc.now);
+  assert.deepEqual([...hooks.groupRosterConflicts(lone)], []);
+});
+
+test("PDF-D11: the group surface paints NO presence chip of its own — it calls the shipped renderer", () => {
+  // The status cell must be presenceChipHtml's bytes, or the group view is a
+  // second renderer that will drift from the fleet card's vocabulary.
+  const sc = GV_AXIS(hooks).find((s) => s.state === "working");
+  const cells = hooks.groupSupportCells(sc.supports, sc.roster, sc.now);
+  for (const c of cells) {
+    assert.ok(hooks.groupSupportRowHtml(c).includes(hooks.presenceChipHtml(c.row)),
+      `the group row for ${c.name} did not embed presenceChipHtml's own markup`);
+  }
+});
+
+test("PDF-D11: the empty state is the group's own sentence, not an empty table", () => {
+  const html = hooks.groupViewHtml(GV_MAIN, [], [], GV_NOW);
+  assert.ok(html.includes('data-group-state="empty"'));
+  assert.ok(html.includes("group-empty"));
+  assert.ok(!html.includes("group-table"), "the empty group still rendered a header row for nothing");
+});
+
+// ── THE ROUTE (the follow-up slice): #instance/<main-id>/group ──────────────
+
+const GV_MAIN_BP = { id: "main-1", name: "Production", slug: "production", host: "production.barkpark.cloud", url: "https://production.barkpark.cloud", provision_status: "succeeded" };
+const GV_SUPPORT_BP = { id: "sup-1", name: "muscle-1", slug: "muscle-1", host: "muscle-1.fleet.internal", fleet_role: "support", fleet_parent_id: "main-1", provision_status: "succeeded" };
+
+test("PDF-D11 route: Group is a registered tab, and instanceTabsFor is the ONE decider of who is offered it", () => {
+  // The tab exists on the router's registry (so a bookmark resolves) …
+  assert.equal(hooks.instanceTabOf("group"), "group");
+  // … and the per-box decider offers it to a MAIN and withholds it from a
+  // SUPPORT, which has no group of its own.
+  assert.ok([...hooks.instanceTabsFor(GV_MAIN_BP)].includes("group"));
+  assert.ok(![...hooks.instanceTabsFor(GV_SUPPORT_BP)].includes("group"));
+  // A support deep-linked to /group degrades to Overview the way an unknown
+  // suffix does — never a 404, and never a Group panel with no group.
+  assert.equal(hooks.instanceTabFor(GV_SUPPORT_BP, "group"), "overview");
+  assert.equal(hooks.instanceTabFor(GV_MAIN_BP, "group"), "group");
+  // The STRIP follows the same decider rather than the raw registry: the
+  // failure this guards is a second tab list drifting from the first.
+  assert.ok(hooks.instanceTabStripHtml(GV_MAIN_BP, "group").includes("#instance/main-1/group"));
+  assert.ok(!hooks.instanceTabStripHtml(GV_SUPPORT_BP, "overview").includes("/group"));
+  // A null bp (the fleet still in flight) is not a support — the full set, the
+  // pre-existing behaviour, never a silently hidden tab.
+  assert.deepEqual([...hooks.instanceTabsFor(null)], [...hooks.instanceTabs]);
+});
+
+test("PDF-D11 route: the main's workspace mounts the group panel, and frame 1 states NO verdict", () => {
+  const html = hooks.instanceDetailHtml(GV_MAIN_BP, "group", {}, "grant");
+  assert.match(html, /id="instance-group-view"/, "the group tab painted no mount point for wireGroupView to fill");
+  assert.match(html, /data-group-bp="main-1"/, "the mount carries no instance identity, so a stale read could paint the wrong group");
+  assert.match(html, /Reading the roster/);
+
+  // THE POINT OF THE FRAME-1 SHAPE. A null roster is the shape of a read that
+  // FAILED, and it resolves the group to `offline` — so painting groupViewHtml
+  // before the read is ISSUED would announce "no live support is beating"
+  // about boxes nobody has asked yet. The panel must carry no state at all.
+  assert.ok(!html.includes("data-group-state="),
+    "the group panel declared a state before the roster read was issued — a fabricated verdict");
+  assert.ok(!hooks.instanceGroupPanelHtml(GV_MAIN_BP).includes("group-state--offline"));
+  // The control: the SAME renderer with a landed (failed) read DOES say offline,
+  // so the absence above is a property of frame 1 and not of the markup generally.
+  assert.match(hooks.groupViewHtml(GV_MAIN_BP, [GV_SUPPORT_BP], null, Date.parse("2026-07-24T12:00:00Z")),
+    /data-group-state="offline"/);
+});
+
+test("PDF-D11 route c[2] MUTATION: the ROUTED markup collapses with presenceChip too — routing added no second decider", () => {
+  // The parent slice proved the absence through groupViewState. Routing wired a
+  // real fetch, which is exactly when a second cache of "online" gets
+  // introduced by accident, so the proof is re-run against the thing the ROUTE
+  // actually paints: the rendered surface's own state attribute and badge.
+  const ANCHOR = '      online: s !== "offline", // PDF-D89: online is DERIVED, never stored';
+  const mutant = evalApp(replaceUnique(APP_SRC_FOR_MUTATION, ANCHOR, '      online: false, // MUTANT',
+    { what: "presenceChip's online derivation, re-run against the routed render" })).hooks;
+
+  for (const state of ["working", "cap-hit"]) {
+    const sc = GV_AXIS(hooks).find((s) => s.state === state);
+    // Shipped: the surface paints its own state.
+    assert.match(hooks.groupViewHtml(sc.main, sc.supports, sc.roster, sc.now),
+      new RegExp('data-group-state="' + state + '"'));
+    // Mutated: it collapses to offline, badge and all.
+    const after = mutant.groupViewHtml(sc.main, sc.supports, sc.roster, sc.now);
+    assert.match(after, /data-group-state="offline"/,
+      `the routed render still said "${state}" with the single decider broken — something else is deciding online`);
+    assert.match(after, /group-state--offline/);
+  }
+});
+
+// ── THE TWO REMAINING COLLISION SHAPES ──────────────────────────────────────
+// Both are ruled OUT of the catalogue, for different reasons written at the
+// site in app.js. These pin the decisions so neither can be quietly reversed.
+
+test("PDF-D11: a roster row matching no support is an OBSERVATION, never a state — a listener session must not demote a healthy group", () => {
+  const sc = GV_AXIS(hooks).find((s) => s.state === "working");
+  const stray = { worker: "pelle-laptop", agent: "fleet-listener", scope: "production", status: "idle", capacity: "1 task", last_seen: "2026-07-24T11:59:59Z", ttl_s: 120, task: null };
+  const roster = [...sc.roster, stray];
+
+  // It is NAMED (before this slice these rows were silently dropped and the
+  // surface claimed to show "the group" while rendering only the minted part).
+  const cells = hooks.groupSupportCells(sc.supports, roster, sc.now);
+  assert.deepEqual([...hooks.groupOtherListeners(cells, roster)].map((r) => r.worker), ["pelle-laptop"]);
+  const html = hooks.groupViewHtml(sc.main, sc.supports, roster, sc.now);
+  assert.match(html, /group-others/);
+  assert.match(html, /pelle-laptop/);
+
+  // And it decides NOTHING. Fleet's own moduledoc defines a listener as "a
+  // dev-server/agent session running the fleet-listener protocol" and roster/2
+  // returns every listener the WORKSPACE owns — so an unmatched row is routine,
+  // and ranking it in the catalogue would let somebody's laptop take a working
+  // group out of `working`.
+  assert.equal(hooks.groupViewState(cells), "working");
+  assert.ok(html.includes('data-group-state="working"'));
+  assert.ok(!hooks.GROUP_VIEW_STATES.some((s) => /stray|unmatched|orphan/.test(s)),
+    "an unmatched roster row was promoted to a catalogue state — read the rule-out at the site first");
+
+  // A read that never LANDED knows of no listeners — null is not "zero others".
+  assert.deepEqual([...hooks.groupOtherListeners(hooks.groupSupportCells(sc.supports, null, sc.now), null)], []);
+  // The control: with no stray, the sentence is absent — so the match above is
+  // measuring the row and not a line the surface always prints.
+  assert.ok(!hooks.groupViewHtml(sc.main, sc.supports, sc.roster, sc.now).includes("group-others"));
+});
+
+test("PDF-D11: a support whose dataset differs from the roster scope is INDISTINGUISHABLE from one that never beat — same bytes, and that IS the rule-out", () => {
+  // THIS PIN DELIBERATELY DOES NOT READ api/lib/barkpark/tasks/fleet.ex.
+  // It did, to assert that `to_row/3` serializes no `dataset` key — and the
+  // console path-escape ratchet was right to refuse it: a console test reading
+  // api source puts that file in CONSOLE_PATHS, and every api PR touching fleet
+  // presence would then run the browser-heavy console harness to guard a
+  // comment in app.js. CONSOLE_PATHS' existing api entries are files the
+  // console SHIPS OR PAINTS (layouts, stylesheets); a file a console test
+  // merely cites is not that, and billing another fence for it is the smell
+  // that list's own header names. The server-side half of the rule-out lives in
+  // app.js as prose naming exactly where to check it, and a tripwire on
+  // `to_row/3` belongs BESIDE `to_row/3`.
+  //
+  // What the console CAN prove about itself is the operative half, and it is
+  // the stronger claim anyway: the two causes are the SAME BYTES here, so
+  // "classify a divergent dataset" is asking this surface to invent a
+  // distinction its input does not carry.
+  const support = { id: "sup-1", name: "muscle-1", slug: "muscle-1", fleet_role: "support", fleet_parent_id: "main-1" };
+  // Cause A: registered, never beat — the roster landed and holds nothing for it.
+  const neverBeat = hooks.presenceSlotHtml([], support);
+  // Cause B: beating into ANOTHER dataset — the roster landed, holds other
+  // workers' rows, and none of them is this box.
+  const elsewhere = hooks.presenceSlotHtml(
+    [{ worker: "someone-else", status: "working", capacity: "1 task", last_seen: "2026-07-24T11:59:59Z", ttl_s: 120, task: null }],
+    support);
+  assert.equal(neverBeat, elsewhere,
+    "the two causes render differently — then the console CAN tell them apart and the rule-out in app.js is wrong");
+  assert.match(neverBeat, /No heartbeat yet/);
+  assert.doesNotMatch(neverBeat, /fleet-presence--offline/, "an absent row must never be a fabricated Offline");
+
+  // THE CONTROL, or the equality above is satisfied by any two identical
+  // strings: a support that IS on the roster renders something ELSE, so the
+  // match is a fact about the absent case and not about the renderer.
+  const present = hooks.presenceSlotHtml(
+    [{ worker: "muscle-1", status: "working", capacity: "1 task", last_seen: "2026-07-24T11:59:59Z", ttl_s: 120, task: null }],
+    support);
+  assert.notEqual(present, neverBeat);
+  assert.match(present, /fleet-presence--working/);
+});
+
+test("PDF-D11: rosterBeatAgeMs is total over junk and never renders a beat in the future", () => {
+  assert.equal(hooks.rosterBeatAgeMs(null, GV_NOW), null);
+  assert.equal(hooks.rosterBeatAgeMs({}, GV_NOW), null);
+  assert.equal(hooks.rosterBeatAgeMs({ last_seen: "not a date" }, GV_NOW), null);
+  assert.equal(hooks.rosterBeatAgeMs({ last_seen: 12345 }, GV_NOW), null);
+  // A box whose clock runs ahead of the browser's clamps to 0 rather than
+  // printing "Beat -4s ago".
+  assert.equal(hooks.rosterBeatAgeMs({ last_seen: GV_FIXTURE.now }, GV_NOW - 5000), 0);
+  assert.equal(hooks.rosterStalenessText(null, GV_NOW), "No beat recorded");
+  assert.equal(hooks.rosterStalenessText({ last_seen: GV_FIXTURE.now }, GV_NOW), "Beat 0s ago");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-bl-scroll-driven-cue-firefox-fallback — THE EDGE CUE IN AN ENGINE WITH NO
+// SCROLL TIMELINE.
+//
+// The defect is a BROWSER fact and its proof is a driven Firefox measurement
+// recorded in the charter (D904): Firefox 156.0.1 computes --set-matrix-fade and
+// --archive-cli-fade at 0px while both scrollers are genuinely clipped. Every
+// sweep in this epic drives Chrome only, so none of them can see it and these
+// tests do not pretend to. What they own is the smaller thing a node run CAN
+// own: that the fallback's three load-bearing parts cannot silently revert.
+//
+// EVERY EXPECTED VALUE BELOW IS READ OUT OF THE THING IT GUARDS — the fade
+// lengths come from the @keyframes, the selectors come from app.js's own
+// EDGE_CUES table. A literal retyped beside the guarded one is a guard that
+// stays green while the guarded code regresses.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The @supports block, and the three (selector, class, keyframe) triples the rest
+// of this section measures against.
+function firefoxFallbackFixture() {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const js = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const at = css.indexOf("@supports not (animation-timeline: scroll())");
+  assert.ok(at > 0, "the no-timeline fallback must be gated on @supports not (animation-timeline: scroll()) — a UA sniff or a bare override would also fire in Chrome and Safari");
+  const block = css.slice(at, css.indexOf("\n}\n", at) + 3);
+  // app.js's table is the source of truth for WHICH surfaces are cued and under
+  // WHICH class. Parsed, never retyped: adding a third scroller to that table
+  // with no CSS rule reds here.
+  const table = /var EDGE_CUES = \[([\s\S]*?)\n  \];/.exec(js);
+  assert.ok(table, "app.js must declare the EDGE_CUES table");
+  const cues = [...table[1].matchAll(/\{ sel: "([^"]+)", cls: "([^"]+)" \}/g)].map((m) => ({ sel: m[1], cls: m[2] }));
+  // 2 -> 3 (task-db582d05e675115d): #20103 gave .inst-tabs the same scroll-driven
+  // fade, so Firefox needs the same measured class or the strip shows no cue.
+  assert.equal(cues.length, 3, "every scroll-driven edge fade: .set-matrix (W12), the archives CLI chip (W15-S2) and the instance tab strip (ba31)");
+  return { css, js, block, cues };
+}
+
+test("cch-bl-scroll-driven-cue-firefox-fallback: the fallback is TWO-STATE and its length is the keyframe's, not a retyped literal", () => {
+  const { css, block, cues } = firefoxFallbackFixture();
+  for (const { sel, cls } of cues) {
+    // The cue property this surface paints, read off its own mask declaration.
+    const ruleAt = css.indexOf(sel + " {");
+    assert.ok(ruleAt > 0, `app.css must still carry the base rule for ${sel}`);
+    const prop = /mask-image: linear-gradient\(to right, currentColor calc\(100% - var\((--[a-z-]+)\)\)/.exec(css.slice(ruleAt));
+    assert.ok(prop, `${sel} must still paint a horizontal edge mask from a registered length`);
+    const cue = prop[1];
+    // THE EXPECTED VALUE COMES FROM THE GUARDED THING. The `from` keyframe is
+    // what the scroll-driven engines paint at rest while clipped; the fallback
+    // must paint exactly that, or the two engines disagree about the same state.
+    const kf = new RegExp(`@keyframes [a-z-]+ \\{\\s*from \\{ ${cue}: (\\d+px); \\}\\s*to \\{ ${cue}: 0px; \\}`).exec(css);
+    assert.ok(kf, `${cue} must keep a from->0px keyframe pair; the fallback derives its length from it`);
+    // PRESENT WHILE CLIPPED — and only then. The length hangs off the measured
+    // class, never off the bare selector: a constant fade is the CUE_STUCK lie
+    // at the widths where the surface fits whole.
+    const onClass = `${sel}.${cls} { ${cue}: ${kf[1]}; }`;
+    const parts = block.split(onClass);
+    assert.equal(parts.length, 2, `the fallback for ${sel} must key ${cue}=${kf[1]} on the MEASURED class .${cls}, exactly once`);
+    // ABSENT WHILE IT FITS — i.e. the length is never declared unconditionally
+    // inside the block. With the class rule taken out, no declaration of this
+    // cue may remain anywhere in it.
+    assert.ok(!parts.join("").includes(cue + ":"),
+      `${cue} must not be set unconditionally inside the fallback — that is a fade that never retracts`);
+  }
+});
+
+test("cch-bl-scroll-driven-cue-firefox-fallback: animation-name:none cancels the leftover document-timeline animation", () => {
+  const { block, cues } = firefoxFallbackFixture();
+  // THE LINE WITHOUT WHICH THE WHOLE FALLBACK IS INERT, and it is not defensive.
+  // Gecko drops the unsupported `animation-timeline` and keeps the ANIMATION,
+  // which runs on the document timeline to `finished`; `animation-fill-mode:
+  // both` then pins the property to the `to` keyframe (0px), and an animation's
+  // effect value outranks a plain declaration in the cascade. Driven in Firefox
+  // 156.0.1 in one evaluation: the class declaration ALONE computes 0px, the
+  // same declaration plus this line computes 48px.
+  for (const { sel } of cues) {
+    assert.match(block, new RegExp(`${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{ animation-name: none; \\}`),
+      `${sel} must cancel its animation inside the fallback, or the finished document-timeline animation holds the cue at 0px and the fallback paints nothing`);
+  }
+});
+
+test("cch-bl-scroll-driven-cue-firefox-fallback: Chrome and Safari keep the scroll-driven cue, untouched", () => {
+  const { css, cues } = firefoxFallbackFixture();
+  // The row is explicit that this closes the last third of the browser matrix
+  // and does not undo the fix. The scroll timeline stays the source of truth
+  // wherever it exists — there the fallback block is inert and the fade still
+  // RETRACTS progressively rather than snapping.
+  for (const { sel } of cues) {
+    const ruleAt = css.indexOf(sel + " {");
+    const rule = css.slice(ruleAt, css.indexOf("\n}", ruleAt));
+    assert.match(rule, /animation-timeline: scroll\(self inline\)/,
+      `${sel} must still drive its cue from its own inline scroll timeline`);
+    assert.match(rule, /animation-fill-mode: both/);
+  }
+  // And the fallback may never be reachable in an engine that HAS the timeline:
+  // exactly one @supports block, and its condition is the negation.
+  assert.equal(css.split("@supports not (animation-timeline: scroll())").length - 1, 1);
+});
+
+test("cch-bl-scroll-driven-cue-firefox-fallback: the state is MEASURED, plural, and re-measured on every trigger that changes it", () => {
+  const { js } = firefoxFallbackFixture();
+  // navStripCue's ruling (cch-w14-s2), same predicate and the same 1px floor.
+  assert.match(js, /el\.scrollWidth - el\.clientWidth - el\.scrollLeft > 1/,
+    "the cue must read live geometry — a scroll timeline is exactly what is missing in the engine this serves");
+  // PLURAL. An archives panel renders one .cli-chip-code PER ARCHIVED ROW, so a
+  // singleton read would cue row one and leave every other row silent.
+  assert.match(js, /var els = document\.querySelectorAll\(EDGE_CUES\[i\]\.sel\)/,
+    "the sweep must be plural: the chip's population is one per archived row");
+  // Two global triggers. Capture phase, because `scroll` does not bubble: ONE
+  // delegated listener can only see a descendant scroller during capture — and
+  // that is what makes it survive every repaint of both surfaces.
+  assert.match(js, /document\.addEventListener\("scroll", edgeCueSync, true\)/);
+  assert.match(js, /window\.addEventListener\("resize", edgeCueSync\)/);
+  assert.match(js, /wireEdgeCues\(\);/, "the cue must be wired at boot");
+  // And the three PAINTS, each of which creates fresh elements whose class
+  // nothing has measured yet. BOUNDED WINDOWS, not an open `(?:.*\n)*?` reach:
+  // an unbounded one is satisfied by the OTHER paint's call a thousand lines
+  // away, so deleting either trigger leaves it green. Proven by mutation — that
+  // is exactly how the first draft of this assertion failed.
+  for (const [anchor, what] of [
+    ["box.innerHTML = notifPageHtml(s, { canManage: canManage, state: meSt });", "the notifications paint"],
+    ["panel.innerHTML = archivesPanelHtml(model);", "the archives paint"],
+    ["box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady }, instanceAdminAuthority());", "the instance paint (the .inst-tabs strip)"],
+  ]) {
+    const at = js.indexOf(anchor);
+    assert.ok(at > 0, `app.js must still carry ${what}`);
+    assert.ok(js.indexOf(anchor, at + 1) < 0, `${what} must have exactly one site, or this window measures the wrong one`);
+    const window_ = js.slice(at, at + 600);
+    assert.ok(window_.includes("edgeCueSync();"),
+      `${what} must re-measure the cue: every element it just created carries no class, and in a no-timeline engine the class IS the cue`);
+  }
+});
+
+// cch-w73-bl-newcreaterepo-success-fields-unasserted (charter D883): TEST-ONLY.
+// newCreateRepo is fully impure (DOM, api, toast) and is not exported through
+// __bpTestHook, so a driven test would be vacuously green. This pins the
+// contract at source level instead: the SUCCESS arm (between `if (r.ok && r.data) {`
+// and its `} else {`) reads both fields POST /v1/github/repos returns. The window
+// is the arm, not the whole function, so moving either read into an error branch
+// reds this too.
+test("cch-w73: newCreateRepo's success arm reads r.data.html_url and r.data.repo_full_name", () => {
+  const start = APP_SRC.indexOf("  function newCreateRepo(");
+  assert.ok(start > 0, "app.js must still define newCreateRepo");
+  assert.ok(APP_SRC.indexOf("  function newCreateRepo(", start + 1) < 0, "newCreateRepo must have exactly one definition");
+  const fn = APP_SRC.slice(start, APP_SRC.indexOf("\n  }\n", start) + 4);
+  const okAt = fn.indexOf("if (r.ok && r.data) {");
+  assert.ok(okAt > 0, "newCreateRepo must still branch on r.ok && r.data");
+  const elseAt = fn.indexOf("} else {", okAt);
+  assert.ok(elseAt > okAt, "the success arm must still be followed by its else arm");
+  const okArm = fn.slice(okAt, elseAt);
+  assert.match(okArm, /r\.data\.html_url/, "the success arm must read html_url (the Vercel clone href and the result link)");
+  assert.match(okArm, /r\.data\.repo_full_name/, "the success arm must read repo_full_name (the link text and the toast body)");
 });

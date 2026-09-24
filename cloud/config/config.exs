@@ -165,6 +165,16 @@ config :barkpark_cloud, BarkparkCloud.Web.Endpoint, server: true, port: 4100
 # a per-process fake.
 config :barkpark_cloud, BarkparkCloud.Azure.Pricing, http_client: nil
 
+# azure-transport-wiring: the transport for the CREDENTIAL Azure client
+# (BarkparkCloud.Azure.RealClient — OAuth2 client-credentials + ARM). A DIFFERENT
+# key from BarkparkCloud.Azure.Pricing above: that one is the credential-free
+# Retail Prices client. Default nil in dev/test → RealClient fails CLOSED
+# (:http_client_not_configured) so no byte reaches login.microsoftonline.com or
+# management.azure.com without an explicit wiring. prod (runtime.exs) wires the
+# real verified-TLS :httpc transport; dev/test select Azure.FakeClient at the
+# module seam (:azure_http_client) and never reach this key at all.
+config :barkpark_cloud, BarkparkCloud.Azure, http_client: nil
+
 # portable-archives (S14/D39): the read conduit into Hetzner Object Storage for
 # archived-instance bundles. Default is UNCONFIGURED (blank creds) → the store
 # fails closed with {:error, :not_configured} and GET /v1/archives degrades

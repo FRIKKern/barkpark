@@ -714,7 +714,7 @@
 .bp-canvas-table { position: relative; }
 /* Column-resize grips (plan #25): thin hit areas on each column's right edge, visible on hover. */
 .bp-canvas-table__resizers { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
-.bp-canvas-table__resize { position: absolute; width: 7px; cursor: col-resize; pointer-events: auto; opacity: 0; border-radius: 2px; background: var(--paper-accent-soft); transition: opacity 0.12s ease-out; }
+.bp-canvas-table__resize { position: absolute; width: 7px; cursor: col-resize; pointer-events: auto; opacity: 0; border-radius: 2px; background: var(--paper-accent-soft); transition: opacity var(--dur-1) ease-out; }
 .bp-canvas-table:hover .bp-canvas-table__resize, .bp-canvas-table__resize:active { opacity: 1; }
 /* Idle controls add no reader spacing. When exposed, reserve their own space
  * BELOW the table: grids have no safe gutter for floating controls. */
@@ -801,6 +801,8 @@
   font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
   white-space: pre; overflow-wrap: normal;
   background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+  font-feature-settings: inherit; font-variant-ligatures: inherit;
 }
 .bp-paper-editor-body blockquote {
   margin: 12pt 0 0; padding: 12pt 16pt;
@@ -852,11 +854,12 @@
 .ProseMirror-focused { outline: none; }
 
 /* ── Old-style hanging figures — DE-SCOPED from `.bp-paper-surface
- * .ProseMirror`. Wins back ligatures + onum that ProseMirror base CSS kills. */
+ * .ProseMirror`. Wins back ligatures + onum that ProseMirror base CSS kills.
+ * The surface's own feature list, and NO font-variant-numeric: the reader has
+ * none (editor_control_island_parity_test). */
 .ProseMirror {
   font-variant-ligatures: normal;
   -webkit-font-variant-ligatures: normal;
-  font-variant-numeric: oldstyle-nums;
   font-feature-settings: "kern", "liga", "onum";
 }
 
@@ -1288,6 +1291,8 @@ textarea.bp-canvas-island__input { resize: vertical; }
   color: var(--paper-ink-soft, #6a6a6a);
   font-size: 0.9rem; line-height: 1.45;
   font-family: var(--paper-font-serif, 'Iowan Old Style', Palatino, Georgia, serif);
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+  font-feature-settings: inherit; font-variant-ligatures: inherit;
 }
 .bp-canvas-figure-caption-input:focus { outline: none; }
 
@@ -1348,13 +1353,13 @@ textarea.bp-canvas-island__input { resize: vertical; }
  * are hover/focus-revealed (the table-rail precedent). Bound to the --paper- and --st-
  * token vocabulary. Keep BYTE-IDENTICAL with the root.html.heex copy (mirror-check). */
 .bp-canvas-term { position: relative; }
-.bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; }
+.bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; }
 .bp-canvas-term__title-input::placeholder { color: var(--paper-ink-faint); }
 .bp-canvas-term__live-toggle, .bp-canvas-term__add-foot { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 1px 7px; cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
 .bp-canvas-term__live-toggle { margin-left: auto; }
 .bp-canvas-term__live-toggle.is-on { color: var(--st-ok); border-color: var(--st-ok); }
 .bp-canvas-term:hover .bp-canvas-term__live-toggle, .bp-canvas-term:focus-within .bp-canvas-term__live-toggle, .bp-canvas-term:hover .bp-canvas-term__add-foot, .bp-canvas-term:focus-within .bp-canvas-term__add-foot { opacity: 1; }
-.bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; }
+.bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; }
 .bp-canvas-term__foot-input::placeholder { color: var(--paper-ink-faint); }
 .bp-canvas-term__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
 
@@ -1638,9 +1643,9 @@ bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn
 /* Clipboard recovery stays beside the caret without changing document geometry. */
 [data-bp-paste-notice] {
   position: fixed; z-index: 10001; box-sizing: border-box;
-  padding: 10px 12px; border: 1px solid var(--paper-rule, #aaa);
+  padding: 10px 12px; border: 1px solid var(--paper-rule);
   border-radius: 8px; background: var(--paper-bg, Canvas); color: var(--paper-ink, CanvasText);
-  box-shadow: 0 4px 18px #0002; font: 13px/1.45 var(--paper-font-ui, system-ui, sans-serif);
+  box-shadow: 0 4px 18px hsl(var(--bp-shadow-hsl) / 0.13); font: 13px/1.45 var(--paper-font-ui, system-ui, sans-serif);
   white-space: normal; overflow-wrap: anywhere; overflow: auto; scrollbar-width: none;
 }
 

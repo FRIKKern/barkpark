@@ -35,6 +35,7 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemasTest do
   alias Barkpark.Tenancy
   alias Barkpark.TenancyFixtures
   alias Mix.Tasks.Barkpark.Workspace.ProvisionSchemas
+  alias Barkpark.BootModeSandbox
 
   @dataset "production"
 
@@ -84,7 +85,7 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemasTest do
       seed_target!(ctx, "sheet", "Pulled Sheet")
       stamp_target!(ctx)
 
-      out = capture_io(fn -> ProvisionSchemas.run(argv(ctx, ["--schemas", "paper,sheet"])) end)
+      out = capture_io(fn -> run_provision(argv(ctx, ["--schemas", "paper,sheet"])) end)
 
       assert out =~ "• paper (would update — TARGET IS PULLED DATA)"
       assert out =~ "• sheet (would update — TARGET IS PULLED DATA)"
@@ -101,7 +102,7 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemasTest do
       seed_source!(ctx, "paper", "Source Paper")
       stamp_target!(ctx)
 
-      out = capture_io(fn -> ProvisionSchemas.run(argv(ctx, ["--schemas", "paper"])) end)
+      out = capture_io(fn -> run_provision(argv(ctx, ["--schemas", "paper"])) end)
 
       assert out =~ "• paper (would create)"
       refute out =~ "TARGET IS PULLED DATA"
@@ -120,7 +121,7 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemasTest do
       out =
         capture_io(fn ->
           assert_raise Mix.Error, ~r/re-run with --force/, fn ->
-            ProvisionSchemas.run(argv(ctx, ["--schemas", "paper", "--apply"]))
+            run_provision(argv(ctx, ["--schemas", "paper", "--apply"]))
           end
         end)
 
@@ -138,7 +139,7 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemasTest do
       {:ok, _} = Tenancy.set_pull_provenance(ctx.source_ws.id, @dataset, @stamp)
 
       out =
-        capture_io(fn -> ProvisionSchemas.run(argv(ctx, ["--schemas", "paper", "--apply"])) end)
+        capture_io(fn -> run_provision(argv(ctx, ["--schemas", "paper", "--apply"])) end)
 
       assert out =~ "✓ paper (update)"
       refute out =~ "TARGET IS PULLED DATA"
@@ -151,7 +152,7 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemasTest do
       {:ok, _} = Tenancy.set_pull_provenance(ctx.target_ws.id, "staging", @stamp)
 
       out =
-        capture_io(fn -> ProvisionSchemas.run(argv(ctx, ["--schemas", "paper", "--apply"])) end)
+        capture_io(fn -> run_provision(argv(ctx, ["--schemas", "paper", "--apply"])) end)
 
       assert out =~ "✓ paper (update)"
       refute out =~ "TARGET IS PULLED DATA"
@@ -169,7 +170,7 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemasTest do
 
       out =
         capture_io(fn ->
-          ProvisionSchemas.run(argv(ctx, ["--schemas", "paper", "--apply", "--force"]))
+          run_provision(argv(ctx, ["--schemas", "paper", "--apply", "--force"]))
         end)
 
       assert out =~ "✓ paper (update — TARGET IS PULLED DATA)"
@@ -184,7 +185,7 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemasTest do
       seed_target!(ctx, "paper", "Local Paper")
 
       out =
-        capture_io(fn -> ProvisionSchemas.run(argv(ctx, ["--schemas", "paper", "--apply"])) end)
+        capture_io(fn -> run_provision(argv(ctx, ["--schemas", "paper", "--apply"])) end)
 
       assert out =~ "✓ paper (update)"
       refute out =~ "TARGET IS PULLED DATA"
@@ -259,5 +260,23 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemasTest do
   defp title_of(scope, name) do
     {:ok, row} = Content.get_schema(name, @dataset, scope)
     row.title
+  end
+
+  # ── the ONLY way this module may invoke the task (task-086261728f14c078) ────
+  #
+  # `ProvisionSchemas.run/1` calls `Barkpark.OneShot.boot!/0`, whose first line is a
+  # PERSISTENT `Application.put_env(:barkpark, :boot_mode, :one_shot)`. Nothing
+  # in api/lib puts it back — an operator one-shot exits, so it has no reason
+  # to. A test process does not exit, and the key is ONE value for the WHOLE
+  # NODE: this module ran and `Barkpark.ApplicationBootModeTest` then failed
+  # `assert App.boot_mode() == :full` with `left: :one_shot` in elixir-nightly
+  # 35323296944, and again in run 35509163543 where the end-of-suite probe read
+  # `value left behind: :one_shot`.
+  #
+  # `BootModeSandbox.protecting/1` restores in a `try … after` and re-reads the
+  # key, so a restore that does not land reds THIS module. Call the task through
+  # here and nowhere else.
+  defp run_provision(argv) do
+    BootModeSandbox.protecting(fn -> ProvisionSchemas.run(argv) end)
   end
 end

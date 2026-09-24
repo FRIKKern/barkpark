@@ -157,12 +157,98 @@ defmodule Barkpark.Tasks.Dispatchability do
   above it has already stopped; (c) EVERY row, when `live_parents` is `nil`,
   i.e. a caller that did not pay for the parent-liveness query. `nil` means
   UNMEASURED and emits nothing, on the same law as `live_child_counts`.
+
+  ## The THIRD population: a marker the AUTHOR wrote (task-46e82dc40c385ed2)
+
+  `classify/2` and `classify_upstream/3` both read EDGES, and the moduledoc
+  above says the signal is structure and never vocabulary. That holds for what
+  those two rules INFER — "seal" and "the LEAD closes this" are a tool's name
+  and merge-gate boilerplate, and reading a row's shape off them is what was
+  refused.
+
+  `classify_markers/1` is a different kind of read, and the distinction is the
+  whole justification for it. It does not infer a shape from incidental words:
+  it looks for an IMPERATIVE the row's author ADDRESSED TO A DISPATCHER — "DO
+  NOT commission a builder for c0", "OWNER-GATED", "do not work it". That
+  sentence exists for exactly one reader, and the ready listing was the one
+  surface that could not show it to them.
+
+  ### The burn (measured by lead-studio 2026-09-22)
+
+  `bp task ready` answers a LIGHTWEIGHT PROJECTION with no `content` key at
+  all. Every do-not-build marker lives under `content.*`, so a lead triaging
+  from the listing cannot see one. On the studio fence, 9 of 22 unclaimed ready
+  rows carried a defer or forbid marker; a builder was dispatched at
+  `task-ae82ac9ec98a49fd`, whose `operating_instruction` says DO NOT COMMISSION
+  A BUILDER FOR c0 in capitals, and the builder had to refuse. The remedy
+  already broadcast — "fetch every candidate row in full" — is correct, and
+  asks every lead to pay a per-row fetch forever.
+
+  ### The vocabulary is DATA, and there is ONE copy
+
+  `api/priv/tasks/dispatch_markers.json` is the source of truth: the needles,
+  their classes, their case-sensitivity, the three fields scanned, and the
+  class PRECEDENCE (the `classes` array ORDER, strongest first). This module
+  reads it at COMPILE TIME via `@external_resource`, so the rule here IS the
+  file and not a transcript of it. `internal/cli/dispatch_markers.json` is a
+  byte copy, and `TestDispatchMarkerSpecMirrorsTheServerCopy` decodes BOTH and
+  refuses on any difference — the value SET and the ORDER — because two green
+  suites prove nothing about drift between two surfaces.
+
+  ### ALL THREE FIELDS, and why an empty scan is not a clean bill of health
+
+  The marker appears in `description`, `disposition_reason` AND
+  `operating_instruction`; a search of any one undercounts. The census that
+  prompted this row first returned "0 of 400" and was VACUOUS — it grepped a
+  projection that carries no content at all, so nothing matched and it read as
+  a clean page. `marker_scan/1` therefore reports `fields_present` beside the
+  class: a `nil` class with an EMPTY `fields_present` means nothing was
+  searched, which is a different answer from "searched and found none", and
+  only the second one is evidence.
+
+  ### What it costs, calibrated 2026-09-22 over 150 open rows
+
+  `bp task ls --status open --limit 150`, full cards. 5 rows match `forbidden`
+  and 9 match `deferred`; all 14 were read in context and every one is a TRUE
+  marker. RECALL IS UNMEASURED and the list is necessarily incomplete — a
+  marker nobody has phrased yet is invisible to it — so the ABSENCE of a class
+  is never a licence to dispatch, only the absence of a refusal. A bare
+  case-insensitive `backlog` was measured and REFUSED: 12 of 150, mostly prose
+  and row ids (`dr-backlog-never-started`, `stw-backlog-catalog-family`).
+
+  ### Precedence against the other two classes
+
+  All three classes share the ONE `dispatch` key, and the marker OUTRANKS both
+  edge rules: an author who wrote "do not commission a builder" has said
+  something stronger than an INFERRED `delegated`, and two verdicts on one card
+  are no verdict. On bytes the worst case is unchanged — `"forbidden"` is the
+  same 9 characters as `"delegated"` and `"deferred"` the same 8 as
+  `"upstream"`, and a card could already carry exactly one value.
   """
 
   @typedoc "The dispatch class, or `nil` for an ordinary leaf row."
   @type class :: nil | String.t()
 
   @terminal_statuses ~w(done cancelled)
+
+  # THE ONE COPY of the do-not-build vocabulary. Read at COMPILE TIME so this
+  # module's rule IS the file rather than a transcript of it; `@external_resource`
+  # makes an edit to the JSON recompile this module, so the snapshot cannot go
+  # stale silently. See the moduledoc section "The vocabulary is DATA".
+  @markers_path Path.expand("../../../priv/tasks/dispatch_markers.json", __DIR__)
+  @external_resource @markers_path
+  @marker_spec @markers_path |> File.read!() |> Jason.decode!()
+  @marker_classes @marker_spec["classes"]
+  @marker_fields @marker_spec["fields"]
+  @markers @marker_spec["markers"]
+
+  # A spec that decoded to nothing would make classify_markers/1 answer nil for
+  # every row on earth while every test below still passed. Refuse AT COMPILE
+  # TIME instead.
+  if @marker_classes == [] or @marker_fields == [] or @markers == [] do
+    raise "#{@markers_path} decoded to an empty classes/fields/markers list; " <>
+            "an empty marker spec makes every row look clean"
+  end
 
   @doc """
   The `lifecycle_status` values that make a child DEAD for this rule.
@@ -236,4 +322,84 @@ defmodule Barkpark.Tasks.Dispatchability do
         false
     end)
   end
+
+  @doc """
+  The decoded marker spec, exactly as `api/priv/tasks/dispatch_markers.json`
+  holds it. ONE owner: the Go copy is pinned to this same file, and the
+  contract test below re-reads the file at RUNTIME and compares it to this
+  compile-time snapshot, so the expected value is DERIVED from the source of
+  truth rather than hand-written a second time.
+  """
+  @spec marker_spec() :: map()
+  def marker_spec, do: @marker_spec
+
+  @doc """
+  The marker classes in PRECEDENCE order, strongest first. The array order in
+  the JSON IS the precedence — a swapped order is a contract change, and the
+  cross-language pin asserts order, not just membership.
+  """
+  @spec marker_classes() :: [String.t()]
+  def marker_classes, do: @marker_classes
+
+  @doc """
+  The THREE content fields scanned. Searching any one of them undercounts; the
+  row this exists for records markers living in each of the three.
+  """
+  @spec marker_fields() :: [String.t()]
+  def marker_fields, do: @marker_fields
+
+  @doc """
+  Scan a task's `content` for an author-written do-not-build marker and report
+  BOTH the verdict and what was searched.
+
+      %{class: "forbidden" | "deferred" | nil, fields_present: [String.t()]}
+
+  `fields_present` is the anti-vacuity half and the reason this returns a map
+  rather than a class. A `nil` class with `fields_present: []` means NOTHING
+  WAS SEARCHED — the exact shape of the census that answered "0 of 400" off a
+  projection with no content — and is not evidence of a clean row. A `nil`
+  class with a non-empty `fields_present` means the fields were there and no
+  needle matched, which is.
+  """
+  @spec marker_scan(map() | nil) :: %{class: class(), fields_present: [String.t()]}
+  def marker_scan(content) when is_map(content) do
+    present =
+      Enum.filter(@marker_fields, fn field ->
+        case Map.get(content, field) do
+          value when is_binary(value) -> String.trim(value) != ""
+          _ -> false
+        end
+      end)
+
+    %{class: class_of(content, present), fields_present: present}
+  end
+
+  def marker_scan(_content), do: %{class: nil, fields_present: []}
+
+  @doc """
+  The class alone — `"forbidden"`, `"deferred"` or `nil`. Prefer `marker_scan/1`
+  wherever an ABSENCE is about to be reported as a finding: this function
+  cannot tell "searched and found none" from "there was nothing to search".
+  """
+  @spec classify_markers(map() | nil) :: class()
+  def classify_markers(content), do: marker_scan(content).class
+
+  defp class_of(_content, []), do: nil
+
+  defp class_of(content, present) do
+    joined = present |> Enum.map_join("\n", &Map.fetch!(content, &1))
+    lowered = String.downcase(joined)
+
+    Enum.find(@marker_classes, fn class ->
+      Enum.any?(@markers, fn marker ->
+        marker["class"] == class and needle_hit?(marker, joined, lowered)
+      end)
+    end)
+  end
+
+  defp needle_hit?(%{"needle" => needle, "case_sensitive" => true}, joined, _lowered),
+    do: String.contains?(joined, needle)
+
+  defp needle_hit?(%{"needle" => needle}, _joined, lowered),
+    do: String.contains?(lowered, String.downcase(needle))
 end

@@ -162,6 +162,14 @@ defmodule Barkpark.PortableDoc.Render do
       # byte-identical for callers that don't opt in). The walker only INJECTS
       # the string — it never renders recursively (one-level + cycle-safe).
       |> Map.put(:embeds, Map.get(opts, :embeds, %{}))
+      # Linked master instances (task-59f078a2fd248698) ride the palette the
+      # same way. `:masters` is a caller-supplied `%{key => prerendered_html}`
+      # map (Bulldocs masters' batched render map). Deliberately NO `%{}`
+      # default: nil means "this caller does not resolve masters" (the
+      # body_html cache, delta frames, email) and renders a neutral
+      # placeholder, while a map with the key missing renders "Master
+      # unavailable" (missing, foreign-tenant and cyclic masters alike).
+      |> Map.put(:masters, Map.get(opts, :masters))
       # Inline live values (lvw-t1, wire §5) ride the palette the same way.
       # `:values` is a caller-supplied `%{{target, field} => rendered_string}`
       # map — the caller pre-resolves every (target, field) pair in ONE batched
@@ -245,13 +253,45 @@ defmodule Barkpark.PortableDoc.Render do
     theme = Map.get(opts, :theme, :evergreen)
 
     block
+    |> prepare_block(opts)
+    |> compose_block(style, theme)
+    |> render_html(Map.put(opts, :doctype, false))
+  end
+
+  # Container block types whose clauses recurse into child BLOCKS (not inline
+  # nodes). Each child must see the SAME render options the container got —
+  # the pre-pass resolvers below (`:paper_links`, `:ref_resolver`,
+  # `:codelist_resolver`, the encrypted-value redaction) and the palette-riding
+  # maps (`:wikilinks`, `:embeds`, `:values`). Without this, a paper link or an
+  # embed placed inside a columns block fell back to its unresolved placeholder
+  # on the public reader while the same block at top level resolved
+  # (task-00c1e5bae06da161).
+  @container_types ~w(section columns terminal tabs figure card expandable steps)
+
+  @doc """
+  The per-block pre-pass `render_block/2` runs before composition: resolves
+  field-reference titles, codelist labels and paper-link metadata onto
+  transient keys, redacts an encrypted value, and — on a container block —
+  carries the caller's `opts` under the transient `"_render_opts"` key so the
+  container's compose clause renders its children with them
+  (`Compose.render_opts/1`). Public so `Render.Compose` can run the same
+  pre-pass on a child it composes into its own Pd-tree (the stack section).
+  """
+  def prepare_block(block, opts) when is_map(block) do
+    block
     |> resolve_ref_title(opts)
     |> resolve_code_label(opts)
     |> resolve_paper_links(opts)
     |> redact_encrypted_value()
-    |> compose_block(style, theme)
-    |> render_html(Map.put(opts, :doctype, false))
+    |> carry_render_opts(opts)
   end
+
+  def prepare_block(block, _opts), do: block
+
+  defp carry_render_opts(%{"type" => t} = block, opts) when t in @container_types,
+    do: Map.put(block, "_render_opts", opts)
+
+  defp carry_render_opts(block, _opts), do: block
 
   # A bound block whose schema field is `encrypted: true` stores its value as a
   # FieldCipher envelope (`%{"_bpenc" => …}`) — ciphertext-at-rest. The renderer

@@ -861,6 +861,7 @@ const PIN = [
   { key: "FN|loadOverview|d1b27ebe", verdict: "UNREVIEWED", copy: "You don't have access to this fleet." },
   { key: "FN|loadOverview|6ad5126d", verdict: "UNREVIEWED", copy: "Your fleet couldn't be loaded, and the answer didn't say why." },
   { key: "ARG|dismissRunway|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  { key: "ARG|ackRunwayStep|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|runDecommission|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|retryInstance|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|removeInstance|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
@@ -1149,6 +1150,50 @@ const PIN = [
   { key: "FN|offloadFileErrorCopy|009882c1", verdict: "UNREVIEWED", copy: "Couldn't reach the Barkpark — it may be offline, or its add..." },
   { key: "FN|offloadFileErrorCopy|f712989d", verdict: "UNREVIEWED", copy: "The app token was rejected — reload and try again." },
   { key: "ARG|offloadFileErrorCopy|friendly|3fddca35", verdict: "DELEGATED", copy: "Couldn't file the order — please try again." },
+
+  // cch-w47-rv-bl — SIX SITES THAT ARRIVED WITHOUT ONE SENTENCE BEING WRITTEN.
+  // archivesPanelHtml gained ONE call to `forbiddenEvidenceCopy` (the refuse arm's
+  // server-owned role line). That call is what QUALIFIES a function here, so the
+  // whole of archivesPanelHtml's string population entered the census in the same
+  // commit — six literals that were already shipping, unchanged, byte for byte.
+  // The sentence the change actually adds is NOT among them: it is read out of
+  // FORBIDDEN_ROLE_COPY through the fence and is already pinned as a MAP key.
+  // Read each of the six: none is a refusal CAUSE. They are the panel's own
+  // explanatory prose and its empty state — what an archive IS, where archives
+  // come from, and the `bp cloud instance archive <name>` chip. They are console
+  // AUTHORED in the literal sense (no server emits them) and the census's own
+  // question — "can the server produce this cause?" — does not apply to any of
+  // them, because none of them claims a cause. Pinned so the key set is exact;
+  // a copy edit to any of the six reds this gate again, which is correct.
+  { key: "FN|archivesPanelHtml|4497a103", verdict: "AUTHORED", copy: "An archive is a portable bundle of a whole deployment" },
+  { key: "FN|archivesPanelHtml|742ff044", verdict: "AUTHORED", copy: "DNS record and registry row as one unit — that you can resu..." },
+  { key: "FN|archivesPanelHtml|c2e4f6de", verdict: "AUTHORED", copy: "Wire object storage for this deployment and they show up here." },
+  { key: "FN|archivesPanelHtml|9d773160", verdict: "AUTHORED", copy: "No archives yet. Archive an instance with" },
+  { key: "FN|archivesPanelHtml|2a86a13b", verdict: "AUTHORED", copy: "bp cloud instance archive <name>" },
+  { key: "FN|archivesPanelHtml|7c79cc42", verdict: "AUTHORED", copy: "to keep a portable, cross-provider bundle you can resurrect..." },
+  // console-w28 — providerIdentityModel BECAME a refusal renderer, and the two
+  // sentences below are NOT new copy: they shipped in cch-w13 and are unchanged
+  // byte for byte. What changed is that the function now branches on a typed
+  // server error (`typeof payload.error === "string"`, so a 502
+  // credential_unreadable keeps its own sentence instead of being rounded off to
+  // the absent arm), which trips the census's `/\.error\s*===/` predicate and
+  // brings the whole function into scope for the first time. That is the census
+  // working, not drifting: the function reads a server cause now, so its copy is
+  // exactly what this pin is for.
+  //
+  // BOTH ARE CONSULTED, not AUTHORED. Each is reached only AFTER the server's own
+  // payload has been read and found wanting, and each names the specific thing
+  // that was missing rather than inventing a cause:
+  //   · the first fires when the payload carries no `identity` KEY at all —
+  //     `provider_identity/2` always emits the key (identity_absent/2 fills it
+  //     with value:nil + a reason), so its absence means a control plane older
+  //     than D899, which is what the sentence says.
+  //   · the second fires when the key IS there with a null value but the server
+  //     sent no `reason` — every committed identity_absent/2 call site passes
+  //     one, so this is the honest fallback for a reason-less payload rather
+  //     than a blank that would look known.
+  { key: "FN|providerIdentityModel|46965ca1", verdict: "CONSULTED", copy: "This control plane doesn't report which account a connectio..." },
+  { key: "FN|providerIdentityModel|4c83c181", verdict: "CONSULTED", copy: "This connection doesn't say which account it points at." },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════

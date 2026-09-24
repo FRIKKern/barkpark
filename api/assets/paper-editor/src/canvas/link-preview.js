@@ -156,6 +156,11 @@ export class LinkPreview {
     if (!this._el) this._build();
     this._cancelHide();
     this._anchor = info.el;
+    // The card is portaled to body; preserve the hovered paper's theme.
+    const theme = getComputedStyle(info.el);
+    for (const name of ["--paper-chrome-bg", "--paper-chrome-border", "--paper-ink", "--paper-ink-soft", "--paper-rule", "--paper-accent", "--paper-font-sans", "--paper-font-mono"]) {
+      this._el.style.setProperty(name, theme.getPropertyValue(name));
+    }
     this._info = info;
     const ticket = ++this._ticket;
     const p = this._parts;

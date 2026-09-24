@@ -168,6 +168,9 @@
 //       down. `gr-p5r5-successor-seal` was BOTH: done, and `parent_id:
 //       cloud-console-hardening-epic`. Residue forwarded to a row inside the epic has
 //       not left the epic, so clause (a) would certify a move that moved nothing.
+//   R9  the successor's subtree OVERLAPS the epic's — SUCCESSOR-OVERLAPS-EPIC. The third
+//       order: a successor ABOVE the epic contains the epic's whole roster, so every
+//       residue row read as forwarded. Checked after both roster walks, on their overlap.
 //
 // And a FOURTH clause-(a) shape, TERMINAL, reached only AFTER the roster is read:
 // `--successor TERMINAL` claims the epic has no residue to forward. It is accepted ONLY
@@ -280,7 +283,8 @@
 // manufacturing a successor to force a verdict is what charter D83 forbids.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
@@ -304,6 +308,140 @@ const LADDER_ONLY = argv.includes('--ladder-only');
 // re-labelling and never an exemption.
 const GUARD_ENV = { ...process.env };
 for (const k of ['NODE_TEST_CONTEXT', 'NODE_OPTIONS', 'NODE_V8_COVERAGE']) delete GUARD_ENV[k];
+
+// ---------------------------------------------------------------------------
+// A GUARD RUNS ON THE RUNTIME IT DECLARES, OR IT IS NOT MEASURED
+// (task-3e2226c69000587d — the runtime-pin half of the exit-2 rule above.)
+//
+// WHAT THE EARLIER FIX COVERED AND WHERE THIS ONE STARTS. The block headed
+// "WHY A GUARD'S EXIT 2 IS AN INFRA FAULT AND NOT A DEFECT CLAIM" bought one
+// distinction and one only: a guard that exits **2** is REFUSING to measure, so
+// its non-zero becomes an Infra fault instead of "the defect is still measurable
+// at origin/main". That distinction is keyed on the guard's EXIT CODE, and the
+// vocabulary is the guard's to speak. A clause-(b) guard that is a `node --test`
+// file cannot speak it: node exits **1** for any failing test, and a refusal it
+// raises as a failing assertion is exit 1 like every other red. So the one class
+// of refusal the epic actually ships — `cloud/priv/static/__app.test.mjs`'s
+// cchi-w61-bl runtime self-check, which reds BY NAME when the running major is
+// not the one `cloud/priv/static/__node-version` declares — walked straight
+// through the exit-2 door and out the `r.status !== 0` one.
+//
+// MEASURED AT 8b7219e90, and it is worse than the filing said: the spawn site
+// called `spawnSync('node', …)`, i.e. **`node` off PATH**, so the guard's runtime
+// was never the predicate's runtime. Driving the predicate with an absolute
+// `…/v20.20.2/bin/node` still spawned the PATH node (22.22.0) and still read
+// `b-clean=5/6`; only putting node 20 FIRST ON PATH produced 6/6. The runtime
+// the guard ran on was an ambient property of the caller's shell.
+//
+// THE INVARIANT, and it is the whole design: the UNREADABLE outcome is reachable
+// ONLY from a fact THIS PROGRAM measured — that no binary of the major the guard
+// DECLARES could be found, or that the declaration itself cannot be read. It is
+// never reachable from the guard's exit code and never from its output text. A
+// guard that ran on the runtime it declares and exited non-zero is ALWAYS "the
+// defect is still measurable at origin/main", declaration or no declaration.
+// Nothing a guard can print moves it into the refusal bucket, so no real defect
+// can dress itself as an environment fault to escape.
+//
+// The candidate set and the override vocabulary are deliberately the SAME as
+// `scripts/console-harness.sh`'s, because they answer the same question. Two
+// resolvers with different search paths would disagree, and the disagreement
+// would be invisible until one of them reported a defect the other could not see.
+const GUARD_RUNTIME_DECL = '__node-version';
+
+// The major a binary actually REPORTS. Never the one a path or a declaration
+// suggests — the prototype of console-harness.sh printed a declared major beside
+// an unchecked path and that is the defect this epic is named for.
+function nodeMajorOf(bin) {
+  const r = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 20000, env: GUARD_ENV });
+  if (r.error || r.status !== 0) return null;
+  const m = /^v(\d+)\.\d+/.exec(String(r.stdout || '').trim());
+  return m ? { major: m[1], version: String(r.stdout).trim() } : null;
+}
+
+// Version-manager roots hold `v20.20.2` / `20.20.2` directories. Listed, never
+// globbed: a glob that matched nothing would be indistinguishable from a root
+// that does not exist, and this program has to be able to say which it saw.
+function versionedInstalls(base, want, tail) {
+  let entries;
+  try { entries = readdirSync(base); } catch { return []; }
+  const re = new RegExp(`^v?${want}\\.`);
+  return entries.filter((e) => re.test(e)).map((e) => `${base}/${e}/${tail}`).filter((p) => existsSync(p));
+}
+
+function guardRuntimeCandidates(want) {
+  const E = (k, d) => GUARD_ENV[k] || d;
+  const home = GUARD_ENV.HOME || '';
+  const nvm = E('CONSOLE_HARNESS_NVM_DIR', E('NVM_DIR', `${home}/.nvm`));
+  const fnm = E('CONSOLE_HARNESS_FNM_DIR', E('FNM_DIR', `${home}/.local/share/fnm`));
+  const volta = E('CONSOLE_HARNESS_VOLTA_HOME', E('VOLTA_HOME', `${home}/.volta`));
+  const asdf = E('CONSOLE_HARNESS_ASDF_DIR', E('ASDF_DATA_DIR', `${home}/.asdf`));
+  // The GitHub Actions runner tool cache (task-88edd0348e6f703d). actions/setup-node
+  // installs into `$RUNNER_TOOL_CACHE/node/<version>/<arch>/bin/node`, and some runner
+  // images ship majors there pre-cached. It is one more place a binary MAY be; like
+  // every other root, what is found here is trusted only for the major it REPORTS.
+  const toolCache = E('CONSOLE_HARNESS_TOOL_CACHE', E('RUNNER_TOOL_CACHE', '/opt/hostedtoolcache'));
+  const onPath = [];
+  for (const dir of String(GUARD_ENV.PATH || '').split(':')) {
+    if (!dir) continue;
+    for (const n of ['node', `node${want}`]) if (existsSync(`${dir}/${n}`)) onPath.push(`${dir}/${n}`);
+  }
+  return [
+    // 0. THIS process first. When the predicate is already running the declared
+    //    major there is nothing to resolve, and preferring execPath makes the
+    //    common case free and immune to a hostile PATH.
+    process.execPath,
+    ...onPath,
+    ...versionedInstalls(`${nvm}/versions/node`, want, 'bin/node'),
+    ...versionedInstalls(`${fnm}/node-versions`, want, 'installation/bin/node'),
+    ...versionedInstalls(`${volta}/tools/image/node`, want, 'bin/node'),
+    ...versionedInstalls(`${asdf}/installs/nodejs`, want, 'bin/node'),
+    ...versionedInstalls(`${toolCache}/node`, want, 'x64/bin/node'),
+    ...versionedInstalls(`${toolCache}/node`, want, 'arm64/bin/node'),
+    `/opt/homebrew/opt/node@${want}/bin/node`,
+    `/usr/local/opt/node@${want}/bin/node`,
+  ];
+}
+
+const GUARD_RUNTIME_LOOKED_IN = (want) =>
+  `PATH node and node${want}, $NVM_DIR/versions/node/v${want}.*, $FNM_DIR/node-versions/v${want}.*, ` +
+  `$VOLTA_HOME/tools/image/node/${want}.*, $ASDF_DATA_DIR/installs/nodejs/${want}.*, ` +
+  `$RUNNER_TOOL_CACHE/node/${want}.*/{x64,arm64}, ` +
+  `/opt/homebrew/opt/node@${want}, /usr/local/opt/node@${want}`;
+
+// Returns one of:
+//   { status: 'undeclared' }  the guard names no runtime — it runs on THIS process's
+//                             Node, which is stated in the note so the reading is
+//                             never silent about what produced it.
+//   { status: 'resolved'   }  a binary of the declared major was found and measured.
+//   { status: 'unresolved' }  the guard declares a major nothing here can provide.
+//   { status: 'undeclarable'} the declaration exists and is not a bare major.
+// The last two are the ONLY doors to UNREADABLE, and neither one has read a single
+// byte of the guard's output to get there.
+function resolveGuardRuntime(guardPath) {
+  const declPath = `${dirname(guardPath)}/${GUARD_RUNTIME_DECL}`;
+  const running = nodeMajorOf(process.execPath) || {
+    major: String(process.versions.node).split('.')[0], version: `v${process.versions.node}`,
+  };
+  if (!existsSync(declPath)) {
+    return { status: 'undeclared', node: process.execPath, ...running, declPath };
+  }
+  let raw;
+  try { raw = readFileSync(declPath, 'utf8'); }
+  catch (e) { return { status: 'undeclarable', declPath, why: `it could not be read (${String(e.message).slice(0, 80)})` }; }
+  const declared = raw.trim();
+  if (!/^\d+$/.test(declared))
+    return { status: 'undeclarable', declPath, why: `it holds ${JSON.stringify(raw.length > 40 ? `${raw.slice(0, 40)}…` : raw)}, which is not a bare Node major` };
+  if (running.major === declared)
+    return { status: 'resolved', node: process.execPath, ...running, declared, declPath };
+  const seen = new Set();
+  for (const c of guardRuntimeCandidates(declared)) {
+    if (!c || seen.has(c) || !existsSync(c)) continue;
+    seen.add(c);
+    const got = nodeMajorOf(c);
+    if (got && got.major === declared) return { status: 'resolved', node: c, ...got, declared, declPath };
+  }
+  return { status: 'unresolved', declared, declPath, running: running.version, lookedIn: GUARD_RUNTIME_LOOKED_IN(declared) };
+}
 
 const LIVE_STATUSES = ['open', 'in_progress'];
 const PENDING_STATUSES = ['considering'];
@@ -560,7 +698,12 @@ function retryAfterSeconds(parsed) {
 
 // ONE curl, split into { status, body, parsed }. Every reader below shares it so the
 // trailing-whitespace handling and the status/body split have exactly one owner.
+// EVERY REQUEST ON THE WIRE IS COUNTED, retries included, so the cost of a run is a number
+// the run prints rather than a figure somebody estimates afterwards (task-0217190472c7aad7:
+// the per-node walk cost ~950 reads and 15-25 minutes, and nothing in its output said so).
+let LEDGER_REQUESTS = 0;
 function curlOnce(args, unreachable) {
+  LEDGER_REQUESTS += 1;
   let raw;
   try { raw = execFileSync('curl', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
   catch (e) { throw new Infra(unreachable(String(e.message).slice(0, 90)), 'LEDGER-UNREACHABLE'); }
@@ -671,6 +814,40 @@ function qTasks(id) {
     throw new Infra(`/v1/tasks/${id} response is not JSON (HTTP ${status}; ${body.slice(0, 60).replace(/\s+/g, ' ')})`, 'DRAFT-CROSSCHECK-UNREADABLE');
   return parsed;
 }
+// THE CHILD-COUNT READ, ONE PAGE PER PARENT, NOT ONE READ PER CHILD (task-0217190472c7aad7).
+//
+// `/v1/tasks?parent_id=<id>&view=brief` is the task layer's LIST, and every row it returns
+// carries that row's OWN `child_count` — computed by one grouped query over EVERY task row
+// (published and draft, every lifecycle status) keyed by the drafts-stripped `parent_id`,
+// the same producer `/v1/tasks/:id` reads for the cross-check above. Measured live
+// 2026-09-23 on cloud-console-hardening-epic: one page, 950 rows (4 of them `drafts.`),
+// child_count 0 on 948 of them, 1 and 6 on the other two. So the per-node walk was paying
+// two reads per child to learn, 948 times, a zero this one read already states.
+//
+// Same status discipline as `q()` and `qTasks()`: an unreadable count is a refusal, never
+// "no children".
+const TASK_LIST_PAGE_LIMIT = 1000;   // the endpoint's own clamp
+const TASK_LIST_MAX_PAGES = 20;
+function qTaskList(parentId, offset) {
+  const a = ['-sG', `${SERVER}/v1/tasks`, '-w', '\n%{http_code}'];
+  for (const [k, v] of [['parent_id', parentId], ['view', 'brief'], ['limit', String(TASK_LIST_PAGE_LIMIT)], ['offset', String(offset)]])
+    a.push('--data-urlencode', `${k}=${v}`);
+  a.push('-H', `Authorization: Bearer ${TOKEN}`);
+  const { status, body, parsed, ...bp } = curlWithBackpressure(
+    a, (m) => `curl failed reaching /v1/tasks?parent_id=${parentId}: ${m}`, `the child-count list of ${parentId}`);
+  if (!/^2\d\d$/.test(status)) {
+    if (bp.rateLimited) throw new Infra(throttledMessage({ parsed, ...bp }, `the child-count list of ${parentId}`), 'LEDGER-RATE-LIMITED');
+    const err = (parsed && (parsed.error || parsed)) || {};
+    throw new Infra(
+      `the ledger answered HTTP ${status} for /v1/tasks?parent_id=${parentId} — error.code=${err.code || '(none named)'} request_id=${(parsed && (parsed.request_id || err.request_id)) || '(none returned)'} message=${String(err.message || '').slice(0, 90) || '(none)'}. `
+      + 'This is the CHILD-COUNT read the subtree walk prunes leaves by. Without it no child can be called a leaf, so nothing is asserted about clause (a).',
+      'SUBTREE-COUNTS-UNREADABLE');
+  }
+  if (parsed === null)
+    throw new Infra(`/v1/tasks?parent_id=${parentId} response is not JSON (HTTP ${status}; ${body.slice(0, 60).replace(/\s+/g, ' ')})`, 'SUBTREE-COUNTS-UNREADABLE');
+  return parsed;
+}
+
 // NEVER bare ?parent_id= — proven at Decide to silently return 500 unfiltered rows.
 //
 // AND NEVER AN UNCHECKED PAGE. `result.count` is the PAGE SIZE, not a total. Waves 29–63
@@ -765,6 +942,14 @@ const fetchRoster = (parentId) => {
     // the walk is paging over a sequence that is not the one it asked for, and offset
     // paging over a re-sorting population skips rows.
     for (const d of docs) {
+      // THE FILTER MUST HAVE BEEN APPLIED. A dropped `filter[]` answers HTTP 200 with the
+      // whole task table (measured 2026-08-22 on the by-id read), and the per-node walk only
+      // caught that shape INCIDENTALLY, as ROSTER-CYCLE one level down. The pruned walk
+      // descends far fewer nodes, so the check is made here, on every row, by name.
+      if (d && d.parent_id !== parentId)
+        throw new Infra(
+          `the roster of ${parentId} carries a row whose parent_id is ${JSON.stringify(d.parent_id)} (${d._id || 'id absent'}) at offset ${offset}. \`filter[parent_id]=${parentId}\` was requested, so a row under another parent is a filter this endpoint DROPPED and answered unfiltered. A roster read that way is not this parent's roster. Nothing is asserted about clause (a).`,
+          'ROSTER-UNFILTERED');
       const at = d && d._createdAt;
       if (typeof at !== 'string' || at === '')
         throw new Infra(
@@ -974,25 +1159,94 @@ const fetchRoster = (parentId) => {
 //     server-total cross-check, draft cross-check) and any one of them failing refuses
 //     the ENTIRE walk rather than one branch of it.
 //
-// COST, STATED: two requests per node visited — one `/v1/data/query` page plus one
-// `/v1/tasks/:id` draft cross-check. The filing's note that "the endpoint returns no
-// child_count" is true of `/v1/data/query` and FALSE of `/v1/tasks/:id`, which this file
-// already reads per node, so a childless-node prune IS available. It is deliberately not
-// taken here: it would add a live-only branch no fixture can exercise, and the honest
-// number to quote is the unpruned one.
+// COST, STATED — AND NOW PRUNED (task-0217190472c7aad7). The unpruned walk paid two
+// requests per node visited — one `/v1/data/query` page plus one `/v1/tasks/:id` draft
+// cross-check — including every LEAF, whose answer is always "nothing". Measured
+// 2026-09-20 on cloud-console-hardening-epic: ~950 nodes, ~1,900 reads, 15-25 minutes, to
+// find 7 rows below the first level. A 20-minute read on a merge-busy day outran the head
+// it certified against (see `assertRepoUnmovedSince`).
+//
+// THE PRUNE: after a parent's roster is read (in full, through every arm of
+// `fetchRoster`), ONE list read of that parent (`ledgerLeavesOf`) states each child's own
+// `child_count`. A child whose count is EXACTLY the number 0 is a leaf and is not read;
+// every other child — count > 0, count absent, count not a number, two pages disagreeing,
+// or the child missing from the list — is descended exactly as before. Absence is never
+// evidence of a leaf, so a list that is short, stale or re-sorted mid-read costs reads,
+// never rows. Every node that IS read still passes every refusal `fetchRoster` has.
+//
+// A STUBBED ROSTER SOURCE GETS NO PRUNE (see `leavesFor`): a mutation proof that stands a
+// canned roster in at the `rosterSource` seam must not reach the network through the
+// leaf read behind it.
 const ROSTER_MAX_DEPTH = 8;
-function walkSubtree(rootId, rosterOf) {
+const stripDrafts = (id) => (typeof id === 'string' && id.startsWith('drafts.') ? id.slice('drafts.'.length) : id);
+function ledgerLeavesOf(parent, kids) {
+  const counts = new Map();
+  let offset = 0;
+  for (let page = 1; ; page += 1) {
+    if (page > TASK_LIST_MAX_PAGES)
+      throw new Infra(
+        `the child-count list of ${parent} could not be paginated to the end — ${TASK_LIST_MAX_PAGES} pages of ${TASK_LIST_PAGE_LIMIT} were read (${counts.size} rows). A list that does not terminate is a broken endpoint, and no child can be called a leaf off it. Nothing is asserted about clause (a).`,
+        'SUBTREE-COUNTS-TRUNCATED');
+    const parsed = qTaskList(parent, offset);
+    const docs = parsed && parsed.docs;
+    const pg = parsed && parsed.page;
+    if (!Array.isArray(docs) || !pg || typeof pg !== 'object' || (pg.has_more !== true && pg.has_more !== false))
+      throw new Infra(`/v1/tasks?parent_id=${parent} answered no \`docs\` array or no \`page.has_more\`, so no child of it can be called a leaf. Nothing is asserted about clause (a).`, 'SUBTREE-COUNTS-UNREADABLE');
+    // THE WINDOW MUST BE THE ONE ASKED FOR — an `offset` the server ignored re-serves page 1.
+    if (pg.offset !== offset)
+      throw new Infra(`the child-count list of ${parent} was asked for offset ${offset} and answered offset ${JSON.stringify(pg.offset)} — \`offset\` did not move the window. Nothing is asserted about clause (a).`, 'SUBTREE-COUNTS-TRUNCATED');
+    for (const d of docs) {
+      if (!d || typeof d.doc_id !== 'string' || d.doc_id === '')
+        throw new Infra(`the child-count list of ${parent} carries a row with no doc_id. Nothing is asserted about clause (a).`, 'SUBTREE-COUNTS-UNREADABLE');
+      // THE FILTER MUST HAVE BEEN APPLIED. `parent_id` is matched drafts-stripped on the
+      // server, so it is compared drafts-stripped here. A row under another parent is a
+      // dropped filter, and a leaf read off the whole task table is a guess.
+      if (stripDrafts(d.parent_id) !== stripDrafts(parent))
+        throw new Infra(
+          `the child-count list of ${parent} carries ${d.doc_id} with parent_id ${JSON.stringify(d.parent_id)}. \`parent_id=${parent}\` was requested, so a row under another parent is a filter this endpoint DROPPED and answered unfiltered, and no child can be called a leaf off it. Nothing is asserted about clause (a).`,
+          'SUBTREE-COUNTS-UNFILTERED');
+      // A row served twice with two different counts is not a count: mark it unknown, and
+      // unknown is descended.
+      const prev = counts.get(d.doc_id);
+      counts.set(d.doc_id, prev === undefined || prev === d.child_count ? d.child_count : NaN);
+    }
+    if (pg.has_more === false) break;
+    if (typeof pg.next_offset !== 'number' || !(pg.next_offset > offset))
+      throw new Infra(`the child-count list of ${parent} says has_more at offset ${offset} and names no next_offset beyond it (${JSON.stringify(pg.next_offset)}). Nothing is asserted about clause (a).`, 'SUBTREE-COUNTS-TRUNCATED');
+    offset = pg.next_offset;
+  }
+  const leaves = new Set();
+  for (const k of kids) if (k && counts.get(k._id) === 0) leaves.add(k._id);
+  return leaves;
+}
+// A fixture's leaves are the rows it gives no `subtrees` entry of their own — exactly the
+// ids `subtreeOf` would answer `[]` for — so the fixture path walks the same prune.
+const fixtureLeavesOf = (fixture, seedId) => (parent, kids) => {
+  const tree = (fixture && fixture.subtrees) || {};
+  const leaves = new Set();
+  for (const k of kids)
+    if (k && typeof k._id === 'string' && k._id !== seedId && !Object.prototype.hasOwnProperty.call(tree, k._id)) leaves.add(k._id);
+  return leaves;
+};
+const leavesFor = (fixture, rosterOf, seedId) => (fixture
+  ? fixtureLeavesOf(fixture, seedId)
+  : (rosterOf === fetchRoster ? ledgerLeavesOf : null));
+function walkSubtree(rootId, rosterOf, leavesOf = null) {
   const rows = [];
   const seen = new Set([rootId]);
   let frontier = [rootId];
   let level = 0;
   let depth = 0;
+  let nodesRead = 0;
+  let pruned = 0;
   for (;;) {
     const next = [];
     for (const parent of frontier) {
       const kids = rosterOf(parent);
+      nodesRead += 1;
       if (!Array.isArray(kids))
         throw new Infra(`the roster of ${parent}, reached at depth ${level} under ${rootId}, is not an array of documents`, 'ROSTER-NOT-AN-ARRAY');
+      if (kids.length) depth = level + 1;
       for (const d of kids) {
         if (!d || typeof d._id !== 'string' || d._id === '')
           throw new Infra(
@@ -1004,13 +1258,18 @@ function walkSubtree(rootId, rosterOf) {
             'ROSTER-CYCLE');
         seen.add(d._id);
         rows.push({ ...d, _depth: level + 1, _parent: parent });
+      }
+      // AFTER every row of this parent passed the id and cycle arms above, so a malformed
+      // roster is named by those arms and never by the count read.
+      const leaves = leavesOf && kids.length ? leavesOf(parent, kids) : null;
+      for (const d of kids) {
+        if (leaves && leaves.has(d._id)) { pruned += 1; continue; }
         next.push(d._id);
       }
     }
-    if (next.length === 0) return { rows, depth, unread: [] };
-    depth = level + 1;
-    if (depth >= ROSTER_MAX_DEPTH) return { rows, depth, unread: next };
-    level = depth;
+    if (next.length === 0) return { rows, depth, unread: [], nodesRead, pruned };
+    if (level + 1 >= ROSTER_MAX_DEPTH) return { rows, depth, unread: next, nodesRead, pruned };
+    level += 1;
     frontier = next;
   }
 }
@@ -1026,6 +1285,41 @@ const subtreeOf = (fixture, id, seedId, seedRows) => {
   if (id === seedId) return seedRows;
   return [];
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A FIXTURE IS REFUSED WHEN ITS SHAPE IS ONE `parent_id` CANNOT EMIT (task-8532dae7b075f4b3).
+//
+// `parent_id` is ONE field, so on the live ledger every row sits under exactly one parent.
+// A ledger fixture is hand-written and nothing made it obey that: `forward-to-grandchild.json`
+// and `considering-forwarded.json` listed one `_id` in the epic's `children` AND under the
+// successor, and that two-parent row was the ONLY way any fixture reached the in-roster
+// `forwarded` bucket — a bucket R4/R6/R9 make unreachable on every legal invocation (R9 since
+// task-5f6267283fe7a277: before it, a successor ABOVE the epic reached it legally). The arm
+// over it passed from the bucket's introduction to wave 36 while the bucket was dead: a
+// green whose subject cannot exist. `walkSubtree` already refuses a row reached twice INSIDE
+// one walk (ROSTER-CYCLE); the epic and the successor are two separate walks, so an `_id`
+// shared between them crossed no check at all.
+//
+// THE PARENT OF A LISTED ROW, read exactly as the walks read it: `children` is the epic's
+// direct roster (parent = the epic), `forwarded` the successor's (parent = the successor),
+// `subtrees[<id>]` the rows under `<id>`. An `_id` with more than one distinct parent is a
+// world the ledger cannot produce, and the run is an INFRA FAULT naming the id and every
+// parent — nothing is scored over it. FIXTURE-ONLY: a live roster is read from the store,
+// where this shape cannot arise, and the check reads nothing but the fixture's own JSON.
+function fixtureParentConflicts(fixture, epic, successor) {
+  const parents = new Map();
+  const add = (row, parent) => {
+    const id = typeof row === 'string' ? row : (row && row._id);
+    if (typeof id !== 'string' || id === '') return;   // the walk refuses an id-less row by name
+    if (!parents.has(id)) parents.set(id, new Set());
+    parents.get(id).add(parent);
+  };
+  for (const r of Array.isArray(fixture.children) ? fixture.children : []) add(r, epic);
+  for (const r of Array.isArray(fixture.forwarded) ? fixture.forwarded : []) add(r, successor);
+  for (const [parent, rows] of Object.entries(fixture.subtrees || {}))
+    for (const r of Array.isArray(rows) ? rows : []) add(r, parent);
+  return [...parents].filter(([, s]) => s.size > 1).map(([id, s]) => [id, [...s]]);
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // THE ANTI-FILING ARM — A PRIOR CENSUS, KEYED BY `_id`.
@@ -1685,7 +1979,30 @@ function evaluateLadder(fixture, guardOverride, waivers) {
         // default 1MB buffer. The guard PASSED and the predicate reported
         // "NEVER RAN (ENOBUFS)": a claim about a defect from a read that failed.
         // Hence both the sanitised env and the buffer wide enough for a chatty guard.
-        r = spawnSync('node', [guardPath, '--defect', d.id], { encoding: 'utf8', timeout: 300000, env: GUARD_ENV, maxBuffer: 16 * 1024 * 1024 });
+        //
+        // …and NOT on whatever `node` PATH happens to offer. This line used to read
+        // `spawnSync('node', …)`, which made the guard's runtime an ambient property
+        // of the caller's shell: at 8b7219e90, driving this file with an absolute
+        // v20.20.2 binary STILL spawned the PATH node 22 and STILL read b-clean=5/6.
+        // The runtime is resolved from what the guard DECLARES, and a declaration
+        // this host cannot satisfy is UNREADABLE — never a defect claim. See the
+        // invariant at `resolveGuardRuntime`.
+        const rt = resolveGuardRuntime(guardPath);
+        if (rt.status === 'unresolved') {
+          unavailable.push(`RUNTIME-UNAVAILABLE: guard ${d.guard} declares Node major ${rt.declared} in ${GUARD_RUNTIME_DECL} beside it, and no binary of that major exists on THIS HOST (this process is ${rt.running}). Looked in — ${rt.lookedIn}. The guard was NOT RUN, so nothing whatsoever is asserted about ${d.id}: this is a fact about this checkout's toolchain, not about the product. Install it (e.g. \`nvm install ${rt.declared}\`) and re-read.`);
+          r = null;
+        } else if (rt.status === 'undeclarable') {
+          unavailable.push(`RUNTIME-UNAVAILABLE: guard ${d.guard} has a ${GUARD_RUNTIME_DECL} beside it, but ${rt.why}. A runtime declaration this program cannot parse is indistinguishable from one it cannot satisfy, so the guard was NOT RUN and nothing is asserted about ${d.id}. Fix ${rt.declPath} deliberately.`);
+          r = null;
+        } else {
+          r = spawnSync(rt.node, [guardPath, '--defect', d.id], { encoding: 'utf8', timeout: 300000, env: GUARD_ENV, maxBuffer: 16 * 1024 * 1024 });
+          // Printed on EVERY spawned guard, pass or fail. A reading that names the
+          // runtime only when it went wrong is a reading nobody can compare across
+          // two hosts — which is the entire question this row was filed to answer.
+          notes.push(rt.status === 'resolved'
+            ? `RUNTIME RESOLVED: ${d.guard} declares Node ${rt.declared} (${GUARD_RUNTIME_DECL} beside it); ran ${rt.version} from ${rt.node}`
+            : `RUNTIME: ${d.guard} declares none (no ${GUARD_RUNTIME_DECL} beside it); ran this process's own ${rt.version} from ${rt.node}`);
+        }
       }
       if (r) {
         const out = `${r.stdout || ''}${r.stderr || ''}`;
@@ -1801,10 +2118,12 @@ function pushLadder(L, ladder) {
 // and its token spells out which letters were never read. See the D83 boundary in
 // the header: manufacturing a successor to force a verdict is forbidden; reading the
 // ladder without claiming one is exactly how you avoid having to.
-function ladderOnly(fixture, guardOverride, stamp, head) {
+function ladderOnly(fixture, guardOverride, stamp, head, runStart = null) {
   const L = [];
   const waivers = new Set(fixture ? (fixture.unmeasuredWaivers || []) : []);
   const ladder = evaluateLadder(fixture, guardOverride, waivers);
+  // The same end fence as a verdict run: the ladder runs committed guards off this tree.
+  const headEnd = runStart ? assertRepoUnmovedSince(runStart) : null;
 
   L.push(`=== SEAL PREDICATE — LADDER-ONLY READING, NO VERDICT — epic ${EPIC} ===`);
   L.push(`registers: the ladder below is the ${REGISTER_KEY} register — ${KNOWN_DEFECTS.length} registered defect(s)`);
@@ -1867,7 +2186,7 @@ function ladderOnly(fixture, guardOverride, stamp, head) {
   // file's own tests) anchor on the token's HEAD (`^… LADDER-ONLY b-rungs=…`) and on its
   // TAIL (`mode=live repo=… head=…`), so a new field belongs between the two b-fields and
   // nowhere else.
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} b-unavailable=${unread.length}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} repo=${REPO} head=${head || 'NOT-READ'}`);
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} b-unavailable=${unread.length}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} repo=${REPO} head=${head || 'NOT-READ'}${headEnd ? ` head-end=${headEnd}` : ''}`);
   console.log(L.join('\n'));
   return 0;
 }
@@ -1978,6 +2297,52 @@ function assertRepoNotBehindOriginMain() {
     'REPO-BEHIND-ORIGIN-MAIN');
 }
 
+// THE SAME LEG, ASKED AGAIN AT THE END (task-0217190472c7aad7).
+//
+// The leg above fires once, at START. Measured 2026-09-20: a live run took ~19 minutes, and
+// on a merge-busy day `origin/main` moved while the roster walk was descending — so the
+// `head=` the token printed was the head at START, the verdict was certified against a tree
+// the checkout no longer matched, and nothing in the output said so. The next run then
+// refused at 0.2s with REPO-BEHIND-ORIGIN-MAIN, which was the first anyone heard of it.
+//
+// SO THE HEADS ARE READ TWICE. `repoHeads()` records HEAD and the local
+// `refs/remotes/origin/main` before any clause is read; `assertRepoUnmovedSince` reads them
+// again after every clause has been evaluated and before a verdict is printed. Either one
+// moving is REPO-MOVED-DURING-RUN, an INFRA FAULT naming both ends of the window: the
+// clause-(b) legs read guard files off a tree that changed under them, and a verdict over
+// it is a verdict against a head the run outran. The behind-count is NOT re-asked: it is a
+// function of exactly these two refs, so with both unmoved it is the start answer, and with
+// either moved the run has already refused. A verdict that survives prints `head-end=`, the
+// head at the END, beside `head=`, the head at the start.
+//
+// SAME CEILING AS THE START LEG, NAMED AGAIN: this reads LOCAL refs and does not fetch, so a
+// merge on the remote that nobody fetched during the run moves nothing here.
+function repoHeads() {
+  const head = gitProbe(['rev-parse', 'HEAD']);
+  const om = gitProbe(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main']);
+  return {
+    head: head.rc === 0 && head.out ? head.out : null,
+    originMain: om.rc === 0 && om.out ? om.out : null,
+    at: Date.now(),
+  };
+}
+function assertRepoUnmovedSince(start) {
+  const end = repoHeads();
+  const moved = [];
+  const sh = (x) => (x ? x.slice(0, 12) : 'UNREADABLE');
+  if (start.head !== end.head) moved.push(`HEAD ${sh(start.head)} -> ${sh(end.head)}`);
+  if (start.originMain !== end.originMain) moved.push(`origin/main ${sh(start.originMain)} -> ${sh(end.originMain)}`);
+  if (moved.length)
+    throw new Infra(
+      `--repo ${REPO} MOVED DURING THIS RUN: ${moved.join(', ')}, over ${((end.at - start.at) / 1000).toFixed(1)}s between the start of the run and the end of the last clause. `
+      + 'The freshness leg passed at START, and the clause-(b) legs then read guard files, the workflow file and '
+      + 'every `measured_by` path off a tree that changed underneath them, so a verdict now would be certified against '
+      + 'a head this run outran. Nothing is asserted about any clause. Re-run on the tree as it stands.',
+      'REPO-MOVED-DURING-RUN');
+  const short = gitProbe(['rev-parse', '--short', 'HEAD']);
+  return short.rc === 0 && short.out ? short.out : null;
+}
+
 function assertReadableRepoRoot(ledgerPath) {
   if (!existsSync(`${REPO}/.github/workflows/cloud.yml`))
     throw new Infra(
@@ -2029,9 +2394,23 @@ function main() {
   // BEFORE any clause, any refusal and any roster: is the tree under --repo one this
   // program can read at all? A wrong root is an infra fault, not a finding.
   const HEAD = assertReadableRepoRoot(ledgerPath);
+  // The heads at START, for the fence at the END. Live path only: the fixture path names no
+  // tree (`head=NOT-READ`) and has none to outrun.
+  const RUN_START = HEAD ? repoHeads() : null;
 
   L.push(`=== SEAL PREDICATE — epic ${EPIC} ===`);
   L.push(`read at ${STAMP}${fixture ? '  (LEDGER FIXTURE — not live)' : '  (live ledger)'}  (repo ${REPO}${HEAD ? ` @ ${HEAD}` : ''})`);
+
+  // A FIXTURE WHOSE SHAPE `parent_id` CANNOT EMIT IS NOT A WORLD — see
+  // `fixtureParentConflicts` above. Before any refusal and any clause, so it is never scored.
+  if (fixture) {
+    const successorOfFixture = (arg('--successor') || fixture.successor || '(no successor)').toString().trim();
+    const twoParents = fixtureParentConflicts(fixture, EPIC, successorOfFixture);
+    if (twoParents.length)
+      throw new Infra(
+        `the ledger fixture ${ledgerPath} lists ${twoParents.length} _id(s) under MORE THAN ONE PARENT: ${twoParents.map(([id, ps]) => `${id} <- {${ps.join(', ')}}`).join('; ')}. \`parent_id\` is a single field, so the live ledger cannot produce this shape, and a verdict over it asserts something true about a world that does not exist. Nothing is asserted about any clause. Place the row under ONE parent — a re-parented row is absent from \`children\` and present under the successor, with the epic's claim on it carried by \`priorCensus\`.`,
+        'FIXTURE-TWO-PARENTS');
+  }
 
   // ── REFUSALS. Evaluated BEFORE the roster is read, so nothing downstream can
   // print an unresolvable id as a forwarding address. ────────────────────────
@@ -2074,7 +2453,7 @@ function main() {
   // certifies a stub), and BEFORE every successor refusal below. Those four refusals
   // exist to protect a VERDICT, and a reading claims none, so requiring a successor
   // to read the ladder is what made the ladder unreadable for four waves.
-  if (LADDER_ONLY) return ladderOnly(fixture, guardOverride, STAMP, HEAD);
+  if (LADDER_ONLY) return ladderOnly(fixture, guardOverride, STAMP, HEAD, RUN_START);
 
   // R7 — BUCKET (c) HAS NO CARDINALITY FLOOR EITHER. This is R1 and the EMPTY-ROSTER
   // floor pointed at the third population. With `PERMANENT_HUMAN_GATES = {}` the
@@ -2135,7 +2514,7 @@ function main() {
   // proofs assert it is PRESENT before replacing it, so a reword reds loudly here rather
   // than silently putting the suite back on the network.
   const rosterSource = fixture ? (id) => subtreeOf(fixture, id, EPIC, seedChildren) : fetchRoster;
-  const rosterWalk = walkSubtree(EPIC, rosterSource);
+  const rosterWalk = walkSubtree(EPIC, rosterSource, leavesFor(fixture, rosterSource, EPIC));
   const children = rosterWalk.rows;
   const direct = children.filter((c) => c._depth === 1);
   if (rosterWalk.unread.length)
@@ -2190,15 +2569,38 @@ function main() {
     ? fixture.forwarded.map((f) => (typeof f === 'string' ? { _id: f } : f))
     : [];
   const forwardWalk = terminal
-    ? { rows: [], depth: 0, unread: [] }
+    ? { rows: [], depth: 0, unread: [], nodesRead: 0, pruned: 0 }
     : walkSubtree(SUCCESSOR, fixture
       ? (id) => subtreeOf(fixture, id, SUCCESSOR, forwardSeed)
-      : fetchRoster);
+      : fetchRoster, leavesFor(fixture, fetchRoster, SUCCESSOR));
   if (forwardWalk.unread.length)
     throw new Infra(
       `the subtree of the successor ${SUCCESSOR} could not be descended to the end — the walk reached its ${ROSTER_MAX_DEPTH}-level cap with ${forwardWalk.unread.length} node(s) whose children were NEVER READ [${forwardWalk.unread.slice(0, 6).join(', ')}${forwardWalk.unread.length > 6 ? ', …' : ''}]. A forwarding address this walk could not reach is indistinguishable from one that does not exist, and clause (a) would print a correctly-forwarded row as UNNAMED RESIDUE. Nothing is asserted about clause (a).`,
       'SUBTREE-UNREAD');
   const forwarded = new Set(forwardWalk.rows.map((c) => c._id));
+
+  // R9 — THE SUCCESSOR'S SUBTREE OVERLAPS THE EPIC'S (task-5f6267283fe7a277). R4 refuses
+  // `successor === epic` and R6 refuses a successor whose parent chain reaches the epic,
+  // and between them they were believed to keep the two walks disjoint. They do not: a
+  // successor ABOVE the epic — its parent, or any ancestor — has a subtree that CONTAINS
+  // the epic and therefore every row of the epic's roster. `parent_id` is one field, so
+  // that is a shape the live ledger produces, and nothing refused it. Measured on a legal
+  // fixture (successor-contains-epic.json, one parent per `_id`) before this refusal
+  // existed: one open and one considering row, neither forwarded anywhere, and the run
+  // printed `forwarded under successor : 2` and exited 0 at `VERDICT: SEAL a=PASS
+  // orphans=0` — R4's 83-live-rows false PASS, one hop up.
+  //
+  // THE TEST IS THE OVERLAP ITSELF, not an ancestry walk, because the overlap is what
+  // clause (a) would score. On legal input it arises only from a successor at or above the
+  // epic; R4 and R6 answer the other two orders by name before this line is reached. With
+  // this refusal in place the two walks are disjoint on every invocation that is scored, so
+  // the in-roster `fwd` bucket below is empty by construction and a forwarded row can only
+  // be counted through the census, as RE-HOMED.
+  const overlap = forwarded.has(EPIC) ? [EPIC] : children.filter((c) => forwarded.has(c._id)).map((c) => c._id);
+  if (overlap.length)
+    throw new Refusal('SUCCESSOR-OVERLAPS-EPIC',
+      `the successor offered (${SUCCESSOR}) has a subtree that ${forwarded.has(EPIC) ? `CONTAINS ${EPIC} itself — the successor sits ABOVE the epic` : `shares ${overlap.length} row(s) with ${EPIC}'s own subtree [${overlap.slice(0, 6).join(', ')}${overlap.length > 6 ? ', …' : ''}]`}. A row both walks reach has not left the epic, so clause (a) would count it as forwarded by the act of naming a container it already sits in: every row of the epic's roster would read as forwarded and nothing would have moved. R4 refuses the epic itself and R6 a successor inside it; this is the third order. Name a successor OUTSIDE the epic's ancestry, and re-parent the residue onto it.`,
+      'after the roster reads, before any clause was evaluated');
 
   const byStatus = {};
   for (const c of children) byStatus[c.lifecycle_status] = (byStatus[c.lifecycle_status] || 0) + 1;
@@ -2234,9 +2636,12 @@ function main() {
   //
   // ORDER MATTERS. `forwarded` is tested BEFORE the pending bucket, because a named
   // forwarding address is exactly what clause (a) asks for and a considering row that
-  // HAS one must not red. No name is lost by that ordering: `consideringElsewhere`
-  // below re-discloses every considering row that landed in another bucket, so D90's
-  // "printed by name" holds on every branch, not just the common one.
+  // HAS one must not red. Since R9 (SUCCESSOR-OVERLAPS-EPIC) that branch cannot fire on
+  // any scored invocation: the two walks are disjoint, `fwd` is empty, and a considering
+  // row with a forwarding address has left the roster and is named under RE-HOMED. The
+  // one branch a considering row CAN take other than its own bucket is the gate branch,
+  // which labels it by gate and not by status — `consideringElsewhere` below names those,
+  // so D90's "printed by name, as considering" holds on that branch too.
   const orphans = [], gatedLive = [], fwd = [], consideringResidue = [];
   for (const c of residue) {
     if (PERMANENT_HUMAN_GATES[c._id]) gatedLive.push(c._id);
@@ -2244,9 +2649,13 @@ function main() {
     else if (PENDING_STATUSES.includes(c.lifecycle_status)) consideringResidue.push(c._id);
     else orphans.push(c._id);
   }
+  // GATE-LABELLED ONLY. This used to be "every considering row not in its own bucket",
+  // described as "forwarded or gate-labelled"; the forwarded half was reachable only by a
+  // fixture listing one `_id` under two parents, or by a successor above the epic, which
+  // R9 now refuses. What is left is exactly the gate branch, so it is computed as that.
   const consideringElsewhere = considering
     .map((c) => c._id)
-    .filter((id) => !consideringResidue.includes(id));
+    .filter((id) => PERMANENT_HUMAN_GATES[id]);
   // Clause (a) is BOTH failing buckets, never just the orphan one. Splitting the
   // buckets without splitting this predicate would have turned a mis-labelled row
   // into an EXEMPT row — a fix that lowers the bar it was written to correct.
@@ -2259,6 +2668,48 @@ function main() {
   const census = loadCensus(fixture);
   const censusKey = census ? census.key : 'NONE';
   const filingEvents = [];
+  // ── RE-HOMED: THE FORWARDED BUCKET'S ONLY REACHABLE POPULATION ─────────────────
+  //
+  // THE DEFECT THIS CLOSES (cch-w36). `forwarded` is the SUCCESSOR's subtree; the
+  // classify loop above walks `residue`, drawn from `children`, the EPIC's subtree. R4
+  // forbids `successor === epic`, R6 forbids a successor whose parent chain reaches the
+  // epic, R9 forbids a successor whose subtree overlaps the epic's (the successor ABOVE
+  // the epic — R4 and R6 alone let that through, task-5f6267283fe7a277), and `parent_id` is
+  // a single field — so on any invocation those three refusals ALLOW, the two sets are
+  // disjoint BY CONSTRUCTION and `fwd` is structurally empty.
+  // Measured live 2026-09-20 at 149119d00: twelve rows re-parented onto the successor
+  // with `bp task move`, read back from the store on the successor's roster, and the
+  // next run printed `forwarded under successor : 0` while the anti-filing arm named
+  // the same twelve as having LEFT the population without a transition. Dead accounting
+  // printed beside live buckets, and — the part that is a seal-correctness problem, not
+  // a cosmetic one — "forward the residue to a named address" and "empty the roster by
+  // re-parenting" reached the reader in IDENTICAL letters.
+  //
+  // WHICH POPULATION IS HONEST, since it cannot be `residue`. A re-parented row is no
+  // longer in the epic's subtree at all, so no walk rooted at the epic can ever observe
+  // it. The only register that remembers the epic ever owed that row is the PRIOR
+  // CENSUS — which is precisely the population the arm below already iterates. So the
+  // forwarded bucket is scored over `residue ∪ {census departures still unfinished}`,
+  // and a departure is FORWARDED exactly when the successor's own subtree walk — the
+  // same `forwarded` set, the same evidence clause (a) has always demanded — contains
+  // it. Nothing new is fetched and no fence is consulted from a second place.
+  //
+  // THE REFUSALS ARE UNTOUCHED, and deliberately. Making the intersection non-empty by
+  // relaxing R4 or R6 would re-open the one-flag path to a false PASS those refusals
+  // were added to close (83 live rows -> `forwarded: 79`, `orphans: 0`, `a=PASS`). The
+  // fix is about WHICH POPULATION IS CLASSIFIED, never about how wide the fence is.
+  //
+  // THE INVARIANT, stated so a later edit can be checked against it: clause (a) must
+  // still FAIL when residue is genuinely unaddressed. It does — `aPass` is untouched
+  // and still reads `orphans` and `consideringResidue`, both of which are drawn from
+  // the epic's own roster. This arm can only move a row OUT of `filingEvents` (a
+  // blocking bucket) and into `reHomed` (a passing one), and only on positive evidence
+  // that the successor's subtree contains that exact `_id`. A row that left with no
+  // address, or that this run could not resolve, is still a filing event and still
+  // blocks. A re-home can therefore never manufacture a green that the pre-fix file
+  // would have refused for a residue reason; it can only stop charging a correctly
+  // forwarded row as a disappearance.
+  const reHomed = [];
   if (census) {
     const present = new Set(children.map((c) => c._id));
     for (const [id, was] of Object.entries(census.rows)) {
@@ -2267,9 +2718,16 @@ function main() {
       let now = null;
       try { now = resolveDeparted(id, fixture); } catch (e) { now = null; }
       if (now && CLOSED_STATUSES.includes(now)) continue;  // it left by being FINISHED
+      // ORDER MATTERS, exactly as it does in the residue loop above: a named forwarding
+      // address is what clause (a) asks for, so it is tested BEFORE the row is charged
+      // as a disappearance. No name is lost — every re-homed row is printed by id on
+      // the forwarding line AND under ANTI-FILING below.
+      if (forwarded.has(id)) { reHomed.push({ id, was, now: now || 'UNREADABLE' }); continue; }
       filingEvents.push({ id, was, now: now || 'UNREADABLE' });
     }
   }
+  // Clause (a)'s forwarded bucket, over both halves of its population.
+  const forwardedTotal = fwd.length + reHomed.length;
 
   // Bucket (c): every hardcoded gate must resolve. A gate that silently vanished is a
   // gate that stopped being disclosed — that is NO SEAL, not a clean sheet.
@@ -2291,6 +2749,10 @@ function main() {
   // c=UNKNOWN` and throw away two clause readings that were perfectly available.
   const defectUnread = ladder.filter((e) => e.unavailable.length);
 
+  // ── THE END FENCE. Every clause has now been read; nothing is printed until the tree is
+  // shown not to have moved since the start (see `assertRepoUnmovedSince`).
+  const HEAD_END = RUN_START ? assertRepoUnmovedSince(RUN_START) : null;
+
   // ── output ─────────────────────────────────────────────────────────────────
   L.push(`registers: clause (b) and bucket (c) are scored off the ${REGISTER_KEY} register — ${KNOWN_DEFECTS.length} registered defect(s), ${Object.keys(PERMANENT_HUMAN_GATES).length} permanent human gate(s)`);
   L.push(`epic ${EPIC}   successor: ${terminal ? `${TERMINAL} (no successor — post-condition roster read: live=0 considering=0)` : SUCCESSOR}`);
@@ -2301,14 +2763,18 @@ function main() {
   // THIS run, so a future reader re-derives the relation instead of quoting an integer.
   L.push(`depth: ${rosterWalk.depth} level(s) walked (cap ${ROSTER_MAX_DEPTH})  direct ${direct.length} + below ${children.length - direct.length} = ${children.length}  subtree-unread ${rosterWalk.unread.length}`);
   L.push(`forwarding: successor subtree ${forwardWalk.rows.length} row(s) over ${forwardWalk.depth} level(s)`);
+  // THE COST, PRINTED. `read` is nodes whose roster was fetched; `pruned` is rows the
+  // ledger's own child_count called leaves, never read; `requests` is every HTTP request
+  // this process put on the wire, retries included (0 on the fixture path).
+  L.push(`cost: walk read ${rosterWalk.nodesRead + forwardWalk.nodesRead} node(s), pruned ${rosterWalk.pruned + forwardWalk.pruned} leaf row(s)  ledger requests ${LEDGER_REQUESTS}${RUN_START ? `  wall ${((Date.now() - RUN_START.at) / 1000).toFixed(1)}s` : ''}`);
   L.push(`census: ${census ? `${censusKey} (captured ${census.capturedAt}) — ${Object.keys(census.rows).length} row(s) recorded` : 'NONE — the anti-filing arm was NOT RUN and nothing here claims it passed'}`);
   L.push('');
   L.push(`CLAUSE (a) forwarding — residue ${residue.length} (live ${live.length}, considering ${considering.length})`);
-  L.push(`  forwarded under successor : ${fwd.length}`);
+  L.push(`  forwarded under successor : ${forwardedTotal}${reHomed.length ? `  (${fwd.length} still in the epic's roster, ${reHomed.length} RE-HOMED out of it: ${reHomed.slice(0, 8).map((r) => r.id).join(', ')}${reHomed.length > 8 ? ', …' : ''})` : ''}`);
   L.push(`  permanent human gate      : ${gatedLive.length}  [${gatedLive.join(', ') || '-'}]`);
   L.push(`  considering (disclosed)   : ${consideringResidue.length}  [${consideringResidue.slice(0, 8).join(', ') || '-'}${consideringResidue.length > 8 ? ', …' : ''}]`);
   if (consideringElsewhere.length)
-    L.push(`      (+${consideringElsewhere.length} considering row(s) counted on a line above — forwarded or gate-labelled, named here so no considering row is disclosed by count alone: ${consideringElsewhere.slice(0, 8).join(', ')}${consideringElsewhere.length > 8 ? ', …' : ''})`);
+    L.push(`      (+${consideringElsewhere.length} considering row(s) counted on the permanent human gate line above, named here with their status so no considering row is disclosed as a gate alone: ${consideringElsewhere.slice(0, 8).join(', ')}${consideringElsewhere.length > 8 ? ', …' : ''})`);
   L.push(`  UNNAMED RESIDUE (orphans) : ${orphans.length}`);
   orphans.slice(0, 8).forEach((o) => L.push(`      ✗ ${o}`));
   if (orphans.length > 8) L.push(`      … and ${orphans.length - 8} more`);
@@ -2316,16 +2782,32 @@ function main() {
   // re-derivation caught this defect only by doing exactly this sum off the live
   // ledger. If the buckets ever double-count again, this line stops adding up.
   L.push(`  ── buckets partition residue: ${fwd.length} + ${gatedLive.length} + ${consideringResidue.length} + ${orphans.length} = ${residue.length}`);
+  // The sum is over RESIDUE, and a re-homed row is by definition not in it — it left the
+  // epic's subtree. Saying so on its own line keeps the partition arithmetic checkable
+  // instead of silently off by the re-homed count.
+  if (reHomed.length)
+    L.push(`     (+${reHomed.length} re-homed row(s) are NOT in residue — they are no longer in ${EPIC}'s subtree. They are counted on the forwarding line above and listed under ANTI-FILING below.)`);
   L.push('');
   L.push(`ANTI-FILING — rows that LEFT the counted population since the ${censusKey} census`);
   if (!census) {
     L.push('  NOT RUN — no census. A population can shrink by filing and this run cannot tell.');
-  } else if (filingEvents.length === 0) {
-    L.push(`  ✓ 0 filing event(s): every census row that left resolves to done or cancelled today.`);
   } else {
-    L.push(`  FILING EVENT(S) : ${filingEvents.length} — left the population with NO transition to done/cancelled`);
-    filingEvents.slice(0, 8).forEach((f) => L.push(`      ✗ ${f.id}  was=${f.was} now=${f.now}`));
-    if (filingEvents.length > 8) L.push(`      … and ${filingEvents.length - 8} more`);
+    // THE TWO DEPARTURES, IN DIFFERENT LETTERS — the whole point of charter D93's paced
+    // forwarding. "Re-homed under the named successor" and "vanished without a
+    // transition" were previously the SAME sentence, so an honest ~10-rows-a-wave
+    // forwarding read exactly like a population swept to look smaller.
+    if (reHomed.length) {
+      L.push(`  ✓ RE-HOMED UNDER ${SUCCESSOR} : ${reHomed.length} — left ${EPIC}'s roster WITH a forwarding address, found in the successor's own subtree. Counted as FORWARDED by clause (a) above; NOT a filing event.`);
+      reHomed.slice(0, 8).forEach((r) => L.push(`      → ${r.id}  was=${r.was} now=${r.now}`));
+      if (reHomed.length > 8) L.push(`      … and ${reHomed.length - 8} more`);
+    }
+    if (filingEvents.length === 0) {
+      L.push(`  ✓ 0 filing event(s): every census row that left resolves to done or cancelled today${reHomed.length ? `, or is re-homed under ${SUCCESSOR}` : ''}.`);
+    } else {
+      L.push(`  FILING EVENT(S) : ${filingEvents.length} — left the population with NO transition to done/cancelled and NO forwarding address under ${SUCCESSOR}`);
+      filingEvents.slice(0, 8).forEach((f) => L.push(`      ✗ ${f.id}  was=${f.was} now=${f.now}`));
+      if (filingEvents.length > 8) L.push(`      … and ${filingEvents.length - 8} more`);
+    }
   }
   L.push('');
   L.push('BUCKET (c) permanent human gates');
@@ -2352,7 +2834,7 @@ function main() {
     L.push('VERDICT: SEAL');
     L.push('');
     L.push(`SCOPE — what this green does and does NOT claim, read at ${STAMP}:`);
-    L.push(`  Sealed ${children.length} children of ${EPIC}: ${byStatus.done || 0} evidence-closed, ${fwd.length} forwarded by name`);
+    L.push(`  Sealed ${children.length} children of ${EPIC}: ${byStatus.done || 0} evidence-closed, ${forwardedTotal} forwarded by name`);
     L.push(`  ${terminal ? `with NO successor — TERMINAL, on a roster read of live=0 and considering=0` : `to ${SUCCESSOR}`}, and ${Object.keys(PERMANENT_HUMAN_GATES).length} permanent human gate(s) disclosed by hardcoded name.`);
     L.push('  Zero unnamed residue — open, in_progress AND considering all accounted for.');
     L.push(`  Clause (b): ${measuredHere} defect(s) measured HERE by a committed guard, ${measuredElsewhere} MEASURED-ELSEWHERE.`);
@@ -2409,7 +2891,7 @@ function main() {
   // out of the task layer. Zero is the overwhelming majority of parents, and on those the
   // token stays byte-identical to every one quoted before this field existed.
   const draftCount = children.filter((c) => c && c._draft).length;
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${aPass ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'} direct=${direct.length} depth=${rosterWalk.depth} subtree-unread=${rosterWalk.unread.length} census=${censusKey} filing-events=${filingEvents.length}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}${draftCount ? ` drafts=${draftCount}` : ''}`);
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${aPass ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} registers=${REGISTER_KEY} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'}${HEAD_END ? ` head-end=${HEAD_END}` : ''} direct=${direct.length} depth=${rosterWalk.depth} subtree-unread=${rosterWalk.unread.length} census=${censusKey} filing-events=${filingEvents.length}${reHomed.length ? ` re-homed=${reHomed.length}` : ''}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}${draftCount ? ` drafts=${draftCount}` : ''}`);
   console.log(L.join('\n'));
   return ok ? 0 : 1;
 }

@@ -45,6 +45,29 @@ defmodule Barkpark.Tasks.DatasetTwinFence do
   working. Content replication across datasets is an ordinary, supported thing;
   a task in two datasets is a claim that can be lost.
 
+  ## `"task"` appears TWICE, and the two are NOT one property
+
+  Both clauses read `"task"`, which invites collapsing them into one. Do not —
+  they scope the type of DIFFERENT rows, and each is the only thing standing
+  between a legitimate write and a false 409:
+
+    * `def check("task", …)` scopes the type of the write **being born**. It is
+      why a `type:post` birth is never refused, and it is the cheap
+      short-circuit that saves a query on every non-task write. Widen it and a
+      post birth inherits the whole rule.
+    * `d.type == "task"` in `sibling_datasets/4` scopes the type of the
+      **existing** row. `(doc_id, type, dataset_id)` is the unique index, so one
+      id legitimately names rows of several types; without this filter a
+      `type:post` in dataset D refuses an ordinary FIRST task birth of the same
+      id into dataset E.
+
+  A same-type fixture (a post beside a post) cannot tell them apart — with
+  either clause alone deleted the other still answers, which is what made this
+  read as redundancy (task-64cc7c8fbb81d107). The separating fixtures are
+  CROSS-type, and both live in `twin_one_rule_test.exs` under "the producer":
+  a post birth beside a task sibling reds when the head is widened; a task birth
+  beside a post sibling reds when the query filter is dropped.
+
   ## Exemptions, each one measured against a sibling guard
 
     * **Not a birth.** Head-matches `prev_doc == nil`, exactly like

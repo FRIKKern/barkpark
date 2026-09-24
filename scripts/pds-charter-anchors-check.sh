@@ -151,6 +151,10 @@ fi
 
 fails=0
 checked=0
+# THE WORK SIDE of arm A's count identity — one per anchor pair the resolution
+# loop below actually REACHED, tallied before any per-anchor verdict. `checked`
+# is NOT that number: it excludes the `<path>` placeholder on purpose.
+seen=0
 
 # Extract `path`@`literal` pairs. A line may carry more than one; perl walks
 # every match on every line rather than the first, and prints them NUL-free on
@@ -176,6 +180,10 @@ fi
 if [ -n "$anchors" ]; then
   while IFS=$'\t' read -r path literal; do
     [ -n "$path" ] || continue
+    # MUT-SPLICE: anchor-count-identity
+    # Tallied HERE — above the placeholder skip and above every `continue` — so
+    # it counts anchors REACHED, which is the only quantity a short read moves.
+    seen=$((seen + 1))
     [ "$path" = "<path>" ] && continue   # the documented placeholder, not an anchor
     checked=$((checked + 1))
     if [ ! -f "$path" ]; then
@@ -196,6 +204,34 @@ if [ -n "$anchors" ]; then
       fails=$((fails + 1))
     fi
   done <<< "$anchors"
+
+  # ── THE COUNT IDENTITY (task-fb55d468c7dea75b) ─────────────────────────────
+  # The loop above reads `$anchors` on fd 0 (`done <<< "$anchors"`). Any body
+  # child that reads stdin — a future `grep` with no file operand, a `read`, an
+  # `ssh`, a pager — swallows the remaining pairs and the loop ENDS EARLY with
+  # no error and no non-zero status. Nothing downstream could see that: a
+  # resolution loop that stopped after pair 1 of 40 raises no ROTTED and no
+  # AMBIGUOUS, so `fails` stays 0 and the run prints
+  #     RESULT: PASS — every charter content anchor resolves uniquely.
+  # in the SAME WORDS it uses for 40 of 40. "Every" is the assertion, and an
+  # anchor never reached never rots.
+  #
+  # `$pairs` is the enumeration side, already computed above as the non-blank
+  # line count of `$anchors` (`grep -c .`); `perl` emits both fields non-empty
+  # on every line it prints, so a non-blank line and a non-empty `$path` are the
+  # same population. `$seen` is the work side. No body child reads fd 0 today;
+  # the identity is for the one added next year, which is precisely the child no
+  # fd-discipline review can name.
+  # MUT-ANCHOR: anchor-count-identity
+  if [ "$seen" -ne "$pairs" ]; then
+    printf '\nSHORT ANCHOR SWEEP — resolved %s of %s anchor pair(s) parsed from the charter.\n' "$seen" "$pairs"
+    printf '  The resolution loop ended before the parsed list did (a loop-body child that reads\n'
+    printf '  stdin consumes the remaining pairs silently). A partial sweep must never print\n'
+    printf '  RESULT: PASS in the same words as a complete one. This is a fault in THIS script,\n'
+    printf '  not a finding about the charter.\n'
+    exit 2
+  fi
+  # MUT-END: anchor-count-identity
 fi
 
 # Arm B — the legacy bare-citation ratchet.
@@ -244,6 +280,8 @@ dupes="$(printf '%s' "$dupe_list" | grep -c . || true)"
 trigger_gap=0
 trigger_gap_list=""
 trigger_unchecked=""
+trigger_sets=""
+trigger_src=""
 
 if [ ! -f "$TRIGGER_WORKFLOW" ]; then
   trigger_unchecked="workflow not found: $TRIGGER_WORKFLOW"
@@ -253,7 +291,15 @@ else
       my $wf = shift @ARGV;
       open(my $fh, "<", $wf) or die "open: $!";
       my @lines = <$fh>; close $fh;
-      my (@wfpaths, @roster);
+      my (@wfpaths, @roster, @searched, @srcinfo);
+      # Roster rows are matched by SHAPE, never by filename: a line whose whole
+      # content is `pds-harnesses <path>`, indented (the old in-YAML shape) or at
+      # column 0 (the dispatcher-script shape #19505 moved them to).
+      sub roster_rows {
+        my ($txt) = @_; my @out;
+        for my $l (split /\n/, $txt) { push @out, $1 if $l =~ /^\s*pds-harnesses (\S+)\s*$/ }
+        return @out;
+      }
       my ($in_pr, $in_paths) = (0, 0);
       for my $l (@lines) {
         # The workflow-level pull_request paths list: the dispatch half.
@@ -265,14 +311,74 @@ else
           next if $l =~ /^\s*#/ || $l !~ /\S/;
           $in_paths = 0; $in_pr = 0;
         }
-        # The roster rows: the job-SELECTION half.
-        push @roster, $1 if $l =~ /^\s+pds-harnesses (\S+)\s*$/;
+        # The roster rows: the job-SELECTION half. Still read from the
+        # workflow, because that is where they lived before #19505 and where
+        # the self-test fixtures put them.
       }
       # PRECONDITION. An empty set here means the parse stopped matching, not
       # that the workflow stopped filtering — report it, never score it.
       if (!@wfpaths) { print "UNCHECKED\tthe workflow-level pull_request paths list parsed EMPTY\n"; exit }
-      if (!@roster)  { print "UNCHECKED\tthe pds-harnesses roster rows parsed EMPTY\n"; exit }
+      push @roster, roster_rows(join("", @lines));
+      push @srcinfo, sprintf("%s:%d", $wf, scalar(@roster));
+
+      # ── WHERE THE ROSTER LIVES IS DERIVED, NOT HARDCODED ────────────────
+      # #19505 moved the roster rows out of the workflow into
+      # scripts/shell-harness-dispatch.sh and arm E went blind for four days:
+      # the regex matched nothing, the precondition fired, and the job reds
+      # with no coverage verdict at all. Re-pointing this at one new filename
+      # would only re-arm the same trap. So the sources are FOLLOWED from the
+      # workflow: every `.sh` the workflow names (those are the scripts CI
+      # actually runs — the dispatcher is one of them), then, one level
+      # deeper, only files those scripts explicitly `source`/`.`. A roster
+      # that moves into any script the workflow runs, or into anything such a
+      # script sources, is still found. A roster that moves somewhere NONE of
+      # them reaches reds as UNCHECKED naming every file that was read.
+      # The tree of the WORKFLOW ITSELF is searched before the cwd: a self-test
+      # that points this at a fixture workflow must resolve the scripts of that
+      # fixture, never the live copies of the same names in the repo.
+      # (No apostrophes below this line: the whole block is one shell-quoted
+      # string, and one apostrophe ends it and spills perl into the shell.)
+      my @bases = ();
+      { my $d = $wf; $d =~ s{/[^/]*$}{}; $d = "." if $d eq $wf;
+        push @bases, $d, "$d/..", "$d/../..", "$d/../../..", "."; }
+      my %opened = ();
+      my @queue = ({ txt => join("", @lines), depth => 0 });
+      while (my $item = shift @queue) {
+        last if scalar(@searched) >= 200;
+        my @toks;
+        if ($item->{depth} == 0) {
+          @toks = ($item->{txt} =~ m{([A-Za-z0-9_][A-Za-z0-9_./-]*\.sh)}g);
+        } elsif ($item->{depth} == 1) {
+          for my $l (split /\n/, $item->{txt}) {
+            push @toks, $1 if $l =~ /^\s*(?:source|\.)\s+"?([A-Za-z0-9_][A-Za-z0-9_.\/-]*\.sh)"?/;
+          }
+        }
+        for my $tok (@toks) {
+          my $p;
+          for my $b (@bases) { my $c = "$b/$tok"; if (-f $c) { $p = $c; last } }
+          next unless defined $p;
+          my $key = $p; $key =~ s{/+}{/}g;
+          next if $opened{$key}++;
+          open(my $g, "<", $p) or next;
+          my $body = do { local $/; <$g> }; close $g;
+          push @searched, $tok;
+          my @rows = roster_rows($body);
+          if (@rows) { push @roster, @rows; push @srcinfo, sprintf("%s:%d", $tok, scalar(@rows)) }
+          push @queue, { txt => $body, depth => $item->{depth} + 1 };
+        }
+      }
+
+      # PRECONDITION, and the REGRESSION GUARD the move of #19505 earned: an
+      # empty roster names every file that was read, so the next move is a
+      # loud red with a worklist rather than a silent read of zero rows.
+      if (!@roster) {
+        my @shown = @searched > 12 ? (@searched[0..11], sprintf("(+%d more)", scalar(@searched) - 12)) : @searched;
+        printf "UNCHECKED\tthe pds-harnesses roster rows parsed EMPTY — read %s and %d script(s) it names: %s\n",
+          $wf, scalar(@searched), (@shown ? join(", ", @shown) : "none");
+        exit;
+      }
       printf "SETS\t%d\t%d\n", scalar(@wfpaths), scalar(@roster);
+      printf "ROSTERSRC\t%s\n", join(" ", @srcinfo);
       sub to_re {
         my ($g) = @_; my $o = ""; my $i = 0;
         while ($i < length $g) {
@@ -300,13 +406,21 @@ else
       }
     ' "$TRIGGER_WORKFLOW" 2>&1)"
 
-  if printf '%s' "$trigger_out" | grep -q '^UNCHECKED'; then
+  # Here-strings, not `printf … | grep -q`: under this file's pipefail the
+  # reader's early exit SIGPIPEs the producer and 141 comes back, so a MATCH
+  # reads as a non-match. `$trigger_out` is arm E's whole transcript.
+  if grep -q '^UNCHECKED' <<<"$trigger_out"; then
     trigger_unchecked="$(printf '%s' "$trigger_out" | sed -n 's/^UNCHECKED\t//p' | head -1)"
-  elif ! printf '%s' "$trigger_out" | grep -q '^SETS'; then
+  elif ! grep -q '^SETS' <<<"$trigger_out"; then
     trigger_unchecked="the trigger parse produced no verdict line: $trigger_out"
   else
     trigger_gap_list="$(printf '%s' "$trigger_out" | grep '^GAP' | cut -f2- || true)"
     trigger_gap="$(printf '%s' "$trigger_gap_list" | grep -c . || true)"
+    # The two set sizes and the per-file roster provenance, printed so a READER
+    # of a green run can see WHICH file the roster came from. A verdict scored
+    # off a roster nobody can locate is the failure this arm already had once.
+    trigger_sets="$(printf '%s' "$trigger_out" | sed -n 's/^SETS\t/SETS /p' | tr '\t' ' ' | head -1)"
+    trigger_src="$(printf '%s' "$trigger_out" | sed -n 's/^ROSTERSRC\t//p' | head -1)"
   fi
 fi
 
@@ -326,6 +440,7 @@ if [ -n "$trigger_unchecked" ]; then
   printf 'untriggerable cites . UNCHECKED (arm E could not look)\n'
 else
   printf 'untriggerable cites . %s (ceiling %s — cited paths that cannot dispatch this check)\n' "$trigger_gap" "$TRIGGER_GAP_CEILING"
+  printf '                      %s · roster from %s\n' "$trigger_sets" "$trigger_src"
 fi
 
 if [ "$bare" -gt "$LEGACY_BARE_CEILING" ]; then

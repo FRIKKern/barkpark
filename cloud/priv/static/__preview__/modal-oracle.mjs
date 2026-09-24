@@ -157,6 +157,18 @@ const DEFAULT_SCEN = [
   "account-modal-2fa-badcode",
   "account-modal-me-unreadable",
   "tokens-reveal",
+  // The primitive's other consumer SHAPES (gr-blk-oracle-modal-callsite-
+  // coverage). Names, not indexes: every one of these is validated against
+  // scenarios.mjs by the roster guard before a browser is spawned, which is the
+  // whole reason a typo cannot measure the right CSS on the wrong screen.
+  "tokens-revoke",
+  "mixed-fleet",
+  "overview-attention",
+  // The two call sites that had NO SCENARIO AT ALL until task-499cab525e65018b
+  // — the gap the enumeration above filed rather than implied. Same rule: names,
+  // validated against scenarios.mjs AND against this file's plans before Chrome.
+  "instance-pin-version",
+  "instance-update-conflict",
 ];
 
 // ── THE TOKEN REVEAL AS A DRIVEN STATE (cch-w21-bl-token-reveal-modal-oracle)
@@ -241,6 +253,155 @@ const ME_UNREADABLE_SCEN = "account-modal-me-unreadable";
 // could go green on the account modal's determinate OFF panel.
 const UNKNOWN_ARM_HOST = "#a2f-unknown-line";
 
+// ── THE PRIMITIVE'S OTHER CONSUMERS (gr-blk-oracle-modal-callsite-coverage) ──
+// Until this task the roster was the ACCOUNT family plus the token reveal, and
+// the honest statement of what it certified was: ONE consumer of a shared
+// primitive. Derived on origin/main, not estimated — the filing said "15+":
+//
+//   $ grep -n "openModal(" cloud/priv/static/app.js | wc -l
+//   31
+//
+// 31 hits, of which THREE are not calls: two prose lines (the file header's
+// "primitives — toast() … and openModal()/closeModal()" and the comment above
+// the definition) and the `function openModal(html) {` definition itself. The
+// true call-site count is **28**, each in a DISTINCT enclosing function:
+//
+//   openConfirmModal, openAccountModal, openResurrectModal,
+//   openProviderCredential, openTokenModal, revealToken, confirmRevokeToken,
+//   confirmUpdateInstance, openUpdateConflictModal, openAttachDomainModal,
+//   openAddSupportModal, openPinModal, openCreateSiteModal,
+//   showWebhookSecretModal, openCreateWebhookModal, openEditWebhookModal,
+//   confirmDeleteWebhook, openSiteEnvModal, confirmDeploy, openSiteGithub,
+//   openLaunchModal, openCancelPlanModal, openInviteModal, revealInvite,
+//   openRoleModal, confirmRevokeInvite, openCommandPalette, openOffloadModal
+//
+// Re-derive, never trust this list:
+//   grep -n "openModal(" cloud/priv/static/app.js
+//
+// THREE of them are driven here, and the choice is not arbitrary — each is a
+// STRUCTURALLY different consumer shape, and between them they cover the three
+// ways the console gets a dialog on screen:
+//
+//   * openCommandPalette  — the `.modal-root:has(.cmdk)` family. This is the
+//     consumer that makes the exact-selector lesson concrete rather than
+//     theoretical: under #4592 the two `:has(.cmdk)` rules PARSE FINE while the
+//     base rule is eaten, so the palette is precisely the screen on which a
+//     substring check reads greenest while the primitive is dead. Opened by the
+//     REAL Cmd/Ctrl+K keydown path, not by calling the function.
+//   * confirmRevokeToken  — the CONFIRM-SHEET shape (a short, action-bearing
+//     dialog built from an inline HTML string, no model object), reached by a
+//     real click on a real row's Revoke button.
+//   * openLaunchModal     — the SLOT shape: `openModal('<div id="launch-modal-
+//     slot"></div>')` opens an EMPTY body which another renderer fills after
+//     the fact. If the primitive's geometry were asserted only on dialogs whose
+//     content arrives with them, this class would be untested. Reached by the
+//     legacy `#launch` bookmark, which applyRoute honours.
+//
+// The other 25 call sites are REPORTED AS A GAP, not silently implied: this
+// file now certifies FOUR consumer shapes of a 28-call-site primitive, which is
+// a great deal more than one and is still not all of them. The PR's call-site
+// table carries the full mapping (function → scenario, or GAP).
+const CONFIRM_SHEET_SCEN = "tokens-revoke";
+const PALETTE_SCEN = "mixed-fleet";
+const LAUNCH_SCEN = "overview-attention";
+
+// The tokens screen with at least one REVOKABLE row. `tokens-revoke` carries a
+// fourth, already-revoked token that renders a row but NO button, so polling
+// for `.token-row` would land before the button exists; poll for the button.
+const TOKENS_REVOKABLE_PROBE =
+  `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+  `return !!(v && v.id==='view-tokens' && document.querySelector('.token-revoke[data-id]'));})()`;
+
+// A REAL click on a REAL row's Revoke, the way a person reaches the sheet —
+// the same doctrine the mint chain above follows. Calling confirmRevokeToken()
+// directly would route around the delegation in renderTokens().
+const REVOKE_CHAIN_JS =
+  `(function(){var b=document.querySelector('.token-revoke[data-id]');` +
+  `if(!b) return false; b.click(); return true;})()`;
+
+// The confirm sheet is up AND it is the revoke sheet: #token-revoke-go is the
+// button that performs the irreversible DELETE.
+const CONFIRM_OPEN_PROBE =
+  `(function(){var r=document.getElementById('modal-root');` +
+  `return !!(r && !r.hidden && r.querySelector('.modal-card') && ` +
+  `document.getElementById('token-revoke-go'));})()`;
+
+// The authed shell, painted, with NOTHING open — the palette's own guard is
+// "one modal root: never stack over an open dialog", so a chain that fires
+// while some other dialog is up silently no-ops and the state would report
+// "the modal never opened" without saying why.
+const SHELL_IDLE_PROBE =
+  `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+  `var r=document.getElementById('modal-root');` +
+  `return !!(v && r && r.hidden);})()`;
+
+// THE REAL KEY PATH. The listener reads e.key/e.metaKey off the event, so a
+// dispatched KeyboardEvent travels the same handler a physical Cmd+K does —
+// including its four no-op guards (a modal already open, the /new and
+// /activate flows, and no session). Calling openCommandPalette() would skip
+// every one of them.
+const PALETTE_CHAIN_JS =
+  `(function(){document.dispatchEvent(new KeyboardEvent('keydown',` +
+  `{key:'k',metaKey:true,bubbles:true,cancelable:true}));return true;})()`;
+
+const PALETTE_OPEN_PROBE =
+  `(function(){var r=document.getElementById('modal-root');` +
+  `return !!(r && !r.hidden && r.querySelector('.modal-card') && ` +
+  `document.getElementById('cmdk-input'));})()`;
+
+// The slot shape. `#launch-modal-slot` is what openModal() was handed; the
+// renderer replaces its contents, so assert on the form that lands in it.
+const LAUNCH_OPEN_PROBE =
+  `(function(){var r=document.getElementById('modal-root');` +
+  `return !!(r && !r.hidden && r.querySelector('.modal-card') && ` +
+  `r.querySelector('#new-launch-form, #launch-modal-slot'));})()`;
+
+// ── THE TWO CALL SITES THE ENUMERATION FOUND WITH NO SCENARIO ───────────────
+// (task-499cab525e65018b.) The table above reports 28 openModal call sites and
+// maps each to a scenario or to a GAP. There were exactly two GAPS —
+// `openPinModal` and `openUpdateConflictModal` — and a GAP is not something a
+// planFor() branch can close, because there was no screen to plan against:
+// pin-race.mjs tests the pin LOGIC and renders nothing. The fixtures now exist
+// (`instance-pin-version`, `instance-update-conflict`, both `instance-behind`
+// deep-copied), so these are the first two states this oracle drives that it
+// could not have driven at any earlier commit.
+//
+// THEY ARE OPENED BY THE SCENARIO'S OWN DECLARED `modal` DRIVER, not by a chain
+// in this file, and that is deliberate rather than lazy. #19677 promoted the
+// modal seam from shoot.sh's `account-modal*` NAME CONVENTION to a scenarios.mjs
+// FIELD that mock.js dispatches on; the account family's plan already rides that
+// same seam (`&modal=account`, land null, drive null). Driving these two from
+// here as well would fire the opener TWICE — mock.js's declared driver is
+// already clicking — and, worse, would certify a dialog this corpus's own PNGs
+// are NOT proven to reach. Asserting the geometry of exactly what the shot
+// contains is the point.
+const PIN_FORM_SCEN = "instance-pin-version";
+const UPDATE_CONFLICT_SCEN = "instance-update-conflict";
+
+// DERIVED from the fixture, never typed here: the instance id lives in
+// scenarios.mjs's IDS and a second copy of it in this file would be a constant
+// that can rot silently into "the right CSS on the wrong screen".
+const deepLinkOf = (scen) => SCENARIOS[scen].deepLink;
+
+// `#pin-form` and not `.modal-card`: the Updates panel's three OTHER `data-au`
+// controls (pause/resume/unpin) open no dialog at all, and the panel's Roll
+// back opens the GENERIC confirm — which has no form. The form is what makes
+// this the pin sheet.
+const PIN_OPEN_PROBE =
+  `(function(){var r=document.getElementById('modal-root');` +
+  `return !!(r && !r.hidden && r.querySelector('.modal-card') && ` +
+  `document.getElementById('pin-form') && document.getElementById('pin-go'));})()`;
+
+// `#update-force` is the override button, and it exists ONLY on a conflict copy
+// that carries a forceLabel. After the drive's FIRST click confirmUpdateInstance's
+// generic confirm is already up and `.modal-card` is already true, so a card
+// check alone would go green on the dialog this state exists to watch be
+// REPLACED.
+const CONFLICT_OPEN_PROBE =
+  `(function(){var r=document.getElementById('modal-root');` +
+  `return !!(r && !r.hidden && r.querySelector('.modal-card') && ` +
+  `document.getElementById('update-force'));})()`;
+
 // The landed tokens screen, before a single gesture. `?scen=` alone does not
 // route; the deep link does, and this asserts it arrived.
 const TOKENS_VIEW_PROBE =
@@ -308,6 +469,61 @@ const ORACLE_CI_SCOPE =
   "BLOCK a merge. A hand-run still buys the same evidence; it just is not the " +
   "only reader any more.";
 
+// ── WHAT THIS FILE HAS A PLAN FOR (gr-blk-oracle-modal-callsite-coverage) ───
+// THE SECOND HALF OF THE ROSTER GUARD, and it was missing. The guard checked
+// "is this a key of scenarios.mjs" and stopped there, which was sufficient
+// while every state rode the one `&modal=account` plan. It is not sufficient
+// now. MEASURED on this branch, before this set existed:
+//
+//   $ SCEN=billing-trial THEME=light node cloud/priv/static/__preview__/modal-oracle.mjs
+//    ok   billing-trial · light · 1440x900   rules exact=1 substr=9 · pos=fixed …
+//   ORACLE PASS — 1 state(s) asserted, 0 failing
+//
+// `billing-trial` is a REAL key, so the guard waved it through, planFor() fell
+// through to the account plan, and `&modal=account` painted the account modal
+// over the billing screen. The run measured the account dialog and printed the
+// billing scenario's name: the identical "right CSS on the WRONG screen" false
+// green the typo case documents, reached without a typo. A roster that now
+// INVITES non-account names makes that reachable by hand, so the guard must
+// refuse a name this file has no plan for — before Chrome, like everything
+// else in it.
+//
+// THE ACCOUNT FAMILY IS A FIELD, NOT A NAME (task-31d8058ed865a3bd). The
+// fallback plan IS the account family's plan (`&modal=account`,
+// MODAL_OPEN_PROBE, no contract), and a scenario belongs to that family when its
+// DECLARED `modal` driver opens the account sheet — mock.js MODAL_DRIVERS
+// `account` and `account-2fa-badcode`, both `openAccountModalThen(...)`. This
+// used to be `/^account-modal/` on the NAME, the last site holding the retired
+// shoot.sh convention in place after #19677 moved the seam to the field: a
+// scenario declaring `modal: "account"` under any other name was refused
+// UNPLANNED, and — the other direction — an `account-modal*` name that declared
+// NO driver was waved through to a plan whose open probe then waited on a
+// dialog nothing drives. `&modal=account` in the suffix is a no-op for both
+// members (mock.js resolves the scenario's own field first), so the badcode
+// member keeps its specific drive.
+//
+// A new account-opening driver added to MODAL_DRIVERS is refused here UNPLANNED
+// (exit 2, before Chrome) until it is named in this set: loud, never a false
+// green. modal-oracle.test.mjs holds the renamed-scenario proof.
+const ACCOUNT_DRIVERS = new Set(["account", "account-2fa-badcode"]);
+const PLANNED_SCENS = new Set([
+  TOKEN_REVEAL_SCEN,
+  ME_UNREADABLE_SCEN,
+  CONFIRM_SHEET_SCEN,
+  PALETTE_SCEN,
+  LAUNCH_SCEN,
+  PIN_FORM_SCEN,
+  UPDATE_CONFLICT_SCEN,
+]);
+// `scenarios` defaults to the shipped corpus; the test hands in a renamed one.
+export const hasPlan = (s, scenarios = SCENARIOS) =>
+  PLANNED_SCENS.has(s) ||
+  (Object.prototype.hasOwnProperty.call(scenarios, s) &&
+    ACCOUNT_DRIVERS.has(scenarios[s] && scenarios[s].modal));
+export const plannedRoster = (scenarios = SCENARIOS) =>
+  Object.keys(scenarios).filter((s) => hasPlan(s, scenarios)).sort();
+export { DEFAULT_SCEN };
+
 // Viewport. 900px tall on purpose: it is shorter than the 9-session account
 // card, which is what makes assertion 3 meaningful.
 const VIEW_W = Number(process.env.WIDTH || 1440);
@@ -341,6 +557,16 @@ function rosterGuard() {
       problems.push(
         `unknown SCEN "${s}" — not a key of scenarios.mjs → SCENARIOS ` +
           `(did you mean one of: ${DEFAULT_SCEN.join(", ")}?)`,
+      );
+    } else if (!hasPlan(s)) {
+      problems.push(
+        `UNPLANNED SCEN "${s}" — it IS a key of scenarios.mjs, but this file has no ` +
+          `plan for it, so planFor() would fall through to the account plan and ` +
+          `&modal=account would paint the ACCOUNT modal over that scenario's screen. ` +
+          `The run would print "${s}" and measure the account dialog. Planned: ` +
+          `${[...PLANNED_SCENS].join(", ")}, plus any scenario whose declared \`modal\` ` +
+          `driver is one of ${[...ACCOUNT_DRIVERS].join(", ")}. Add a ` +
+          `planFor() branch (suffix/land/drive/open/cells/cfg) before naming it here.`,
       );
     }
   }
@@ -586,8 +812,30 @@ function assertJs(cfg) { return `(function () {
     var t = (btns[b].textContent || "").trim();
     if (/^(close|log out|logout)$/i.test(t) || (btns[b].classList && btns[b].classList.contains("modal-x"))) {
       var rb = btns[b].getBoundingClientRect();
-      wanted.push({ label: t || "×", w: Math.round(rb.width), h: Math.round(rb.height) });
-      if (rb.width <= 0 || rb.height <= 0) {
+      // NOT OFFERED vs BROKEN — the distinction this sweep lacked until the
+      // roster widened past the account family (gr-blk-oracle-modal-callsite-
+      // coverage). app.css carries a rule setting .modal-x to display:none
+      // inside .modal-root:has(.cmdk) - NO BACKTICKS ANYWHERE IN THIS STRING,
+      // it IS a template literal and a stray one closes it (the header says so,
+      // and it cost a cycle here too). The command palette WITHHOLDS the close
+      // ×, so the element is in the markup with a 0x0 box and this sweep read
+      // it as "a control with a zero-area box" — a red on a design decision, on
+      // the very first non-account consumer it met. An author rule that sets
+      // display:none means the dialog does not OFFER that control; a control
+      // the dialog DOES offer and renders at zero area is still the defect this
+      // leg exists to catch, and that arm is untouched.
+      var bcs = getComputedStyle(btns[b]);
+      var withheld = bcs.display === "none";
+      wanted.push({
+        label: t || "×", w: Math.round(rb.width), h: Math.round(rb.height),
+        withheld: withheld,
+      });
+      if (withheld) {
+        out.notes.push(
+          "control '" + (t || "×") + "' is not offered by this dialog (display:none from an " +
+          "author rule) — withheld, not broken, so the zero-area check does not apply to it"
+        );
+      } else if (rb.width <= 0 || rb.height <= 0) {
         out.failures.push("REACHABILITY (non-#4592 class): control '" + (t || "×") + "' has a zero-area box");
       }
     }
@@ -833,6 +1081,148 @@ function planFor(scen) {
       },
     };
   }
+  // ── THE CONFIRM SHEET (confirmRevokeToken) ───────────────────────────────
+  // A short, action-bearing dialog built from an inline HTML string with no
+  // model object behind it. dialogHost pins it to the REVOKE sheet: mock.js
+  // will happily have some other dialog up, and sections 1-4 answer the same
+  // on any of them.
+  if (scen === CONFIRM_SHEET_SCEN) {
+    return {
+      suffix: "#settings/tokens",
+      land: TOKENS_REVOKABLE_PROBE,
+      drive: REVOKE_CHAIN_JS,
+      open: CONFIRM_OPEN_PROBE,
+      cells: [{ w: VIEW_W, h: VIEW_H, requireTall: false }],
+      cfg: {
+        state: "confirm-revoke-token",
+        dialogHost: "#token-revoke-go",
+        dialogHostWhy:
+          "the click on a row's Revoke opened SOME dialog, but not the revoke confirm sheet",
+        requiredControl: "#token-revoke-go",
+        requiredControlLabel: "Revoke",
+        requiredControlWhy:
+          "the control that performs the irreversible DELETE this sheet exists to confirm",
+      },
+    };
+  }
+
+  // ── THE COMMAND PALETTE (openCommandPalette) ─────────────────────────────
+  // The `.modal-root:has(.cmdk)` family — the consumer on which a SUBSTRING
+  // CSSOM check reads greenest under the #4592 defect, because both :has(.cmdk)
+  // rules parse fine while the base rule is eaten. Asserting the EXACT base
+  // rule here is the lesson made concrete.
+  if (scen === PALETTE_SCEN) {
+    return {
+      suffix: "#fleet",
+      land: SHELL_IDLE_PROBE,
+      drive: PALETTE_CHAIN_JS,
+      open: PALETTE_OPEN_PROBE,
+      cells: [{ w: VIEW_W, h: VIEW_H, requireTall: false }],
+      cfg: {
+        state: "command-palette",
+        dialogHost: "#cmdk-input",
+        dialogHostWhy:
+          "the Cmd+K keydown opened SOME dialog, but not the command palette — " +
+          "the handler's own guards (a modal already open, no session, the /new " +
+          "and /activate flows) all no-op silently",
+        requiredControl: "#cmdk-input",
+        requiredControlLabel: "the palette query field",
+        requiredControlWhy:
+          "the only control in this dialog — a palette you cannot type into is a palette",
+      },
+    };
+  }
+
+  // ── THE SLOT SHAPE (openLaunchModal) ─────────────────────────────────────
+  // `openModal('<div id="launch-modal-slot"></div>')` opens an EMPTY body that
+  // another renderer fills afterwards. Every other state here hands openModal a
+  // finished string, so without this the class of dialog whose content arrives
+  // SECOND — and whose height therefore lands after the root is already up — is
+  // untested. Reached by the legacy `#launch` bookmark, which applyRoute lands
+  // on Overview and then reopens.
+  if (scen === LAUNCH_SCEN) {
+    return {
+      suffix: "#launch",
+      land: null,
+      drive: null,
+      open: LAUNCH_OPEN_PROBE,
+      cells: [{ w: VIEW_W, h: VIEW_H, requireTall: false }],
+      cfg: {
+        state: "launch-modal",
+        // `.launch-form`, not `#new-launch-form`: the MODAL mount renders
+        // renderLaunchName's class-keyed form, while `#new-launch-form` belongs
+        // to the /new real-path funnel. Measured, not assumed — the first run
+        // of this state said "no '#new-launch-form' inside the open .modal-card"
+        // on a card that was 462px of real launch flow.
+        dialogHost: ".launch-form",
+        dialogHostWhy:
+          "the #launch bookmark opened the modal but the launch form never landed in " +
+          "its slot — the slot shape's whole risk is content that arrives second, and " +
+          "launchFlow also has two NON-form arms (the pre-hoc role refusal and the " +
+          "unknown-/v1/me card) that would otherwise buy a green here",
+        requiredControl: ".launch-form button[type=submit]",
+        requiredControlLabel: "Launch",
+        requiredControlWhy: "the only control that submits this flow",
+      },
+    };
+  }
+
+  // ── THE PIN FORM (openPinModal) ──────────────────────────────────────────
+  // The FORM shape, and the first state here reached through an AUTHORITY-GATED
+  // control: `[data-au="pin"]` carries its live mount hook on the granted arm
+  // only (adminWriteControlHtml), so this dialog is one a plain member is never
+  // handed the button for. Opened by the scenario's declared driver.
+  if (scen === PIN_FORM_SCEN) {
+    return {
+      suffix: deepLinkOf(PIN_FORM_SCEN),
+      land: null,
+      drive: null,
+      open: PIN_OPEN_PROBE,
+      cells: [{ w: VIEW_W, h: VIEW_H, requireTall: false }],
+      cfg: {
+        state: "pin-version",
+        dialogHost: "#pin-form",
+        dialogHostWhy:
+          "the click on the panel's Pin version control opened SOME dialog, but not the pin " +
+          "form - the same panel's Roll back opens the GENERIC confirm, which has no form at all",
+        requiredControl: "#pin-go",
+        requiredControlLabel: "Pin version",
+        requiredControlWhy:
+          "the only control that submits the freeze this dialog exists to set",
+      },
+    };
+  }
+
+  // ── THE PIN-CONFLICT SHEET (openUpdateConflictModal) ─────────────────────
+  // The REFUSAL shape, and the only state in this file whose dialog REPLACES
+  // another one: the drive clicks #inst-update (confirmUpdateInstance's generic
+  // confirm opens), then #update-go inside it, and the 409 the fixture's
+  // `instanceSelfUpdate` answers is what swaps that confirm for this sheet.
+  // Charter-relevant and the reason the state is worth its cost: a failed
+  // confirm never dies into a toast, so the geometry of the dialog the operator
+  // is LEFT in is exactly what the #4592 mechanism would take away.
+  if (scen === UPDATE_CONFLICT_SCEN) {
+    return {
+      suffix: deepLinkOf(UPDATE_CONFLICT_SCEN),
+      land: null,
+      drive: null,
+      open: CONFLICT_OPEN_PROBE,
+      cells: [{ w: VIEW_W, h: VIEW_H, requireTall: false }],
+      cfg: {
+        state: "update-conflict",
+        dialogHost: "#update-force",
+        dialogHostWhy:
+          "a dialog is up, but it is still the GENERIC confirm the first click opened - " +
+          "#update-force exists only on a conflict copy carrying a forceLabel, so its absence " +
+          "means the 409 never landed or never classified as kind 'pinned'",
+        requiredControl: "#update-force",
+        requiredControlLabel: "Update anyway",
+        requiredControlWhy:
+          "the explicit override that is the whole reason this refusal is a dialog and not a toast",
+      },
+    };
+  }
+
   return {
     suffix: "&modal=account",
     land: null,
@@ -1034,6 +1424,12 @@ async function main() {
 
     const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
     process.stdout.write(`>> ${version.Browser} · node ${process.version}\n`);
+    // THE SCOPE OF THIS RUN, PRINTED WITH ITS RESULT (D906). Everything below
+    // is measured in ONE engine. D168 asserted a cross-browser property off a
+    // green like this one and stood for four waves until a hand-driven Firefox
+    // refuted it (D904). browser-axis-census.mjs derives the engine from this
+    // file's own discovery candidates and reds if this line disagrees with them.
+    process.stdout.write(">> browser axis  Blink — 1 of 3 engine families (Blink · Gecko · WebKit). A green here is NOT a cross-browser green.\n");
     process.stdout.write(`>> ${ORACLE_CI_SCOPE}\n\n`);
     cdp = await Cdp.connect(version.webSocketDebuggerUrl);
 
@@ -1163,7 +1559,16 @@ async function main() {
             ? ` · badge="${r.indeterminateText}" retry=${ctrlCell}` +
               ` hitRetry=${r.ctrlHit ?? "-"} a2f-start=${r.forbiddenPainted ? "PAINTED" : "absent"}`
             : r.tokenChars === undefined
-            ? ""
+            // THE NEW CONSUMER SHAPES PRINT THEIR CONTROL TOO (gr-blk-oracle-
+            // modal-callsite-coverage). Without this arm the confirm sheet, the
+            // palette and the launch modal printed a line IDENTICAL to a state
+            // that declares no contract at all, and a reader could not tell a
+            // required-control assertion that RAN from one that was never
+            // configured — the same "reads like a pass" failure the tall-card
+            // N/A note taught this file.
+            ? (r.ctrlBox
+                ? ` · ctrl=${ctrlCell} hit=${r.ctrlHit ?? "-"}`
+                : "")
             : ` · tok=${r.tokenChars}c/${r.tokenLines}L` +
               ` done=${ctrlCell}` +
               ` scrolled=${r.rootScrollTop ?? "-"}/${r.rootScrollMax ?? "-"}` +
@@ -1209,4 +1614,14 @@ async function main() {
   process.exit(0);
 }
 
-main();
+// Run only as a program. Importing this file (modal-oracle.test.mjs does, for
+// hasPlan) must not boot Chrome or call process.exit.
+const invokedAsProgram = (() => {
+  try {
+    return !!process.argv[1] &&
+      fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+if (invokedAsProgram) main();

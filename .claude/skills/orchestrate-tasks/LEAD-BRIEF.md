@@ -28,8 +28,22 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
 ## The loop (per row)
 
 1. **T1 triage — you, cheap, before any worker.** `env -u BARKPARK_TOKEN bp task get <id>`
-   (criteria live under `doc.content`). Then prove the premise on `origin/main`:
-   `git show origin/main:<path>` + grep. Confirm the defect EXISTS, is REACHABLE, and is
+   (criteria live under `doc.content`). Then prove the premise AT THE REF, and fetch first —
+   **`git fetch origin main` and then `git show origin/main:<path>` + grep, from a worktree, never
+   `cat`/`grep`/`git show HEAD:` in the shared checkout.** Both halves are load-bearing: without
+   the fetch, `origin/main` is whatever ref is on disk, which is as old as the last fetch.
+   WHY INSPECTION CANNOT CATCH THIS, and why the rule is worded as a COMMAND and not a caution:
+   a stale checkout is a valid git repo, on `main`, clean, and every read of it SUCCEEDS. `cat`,
+   `grep`, `sed` and `git show HEAD:<path>` return exit 0 and well-formed, internally CONSISTENT
+   content — the file agrees with its own tests, its own comments and its sibling files, because
+   it is a coherent older SNAPSHOT of the tree, not a corruption of the current one. There is no
+   error, no empty read, no malformed byte to notice, so re-reading it more carefully cannot
+   help: the failure is a CONFIRMED ANSWER TO THE WRONG QUESTION. Measured 2026-09-21 — the
+   shared checkout was 581 commits behind and two agents filed two independent false findings off
+   it in one shift, one of them a P1 against an instrument that had already been fixed on main.
+   `held-liveness.sh` now prints that distance at the top of every loop (see the pulse section);
+   when it says `CHECKOUT STALE`, every unfetched read you have made this session is suspect.
+   Confirm the defect EXISTS, is REACHABLE, and is
    NOT ALREADY BUILT (search `gh pr list --search "<id>"` and the ledger for a PR). A
    filed row is a measurement with a timestamp; many are stale within hours. If the
    premise is false, close the row honestly: `bp task close <id> <you> <epoch> cancelled
@@ -70,8 +84,12 @@ system where it hurt you, (3) leave the ledger and git telling the truth.
    never borrow `_build` from another tree. NOT bare `mix test <files>`: mix refuses
    only when EVERY named path is unmatched, so one real path makes a renamed or
    mistyped sibling vanish and the run still prints `N tests, 0 failures` and exits 0
-   (task-1d5bf80f8f4de47a). The strict runner refuses first, exit 2, naming the
-   offending argument, and forwards every argument unchanged otherwise. Go: `go build ./... && go test ./internal/cli/...`.
+   (task-1d5bf80f8f4de47a). The strict runner refuses first, **exit 64**, naming the
+   offending argument, and forwards every argument unchanged otherwise. READ THE
+   CODE, not the output: 64 = REFUSED, nothing ran (fix the argv); 2 = the suite RAN
+   and tests FAILED (fix the code); 0 = green. Before 2026-09-20 a refusal also exited
+   2, so `… || echo REFUSED` called a red suite a refusal (task-620ea822de73bf5e). Go: `go build ./... && go test ./internal/cli/...`.
+   Beside mix-test-strict.sh, any api/test edit also runs `bash scripts/unreachable-assert-message-check.sh --files <staged api/test files>` (the required Elixir gate's ratchet; the pre-commit hook runs it too, but a `--no-verify` commit skips it).
    `cc` on this Mac is a Claude Code shim: cgo/NIF builds die on a fake "unknown option" — use
    `CGO_ENABLED=0` for Go (as the Makefile does) and `CC=/usr/bin/clang` for mix when a NIF compiles.
    A change with a test proves red-without / green-with (mutation-prove it).
@@ -213,6 +231,15 @@ ONLY what this prints:
   session's pulse list IMPOSSIBLE BY CONSTRUCTION rather than merely reported — which is the
   remedy this brief chose, because an audit log of a silent removal is read only by someone
   who already suspects it happened.
+- **Takeover, FIRST command — when the predecessor's `status.*.md` is older than the last line
+  of its `pulse.*.log`:** `bash .claude/skills/orchestrate-tasks/helpers/lane-state.sh <lane>
+  FRIKKern/barkpark`. A pulse after the status write means the lead kept working after its last
+  snapshot: r10 (2026-09-11) closed five rows and opened six draft PRs it never recorded, and the
+  successor spent ~40 min re-deriving them. It prints LEDGER (in_progress rows claimed by
+  `lead-<lane>*`), PRS (via `lane-open-prs.sh`, each `Task:` trailer checked against LEDGER) and
+  WORKTREES (commits off `origin/main` or uncommitted files, excluding a branch whose PR GitHub
+  says MERGED). Exit 0 = every read succeeded; exit 2 = a `CANNOT READ` line, and that section is
+  INCOMPLETE, not empty. Plan from its output, not from the stale table.
 - **If you believe you INHERITED this lane, APPEND.** `open` prints an `INHERITED:` banner
   naming every predecessor file. Read them; write your own. NEVER rewrite one — a filename
   stops a name collision, it does not stop a successor that correctly believes itself the
@@ -238,7 +265,12 @@ ONLY what this prints:
   Do not hand-write that loop: run `.claude/skills/orchestrate-tasks/helpers/pulse-loop.sh lead-<lane> $ORCH/lead-<lane>/held.s<N>.txt $ORCH/lead-<lane>/pulse.s<N>.log`, which drops a closed row from the round instead of striking the whole list for it. The held file and the log are YOUR SESSION's, from `session-files.sh open` — never the lane-wide `held.txt`.
   And running is not held: at the TOP OF EVERY LOOP, and again after ANY peer stand-down, run
   `.claude/skills/orchestrate-tasks/helpers/held-liveness.sh $ORCH/lead-<lane> --session s<N> --expect-worker lead-<lane> --pid-file $ORCH/lead-<lane>/pulse.s<N>.pid --log $ORCH/lead-<lane>/pulse.s<N>.log` (`--session` names YOUR list; a named list that is absent is exit 2, never a silent fallback to a peer's)
-  and read its exit code (0 held, 1 a NAMED violation, 2 an empty/missing list, 3 a ledger read refused). It reads the LEDGER's `claim.worker` and lease-until for every row in your held file and compares your pulse log's age and pid against the cadence — a loop that STOPS RUNNING prints nothing, so nothing else in this campaign can tell you. Quote its last line in your status file.
+  and read its exit code (0 held, 1 a NAMED violation, 2 an empty/missing list, 3 a ledger read refused,
+  4 the ghost scan could not enumerate any pulse-loop process — a failed read, never a clean verdict).
+  Its FIRST line is the checkout-distance banner: `CHECKOUT STALE: <dir> is N COMMIT(S) BEHIND …` when the
+  tree it was read from is behind `origin/main`, `checkout: … is LEVEL …` at zero, and `CHECKOUT DISTANCE
+  UNKNOWN` when it could not measure — which is never a zero. It is ADVISORY: it never changes the exit
+  code, so branch on the codes exactly as before. It does NOT fetch, so the number it prints is a FLOOR. It reads the LEDGER's `claim.worker` and lease-until for every row in your held file and compares your pulse log's age and pid against the cadence — a loop that STOPS RUNNING prints nothing, so nothing else in this campaign can tell you. Quote its last line in your status file.
 
 - **Decisions file — read it at the top of EVERY loop.** The orchestrator writes rulings, approvals and
   routing to `$ORCH/lead-<lane>/DECISIONS-FROM-MAIN.md` (append-only, a table per date). Inbox

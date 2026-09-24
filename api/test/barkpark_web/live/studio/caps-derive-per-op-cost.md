@@ -54,27 +54,73 @@ bash caps-meter.sh <worktree> 200 5000 3      # n = 19,200 derives per A/B pair
 #                        mix test test/barkpark_web/live/studio/pds_w42_caps_derive_op_latency_test.exs"
 ```
 
-n = 19,200 derives differenced, 3 trials, `load1` 20.5–23.6 on **10 cpus**:
+n = 19,200 derives differenced, 3 trials. **RE-RUN ON A QUIET HOST
+2026-09-22T11:47Z** (lead-api-r21o), `load1` 5.10–5.33 on **10 cpus** —
+under-subscribed, where the 2026-09-16 run was 2x over:
 
 | trial | load1 | CPU user+sys / derive | wall / derive |
 |---|---|---|---|
-| 1 | 21.2 | 209 µs | 2.53 ms |
-| 2 | 23.6 | 204 µs | 2.90 ms |
-| 3 | 21.3 | 223 µs | 2.77 ms |
+| 1 | 5.10 | 98 µs | 0.096 ms |
+| 2 | 5.33 | 107 µs | 0.130 ms |
+| 3 | 5.15 | 96 µs | 0.112 ms |
 
-**Band 204–223 µs CPU per derive; QUOTE THE HIGH END: 223 µs.**
-Per op (2 derives): **≤ 0.45 ms CPU**, wall ≤ 5.8 ms.
+**Band 96–107 µs CPU per derive; QUOTE THE HIGH END: 107 µs.**
+Per op (2 derives): **≤ 0.215 ms CPU** — ~0.043% of the 500 ms debounce window.
+
+The 2026-09-16 band was 204–223 µs (quote 223) at `load1` 20.5–23.6. The quiet
+host reads **2.08x cheaper**, which is the direction contention predicts: CPU
+accounting inflates under oversubscription. The DECISION below is unchanged and
+is now argued from a smaller number, not a larger one.
+
+**HOW n = 19,200 IS DERIVED, because the figure cannot be checked without it:**
+`price!/2` runs `Enum.each(1..@ops, …)` **twice** (once inside `queries_during/1`,
+once between two `Process.info(:reductions)` reads) and is called at **two** sites
+(`"API-TOKEN socket"`, `"USER socket"`). So one arm costs `4 × @ops` derives and
+the A/B difference is `4 × (5000 − 200) = 19,200`. Reproducing the documented n
+from the source is the control that the per-derive arithmetic is right; a reader
+who assumes `Δ = 4800` gets a band 4x too high.
+
+**THE 2026-09-16 HARNESS RUN WAS SILENTLY MEASURING NOTHING ON THIS BOX, and the
+first re-run reproduced that.** `caps-meter.sh` redirects its arm to
+`>/dev/null 2>&1`, so when `mix test` dies before running a single test the meter
+still prints a clean, plausible timing row. On this machine `cc` is a shell alias
+to Claude Code, so `argon2_elixir`'s NIF build fails with `error: unknown option
+'-g'` and the run aborts in under a second — six rows, zero tests, no A/B
+difference at all (n=200 and n=5000 both ~0.5 s). The tell was the script's own
+header: *"A meter that reads zero is broken, not fast."* Run it as
+`CC=/usr/bin/cc bash caps-meter.sh …`.
+
+**THE METER NOW REFUSES INSTEAD (task-878b408c5abca5e2).** "Before trusting any
+row, run one arm without the redirect and read `N tests, 0 failures`" was the
+right instruction and it is not a guard — a written finding does not fire by
+itself. Two refusals now carry it in code:
+
+* **Per arm.** The arm's output goes to a LOG rather than `/dev/null` (the
+  redirect stays — it is why the `time` line is readable). The ExUnit summary
+  line must be present with N > 0, or the meter prints NO timing row for that
+  arm, names it, dumps the arm's own error text, and exits **2**.
+* **Per run.** The A/B difference must clear a floor of
+  `4 × (HI − LO) × 10 µs` — an order of magnitude below the measured 96–107 µs
+  band, so a healthy run clears it ~10x while a difference of ~0 never can.
+  Exits **3**. This is the tell that caught the original defect made mechanical.
+
+`caps-meter-selftest.sh` beside the meter drives the real meter with a stub
+`mix` on `PATH` and proves both refusals **and** a healthy six-row exit-0 run in
+one output.
 
 Three things this price does NOT cover, said here rather than left implied:
 
 * **Postgres' own server-side CPU.** The server is not a child of the metered
   shell. The client-side round-trip cost is inside the meter; the backend's
   work is not.
-* **A quiet host.** The row asked for one and this is not one — `load1` was
-  ~21 on 10 cpus, 2x oversubscribed. The **wall** column IS that load and must
-  not be quoted as the code's cost. The CPU column is far less load-sensitive
-  and the reductions row is load-invariant, which is why the harness ratchets
-  reductions and asserts no millisecond at all.
+* **A quiet host — SATISFIED as of the 2026-09-22 re-run** (`load1` 5.10–5.33
+  on 10 cpus, under-subscribed). The 2026-09-16 run was ~21 on 10, 2x over, and
+  its **wall** column was that load rather than the code's cost. The wall column
+  above is from an under-subscribed box and is still the weaker number: the CPU
+  column is far less load-sensitive and the reductions row is load-invariant,
+  which is why the harness ratchets reductions and asserts no millisecond at all.
+  Nothing here is asserted in the suite; this file is the record, the ratchet is
+  the guard.
 * **A grantee.** These principals hold no grants; `Access.admits_desk?/3`
   re-validates the grantor per action and issues its own queries.
 

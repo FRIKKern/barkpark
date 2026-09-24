@@ -462,6 +462,37 @@ FIX
     fi
   fi
 
+  # ── THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817) ─
+  # Every case above grades scan_files IN PROCESS; none executes run_tree_scan's
+  # `return "$EX_VIOLATION"`, which IS the process exit code, so flipping it to
+  # `return "$EX_OK"` kept this selftest green (8 cases, 0 failures) while the
+  # tree scan certified a planted BSD-first stat. Same idiom as PR #13405 /
+  # #20180: RE-EXEC THE WHOLE PROGRAM on a fixture repo and assert the PROCESS
+  # exit. REPO_ROOT derives from the script's own location, so a copy at
+  # <fixture>/scripts/ scans only the fixture — no override is added — and the
+  # fixture holds exactly the 50-file floor, so the plant alone moves the verdict.
+  local e2e rc_planted rc_removed rc_empty i
+  e2e="$root/e2e"
+  mkdir -p "$e2e/scripts" "$root/e2e-empty/scripts"
+  cp "$SELF_PATH" "$e2e/scripts/stat-portability-check.sh"
+  cp "$SELF_PATH" "$root/e2e-empty/scripts/stat-portability-check.sh"
+  i=0; while [ "$i" -lt 50 ]; do printf 'echo %s\n' "$i" > "$e2e/scripts/s$i.sh"; i=$((i+1)); done
+  git -C "$e2e" init -q >/dev/null 2>&1 && git -C "$e2e" add -A >/dev/null 2>&1 \
+    && git -C "$root/e2e-empty" init -q >/dev/null 2>&1 && git -C "$root/e2e-empty" add -A >/dev/null 2>&1 \
+    || die "selftest could not build its E2E fixture repo (git init/add failed)"
+  sed -n 2p "$root/violating.sh" > "$e2e/scripts/s0.sh"
+  bash "$e2e/scripts/stat-portability-check.sh" >/dev/null 2>&1; rc_planted=$?
+  printf 'mtime_of() { stat -c %%Y "$1" 2>/dev/null || true; }\n' > "$e2e/scripts/s0.sh"
+  bash "$e2e/scripts/stat-portability-check.sh" >/dev/null 2>&1; rc_removed=$?
+  bash "$root/e2e-empty/scripts/stat-portability-check.sh" >/dev/null 2>&1; rc_empty=$?
+  cases=$((cases+1))
+  if [ "$rc_planted" -eq "$EX_VIOLATION" ] && [ "$rc_removed" -eq "$EX_OK" ] && [ "$rc_empty" -ne "$EX_OK" ]; then
+    echo "  PASS  verdict-wiring control — the WHOLE PROGRAM exits $rc_planted on a planted BSD-first stat, $rc_removed once it is removed, and $rc_empty (never 0) on an empty repo"
+  else
+    echo "  FAIL  verdict-wiring control — whole program exited planted=$rc_planted (want $EX_VIOLATION), removed=$rc_removed (want $EX_OK), empty=$rc_empty (want non-zero)" >&2
+    fails=$((fails+1))
+  fi
+
   [ "$cases" -ge 8 ] || die "selftest ran only $cases case(s); an empty tally is not a pass"
   printf '\n=== selftest: %s case(s), %s failure(s) ===\n' "$cases" "$fails"
   [ "$fails" -eq 0 ] || return "$EX_VIOLATION"

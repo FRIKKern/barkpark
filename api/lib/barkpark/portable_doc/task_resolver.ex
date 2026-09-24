@@ -122,6 +122,80 @@ defmodule Barkpark.PortableDoc.TaskResolver do
 
   defp collect_block_queries(_block, acc), do: acc
 
+  @doc """
+  Mark every query-carrying task block in `blocks` as UNAVAILABLE — the
+  plugins-off twin of `resolve/3` (task-9c59aa555e1e015e). Used when no task
+  resolver is loaded (the Tasks plugin is out of the load order): each task-row
+  (`tasks`/`task-list`/`task-board`/`roadmap`/`task-detail`) and data-viz
+  (`chart`/`heatmap`/`stat`) block carrying a `query` gains
+  `"unavailable" => true`, keeping its `query`, so every renderer shows an
+  explicit placeholder instead of an empty board that reads as "no tasks".
+  Walks the same three container shapes as `resolve/3`; an author-pinned
+  literal block (no `query`) and every other block pass through untouched.
+  """
+  @unavailable_types @snapshot_types ++ [@detail_type | @dataviz_types]
+
+  def mark_unavailable(blocks) when is_list(blocks), do: Enum.map(blocks, &mark_block/1)
+  def mark_unavailable(blocks), do: blocks
+
+  @doc "The block types `mark_unavailable/1` marks when they carry a `query`."
+  def unavailable_types, do: @unavailable_types
+
+  defp mark_block(%{"type" => type, "query" => query} = block)
+       when type in @unavailable_types and is_map(query),
+       do: Map.put(block, "unavailable", true)
+
+  defp mark_block(%{"children" => children} = block) when is_list(children),
+    do: Map.put(block, "children", mark_unavailable(children))
+
+  defp mark_block(%{"blocks" => blocks} = block) when is_list(blocks),
+    do: Map.put(block, "blocks", mark_unavailable(blocks))
+
+  defp mark_block(%{"columns" => cols} = block) when is_list(cols) do
+    Map.put(
+      block,
+      "columns",
+      Enum.map(cols, fn
+        col when is_list(col) -> mark_unavailable(col)
+        col -> col
+      end)
+    )
+  end
+
+  defp mark_block(block), do: block
+
+  @doc """
+  The id-keyed preview entries for an UNAVAILABLE task resolver — the
+  plugins-off twin of `preview/3` (task-f4d19b64198780b6). Every block
+  `mark_unavailable/1` would mark that also carries a stable `id` yields
+  `%{"block_id" => id, "type" => t, "unavailable" => true}`; `apply_preview/2`
+  turns that entry back into the marked block, so the Studio editor preview
+  paints the reader's own placeholder (`Components.task_unavailable_html/1`).
+  Walks the same three container shapes as `preview/3`.
+  """
+  def unavailable_previews(blocks) when is_list(blocks) do
+    blocks |> mark_unavailable() |> collect_unavailable()
+  end
+
+  def unavailable_previews(_blocks), do: []
+
+  defp collect_unavailable(blocks), do: Enum.flat_map(blocks, &unavailable_entry/1)
+
+  defp unavailable_entry(%{"type" => type, "unavailable" => true, "id" => id})
+       when type in @unavailable_types and is_binary(id) and id != "",
+       do: [%{"block_id" => id, "type" => type, "unavailable" => true}]
+
+  defp unavailable_entry(%{"children" => children}) when is_list(children),
+    do: collect_unavailable(children)
+
+  defp unavailable_entry(%{"blocks" => blocks}) when is_list(blocks),
+    do: collect_unavailable(blocks)
+
+  defp unavailable_entry(%{"columns" => cols}) when is_list(cols),
+    do: cols |> Enum.filter(&is_list/1) |> Enum.flat_map(&collect_unavailable/1)
+
+  defp unavailable_entry(_block), do: []
+
   defp resolve_list(blocks, fetch, agg_fetch) when is_list(blocks) do
     Enum.map(blocks, &resolve_block(&1, fetch, agg_fetch))
   end
@@ -186,6 +260,12 @@ defmodule Barkpark.PortableDoc.TaskResolver do
       when type in @dataviz_types and is_map(attrs) do
     block |> Map.merge(attrs) |> Map.delete("query")
   end
+
+  # An `unavailable_previews/1` entry: no task resolver for this workspace. The
+  # block is marked (query kept) so the reader's placeholder emitter paints it.
+  def apply_preview(%{"type" => type} = block, %{"type" => type, "unavailable" => true})
+      when type in @unavailable_types,
+      do: Map.put(block, "unavailable", true)
 
   def apply_preview(block, _entry), do: block
 

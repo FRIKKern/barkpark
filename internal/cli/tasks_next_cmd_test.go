@@ -26,6 +26,10 @@ type claimReply struct {
 type capturedClaim struct {
 	worker    string
 	resources []string
+	// session / sessionDocSent: the session headers the claim carried
+	// (task-9af836a40731b63a).
+	session        string
+	sessionDocSent bool
 }
 
 // nextFrontierServer serves the board snapshot (two ready tasks in DISTINCT
@@ -52,7 +56,9 @@ func nextFrontierServer(t *testing.T, replies map[string]claimReply, captured ma
 				}
 				raw, _ := io.ReadAll(r.Body)
 				_ = json.Unmarshal(raw, &body)
-				captured[id] = &capturedClaim{worker: body.WorkerID, resources: body.Resources}
+				_, docSent := r.Header["X-Barkpark-Session-Doc"]
+				captured[id] = &capturedClaim{worker: body.WorkerID, resources: body.Resources,
+					session: r.Header.Get("X-Barkpark-Session"), sessionDocSent: docSent}
 			}
 			rep, ok := replies[id]
 			if !ok {

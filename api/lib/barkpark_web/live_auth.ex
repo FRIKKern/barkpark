@@ -31,7 +31,11 @@ defmodule BarkparkWeb.LiveAuth do
       (era-w8-sso-mfa-binding), defence-in-depth behind the session-mint
       chokepoints: a `user_session` cookie resolving to a user who is
       governed by a `require_mfa` org and has NO factor enrolled is halted
-      to `/login` with enrolment guidance. Covers cookie reuse — a session
+      to `/login` with enrolment guidance — carrying the requested Studio
+      destination as a validated `?return_to=` when there is one
+      (era-bl-mfa-returnto-parity), so enrolling and signing in lands on
+      the deep link the notifier email pointed at rather than `/studio`.
+      Covers cookie reuse — a session
       minted before the org flipped `require_mfa` on, or the deliberately
       flagged `POST /v1/auth/login` enrolment session (which the API
       surface gates via `RequireOrgMfaEnrolment`, but LiveViews never ran
@@ -97,7 +101,7 @@ defmodule BarkparkWeb.LiveAuth do
           {:halt,
            socket
            |> put_flash(:error, BarkparkWeb.SessionIssuer.org_mfa_enrolment_message())
-           |> redirect(to: "/login")}
+           |> redirect(to: mfa_denial_target(socket))}
         else
           {:cont, socket}
         end
@@ -332,6 +336,39 @@ defmodule BarkparkWeb.LiveAuth do
       ReturnTo.with_return_to("/login", dest)
     else
       _ -> "/studio"
+    end
+  end
+
+  # era-bl-mfa-returnto-parity — the `:require_org_mfa` twin of `denial_target/2`.
+  # The halt is UNCHANGED (`/login`, same flash, same population); this only
+  # decides whether the requested destination rides along as a validated
+  # `?return_to=`, so an MFA-required-but-unenrolled admin who followed a
+  # notifier deep link lands back on it after enrolling instead of `/studio`.
+  #
+  # `ReturnTo.sanitize_dest/1` is the ONE validator — the same open-redirect
+  # guard `denial_target/2` uses. No second validator was written: external
+  # URLs, `//host` authority tricks, `/studioevil` prefix tricks and
+  # dot-segment traversal all return nil here and leave the halt at bare
+  # `/login`, whose `@default_return_to` is `/studio`.
+  #
+  # It deliberately does NOT reuse `denial_target/2` itself: that function's
+  # first clause is `anonymous?(session)`, and this population is exactly the
+  # complement (a `user_session` is present by construction), so it would
+  # always funnel to `/studio` — and `/studio` is a DIFFERENT place from the
+  # `/login` this hook must keep sending people.
+  #
+  # The allow-list here is `sanitize_dest/1`'s full grammar (flat `/studio…`
+  # plus the scoped `/w/:ws/p/:proj[/d/:ds]/studio…`), not `denial_target/2`'s
+  # narrower `@chat_deep_link`. That narrowing is a property of the ANONYMOUS
+  # arm — it keeps the pre-D69 `/studio` funnel byte-stable for every other
+  # anonymous denial — and it has no counterpart here, where the pre-fix
+  # target was `/login` for every path alike.
+  defp mfa_denial_target(socket) do
+    with %URI{path: path} = uri when is_binary(path) <- requested_uri(socket),
+         dest when is_binary(dest) <- ReturnTo.sanitize_dest(path <> query_suffix(uri.query)) do
+      ReturnTo.with_return_to("/login", dest)
+    else
+      _ -> "/login"
     end
   end
 

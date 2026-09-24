@@ -330,6 +330,49 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  The pre-write fences the writer will run, in load order — a read of
+  `Barkpark.Content.PreWriteFences.list/0`, which this Registry PUBLISHES to
+  on every register / reset and at init (see `publish_pre_write_fences/1`).
+  The writer reads the content-side holder directly; this delegate exists for
+  callers already holding the Registry (boot checks, release eval).
+  """
+  @spec collect_pre_write_fences() :: [Barkpark.Plugin.pre_write_fence()]
+  defdelegate collect_pre_write_fences, to: Barkpark.Content.PreWriteFences, as: :list
+
+  @doc """
+  The pre-publish fences the publish lifecycle will run, in load order — a
+  read of `Barkpark.Content.PrePublishFences.list/0`, which this Registry
+  PUBLISHES to exactly as it does the pre-write fences (see
+  `publish_pre_publish_fences/1`). The lifecycle reads the content-side holder
+  directly; this delegate exists for callers already holding the Registry
+  (boot checks, release eval).
+  """
+  @spec collect_pre_publish_fences() :: [Barkpark.Plugin.pre_publish_fence()]
+  defdelegate collect_pre_publish_fences, to: Barkpark.Content.PrePublishFences, as: :list
+
+  @doc """
+  The pre-write transforms the writer will run over a write's attrs, in load
+  order — a read of `Barkpark.Content.PreWriteTransforms.list/0`, which this
+  Registry PUBLISHES to exactly as it does the pre-write fences (see
+  `publish_pre_write_transforms/1`). The writer reads the content-side holder
+  directly; this delegate exists for callers already holding the Registry
+  (boot checks, release eval).
+  """
+  @spec collect_pre_write_transforms() :: [Barkpark.Plugin.pre_write_transform()]
+  defdelegate collect_pre_write_transforms, to: Barkpark.Content.PreWriteTransforms, as: :list
+
+  @doc """
+  The mutate-door fences `Content.apply_mutations/3` will run, in load order —
+  a read of `Barkpark.Content.MutateDoorFences.list/0`, which this Registry
+  PUBLISHES to exactly as it does the pre-write fences (see
+  `publish_mutate_door_fences/1`). The mutate door reads the content-side
+  holder directly; this delegate exists for callers already holding the
+  Registry (boot checks, release eval).
+  """
+  @spec collect_mutate_door_fences() :: [Barkpark.Plugin.mutate_door_fence()]
+  defdelegate collect_mutate_door_fences, to: Barkpark.Content.MutateDoorFences, as: :list
+
+  @doc """
   Drives the `resolve_api_tests/2` chain → flat list of `api_test_spec()` maps
   the runner fires on demand. Not cached; accepts `:baseline` / `:ctx`. Plugins
   usually implement additive `api_tests/0` (default resolver lifts via
@@ -502,7 +545,175 @@ defmodule Barkpark.Plugins.Registry do
       top_menu_entries: ResolverChain.compute_top_menu_entries([], %{})
     })
 
+    publish_pre_write_fences(plugins)
+    publish_pre_publish_fences(plugins)
+    publish_pre_write_transforms(plugins)
+    publish_paper_task_resolvers(plugins)
+    publish_mutate_door_fences(plugins)
+
     state
+  end
+
+  # Publish every registered plugin's `pre_write_fences/0` declaration to the
+  # content-owned holder the writer reads (task-e5baaaa14ddf2e1c). Content
+  # never names this Registry (kernel→feature); the Registry writes INTO
+  # content instead. Load order is applied at read time by the holder.
+  #
+  # NOT routed through `reduce_resolvers/3`: that chain rescues a raising
+  # plugin back to the accumulator, which here would silently drop an
+  # integrity fence. A raising declaration or a malformed entry raises.
+  #
+  # EVERY registered plugin is published, one declared entry each — with an
+  # EMPTY list (or a `nil` resolver) when it declares nothing for this holder
+  # (task-a67de91e32edf1a4). The holder hands its declarations to
+  # `Content.PluginLoadOrder.plugins/3` as the plugins it KNOWS, so publishing
+  # only the declarers made an explicit load order naming any other registered
+  # plugin warn "names no plugin this reader knows" / "not a registered
+  # plugin" — false. An empty entry adds no step, so the fences, steps and
+  # resolver a holder yields are unchanged; a module that never registered is
+  # still unknown to the holder and still warned about by name. All five
+  # publishers below follow this one rule.
+  defp publish_pre_write_fences(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_pre_write_fences/1)
+    |> Barkpark.Content.PreWriteFences.publish()
+  end
+
+  defp declared_pre_write_fences(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :pre_write_fences, 0) do
+      fences = Enum.map(mod.pre_write_fences(), &validate_pre_write_fence!(&1, name))
+      [%{name: name, module: mod, fences: fences}]
+    else
+      [%{name: name, module: mod, fences: []}]
+    end
+  end
+
+  defp validate_pre_write_fence!({mod, fun} = fence, _name)
+       when is_atom(mod) and is_atom(fun),
+       do: fence
+
+  defp validate_pre_write_fence!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed pre-write fence " <>
+            "#{inspect(other)}; expected {module, function}"
+  end
+
+  # The publish-door twin of `publish_pre_write_fences/1`
+  # (task-8273f2f1b24a6de1): every registered plugin's `pre_publish_fences/0`
+  # declaration, into the content-owned holder the publish lifecycle reads.
+  # Same rules — not routed through `reduce_resolvers/3`, a raising
+  # declaration or a malformed entry raises.
+  defp publish_pre_publish_fences(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_pre_publish_fences/1)
+    |> Barkpark.Content.PrePublishFences.publish()
+  end
+
+  defp declared_pre_publish_fences(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :pre_publish_fences, 0) do
+      fences = Enum.map(mod.pre_publish_fences(), &validate_pre_publish_fence!(&1, name))
+      [%{name: name, module: mod, fences: fences}]
+    else
+      [%{name: name, module: mod, fences: []}]
+    end
+  end
+
+  defp validate_pre_publish_fence!({phase, mod, fun} = fence, _name)
+       when phase in [:door, :in_transaction] and is_atom(mod) and is_atom(fun),
+       do: fence
+
+  defp validate_pre_publish_fence!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed pre-publish fence " <>
+            "#{inspect(other)}; expected {:door | :in_transaction, module, function}"
+  end
+
+  # The attrs-shaping twin of `publish_pre_write_fences/1`
+  # (task-aed4f02e57d3a760): every registered plugin's `pre_write_transforms/0`
+  # declaration, into the content-owned holder the writer reads. Same rules —
+  # not routed through `reduce_resolvers/3`, a raising declaration or a
+  # malformed entry raises.
+  defp publish_pre_write_transforms(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_pre_write_transforms/1)
+    |> Barkpark.Content.PreWriteTransforms.publish()
+  end
+
+  defp declared_pre_write_transforms(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :pre_write_transforms, 0) do
+      steps = Enum.map(mod.pre_write_transforms(), &validate_pre_write_transform!(&1, name))
+      [%{name: name, module: mod, steps: steps}]
+    else
+      [%{name: name, module: mod, steps: []}]
+    end
+  end
+
+  defp validate_pre_write_transform!({kind, mod, fun} = step, _name)
+       when kind in [:transform, :check] and is_atom(mod) and is_atom(fun),
+       do: step
+
+  defp validate_pre_write_transform!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed pre-write transform " <>
+            "#{inspect(other)}; expected {:transform | :check, module, function}"
+  end
+
+  # Every registered plugin's `paper_task_resolver/0` declaration, into the
+  # content-owned holder papers read for task chips and task query blocks
+  # (task-9c59aa555e1e015e). Content never names this Registry; the Registry
+  # writes INTO content. Load order is applied at read time by the holder. Same
+  # rules as the fence publishers: a raising declaration or a malformed entry
+  # raises rather than silently dropping the resolver.
+  defp publish_paper_task_resolvers(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_paper_task_resolver/1)
+    |> Barkpark.Content.PaperTaskResolver.publish()
+  end
+
+  defp declared_paper_task_resolver(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :paper_task_resolver, 0) do
+      case mod.paper_task_resolver() do
+        resolver when is_atom(resolver) ->
+          [%{name: name, module: mod, resolver: resolver}]
+
+        other ->
+          raise ArgumentError,
+                "plugin #{inspect(name)} declared a malformed paper task resolver " <>
+                  "#{inspect(other)}; expected a module or nil"
+      end
+    else
+      [%{name: name, module: mod, resolver: nil}]
+    end
+  end
+
+  # The mutate-door twin of `publish_pre_publish_fences/1`
+  # (task-b04cbe7823d084a6): every registered plugin's `mutate_door_fences/0`
+  # declaration, into the content-owned holder `Content.Mutations` reads. Same
+  # rules — not routed through `reduce_resolvers/3`, a raising declaration or
+  # a malformed entry raises.
+  defp publish_mutate_door_fences(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_mutate_door_fences/1)
+    |> Barkpark.Content.MutateDoorFences.publish()
+  end
+
+  defp declared_mutate_door_fences(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :mutate_door_fences, 0) do
+      fences = Enum.map(mod.mutate_door_fences(), &validate_mutate_door_fence!(&1, name))
+      [%{name: name, module: mod, fences: fences}]
+    else
+      [%{name: name, module: mod, fences: []}]
+    end
+  end
+
+  defp validate_mutate_door_fence!({phase, mod, fun} = fence, _name)
+       when phase in [:before_rev, :after_claim] and is_atom(mod) and is_atom(fun),
+       do: fence
+
+  defp validate_mutate_door_fence!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed mutate-door fence " <>
+            "#{inspect(other)}; expected {:before_rev | :after_claim, module, function}"
   end
 
   # ─── GenServer ──────────────────────────────────────────────────────────
@@ -515,6 +726,16 @@ defmodule Barkpark.Plugins.Registry do
     # as a safety net for callers that skip discovery entirely (e.g. tests
     # that set the kill-switch env before any reset). See
     # `handle_call(:capture_baseline, …)` and `handle_call(:reset, …)`.
+    #
+    # A fresh Registry has no plugins, so it publishes NO pre-write fences, NO
+    # pre-publish fences, NO pre-write transforms and NO mutate-door fences —
+    # the kill-switch boot never registers, and a `:persistent_term` left by a
+    # previous start of the app in the same VM must not survive it.
+    publish_pre_write_fences([])
+    publish_pre_publish_fences([])
+    publish_pre_write_transforms([])
+    publish_paper_task_resolvers([])
+    publish_mutate_door_fences([])
     {:ok, %{plugins: %{}, baseline_plugins: nil}}
   end
 

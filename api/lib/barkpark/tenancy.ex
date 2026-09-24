@@ -2028,6 +2028,87 @@ defmodule Barkpark.Tenancy do
     end
   end
 
+  @doc """
+  ARCHIVE a workspace — the reversible, non-destructive sibling of
+  `delete_workspace/1` (task-55474a106554e65a).
+
+  Sets `archived_at` and NOTHING ELSE: no document, media file, membership,
+  token, project or dataset row is read or written, and the workspace row's
+  other columns (`updated_at` included) are left byte-for-byte as they were,
+  so `restore_workspace/1` reproduces the exact pre-archive state. The
+  single `UPDATE … WHERE archived_at IS NULL AND is_default = false` is the
+  whole write.
+
+  While archived, the tenant resolvers refuse scoped traffic with
+  `workspace_archived` (see `Barkpark.Tenancy.Workspace`'s `archived_at`).
+
+    * `{:ok, workspace}` — archived now, or ALREADY archived (idempotent: a
+      second archive neither errors nor moves the original `archived_at`).
+    * `{:error, :default_workspace_not_archivable}` — the instance-Default
+      workspace. Every unscoped flat route resolves to it
+      (`Plugs.AssignDefaultScope`), so archiving it would make the whole flat
+      surface answer `workspace_archived` for callers who never named it.
+      Refused, not silently ignored.
+    * `{:error, :not_found}` — the row is gone.
+
+  AUTHORISATION IS NOT HERE. This is the context primitive; the HTTP action
+  (`WorkspaceController.archive/2`) carries the admin + tenancy gate.
+  """
+  @spec archive_workspace(Workspace.t()) ::
+          {:ok, Workspace.t()} | {:error, :default_workspace_not_archivable | :not_found}
+  def archive_workspace(%Workspace{is_default: true}),
+    do: {:error, :default_workspace_not_archivable}
+
+  def archive_workspace(%Workspace{id: id}) do
+    now = DateTime.utc_now()
+
+    {_count, _} =
+      Repo.update_all(
+        from(w in Workspace,
+          where: w.id == ^id and is_nil(w.archived_at) and w.is_default == false
+        ),
+        set: [archived_at: now]
+      )
+
+    # Re-read rather than trust the update count: 0 rows is EITHER "already
+    # archived" (idempotent success) OR "became the Default seat under us" OR
+    # "gone" — the row tells them apart.
+    case Repo.get(Workspace, id) do
+      nil ->
+        {:error, :not_found}
+
+      %Workspace{archived_at: nil, is_default: true} ->
+        {:error, :default_workspace_not_archivable}
+
+      %Workspace{archived_at: nil} ->
+        {:error, :not_found}
+
+      %Workspace{} = archived ->
+        {:ok, archived}
+    end
+  end
+
+  @doc """
+  RESTORE an archived workspace — clears `archived_at` and nothing else, so
+  the workspace and everything scoped to it answer exactly as they did before
+  `archive_workspace/1`. Idempotent: restoring a live workspace is `{:ok, ws}`.
+  `{:error, :not_found}` when the row is gone. Authorisation lives in the
+  HTTP action, as for `archive_workspace/1`.
+  """
+  @spec restore_workspace(Workspace.t()) :: {:ok, Workspace.t()} | {:error, :not_found}
+  def restore_workspace(%Workspace{id: id}) do
+    {_count, _} =
+      Repo.update_all(
+        from(w in Workspace, where: w.id == ^id and not is_nil(w.archived_at)),
+        set: [archived_at: nil]
+      )
+
+    case Repo.get(Workspace, id) do
+      nil -> {:error, :not_found}
+      %Workspace{} = restored -> {:ok, restored}
+    end
+  end
+
   # Ordered cleanup inside the transaction. Each step short-circuits on
   # error so the transaction rolls back via Repo.rollback in the wrapper.
   defp do_delete_workspace(%Workspace{id: ws_id} = workspace) do

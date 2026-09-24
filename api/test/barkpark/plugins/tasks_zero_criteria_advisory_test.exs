@@ -41,7 +41,14 @@ defmodule Barkpark.Plugins.TasksZeroCriteriaAdvisoryTest do
   @code "zero_acceptance_criteria"
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", @dataset, ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      @dataset,
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
     register_task_schemas!()
     :ok
   end

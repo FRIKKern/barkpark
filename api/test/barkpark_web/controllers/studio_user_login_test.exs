@@ -213,8 +213,16 @@ defmodule BarkparkWeb.StudioUserLoginTest do
 
       conn = cookie_conn(conn, user)
 
-      assert {:error, {:redirect, %{to: "/login"}}} =
+      # Still REFUSED, still to `/login` — era-bl-mfa-returnto-parity only adds
+      # the validated `?return_to=` so enrolling lands back here (full matrix:
+      # live_auth_mfa_return_to_test.exs).
+      assert {:error, {:redirect, %{to: to}}} =
                live(conn, "/w/mfa-scope/p/main/d/production/studio")
+
+      assert %URI{path: "/login", query: query} = URI.parse(to)
+
+      assert URI.decode_query(query)["return_to"] ==
+               "/w/mfa-scope/p/main/d/production/studio"
     end
 
     test "a governed factor-less admin cookie is denied the admin mount", %{conn: conn} do
@@ -226,7 +234,9 @@ defmodule BarkparkWeb.StudioUserLoginTest do
       conn = cookie_conn(conn, user)
 
       # LiveAuth :admin passes (owner in Default) — :require_org_mfa halts.
-      assert {:error, {:redirect, %{to: "/login"}}} = live(conn, "/studio/org-admin")
+      assert {:error, {:redirect, %{to: to}}} = live(conn, "/studio/org-admin")
+      assert %URI{path: "/login", query: query} = URI.parse(to)
+      assert URI.decode_query(query)["return_to"] == "/studio/org-admin"
     end
 
     test "a governed user WITH a factor mounts unchanged (zero-tax)", %{conn: conn} do

@@ -23,7 +23,7 @@ defmodule Barkpark.Content.Analytics do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, MutationEvent}
+  alias Barkpark.Content.{CallerContext, Document, MutationEvent}
 
   import Barkpark.Content.Scope,
     only: [
@@ -66,20 +66,113 @@ defmodule Barkpark.Content.Analytics do
   `scope_to_grants/3` fails CLOSED on a missing context, so forwarding the flag
   without the context would blank a grantee's …Rest tier rather than narrow it.
   `Barkpark.Structure.census_opts/1` forwards both.
+
+  OWNERSHIP NARROWING (task-188996c5008f4299, split out of the grant fix above).
+  The census now also composes `maybe_scope_to_owner/4`, gated per type on
+  `Content.owner_scoped?/3` exactly as `Content.Query.base_query/4` gates it, so
+  an `owner_scoped: true` type's …Rest count is the caller's rows and not every
+  owner's. A PER-TYPE predicate, not a whole-query clamp — see the helper below
+  for why `maybe_scope_to_owner_any/4`'s fail-closed shape is wrong here.
+
+  NOT ARMED in this repo today and that is deliberate framing, not a hedge:
+  `owner_scoped` is a CONSUMER-SET schema flag and no plugin declares it, so
+  this closes the boundary before a consumer POSTs a schema that opens it.
+  NOT restored, also deliberately: the `Schema.visible_schemas/2` visibility
+  clamp. This PR closes the OWNERSHIP boundary only.
   """
   @spec type_census(String.t(), keyword()) :: [%{type: String.t(), total: non_neg_integer()}]
   def type_census(dataset, opts \\ []) do
+    base = census_base(dataset, opts)
+    rows = census_rows(base)
+
+    case maybe_scope_to_owner(base, census_types(rows), dataset, opts) do
+      :unscoped -> rows
+      {:scoped, narrowed} -> census_rows(narrowed)
+    end
+  end
+
+  defp census_base(dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
 
     Document
     |> scope_to_dataset(dataset, workspace_id: workspace_id)
     |> scope_to_workspace_including_global(workspace_id, nil)
     |> maybe_scope_to_grants(opts)
+  end
+
+  defp census_rows(query) do
+    query
     |> group_by([d], d.type)
     |> select([d], %{type: d.type, total: count(d.id)})
     |> order_by([d], asc: d.type)
     |> Repo.all()
   end
+
+  defp census_types(rows), do: rows |> Enum.map(& &1.type) |> Enum.reject(&is_nil/1)
+
+  # OWNERSHIP NARROWING (task-188996c5008f4299). The census is the LAST document
+  # read that did not compose the row/ownership ACL. `Content.Query.base_query/4`
+  # appends `scope_to_owner/2` whenever `Content.owner_scoped?/3` says the type
+  # opted in; the census did not, so for an `owner_scoped: true` type the desk's
+  # …Rest row rendered "type (N)" with N counting EVERY owner's documents while
+  # the drill-down below it correctly showed only the caller's. Existence and
+  # volume across an OWNERSHIP boundary — the same shape as the GRANT leak
+  # task-c6d2e34c64100678 / PR #14079 closed one boundary over, and deliberately
+  # left this one rather than restoring all four clamps reflexively.
+  #
+  # WHY IT IS NOT A ONE-LINER, and why this is not `maybe_scope_to_owner_any/4`.
+  # `Content.Query`'s helpers narrow a query about ONE type (or fail closed
+  # across a type LIST). The census is a `group_by(:type)` over EVERY type at
+  # once, so clamping the whole query on "any member type is owner-scoped" would
+  # silently narrow the counts of every NON-owner-scoped type beside it — a
+  # widening bug traded for an under-counting one. The clamp is therefore a
+  # PER-TYPE predicate: only rows whose `type` is owner-scoped face the ownership
+  # clause; every other type's count is byte-identical.
+  #
+  # Two passes, and the second one runs only when it can change an answer: the
+  # gate needs the census's own type list, and with NO owner-scoped type in
+  # scope (every schema in this repo today) it returns `:unscoped` and the
+  # single original query stands.
+  #
+  # The caller bypasses mirror `Content.Scope.scope_to_owner/2` exactly —
+  # `is_admin` and `:api_token` see all; a non-admin user sees their own rows
+  # plus the unowned base; anonymous AND a nil `caller_context` fail CLOSED to
+  # unowned rows only. `Structure.census_opts/1` already forwards
+  # `:caller_context`, so the desk path arrives with a principal.
+  defp maybe_scope_to_owner(query, types, dataset, opts) do
+    ctx = Keyword.get(opts, :caller_context)
+
+    if owner_clamp_exempt?(ctx) do
+      :unscoped
+    else
+      case Enum.filter(types, &Content.owner_scoped?(&1, dataset, opts)) do
+        [] -> :unscoped
+        owned -> {:scoped, scope_owned_types_to_owner(query, owned, ctx)}
+      end
+    end
+  end
+
+  defp owner_clamp_exempt?(%CallerContext{is_admin: true}), do: true
+  defp owner_clamp_exempt?(%CallerContext{principal_type: :api_token}), do: true
+  defp owner_clamp_exempt?(_), do: false
+
+  defp scope_owned_types_to_owner(query, owned_types, %CallerContext{
+         principal_type: :user,
+         user_id: uid
+       })
+       when is_binary(uid) do
+    where(
+      query,
+      [d],
+      d.type not in ^owned_types or d.owner_id == ^uid or is_nil(d.owner_id)
+    )
+  end
+
+  # Fail CLOSED — anonymous, a user with no resolved id, or NO caller_context at
+  # all sees only the unowned base of an owner-scoped type, never another
+  # owner's rows.
+  defp scope_owned_types_to_owner(query, owned_types, _ctx),
+    do: where(query, [d], d.type not in ^owned_types or is_nil(d.owner_id))
 
   @doc """
   Count documents grouped by type, with published/draft breakdown.

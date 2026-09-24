@@ -44,6 +44,7 @@ defmodule Barkpark.Webhooks.RetryWorker do
   require Logger
 
   alias Barkpark.Repo
+  alias Barkpark.Webhooks
   alias Barkpark.Webhooks.{Delivery, Dispatcher, PayloadRebuild}
 
   @impl Oban.Worker
@@ -65,14 +66,31 @@ defmodule Barkpark.Webhooks.RetryWorker do
   # CAS on the SHARED `updated_at` fence. Exactly one of {this job, a crash-sweep,
   # another racing writer that observed the same value} can flip it; a miss
   # (0 rows) means we lost the race — yield without delivering.
+  #
+  # The value written is derived from the TOKEN (`Webhooks.advance_fence/1`), not
+  # from the clock alone (task-790e468acada213c). This site is the one where that
+  # matters most and the one where nothing supplies the ordering for free: the
+  # token arrives from OUTSIDE — an ISO8601 string in the Oban job args, written
+  # by `schedule_retry/3` at an arbitrary earlier instant and parsed back here —
+  # so there is no query filter, no read, and no happens-before edge relating a
+  # bare `DateTime.utc_now()` to it. `os_time` is not monotonic: after a backward
+  # NTP step the token is in the FUTURE, and a bare clock read writes a value
+  # LESS than the token (the CAS "wins" while moving the row backward, straight
+  # back under the crash sweeper's cutoff), or, at the resolution boundary, EQUAL
+  # to it — in which case this job's Oban retry (max_attempts: 3, same args, same
+  # fence) or a sweeper holding the same token CASes successfully a second time
+  # and the "mutually exclusive" property in the moduledoc above is simply gone.
+  # `advance_fence/1` makes the written value unconditionally greater, so the
+  # exclusion stops depending on clock behaviour. Pinned by
+  # test/barkpark/webhooks/sibling_fence_nonrepetition_test.exs.
   defp claim_fence(id, %DateTime{} = fence) do
-    now = DateTime.utc_now()
+    advanced = Webhooks.advance_fence(fence)
 
     {claimed, _} =
       from(d in Delivery,
         where: d.id == ^id and d.status == "pending" and d.updated_at == ^fence
       )
-      |> Repo.update_all(set: [updated_at: now])
+      |> Repo.update_all(set: [updated_at: advanced])
 
     claimed == 1
   end

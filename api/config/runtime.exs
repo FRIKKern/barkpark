@@ -195,8 +195,22 @@ case System.get_env("BARKPARK_CLOUD_URL") do
     :ok
 end
 
+# REQUEST-LINE CEILING (pds-bl-bandit-request-line-ceiling). Bandit caps the
+# HTTP/1 request line at max_request_line_length bytes; 10_000 is Bandit's own
+# default, written out here so the limit is visible instead of implicit. The
+# request line is METHOD + space + TARGET + " HTTP/1.1" + CRLF, so for a POST the
+# request TARGET (path plus query string) may be at most 10_000 - 5 - 9 - 2 =
+# 9_984 bytes. Measured 2026-07-21: total URL 10_016 bytes OK, 10_017 refused,
+# the same byte through Caddy and direct to :4000, so it is this limit and not
+# the proxy. Past it the client gets 414 and the server logs a Bandit.HTTPError
+# "Request URI is too long" (grep journalctl for that, it is not a network blip).
+# Deliberately NOT raised: bp stamp evidence rides the query string, and the fix
+# for oversized evidence is to send it in the request body, not a longer URL.
 config :barkpark, BarkparkWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+  http: [
+    port: String.to_integer(System.get_env("PORT", "4000")),
+    http_1_options: [max_request_line_length: 10_000]
+  ]
 
 cloak_key =
   case System.get_env("BARKPARK_CLOAK_KEY") do
@@ -408,6 +422,30 @@ bokbasen_env =
 
 if bokbasen_env != [] do
   config :barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, bokbasen_env
+end
+
+# Per-kind default token expiry (task-a0f8cfd7f4800236). Unset = the shipped nil
+# (config.exs): no default, no behaviour change. A value must be a positive
+# integer number of days; `Barkpark.Auth.TokenExpiry` refuses one above the
+# kind's max age (api 365, share 365) at mint.
+token_default_expiry_days =
+  for {kind, env_name} <- [
+        api: "BARKPARK_TOKEN_DEFAULT_EXPIRY_DAYS_API",
+        share: "BARKPARK_TOKEN_DEFAULT_EXPIRY_DAYS_SHARE"
+      ],
+      raw = System.get_env(env_name),
+      raw not in [nil, ""],
+      into: %{} do
+    case Integer.parse(raw) do
+      {days, ""} when days > 0 -> {kind, days}
+      _ -> raise "#{env_name} must be a positive integer number of days, got: #{inspect(raw)}"
+    end
+  end
+
+if token_default_expiry_days != %{} do
+  config :barkpark,
+         :token_default_expiry_days,
+         Map.merge(%{api: nil, share: nil}, token_default_expiry_days)
 end
 
 # Indx search-engine credentials (retriever seam). `Barkpark.Plugins.Indx.Settings`
@@ -753,6 +791,16 @@ end
 # the runtime override that flips it on.
 if System.get_env("BARKPARK_ALLOW_BUNDLE_IMPORT") in ~w(1 true yes on) do
   config :barkpark, :allow_bundle_import, true
+end
+
+# Filing-law HARD tier for an ABSENT `surface` under cloud-console-hardening-epic
+# (cch-w28-s4-followup). Fail-open by design: OFF unless the env var is truthy,
+# and `Barkpark.Tasks.BirthGuards.surface_declared/6` reads the key with a false
+# default at call time. Off = an undeclared surface is warned and allowed
+# (`filing law: undeclared surface`); on = refused 422. Flip it only once the
+# open epic rows carry a surface — see that guard's header.
+if System.get_env("BARKPARK_FILING_LAW_ABSENT_SURFACE_HARD") in ~w(1 true yes on) do
+  config :barkpark, :filing_law_absent_surface_hard, true
 end
 
 # INSTANCE-OPERATOR allowlist (task-c7e2b87f1bbca815), mirroring cloud's

@@ -156,6 +156,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   def walk(%{"kind" => "PdWikilink"} = n, width, pal), do: wikilink(n, width, pal)
   def walk(%{"kind" => "PdEmbed"} = n, _width, pal), do: embed(n, pal)
+  def walk(%{"kind" => "PdMasterRef"} = n, _width, pal), do: master_ref(n, pal)
   def walk(%{"kind" => "PdBlockref"} = n, _width, pal), do: blockref(n, pal)
   def walk(%{"kind" => "PdTag"} = n, _width, pal), do: tag_node(n, pal)
   def walk(%{"kind" => "PdChip"} = n, _width, pal), do: chip(n, pal)
@@ -540,6 +541,16 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     "<h#{level}#{heading_align_attr(n)}>#{heading_inner(n, width, pal)}</h#{level}>"
   end
 
+  # Non-article fallback: a PdHeading reaching the walker under a stylesheet-less
+  # palette (email / a raw hand-built tree) keeps the level-sized inline rule so
+  # it is never unstyled off-surface. `:email` compose never emits PdHeading
+  # (headings render as bold PdText spans), so this stays byte-frozen for email.
+  defp heading(n, width, pal) do
+    level = heading_level(Map.get(n, "level"))
+    style = (heading_style(level, pal) ++ heading_align_style(n)) |> Enum.join(";")
+    ~s(<h#{level} style="#{style}">#{heading_inner(n, width, pal)}</h#{level}>)
+  end
+
   # The author's alignment on a heading is DATA (like `color` on a run): an inline
   # text-align on every surface — the only inline property an article heading carries,
   # and one the :article allowlist already holds.
@@ -555,16 +566,6 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       [] -> ""
       styles -> ~s( style="#{escape_attr(Enum.join(styles, ";"))}")
     end
-  end
-
-  # Non-article fallback: a PdHeading reaching the walker under a stylesheet-less
-  # palette (email / a raw hand-built tree) keeps the level-sized inline rule so
-  # it is never unstyled off-surface. `:email` compose never emits PdHeading
-  # (headings render as bold PdText spans), so this stays byte-frozen for email.
-  defp heading(n, width, pal) do
-    level = heading_level(Map.get(n, "level"))
-    style = (heading_style(level, pal) ++ heading_align_style(n)) |> Enum.join(";")
-    ~s(<h#{level} style="#{style}">#{heading_inner(n, width, pal)}</h#{level}>)
   end
 
   defp heading_inner(n, width, pal) do
@@ -865,6 +866,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         %{met: met, total: total} when is_integer(met) and is_integer(total) and total > 0 ->
           "#{met}/#{total}"
 
+        # No task resolver loaded (task-9c59aa555e1e015e): the count cannot be
+        # read, so the chip SAYS so rather than omitting the segment (which
+        # would read as "this task has no criteria").
+        :unavailable ->
+          "criteria unavailable"
+
         _ ->
           nil
       end
@@ -884,16 +891,21 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # (nowrap) + `bp-task-chip__badge` (the pill border/padding/accent), styled by
   # `.bp-paper-surface`; `:email` keeps the inline pill verbatim.
   defp task_chip_html(target, hit, status, chip_text, label, %{style: :article}) do
-    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)} class="bp-task-chip">) <>
+    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)}#{task_unavailable_attr(hit)} class="bp-task-chip">) <>
       ~s(<span class="bp-task-chip__badge">#{chip_text}</span> ) <>
       label <> "</span>"
   end
 
   defp task_chip_html(target, hit, status, chip_text, label, pal) do
-    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)} style="white-space:nowrap">) <>
+    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)}#{task_unavailable_attr(hit)} style="white-space:nowrap">) <>
       ~s(<span style="border:1px solid #{pal.link_color};border-radius:10px;padding:0 6px;color:#{pal.link_color};font-size:0.85em">#{chip_text}</span> ) <>
       label <> "</span>"
   end
+
+  # Emitted ONLY for the unavailable chip, so every resolved chip is
+  # byte-identical to before.
+  defp task_unavailable_attr(%{criteria: :unavailable}), do: ~s( data-unavailable="tasks")
+  defp task_unavailable_attr(_hit), do: ""
 
   defp task_status_attr(nil), do: ""
   defp task_status_attr(s), do: ~s( data-task-status="#{escape_html(s)}")
@@ -1033,6 +1045,60 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         # broken-link span). NO <a> — a raw human title is not a slug, so a link
         # would 404; show the broken reference, muted + framed, instead.
         ~s(<section class="paper-embed paper-embed--unresolved" data-embed="#{target}" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted};font-style:italic">↪ #{target}</section>)
+    end
+  end
+
+  # Linked master instance (task-59f078a2fd248698). `pal.masters` is the
+  # caller's `%{key => prerendered_html}` map (Bulldocs masters' render map,
+  # resolved per read and batched), or nil when the caller did not resolve
+  # masters at all (the body_html cache, delta frames, email).
+  #
+  #   * nil map      → a neutral "Linked master" placeholder: this surface does
+  #     not resolve at read time, so it shows no content rather than a copy that
+  #     would go stale when the master changes.
+  #   * key present  → the master's HTML, injected VERBATIM (already renderer
+  #     output) inside the instance frame.
+  #   * key absent   → "Master unavailable". A missing master, a master in
+  #     another tenant and a cycle all land here, and the output names no id,
+  #     so the two are byte-identical (no existence oracle).
+  #
+  # PURE: only injects the string — no Repo, no recursive Render.
+  defp master_ref(n, %{style: :article} = pal) do
+    case master_ref_html(n, pal) do
+      {:ok, html} ->
+        ~s(<div class="bp-master-ref">#{html}</div>)
+
+      :pending ->
+        ~s(<div class="bp-master-ref bp-master-ref--pending">Linked master</div>)
+
+      :unavailable ->
+        ~s(<div class="bp-master-ref bp-master-ref--unavailable">Master unavailable</div>)
+    end
+  end
+
+  defp master_ref(n, pal) do
+    case master_ref_html(n, pal) do
+      {:ok, html} ->
+        ~s(<div class="bp-master-ref">#{html}</div>)
+
+      :pending ->
+        ~s(<div class="bp-master-ref" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted}">Linked master</div>)
+
+      :unavailable ->
+        ~s(<div class="bp-master-ref" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted};font-style:italic">Master unavailable</div>)
+    end
+  end
+
+  defp master_ref_html(n, pal) do
+    case Map.get(pal, :masters) do
+      masters when is_map(masters) ->
+        case Map.get(masters, Map.get(n, "key")) do
+          html when is_binary(html) -> {:ok, html}
+          _ -> :unavailable
+        end
+
+      _ ->
+        :pending
     end
   end
 
@@ -1271,23 +1337,6 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       thead <> "<tbody>#{tbody}</tbody></table>"
   end
 
-  # Column widths (Barkdown plan #25): one <col> per column, `style="width:Npx"` where a width is
-  # set. Integers only (compose.ex table_put_widths/2), so nothing here carries author text.
-  defp table_colgroup(widths, ncols) when is_list(widths) do
-    # One <col> per grid column: the stored list is trimmed to the last column that has a width.
-    padded = widths ++ List.duplicate(nil, max(0, ncols - length(widths)))
-
-    cols =
-      Enum.map_join(padded, "", fn
-        w when is_integer(w) and w > 0 -> ~s(<col style="#{escape_attr("width:#{w}px")}">)
-        _ -> "<col>"
-      end)
-
-    "<colgroup>#{cols}</colgroup>"
-  end
-
-  defp table_colgroup(_widths, _ncols), do: ""
-
   defp table(n, width, pal) do
     # Email table: horizontal rules only (a full 1px grid reads as a 2003
     # default); an opt-in header band mirrors the article thead. All inline —
@@ -1328,6 +1377,23 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
     ~s(<table role="presentation" style="border-collapse:collapse;width:100%;margin:18px 0">#{thead}<tbody>#{rows}</tbody></table>)
   end
+
+  # Column widths (Barkdown plan #25): one <col> per column, `style="width:Npx"` where a width is
+  # set. Integers only (compose.ex table_put_widths/2), so nothing here carries author text.
+  defp table_colgroup(widths, ncols) when is_list(widths) do
+    # One <col> per grid column: the stored list is trimmed to the last column that has a width.
+    padded = widths ++ List.duplicate(nil, max(0, ncols - length(widths)))
+
+    cols =
+      Enum.map_join(padded, "", fn
+        w when is_integer(w) and w > 0 -> ~s(<col style="#{escape_attr("width:#{w}px")}">)
+        _ -> "<col>"
+      end)
+
+    "<colgroup>#{cols}</colgroup>"
+  end
+
+  defp table_colgroup(_widths, _ncols), do: ""
 
   # num and delta both RIGHT-ALIGN (digits and deltas line up on their ones
   # place), the head riding right with its column — the same colRightAlign rule

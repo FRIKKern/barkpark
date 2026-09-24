@@ -7,6 +7,7 @@ defmodule Barkpark.Tasks.Dedup do
   REFUSE the create if a near-duplicate survives structural exclusion — unless
   the author declared it distinct.
 
+
   ## Escape hatches ride existing content fields (no new API/CLI surface)
 
     * **`content.parent_id`** — a task filed under a parent is automatically
@@ -73,12 +74,30 @@ defmodule Barkpark.Tasks.Dedup do
       modelled on `Content.DedupWall`'s (at its own measured floor — the two
       corpora do not share one), and that function's comment states exactly what
       the net can miss.
+
+  ## The `catch :exit` arm is PROVEN, not asserted
+
+  That exit clause used to be unfalsifiable from a test: inside the Ecto SQL
+  sandbox every stageable failure (dead or live dummy dynamic repo, ownership
+  timeout, unallowed process, `pg_terminate_backend`, query/transaction timeout
+  0 and 1) arrives as an EXCEPTION and lands in the `rescue`. Deleting the
+  clause left the whole dedup suite green.
+
+  `Barkpark.Dedup.ScanSeam` closes that. It is a one-verb fault injector
+  (`exit/1` and nothing else) called from inside this module's candidate fetch,
+  compiled in ONLY when `:dedup_scan_seam` is set — which only `config/test.exs`
+  does. Outside that build the compiler emits `check!/1` as a literal `:ok` and
+  the arming functions do not exist in the BEAM at all; inside it, an unarmed
+  process is byte-identical to today. Its moduledoc states all three layers.
+  The coverage lives in `test/barkpark/dedup/scan_exit_seam_test.exs`, whose two
+  cases red INDEPENDENTLY when the matching `catch :exit` clause is deleted.
   """
   import Ecto.Query, only: [from: 2]
 
   require Logger
 
   alias Barkpark.Content.{Document, Scope, WriteScope}
+  alias Barkpark.Dedup.ScanSeam
   alias Barkpark.Repo
   alias Barkpark.Tasks.{Judge, Similarity}
 
@@ -719,6 +738,13 @@ defmodule Barkpark.Tasks.Dedup do
   # threads a workspace id, and the `:shared_only` request sentinel, both reach
   # `scope_to_workspace/3` exactly as before.
   defp fetch_candidates(dataset, opts) do
+    # THE EXIT SEAM. Inert by construction outside `MIX_ENV=test` — see
+    # `Barkpark.Dedup.ScanSeam`'s moduledoc for the three layers that make it so.
+    # It sits INSIDE this function's try body on purpose: the `catch :exit` arm
+    # below is the thing under test, and an injection point outside the try would
+    # prove nothing about it.
+    ScanSeam.check!(:tasks_dedup)
+
     with {:ok, workspace_id} <- candidate_workspace(opts) do
       scan_candidates(dataset, opts, workspace_id)
     end

@@ -3,7 +3,13 @@ defmodule BarkparkWeb.Contract.MutateTest do
   alias Barkpark.Content
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      "test",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     Content.upsert_schema(
       %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
@@ -480,7 +486,7 @@ defmodule BarkparkWeb.Contract.MutateTest do
       # a `[]` default would restore an EXPLICIT `[]`, which BootCollectors
       # reads as the discovery kill switch and leaks to later tests.
       prior = Barkpark.PluginEnv.capture()
-      Application.put_env(:barkpark, :plugins, [Barkpark.Plugins.Bulldocs])
+      Barkpark.PluginEnv.put!([Barkpark.Plugins.Bulldocs])
       on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
       Barkpark.LabelFixtures.register_tags!("test")
       :ok

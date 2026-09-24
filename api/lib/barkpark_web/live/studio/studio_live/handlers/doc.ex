@@ -67,7 +67,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
           )
       end
     else
-      {:noreply, socket}
+      # Same rule as the refusal arms above: an ERROR arm of this case already
+      # flashes, so a press that never ran must not answer with silence.
+      {:noreply, put_flash(socket, :error, "Nothing to publish — open a document first")}
     end
   end
 
@@ -90,7 +92,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
         {:noreply, assign(socket, show_unpublish_guard: true, unpublish_refs: refs)}
       end
     else
-      {:noreply, socket}
+      {:noreply, put_flash(socket, :error, "Nothing to unpublish — open a document first")}
     end
   end
 
@@ -146,7 +148,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
           {:noreply, put_flash(socket, :error, "Failed to duplicate")}
       end
     else
-      {:noreply, socket}
+      {:noreply, put_flash(socket, :error, "Nothing to duplicate — open a document first")}
     end
   end
 end

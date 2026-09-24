@@ -211,9 +211,9 @@ defmodule Barkpark.PluginFreeBootTest do
   ]
 
   setup_all do
-    prev_plugins = Application.get_env(:barkpark, :plugins, :unset)
+    prev_plugins = Barkpark.PluginEnv.capture()
 
-    Application.put_env(:barkpark, :plugins, [])
+    Barkpark.PluginEnv.put!([])
     Application.stop(:barkpark)
 
     # Erase plugin-derived `:persistent_term` snapshots that survive
@@ -268,10 +268,7 @@ defmodule Barkpark.PluginFreeBootTest do
     on_exit(fn ->
       Application.stop(:barkpark)
 
-      case prev_plugins do
-        :unset -> Application.delete_env(:barkpark, :plugins)
-        v -> Application.put_env(:barkpark, :plugins, v)
-      end
+      Barkpark.PluginEnv.restore(prev_plugins)
 
       {:ok, _} = Application.ensure_all_started(:barkpark)
       Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)
@@ -488,6 +485,48 @@ defmodule Barkpark.PluginFreeBootTest do
              "supervision tree contains plugin children: #{inspect(offenders)}"
     end
 
+    test "no pre-write fence resolves: the writer runs no plugin fence under :plugins []" do
+      # task-e5baaaa14ddf2e1c — the Tasks write fences moved behind
+      # `pre_write_fences/0`; with nothing registered the list the writer
+      # runs is empty, not a Tasks-shaped residue.
+      assert Barkpark.Plugins.Registry.collect_pre_write_fences() == []
+    end
+
+    test "no pre-publish fence resolves: a publish runs no plugin gate under :plugins []" do
+      # task-8273f2f1b24a6de1 — the Tasks publish-door gates moved behind
+      # `pre_publish_fences/0`; with nothing registered the lifecycle runs no
+      # fence at the door or inside the publish transaction.
+      assert Barkpark.Plugins.Registry.collect_pre_publish_fences() == []
+    end
+
+    test "no pre-write transform resolves: a write runs no plugin transform or check under :plugins []" do
+      # task-aed4f02e57d3a760 — the Tasks brief re-sync and kind check moved
+      # behind `pre_write_transforms/0`; with nothing registered the writer
+      # stores a write's attrs as sent.
+      assert Barkpark.Plugins.Registry.collect_pre_write_transforms() == []
+    end
+
+    test "no paper task resolver resolves: papers mark task blocks unavailable under :plugins []" do
+      # task-9c59aa555e1e015e — task chips and task query blocks read task data
+      # through `paper_task_resolver/0`; with nothing registered the seam
+      # answers nil and a query block renders its explicit placeholder.
+      assert Barkpark.Content.PaperTaskResolver.get() == nil
+
+      assert [%{"unavailable" => true}] =
+               Barkpark.Content.Papers.resolve_tasks_in_blocks(
+                 [%{"type" => "task-list", "query" => %{"parent_id" => "x"}}],
+                 []
+               )
+    end
+
+    test "no mutate-door fence resolves: the raw mutate door runs no plugin guard under :plugins []" do
+      # task-b04cbe7823d084a6 — the Tasks published-fork fence and adjudication
+      # guards moved behind `mutate_door_fences/0`; with nothing registered
+      # `apply_mutations/3` runs neither phase.
+      assert Barkpark.Plugins.Registry.collect_mutate_door_fences() == []
+      assert Barkpark.Content.MutateDoorFences.list() == []
+    end
+
     test "GET /studio/production renders 200 with Structure marker (following the scoped-shell redirect)" do
       conn = get_following_redirects("/studio/production")
       body = html_response(conn, 200)
@@ -582,6 +621,53 @@ defmodule Barkpark.PluginFreeBootTest do
       assert conn.status == 200
     end
 
+    # task-6325dacb0e233d75: the corpus route's admission-cap slot table is
+    # created at boot by CORE (`Barkpark.Content.Graph.CorpusSlots.init/0` from
+    # `Barkpark.Application.start/2`), not by the Tasks plugin. This case's
+    # setup_all RESTARTED the application with :plugins [], so the table below
+    # was created by that plugin-free boot (the previous owner died with the
+    # stopped application). Were the table plugin-owned, it would be absent and
+    # `acquire_graph_corpus_slot/0` would shed EVERY request with a 503.
+    test "GET /v1/graph (the corpus) serves under :plugins [], not 503 — the slot table is core" do
+      assert :ets.whereis(Barkpark.Content.Graph.CorpusSlots.table()) != :undefined,
+             "the /v1/graph slot table was not created by the plugin-free boot"
+
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      scope = [workspace_id: ws.id, project_id: project.id]
+      doc_id = "graph-corpus-killswitch-#{System.unique_integer([:positive])}"
+
+      {:ok, _doc} =
+        Barkpark.Content.create_document(
+          "post",
+          %{"doc_id" => doc_id, "title" => doc_id, "content" => %{}},
+          "production",
+          scope
+        )
+
+      {:ok, _pub} = Barkpark.Content.publish_document(doc_id, "post", "production", scope)
+
+      raw_token = "barkpark-plugin-free-corpus-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Barkpark.Auth.create_token(raw_token, "plugin-free-corpus", "test", [
+          "read",
+          "write",
+          "admin"
+        ])
+
+      conn =
+        BarkparkWeb.ConnCase.scoped_conn()
+        |> put_req_header("authorization", "Bearer " <> raw_token)
+        |> get("/v1/graph?dataset=production")
+
+      refute conn.status == 503,
+             "GET /v1/graph shed with 503 under :plugins [] — the slot table is missing"
+
+      assert conn.status == 200
+      body = Jason.decode!(conn.resp_body)
+      assert doc_id in Enum.map(body["nodes"], & &1["id"])
+    end
+
     test "read-tier manifest lists the graph.* verbs under :plugins []" do
       manifest = Barkpark.Plugins.Capabilities.manifest("read")
 
@@ -637,8 +723,31 @@ defmodule Barkpark.PluginFreeBootTest do
 
       raw_token = "barkpark-plugin-free-wall-#{System.unique_integer([:positive])}"
 
+      # THE WORKSPACE IS NAMED, NOT FALLEN INTO (task-e0e6454b8b2045ae).
+      # This mint used to be bare 4-arity, and `Auth.create_token/5`'s own
+      # `|| default_workspace_id()` fallback silently handed the token a
+      # Tenancy.Membership in whatever workspace held the default seat. That
+      # fallback is gone, so a bare mint is now genuinely WORKSPACE-LESS and
+      # the (untouched, pre-existing) write-scope guard in
+      # `Barkpark.Content.WriteScope` refuses the flat /v1/data/mutate write
+      # `workspace_scope_required` with `details.workspaces => []` — before the
+      # core unknown_tag wall this test exists to prove is ever reached.
+      #
+      # THIS IS FIXTURE PLUMBING, NOT THE SUBJECT. The fresh-install admin mint
+      # (`Barkpark.Seeds.Clean.mint_admin_token!/2`) already passes
+      # `scope.workspace_id` explicitly, as does every other production caller
+      # of create_token/5, so no real fresh install can produce the empty
+      # `workspaces` list seen here — only a test that skipped the argument. The
+      # token is bound to the SAME workspace the fixture doc above was created
+      # in, which is what the bare mint was accidentally getting all along.
       {:ok, _} =
-        Barkpark.Auth.create_token(raw_token, "plugin-free-wall", "test", ["read", "write"])
+        Barkpark.Auth.create_token(
+          raw_token,
+          "plugin-free-wall",
+          "test",
+          ["read", "write"],
+          ws.id
+        )
 
       conn =
         BarkparkWeb.ConnCase.scoped_conn()

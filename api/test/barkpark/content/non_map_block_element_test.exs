@@ -15,8 +15,8 @@ defmodule Barkpark.Content.NonMapBlockElementTest do
 
       ** (FunctionClauseError) no function clause matching in
          Barkpark.PortableDoc.Render.render_block/2   # arg 1 was "notamap"
-        render.ex:243  render_block/2
-        render.ex:367  render_blocks/2
+        render.ex      render_block/2
+        render.ex      render_blocks/2
         projection.ex     project_body/2
         projection.ex:162  project/4
         writer.ex:Writer.scaffold_expectation/3      (create / createOrReplace)
@@ -36,7 +36,13 @@ defmodule Barkpark.Content.NonMapBlockElementTest do
   @dataset "test"
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      "test",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     # A schema with a STORED, non-empty layout is what routes a create through
     # `Writer.scaffold_expectation/3` → `Projection.project/4` → the renderer.

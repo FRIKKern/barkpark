@@ -22,8 +22,11 @@
  *     } ], "count": 1 }, "syncTags": ["bp:ds:…:related:…"] }
  *
  * A zero-tag source degrades to backlink-only related entries
- * (`sources == ["references"]`, empty `shared_tags`) — the ~35% untagged
- * corpus. `isBacklinkOnly` is the provenance predicate the UI badges on.
+ * (`sources == ["references"]`, empty `shared_tags`). Sources with no
+ * weighted tag: 1120/10863 = 10.3% of published `production` docs, 0/1056
+ * papers (census 2026-09-23: `bp doc ls <type> --perspective published
+ * --fields tags --all` over every type; supersedes charter D68's 2026-07-22
+ * ~35%). `isBacklinkOnly` is the provenance predicate the UI badges on.
  */
 
 /** Provenance leg an entry earned its place through. */

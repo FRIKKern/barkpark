@@ -80,6 +80,7 @@
 #   console-path-escape-check.sh --print-floors  # print the per-idiom floors
 #   console-path-escape-check.sh --print-set console
 #   console-path-escape-check.sh --match console      # changed paths on stdin
+#   console-path-escape-check.sh --match console --null # …NUL-separated (`git diff -z`)
 #                                                     # -> prints true|false
 #
 # `--print-set` / `--match` are consumed by the console-harness.yml dispatcher,
@@ -233,6 +234,56 @@ set -euo pipefail
 # is ONE EXACT FILE for the reason cch-w30-bl-artifacts-paths-ungated gives: a
 # tree-wide `internal/cli/**` would bill every unrelated CLI PR for a console
 # harness run, which is the smell, not the remedy.
+# `cloud/priv/static/__fixtures__/**` RIDES `cloud/priv/static/**` ON PURPOSE, AND
+# IT STAYS THERE (task-9cbf50523873c126, decided 2026-09-22). The question asked
+# was whether a fixture-only commit should be cheaper: `--match console` answers
+# `true` for `cloud/priv/static/__fixtures__/attention_order.json`, so an eleven-
+# file golden directory that looks like inert test data bills the full, REQUIRED
+# Console gate. The answer is that it must, because those goldens are INPUTS to
+# console assertions, not outputs of them.
+#
+# MEASURED 2026-09-22 on origin/main 7b991dec9, the whole decision in one control:
+# swap the `rank` of `suspended` (3) and `degraded` (4) in
+# cloud/priv/static/__fixtures__/attention_order.json — two integers, no code —
+# and `node --test cloud/priv/static/__app.test.mjs` goes from
+# `# pass 1519 / # fail 1` to `# pass 1518 / # fail 2`, the new red being
+# `D32: the SPA ladder is attention_order.json ORDER, derived on both sides`.
+# (The constant 1 is a local-only environment red — __node-version pins 20, the
+# measuring box ran v22 — and is identical on both arms, so it cancels.)
+# That test is DERIVED ON BOTH SIDES by construction: neither the SPA order nor
+# the fixture order is typed out in the harness, so the ONLY way the assertion
+# can change is a fixture edit or an app.js edit. Move the fixtures to a cheaper
+# dispatch set and that red becomes unreachable on the PR that causes it.
+#
+# THE READS, BY FILE AND LINE, so the next reader does not have to re-derive them:
+# cloud/priv/static/__app.test.mjs readFileSync's the directory at :4632
+# (event_types.json), :5097 and :5785 (attention_order.json), :9103
+# (verify_probes.json), :10826 (usage_meters.json), :11856 (provider_catalog.json),
+# :12198 (providers_capabilities.json) and :13285 (domain-status.json); its
+# :10740/:10746 pair asserts on the `/__fixtures__/` route table in
+# cloud/priv/static/__preview__/serve.mjs:57-59; and
+# cloud/priv/static/__preview__/group-view-scenarios.mjs:47 joins
+# `../__fixtures__/fleet_group_roster.json` and DIES (:88) when the catalogue
+# gains a state the fixture does not carry. Nine of the eleven committed
+# fixtures are read by a console instrument directly. The other two —
+# hetzner_overview.json and platform_deliveries.json — are the same shape one
+# fence over: cloud/test/barkpark_cloud/web/hetzner_proxy_test.exs:489 and
+# cloud/test/barkpark_cloud/platform_delivery_fixture_reachability_test.exs:44
+# read them, and the FIRST of those is itself declared in this set via
+# `cloud/test/barkpark_cloud/web/**`.
+#
+# AND NOTHING CHEAPER CAN CATCH IT. .github/workflows/go-tests.yml:182 does
+# declare `cloud/priv/static/__fixtures__/**`, so the Go side re-runs — but
+# go-tests publishes no context in `.github/required-checks.json`, whose required
+# set is exactly Cloud gate / Console gate / Elixir gate / PR references an
+# active task. Of those, only the Console gate runs __app.test.mjs. Demote the
+# fixtures here and the only BLOCKING watcher of a fixture edit is gone, which is
+# the green-by-construction shape this whole file exists to refuse.
+#
+# THE COST IS THE POINT, not a side effect: an eleven-file directory of
+# cross-language goldens is exactly where a one-integer edit silently changes
+# what three runtimes believe. Re-open this only with a control that shows a
+# fixture edit reaching a required red by some OTHER door.
 CONSOLE_PATHS='cloud/priv/static/**
 internal/taskboard/testdata/styleguide_lifecycle.txt
 internal/pdrender/testdata/styleguide_tokens.txt
@@ -445,7 +496,32 @@ tag_lits() {
 file_lits() {
   local p="$REPO_ROOT/$1"
   #  (1) the literal idiom: path.join(REPO_ROOT, "…") / join(REPO, '…')
-  { grep -Eoh "(REPO_ROOT|REPO)[[:space:]]*,[[:space:]]*['\"][^'\"]*['\"]" "$p" || true; } \
+  #      THE `join(` PREFIX IS LOAD-BEARING, NOT DECORATION. This grep used to
+  #      be spelled `(REPO_ROOT|REPO),[[:space:]]*"…"` — a bare TOKEN PAIR with
+  #      no call shape around it — and a token pair also describes an ARGV
+  #      ARRAY: `execFileSync('git', ['-C', REPO, 'rev-parse', …])` in
+  #      __preview__/seal-predicate.mjs fed `rev-parse`, `show`, `merge-base`,
+  #      `--guard-cmd`, `--successor`, `--epic`, `--ladder-only`, `.git` and
+  #      `.github` into this idiom. Every one of them was harmless BY
+  #      COINCIDENCE — dropped by the `[ -f ]` existence filter or by the
+  #      explicit `.git` exclusion — never by construction.
+  #
+  #      That coincidence stopped being tolerable when literal-join became one
+  #      of the three idioms that MAY ADMIT BARE WORDS (see the bare-word rule
+  #      in scan_files). A bare word is exactly the shape of a git subcommand
+  #      AND exactly the shape of a repo-root file: the day an argv token
+  #      collides with a top-level name — `git archive`, `git bundle`, a flag
+  #      value spelled `Makefile` — the ratchet reds on a path nothing reads,
+  #      and the fix would look like adding an exemption for a read that does
+  #      not exist.
+  #
+  #      So the match must sit inside a `join(...)` CALL, which is the shape
+  #      (1b) already requires, and which is the only thing in the source text
+  #      that says "this literal is a PATH SEGMENT under that root" rather than
+  #      "this literal is the next element of a list". Non-path uses of REPO
+  #      cannot spell themselves that way. The bare-word admission rule for this
+  #      idiom is unchanged — it is now merely earned instead of assumed.
+  { grep -Eoh "join[[:space:]]*\([[:space:]]*(REPO_ROOT|REPO)[[:space:]]*,[[:space:]]*['\"][^'\"]*['\"]" "$p" || true; } \
     | tag_lits literal-join
   #  (1b) THE GENERIC JOIN IDIOM: `join(<anyIdentifier>, "…")`. (1) is spelled
   #      against ONE naming convention — `(REPO_ROOT|REPO)`, case-sensitive —
@@ -644,6 +720,33 @@ is_exempt() {
 # modes
 # ---------------------------------------------------------------------------
 
+# ── --null: one path per NUL-terminated record (cch-bl-nul-native-path-matcher)
+# `git diff -z` ends every path with a NUL, and a path may hold a literal
+# NEWLINE. A LINE reader splits that path into two pseudo-paths before the
+# anchored ERE sees it: for a glob anchored at BOTH ends (`docs/cards/*.md`),
+# `docs/cards/a<LF>b.md` becomes `docs/cards/a` and `b.md`, neither matches,
+# and a path IN the set answers false. That was the dispatchers' old
+# `git diff -z … | tr '\0' '\n'`. Under --null each record stays ONE line: an
+# embedded newline is rewritten to \037 (US), a byte no declared glob names and
+# one that `.` and `[^/]` match exactly as they match a newline — so the
+# declared EREs are UNCHANGED and `^…$` anchors the WHOLE path. Without --null
+# stdin is newline-separated, as every other caller (scripts/which-gates.sh,
+# the harness's line fixtures) still writes it.
+#
+# MATCH-INPUT-NUL — the dispatchers grep for this token: a copy that predates
+# --null IGNORES the flag and reads the NUL stream as ONE line (a silent
+# false), so a pinned copy without it is refused, never trusted.
+match_input() {
+  local rec
+  if [ "$1" = null ]; then
+    while IFS= read -r -d '' rec || [ -n "$rec" ]; do
+      printf '%s\n' "${rec//$'\n'/$'\037'}"
+    done
+  else
+    cat
+  fi
+}
+
 mode="${1:---check}"
 
 case "$mode" in
@@ -659,8 +762,23 @@ case "$mode" in
     # ratchet can never disagree about what the path set contains.
     want="${2:?--match needs console}"
     assert_set_name "$want"
+    case "${3:-}" in
+      '') input=lines ;;
+      --null) input=null ;;
+      *)
+        echo "console-path-escape-check: unknown flag '${3}' (want --null)" >&2
+        exit 2
+        ;;
+    esac
+    if [ "$#" -gt 3 ]; then
+      echo "console-path-escape-check: unexpected argument '${4}' after --match" >&2
+      exit 2
+    fi
     ere="$(set_ere "$want")"
-    if grep -Eq -- "$ere"; then
+    # A HERE-STRING, never `match_input … | grep -q` (house D37): grep -q
+    # exits on the first match and a writer still holding bytes takes SIGPIPE.
+    changed="$(match_input "$input")"
+    if grep -Eq -- "$ere" <<<"$changed"; then
       echo "true"
     else
       echo "false"
@@ -693,7 +811,7 @@ case "$mode" in
 
   *)
     echo "console-path-escape-check: unknown argument '$mode'" >&2
-    echo "usage: $0 [--check|--selftest|--list-escapes|--print-floors|--print-set SET|--match SET]" >&2
+    echo "usage: $0 [--check|--selftest|--list-escapes|--print-floors|--print-set SET|--match SET [--null]]" >&2
     exit 2
     ;;
 esac

@@ -212,6 +212,14 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	if key := sessionKey(); key != "" {
 		headers[sessionHeader] = key
 	}
+	// THE SESSION-DOC POINTER (task-9002f2b301329f1f). A SEPARATE header from
+	// the secret key above and never a replacement for it: that one identifies
+	// the claim session, this one names the type:session DOCUMENT the server
+	// appends a task-closed / paper-published event to. Only the two doors the
+	// server arms carry it (session_doc_header.go says why).
+	if slug := sessionDocFor(g, ctx, cmd); slug != "" {
+		headers[sessionDocHeader] = slug
+	}
 	if needsPerspectiveAuth || needsDraftIDAuth {
 		// doc get/ls/query are public at their default published perspective,
 		// so their manifest tier must remain `none`. Drafts and raw are
@@ -892,6 +900,10 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// only on a page that actually carries a live claim, never on stdout — so
 	// `-o json` stays byte-identical (tasks_claim_path.go).
 	emitTaskClaimPathAdvisory(out, cmd, status, out.machineOut(), respBody)
+	// task-46e82dc40c385ed2: the do-not-build half of the same page. Unlike the
+	// claim advisory above it fires in BOTH human and machine mode — its reader
+	// is a lead skimming the table, not a jq script — and writes only to stderr.
+	emitTaskDispatchAdvisory(out, cmd, status, respBody)
 
 	var hinter func() string
 	if typed := taskGetTypedID(cmd, tail); typed != "" {
@@ -2739,7 +2751,10 @@ func commandFlagBelongsInBody(cmd manifest.Command, name string) bool {
 	// key is pinned by a test rather than trusted.
 	if cmd.ID == "task.stamp" {
 		switch name {
-		case "evidence", "note", "criterion-text":
+		// `amended-criterion` is criterion wording too — the --amend
+		// replacement (task-f65368969b1a2471) — and rides the body under the
+		// snake_case key for the same reason criterion-text does.
+		case "evidence", "note", "criterion-text", "amended-criterion":
 			return true
 		}
 	}
@@ -2808,8 +2823,13 @@ func commandHasSetBodyFlags(cmd manifest.Command, flags map[string][]string) boo
 // "criterionText". Kept as a named seam rather than an if buried inside
 // bodyFlagKey so the exception is visible from either function.
 func stampBodyKey(name string) string {
-	if name == "criterion-text" {
+	switch name {
+	case "criterion-text":
 		return "criterion_text"
+	case "amended-criterion":
+		// Params.stamp_amended_criterion/1 reads "amended_criterion" or
+		// "amended-criterion"; the camelCase "amendedCriterion" is NO key.
+		return "amended_criterion"
 	}
 	return bodyFlagKey(name)
 }
@@ -3312,6 +3332,13 @@ func handleResponseHinted(out *writer, m *manifest.Manifest, cmd manifest.Comman
 // the payload, not the envelope. minimal/quiet prints rev + ids only.
 func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 	payload := unwrapResult(respBody)
+
+	// Document listings get their `_id` mirrored to `doc_id` and a `count` when
+	// the envelope carries none — one place, so the single-page passthrough and
+	// the stitched `--all` walk (both of which land here) emit the SAME shape.
+	// Every other command's body is returned byte-identical; see
+	// doc_listing_row_id_key.go.
+	payload = enrichDocListingRows(cmd, payload)
 
 	// Handoff-card shape: a 2xx object carrying a non-empty string "quickstart"
 	// (the ticket-key mint / rotate receipt) prints that block verbatim as the

@@ -49,6 +49,9 @@ on:
 permissions:
   actions: read
   contents: read
+  # so a failed sweep can surface itself to a human (task-e6fe244ece2b5d27).
+  # Until this line existed the notifier below could not have filed anything.
+  issues: write
 
 concurrency:
   group: scheduled-arm-health
@@ -100,3 +103,59 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
+
+      # ── THE READER THIS FILE DID NOT HAVE (task-e6fe244ece2b5d27) ─────────
+      # MEASURED: this workflow was red on 5 of its 5 most recent runs and
+      # nobody was told — and by construction nobody COULD have been. It
+      # declares no `push:` arm and no `pull_request:` arm, both deliberately
+      # (see the header). That is not merely "no check run on a PR": it puts
+      # this file OUTSIDE the population of scripts/main-red-predicate.sh,
+      # which enumerates workflows by `grep -qE '^[[:space:]]*push:'` over the
+      # tree — its enumeration loop, under the banner comment
+      # `--- enumerate workflows carrying a push: arm ---`, is
+      # `grep -qE '^[[:space:]]*push:' "$f" || continue` — and is the input to
+      # main-red-owner.yml
+      # — the one mechanism in this repo that gives a red on main's tip an
+      # owner. A schedule-only workflow is structurally invisible to it.
+      #
+      # So the instrument that tells this repo whether its crons DISPATCH and
+      # CONCLUDE was itself the loudest instance of the disease it reports.
+      # This step closes that, and it is the only reader available to a file
+      # that may not have the other one.
+      #
+      # `failure() || cancelled()`, NOT a bare `failure()`. `failure()`
+      # evaluates FALSE on a cancelled run, and cancelled is the dominant
+      # non-success conclusion on this repository's scheduled workflows — a
+      # sweep that stopped running is the same silence as a sweep that ran red,
+      # and worse, because a stale issue keeps sitting there looking current.
+      # The same reasoning is written above the equivalent steps in
+      # paper-readers.yml and codebase-intel.yml.
+      #
+      # THIS WILL FILE AN ISSUE ON ITS NEXT RUN, AND THAT IS THE POINT, NOT A
+      # REGRESSION. The red it reports is real and six weeks old
+      # (studio-journey-smoke's scheduled arm, 47-of-47 failed). It is ONE
+      # deduped issue, not one per night: file-ci-failure-issue.sh keys on
+      # CI_FAILURE_KEY, appends to the open issue rather than minting a new
+      # one, and after ESCALATE_AFTER repeats stops appending and escalates
+      # ONCE. A finding that has been invisible for six weeks becoming one
+      # issue is the intended state change.
+      - name: Report failure to a human
+        if: failure() || cancelled()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: scheduled-arm-health
+          CI_FAILURE_DETAIL: |
+            The daily scheduled-arm-health sweep did not come back clean.
+
+            It reads every cron-declaring workflow in this tree against its
+            real run history, SCOPED `event=schedule`, and reds on five
+            shapes: NEVER SUCCEEDED, LAUNDERED (green on another event only),
+            STALE, VACUOUS CRON (the cron executes nothing the push/PR arm
+            does not) and ASSERTED NOTHING (every job in the run skipped).
+
+            Exit 2 is CANNOT MEASURE and fails too, deliberately: a sweep that
+            could not read a row must never be mistaken for a sweep that found
+            nothing.
+
+            The per-workflow verdict table is in this run's STEP SUMMARY.
+        run: bash scripts/file-ci-failure-issue.sh

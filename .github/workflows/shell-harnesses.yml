@@ -204,6 +204,13 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # THE LOCAL GATE'S PIN (task-561ac06ea4ebb607). console-harness.sh
+      # READS the test-count pin out of console-harness.yml instead of
+      # carrying a second literal that can drift from CI's. The .yml is
+      # already an entry above as the ratchet's subject; these two are the
+      # SCRIPT and its harness, so an edit to either re-runs the pair.
+      - "scripts/console-harness.sh"
+      - "scripts/console-harness-pin.test.sh"
       # THE CLOUD/CONSOLE AGGREGATOR SHAPE RATCHET
       # (cch-w11-bl-aggregator-decide-shape-ratchet). It reads all THREE
       # aggregator workflows — cloud.yml and console-harness.yml as subjects,
@@ -217,6 +224,44 @@ on:
       # the `scripts/*.test.mjs` entry below, but an edit to the capture module
       # it imports could invalidate the 9 controls without touching the test.
       - "scripts/console-refusal-capture.mjs"
+      # ── THE FENCE ITSELF, AS THREE GLOBS (task-ea44d7b4a12eaf38) ──────────
+      # The two entries above are the harness and the module it imports. They
+      # are NOT what breaks this check. The test's DERIVED arms enumerate a
+      # POPULATION from the tree — scripts/console-refusal-capture.mjs's
+      # FENCE_GLOBS, which is literally
+      #     cloud/priv/static/*.mjs
+      #     cloud/priv/static/__preview__/*.mjs
+      #     scripts/console-*.mjs
+      # — and red when a file with an exit-2 path lands in it and no manifest
+      # row names it. That red therefore belongs to the PR that ADDED the file,
+      # and until now it could not reach one: the leg dispatched on the harness
+      # and the module only, so #19654 (which added
+      # cloud/priv/static/__preview__/accent-role-separation.mjs) ran none of
+      # these 13 tests, merged clean, and reddened MAIN'S TIP for 18h24m until
+      # a THIRD row (task-3f76bb5b8bcc15f8) closed the same instance again.
+      #
+      # THIS IS THE D26 AMENDED EXCEPTION, not a convenience glob. The fence is
+      # a PREDICATE, not a list: the file whose arrival this check exists to
+      # catch does not exist yet, so an enumeration of today's 28 emitters would
+      # go dark on exactly the PR that matters. The three globs below are a
+      # verbatim transcription of FENCE_GLOBS, so the trigger and the corpus are
+      # the same set BY CONSTRUCTION, and the derived arms themselves red if the
+      # two ever disagree.
+      #
+      # THE FIRST TWO WIDEN NOTHING AT THE WORKFLOW LEVEL: `cloud/priv/static/**`
+      # is already an entry (the cloud-static-gz guard), so these are strict
+      # subsets of a trigger that already fires. They exist so the per-leg
+      # dispatcher in scripts/shell-harness-dispatch.sh can name them under
+      # clause A (a roster row must be a verbatim entry here) WITHOUT billing
+      # this leg for every app.js / app.css / image edit under that directory.
+      - "cloud/priv/static/*.mjs"
+      - "cloud/priv/static/__preview__/*.mjs"
+      # The third DOES add one file to the workflow-level trigger —
+      # scripts/console-tdz-order-check.mjs, the only scripts/console-*.mjs not
+      # already listed (the capture module above and console-slice-gate.mjs are
+      # both entries). MEASURED over the last 500 first-parent commits of
+      # origin/main: ZERO touched it.
+      - "scripts/console-*.mjs"
       - "scripts/pds-ledger-census.sh"
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
@@ -828,6 +873,14 @@ on:
       - "internal/cli/tasks_next_cmd.go"
       - "docs/contracts/canonical-impl-markers.md"
       - "scripts/pds-*.py"
+      # ECHO-INTO-JQ CORRUPTION (task-8a5fb4bf0915b5b2). The fixture is a
+      # SUBJECT, not an input: it is a frozen captured bp row, and its escape
+      # sequences ARE what an escape-interpreting echo destroys — strip them and
+      # the check stops measuring anything. The SKILL.md is the other subject:
+      # its fenced recipes are what an agent pastes into zsh.
+      - "scripts/echo-json-parse-guard.test.sh"
+      - "scripts/fixtures/echo-json-parse-row.json"
+      - ".claude/skills/session/SKILL.md"
   push:
     branches: [main]
     paths:
@@ -899,6 +952,13 @@ on:
       - "scripts/console-path-escape-check.sh"
       - "scripts/console-path-escape-check.test.sh"
       - ".github/workflows/console-harness.yml"
+      # THE LOCAL GATE'S PIN (task-561ac06ea4ebb607). console-harness.sh
+      # READS the test-count pin out of console-harness.yml instead of
+      # carrying a second literal that can drift from CI's. The .yml is
+      # already an entry above as the ratchet's subject; these two are the
+      # SCRIPT and its harness, so an edit to either re-runs the pair.
+      - "scripts/console-harness.sh"
+      - "scripts/console-harness-pin.test.sh"
       # THE CLOUD/CONSOLE AGGREGATOR SHAPE RATCHET
       # (cch-w11-bl-aggregator-decide-shape-ratchet). It reads all THREE
       # aggregator workflows — cloud.yml and console-harness.yml as subjects,
@@ -912,6 +972,44 @@ on:
       # the `scripts/*.test.mjs` entry below, but an edit to the capture module
       # it imports could invalidate the 9 controls without touching the test.
       - "scripts/console-refusal-capture.mjs"
+      # ── THE FENCE ITSELF, AS THREE GLOBS (task-ea44d7b4a12eaf38) ──────────
+      # The two entries above are the harness and the module it imports. They
+      # are NOT what breaks this check. The test's DERIVED arms enumerate a
+      # POPULATION from the tree — scripts/console-refusal-capture.mjs's
+      # FENCE_GLOBS, which is literally
+      #     cloud/priv/static/*.mjs
+      #     cloud/priv/static/__preview__/*.mjs
+      #     scripts/console-*.mjs
+      # — and red when a file with an exit-2 path lands in it and no manifest
+      # row names it. That red therefore belongs to the PR that ADDED the file,
+      # and until now it could not reach one: the leg dispatched on the harness
+      # and the module only, so #19654 (which added
+      # cloud/priv/static/__preview__/accent-role-separation.mjs) ran none of
+      # these 13 tests, merged clean, and reddened MAIN'S TIP for 18h24m until
+      # a THIRD row (task-3f76bb5b8bcc15f8) closed the same instance again.
+      #
+      # THIS IS THE D26 AMENDED EXCEPTION, not a convenience glob. The fence is
+      # a PREDICATE, not a list: the file whose arrival this check exists to
+      # catch does not exist yet, so an enumeration of today's 28 emitters would
+      # go dark on exactly the PR that matters. The three globs below are a
+      # verbatim transcription of FENCE_GLOBS, so the trigger and the corpus are
+      # the same set BY CONSTRUCTION, and the derived arms themselves red if the
+      # two ever disagree.
+      #
+      # THE FIRST TWO WIDEN NOTHING AT THE WORKFLOW LEVEL: `cloud/priv/static/**`
+      # is already an entry (the cloud-static-gz guard), so these are strict
+      # subsets of a trigger that already fires. They exist so the per-leg
+      # dispatcher in scripts/shell-harness-dispatch.sh can name them under
+      # clause A (a roster row must be a verbatim entry here) WITHOUT billing
+      # this leg for every app.js / app.css / image edit under that directory.
+      - "cloud/priv/static/*.mjs"
+      - "cloud/priv/static/__preview__/*.mjs"
+      # The third DOES add one file to the workflow-level trigger —
+      # scripts/console-tdz-order-check.mjs, the only scripts/console-*.mjs not
+      # already listed (the capture module above and console-slice-gate.mjs are
+      # both entries). MEASURED over the last 500 first-parent commits of
+      # origin/main: ZERO touched it.
+      - "scripts/console-*.mjs"
       - "scripts/pds-ledger-census.sh"
       - "scripts/pds-ledger-census_test.sh"
       - "scripts/pds-record-parity.sh"
@@ -1422,6 +1520,14 @@ on:
       - "internal/cli/tasks_next_cmd.go"
       - "docs/contracts/canonical-impl-markers.md"
       - "scripts/pds-*.py"
+      # ECHO-INTO-JQ CORRUPTION (task-8a5fb4bf0915b5b2). The fixture is a
+      # SUBJECT, not an input: it is a frozen captured bp row, and its escape
+      # sequences ARE what an escape-interpreting echo destroys — strip them and
+      # the check stops measuring anything. The SKILL.md is the other subject:
+      # its fenced recipes are what an agent pastes into zsh.
+      - "scripts/echo-json-parse-guard.test.sh"
+      - "scripts/fixtures/echo-json-parse-row.json"
+      - ".claude/skills/session/SKILL.md"
 
 permissions:
   contents: read
@@ -1514,6 +1620,7 @@ jobs:
       deploy-convergence: ${{ steps.sets.outputs.deploy-convergence }}
       deploy-concurrency: ${{ steps.sets.outputs.deploy-concurrency }}
       console-path-ratchet: ${{ steps.sets.outputs.console-path-ratchet }}
+      console-harness-pin: ${{ steps.sets.outputs.console-harness-pin }}
       console-refusal-capture: ${{ steps.sets.outputs.console-refusal-capture }}
       weekly-changelog-backfill-guard: ${{ steps.sets.outputs.weekly-changelog-backfill-guard }}
       pds-harnesses: ${{ steps.sets.outputs.pds-harnesses }}
@@ -1554,6 +1661,7 @@ jobs:
       scheduled-arm-health: ${{ steps.sets.outputs.scheduled-arm-health }}
       place-directory-install: ${{ steps.sets.outputs.place-directory-install }}
       scratchpad-reaper: ${{ steps.sets.outputs.scratchpad-reaper }}
+      echo-json-parse: ${{ steps.sets.outputs.echo-json-parse }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1601,7 +1709,32 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: bash scripts/shell-harness-dispatch.sh
+        # THE ABSENT-FILE FALLBACK (task-ecb7fc56b5868bfc). The checkout above is
+        # the PR HEAD; the workflow FILE comes from the merge ref. So a head
+        # whose merge base predates befc8cbbf — the commit that created this
+        # script — carries the new `run:` line and NOT the script:
+        # `bash: scripts/shell-harness-dispatch.sh: No such file or directory`,
+        # exit 127. And because this job feeds the matrix, the failure is not a
+        # red leg, it is NO LEG AT ALL: every harness check run is ABSENT, which
+        # reads exactly like "nothing to run". MEASURED on run 35517160933 job
+        # 106094923976 (head 1badf9dc5, 42 open PRs affected at 18:35Z).
+        # So: the head's OWN copy when it has one — a PR that edits the
+        # dispatcher must test its edit — else the base branch's copy.
+        run: |
+          set -euo pipefail
+          src=scripts/shell-harness-dispatch.sh
+          if [ -f "$src" ]; then
+            echo "dispatcher: HEAD copy ($src)"
+          else
+            base="${GITHUB_BASE_REF:-main}"
+            echo "dispatcher: this head has no $src (it predates befc8cbbf) — running origin/$base's copy"
+            src="$RUNNER_TEMP/shell-harness-dispatch.sh"
+            git show "origin/$base:scripts/shell-harness-dispatch.sh" >"$src" || {
+              git fetch --depth=1 origin "$base"
+              git show "FETCH_HEAD:scripts/shell-harness-dispatch.sh" >"$src"
+            }
+          fi
+          bash "$src"
       - name: Emit the harness matrix
         id: matrix
         # The verdicts the step above wrote are read back as ONE object rather
@@ -1612,7 +1745,24 @@ jobs:
         # introduce, and it is the one thing an empty matrix would hide.
         env:
           SELECTION: ${{ toJSON(steps.sets.outputs) }}
-        run: python3 scripts/shell-harness-matrix.py "$SELECTION" >> "$GITHUB_OUTPUT"
+        # Same absent-file fallback as the step above, for the same reason: a
+        # head that predates this script would exit 127 here and delete the
+        # matrix just as silently.
+        run: |
+          set -euo pipefail
+          src=scripts/shell-harness-matrix.py
+          if [ -f "$src" ]; then
+            echo "matrix: HEAD copy ($src)"
+          else
+            base="${GITHUB_BASE_REF:-main}"
+            echo "matrix: this head has no $src — running origin/$base's copy"
+            src="$RUNNER_TEMP/shell-harness-matrix.py"
+            git show "origin/$base:scripts/shell-harness-matrix.py" >"$src" || {
+              git fetch --depth=1 origin "$base"
+              git show "FETCH_HEAD:scripts/shell-harness-matrix.py" >"$src"
+            }
+          fi
+          python3 "$src" "$SELECTION" >> "$GITHUB_OUTPUT"
 
   # ── THE HARNESS MATRIX ───────────────────────────────────────────────────────
   # 53 sibling jobs, each gated by one uniform

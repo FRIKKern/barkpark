@@ -42,9 +42,19 @@
 #                        with opposite remedies. GitHub publishes no reason for
 #                        a startup failure, so this class names the conclusion
 #                        and the remedy and never a cause.
+#        CANCELLED_CURRENT the NEWEST producing run on this head COMPLETED
+#                        with conclusion `cancelled` and rendered no check run
+#                        under this name — typically evicted, still pending, as
+#                        the pending run of its concurrency group. Terminal on
+#                        THIS head. Re-dispatch: `gh pr update-branch <n>`, or
+#                        push a new sha. Measured on PR #16709 (run
+#                        35890853900): filed NAME_NOT_IN_RUN, told "never
+#                        re-dispatch", and update-branch is what cleared it.
+#                        A cancelled run that was SUPERSEDED never reaches this
+#                        class: only the newest run on the head is classified.
 #        NAME_NOT_IN_RUN the producing run COMPLETED on its first attempt, on a
-#                        conclusion that is NOT `startup_failure`, and
-#                        rendered no check run under this name — a head
+#                        conclusion that is NEITHER `startup_failure` NOR
+#                        `cancelled`, and rendered no check run under this name — a head
 #                        predating the context, a renamed job, a pruned
 #                        aggregator. Rebase, or edit the spec. Never
 #                        re-dispatch; there is nothing to dispatch.
@@ -219,6 +229,23 @@ ABSENT_ROWS=0
 STALE_ROWS=0
 UNKNOWN_ROWS=0
 PENDING_ROWS=0
+# THE RE-ARM SIGNAL (task-a0abaae6f64c0a9c). The in-flight rows whose producing
+# run was created and has dispatched NOTHING yet. Every other in-flight row ends
+# in a producer COMPLETION, and a completion is an event the workflow's
+# `workflow_run` leg already listens to. This population is the one that can
+# leave in silence: it concludes `startup_failure` (measured: GitHub creates NO
+# workflow_run event for that conclusion) or it never leaves the queue at all
+# and ages into ZOMBIED. No event will ever announce either, so the workflow
+# reads this count and, while it is non-zero, dispatches the census again one
+# cycle later — the census re-checks a condition for as long as it holds, which
+# is a level trigger built out of the only thing that knows the condition
+# exists. It is never a finding and never moves the exit code.
+UNDISPATCHED_YOUNG_ROWS=0
+# THE NOTIFY KEY'S INPUT (task-a0abaae6f64c0a9c). One token per head carrying an
+# ABSENT row: `pr<N>` for an open pull request, `sha<9 hex>` under --sha. The
+# workflow files the absence limb under a key built from this SET, not under the
+# workflow's name — see notify_keys() below for why.
+ABSENT_HEAD_TOKENS=""
 # ORPHANED runs are stale-queued rows that are UNDISPATCHABLE and unattached:
 # jobs.total_count 0, and a head that is no longer the current head of any open
 # PR or of main. GitHub has no state transition for them — `gh run cancel` says
@@ -408,11 +435,13 @@ read_check_runs() { # <sha>
 # Workflow runs on a head: NDJSON of
 # {id, path, status, run_attempt, created_at, conclusion}.
 #
-# `conclusion` is carried for ONE reason: `startup_failure` is a terminal
-# conclusion that publishes ZERO jobs and ZERO check runs, so without it a run
-# that never compiled is indistinguishable, in this projection, from a run that
-# executed and simply carried no job of that name. Those are opposite
-# diagnoses. See classify_completed_run() for the whole-token match.
+# `conclusion` is carried for TWO questions, both about which REMEDY to print
+# and neither about whether anything passed: `startup_failure` (a run refused
+# at creation — ZERO jobs, ZERO check runs) and `cancelled` (a run stopped
+# before it rendered — the concurrency-group eviction). Without it either is
+# indistinguishable, in this projection, from a run that executed and simply
+# carried no job of that name, and those are opposite diagnoses. See
+# is_startup_failure() and is_cancelled() for the whole-token matches.
 read_head_runs() { # <sha>
   local sha="$1" f
   if [ -n "$FIXTURES" ]; then
@@ -597,6 +626,33 @@ is_startup_failure() { # <conclusion>
   esac
 }
 
+# ── cancelled, matched as a WHOLE TOKEN (task-faadd040f770153f) ──────────────
+#
+# GitHub's `status: completed` covers success, failure AND cancelled. A run
+# cancelled while still pending — evicted when the next push entered its
+# concurrency group, the dominant way runs die here — is `completed` with no
+# check run rendered under the gate's name, and it used to land in
+# NAME_NOT_IN_RUN, whose remedy is "NEVER re-dispatch". THE SPECIMEN: PR
+# #16709, head ebc4fb514; its only pr-task-gate run 35890853900 (created
+# 2026-09-23T16:44:38Z) concluded cancelled with ZERO jobs because a
+# same-second run for the OLD head evicted it. Census run 35892264098 said
+# NAME_NOT_IN_RUN / never re-dispatch; `update-branch` re-dispatched it and the
+# context rendered on the new head (check run 107438093928, success).
+#
+# THE SUPERSEDED HALF IS ALREADY CORRECT, BY CONSTRUCTION: `newest` is chosen
+# with `sort_by(.created_at, .id) | last`, so an evicted OLDER run beside a
+# newer one is never the run examined. Only cancelled-AND-CURRENT reaches this
+# test — the narrow population the class is for.
+#
+# Reading the conclusion here picks a REMEDY; it never decides pass or fail.
+# The row screams (exit 1, context named) whichever class it lands in.
+is_cancelled() { # <conclusion>
+  case "$1" in
+    cancelled) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # The remedy a class implies, printed beside it. The class name alone is not a
 # diagnosis at 3am: STARTUP_FAILURE and NAME_NOT_IN_RUN are both "a completed
 # run rendered nothing under this name", and only the remedy line tells them
@@ -605,6 +661,8 @@ class_remedy() { # <class>
   case "$1" in
     STARTUP_FAILURE)
       echo "re-arm this head NOW — \`gh pr update-branch <n>\`, or push a new sha. The run was refused at creation, published no jobs and no check runs, and is TERMINAL: this context will stay pending forever on THIS head. GitHub publishes no reason for it, so none is guessed here." ;;
+    CANCELLED_CURRENT)
+      echo "re-dispatch — \`gh pr update-branch <n>\`, or push a new sha. The newest producing run on this head was CANCELLED before it rendered this context (typically evicted as the pending run of its concurrency group); a cancelled run never self-heals on THIS head." ;;
     ZOMBIED)
       echo "re-dispatch — GitHub created the run and never dispatched it." ;;
     RERUN_DELETED)
@@ -757,12 +815,20 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
           # is_startup_failure() above for why a substring test loses this.
           if is_startup_failure "$conclusion"; then
             class="STARTUP_FAILURE"
+          # Same order, same reason: a CANCELLED run — first attempt or re-run —
+          # rendered nothing because it was stopped, not because the name is
+          # absent from the spec or a check run was deleted. Its remedy is a
+          # re-dispatch, the one remedy NAME_NOT_IN_RUN forbids. See
+          # is_cancelled() above; superseded cancels never reach here.
+          elif is_cancelled "$conclusion"; then
+            class="CANCELLED_CURRENT"
           # A re-run that finished and still rendered nothing is a DELETED
           # check run; a first attempt that did the same never had one. The
           # remedies differ, so the names must.
           elif [ "$attempt" -ge 2 ] 2>/dev/null; then
             class="RERUN_DELETED"
           else
+            # success, failure, or no conclusion at all: the run EXECUTED.
             class="NAME_NOT_IN_RUN"
           fi
           ;;
@@ -785,6 +851,7 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
            class   $class
            run     $rid  producer $wf"
         PENDING_ROWS=$((PENDING_ROWS + 1))
+        [ "$class" = "UNDISPATCHED_YOUNG" ] && UNDISPATCHED_YOUNG_ROWS=$((UNDISPATCHED_YOUNG_ROWS + 1))
         ;;
       *)
         say "ABSENT   $label  head $sha"
@@ -794,6 +861,12 @@ census_head() { # <sha> <label> <pr-updated-at> <mergeable>
         say "         age     $(age_hours "$anchor")h  (anchor: $anchor_label $anchor)"
         say "         run     $rid  producer $wf"
         ABSENT_ROWS=$((ABSENT_ROWS + 1))
+        case "$label" in
+          "PR #"*) ABSENT_HEAD_TOKENS="$ABSENT_HEAD_TOKENS
+pr${label#PR #}" ;;
+          *)       ABSENT_HEAD_TOKENS="$ABSENT_HEAD_TOKENS
+sha$(printf '%s' "$sha" | cut -c1-9)" ;;
+        esac
         ;;
     esac
   done <<EOF
@@ -1042,6 +1115,59 @@ if [ "$ORPHAN_ROWS" -gt 0 ]; then
 fi
 say ""
 say "SUMMARY  absent=$ABSENT_ROWS  stale-queued=$STALE_ROWS  unknown=$UNKNOWN_ROWS  in-flight=$PENDING_ROWS  orphaned=$ORPHAN_ROWS  phantom-queued=$PHANTOM_ROWS"
+# Its own line, not a seventh SUMMARY field: readers already parse SUMMARY.
+say "CADENCE  undispatched-young=$UNDISPATCHED_YOUNG_ROWS  (non-zero = re-arm: a producer run exists that can end without emitting any event)"
+
+# ── the notify keys ──────────────────────────────────────────────────────────
+# THE KEY IDENTIFIES THE FINDING, NOT THE WORKFLOW. scripts/file-ci-failure-issue.sh
+# keeps ONE open issue per key and, after escalate_after=3 appends on it,
+# escalates once and goes SILENT. Under one fixed key, a single stuck head (PR
+# #16709 sat NAME_NOT_IN_RUN for hours) spends those three appends within an hour
+# of census runs, and every NEW absence on ANOTHER head then lands on the same
+# silenced issue and reaches nobody. Keyed by the SET of absent heads instead: a
+# set that persists escalates once and goes quiet, which is right; a set that
+# gains a head is a different key and opens a fresh issue.
+#   absence limb  absent-context-census-absent-<sorted tokens joined by ->,
+#                 e.g. absent-context-census-absent-pr16709. Past 8 heads the
+#                 list becomes <N>heads-<12 hex of sha256 over the sorted list>,
+#                 so the issue title stays far under GitHub's 256-char limit
+#                 and the key stays a pure function of the set.
+#   queue limb    absent-context-census-queue — STABLE on purpose: stale-queued
+#                 rows are one standing condition, not per-head news.
+#   neither       empty. The workflow then files only on a red with no finding
+#                 (harness red, UNKNOWN, CONFIGURATION FAULT, cancelled) under
+#                 the bare fallback key absent-context-census.
+sha256_hex() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -c1-64
+  else shasum -a 256 | cut -c1-64; fi
+}
+notify_keys() {
+  local toks n
+  toks="$(printf '%s\n' "$ABSENT_HEAD_TOKENS" | grep . | sort -u)"
+  n="$(printf '%s\n' "$toks" | grep -c .)"
+  if [ "$n" -eq 0 ]; then
+    ABSENT_KEY=""
+  elif [ "$n" -le 8 ]; then
+    ABSENT_KEY="absent-context-census-absent-$(printf '%s\n' "$toks" | paste -sd- -)"
+  else
+    ABSENT_KEY="absent-context-census-absent-${n}heads-$(printf '%s\n' "$toks" | sha256_hex | cut -c1-12)"
+  fi
+  if [ "$STALE_ROWS" -gt 0 ]; then QUEUE_KEY="absent-context-census-queue"; else QUEUE_KEY=""; fi
+}
+notify_keys
+say "NOTIFY   absence-key=${ABSENT_KEY:-none}  queue-key=${QUEUE_KEY:-none}"
+
+# The workflow reads these as step outputs. Opt-in, so a hermetic harness run
+# inside a CI step never writes into that step's outputs by accident. ALL THREE
+# are written on every run, empty included, so a retried census overwrites the
+# first attempt's values rather than inheriting them.
+if [ "${ABSENT_CENSUS_EMIT_OUTPUT:-}" = "1" ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
+  {
+    echo "undispatched_young=$UNDISPATCHED_YOUNG_ROWS"
+    echo "absent_key=$ABSENT_KEY"
+    echo "queue_key=$QUEUE_KEY"
+  } >> "$GITHUB_OUTPUT"
+fi
 
 [ "$CONFIG_FAULT" = "1" ] && {
   warn "CONFIGURATION FAULT — this run's credential cannot read the Actions and check-run endpoints. A census with no authority is not a clean census."

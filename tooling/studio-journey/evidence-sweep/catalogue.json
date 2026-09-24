@@ -1,0 +1,121 @@
+{
+  "_what": "Harness-debris catalogue for task-d582be9d064f35dc, criterion 2. NOTHING IN THIS FILE HAS BEEN DELETED. These are documents on a live host and the row's own ruling is that a predicate nobody checked is how documents get deleted wrongly. Disposal needs authorisation from the lane lead or the owner.",
+  "_host": "https://guerrilla.barkpark.cloud",
+  "_dataset": "production",
+  "_served_commit_at_measurement": "e02e4296d",
+  "_measured_at": "2026-09-22T12:40Z",
+  "_population": "1093 paper documents in the drafts perspective, of which 42 carry _draft:true. Every one of the 42 was read and classified; the 34 not listed here are named Papers with authored content or long-lived probe documents from other epics, and none is claimed as journey debris.",
+  "_how_found": "Full pagination of /v1/data/query/production/paper?perspective=drafts (limit 100, 11 pages), then classified by (a) the new provenance stamp journeyRun.harness, (b) the journey's own marker strings JOURNEY HEADING / journey paragraph in the title or block text, (c) id prefix for the two documents this task created deliberately.",
+  "_new_predicate_finds": "The new predicate (arm 1, journeyRun.harness) selects exactly 2 documents on this host — both created by THIS task's work today. It finds NONE of the six catalogued drafts, and that is by construction: nothing stamped them, so nothing can prove by rule that they are debris. The fix is forward-only. See _the_sixth_is_the_interesting_one.",
+  "_the_sixth_is_the_interesting_one": "drafts.paper-8be087501234ae2d is UNTITLED and template-shaped. The old predicate's TITLE clause passes it — so the row's mechanism (title-only) does not explain it. What makes it permanent is the TIME clause: `since` is always the current run's own press. It is the proof that a longer title vocabulary was never the fix, and it is also the one document in this list with NO textual evidence of its own provenance: it is debris only by circumstance (its timestamp sits inside the same night's run window). That is precisely why it must not be swept by rule.",
+  "harness_debris": [
+    {
+      "id": "drafts.paper-c113346aba4d66ab",
+      "title": "journey paragraph MUCA9FZ6",
+      "created_at": "2026-09-22T06:18:33.005780Z",
+      "updated_at": "2026-09-22T06:18:36.215228Z",
+      "blocks": 2,
+      "block_text": "journey paragraph MUCA9FZ6",
+      "stamped": false,
+      "evidence": "The block text is journey.mjs's own TYPE-beat marker `journey paragraph <base36 stamp>` (journey.mjs legA, run.markers). No human types that string. Two blocks = the untouched seeded template. Created in the 05:57-06:29 window of the night's killed runs.",
+      "catalogued_by": "studio-s30-w6, in the task row",
+      "disposition": "NOT DELETED — awaiting authorisation"
+    },
+    {
+      "id": "drafts.paper-0643af76eb6b633b",
+      "title": "journey paragraph MUCA8WHGJOURNEY HEADING MUCA8WHGjourney paragraph MUCA8WHG",
+      "created_at": "2026-09-22T06:18:07.642356Z",
+      "updated_at": "2026-09-22T06:18:28.182716Z",
+      "blocks": 2,
+      "block_text": "journey paragraph MUCA8WHGJOURNEY HEADING MUCA8WHGjourney paragraph MUCA8WHG",
+      "stamped": false,
+      "evidence": "Carries BOTH of the run's markers with the same base36 stamp MUCA8WHG — heading and paragraph, concatenated, which is what a retried typing pass produces. Two blocks.",
+      "catalogued_by": "studio-s30-w6, in the task row",
+      "disposition": "NOT DELETED — awaiting authorisation"
+    },
+    {
+      "id": "drafts.paper-3a477d9b6918e824",
+      "title": "journey paragraph MUCA8HNK",
+      "created_at": "2026-09-22T06:17:48.067584Z",
+      "updated_at": "2026-09-22T06:17:50.875999Z",
+      "blocks": 2,
+      "block_text": "journey paragraph MUCA8HNK",
+      "stamped": false,
+      "evidence": "TYPE-beat marker with stamp MUCA8HNK. Two blocks.",
+      "catalogued_by": "studio-s30-w6, in the task row",
+      "disposition": "NOT DELETED — awaiting authorisation"
+    },
+    {
+      "id": "drafts.paper-98e2223da8e80e75",
+      "title": "journey paragraph MUC9UTIOJOURNEY HEADING MUC9UTIOjourney paragraph MUC9UTIO",
+      "created_at": "2026-09-22T06:07:10.973495Z",
+      "updated_at": "2026-09-22T06:07:30.414854Z",
+      "blocks": 2,
+      "block_text": "journey paragraph MUC9UTIOJOURNEY HEADING MUC9UTIOjourney paragraph MUC9UTIO",
+      "stamped": false,
+      "evidence": "Both markers, stamp MUC9UTIO. Two blocks.",
+      "catalogued_by": "studio-s30-w6, in the task row",
+      "disposition": "NOT DELETED — awaiting authorisation"
+    },
+    {
+      "id": "drafts.paper-b9a56007639bfd72",
+      "title": "journey paragraph MUC9IDY5JOURNEY HEADING MUC9IDY5journey paragraph MUC9IDY5",
+      "created_at": "2026-09-22T05:57:30.827813Z",
+      "updated_at": "2026-09-22T05:57:50.822665Z",
+      "blocks": 2,
+      "block_text": "journey paragraph MUC9IDY5JOURNEY HEADING MUC9IDY5journey paragraph MUC9IDY5",
+      "stamped": false,
+      "evidence": "Both markers, stamp MUC9IDY5. Two blocks.",
+      "catalogued_by": "studio-s30-w6, in the task row",
+      "disposition": "NOT DELETED — awaiting authorisation"
+    },
+    {
+      "id": "drafts.paper-8be087501234ae2d",
+      "title": null,
+      "created_at": "2026-09-22T06:29:01.217408Z",
+      "updated_at": "2026-09-22T06:29:01.217408Z",
+      "blocks": 2,
+      "block_text": "",
+      "stamped": false,
+      "evidence": "WEAKEST OF THE SIX, AND SAID SO. No marker text at all: title null, both template blocks empty, _updatedAt == _createdAt (never edited). It is the shape a `+` press with no typing leaves. It is debris only by circumstance — its timestamp sits 12 minutes after the last titled leftover, inside the same night's window. NOTHING in the document itself distinguishes it from an empty draft a human opened and abandoned, and the harness's own instrument cannot tell those apart. This is the document that most needs a human ruling, not a predicate.",
+      "catalogued_by": "studio-s30-w6, in the task row",
+      "disposition": "NOT DELETED — awaiting authorisation"
+    },
+    {
+      "id": "drafts.paper-e64b438d91789273",
+      "title": "journey paragraph MUCNNJX3",
+      "created_at": "2026-09-22T12:33:26.154591Z",
+      "updated_at": "2026-09-22T12:33:29.368978Z",
+      "blocks": 2,
+      "block_text": "journey paragraph MUCNNJX3",
+      "stamped": true,
+      "stamp": { "harness": "tooling/studio-journey/journey.mjs", "run_id": "MUCNNJX3", "host": "https://guerrilla.barkpark.cloud", "stamped_at": "2026-09-22T12:33:24.375Z" },
+      "evidence": "CREATED DELIBERATELY BY THIS TASK, criterion 0. A journey run was SIGKILLed the moment the dataset showed a titled draft — i.e. after the TYPE beat. Reading in c0-killed-run.json. It is also the proof that the stamp survives TYPE and autosave: stamped_at 12:33:24.375Z, _updatedAt 12:33:29.368978Z, and the stamp is still on the document after the typed blocks landed.",
+      "catalogued_by": "studio-s30-w13 (this task)",
+      "disposition": "NOT DELETED — awaiting authorisation. Reclaimable by rule once 30 minutes old: the new predicate selects it for a later run."
+    },
+    {
+      "id": "drafts.paper-w13probemucnckud",
+      "title": "W13 MARKER PROBE",
+      "created_at": "2026-09-22T12:24:52.524887Z",
+      "updated_at": "2026-09-22T12:25:47.682386Z",
+      "blocks": 2,
+      "stamped": true,
+      "stamp": { "harness": "tooling/studio-journey/journey.mjs", "run_id": "PATCHED2" },
+      "evidence": "CREATED DELIBERATELY BY THIS TASK. The probe that established three facts the design rests on: a custom field survives a create on a `paper`; `patch` sets it (and guerrilla refuses a patch with no `type` — 422 validation_failed); and `filter[journeyRun.harness][eq]` is a real server-side filter (count 1 for the mark, count 0 for a value nothing carries).",
+      "catalogued_by": "studio-s30-w13 (this task)",
+      "disposition": "NOT DELETED — awaiting authorisation"
+    },
+    {
+      "id": "drafts.paper-w13controlmucnodkq",
+      "title": null,
+      "created_at": "2026-09-22T12:34:02.915683Z",
+      "updated_at": "2026-09-22T12:34:02.915683Z",
+      "blocks": 2,
+      "stamped": false,
+      "evidence": "CREATED DELIBERATELY BY THIS TASK, criterion 0's CONTROL. An untitled, template-shaped draft inside the killed run's own window — the shape of a `+`-without-navigating orphan. The OLD predicate SELECTS it, which is what makes the subject's non-selection a property of the predicate and not of a sweeper that selected nothing.",
+      "catalogued_by": "studio-s30-w13 (this task)",
+      "disposition": "NOT DELETED — awaiting authorisation"
+    }
+  ]
+}

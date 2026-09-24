@@ -694,6 +694,12 @@ async function main() {
 
     const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
     process.stdout.write(`>> ${version.Browser} · node ${process.version}\n`);
+    // THE SCOPE OF THIS RUN, PRINTED WITH ITS RESULT (D906). Everything below
+    // is measured in ONE engine. D168 asserted a cross-browser property off a
+    // green like this one and stood for four waves until a hand-driven Firefox
+    // refuted it (D904). browser-axis-census.mjs derives the engine from this
+    // file's own discovery candidates and reds if this line disagrees with them.
+    process.stdout.write(">> browser axis  Blink — 1 of 3 engine families (Blink · Gecko · WebKit). A green here is NOT a cross-browser green.\n");
     process.stdout.write(
       `>> widths ${WIDTHS.length}: ${SWEEP_WIDTHS.length} IMPORTED from breakpoint-sweep.mjs ` +
       `(${SWEEP_WIDTHS[0]}..${SWEEP_WIDTHS[SWEEP_WIDTHS.length - 1]}, derived from app.css's own @media preludes)\n` +

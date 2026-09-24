@@ -302,20 +302,107 @@ defmodule Barkpark.Tasks.TwinOneRuleTest do
       end
     end
 
+    # ── THE TWO TYPE CLAUSES ARE NOT ONE PROPERTY ─────────────────────────────
+    #
+    # `DatasetTwinFence` names `"task"` twice, and the pair above (a post beside
+    # a post) cannot tell them apart: delete either clause alone and this file
+    # stayed green, which reads as redundancy. It is not. The two clauses scope
+    # DIFFERENT types, and only a CROSS-type fixture separates them:
+    #
+    #   * the head `def check("task", …)` scopes the type of the write BEING
+    #     BORN — nothing but a task birth is ever refused;
+    #   * `d.type == "task"` in `sibling_datasets/4` scopes the type of the
+    #     EXISTING row — nothing but a task counts as the sibling that refuses.
+    #
+    # `(doc_id, type, dataset_id)` is the unique index, so one id legitimately
+    # names rows of several types. Each clause below is the ONLY thing standing
+    # between a legitimate write and a false refusal, and each of the two tests
+    # reds under its own single mutation. Delete a clause and the twin test goes
+    # red; re-merge the two into one and one of them goes red.
+
+    test "a NON-task birth is untouched even when a TASK holds the id elsewhere — " <>
+           "the `\"task\"` HEAD alone carries this",
+         %{scope: scope} do
+      doc_id = uniq("head-scopes-the-birth")
+
+      # A real task sibling: `d.type == "task"` MATCHES it, so the query filter
+      # cannot be what exempts the post below. Only the head can.
+      _task_elsewhere = mk_draft!(doc_id, @primary, scope)
+
+      # RED if the head is widened past `"task"` (mutation A): the post birth
+      # then enters the cond, the query finds the task in @primary, and a write
+      # this fence must never touch is refused 409.
+      assert {:ok, %Document{}} =
+               Content.create_document(
+                 "post",
+                 %{"doc_id" => doc_id, "title" => doc_id, "content" => %{"body" => "x"}},
+                 @secondary,
+                 scope
+               )
+    end
+
+    test "a TASK birth is allowed when a NON-task holds the id elsewhere — " <>
+           "`d.type == \"task\"` in sibling_datasets/4 alone carries this",
+         %{scope: scope} do
+      doc_id = uniq("query-scopes-the-sibling")
+
+      # A non-task sibling. The head MATCHES the write below (it is a task), so
+      # the head cannot be what exempts it. Only the query's type filter can.
+      {:ok, _post_elsewhere} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => doc_id, "title" => doc_id, "content" => %{"body" => "x"}},
+          @primary,
+          scope
+        )
+
+      # RED if `d.type == "task"` is dropped from sibling_datasets/4
+      # (mutation B): the post in @primary is then counted as a sibling and a
+      # perfectly ordinary first task birth is refused 409.
+      assert {:ok, %Document{}} =
+               Content.create_document(
+                 "task",
+                 %{"doc_id" => doc_id, "title" => doc_id, "content" => content()},
+                 @secondary,
+                 scope
+               )
+
+      # Non-vacuity: the fence DOES still refuse when the sibling is a task.
+      other_id = uniq("query-scopes-the-sibling-control")
+      _task_elsewhere = mk_draft!(other_id, @primary, scope)
+
+      assert {:error, {:dataset_twin, %{datasets: [@primary]}}} =
+               Content.create_document(
+                 "task",
+                 %{"doc_id" => other_id, "title" => other_id, "content" => content()},
+                 @secondary,
+                 scope
+               )
+    end
+
+    # THE UPDATE MUST REACH THE NAMED CLAUSE. The edit used to carry
+    # `dataset_twin_intended: true` as well, so `intended?/1` — a clause INSIDE
+    # the cond — waved it through: widen the head to accept a non-nil
+    # `prev_doc` and this arm still passed, leaving the birth restriction
+    # unmeasured. Only the TWIN'S BIRTH needs the stated intent (it is the
+    # write that would otherwise be refused); the edit must state nothing, so
+    # the `nil = _prev_doc` head is the only thing that can exempt it.
     test "an UPDATE of an existing row is untouched — the guard is a birth guard",
          %{scope: scope} do
       doc_id = uniq("producer-update")
       _first = mk_draft!(doc_id, @primary, scope)
       _twin = mk_draft!(doc_id, @secondary, scope, %{"dataset_twin_intended" => true})
 
+      edit = content()
+
+      refute Map.has_key?(edit, "dataset_twin_intended"),
+             "the edit states the twin intent, so `intended?/1` would exempt it and the " <>
+               "birth-guard head would go unmeasured"
+
       assert {:ok, %Document{}} =
                Content.upsert_document(
                  "task",
-                 %{
-                   "doc_id" => doc_id,
-                   "title" => "#{doc_id} (edited)",
-                   "content" => content(%{"dataset_twin_intended" => true})
-                 },
+                 %{"doc_id" => doc_id, "title" => "#{doc_id} (edited)", "content" => edit},
                  @secondary,
                  scope
                )

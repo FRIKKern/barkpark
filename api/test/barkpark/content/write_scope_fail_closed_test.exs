@@ -34,7 +34,14 @@ defmodule Barkpark.Content.WriteScopeFailClosedTest do
   @invalid_dataset "Not-Valid"
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      "test",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
     :ok
   end
 

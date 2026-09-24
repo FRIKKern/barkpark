@@ -79,16 +79,13 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerBoundedCollectTest do
   end
 
   setup do
-    prev_plugins = Application.get_env(:barkpark, :plugins)
+    prev_plugins = Barkpark.PluginEnv.capture()
     Application.delete_env(:barkpark, :plugins)
 
     on_exit(fn ->
       Registry.reset()
 
-      case prev_plugins do
-        nil -> Application.delete_env(:barkpark, :plugins)
-        v -> Application.put_env(:barkpark, :plugins, v)
-      end
+      Barkpark.PluginEnv.restore(prev_plugins)
     end)
 
     Content.upsert_schema(

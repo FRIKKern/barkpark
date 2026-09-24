@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: paper-editor-integration | budget: 1000tok -->
 # Paper editor integration
 
-Public/Studio share canvas + `PaperViewer`. View flushes; focus pins revisions; overlaps need review. External revision-owning hosts may use `applyServerBlocksIfIdle`: only `true` permits advancing their revision; drafts/IME/source/island input refuse without discard. Same-type textblocks and unchanged list/table structure preserve caret mapping; mark/link-only updates retain selection with mark steps. Figure writes child `src`; empty captions are zero-flow. Null-type Card media stays contextual and exact. Card titles edit in place unless rich. Undo/Redo: authorized single-use 1h receipts, session queue; text history stays native. Clients get opaque refs, never inverses.
+Public/Studio share canvas + `PaperViewer`. View flushes; focus pins revisions; overlaps need review. External revision-owning hosts may use `applyServerBlocksIfIdle`: callers must reject stale read/echo revisions; only `true` permits advancing their revision; drafts/IME/source/island input refuse without discard. Same-type textblocks and unchanged list/table structure preserve caret mapping; mark/link-only updates retain selection with mark steps. Figure writes child `src`; empty captions are zero-flow. Null-type Card media stays contextual and exact. Card titles edit in place unless rich. Undo/Redo: authorized single-use 1h receipts, session queue; text history stays native. Clients get opaque refs, never inverses.
 - **Plugin module:** `register_schemas/1` + `register_routes/1` expose the `:public_root` reader and `:ingest` API (`/v1/plugins/bulldocs/*`) for reuse.
 - **Sessions:** 2nd blocks type (whitelist `{paper, session}`); routes `/v1/plugins/bulldocs/sessions*`; private+unwalled schema; Studio pane read-only v1 (`bp session publish` writes).
 
@@ -18,4 +18,4 @@ Image upload completion stays outside native Undo history. Per-editor upload rec
 Native splits materialize duplicate inherited top-level IDs before dispatch. The original first occurrence and unrelated references remain stable across pending writes, reorder/delete and native history. Regression: `__block_identity_mounted.test.mjs`.
 
 
-Source: `api/assets/paper-editor/src/`; tests named above are relative to it. The shared converter is `convert.js`; `index.js` and `canvas/index.js` mount the same boundaries.
+Source: `api/assets/paper-editor/src/`; named regressions live under `src/canvas/`. The shared converter is `convert.js`; `index.js` and `canvas/index.js` mount the same boundaries.

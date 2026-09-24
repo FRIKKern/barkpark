@@ -121,6 +121,7 @@
                   "create_wall",
                   "csrf_required",
                   "dataset_twin",
+                  "default_workspace_not_archivable",
                   "deploy_runner_unavailable",
                   "duplicate_of",
                   "duplicate_task",
@@ -191,6 +192,7 @@
                   "unsupported_media_type",
                   "validation_failed",
                   "webhook_not_found",
+                  "workspace_archived",
                   "workspace_scope_required",
                   "workspace_slug_conflict",
                   "workspace_suspended"
@@ -5483,6 +5485,75 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/api/workspaces/{workspace_slug}/archive": {
+      "post": {
+        "operationId": "workspace.archive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Archive a workspace reversibly (the active --workspace): content is kept, scoped reads/writes answer 409 workspace_archived until restored.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/chat/sessions/{id}/answer": {
       "post": {
         "operationId": "chat.answer",
@@ -5797,6 +5868,75 @@
           "media"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/tokens/{id}/rotate": {
+      "post": {
+        "operationId": "token.rotate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a successor for a token seated here (same permissions and scope); the old one expires after the grace window.",
+        "tags": [
+          "token"
+        ],
+        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/v1/plugins/sheets/{slug}/export.csv": {
@@ -7316,7 +7456,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Patch a document: --set the fields to change (key:=json for typed values).",
+        "summary": "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "tags": [
           "doc"
         ],
@@ -8756,6 +8896,75 @@
           "auth"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/api/workspaces/{workspace_slug}/restore": {
+      "post": {
+        "operationId": "workspace.restore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Restore an archived workspace (the active --workspace) to exactly its pre-archive state.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/tasks/{doc_id}/claim": {
@@ -11208,7 +11417,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Patch a document: --set the fields to change (key:=json for typed values).",
+        "summary": "Patch a document: --set the fields to change (key:=json for typed values), or --file for a JSON object of fields.",
         "tags": [
           "doc"
         ],
@@ -12856,6 +13065,91 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/tokens/{id}/rotate": {
+      "post": {
+        "operationId": "token.rotate.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a successor for a token seated here (same permissions and scope); the old one expires after the grace window.",
+        "tags": [
+          "token"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
     "/v1/media/{dataset}/collections/{id}/assets": {
       "get": {
         "operationId": "media.collection-assets",
@@ -14027,6 +14321,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Bound each hit's projected prose to ~N characters: blocks/body are cut to the smallest whole-block document prefix carrying that much text, and a cut hit carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse projecting blocks answers ~14 MB). A malformed value is a 400, never an unbounded 200.",
+            "in": "query",
+            "name": "bodyChars",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -14839,6 +15142,15 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Bound each hit's projected prose to ~N characters: blocks/body are cut to the smallest whole-block document prefix carrying that much text, and a cut hit carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse projecting blocks answers ~14 MB). A malformed value is a 400, never an unbounded 200.",
+            "in": "query",
+            "name": "bodyChars",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -16737,7 +17049,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES the criterion's exact stored wording, and it must ride a FILE: --criterion-text-file <path> (or `-` for stdin) reads the bytes without a shell ever touching them. Do NOT retype it inline as --criterion-text \"…\" — criterion wording is MARKDOWN, and a backticked code span inside a double-quoted shell argument is COMMAND SUBSTITUTION, so bash/zsh EXECUTE it and bp is handed text that is not the stored wording. The index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated \"<why this stamp is yours to make>\" (the override takes a REASON, and a bare --merge-gated is refused; the reason lands at content.merge_gate_autostamp.stamp_overrides[].reason); a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps to an EXISTING criterion never trip close's work-digest fence — met/evidence/attempts are your progress record, and WorkDigest D5 reduces them away before hashing. A SEED IS THE EXCEPTION, and the refusal is CORRECT: stamping one past the end adds criterion TEXT, text IS work-defining, so your own next DEFAULT-path close is refused 409 doc_changed_since_claim with changed_fields [\"acceptance_criteria\"]. You moved the bar the row will be judged against, so re-read the row and close with --set observed_rev=<the rev you read AFTER the seed>; do not read that 409 as breakage. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text-file) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done.",
+        "summary": "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES the criterion's exact stored wording, and it must ride a FILE: --criterion-text-file <path> (or `-` for stdin) reads the bytes without a shell ever touching them. Do NOT retype it inline as --criterion-text \"…\" — criterion wording is MARKDOWN, and a backticked code span inside a double-quoted shell argument is COMMAND SUBSTITUTION, so bash/zsh EXECUTE it and bp is handed text that is not the stored wording. The index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated \"<why this stamp is yours to make>\" (the override takes a REASON, and a bare --merge-gated is refused; the reason lands at content.merge_gate_autostamp.stamp_overrides[].reason); a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps to an EXISTING criterion never trip close's work-digest fence — met/evidence/attempts are your progress record, and WorkDigest D5 reduces them away before hashing. A SEED IS THE EXCEPTION, and the refusal is CORRECT: stamping one past the end adds criterion TEXT, text IS work-defining, so your own next DEFAULT-path close is refused 409 doc_changed_since_claim with changed_fields [\"acceptance_criteria\"]. You moved the bar the row will be judged against, so re-read the row and close with --set observed_rev=<the rev you read AFTER the seed>; do not read that 409 as breakage. Emits a task.criterion event. Stamp is progress; close is the seal. THE WITHDRAWAL: --withdraw --note \"<why>\" (with --criterion-text-file) is the verb that LOWERS a met flag when review refutes the proof. It sets met=false so criteria_progress drops, LEAVES the original evidence in place, and appends a signed {who,why,when,superseded_evidence} record to the criterion's withdrawals list. A raw met:true -> met:false patch is still refused — an un-flip that leaves no trace is the silent rewrite append-only exists to prevent. Because review lands AFTER the close, --withdraw is the ONE stamp outcome allowed on a sealed row: on an in_progress row it is holder-only + epoch-fenced like any stamp, and on any other row (done/cancelled/blocked/open) it requires --observed-rev <the rev you read> instead (409 observed_rev_required) — a sealed row keeps its claim only as a receipt, so liveness decides, not presence. Withdrawing an already-unmet criterion is refused (409 criterion_not_met), and a merge gate needs no --merge-gated to be withdrawn — lowering a lock can never fabricate a done. THE AMENDMENT: --amend --amended-criterion-file <path> --note \"<why>\" (with --criterion-text-file) is the verb that CORRECTS A CRITERION'S WORDING when the sentence itself turns out false — e.g. a criterion asserting that code is NOT on origin/main while origin/main carries it, closed \"remains NOT MET\" beside met=true. It replaces acceptance_criteria[N].criterion AND re-derives the brief's criteria-list mirror in ONE rev-fenced write, so both surfaces move or neither does; patching one surface is the half-fix this verb exists to end. It is NEVER a silent rewrite: the superseded sentence is snapshotted onto an UNBOUNDED amendments list with {note,ts,worker,superseded_criterion}. It moves NO lock — met is pinned to its stored value and evidence is untouched — so it can neither fabricate a done nor erase a proof, which is also why a MERGE GATE is amendable with no --merge-gated. Fenced exactly like --withdraw: on an in_progress row holder-only + epoch, on any other row (done/cancelled/blocked/open) --observed-rev <the rev you read> (409 observed_rev_required). The criterion-text CAS is REQUIRED (409 criterion_text_required) — re-wording the wrong neighbour is as much a lie as flipping it. Blank replacement wording is refused (409 amended_criterion_required: emptying a criterion is a DELETION, not a correction), wording identical to the stored text is refused (409 criterion_unchanged), and an amendment can never SEED a criterion one past the end (409 criteria_index_out_of_range).",
         "tags": [
           "task"
         ],

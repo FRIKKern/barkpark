@@ -546,7 +546,7 @@ var completionNouns = []string{
 // completionGlobals are the global flags valid before any noun.
 var completionGlobals = []string{
 	"-s", "--server", "--token", "-w", "--workspace", "-p", "--project",
-	"-d", "--dataset", "-o", "--output", "--limit", "--offset", "--manifest",
+	"-d", "--dataset", "-o", "--output", "--limit", "--offset", "--manifest", "--session",
 	"--json", "-q", "--quiet", "-v", "--verbose", "--no-color", "--dry-run",
 	"--yes", "--all", "--full", "--no-cache", "-h", "--help", "--version", "-V",
 }

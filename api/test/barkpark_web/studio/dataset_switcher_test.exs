@@ -3,10 +3,14 @@ defmodule BarkparkWeb.Studio.DatasetSwitcherTest do
   Locks the section → URL mapping of the Studio dataset switcher.
 
   Four of this component's fixes were "restore /api-tester" regressions: when a
-  Studio section is dropped or renamed, `section_suffix/1` silently falls through
-  to the dataset root, navigating users to the wrong place — and it shipped each
-  time because the component had no test. These assertions pin each section's
-  suffix and the selected-option behaviour so that drift fails CI instead.
+  Studio section is dropped or renamed, the suffix silently falls through to the
+  dataset root, navigating users to the wrong place — and it shipped each time
+  because the component had no test. These assertions pin each section's suffix
+  and the selected-option behaviour so that drift fails CI instead.
+
+  The section is no longer a hand-assigned `:nav_section` atom: it is DERIVED
+  from `current_path` by `BarkparkWeb.Studio.Section`, so these cases now drive
+  the component with the REAL URLs a viewer is on.
   """
   use Barkpark.DataCase, async: true
 
@@ -23,8 +27,9 @@ defmodule BarkparkWeb.Studio.DatasetSwitcherTest do
   # either way.
   @alt_dataset "w7-selected-option-alt"
 
-  defp markup(section, current \\ "production"),
-    do: render_component(&DatasetSwitcher.switcher/1, current: current, current_section: section)
+  defp markup(current_path, current \\ "production"),
+    do:
+      render_component(&DatasetSwitcher.switcher/1, current: current, current_path: current_path)
 
   # Bind `selected` to the option it sits on. `assert html =~ "selected"` is a
   # substring search over the whole render and is true for EVERY assignment of
@@ -42,24 +47,58 @@ defmodule BarkparkWeb.Studio.DatasetSwitcherTest do
       |> LazyHTML.query("option[selected]")
       |> LazyHTML.attribute("value")
 
-  describe "section → navigation suffix" do
-    test "structure navigates to the dataset root (no subpath)" do
-      html = markup(:structure)
+  describe "current_path → navigation suffix" do
+    test "the structure root navigates to the dataset root (no subpath)" do
+      html = markup("/studio/production")
       assert html =~ "encodeURIComponent(this.value)"
       refute html =~ "/media"
       refute html =~ "/api-tester"
     end
 
-    test "media preserves the /media subpath" do
-      assert markup(:media) =~ "/media"
+    test "a structure SUB-path still navigates to the dataset root" do
+      html = markup("/studio/production/schema/Article")
+      assert html =~ "encodeURIComponent(this.value)"
+      refute html =~ "/media"
+      refute html =~ "/api-tester"
     end
 
-    test "api_tester preserves the /api-tester subpath (regressed 4×)" do
-      assert markup(:api_tester) =~ "/api-tester"
+    test "the media path preserves the /media subpath" do
+      assert markup("/studio/production/media") =~ "/media"
+    end
+
+    test "the api-tester path preserves the /api-tester subpath (regressed 4×)" do
+      assert markup("/studio/production/api-tester") =~ "/api-tester"
+    end
+
+    test "a SCOPED media path preserves /media (the dataset is not interposed)" do
+      assert markup("/w/acme/p/site/d/production/studio/media") =~ "/media"
+    end
+
+    test "a SCOPED api-tester path preserves /api-tester" do
+      assert markup("/w/acme/p/site/d/production/studio/api-tester") =~ "/api-tester"
+    end
+
+    # The derivation's one genuine hazard, which the retired atom could not
+    # have: a dataset may legally be NAMED "media", and `/studio/media` is then
+    # that dataset's STRUCTURE page. A last-segment rule sends the operator to
+    # `/studio/<new>/media` — a surface they were never on.
+    test "a dataset NAMED media: its root is structure, its media page is media" do
+      root = markup("/studio/media", "media")
+      assert root =~ "encodeURIComponent(this.value)"
+      refute root =~ "/media"
+
+      assert markup("/studio/media/media", "media") =~ "/media"
     end
 
     test "an unknown section falls back to the dataset root, never raises" do
-      html = markup(:something_new)
+      html = markup("/studio/production/something-new")
+      assert html =~ "encodeURIComponent(this.value)"
+      refute html =~ "/media"
+      refute html =~ "/api-tester"
+    end
+
+    test "a nil current_path falls back to the dataset root, never raises" do
+      html = markup(nil)
       assert html =~ "encodeURIComponent(this.value)"
       refute html =~ "/media"
       refute html =~ "/api-tester"
@@ -82,7 +121,7 @@ defmodule BarkparkWeb.Studio.DatasetSwitcherTest do
     end
 
     test "the fixture really offers a non-current dataset to be wrong about" do
-      values = option_values(markup(:structure, "production"))
+      values = option_values(markup("/studio/production", "production"))
       assert "production" in values
       assert @alt_dataset in values
     end
@@ -90,7 +129,7 @@ defmodule BarkparkWeb.Studio.DatasetSwitcherTest do
     # Purely NEGATIVE, so it is disjoint from the positive test below: an
     # always-off `selected` passes here and fails there, and vice versa.
     test "no dataset other than the current one is selected" do
-      selected = selected_option_values(markup(:structure, "production"))
+      selected = selected_option_values(markup("/studio/production", "production"))
       strays = selected -- ["production"]
 
       assert strays == [],
@@ -98,7 +137,7 @@ defmodule BarkparkWeb.Studio.DatasetSwitcherTest do
     end
 
     test "the current dataset's option is the one that carries `selected`" do
-      html = markup(:structure, @alt_dataset)
+      html = markup("/studio/#{@alt_dataset}", @alt_dataset)
 
       assert @alt_dataset in selected_option_values(html),
              "the current dataset's <option> lost its `selected` attribute; selected: " <>

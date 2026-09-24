@@ -300,8 +300,19 @@ defmodule Barkpark.Api.OpenApi do
     flags = Map.get(cmd, "flags", []) || []
     file_flag? = Enum.any?(flags, fn f -> Map.get(f, "type") == "file" end)
 
+    # scaffy-backlog-doc-patch-file-flag. A `file` flag alone does NOT make the
+    # wire body a raw upload. For a command carrying `mutation_op` (doc.create,
+    # doc.create-or-replace, doc.create-if-not-exists, doc.patch) the CLI READS
+    # the file client-side and folds its JSON object into the mutation envelope
+    # it posts — the request is `application/json` whether or not `--file` was
+    # used. Without this guard, declaring the file flag on doc.patch silently
+    # retyped POST /v1/data/mutate/{dataset} as an octet-stream binary upload in
+    # the public descriptor, which is a lie about an endpoint that only ever
+    # accepts JSON.
+    raw_upload? = file_flag? and is_nil(Map.get(cmd, "mutation_op"))
+
     content =
-      if file_flag? do
+      if raw_upload? do
         # `file`-typed flags are raw uploads (e.g. media bytes, mutation NDJSON).
         %{
           "application/octet-stream" => %{"schema" => %{"type" => "string", "format" => "binary"}}

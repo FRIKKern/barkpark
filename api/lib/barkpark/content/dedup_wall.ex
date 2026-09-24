@@ -56,6 +56,23 @@ defmodule Barkpark.Content.DedupWall do
       offers no bypass, logs at `:error` with a `DEFECT` prefix and emits
       `[:barkpark, :dedup_wall, :defect]` — one sentence cannot mean both.
 
+  ## The `catch :exit` arm is PROVEN, not asserted
+
+  That exit clause used to be unfalsifiable from a test: inside the Ecto SQL
+  sandbox every stageable failure (dead or live dummy dynamic repo, ownership
+  timeout, unallowed process, `pg_terminate_backend`, query/transaction timeout
+  0 and 1) arrives as an EXCEPTION and lands in the `rescue`. Deleting the
+  clause left the whole dedup suite green.
+
+  `Barkpark.Dedup.ScanSeam` closes that. It is a one-verb fault injector
+  (`exit/1` and nothing else) called from inside this module's candidate fetch,
+  compiled in ONLY when `:dedup_scan_seam` is set — which only `config/test.exs`
+  does. Outside that build the compiler emits `check!/1` as a literal `:ok` and
+  the arming functions do not exist in the BEAM at all; inside it, an unarmed
+  process is byte-identical to today. Its moduledoc states all three layers.
+  The coverage lives in `test/barkpark/dedup/scan_exit_seam_test.exs`, whose two
+  cases red INDEPENDENTLY when the matching `catch :exit` clause is deleted.
+
   Escape hatches, both live: a document in the grandfather exemption ledger
   never reaches E4 at all (`AuthoringWall.dedup_gate/5`), and
   **`content.dedup_bypass: true`** publishes unchecked, deliberately, with the
@@ -94,6 +111,7 @@ defmodule Barkpark.Content.DedupWall do
   require Logger
 
   alias Barkpark.Content.{Document, DraftId, Scope}
+  alias Barkpark.Dedup.ScanSeam
   alias Barkpark.Repo
 
   # ── Tunable thresholds (copied from Tasks.Similarity — one calibrated scale) ─
@@ -572,6 +590,13 @@ defmodule Barkpark.Content.DedupWall do
   end
 
   defp do_fetch_candidates(type, dataset, title, timeout, incumbent, opts) do
+    # THE EXIT SEAM. Inert by construction outside `MIX_ENV=test` — see
+    # `Barkpark.Dedup.ScanSeam`'s moduledoc for the three layers that make it so.
+    # It sits INSIDE this function's try body on purpose: the `catch :exit` arm
+    # below is the thing under test, and an injection point outside the try would
+    # prove nothing about it.
+    ScanSeam.check!(:content_dedup_wall)
+
     query =
       from(d in Document,
         as: :doc,

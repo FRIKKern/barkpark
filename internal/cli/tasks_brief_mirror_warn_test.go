@@ -27,14 +27,14 @@ import (
 // argues all three at length and pins the composer's side against the 1,313-row
 // shared corpus.
 //
-// AND THE WARNING TOLERATES THE OTHER RULE. A brief that fails the one-pass
-// expectation but MATCHES the three-pass one was written faithfully by the
-// server as it behaves today, so it is legacy normalisation, not a false
-// record, and the warning stays quiet. Measured over all 9,119 published task
-// documents on 2026-09-17, EXACTLY ONE row is in that class — and it is
-// task-8ba550b59141bccb itself. It is in the fixture below, asserted QUIET, so
-// a future edit that drops the tolerance reds here on the very row the
-// tolerance exists for.
+// THE TOLERANCE FOR THE OTHER RULE IS GONE. While the server rescanned, a brief
+// matching only the three-pass output was a FAITHFUL mirror and the warning
+// stayed quiet on it. task-b641646addba4bdf made the server single-pass, so
+// nothing writes that text any more and a row carrying it is a stale record
+// like any other. Measured over all 9,119 published task documents on
+// 2026-09-17, EXACTLY ONE row is in that class — task-8ba550b59141bccb itself.
+// It is in the fixture below, now asserted LOUD, so a future re-introduction of
+// the tolerance reds here on the very row it would silence.
 //
 // THE POPULATION THE FIXTURE IS DRAWN FROM, same measurement, stated as a SPLIT
 // because a uniform verdict is the signature of a broken comparator and this
@@ -209,48 +209,6 @@ func TestBriefMirrorWarningFlipsWhenTheMIRRORIsMUTATED(t *testing.T) {
 	}
 	if repaired == 0 || broken == 0 {
 		t.Fatalf("mutation control did not discriminate: %d repaired-to-quiet, %d broken-to-loud", repaired, broken)
-	}
-}
-
-// TestBriefMirrorStripRulesDisagreeAsRecorded is the CONTROL on the tolerance.
-// It proves the two strip rules are genuinely different functions here, so the
-// tolerance in briefMirrorDivergenceOf is doing work rather than being a
-// second copy of the same call.
-func TestBriefMirrorStripRulesDisagreeAsRecorded(t *testing.T) {
-	cases := []struct {
-		in         string
-		onePass    string
-		threePass  string
-		theyDiffer bool
-	}{
-		{in: "foo_**_bar", onePass: "foo__bar", threePass: "foobar", theyDiffer: true},
-		{in: "_**_", onePass: "__", threePass: "", theyDiffer: true},
-		{in: "*__*", onePass: "**", threePass: "**"},
-		{in: "**bold** and `code`", onePass: "bold and code", threePass: "bold and code"},
-		{in: "  a plain description  ", onePass: "a plain description", threePass: "a plain description"},
-	}
-	differed, agreed := 0, 0
-	for _, tc := range cases {
-		if got := briefPurposeStripOnePass(tc.in); got != tc.onePass {
-			t.Fatalf("one pass on %q gave %q, want %q", tc.in, got, tc.onePass)
-		}
-		if got := briefPurposeStripLegacyThreePass(tc.in); got != tc.threePass {
-			t.Fatalf("three passes on %q gave %q, want %q", tc.in, got, tc.threePass)
-		}
-		if tc.theyDiffer {
-			if tc.onePass == tc.threePass {
-				t.Fatalf("%q was listed as divergent but both rules give %q", tc.in, tc.onePass)
-			}
-			differed++
-			continue
-		}
-		if tc.onePass != tc.threePass {
-			t.Fatalf("%q was listed as agreeing but the rules give %q and %q", tc.in, tc.onePass, tc.threePass)
-		}
-		agreed++
-	}
-	if differed == 0 || agreed == 0 {
-		t.Fatalf("control did not discriminate: %d divergent, %d agreeing — a uniform verdict proves nothing", differed, agreed)
 	}
 }
 

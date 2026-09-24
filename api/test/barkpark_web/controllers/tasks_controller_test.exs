@@ -4018,6 +4018,58 @@ defmodule BarkparkWeb.TasksControllerTest do
       refute Map.has_key?(card, "claim")
     end
 
+    # task-4fe00055375680bb: the cut above is right, and it made the residue
+    # UNCOUNTABLE from this endpoint — the read every board-wide sweep runs.
+    # `claim_residue` is the replacement question, asserted here over the real
+    # HTTP page rather than the renderer, because it is the page that the
+    # sweep walks. Both directions in one request.
+    test "claim_residue rides the ready page for a worker-less claim, and only for one",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-brief-residue-key")
+
+      mk_task!(uniq("brief-residue-expired"), scope, %{
+        "parent_id" => phase,
+        "priority" => 0,
+        "claim" => %{
+          "worker" => nil,
+          "epoch" => 2,
+          "previous_worker" => "console-r21f-w14",
+          "expired_at" => "2026-09-18T05:06:00.735979Z"
+        }
+      })
+
+      mk_task!(uniq("brief-residue-released"), scope, %{
+        "parent_id" => phase,
+        "priority" => 1,
+        "claim" => %{
+          "worker" => nil,
+          "epoch" => 16,
+          "released_by" => "lead-cli",
+          "released_at" => "2026-09-20T14:56:20.623609Z"
+        }
+      })
+
+      # THE CONTROL that makes an absent key mean something: a row with no
+      # claim at all, on the same page, through the same render.
+      mk_task!(uniq("brief-residue-none"), scope, %{"parent_id" => phase, "priority" => 2})
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/ready?phase_id=#{phase}&view=brief")
+        |> json_response(200)
+
+      cards = Enum.sort_by(payload["docs"], & &1["priority"])
+      assert length(cards) == 3
+      assert Enum.map(cards, & &1["claim_residue"]) == ["expired", "released", nil]
+
+      # The card tightening is untouched: no claim block came back with it.
+      refute Enum.any?(cards, &Map.has_key?(&1, "claim"))
+
+      # Cut (a) holds — the claimless row omits the key, it does not null it.
+      refute Map.has_key?(List.last(cards), "claim_residue")
+    end
+
     test "truncation: title/now.text grapheme-capped with bare … and ONE help line; full view untouched",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-brief-trunc")

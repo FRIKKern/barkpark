@@ -266,7 +266,7 @@ import { cuePaints, cueWhy, CUE_METRICS_FN } from "./cue-paint-verdict.mjs";
 // copied as a numeral would go stale the day the stylesheet grows a boundary
 // below 620, silently re-opening the gap in both files. breakpoint-sweep.mjs
 // guards its own main behind `process.argv[1]`, so importing it runs nothing.
-import { WIDTHS as SWEEP_WIDTHS } from "./breakpoint-sweep.mjs";
+import { WIDTHS as SWEEP_WIDTHS, accentIdentities } from "./breakpoint-sweep.mjs";
 import { edgeCoverSentence } from "./edge-cover-verdict.mjs";
 import { createCrossDocumentNavigator } from "./same-document-nav-census.mjs";
 
@@ -283,6 +283,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 const DEFECTS = [
   "GR108-tablet-topbar-overflow",
+  "GRBLK-accent-scenario-matrix",
   "W20-phone-band-billing-chip",
   "GR109-attention-row-dead-rule",
   "GR115-bpconsole-dead-rule",
@@ -326,6 +327,10 @@ const DEFECTS = [
   "W22-url-remedy-pricing",
   "W34-sites-read-failed-bounded",
   "W16-site-freshness-agrees-with-production-ladder",
+  "W21m-member-head-title-floor",
+  "W21m-wizard-refusal-row-field-floor",
+  "W24-word-break-alias-population",
+  "W21n-group-table-phone-band",
 ];
 
 // ── W22 SHARED `.modal-card` FLOOR: the roster, the widths, the probe ────────
@@ -828,6 +833,9 @@ const BAND_WIDTHS = [721, 768, 769, 790, 830, 860, 899, 900, 1024];
 // pins WHICH instance sub-tab landed, because all three instance routes share
 // the single #view-instance section.
 const INST = "5b2c1e00-0000-4000-8000-0000000000a1";
+// The BEHIND box (IDS.behindInstance) — `instance-behind-member` deep-links it,
+// and it is a different row from INST above, not the same box in another state.
+const INST_BEHIND = "5b2c1e00-0000-4000-8000-0000000000a2";
 const SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
 //
 // cchi-w23 — THE RAIL POPULATION IS DECLARED PER ROUTE, NEVER TALLIED AFTER THE
@@ -928,6 +936,16 @@ const SITE_PHONE_WIDTHS = [320, 340, 360, 375, 390, 412, 430, 480, 495, 496, 620
 // Its 22 cells are still asserted — a page that starts scrolling sideways on a
 // never-deployed site is a defect too, and this is the only leg that would see it.
 const SITE_PHONE_SCENS = ["rollback", "site-states", "site-binding-bound"];
+
+// ── PDF-D11 GROUP TABLE: the widths, and WHY THESE ─────────────────────────
+// `.group-row` is a FIVE-column grid that becomes two at 899 (`grep -n
+// "group-row" cloud/priv/static/app.css`) — the only five-column grid on the
+// instance route, and the newest surface in the corpus to have a route at all.
+// The band is the four phone widths every leg here drives, plus the BOUNDARY
+// walked from both sides (898/899/900): a collapse asserted only below its own
+// edge is a collapse nobody has watched happen.
+const GROUP_BAND_WIDTHS = [320, 360, 390, 430, 898, 899, 900, 1000];
+const GROUP_BAND_SCEN = "fleet-group-view";
 
 // W17-S6: THE CHIP'S OWN WIDTH SET, BECAUSE THIS FILE USED TO ASK ITS QUESTION
 // AT ONE WIDTH. The money-message read below sat behind `await setViewport(768)`
@@ -1420,6 +1438,12 @@ async function main() {
       fetch(`http://127.0.0.1:${devPort}/json/version`, { signal: AbortSignal.timeout(ATTACH_CAP) }),
     )).json();
     process.stdout.write(`>> chrome     ${version.Browser} · node ${process.version}\n`);
+    // THE SCOPE OF THIS RUN, PRINTED WITH ITS RESULT (D906). Everything below
+    // is measured in ONE engine. D168 asserted a cross-browser property off a
+    // green like this one and stood for four waves until a hand-driven Firefox
+    // refuted it (D904). browser-axis-census.mjs derives the engine from this
+    // file's own discovery candidates and reds if this line disagrees with them.
+    process.stdout.write(">> browser axis  Blink — 1 of 3 engine families (Blink · Gecko · WebKit). A green here is NOT a cross-browser green.\n");
     cdp = await attach("websocket open", Cdp.connect(version.webSocketDebuggerUrl));
     const { targetId } = await attach("Target.createTarget", cdp.send("Target.createTarget", { url: "about:blank" }));
     ({ sessionId } = await attach("Target.attachToTarget", cdp.send("Target.attachToTarget", { targetId, flatten: true })));
@@ -1726,6 +1750,183 @@ async function main() {
         // the band above the breakpoint had been cleared for the chip too; the
         // chip was only ever read at 768. The chip now answers for itself above.
         okLine(`0/${checks} PAGE-overflow cells across ${WIDTHS[0]}-${WIDTHS[WIDTHS.length - 1]} (sweep includes 769/775/780/785 — ABOVE the breakpoint). The chip's own question is answered per-width above, not by this line.`);
+      }
+    }
+
+    // ── GRBLK: THE ACCENT AXIS. Every leg above this one drives exactly ONE
+    //    identity — the evergreen default — because no cell in this file has
+    //    ever carried `?accent=`. `grep -n -i accent cloud/priv/static/
+    //    __preview__/overflow-guard.mjs` returned NOTHING before this leg.
+    //    breakpoint-sweep.mjs's theme derivation says so in its own words
+    //    ("Identity is a SEPARATE AXIS with its own owner —
+    //    gr-blk-accent-scenario-sweep — and this sweep does not claim it");
+    //    this is that owner, living in the committed guard rather than in the
+    //    /tmp instrument the round-8 sweep used and lost.
+    //
+    //    THE ROSTER IS DERIVED, NEVER TYPED, on both axes:
+    //      · scenarios   from scenarios.mjs's own SCENARIO_NAMES (135 today).
+    //        The round-8 record and the filing row both say "86 scenarios /
+    //        860 runs"; the corpus has grown since and the filed denominator
+    //        is STALE. A typed 86 would have printed a plausible tally over a
+    //        roster it no longer matches, which is the failure this file's
+    //        "print the count, never narrate it" rule exists for. The module
+    //        is import()ed HERE rather than at the top of the file because it
+    //        is ~340KB and this is the only leg that needs the whole roster.
+    //      · accents     from app.css's own `[data-bp-theme="…"]` selectors
+    //        via breakpoint-sweep.mjs's accentIdentities(). A sixth skin
+    //        generated into BP_THEMES and app.css joins this matrix the day it
+    //        lands, with no edit here.
+    //
+    //    THE READ-BACK IS THE POINT, NOT CEREMONY (the W13 "a route is not a
+    //    query string" shape, one axis over). `?accent=` is consumed by
+    //    mock.js (`grep -n 'var accent = params.get' cloud/priv/static/
+    //    __preview__/mock.js`), which seeds localStorage and the root
+    //    attribute before app.js boots. If that pre-seed ever stops applying,
+    //    a sweep that only reads geometry prints a full, plausible five-accent
+    //    table in which all five columns are evergreen. So every cell reads
+    //    `data-bp-theme` and `data-theme` BACK off the root and reds when the
+    //    identity or the mode it measured is not the one it asked for.
+    //
+    //    ONE WIDTH, 768, ON PURPOSE. The accent switch changes COLOUR tokens,
+    //    not the layout algebra — but it also changes rendered TEXT nowhere,
+    //    so the only way it can move geometry is through a token that feeds a
+    //    border, a shadow or a font stack. 768 is the tablet breakpoint the
+    //    seal's tablet claim is about; widening this to the full WIDTHS ladder
+    //    would multiply an already 1350-cell matrix by eleven for a question
+    //    the other legs already answer at one identity.
+    //
+    //    THE DEFAULT IS THE SAMPLE, AND IT SAYS SO. The full matrix is 1350
+    //    page loads; this leg runs inside `Console gate` on every
+    //    console-touching PR, and a required gate is not the place to spend
+    //    that. Unset, the leg drives ONE scenario per DISTINCT ROUTE — a
+    //    predicate, not a hand-kept list, so a new route joins the sample by
+    //    existing — across every accent and both themes, and prints the
+    //    fraction of the corpus that is. `OVERFLOW_GUARD_ACCENT_MATRIX=full`
+    //    drives all of it. Either way the covered/total line is PRINTED from
+    //    the counters, and every cell prints its own row, so a reader can
+    //    recount the tally out of the transcript rather than trust it.
+    if (requested.includes("GRBLK-accent-scenario-matrix")) {
+      const D = "GRBLK-accent-scenario-matrix";
+      const { SCENARIO_NAMES, SCENARIOS } = await import("./scenarios.mjs");
+      const ACCENTS = accentIdentities(fs.readFileSync(path.join(ROOT, "app.css"), "utf8"));
+      // AUDITED (exit 2): a roster of fewer than two identities means the
+      // derivation stopped working, not that the console lost its skins — and
+      // a one-member "matrix" would print a green over an axis it never drove.
+      if (ACCENTS.length < 2) {
+        return die(
+          `${D}: the accent roster derived from app.css's [data-bp-theme="…"] selectors has ` +
+          `${ACCENTS.length} member(s) (${ACCENTS.join(", ") || "none"}). This leg's whole subject is the ` +
+          `identity axis, so a roster that small is a broken derivation — re-derive with ` +
+          `\`grep -n 'data-bp-theme=' cloud/priv/static/app.css\` and \`grep -n 'var BP_THEMES' cloud/priv/static/app.js\`. ` +
+          `Refusing to print a one-identity table under a five-identity name.`,
+        );
+      }
+      const ACCENT_MODE = String(process.env.OVERFLOW_GUARD_ACCENT_MATRIX || "").toLowerCase();
+      const FULL = ACCENT_MODE === "full";
+      // The route a scenario lands on, with instance/site UUIDs folded to <id>
+      // so two fixtures of the same screen are one route and not two.
+      const routeOf = (n) =>
+        SCENARIOS[n].pathname
+          ? `path:${SCENARIOS[n].pathname}`
+          : String(SCENARIOS[n].deepLink || "#overview").replace(/[0-9a-f]{8}-[0-9a-f-]{20,}/g, "<id>");
+      const sampleRoster = [];
+      {
+        const seenRoute = new Set();
+        for (const n of SCENARIO_NAMES) {
+          const r = routeOf(n);
+          if (seenRoute.has(r)) continue;
+          seenRoute.add(r);
+          sampleRoster.push(n);
+        }
+      }
+      const roster = FULL ? SCENARIO_NAMES.slice() : sampleRoster;
+      const total = roster.length * ACCENTS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${roster.length} scenarios x ${ACCENTS.length} accents x 2 themes @768 = ${total} cells` +
+        ` · accents DERIVED from app.css: ${ACCENTS.join(", ")}` +
+        ` · mode ${FULL
+          ? `FULL (OVERFLOW_GUARD_ACCENT_MATRIX=full) — the whole ${SCENARIO_NAMES.length}-scenario corpus`
+          : `SAMPLE (default) — ${roster.length} of ${SCENARIO_NAMES.length} scenarios, one per distinct route; ` +
+            `OVERFLOW_GUARD_ACCENT_MATRIX=full drives all ${SCENARIO_NAMES.length}`}\n`,
+      );
+      // The per-cell offender probe: the element whose right edge reaches
+      // furthest past the viewport, with its OWN scrollWidth/clientWidth, so a
+      // finding names a cell AND an element instead of handing the reader a
+      // page number to go hunting with.
+      const ACCENT_PROBE =
+        `(function(){var d=document.documentElement;var worst=null;` +
+        `if(d.scrollWidth>d.clientWidth){var cw=d.clientWidth;var all=document.querySelectorAll('body *');` +
+        `for(var i=0;i<all.length;i++){var e=all[i];var r=e.getBoundingClientRect();` +
+        `if(r.width===0&&r.height===0)continue;var right=Math.round(r.right);if(right<=cw)continue;` +
+        `if(!worst||right>worst.right){var cls=(typeof e.className==='string'&&e.className)?('.'+e.className.trim().split(/\\s+/).join('.')):'';` +
+        `worst={right:right,sw:e.scrollWidth,cw:e.clientWidth,sel:e.tagName.toLowerCase()+(e.id?('#'+e.id):'')+cls};}}}` +
+        `return {sw:d.scrollWidth,cw:d.clientWidth,theme:d.getAttribute('data-theme'),` +
+        `accent:d.getAttribute('data-bp-theme'),worst:worst};})()`;
+      let measured = 0, pageOver = 0, wrongAccent = 0, wrongTheme = 0;
+      for (const name of roster) {
+        const sc = SCENARIOS[name];
+        const pathPart = sc.pathname || "/";
+        const q = sc.search ? `${sc.search}&` : "?";
+        // A pathname scenario IS its own page (/new, /activate) and carries no
+        // hash; a hash scenario needs its deepLink or it renders #overview.
+        const hash = sc.pathname ? "" : String(sc.deepLink || "#overview");
+        for (const accent of ACCENTS) {
+          for (const theme of ["light", "dark"]) {
+            await setViewport(768);
+            const url = `${BASE}${pathPart}${q}scen=${name}&theme=${theme}&accent=${accent}${hash}`;
+            await nav(
+              url,
+              `document.querySelectorAll('section.view:not([hidden]), main.auth-screen:not([hidden]), main.new-screen:not([hidden])').length > 0`,
+            );
+            const m = await evalJs(ACCENT_PROBE);
+            measured++;
+            const over = m.sw > m.cw;
+            if (over) {
+              pageOver++;
+              fail(
+                D,
+                `${name}/${accent}/${theme}@768: documentElement scrollWidth ${m.sw} > clientWidth ${m.cw}` +
+                (m.worst
+                  ? ` — furthest element \`${m.worst.sel}\` right edge ${m.worst.right}px (its own scrollWidth ${m.worst.sw} / clientWidth ${m.worst.cw})`
+                  : ` — no descendant's right edge exceeded the viewport, so the overhang is the root box itself`),
+              );
+            }
+            if (m.accent !== accent) {
+              wrongAccent++;
+              fail(
+                D,
+                `${name}/${accent}/${theme}@768: the shell's data-bp-theme reads "${m.accent}" — the \`?accent=\` ` +
+                `pre-seed did NOT apply, so this cell measured a DIFFERENT identity than the one it asked for. ` +
+                `Every green in this column would be the same evergreen run wearing five names.`,
+              );
+            }
+            if (m.theme !== theme) {
+              wrongTheme++;
+              fail(D, `${name}/${accent}/${theme}@768: the shell's data-theme reads "${m.theme}" — the \`?theme=\` did not apply.`);
+            }
+            process.stdout.write(
+              `   cell ${name} ${accent} ${theme} 768 sw=${m.sw} cw=${m.cw} bp=${m.accent} mode=${m.theme} ` +
+              `${over ? `OVER ${m.worst ? m.worst.sel : "root"}` : "ok"}\n`,
+            );
+          }
+        }
+      }
+      // UNCONDITIONAL, on a clean run and a red one alike: a denominator a
+      // reader has to infer is a denominator the next summary gets to round.
+      process.stdout.write(
+        `   ${D}: MEASURED ${measured} of ${total} cells · ${pageOver} page-overflow offender(s) · ` +
+        `identity read back correct in ${measured - wrongAccent} of ${measured} · ` +
+        `mode read back correct in ${measured - wrongTheme} of ${measured}\n`,
+      );
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `0/${measured} page-overflow cells at 768px across ${roster.length} scenario(s) x ` +
+          `${ACCENTS.length} accents (${ACCENTS.join("/")}) x 2 themes` +
+          `${FULL ? ` — the WHOLE ${SCENARIO_NAMES.length}-scenario corpus` : ` — ${roster.length} of ${SCENARIO_NAMES.length} scenarios (one per distinct route)`}. ` +
+          `Every cell read its identity back off the root: ${measured} of ${measured} rendered under the accent asked for, ` +
+          `so this is five identities measured and not one measured five times. ` +
+          `THIS CLAIM IS 768px ONLY — the other widths in this file are driven at the default identity alone.`,
+        );
       }
     }
 
@@ -2303,6 +2504,22 @@ async function main() {
       // name element is itself blind to element-local scrollWidth (497/497), so
       // the rect comparison must cross the element boundary — child rect
       // against PARENT rect — to see anything at all.
+      // ── PER-ASSERTION SCORING (cchi-w27-bl-w22s7, criterion 3) ───────────
+      //    This half's clean claim used to be printed whenever the SELECTOR
+      //    still matched — `walked === 0 ? fail : okLine` — so a run in which
+      //    every card in the grid overhung its own edge printed its findings
+      //    AND, underneath them, a ✓ saying the readiness gate stood in front
+      //    of N cards. The ✓ was true about the gate and silent about the
+      //    measurement, which is the shape that reads as a pass.
+      //
+      //    It is now scored against ITS OWN findings, the way half (b) below
+      //    already scores each of its cells (`failures.length === before`): the
+      //    claim is EARNED or WITHHELD, never narrated. And scoring it per half
+      //    is what makes the halves INDEPENDENT — this half can red while (b)
+      //    keeps every ✓ it earned, and (b) can red without costing this half
+      //    the claim it paid for. The leg's exit code is still one number over
+      //    all of them; what changes is that the number is now attributable.
+      const beforeCards = failures.length;
       const CARD_SCENS = ["mixed-fleet", "fleet-cruel-content", "overview-attention", "overview-past-due"];
       // 320..496 is the defect band; 620 is CLEAN on pre-fix bytes (a 588px
       // track holds the 497px name), so a width list that stopped at the widest
@@ -2376,7 +2593,15 @@ async function main() {
       // A selector that stops matching must RED, not sail through zero
       // iterations printing a tick.
       if (walked === 0) fail(D, `#overview: .instances-grid .instance-card matched NOTHING across ${CARD_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes — the selector no longer reaches the population it certifies`);
-      else okLine(`READINESS STOOD IN FRONT OF ${readyPop.join(", ")} card(s) — the gate counts the population it waits for (D228), so a grid caught one card into its paint cannot pass for a painted grid. instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
+      else if (failures.length > beforeCards) {
+        // WITHHELD, not printed under its own findings. The count is this
+        // half's alone, so a reader can tell which half of this leg lost.
+        process.stdout.write(
+          `   ! THE .instances-grid CARD HALF SCORED ${failures.length - beforeCards} FINDING(S) — its clean claim is WITHHELD ` +
+          `(walked ${walked} cards = ${CARD_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs). ` +
+          `The findings above are THIS half's; every clean claim below belongs to the notifications-matrix half and is unaffected (the tick glyph is deliberately absent from this line so a grep -c over the run still counts only EARNED claims) — the two are scored separately on purpose\n`,
+        );
+      } else okLine(`READINESS STOOD IN FRONT OF ${readyPop.join(", ")} card(s) — the gate counts the population it waits for (D228), so a grid caught one card into its paint cannot pass for a painted grid. instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
 
       // (b) the notifications matrix must ADMIT it is clipped. Two independent
       //     cues, both measured: a label column that stays put while the
@@ -2894,6 +3119,168 @@ async function main() {
           `${wrapped} of ${links} link(s) render on more than one line box (the wrap remedy doing its job);` +
           ` ${linkBoxed} with a non-zero clientWidth — the CLIP assertion is inert while that count is 0` +
           ` and goes live the moment the link stops being an inline box, which is exactly how a page-level green would be bought`,
+        );
+      }
+    }
+
+    // ── pdf-bl-fleet-group-route: THE GROUP TABLE, THE FIRST SURFACE IN THIS
+    //    FILE WHOSE CONTENT ARRIVES AFTER AN ASYNC READ.
+    //    Every leg above measures markup the loader paints synchronously. The
+    //    PDF-D11 group panel paints "Reading the roster…" first and is replaced
+    //    only when the browser-direct GET /v1/fleet/roster lands — so the nav
+    //    predicate below waits for `.group-table`, and a leg that cannot get
+    //    past that predicate is telling you the ROUTE is broken, not the CSS.
+    //    That is also why this leg is worth its cells: it is the only place in
+    //    the corpus where a real browser proves the route's async paint.
+    if (requested.includes("W21n-group-table-phone-band")) {
+      const D = "W21n-group-table-phone-band";
+      // ROUTE AND POPULATION BOTH DERIVED FROM THE FIXTURE (charter D228). A
+      // transcribed hash that drifts renders #overview and every number below
+      // is phantom; a transcribed row count goes quietly stale the moment the
+      // fixture changes, and a leg that merely tallies what it finds prints a
+      // happy total over a table that stopped rendering.
+      const { SCENARIOS } = await import("./scenarios.mjs");
+      const sc = SCENARIOS[GROUP_BAND_SCEN];
+      if (!sc || typeof sc.deepLink !== "string" || !/^#instance\/[^/]+\/group$/.test(sc.deepLink)) {
+        return die(`${D}: SCENARIOS["${GROUP_BAND_SCEN}"] no longer carries an #instance/<id>/group deepLink — the route this leg certifies cannot be reached, so every cell would measure some other screen`);
+      }
+      const mainId = sc.deepLink.slice("#instance/".length).split("/")[0];
+      const bps = (sc.data && Array.isArray(sc.data.barkparks)) ? sc.data.barkparks : [];
+      const main = bps.find((b) => b && b.id === mainId);
+      if (!main) return die(`${D}: the deepLink points at ${mainId}, which is not in the fixture's own data.barkparks`);
+      // What the surface OWES, read off the fixture the mock serves:
+      //   · one row per support of this main (plus the header row);
+      //   · the `.group-others` sentence iff the roster carries a worker that
+      //     matches no support — the unmatched-listener observation.
+      const supports = bps.filter((b) => b && b.fleet_role === "support" && String(b.fleet_parent_id) === String(mainId));
+      const roster = (sc.data && Array.isArray(sc.data.fleetRoster)) ? sc.data.fleetRoster : [];
+      const known = new Set(supports.flatMap((b) => [b.slug, b.name].filter((x) => x != null).map(String)));
+      const strays = roster.filter((r) => r && r.worker != null && !known.has(String(r.worker)));
+      if (!supports.length) return die(`${D}: the fixture has no supports, so the table this leg is named after would have zero body rows and every assertion below would measure nothing`);
+      const wantRows = supports.length + 1; // + the header row
+      const wantOthers = strays.length ? 1 : 0;
+      process.stdout.write(
+        `\n${D} — 1 fixture x ${GROUP_BAND_WIDTHS.length} widths x 2 themes ` +
+        `(${GROUP_BAND_WIDTHS.length * 2} cells; ${supports.length} support row(s) + head, ` +
+        `${strays.length} unmatched listener row(s) -> ${wantOthers} .group-others line)\n`,
+      );
+      let cells = 0, cellsSeen = 0, collapsed = 0;
+      for (const theme of ["light", "dark"]) {
+        // Enter ABOVE the band and WAIT FOR THE ASYNC PAINT. `.group-table`
+        // exists only after the roster read resolves — entering on the frame-1
+        // placeholder would measure a one-paragraph card and call it a table.
+        await setViewport(1000);
+        await nav(
+          `${BASE}/?scen=${GROUP_BAND_SCEN}&theme=${theme}${sc.deepLink}`,
+          `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+          `return !!(v && v.id==='view-instance' && v.querySelector('#instance-group-view .group-table'));})()`,
+        );
+        const row = [];
+        for (const width of GROUP_BAND_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){var d=document.documentElement;var R=function(v){return Math.round(v*100)/100;};` +
+            `var v=document.querySelector('section.view:not([hidden])');` +
+            `var p=(v||document).querySelector('#instance-group-view');` +
+            `var t=p?p.querySelector('.group-table'):null;` +
+            `var cols=t?getComputedStyle(t.querySelector('.group-row')).gridTemplateColumns:'';` +
+            `var cs=[].slice.call(p?p.querySelectorAll('.group-cell'):[]).map(function(c){` +
+            `  var rr=c.getBoundingClientRect();` +
+            `  return {right:R(rr.right),sw:c.scrollWidth,cw:c.clientWidth,t:(c.textContent||'').trim().slice(0,40)};});` +
+            `var o=p?p.querySelector('.group-others'):null;` +
+            `return {sw:d.scrollWidth,cw:d.clientWidth,view:v?v.id:'none',theme:d.getAttribute('data-theme'),` +
+            ` panel:!!p,table:!!t,state:p&&p.querySelector('[data-group-state]')?p.querySelector('[data-group-state]').getAttribute('data-group-state'):null,` +
+            ` rows:p?p.querySelectorAll('.group-row').length:0,cols:cols,cells:cs,` +
+            ` others:o?1:0,osw:o?o.scrollWidth:null,ocw:o?o.clientWidth:null,` +
+            ` oright:o?R(o.getBoundingClientRect().right):null};})()`,
+          );
+          cells++;
+          // (1) THE ROUTE LANDED AND THE READ PAINTED. Without both, every
+          //     number below is about some other screen or about frame 1.
+          if (m.view !== "view-instance") {
+            fail(D, `${theme}@${width}: rendered section.view "${m.view}", asked for "view-instance" — the group hash did not route`);
+            continue;
+          }
+          if (!m.table) {
+            fail(D, `${theme}@${width}: #instance-group-view carries no .group-table — the panel is still on its "Reading the roster…" frame, so the roster read never painted at this width`);
+            continue;
+          }
+          if (m.state !== "working") {
+            fail(D, `${theme}@${width}: the panel reads data-group-state="${m.state}", expected "working" — the surface is not deriving the fixture's own roster plane`);
+          }
+          if (m.theme !== theme) fail(D, `${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+          // (2) THE POPULATION IS THE FIXTURE'S, not whatever rendered.
+          if (m.rows !== wantRows) {
+            fail(D, `${theme}@${width}: ${m.rows} .group-row, expected ${wantRows} (${supports.length} support(s) + the header row) — the table and its fixture have drifted apart, so the cells below are not the cells this leg names`);
+          }
+          if (m.others !== wantOthers) {
+            fail(D, `${theme}@${width}: ${m.others} .group-others line(s), expected ${wantOthers} — the fixture's roster carries ${strays.length} worker(s) matching no support, and the unmatched-listener observation ${wantOthers ? "must" : "must not"} render`);
+          }
+          // (3) THE PAGE. A five-column grid on a 320px phone is exactly how a
+          //     table walks off the screen.
+          const overhang = m.sw - m.cw;
+          if (overhang > 0) {
+            fail(D, `${theme}@${width}#group: documentElement scrollWidth ${m.sw} > clientWidth ${m.cw} — ${overhang}px of the group surface is off-screen at rest, with no cue`);
+          }
+          // (4) EVERY CELL, BOUNDED AND NOT CLIPPED. `.group-cell` carries
+          //     `overflow-wrap: anywhere`, so a clip here means the wrap stopped
+          //     applying — and a task title or a worker name silently losing its
+          //     tail is the whole reason this column exists.
+          for (const c of m.cells) {
+            cellsSeen++;
+            if (c.right > m.cw + 1) {
+              fail(D, `${theme}@${width}#group: a .group-cell's right edge ${c.right} is past the ${m.cw}px viewport — "${c.t}" paints off-screen`);
+            }
+            if (c.sw > c.cw + 1) {
+              fail(D, `${theme}@${width}#group: .group-cell scrollWidth ${c.sw} > clientWidth ${c.cw} — "${c.t}" is CLIPPED, not wrapped`);
+            }
+          }
+          if (m.others && m.osw > m.ocw + 1) {
+            fail(D, `${theme}@${width}#group: .group-others scrollWidth ${m.osw} > clientWidth ${m.ocw} — the unmatched-listener sentence hides ${m.osw - m.ocw}px of itself`);
+          }
+          if (m.others && m.oright > m.cw + 1) {
+            fail(D, `${theme}@${width}#group: .group-others right edge ${m.oright} is past the ${m.cw}px viewport`);
+          }
+          // (5) THE COLLAPSE ACTUALLY HAPPENS, watched from BOTH sides of its
+          //     own edge. Two track values below 900 and five at 900+.
+          //     TOP-LEVEL tokens only: Chrome resolves the narrow arm as
+          //     "minmax(0px, 1fr) minmax(0px, 1fr)", and a bare /\s+/ split
+          //     reads that two-track value as FOUR — a refusal that names the
+          //     collapse and is really naming the parser. Depth-counted.
+          const tracks = (function (v) {
+            let depth = 0, n = 0, inTok = false;
+            for (const ch of String(v || "")) {
+              if (ch === "(") depth++;
+              else if (ch === ")") depth--;
+              if (depth === 0 && /\s/.test(ch)) { inTok = false; continue; }
+              if (!inTok) { inTok = true; n++; }
+            }
+            return n;
+          })(m.cols);
+          const wantTracks = width <= 899 ? 2 : 5;
+          if (tracks !== wantTracks) {
+            fail(D, `${theme}@${width}#group: .group-row resolves ${tracks} grid track(s) ("${m.cols}"), expected ${wantTracks} — the 899px collapse did not take on this side of its own edge`);
+          }
+          if (tracks === 2) collapsed++;
+          row.push(`${width}:${m.sw}/${tracks}c${overhang > 0 ? "!" : ""}`);
+        }
+        process.stdout.write(`   ${GROUP_BAND_SCEN}/${theme}  ${row.join(" ")}\n`);
+        if (row.length !== GROUP_BAND_WIDTHS.length) fail(D, `${theme}: ${row.length} of ${GROUP_BAND_WIDTHS.length} widths measured`);
+      }
+      // AN EMPTY POPULATION IS NOT A CLEAN ONE.
+      if (cellsSeen === 0) {
+        fail(D, `zero .group-cell measured across ${cells} cells — the table this leg is named after rendered nothing, which is not a pass`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${GROUP_BAND_WIDTHS[0]}-${GROUP_BAND_WIDTHS[GROUP_BAND_WIDTHS.length - 1]}` +
+          ` on the routed group tab x 2 themes; ${cellsSeen} .group-cell measured,` +
+          ` ${collapsed} of ${cells} cells took the 899px two-column collapse (the rest are the 5-track grid above it)`,
+        );
+        okLine(
+          `the route's ASYNC paint is proven in a real browser: the nav predicate waits for` +
+          ` #instance-group-view .group-table, which exists only after the browser-direct roster read lands —` +
+          ` frame 1 is a "Reading the roster…" card with no state attribute at all`,
         );
       }
     }
@@ -5008,17 +5395,21 @@ async function main() {
     //    into view — and the copy renders ABOVE that button.
     //
     //    THE FIXTURE IS THE FIRST HALF OF THIS LEG (wave-23 clause 4). The
-    //    shipped `providers-unverified` copy is a 168-character PARAPHRASE and
-    //    it measures CLEAN at every geometry here: on that string the defect
+    //    `providers-unverified` copy is the SHORT one — 169 characters, and
+    //    since cch-w23-bl-real-hetzner-remediation-scenario it is
+    //    `connect_remediation("hetzner")` VERBATIM rather than the
+    //    168-character paraphrase it was — and it measures CLEAN at every
+    //    geometry here: on that string the defect
     //    cannot be produced, so a leg driving it would be green by
     //    construction with a perfectly real browser. `providers-empty` — the
     //    scenario the defect was reproduced on — therefore now carries
     //    `connect_remediation("azure")` VERBATIM, 275 characters, the longest
-    //    clause the server can send (cloud/lib/barkpark_cloud/failure_copy.ex
-    //    :361-375, whose four clauses measure 169/275/206/88). The length is
+    //    clause the server can send (cloud/lib/barkpark_cloud/failure_copy.ex,
+    //    `grep -n 'def connect_remediation' ` — four clauses, measuring
+    //    169/275/206/88). The length is
     //    ASSERTED per cell against that number — a corpus that understates the
-    //    server is a corpus that certifies nothing — and the paraphrase is
-    //    kept as the labelled SHORT control so a regression on ordinary copy
+    //    server is a corpus that certifies nothing — and the server's SHORT
+    //    clause is kept as the short control so a regression on ordinary copy
     //    is still visible.
     //
     //    D228, AND IT BITES TWICE HERE. `#cred-remediation` is rendered by TWO
@@ -5049,26 +5440,30 @@ async function main() {
       // BLOCK-SCOPED (D247): these axes belong to this leg alone.
       // Two kinds because they are the only two `available: true` providers in
       // app.js's PROVIDERS list and they render DIFFERENT credential forms
-      // (four fields vs one token); two scenarios because a fixture carries ONE
-      // `providerConnect` response and `route()` never sees the request body,
-      // so the string is a property of the SCENARIO, not of the kind.
+      // (four fields vs one token).
       //   · `providers-empty` — the scenario the defect was reproduced on —
-      //     now carries `connect_remediation("azure")` VERBATIM: 275 chars, the
+      //     carries `connect_remediation("azure")` VERBATIM: 275 chars, the
       //     longest the server can send.
-      //   · `providers-unverified` keeps its 168-character PARAPHRASE and is
-      //     driven here as the SHORT control, labelled as such. It is one
-      //     character under the real hetzner clause (169), so it does not
-      //     materially understate it — but it is NOT the server's string, and
-      //     that is written down rather than papered over:
-      //     cch-w23-bl-real-hetzner-remediation-scenario owns
-      //     giving the real 169 its own key (a new `SCENARIOS` key is refused
-      //     by breakpoint-sweep.mjs's census, which this slice is fenced out
-      //     of). A leg that only ever drove the worst string could not tell
-      //     you the shorter one regressed, which is why the short cell is here
-      //     at all.
+      //   · `providers-unverified` is the SHORT cell, and since
+      //     cch-w23-bl-real-hetzner-remediation-scenario it is the SERVER'S
+      //     short string: `connect_remediation("hetzner")`, 169 chars,
+      //     verbatim. It used to be a 168-character PARAPHRASE — one character
+      //     under the real clause, honestly labelled as such, but a string the
+      //     server has never sent — because a fixture carried ONE
+      //     `providerConnect` response and `route()` never saw the request
+      //     body, so the string was a property of the SCENARIO and not of the
+      //     kind. `route(name, method, path, state, body)` (scenarios.mjs) plus
+      //     mock.js's parse of `init.body` removed that limit; the fixture is
+      //     now a per-kind map and no new `SCENARIOS` key was needed, so
+      //     breakpoint-sweep.mjs's census moved by zero.
+      //     Neither number is typed twice: breakpoint-sweep.test.mjs extracts
+      //     `connect_remediation/1`'s clauses from failure_copy.ex and reds if
+      //     any remediation in the corpus is not one of them.
+      //   A leg that only ever drove the worst string could not tell you the
+      //   shorter one regressed, which is why the short cell is here at all.
       const CRED_CELLS = [
         { scen: "providers-empty", kind: "azure", chars: 275, src: "connect_remediation(\"azure\"), verbatim" },
-        { scen: "providers-unverified", kind: "hetzner", chars: 168, src: "the 168-char paraphrase, driven as the SHORT control" },
+        { scen: "providers-unverified", kind: "hetzner", chars: 169, src: "connect_remediation(\"hetzner\"), verbatim — the SHORT control" },
       ];
       // [width, height]. HEIGHT IS THE VARIABLE HERE, which is why this leg
       // cannot use the file's width sets: 390x390 is the filed reproduction,
@@ -5266,12 +5661,16 @@ async function main() {
         okLine(
           `THE STRINGS, ASSERTED PER CELL AND ATTRIBUTED: ` +
           `${CRED_CELLS.map((c) => `${c.scen} ${c.kind} >= ${c.chars}ch (${c.src})`).join("; ")}. ` +
-          `The azure number is re-derived from cloud/lib/barkpark_cloud/failure_copy.ex:361-375, whose four ` +
-          `clauses measure 169/275/206/88 — NOT the 89 the filed row cites, and NOT at the \`registry/\` path it ` +
-          `cites, which does not exist. The 168-character paraphrase measures CLEAN at every geometry here: ` +
-          `driving it ALONE is green by construction (wave-23 clause 4), which is why it is the short control ` +
-          `and never the only cell. No length bound was added anywhere — the copy is the product, and the ` +
-          `remedy is where the viewport lands`,
+          `The azure number is re-derived from cloud/lib/barkpark_cloud/failure_copy.ex — located by ` +
+          `\`grep -n 'def connect_remediation'\`, NOT by a line range, because the one this leg used to print ` +
+          `(:361-375) had drifted off the clauses by ~670 lines — whose four clauses measure 169/275/206/88 — ` +
+          `NOT the 89 the filed row cites, and NOT at the \`registry/\` path it cites, which does not exist. BOTH cells are now the server's own bytes: the short cell drives ` +
+          `connect_remediation("hetzner") VERBATIM (169), not the 168-character paraphrase this leg used to ` +
+          `label as such — cch-w23-bl-real-hetzner-remediation-scenario gave route() the POSTed body so one ` +
+          `scenario can answer per KIND. The short string measures CLEAN at every geometry here: driving it ` +
+          `ALONE is green by construction (wave-23 clause 4), which is why it is the short control and never ` +
+          `the only cell. No length bound was added anywhere — the copy is the product, and the remedy is ` +
+          `where the viewport lands`,
         );
       }
     }
@@ -7568,6 +7967,166 @@ async function main() {
         "CRUEL", "INADMISSIBLE", "NONE-POSSIBLE", "GONE-KIND",
         "BREAKABLE", "ADMIN-ONLY-AT-MINT", "FORMAT-LEGAL", "UNCAPPED-DERIVED",
       ];
+
+      // ── THE CAP DERIVATION (cchi-w27-bl-w22s7, criteria 1-2) ──────────────
+      // A cap was a PROSE STRING on the row: `"barkpark.name <= 255"` followed
+      // by a bare line number into registry/barkpark.ex — a number that had
+      // already moved. Three things are wrong with a sentence.
+      // It cannot be COMPARED (nothing could assert `cruelMin === the cap`), it
+      // cannot be WRONG OUT LOUD (a moved line number reads identically to a
+      // moved cap), and it cannot express the one fact this ledger keeps
+      // getting bitten by — that the number a changeset DECLARES is not
+      // necessarily the number the server ENFORCES.
+      //
+      // So a cap is now `{ value, from, effective }`, and `effective` is
+      // DERIVED — the minimum over every layer that can refuse the write:
+      //   changeset   `validate_length(:col, max: N)` in the changeset that
+      //               casts the field. ABSENT is not zero and not 255; it is
+      //               "this layer does not bound the field".
+      //   column      the Postgres column. `add|modify :col, :string` is a BARE
+      //               varchar, which Ecto renders as varchar(255) — a bound
+      //               nobody typed and everybody forgets. `:text` is unbounded.
+      //   format      a `validate_change` + regex. A LENGTH-ONLY census is
+      //               structurally blind to this layer, and being blind to it
+      //               is how a family gets filed NONE-POSSIBLE when the server
+      //               refuses it at 254 (charter D269, D252).
+      //   downstream  a renderer that truncates (none in this console does) or
+      //               LENGTHENS (several do — recorded per row, never netted
+      //               into the cap, because a cap is what the SERVER accepts).
+      //
+      // `value` is what a reader would have typed into the prose: the declared
+      // length cap if the changeset declares one, else the column's own width.
+      // `effective` is what the server actually enforces. THEY DIFFER, and the
+      // ledger is only worth its bytes on the rows where they do.
+      //
+      // TWO KNOWN ANSWERS THE DERIVATION MUST REPRODUCE, asserted at load below
+      // (`CAP_DERIVATION_SPECIMENS`) so the rule is exercised on inputs whose
+      // answer was settled by other work, not only on the rows it feeds:
+      //   env_var.comment  effective 255, NOT the 1000 its changeset once
+      //                    declared. `add :comment, :string` is a bare varchar,
+      //                    and no migration ever widened it, so a 1000 cap
+      //                    ACCEPTED a 256-char comment the column then refused.
+      //                    RETIRED FAMILY, kept as a SPECIMEN: the env-var
+      //                    feature was deleted on 2026-09-02, and the specimen
+      //                    is still re-derivable from committed bytes — the
+      //                    drop migration's own `down/0` carries `add :comment,
+      //                    :string` verbatim (re-derive: grep -n 'add :comment'
+      //                    cloud/priv/repo/migrations/*drop_env_vars.exs). This
+      //                    is the COLUMN-BINDS branch, and the only input in
+      //                    this file on which the changeset is the loser.
+      //   site.domains     effective 253 BY FORMAT. The changeset declares NO
+      //                    validate_length on :domains at all, so a
+      //                    validate_length census over site.ex sees the 255-char
+      //                    NAME and nothing here; the bound comes from
+      //                    @domain_format capping every label at 63, whose
+      //                    admissible maximum is 63.63.63 + "." + 61 = 253.
+      //                    This is the FORMAT-BINDS branch.
+      const capLayers = (l) => [
+        ["changeset", l.changeset], ["column", l.column],
+        ["format", l.format], ["downstream", l.downstream],
+      ].filter(([, n]) => Number.isFinite(n));
+      const deriveCap = (l) => {
+        const bounded = capLayers(l);
+        if (bounded.length === 0) {
+          return { value: null, from: "NO LAYER BOUNDS THIS FIELD", effective: null, layers: l };
+        }
+        const effective = Math.min(...bounded.map(([, n]) => n));
+        const binds = bounded.filter(([, n]) => n === effective).map(([k]) => k);
+        // `value` is the number the prose would have cited: the declared length
+        // cap, or — when no changeset bounds the field — the column's own width.
+        const value = Number.isFinite(l.changeset) ? l.changeset
+          : (Number.isFinite(l.column) ? l.column : effective);
+        return { value, from: binds.join(" + "), effective, layers: l };
+      };
+      const capSentence = (c) => (c.effective === null
+        ? `UNCAPPED — ${c.from}`
+        : `effective ${c.effective} (bound by ${c.from}${c.value !== c.effective ? `; the declared ${c.value} is NOT what the server enforces` : ""})`);
+      // The specimens. A refusal, not a console.log: if the rule stops
+      // reproducing an answer someone else already paid for, every cap below is
+      // suspect and this leg has no business measuring anything.
+      const CAP_DERIVATION_SPECIMENS = [
+        { name: "env_var.comment (RETIRED 2026-09-02, kept as the column-binds specimen)",
+          layers: { changeset: 1000, column: 255 }, effective: 255, from: "column" },
+        { name: "site.domains (the format-binds specimen)",
+          layers: { column: 255, format: 253 }, effective: 253, from: "format" },
+      ];
+      for (const s of CAP_DERIVATION_SPECIMENS) {
+        const got = deriveCap(s.layers);
+        if (got.effective !== s.effective || got.from !== s.from) {
+          return die(`${D}: THE CAP DERIVATION NO LONGER REPRODUCES A SETTLED ANSWER — ${s.name} derives effective ${got.effective} bound by "${got.from}", and the answer this rule was built to reproduce is ${s.effective} bound by "${s.from}". Every \`effective\` in the ledger below comes out of the same function, so none of them can be trusted while this is false. This is a refusal to measure, not a finding`);
+        }
+      }
+      // ── THE LEDGER, NAME-KEYED (cchi-w27-bl-w22s7, criterion 1) ───────────
+      // Keyed by the FIELD the cap belongs to — `schema.column` — and not by
+      // the selector that happens to render it today. Two consequences, and
+      // both are the point:
+      //  * ONE cap, many hosts. A field rendered on two screens cannot carry
+      //    two different numbers, because there is only one entry to disagree
+      //    with itself.
+      //  * A CONSUMER NAMES WHAT IT MEASURES. A `CRUEL_ROUTES` row (and a
+      //    `CRUEL_REFUSALS` entry) declares `family:` and is RESOLVED against
+      //    this object. A name that is not a key here is UNLISTED and refuses
+      //    by name at exit 2 — see the resolution loop below the tables.
+      // Every `layers` value below is re-derivable by the grep beside it. The
+      // prose that used to be the cap survives on the row as `capCite`,
+      // demoted: it is a reading aid now, not the thing anything asserts.
+      const CRUEL_LEDGER = {
+        // validate_length(:custom_host, max: 253) — grep -n 'validate_length(:custom_host'
+        // registry/barkpark.ex; bare `add :custom_host, :string` —
+        // 20260706210000_add_custom_host_to_barkparks.exs; @external_host_format
+        // (grep -n '@external_host_format' registry/barkpark.ex) caps every
+        // label at 63, admissible maximum 63.63.63.61 = 253.
+        "barkpark.custom_host": { class: "CRUEL", cruelMin: 253,
+          layers: { changeset: 253, column: 255, format: 253 } },
+        // validate_length(:name, min: 1, max: 255) + bare `add :name, :string`
+        // (20260626193000_create_barkparks.exs). The 63-char SLUG is a
+        // reachability fact (INADMISSIBLE), NOT a cap on this column — nothing
+        // truncates the name itself, which is why this row is kept as an upper
+        // bound rather than dropped.
+        "barkpark.name": { class: "INADMISSIBLE", cruelMin: 255,
+          layers: { changeset: 255, column: 255 } },
+        // ZERO validate_length in ProvisionJob.changeset and a POSTGRES :text
+        // column (`modify :error, :text`,
+        // 20260702130000_provision_job_error_to_text.exs). No layer bounds it,
+        // so `effective` is null and `cruelMin` is the smallest MEASURED biting
+        // length rather than a legal maximum — which is exactly what
+        // UNCAPPED-DERIVED means and why MISCLASSED below keys on it.
+        "provision_jobs.error": { class: "UNCAPPED-DERIVED", cruelMin: 512,
+          layers: {} },
+        // NO validate_length on :domains at all — the bound is
+        // validate_domains/1's validate_change against @domain_format
+        // (grep -n 'defp validate_domains\|@domain_format' registry/site.ex).
+        // The column is `{:array, :string}`, i.e. varchar(255) per element.
+        "site.domains": { class: "FORMAT-LEGAL", cruelMin: 253,
+          layers: { column: 255, format: 253 } },
+        // validate_length(:name, min: 1, max: 255) in Site.changeset/2 + bare
+        // `add :name, :string` (20260627150000_create_sites.exs). The slug is a
+        // SEPARATE cast field with its own clause, so — unlike barkpark.name —
+        // a 255-char site name does not have to survive a 63-char derivation.
+        "site.name": { class: "CRUEL", cruelMin: 255,
+          layers: { changeset: 255, column: 255 } },
+        // validate_length(:account_login, max: 255) in Installation.changeset/2
+        // + bare `add :account_login, :string`
+        // (20260702160000_create_github_installations.exs). The downstream
+        // LENGTHENS (githubCardHtml renders "GitHub · " + login = 264 painted
+        // characters) and lengthening never enters the cap.
+        "installation.account_login": { class: "INADMISSIBLE", cruelMin: 255,
+          layers: { changeset: 255, column: 255 } },
+        // validate_length(:pinned_release, max: 255) in autoupdate_changeset/2
+        // + bare `add :pinned_release, :string`
+        // (20260707110000_add_autoupdate_to_barkparks.exs). The changeset's only
+        // other clause is an update_change TRIM — NO format regex, which is the
+        // difference between this family and site.domains directly above.
+        "barkpark.pinned_release": { class: "CRUEL", cruelMin: 255,
+          layers: { changeset: 255, column: 255 } },
+        // validate_length(:vercel_deploy_url, max: 255) in vercel_changeset/2 +
+        // bare `add :vercel_deploy_url, :string`
+        // (20260705200000_add_vercel_claim_to_barkparks.exs). Carried by
+        // CRUEL_REFUSALS, not by a row — nothing in the corpus reaches the host.
+        "barkpark.vercel_deploy_url": { class: "INADMISSIBLE", cruelMin: 255,
+          layers: { changeset: 255, column: 255 } },
+      };
+      for (const [name, e] of Object.entries(CRUEL_LEDGER)) e.cap = deriveCap(e.layers);
       // THE FAILED INSTANCE (cch-w24-s2). Its own detail screen is the ONLY
       // place a person can read WHY provisioning failed, and it is the screen
       // no row above reaches — `#overview` and `#fleet` are LIST routes.
@@ -7579,7 +8138,12 @@ async function main() {
       // corpus (32-char host / 10-char name)", a sentence with its own
       // refutation on the same screen.
       //   cruelMin  the shortest rendered length that still counts as cruel on
-      //             this host. A cruel cell below it has GONE KIND.
+      //             this host. A cruel cell below it has GONE KIND. NO LONGER
+      //             SPELLED ON THE ROW (cchi-w27-bl-w22s7): it is the FAMILY's,
+      //             read out of CRUEL_LEDGER by the resolution loop below the
+      //             table, and asserted there to equal the family's derived
+      //             effective cap. A floor typed on the row could drift from
+      //             the cap it claims to be without anything noticing.
       //   kindMax   the CEILING the kind control must stay under. There is no
       //             server floor to cite for this number, so it is chosen and
       //             justified per row: it sits comfortably above what the kind
@@ -7593,9 +8157,9 @@ async function main() {
           hash: "#fleet", view: "view-fleet", sel: ".fleet-url", ready: ".fleet-row",
           scopes: ".fleet-main, .fleet-status, .fleet-row",
           scens: ["fleet-cruel-content", "mixed-fleet"],
-          cap: "barkpark.custom_host <= 253 (registry/barkpark.ex:727) under @external_host_format (:109)",
+          family: "barkpark.custom_host",
+          capCite: "barkpark.custom_host <= 253 (registry/barkpark.ex:727) under @external_host_format (:109)",
           class: "CRUEL",
-          cruelMin: 253,
           // `mixed-fleet` renders a 32-char host; 64 is double it and a quarter
           // of the cap, so an ordinary hostname edit passes and a drift toward
           // the 253-char twin reds.
@@ -7606,9 +8170,9 @@ async function main() {
           hash: "#overview", view: "view-overview", sel: ".instance-card-name", ready: ".instance-card",
           scopes: ".instance-card-head, .instance-card",
           scens: ["fleet-cruel-content", "mixed-fleet"],
-          cap: "barkpark.name <= 255 (registry/barkpark.ex:466)",
+          family: "barkpark.name",
+          capCite: "barkpark.name <= 255 (registry/barkpark.ex:466)",
           class: "INADMISSIBLE",
-          cruelMin: 255,
           // `mixed-fleet`'s longest card name is 10 characters. 64 again: the
           // slug cap is 63 and every mint path derives the slug from the name
           // WITHOUT truncation (see INADMISSIBLE above), so a name a person can
@@ -7664,9 +8228,9 @@ async function main() {
             //    kind ceiling keeps it honest.
             { scen: "mixed-fleet", hash: "#instance/5b2c1e00-0000-4000-8000-0000000000a4" },
           ],
-          cap: "provision_jobs.error is UNBOUNDED at every layer — a POSTGRES :text column (the `modify :error, :text` migration under cloud/priv/repo/migrations) and ProvisionJob.changeset (registry/provision_job.ex) casts :error with ZERO validate_length. The row's cruelMin is therefore the smallest MEASURED biting length, not a legal maximum",
+          family: "provision_jobs.error",
+          capCite: "provision_jobs.error is UNBOUNDED at every layer — a POSTGRES :text column (the `modify :error, :text` migration under cloud/priv/repo/migrations) and ProvisionJob.changeset (registry/provision_job.ex) casts :error with ZERO validate_length. The row's cruelMin is therefore the smallest MEASURED biting length, not a legal maximum",
           class: "UNCAPPED-DERIVED",
-          cruelMin: 512,
           // The kind control is the live instance, whose detail reads "Online"
           // (6 characters). 64 keeps the ceiling identical across all three
           // rows rather than tuning one number per host: any status detail a
@@ -7785,7 +8349,8 @@ async function main() {
             { scen: "mixed-fleet", hash: "#sites" },
           ],
           // NOT a validate_length — which is the whole point of the row.
-          cap: "site.domains — every entry <= 253 AND matching @domain_format, enforced by validate_domains/1's validate_change (registry/site.ex; re-derive: grep -n 'defp validate_domains\\|@domain_format' cloud/lib/barkpark_cloud/registry/site.ex). A validate_length census over site.ex sees the 255-char NAME and NOTHING here (D252)",
+          family: "site.domains",
+          capCite: "site.domains — every entry <= 253 AND matching @domain_format, enforced by validate_domains/1's validate_change (registry/site.ex; re-derive: grep -n 'defp validate_domains\\|@domain_format' cloud/lib/barkpark_cloud/registry/site.ex). A validate_length census over site.ex sees the 255-char NAME and NOTHING here (D252)",
           // FORMAT-LEGAL, not plain CRUEL: the cruel value on this family is
           // constrained by a REGEX as well as a length, so the admissible
           // maximum is a CONSTRUCTION (63.63.63.61) rather than a repeat count.
@@ -7796,7 +8361,6 @@ async function main() {
           // 212-char trap are proven against the SERVER by
           // cloud/test/barkpark_cloud/web/router_site_domain_format_legal_cap_test.exs.
           class: "FORMAT-LEGAL",
-          cruelMin: 253,
           kindMax: 64,
           // MEMBER-REACHABLE, re-derived by symbol on this tree rather than
           // inherited from the filing: `post "/v1/sites/:id/domains"` calls the
@@ -7818,7 +8382,8 @@ async function main() {
             { scen: "fleet-cruel-content", hash: "#sites" },
             { scen: "mixed-fleet", hash: "#sites" },
           ],
-          cap: "site.name <= 255 (validate_length(:name, min: 1, max: 255) in Site.changeset/2, registry/site.ex)",
+          family: "site.name",
+          capCite: "site.name <= 255 (validate_length(:name, min: 1, max: 255) in Site.changeset/2, registry/site.ex)",
           // CRUEL, not INADMISSIBLE like `.instance-card-name` above: the site
           // name and the site SLUG are separate cast fields (`validate_length(:slug,
           // max: 63)` is its own clause), so a 255-char name does NOT have to
@@ -7827,7 +8392,6 @@ async function main() {
           // route — so this row IS a reachability claim, where the row above it
           // in this table deliberately is not.
           class: "CRUEL",
-          cruelMin: 255,
           kindMax: 64,
           predicate: "a person on the sites list can tell their sites apart by the name they typed — the whole name, not the leading fragment that happened to fit",
         },
@@ -7862,7 +8426,8 @@ async function main() {
             { scen: "fleet-cruel-content", hash: "#settings/providers" },
             { scen: "providers-connected", hash: "#settings/providers" },
           ],
-          cap: "installation.account_login <= 255 — validate_length(:account_login, max: 255) in Installation.changeset/2 (github/installation.ex:48) AND the varchar(255) column (`add :account_login, :string`, priv/repo/migrations/20260702160000_create_github_installations.exs:18). The EFFECTIVE cap is the min of those two and nothing downstream shortens it: githubCardHtml esc()s the value into `'GitHub · ' + login` with no truncation of its own, so the host renders 9 + 255 = 264 characters",
+          family: "installation.account_login",
+          capCite: "installation.account_login <= 255 — validate_length(:account_login, max: 255) in Installation.changeset/2 (github/installation.ex:48) AND the varchar(255) column (`add :account_login, :string`, priv/repo/migrations/20260702160000_create_github_installations.exs:18). The EFFECTIVE cap is the min of those two and nothing downstream shortens it: githubCardHtml esc()s the value into `'GitHub · ' + login` with no truncation of its own, so the host renders 9 + 255 = 264 characters",
           // INADMISSIBLE, and the derivation is a WRITE-PATH one rather than a
           // role one (L2, no write was run). NO Barkpark request field carries
           // this value: `POST /v1/github/installations` (router.ex:5753, team
@@ -7881,7 +8446,6 @@ async function main() {
           // 255 characters is what this card must survive, and no other
           // instrument would have found out.
           class: "INADMISSIBLE",
-          cruelMin: 255,
           // `providers-connected` renders "GitHub · acme-engineering" (25
           // characters). 64 is the ceiling every row in this table uses, and it
           // sits comfortably above a real GitHub login — github.com itself does
@@ -7894,7 +8458,8 @@ async function main() {
           hash: "#fleet", view: "view-fleet", sel: ".fleet-meta", ready: ".fleet-row",
           scopes: ".fleet-main, .fleet-row",
           scens: ["fleet-cruel-content", "mixed-fleet"],
-          cap: "barkpark.pinned_release <= 255 — validate_length(:pinned_release, max: 255) in autoupdate_changeset/2 (registry/barkpark.ex:981) AND the varchar(255) column (`add :pinned_release, :string`, priv/repo/migrations/20260707110000_add_autoupdate_to_barkparks.exs:20). The changeset's ONLY other clause is an update_change TRIM (barkpark.ex:977-980) — no format regex, so a length-only cruel string is server-legal here, unlike site.domains above. The downstream derivation LENGTHENS: fleetAutoupdateText renders `\"pinned \" + vRel(pinned_release)` and vRel prepends a \"v\" to anything that does not carry one, so the fixture starts with \"v\" and the segment paints exactly 262 characters",
+          family: "barkpark.pinned_release",
+          capCite: "barkpark.pinned_release <= 255 — validate_length(:pinned_release, max: 255) in autoupdate_changeset/2 (registry/barkpark.ex:981) AND the varchar(255) column (`add :pinned_release, :string`, priv/repo/migrations/20260707110000_add_autoupdate_to_barkparks.exs:20). The changeset's ONLY other clause is an update_change TRIM (barkpark.ex:977-980) — no format regex, so a length-only cruel string is server-legal here, unlike site.domains above. The downstream derivation LENGTHENS: fleetAutoupdateText renders `\"pinned \" + vRel(pinned_release)` and vRel prepends a \"v\" to anything that does not carry one, so the fixture starts with \"v\" and the segment paints exactly 262 characters",
           // CRUEL, and this one IS a reachability claim (L2 — a source
           // derivation, no write was run). `PATCH /v1/barkparks/:id/autoupdate`
           // (router.ex:4271, Auth.require_current_team_admin) casts the body's
@@ -7911,7 +8476,6 @@ async function main() {
           // about wrapping or overflow — which is why the fixture string is a
           // single unbroken token (scenarios.mjs refuses one that is not).
           class: "CRUEL",
-          cruelMin: 255,
           // `mixed-fleet`'s meta line is the ordinary region · size · version ·
           // channel · autoupdate sentence. 64 is this table's shared ceiling and
           // is the number to move — with its measurement quoted — if an
@@ -7933,6 +8497,7 @@ async function main() {
       const CRUEL_REFUSALS = [
         {
           field: "barkpark.vercel_deploy_url",
+          family: "barkpark.vercel_deploy_url",
           // THE KEY RENAME, RECORDED (the row's criterion 3). A name-keyed
           // census over app.js for `vercel_deploy_url` returns ZERO and
           // declares the field unrendered. It is rendered — under a DIFFERENT
@@ -7943,16 +8508,97 @@ async function main() {
           // :125. The FILE and the SYMBOL are what to re-derive against:
           // `grep -n 'deployment_url' cloud/lib/barkpark_cloud/vercel.ex`.
           host: ".new-fineprint .mono — href AND text on all THREE arms of the claim ladder: vercelClaimLinkHtml(), vercelClaimedHtml() and vercelClaimUnknownHtml() (re-derive: grep -n 'function vercelClaim' cloud/priv/static/app.js)",
-          cap: "barkpark.vercel_deploy_url <= 255 — validate_length(:vercel_deploy_url, max: 255) in vercel_changeset/2 (registry/barkpark.ex:1027) AND the varchar(255) column (`add :vercel_deploy_url, :string`, priv/repo/migrations/20260705200000_add_vercel_claim_to_barkparks.exs:10). No downstream derivation shortens it; the producer LENGTHENS by 8 (`\"https://\" <> url`, vercel/real.ex:61)",
+          capCite: "barkpark.vercel_deploy_url <= 255 — validate_length(:vercel_deploy_url, max: 255) in vercel_changeset/2 (registry/barkpark.ex:1027) AND the varchar(255) column (`add :vercel_deploy_url, :string`, priv/repo/migrations/20260705200000_add_vercel_claim_to_barkparks.exs:10). No downstream derivation shortens it; the producer LENGTHENS by 8 (`\"https://\" <> url`, vercel/real.ex:61)",
           reachability: "L2 (source derivation, no write run) — MACHINE-WRITTEN, never person-typed. The sole writer is Vercel.deploy_for/1 -> persist/2 (vercel.ex:76-88, :194-203), whose value is `deployed.deployment_url` from client().deploy_project/3; in prod that is Real.deploy_project/3 returning `\"https://\" <> deployment[\"url\"]` from api.vercel.com (vercel/real.ex:51-62). Its one caller is POST /v1/barkparks/:id/vercel-deploy (router.ex:5292)",
           why: "UNREACHABLE BY THE CORPUS, at two independent rungs, and neither is a fixture VALUE this slice could add. (1) `vercelClaimHtml` renders nothing unless `boot.vercel` is present, and `boot` is GET /v1/barkparks/:id/bootstrap — a path scenarios.mjs's route() does not model, so it falls to the terminal `/v1/` 200 {} and `boot.vercel` is undefined in EVERY scenario. (2) Even with that arm, the host lives on the /new READY screen, which `newRenderReady` reaches only from `newCheckStatus`'s poll (re-derive: grep -n 'function newRenderReady\\|function newCheckStatus' cloud/priv/static/app.js) — ZERO scenarios deep-link `#new`, so there is no hash that lands there. Covering it needs a bootstrap route arm carrying a `vercel` block AND a scenario that drives the create flow to `step === \"ready\"`, which is a corpus build, not a cruel string",
         },
       ];
+      // ── RESOLUTION, AND THE TWO REFUSALS THE NAME-KEYING BUYS ────────────
+      //    (cchi-w27-bl-w22s7, criterion 2.) The three refusals this leg's
+      //    comment above promises — GONE-KIND length, a format the server would
+      //    reject, and BREAKABLE self-wrapping — ALREADY EXIST UPSTREAM, in the
+      //    CRUEL-row fixture guards in scenarios.mjs (grep -n 'cruel fixture:'
+      //    scenarios.mjs), and they throw AT LOAD. They are cited here, not
+      //    rebuilt. What no layer refuses yet is the two faults a name-keyed
+      //    ledger makes expressible for the first time:
+      //
+      //    UNLISTED — a consumer measures a host whose FIELD has no ledger
+      //    entry. Before name-keying this was unsayable: the cap was a string
+      //    on the row, so every row was trivially "listed" in a table of one.
+      //    A new row copied from its neighbour inherits the neighbour's cap
+      //    prose and certifies a family nobody derived. That is exit 2, not a
+      //    finding: the run would be measuring against a number it invented.
+      //
+      //    MISCLASSED — the row's CLASS contradicts its own DERIVED cap. The
+      //    two classes that make an assertion ABOUT the cap are the two that
+      //    can be caught: NONE-POSSIBLE and UNCAPPED-DERIVED both claim no
+      //    layer bounds the field, so a finite `effective` refutes them on
+      //    their own evidence; every other class in the vocabulary claims a
+      //    cap the cruel string is cut to, so a null `effective` refutes those.
+      //    And a `cruelMin` that is not the effective cap is the GONE-KIND
+      //    fault one layer up — a row calling itself cruel at a length the
+      //    server does not enforce. UNCAPPED-DERIVED is exempt from that last
+      //    one BY DEFINITION: its cruelMin is a measured biting length, not a
+      //    legal maximum. Exit 2 for the same reason as UNLISTED — a verdict
+      //    that disagrees with its own derivation is not a finding about the
+      //    console, it is a broken instrument.
+      const UNCAPPED_CLASSES = ["NONE-POSSIBLE", "UNCAPPED-DERIVED"];
+      for (const consumer of [...CRUEL_ROUTES, ...CRUEL_REFUSALS]) {
+        const at = consumer.sel ? `${consumer.hash} \`${consumer.sel}\`` : `refusal \`${consumer.field}\``;
+        const entry = CRUEL_LEDGER[consumer.family];
+        if (!entry) {
+          return die(`${D}: UNLISTED FAMILY — ${at} declares \`family: "${consumer.family}"\`, which is not a key in CRUEL_LEDGER (${Object.keys(CRUEL_LEDGER).join(", ")}). The row would be certified against a cap nobody derived: its \`capCite\` prose is a sentence, and a sentence cannot be compared to anything. Add the field to the ledger with its changeset/column/format layers, or correct the name`);
+        }
+        consumer.cap = entry.cap;
+        // The row does not spell its own floor or verdict any more — it is
+        // HANDED them, by name, from the one place they are derived. A row that
+        // still carried its own copy could disagree with the ledger silently,
+        // which is the drift name-keying exists to end.
+        consumer.cruelMin = entry.cruelMin;
+        const uncapped = UNCAPPED_CLASSES.includes(entry.class);
+        const cls = entry.class;
+        if (uncapped && entry.cap.effective !== null) {
+          return die(`${D}: MISCLASSED — ${at} is filed ${cls}, which asserts that NO layer bounds this field, but the derivation finds ${capSentence(entry.cap)} for \`${consumer.family}\`. One of the two is wrong and the class is the cheaper thing to be wrong about: a family with a live cap filed as uncapped is a cruel string nobody is cutting to anything`);
+        }
+        if (!uncapped && entry.cap.effective === null) {
+          return die(`${D}: MISCLASSED — ${at} is filed ${cls}, a class that claims the cruel string is cut TO A CAP, but the derivation finds no layer bounding \`${consumer.family}\` at all (${entry.cap.from}). An uncapped family belongs to NONE-POSSIBLE or UNCAPPED-DERIVED, and the difference between those two is whether cruelty has anything to measure against`);
+        }
+        if (consumer.sel && !uncapped && entry.cruelMin !== entry.cap.effective) {
+          return die(`${D}: MISCLASSED — ${at} drives a cruelMin of ${entry.cruelMin} while \`${consumer.family}\` derives ${capSentence(entry.cap)}. A cruel string is cruel only while it still matches its cap; a floor above the cap can never be reached, and a floor below it measures a KIND value under a cruel name — which is the quietest green there is`);
+        }
+        if (!CRUEL_CLASSES.includes(entry.class)) {
+          return die(`${D}: MISCLASSED — the ledger files \`${consumer.family}\` as "${entry.class}", which is not in the class vocabulary (${CRUEL_CLASSES.join(", ")}). An unclassified family is a cap with no recorded verdict, and this table's whole job is that no family goes without one`);
+        }
+      }
       // Per-scenario hash, normalized once. A row may hand `scens` a bare
       // scenario name (the hash is the row's) or `{ scen, hash }` (its own).
       const cruelCells = (r) => r.scens.map((s) => (
         typeof s === "string" ? { scen: s, hash: r.hash } : { scen: s.scen, hash: s.hash || r.hash }
       ));
+      // ── THE SCENARIO CENSUS, INSIDE THIS LEG (cchi-w27-bl-w22s7, crit. 5) ─
+      //    This file imports SCENARIOS in five other legs and die()s when a
+      //    named fixture loses its shape. THIS leg — the one whose whole table
+      //    is a list of scenario names — did not import it AT ALL. So a
+      //    `route.scens` entry naming a scenario somebody deleted was not
+      //    refused by name: nav() drove `?scen=<gone>`, the preview served
+      //    whatever its unknown-scenario path serves, and the leg failed at
+      //    RUNTIME somewhere below — on a readiness timeout, or worse, on a
+      //    green over a screen nobody meant to measure. The census runs BEFORE
+      //    any navigation and names the row, the scenario and the corpus.
+      //
+      //    EXIT 2, NOT A FINDING, and the distinction is this file's own: a
+      //    finding is a claim about the CONSOLE, and a table pointing at a
+      //    fixture that does not exist is a claim about nothing. It is the same
+      //    verdict `SCENARIOS["site-states"] no longer carries a deepLink`
+      //    reaches four legs above, for the same reason.
+      const { SCENARIOS: CRUEL_SCENARIOS } = await import("./scenarios.mjs");
+      for (const route of CRUEL_ROUTES) {
+        for (const cell of cruelCells(route)) {
+          if (!CRUEL_SCENARIOS[cell.scen]) {
+            return die(`${D}: SCENARIOS no longer carries "${cell.scen}", named by the \`${route.sel}\` row (family \`${route.family}\`) at ${cell.hash}. The corpus holds ${Object.keys(CRUEL_SCENARIOS).length} scenarios and this is not one of them — so this row would drive a fixture that does not exist and every line printed under it would be about some other screen. Re-point the row at a live scenario, or drop it and its family's ledger entry together`);
+          }
+        }
+      }
       // ANTI-VACUITY 0 — the axes. A leg that lost the cruel scenario, or the
       // kind control, or the sub-899 band, or its whole route table, passes for
       // the wrong reason.
@@ -7983,7 +8629,7 @@ async function main() {
           fail(D, `axis check ${at}: kindMax ${route.kindMax} is not below cruelMin ${route.cruelMin} — the two ceilings overlap, so one string could satisfy BOTH sides of the axis and neither assertion could lose`);
         }
         if (cruel.length === 0) {
-          fail(D, `axis check ${at}: this row carries NO cruel fixture (scens: ${cruelCells(route).map((c) => c.scen).join(", ") || "none"}) — a row driven only on kind content measures the corpus every other leg already measures, and its green says nothing about the cap it cites (${route.cap})`);
+          fail(D, `axis check ${at}: this row carries NO cruel fixture (scens: ${cruelCells(route).map((c) => c.scen).join(", ") || "none"}) — a row driven only on kind content measures the corpus every other leg already measures, and its green says nothing about the cap it cites (${route.capCite})`);
         }
         if (kind.length === 0) {
           fail(D, `axis check ${at}: this row carries NO kind control (scens: ${cruelCells(route).map((c) => c.scen).join(", ") || "none"}) — without one, a bound that fixes the cruel value by shredding today's rendering scores a clean sweep on this host`);
@@ -7991,8 +8637,8 @@ async function main() {
         if (!CRUEL_CLASSES.includes(route.class)) {
           fail(D, `axis check ${at}: class "${route.class}" is not in the ledger vocabulary (${CRUEL_CLASSES.join(", ")}) — an unclassified row is a family with no recorded verdict`);
         }
-        if (!route.cap || !route.predicate) {
-          fail(D, `axis check ${at}: the row is missing its ${!route.cap ? "cap citation" : "person-facing predicate"} — a cruel row that cannot say which cap it is cut to, or which person it is for, is a fixture with no claim attached`);
+        if (!route.capCite || !route.predicate) {
+          fail(D, `axis check ${at}: the row is missing its ${!route.capCite ? "cap citation" : "person-facing predicate"} — a cruel row that cannot say which cap it is cut to, or which person it is for, is a fixture with no claim attached`);
         }
       }
       // THE REFUSAL TABLE'S OWN SHAPE CHECK. An entry that cannot say which
@@ -8001,7 +8647,7 @@ async function main() {
       // a note. The `from:` field is the one this table exists for: it is the
       // answer to a name-keyed grep that returned zero.
       for (const r of CRUEL_REFUSALS) {
-        for (const f of ["field", "from", "host", "cap", "reachability", "why"]) {
+        for (const f of ["field", "from", "host", "capCite", "reachability", "why"]) {
           if (!r[f]) {
             fail(D, `refusal check \`${r.field || "<unnamed>"}\`: the entry is missing its \`${f}\` — an uncoverable family with an incomplete record is indistinguishable from a family nobody looked at`);
           }
@@ -8218,7 +8864,7 @@ async function main() {
               // corpus" that the numbers on the same screen refuted.
               if (isCruel && m.longest < route.cruelMin) {
                 wentKind++;
-                fail(D, `${scen}/${theme}@${width}${cell.hash}: the longest \`${route.sel}\` renders ${m.longest} characters, below this row's cruel floor of ${route.cruelMin} (${route.cap}) — the CRUEL fixture has GONE KIND, so every clean line under it is a pass over ordinary content`);
+                fail(D, `${scen}/${theme}@${width}${cell.hash}: the longest \`${route.sel}\` renders ${m.longest} characters, below this row's cruel floor of ${route.cruelMin} (${capSentence(route.cap)}) — the CRUEL fixture has GONE KIND, so every clean line under it is a pass over ordinary content`);
               }
               if (!isCruel && m.longest > route.kindMax) {
                 wentCruel++;
@@ -9320,7 +9966,14 @@ async function main() {
     //        kind, not by convenience.
     //      SEVEN ARE THE ALIAS ON SURFACES THIS LEG CANNOT REACH, and each is
     //        named with the reason it went unmeasured rather than "it has
-    //        always been there":
+    //        always been there". TWO OF THOSE REASONS WERE LATER MEASURED FALSE
+    //        by the row this paragraph filed — see W24-word-break-alias-
+    //        population below, which drove all seven: `.rail-row .v` drags the
+    //        page to 668/320 on deletion WITH its `min-width: 0` in place, and
+    //        `.new-step-probe` does have a fixture (the instance rail's
+    //        `failedSteps`, which carries two `progress` entries). The
+    //        paragraph is corrected here rather than rewritten, so the next
+    //        reader sees which inferences did not survive a measurement:
     //          .rail-row .v          already carries its own `min-width: 0`, so
     //                                the escape the tear needs is present.
     //          .new-step-probe       same screen, same family as the converted
@@ -9336,9 +9989,12 @@ async function main() {
     //                                this property.
     //          .wh-del-err, .tlv-detail   webhooks and timeline detail; no leg
     //                                in this file renders either.
-    //        All seven are filed as cch-w24-bl-word-break-alias-remaining-seven
-    //        — a POPULATION to triage with a fixture each, never a to-do list
-    //        to convert.
+    //        All seven were filed as cch-w24-bl-word-break-alias-remaining-
+    //        seven — a POPULATION to triage with a fixture each, never a to-do
+    //        list to convert. That triage ran: the fixture separated THREE
+    //        (.bp-console-line, .deploy-console-line, .wh-del-err, now
+    //        `overflow-wrap: anywhere`) and could not separate the other four,
+    //        which keep the alias with the numbers written at the declaration.
     //
     //    D274/D292: no line numbers. Every citation above is a grep or a class.
     if (requested.includes("W24-theater-failed-hostname-whole")) {
@@ -13595,6 +14251,801 @@ async function main() {
           `and be measuring the shipped sheet under another name: that is an exit-2 refusal here, not a pass), ` +
           `measured, and restored with the sheet removed inside the same synchronous pass. The DOM walk is scoped ` +
           `to \`section.view:not([hidden])\` and PLURAL`,
+        );
+      }
+    }
+
+    // ── W21m-member-head-title-floor ────────────────────────────────────────
+    //    THE HOLE THIS FILLS. Every instance-head leg in this file measures the
+    //    OWNER's header: W21-inst-head-320-copy-reachable drives `mixed-fleet`
+    //    and `panel-overview` (both owner fixtures) and asserts the PAGE plus
+    //    the copy controls; W13 sweeps 721-1024. None of them drives a MEMBER,
+    //    and the member is the only reader whose header carries a second
+    //    element — `.inst-life-reason`, the server's own "team admins only"
+    //    sentence that D428 disable-and-explain puts beside the strip. So the
+    //    one fixture where the head row holds a long sentence had never been
+    //    measured at desktop width by any instrument here.
+    //
+    //    WHAT IT MEASURES, driven on the pre-fix tree: `.detail-head--inst
+    //    .detail-actions` is authored `flex: 0 0 auto` while its own box wraps,
+    //    so its flex BASE size is the max-content sum of every chip plus that
+    //    whole sentence on one line, and `flex-shrink: 0` forbids it to give
+    //    any of it back. The sibling `.detail-head-main` carries `min-width: 0`
+    //    and therefore absorbs the entire deficit: the H1 is squeezed toward
+    //    its min-content width and the instance name wraps ONE LETTER PER LINE,
+    //    leaving the right-hand column of the header empty under the strip.
+    //    The numbers are printed per cell rather than typed here, because every
+    //    literal a header in this file has typed about pixels has rotted.
+    //
+    //    TWO QUESTIONS, both from the filed criterion. (1) the title's own
+    //    height: how many LINE BOXES its text occupies, measured with a Range
+    //    over the text node — the element's own rect merges every line into one
+    //    box and is green on the defect by construction. (2) the gap below the
+    //    actions strip inside the header: with the title collapsed the header
+    //    grows to the title's height while the strip stays two rows tall, so
+    //    the dead band is `head.bottom - actions.bottom`.
+    //
+    //    THE BAND IS THE ROW BAND, AND THE 768 CELL IS THE NO-REGRESSION
+    //    CONTROL. `.detail-head--inst` stacks to a column at <=899 (app.css's
+    //    899 block), where `.detail-head-main` already spans the head and the
+    //    title cannot be squeezed — so 768 must stay clean both before and
+    //    after, and a remedy expressed as a flex-BASIS would become a HEIGHT
+    //    basis there if it were not scoped above the stack.
+    if (requested.includes("W21m-member-head-title-floor")) {
+      const D = "W21m-member-head-title-floor";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      const MEM_CASES = [
+        { scen: "panel-overview-member", hash: `#instance/${INST}` },
+        { scen: "timeline-events-only", hash: `#instance/${INST}/timeline` },
+        { scen: "instance-behind-member", hash: `#instance/${INST_BEHIND}` },
+      ];
+      // 1280 IS DELIBERATELY ABSENT, and it is not an oversight. Driven, it
+      // reads BYTE-IDENTICAL to 1440 in both directions (pre-fix 2L/h78/
+      // dead131 and 7L/h273/dead434; post-fix 1L/h39/dead12 and 1L/h39/
+      // dead48), so it adds no question this axis does not already ask — and
+      // width-drivers.test.mjs's FLICK_VIEWPORTS mutation arm depends on 1280
+      // having exactly ONE driver in this file, so that removing it can
+      // produce the honest negative ("driven by NO other axis"). A second
+      // driver here would silently retire that arm's negative branch to buy a
+      // cell that measures nothing new. Re-derive with
+      // `node --test cloud/priv/static/__preview__/width-drivers.test.mjs`.
+      const MEM_WIDTHS = [1440, 1024, 900, 768];
+      // A title is allowed TWO lines; a third is the wrap this leg exists for.
+      const TITLE_LINE_CAP = 2;
+      // "no dead band taller than one row", and the number is DERIVED FROM
+      // THE MEASUREMENT IN BOTH DIRECTIONS rather than chosen a priori. Driven
+      // on origin/main bytes the SMALLEST pre-fix band in the row band is
+      // 131px (panel-overview-member / timeline-events-only at 1440) and the
+      // largest is 533px; driven on the remedy the LARGEST band left
+      // is 66px, on `instance-behind-member` at 900 — where the left column is
+      // legitimately the taller one because the behind box's `.status-pill`
+      // wraps under its own title inside `.detail-title-row`, which is CONTENT
+      // and not dead space (the row prints main/acts widths so a reader can
+      // see it). 96 sits strictly between those two populations: every pre-fix
+      // cell reds, every post-fix cell passes, and it is ~45% above the worst
+      // surviving band so a font or platform that paints a little taller does
+      // not flip it.
+      const DEAD_BAND_CAP = 96;
+      // ANTI-VACUITY 0 — the axis itself. The defect was filed at 1440; a leg
+      // that dropped it would pass having never visited the width it is named
+      // for, and the 768 control alone is clean on both trees.
+      for (const want of [1440, 768]) {
+        if (!MEM_WIDTHS.includes(want)) {
+          fail(D, `axis check: ${want} is not in this leg's width set — 1440 is the width the defect was filed at and 768 is the stacked no-regression control; a leg missing either cannot make the claim its ok-line makes`);
+        }
+      }
+      const memCells = MEM_CASES.length * MEM_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${MEM_CASES.length} member scenarios x ${MEM_WIDTHS.length} widths x 2 themes` +
+        ` (${memCells} cells; .detail-title-row h1 LINE BOXES + the gap under .detail-actions)\n`,
+      );
+      let cells = 0, headsSeen = 0, reasonsSeen = 0, overWrapped = 0, deadBands = 0, pageOver = 0;
+      let worstLines = 0, worstDead = 0;
+      for (const c of MEM_CASES) {
+        for (const theme of ["light", "dark"]) {
+          // Enter AT the widest cell and pin the hash: `?scen=` alone renders
+          // #overview (the W13 routing trap), and an overview screen measured
+          // under an instance heading is a phantom table.
+          await setViewport(MEM_WIDTHS[0]);
+          await nav(
+            `${BASE}/?scen=${c.scen}&theme=${theme}${c.hash}`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return !!(v && v.id==='view-instance' && v.querySelector('.detail-head--inst .detail-title-row h1'));})()`,
+          );
+          const row = [];
+          for (const width of MEM_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var head=v?v.querySelector('.detail-head--inst'):null;` +
+              `var main=head?head.querySelector('.detail-head-main'):null;` +
+              `var h1=head?head.querySelector('.detail-title-row h1'):null;` +
+              `var acts=head?head.querySelector('.detail-actions'):null;` +
+              `var reason=head?head.querySelector('.inst-life-reason'):null;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),` +
+              ` hasHead:!!head,hasH1:!!h1,hasActs:!!acts,hasReason:!!reason,` +
+              ` psw:d.scrollWidth,pcw:d.clientWidth};` +
+              `if(!head||!h1) return out;` +
+              // LINE BOXES, not the element rect. A Range over the text node
+              // reports one rect per line box; the H1's own getBoundingClientRect
+              // merges them and reads ONE box however many lines are painted.
+              // The first NON-EMPTY TEXT NODE under the H1, at any depth: since
+              // task-1614ac4ba29eec9b the instance name rides inside its own
+              // <bdi>, so a direct-children scan found no text node and the leg
+              // refused every cell ("ZERO line boxes") on a correct render.
+              `var lines=0,lh=0,tn=null;` +
+              `var tw=document.createTreeWalker(h1,NodeFilter.SHOW_TEXT,null),n;` +
+              `while((n=tw.nextNode())){if(n.nodeValue.trim()){tn=n;break;}}` +
+              `if(tn){var rg=document.createRange();rg.selectNodeContents(tn);` +
+              ` var rs=rg.getClientRects(),tops=[];` +
+              ` for(var j=0;j<rs.length;j++){var t=Math.round(rs[j].top*2)/2;` +
+              `  if(tops.indexOf(t)===-1)tops.push(t);` +
+              `  if(rs[j].height>lh)lh=rs[j].height;}` +
+              ` lines=tops.length;}` +
+              `var hr=head.getBoundingClientRect();` +
+              `out.titleLines=lines;out.lineH=+lh.toFixed(2);` +
+              `out.title=(h1.textContent||'').replace(/\\s+/g,' ').trim().slice(0,48);` +
+              `out.h1H=h1.clientHeight;out.headH=+hr.height.toFixed(2);` +
+              `out.mainW=main?+main.getBoundingClientRect().width.toFixed(2):null;` +
+              `out.actsW=acts?+acts.getBoundingClientRect().width.toFixed(2):null;` +
+              `out.deadBand=acts?+(hr.bottom-acts.getBoundingClientRect().bottom).toFixed(2):null;` +
+              `out.stacked=getComputedStyle(head).flexDirection==='column';` +
+              `if(reason){var r2=document.createRange();r2.selectNodeContents(reason);` +
+              ` var rr=r2.getClientRects(),t2=[];` +
+              ` for(var k=0;k<rr.length;k++){var tt=Math.round(rr[k].top*2)/2;` +
+              `  if(t2.indexOf(tt)===-1)t2.push(tt);}` +
+              ` out.reasonLines=t2.length;` +
+              ` out.reason=(reason.textContent||'').replace(/\\s+/g,' ').trim().slice(0,40);}` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-instance") {
+              fail(D, `${c.scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-instance" — the hash did not route, so nothing below this line measures the instance workspace header`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) {
+              fail(D, `${c.scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply, so the dark half of this run measured the light one`);
+            }
+            // VACUITY, three shapes. Each is a tree on which this leg would
+            // score a perfect zero having measured nothing it is named for.
+            if (!m.hasHead || !m.hasH1) {
+              fail(D, `${c.scen}/${theme}@${width}: \`.detail-head--inst\` ${m.hasHead ? "is present but carries no" : "is ABSENT, so there is no"} \`.detail-title-row h1\` — the header this leg measures is not in the DOM. An empty walk is not a clean walk`);
+              row.push(`${width}:0h`);
+              continue;
+            }
+            if (!m.hasActs) {
+              fail(D, `${c.scen}/${theme}@${width}: no \`.detail-actions\` in the head — the strip whose unshrinkable base size squeezes the title is the SUBJECT here, and with it gone the title has the whole row by default. This leg would pass having measured the absence of its own cause`);
+              row.push(`${width}:0a`);
+              continue;
+            }
+            if (!m.hasReason) {
+              fail(D, `${c.scen}/${theme}@${width}: no \`.inst-life-reason\` in the head — these three fixtures are MEMBER fixtures precisely because a member is answered with the server's own permission sentence (D428 disable-and-explain). Without it the strip is chips only, which is the OWNER header W21-inst-head-320-copy-reachable already covers, and this leg has no subject`);
+              row.push(`${width}:0r`);
+              continue;
+            }
+            headsSeen++;
+            reasonsSeen++;
+            if (m.titleLines === 0) {
+              fail(D, `${c.scen}/${theme}@${width}: the H1 "${m.title}" reported ZERO line boxes from a Range over its text node — the measurement did not bind (an empty or element-only H1), so the line cap below could not have fired`);
+              row.push(`${width}:0l`);
+              continue;
+            }
+            if (m.titleLines > worstLines) worstLines = m.titleLines;
+            if (m.deadBand != null && m.deadBand > worstDead) worstDead = m.deadBand;
+            // (1) THE TITLE. At most two lines, at every width in the band.
+            if (m.titleLines > TITLE_LINE_CAP) {
+              overWrapped++;
+              fail(D, `${c.scen}/${theme}@${width}: the instance name "${m.title}" is painted over ${m.titleLines} line boxes (H1 clientHeight ${m.h1H}px at a ${m.lineH}px line) — cap is ${TITLE_LINE_CAP}. \`.detail-head-main\` measures ${m.mainW}px beside a ${m.actsW}px \`.detail-actions\` in a ${m.pcw}px viewport: the strip took the row and the title is wrapping toward its min-content width`);
+            }
+            // (2) THE DEAD BAND. The header's own height past the strip.
+            if (m.deadBand != null && m.deadBand > DEAD_BAND_CAP) {
+              deadBands++;
+              fail(D, `${c.scen}/${theme}@${width}: ${m.deadBand}px of empty header sits under \`.detail-actions\` (head ${m.headH}px tall, H1 ${m.h1H}px) — the right-hand column of the header is dead space the collapsed title paid for, and everything below the header starts that far down the page`);
+            }
+            // (3) THE PAGE, the same strict equality every leg here asserts.
+            if (m.psw !== m.pcw) {
+              pageOver++;
+              fail(D, `${c.scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} != clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the instance workspace is off-screen sideways at rest`);
+            }
+            row.push(`${width}:${m.titleLines}L/h${m.h1H}/dead${m.deadBand}/main${m.mainW}/acts${m.actsW}/r${m.reasonLines}${m.stacked ? "/col" : ""}`);
+          }
+          process.stdout.write(`   ${c.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // RUN-LEVEL VACUITY: a leg whose every cell `continue`d must not reach
+      // the ok-line. Both counters are incremented only past the three
+      // presence refusals above.
+      if (headsSeen === 0) {
+        fail(D, `${D}: measured ZERO instance headers across all ${cells} cells — the member fixtures stopped painting \`.detail-head--inst\`, so nothing this leg is named for was measured`);
+      }
+      if (reasonsSeen === 0) {
+        fail(D, `${D}: measured ZERO \`.inst-life-reason\` sentences across all ${cells} cells — the permission copy that makes these fixtures MEMBER fixtures never rendered`);
+      }
+      if (cells !== memCells) {
+        fail(D, `${D}: ${cells} of ${memCells} cells measured — a half-driven run does not certify the band`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${headsSeen} \`.detail-head--inst\` measured, each carrying the ` +
+          `\`.inst-life-reason\` permission sentence) across ${MEM_WIDTHS.join("/")} on ` +
+          `${MEM_CASES.map((c) => c.scen).join(" + ")}: worst title ${worstLines} line box(es) against a cap of ` +
+          `${TITLE_LINE_CAP}, worst dead band under \`.detail-actions\` ${worstDead}px against a cap of ` +
+          `${DEAD_BAND_CAP}px, ${overWrapped} over-wrapped titles, ${deadBands} dead bands, ${pageOver} pages ` +
+          `scrolling sideways`,
+        );
+        okLine(
+          `THE TITLE IS MEASURED IN LINE BOXES, NOT IN ITS OWN RECT. \`h1.getBoundingClientRect()\` merges every ` +
+          `line into one box and reads identically on a one-line title and a one-letter-per-line one, so this leg ` +
+          `asks a \`Range\` over the H1's TEXT NODE and counts distinct rect tops. Restore ` +
+          `\`flex: 0 0 auto\` on \`.detail-head--inst .detail-actions\` (drop the min-width:900 block this PR adds ` +
+          `to app.css) and every 900-1440 cell reds naming the instance name, its line count and the pixels of ` +
+          `dead header under the strip — driven both ways`,
+        );
+        okLine(
+          `THE ${768}px CELL IS THE NO-REGRESSION CONTROL, and it is printed with a \`/col\` marker so the reader ` +
+          `can see it took the stacked branch: \`.detail-head--inst\` computes \`flex-direction: column\` at <=899 ` +
+          `(app.css's 899 block), where \`.detail-head-main\` already spans the head. That is why the remedy is ` +
+          `scoped to a \`min-width: 900px\` block — an unscoped \`flex-basis\` on a column item is a HEIGHT basis, ` +
+          `and would have bought the wide band at the cost of the stacked one`,
+        );
+      }
+    }
+
+
+    // ── W21m: THE WIZARD ROW'S FIELD HAS A FLOOR, IN BOTH AUTHORITY ARMS ────
+    //
+    //    THE DEFECT NO PAGE-LEVEL LEG IN THIS FILE COULD SEE. `.new-golive-row`
+    //    never overflowed anything: it is a two-item flex line inside a fixed
+    //    card, and on origin/main d5bea4de9 its page, its card and its own box
+    //    all measured clean while `#new-gh-name` sat at 26px — an empty ~40px
+    //    outlined square with the greyed "Create GitHub repo" label beside it,
+    //    which is what the accent-matrix re-review filed as DEFECT-F (and filed
+    //    as a collapsed BUTTON; the button measured 133.47x28 with its label
+    //    inside it, so the filing named the wrong element).
+    //
+    //    `flex: 1` is `flex: 1 1 0%`. A zero flex base size means the field
+    //    contributes NOTHING to the line's hypothetical width, so the sibling
+    //    takes its content width first and the field divides the remainder —
+    //    fine beside a button, ruinous beside D428's disable-and-explain arm,
+    //    which is a `.inst-life-disabled` flex box carrying
+    //    FORBIDDEN_ROLE_COPY.admin's whole sentence.
+    //
+    //    TWO ARMS, ONE ROW, AND THE SECOND IS THE POINT. The member arm is the
+    //    defect; the OWNER arm (`theater-ready-github`, same row, same card) is
+    //    the CONTROL, and it is asserted to be UNMOVED — a remedy that fixed
+    //    the refusal by reshaping the screen everybody reaches would red here
+    //    rather than pass as "the field is wide now". Both numbers are
+    //    measured, never inferred from the class list.
+    if (requested.includes("W21m-wizard-refusal-row-field-floor")) {
+      const D = "W21m-wizard-refusal-row-field-floor";
+      // 1440 is where the re-review shot it; 768 is this file's own tablet
+      // band; 390 is a phone, where the row has always wrapped and the field
+      // has always been the full width — a SHOULDER, unable to detect the
+      // defect, present to catch a remedy that breaks the narrow layout.
+      const WIDTHS_W21M = [1440, 768, 390];
+      // The floor is the authored flex-basis, and it is NOT re-typed from
+      // app.css: it is read off the live computed style below and asserted to
+      // be a real length, so deleting the declaration reds this leg rather
+      // than leaving it measuring a default.
+      const ARMS = [
+        { scen: "theater-ready-github-member", refuses: true },
+        { scen: "theater-ready-github", refuses: false },
+      ];
+      const { SCENARIOS: SC_W21M } = await import("./scenarios.mjs");
+      process.stdout.write(
+        `\n${D} — theater-ready-github{,-member} x ${WIDTHS_W21M.length} widths x 2 themes ` +
+        `(${ARMS.length * WIDTHS_W21M.length * 2} cells; the repo-name field's painted width against its own ` +
+        `row, in the REFUSAL arm and in the GRANT control, plus the row's box and the page)\n`,
+      );
+      let cells = 0, starved = 0, armMismatch = 0, boxOver = 0, pageOver = 0;
+      const grantWidths = new Map();
+      for (const arm of ARMS) {
+        const sc = SC_W21M[arm.scen];
+        if (!sc || !sc.pathname || !sc.search) {
+          return die(`${D}: SCENARIOS["${arm.scen}"] no longer carries pathname+search — the launch theater cannot be reached, so nothing was measured`);
+        }
+        for (const theme of ["light", "dark"]) {
+          await setViewport(WIDTHS_W21M[0]);
+          await nav(
+            `${BASE}${sc.pathname}${sc.search}&scen=${arm.scen}&theme=${theme}`,
+            // READINESS, KEYED ON THE ELEMENT THIS LEG MEASURES. `.new-golive-row
+            // .form-input` would be a population-blind singular wait on whichever
+            // golive row painted first — the view-scope census names that class and
+            // refuses it undischarged. `#new-gh-name` is the field under
+            // measurement and an id is one host by the HTML contract, so the wait
+            // and the measurement now agree on their subject.
+            `document.querySelector('.new-golive-row') && document.querySelector('#new-gh-name')`,
+          );
+          const row = [];
+          for (const width of WIDTHS_W21M) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              // D228: ITERATE. There are two `.new-golive-row`s on this screen
+              // (the GitHub row and the go-live URL row) and a querySelector
+              // would silently pick one — the wrong one, on any future reorder.
+              // The row this leg is about is the one that HOLDS the repo-name
+              // field, named by its id, and the other row is measured too.
+              `var rows=[].slice.call(document.querySelectorAll('.new-golive-row'));` +
+              `var out={theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:rows.length,gh:null,others:[]};` +
+              `rows.forEach(function(r){` +
+              `  var f=r.querySelector('.form-input');if(!f) return;` +
+              `  var rr=r.getBoundingClientRect(),fr=f.getBoundingClientRect();` +
+              `  var cs=getComputedStyle(f);` +
+              `  var rec={rowW:+rr.width.toFixed(2),rowH:+rr.height.toFixed(2),fieldW:+fr.width.toFixed(2),` +
+              `    basis:cs.flexBasis,wrap:getComputedStyle(r).flexWrap,` +
+              `    rowSW:r.scrollWidth,rowCW:r.clientWidth,` +
+              `    refusal:!!r.querySelector('.inst-life-disabled'),` +
+              `    live:!!r.querySelector('button:not([disabled])')};` +
+              `  if(f.id==='new-gh-name') out.gh=rec; else out.others.push(rec);` +
+              `});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.theme !== theme) fail(D, `${arm.scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: no row, no measurement. A screen that stopped rendering
+            // the GitHub block would otherwise print a perfect table about
+            // nothing — the absence class this file refuses by name.
+            if (!m.gh) {
+              fail(D, `${arm.scen}/${theme}@${width}: no \`.new-golive-row\` holds \`#new-gh-name\` (${m.rows} golive row(s) on the page) — nothing was measured, this is not a pass`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            // AUDITED: the ARM is measured, not assumed from the scenario name.
+            // If a fixture drifted and the member screen started offering a
+            // live control, every width below would be measuring the grant arm
+            // while this leg claimed to have driven the refusal.
+            if (m.gh.refusal !== arm.refuses || m.gh.live === arm.refuses) {
+              armMismatch++;
+              fail(D, `${arm.scen}/${theme}@${width}: the row renders refusal=${m.gh.refusal} live-button=${m.gh.live}, but this arm is ${arm.refuses ? "the REFUSAL" : "the GRANT control"} — the authority arm under measurement is not the one named`);
+            }
+            // THE FLOOR ITSELF. A `flex-basis` of `0%`/`0px` IS the defect's
+            // mechanism, so reading it back off the live cascade is what makes
+            // deleting the declaration red this leg instead of leaving it
+            // measuring a browser default.
+            if (/^0(px|%)?$/.test(m.gh.basis)) {
+              fail(D, `${arm.scen}/${theme}@${width}: \`#new-gh-name\` computes flex-basis ${m.gh.basis} — a ZERO flex base size is the pre-fix mechanism: the field contributes nothing to the line and divides whatever its sibling leaves`);
+            }
+            // THE DEFECT: a field narrower than its own sibling's gap is not a
+            // field. The threshold is the AUTHORED basis where one is
+            // declared — never a number invented here — and 120px is the
+            // fallback floor below which no text input is usable.
+            const floor = Math.min(parseFloat(m.gh.basis) || 120, 120);
+            if (m.gh.fieldW < floor) {
+              starved++;
+              fail(D, `${arm.scen}/${theme}@${width}: \`#new-gh-name\` painted ${m.gh.fieldW}px inside a ${m.gh.rowW}px row (floor ${floor}px) — the repo-name field is starved to an empty square while its sibling takes the line (origin/main d5bea4de9: 26px of 464 at 1440, light)`);
+            }
+            for (const r of [m.gh, ...m.others]) {
+              if (r.rowSW > r.rowCW + 1) {
+                boxOver++;
+                fail(D, `${arm.scen}/${theme}@${width}: a \`.new-golive-row\` measures scrollWidth ${r.rowSW} > clientWidth ${r.rowCW} — the row is wider than the box that holds it`);
+              }
+            }
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${arm.scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — the remedy dragged the page sideways`);
+            }
+            // THE CONTROL LEDGER. The grant arm's numbers at each width+theme
+            // are recorded and printed; they are what a reviewer compares a
+            // future reshape against, and they are the half of this leg that
+            // fails when a remedy "fixes" the refusal by moving the screen
+            // everybody reaches.
+            if (!arm.refuses) grantWidths.set(`${theme}@${width}`, { f: m.gh.fieldW, h: m.gh.rowH });
+            row.push(`${width}:field ${m.gh.fieldW}/${m.gh.rowW}px h=${m.gh.rowH} basis=${m.gh.basis} wrap=${m.gh.wrap} page ${m.psw}/${m.pcw}`);
+          }
+          process.stdout.write(`   ${arm.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (cells !== ARMS.length * WIDTHS_W21M.length * 2) {
+        fail(D, `only ${cells} of ${ARMS.length * WIDTHS_W21M.length * 2} cells ran — this leg's claim is about every one of them`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean: \`#new-gh-name\` is a usable field in BOTH authority arms, at ` +
+          `${WIDTHS_W21M.join("/")} in both themes, with the arm under measurement ASSERTED from the rendered ` +
+          `bytes (refusal = a \`.inst-life-disabled\` present and no live button; grant = the inverse) rather ` +
+          `than taken from the scenario name`,
+        );
+        okLine(
+          `THE GRANT ARM IS THE CONTROL AND IT DID NOT MOVE: ` +
+          `${[...grantWidths].map(([k, v]) => `${k} field ${v.f}px h=${v.h}`).join(" · ")}. On origin/main ` +
+          `d5bea4de9 the same cells measured field 305.23px / row height 38 at light@1440 — the remedy is ` +
+          `required to cost the screen everybody reaches nothing, and this line is where that is paid`,
+        );
+        okLine(
+          `THE FLOOR IS READ OFF THE LIVE CASCADE, NEVER RE-TYPED: every cell asserted \`#new-gh-name\`'s ` +
+          `computed \`flex-basis\` is not a zero base size, so deleting app.css's \`flex: 1 1 220px\` reds this ` +
+          `leg on the MECHANISM, and the painted-width assertion reds it on the PIXELS. Two doors, one defect`,
+        );
+        okLine(
+          `HONEST LIMIT: this leg drives the GitHub-connected launch theater only. The go-live URL row shares ` +
+          `\`.new-golive-row\` and is measured for box overflow on the same screens, but its own field is not ` +
+          `floor-asserted — no authority arm reaches it, so it has no sibling that can starve it`,
+        );
+      }
+    }
+
+    // ── W24: THE `word-break: break-word` POPULATION OUTSIDE /new ───────────
+    //    cch-w24-s4 converted the two alias sites that bit on the /new failure
+    //    screen and REFUSED to sweep the rest, filing the remaining seven as a
+    //    population to triage with a fixture each. This leg is that triage, and
+    //    it ships the fixture rather than the verdict: one 78-char host — 63
+    //    octets, the legal maximum DNS label, plus `.barkpark.cloud` — is
+    //    substituted into each site's OWN text nodes and the element is
+    //    measured under the shipped cascade.
+    //
+    //    WHAT THE FIXTURE SEPARATED, AND WHAT IT COULD NOT. Driven across four
+    //    candidate values (the alias, `overflow-wrap: break-word`,
+    //    `overflow-wrap: anywhere`, and no declaration at all), the seven split
+    //    3/4 on a measured axis rather than on taste:
+    //      THREE the fixture SEPARATES, now converted to `anywhere`:
+    //        .bp-console-line    break-word -> scrollWidth 735 vs clientWidth 224
+    //        .deploy-console-line  -> 658/230 (deploy-detail-cruel), 583/230 (live)
+    //        .wh-del-err         -> box 561.61 in a 248px parent, inside a
+    //                               `.wh-del-card { overflow: hidden }`, so the
+    //                               clip is SILENT TEXT LOSS, not a scrollbar
+    //      FOUR it CANNOT, left alone with a written reason at the declaration:
+    //        .rail-row .v, .new-step-probe, .deploy-detail, .tlv-detail — all
+    //        three values measure identically to the decimal at every one.
+    //    A conversion no fixture could have refused is the green-by-
+    //    construction this wave exists to forbid, so those four were not swept.
+    //
+    //    TWO CORRECTIONS TO THE FILING, both measured here rather than argued:
+    //      · `.rail-row .v` was filed as safe because it "already carries its
+    //        own min-width: 0". Delete its break declaration WITH that escape
+    //        still in place and the page drags to 668 against a 320 viewport.
+    //        The escape is present and it is not what holds the page.
+    //      · `.new-step-probe` was filed as having no fixture that can produce
+    //        it, because `theaterFailedSteps` mounts no probe rows. True on
+    //        /new; false on the instance rail, where `failedSteps` carries two
+    //        `status: "progress"` entries and the `failed` scenario paints
+    //        them. This leg drives that mount.
+    //
+    //    THE LEG HAS BOTH HALVES, and a patch must pass both. (a) THE CASCADE:
+    //    each converted site must compute `word-break: normal` +
+    //    `overflow-wrap: anywhere`, so restoring the alias reds by name — the
+    //    conversion is geometrically identical to the alias, which is exactly
+    //    why a geometry-only leg could not police it. (b) THE GEOMETRY: every
+    //    one of the seven must CONTAIN the cruel host in its own box, which is
+    //    what `overflow-wrap: break-word` fails at the three converted sites
+    //    and what a plain deletion fails at all seven. Without (b) this leg
+    //    would be a spelling checker; without (a) it would pass on the alias it
+    //    was written to retire.
+    //
+    //    D274/D292: no line numbers. Every citation above is a grep or a class.
+    if (requested.includes("W24-word-break-alias-population")) {
+      const D = "W24-word-break-alias-population";
+      // The cruel host is the LONGEST LEGAL one, not an arbitrarily huge one —
+      // RFC 1035 caps a DNS label at 63 octets. Built, never pasted, so its
+      // length is a fact of this line. Same anchor cch-w24-s4 used.
+      const CRUEL = "a".repeat(63) + ".barkpark.cloud";
+      // 320 is the DRIVEN width (every number in the comment above and in
+      // app.css's per-site comments was measured there); 430 is a SHOULDER —
+      // already contained on origin/main, so it can only catch a remedy that
+      // breaks the wider phone layout.
+      const WB_WIDTHS = [320, 430];
+      // CONVERTED: the cascade is asserted here as well as the geometry.
+      // KEPT: geometry only — the alias is what app.css still ships, with the
+      // reason written at the declaration.
+      const CONVERTED = new Set([".bp-console-line", ".deploy-console-line", ".wh-del-err"]);
+      const { SCENARIOS } = await import("./scenarios.mjs");
+      // The instance/site ids are DERIVED from the fixture module, never
+      // transcribed: a transcribed uuid rots silently into "the overview screen
+      // rendered instead" and every cell below would measure the wrong page.
+      const hashOf = (name) => {
+        const sc = SCENARIOS[name];
+        if (!sc || !sc.deepLink) return null;
+        return sc.deepLink;
+      };
+      const CASES = [
+        // EVERY readiness walk here is SCOPED TO THE LIVE VIEW, the way
+        // cch-w24-s5 scoped `.fleet-row`: app.js routes by `section.hidden` and
+        // never clears a view, so a document-wide `.tlv-row` matched 5 nodes
+        // inside a hidden `#view-activity` and W35-hash-nav-hidden-view-residue
+        // refused this leg by name for it. The scope is the fix, not a register
+        // entry.
+        { scen: "failed", ready: `document.querySelector('section.view:not([hidden]) .new-step-probe')`,
+          sels: [".rail-row .v", ".new-step-probe", ".bp-console-line"] },
+        { scen: "deploy-detail-cruel", ready: `document.querySelector('section.view:not([hidden]) .deploy-row')`,
+          sels: [".deploy-detail", ".deploy-console-line"] },
+        { scen: "site-deploy-rail-live", ready: `document.querySelector('section.view:not([hidden]) .deploy-row')`,
+          sels: [".deploy-console-line"] },
+        // The delivery log is behind the card's own `Deliveries` button and
+        // arrives on a fetch, so the click is followed by a SETTLE on the
+        // element this case exists to measure — a measurement taken in the gap
+        // would report "zero painted .wh-del-err" about a screen that was about
+        // to paint one.
+        { scen: "webhooks-autodisabled", ready: `document.querySelector('section.view:not([hidden]) .wh-card')`,
+          click: "section.view:not([hidden]) [data-wh-deliveries]", settle: "section.view:not([hidden]) .wh-del-err", sels: [".wh-del-err"] },
+        // THE SECOND PRODUCER OF THE SAME CLASS. `.wh-del-err` is painted by
+        // TWO functions in app.js — `deliveryRowHtml` (the webhooks panel,
+        // above, off `d.last_error_text`) and `notifDeliveryRowHtml` (the
+        // notifications delivery log, here, off `d.last_error`). One CSS rule,
+        // two render paths, and the case above measured only one of them: the
+        // notifications row carries `.wh-del-meaning`, `.wh-del-proof` and
+        // `.wh-del-meta` siblings the webhook row never emits, so it is a
+        // different flex line reaching the same `flex-basis: 100%` span. This
+        // log is NOT behind a control — `notifDeliveriesShellHtml` mounts
+        // `#notif-deliveries-body` with a `Loading delivery log…` placeholder
+        // and fills it from GET /v1/notifications/deliveries — so there is no
+        // click, only a SETTLE, and a measurement taken in that gap would
+        // report a perfect table about a spinner.
+        { scen: "notif-configured", ready: `document.querySelector('section.view:not([hidden]) #notif-deliveries-body')`,
+          settle: "section.view:not([hidden]) #notif-deliveries-body .wh-del-err", sels: [".wh-del-err"] },
+        { scen: "activity", ready: `document.querySelector('section.view:not([hidden]) .tlv-row')`, click: "section.view:not([hidden]) .tlv-toggle",
+          sels: [".tlv-detail"] },
+        { scen: "timeline", ready: `document.querySelector('section.view:not([hidden]) .tlv-row')`, click: "section.view:not([hidden]) .tlv-toggle",
+          sels: [".tlv-detail"] },
+      ];
+      // COVERAGE, ASSERTED AND NOT ASSUMED: the seven this row owns are named
+      // once, here, and every one must be measured by some case below. A
+      // selector that stops rendering would otherwise leave this leg printing a
+      // clean table about six sites while the seventh went unwatched.
+      const OWNED = [".rail-row .v", ".new-step-probe", ".deploy-console-line", ".deploy-detail", ".bp-console-line", ".wh-del-err", ".tlv-detail"];
+      const covered = new Set(CASES.flatMap((c) => c.sels));
+      for (const sel of OWNED) {
+        if (!covered.has(sel)) {
+          return die(`${D}: \`${sel}\` is one of the seven this row owns and no case in this leg renders it — the population would be measured six-sevenths and reported whole`);
+        }
+      }
+      // A SELECTOR IS NOT A RENDER PATH, and the coverage check above cannot
+      // tell them apart: it is satisfied the moment ONE case paints a class.
+      // `.wh-del-err` has two producers in app.js and for a full wave only one
+      // of them was driven, so a regression on the notifications path was
+      // unguarded while this leg printed a clean table naming the class.
+      // The pairing is named here AND the population is counted off app.js, so
+      // a THIRD producer appearing is a refusal rather than a silent
+      // two-thirds measurement — an enumeration is a snapshot, a count read
+      // from the source is a rule.
+      const PRODUCERS = [
+        { sel: ".wh-del-err", fn: "deliveryRowHtml", field: "last_error_text", scen: "webhooks-autodisabled" },
+        { sel: ".wh-del-err", fn: "notifDeliveryRowHtml", field: "last_error", scen: "notif-configured" },
+      ];
+      for (const pr of PRODUCERS) {
+        if (!CASES.some((c) => c.scen === pr.scen && c.sels.includes(pr.sel))) {
+          return die(`${D}: \`${pr.sel}\` is painted by \`${pr.fn}\` off \`${pr.field}\` and no case in this leg drives \`${pr.scen}\` for it — the class would be measured on one of its ${PRODUCERS.length} render paths and reported as the class`);
+        }
+      }
+      const APP_JS = fs.readFileSync(path.join(ROOT, "app.js"), "utf8");
+      const errEmitters = (APP_JS.match(/class="wh-del-err"/g) || []).length;
+      if (errEmitters !== PRODUCERS.length) {
+        return die(`${D}: app.js emits \`class="wh-del-err"\` from ${errEmitters} site(s), and this leg names ${PRODUCERS.length} (${PRODUCERS.map((pr) => pr.fn).join(", ")}) — the population moved under the leg, so the table below would be a claim about ${PRODUCERS.length} of ${errEmitters} render paths`);
+      }
+      for (const c of CASES) {
+        if (!hashOf(c.scen)) {
+          return die(`${D}: SCENARIOS["${c.scen}"] no longer carries a deepLink — the route cannot be reached, so nothing about ${c.sels.join("/")} was measured`);
+        }
+      }
+      const cellCount = CASES.length * WB_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${CASES.length} scenarios x ${WB_WIDTHS.length} widths x 2 themes (${cellCount} cells; ` +
+        `a ${CRUEL.length}-char host — a 63-octet DNS label, the legal maximum — substituted into each site's OWN ` +
+        `text nodes, every matching element then asserted to contain it, and the ${CONVERTED.size} converted sites ` +
+        `asserted on the LIVE CASCADE too). h= is the tallest box the cruel host produced, REPORTED: the ` +
+        `min-content the alias lowers is bought with vertical room and no pixel of it is pinned\n`,
+      );
+      // The measurement is one synchronous pass: substitute, force layout,
+      // measure, restore. Nothing under app.css or app.js is in this leg's
+      // diff — the cruel host is a DOM edit undone before the next cell.
+      const wbProbe = (sel) =>
+        `(function(){` +
+        `var SEL=${JSON.stringify(sel)};var CR=${JSON.stringify(CRUEL)};` +
+        // THE SPLIT IS A WHITESPACE CLASS, AND THIS IS A TEMPLATE LITERAL.
+        // `\s` written with ONE backslash inside a template literal is just
+        // `s` by the time the browser parses it: the walk shipped `/(s+)/`
+        // and `/^s+$/` and split every text node on runs of the LETTER s,
+        // concatenating the cruel host onto the remaining letters of a word
+        // instead of replacing a whole token. The stress still landed, so no
+        // assertion here ever lied about a pass — but `Ns` and the ok-line's
+        // substitution count were counting something other than what they
+        // said. The regexes are named here and READ BACK OUT of the page
+        // below as `RXS.source`/`RXW.source` — the WALK'S OWN objects, not a
+        // second literal spelled the same way. That distinction is measured,
+        // not stylistic: with the reporting literal correct and RXS alone
+        // regressed to one backslash, this leg ran GREEN while splitting on
+        // `s`. A check whose expected value comes from a literal BESIDE the
+        // guarded one guards nothing. The regexes are declared once, beside
+        // SEL/CR, and the same objects are both used and reported.
+        `var RXS=/(\\s+)/,RXW=/^\\s+$/;` +
+        `var ns=[].slice.call(document.querySelectorAll('section.view:not([hidden]) '+SEL))` +
+        `  .filter(function(e){return e.getClientRects().length;});` +
+        `var d=document.documentElement;` +
+        `if(!ns.length) return {n:0,psw:d.scrollWidth,pcw:d.clientWidth,tsn:0,tsbad:[]};` +
+        // THE CASCADE IS READ BEFORE THE SUBSTITUTION, off the shipped sheet.
+        `var cs0=getComputedStyle(ns[0]);` +
+        // THE TIMESTAMP COLUMN'S CEILING, read here and asserted below. The
+        // walk skips `.bp-console-ts` / `.deploy-console-ts` (see the note at
+        // the skip), and the reason it may is a claim about app.js, not about
+        // this probe — so the claim is MEASURED on the live text rather than
+        // taken on trust. Read before the substitution for the same reason the
+        // cascade is: after it, this would be reading the fixture.
+        `var tss=[].slice.call(document.querySelectorAll('section.view:not([hidden]) .bp-console-ts,section.view:not([hidden]) .deploy-console-ts'));` +
+        `var tsbad=tss.map(function(e){return (e.textContent||'');})` +
+        `  .filter(function(t){return !/^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]$/.test(t);});` +
+        `var saved=[],hit=0;` +
+        `ns.forEach(function(e){var w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT,null);var n;` +
+        // The timestamp column of a console line is `flex: 0 0 auto`: putting
+        // the cruel host THERE manufactures a spill no string the product can
+        // emit would cause, and the leg would be asserting against its own
+        // fixture. Measured by deleting this skip and re-running the leg: it
+        // drove .bp-console-line to 626/224 at 320 and 626/334 at 430, with
+        // 1993.9px of single-character line boxes, and .deploy-console-line to
+        // 579/230 and 1636.3px — on a tree that is otherwise clean.
+        // THE SKIP IS LEGITIMATE BECAUSE OF A CEILING, NOT BECAUSE IT IS
+        // CONVENIENT: both spans are filled by `newFmtConsoleTime`, which
+        // returns "" or exactly `HH:MM:SS` from two-digit-padded
+        // getHours/getMinutes/getSeconds — 8 characters, never a token a
+        // `flex: 0 0 auto` column cannot hold. That claim is app.js's, so it
+        // is asserted below against the LIVE text of every timestamp painted
+        // in this leg rather than left as a comment.
+        `  while((n=w.nextNode())){var t=n.nodeValue||'';if(!t.trim()) continue;` +
+        `    if(n.parentElement&&n.parentElement.closest('.bp-console-ts,.deploy-console-ts')) continue;` +
+        `    var toks=t.split(RXS);var bi=-1,bl=0;` +
+        `    toks.forEach(function(x,i){if(!RXW.test(x)&&x.length>bl){bl=x.length;bi=i;}});` +
+        `    if(bi<0) continue;` +
+        `    saved.push([n,t]);toks[bi]=CR;n.nodeValue=toks.join('');hit++;}});` +
+        `void d.offsetWidth;` +
+        `var rows=ns.map(function(e){var r=e.getBoundingClientRect();` +
+        `  var pe=e.parentElement;var pr=pe?pe.getBoundingClientRect():null;` +
+        `  return {cls:(e.className||e.tagName||'?').toString().slice(0,40),` +
+        `    sw:e.scrollWidth,cw:e.clientWidth,w:+r.width.toFixed(2),` +
+        `    pw:pr?+pr.width.toFixed(2):-1,psw2:pe?pe.scrollWidth:-1,pcw2:pe?pe.clientWidth:-1,` +
+        `    h:+r.height.toFixed(1)};});` +
+        `var out={n:ns.length,hit:hit,rxs:RXS.source,rxw:RXW.source,rows:rows,psw:d.scrollWidth,pcw:d.clientWidth,` +
+        `  wb:cs0.wordBreak,ow:cs0.overflowWrap,tsn:tss.length,tsbad:tsbad.slice(0,3)};` +
+        `saved.forEach(function(x){x[0].nodeValue=x[1];});void d.offsetWidth;` +
+        `return out;})()`;
+      let cells = 0, elsSeen = 0, subs = 0, spills = 0, cascadeBad = 0, pageOver = 0, tallest = 0;
+      let tsSeen = 0, tsBad = 0;
+      for (const c of CASES) {
+        for (const theme of ["light", "dark"]) {
+          // Enter WIDE and assert the landed screen through the readiness
+          // expression — `?scen=` alone renders #overview (the W13/W15 note),
+          // and a phantom surface is worse than none.
+          await setViewport(WB_WIDTHS[WB_WIDTHS.length - 1]);
+          await nav(`${BASE}/?scen=${c.scen}&theme=${theme}${hashOf(c.scen)}`, c.ready);
+          if (c.click) {
+            const clicked = await evalJs(
+              `(function(){var n=[].slice.call(document.querySelectorAll(${JSON.stringify(c.click)}));` +
+              `n.forEach(function(e){try{e.click();}catch(x){}});return n.length;})()`,
+            );
+            if (!clicked) {
+              return die(`${D}: ${c.scen} rendered no \`${c.click}\` to open — \`${c.sels.join("/")}\` is behind that control, so a run without it would report a perfect table about a collapsed row`);
+            }
+          }
+          // THE SETTLE IS NOT THE CLICK'S DEPENDANT. It used to be nested
+          // inside `if (c.click)`, which made "arrives on a fetch" and "is
+          // behind a control" the same property — and the notifications
+          // delivery log is the first case that is the first WITHOUT being the
+          // second. A case declaring `settle` with no `click` would have
+          // skipped the wait entirely and measured the `Loading delivery log…`
+          // placeholder as a clean zero-spill row.
+          if (c.settle) {
+            const t0 = Date.now();
+            let ok = false;
+            while (Date.now() - t0 < 5000) {
+              ok = !!(await evalJs(`!!document.querySelector(${JSON.stringify(c.settle)})`));
+              if (ok) break;
+              await sleep(100);
+            }
+            if (!ok) {
+              return die(`${D}: ${c.scen} never painted \`${c.settle}\` within 5000ms${c.click ? ` of opening \`${c.click}\`` : " of the route landing"} — the delivery log did not arrive, so this case would have measured an empty box`);
+            }
+          }
+          const row = [];
+          for (const width of WB_WIDTHS) {
+            await setViewport(width);
+            cells++;
+            for (const sel of c.sels) {
+              const m = await evalJs(wbProbe(sel));
+              if (!m.n) {
+                fail(D, `${c.scen}/${theme}@${width}: zero painted \`${sel}\` in the visible view — the surface this site lives on did not render, so nothing about it was measured and this is not a pass`);
+                row.push(`${sel}:0`);
+                continue;
+              }
+              if (!m.hit) {
+                fail(D, `${c.scen}/${theme}@${width} ${sel}: the cruel host replaced nothing — every text node was empty or whitespace, so the stress measured no string at all`);
+              }
+              // THE WALK'S OWN SPLIT, READ BACK OUT OF THE PAGE. Not a source
+              // grep: the defect this catches is an ESCAPE that only exists
+              // between this file's bytes and the browser's parser, and a
+              // source regex over a template literal is exactly the instrument
+              // that cannot see it. `.source` is what the page evaluated.
+              if (m.rxs !== "(\\s+)" || m.rxw !== "^\\s+$") {
+                fail(D, `${c.scen}/${theme}@${width} ${sel}: the walk's split reached the browser as /${m.rxs}/ with separator /${m.rxw}/, not a whitespace class — every \`Ns\` and the substitution count below are then counting tokens of something other than words, and this leg's stated mechanism is not its actual one`);
+              }
+              elsSeen += m.n;
+              subs += m.hit;
+              // (a) THE CASCADE, converted sites only.
+              if (CONVERTED.has(sel)) {
+                if (m.wb !== "normal" || m.ow !== "anywhere") {
+                  cascadeBad++;
+                  fail(D, `${c.scen}/${theme}@${width} ${sel}: computes word-break:${m.wb} overflow-wrap:${m.ow}, expected normal/anywhere — cch-w24-s4's deprecated alias is back on a site this row converted, and it is geometrically indistinguishable from the remedy, so nothing else in this leg can see it`);
+                }
+              }
+              // (b) THE GEOMETRY, every site.
+              for (const r of m.rows) {
+                if (r.sw > r.cw + 1) {
+                  spills++;
+                  fail(D, `${c.scen}/${theme}@${width} ${sel} (.${r.cls}): scrollWidth ${r.sw} > clientWidth ${r.cw} — a ${CRUEL.length}-char host does not fit its own box. \`overflow-wrap: break-word\` and a bare deletion both land here; \`anywhere\` and the alias do not`);
+                }
+                if (r.pw >= 0 && r.w > r.pw + 1) {
+                  spills++;
+                  fail(D, `${c.scen}/${theme}@${width} ${sel} (.${r.cls}): box ${r.w} is wider than its ${r.pw}px parent (parent ${r.psw2}/${r.pcw2}) — on a clipping ancestor that is silent text loss rather than a scrollbar`);
+                }
+                if (r.h > tallest) tallest = r.h;
+              }
+              // THE TIMESTAMP COLUMN, whose `flex: 0 0 auto` this leg's walk
+              // steps around. Unbounded it is a real overflow (the numbers at
+              // the skip above); bounded it is not reachable, and THIS is where
+              // the bound is checked rather than believed.
+              // ONCE PER CELL, not once per selector: every selector in a case
+              // shares one screen, so counting per selector would report the
+              // same timestamps two and three times and inflate the ok-line's
+              // population into a number nothing painted.
+              if (sel === c.sels[0]) tsSeen += m.tsn || 0;
+              if (sel === c.sels[0] && m.tsbad && m.tsbad.length) {
+                tsBad += m.tsbad.length;
+                fail(D, `${c.scen}/${theme}@${width} ${sel}: a \`.bp-console-ts\`/\`.deploy-console-ts\` carries ${JSON.stringify(m.tsbad)} — not the \`HH:MM:SS\` \`newFmtConsoleTime\` is the only producer of. The column is \`flex: 0 0 auto\` with no min-width escape, and this leg's walk SKIPS it on the strength of that ceiling; with the ceiling gone the skip is a blind spot rather than a fixture-discipline (deleting the skip drove .bp-console-line to 626/224 and .deploy-console-line to 579/230)`);
+              }
+              if (m.psw > m.pcw) {
+                pageOver++;
+                fail(D, `${c.scen}/${theme}@${width} ${sel}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the screen is off-screen sideways under the cruel host`);
+              }
+              const worst = m.rows.reduce((a, b) => (b.sw - b.cw > a.sw - a.cw ? b : a), m.rows[0]);
+              const tall = m.rows.reduce((a, b) => (b.h > a.h ? b : a), m.rows[0]);
+              // PRINTED AT EVERY WIDTH, not only on failure: "the remedy cost no
+              // horizontal room" is a claim about these numbers, and a row that
+              // prints them only when it fires cannot be quoted for it.
+              row.push(`${width}:${sel} ${m.n}n/${m.hit}s ${worst.sw}/${worst.cw} h=${tall.h} page=${m.psw}/${m.pcw}`);
+            }
+          }
+          process.stdout.write(`   ${c.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${CASES.length} scenarios and ${WB_WIDTHS.join("/")} in both ` +
+          `themes: ${elsSeen} painted element(s) walked, ${subs} text node(s) actually carried the ` +
+          `${CRUEL.length}-char host (counted, not assumed — a substitution that hit nothing is a FAILURE above, ` +
+          `not a pass, and the walk's split is READ BACK out of the page as /(\\s+)/ at every cell rather than ` +
+          `trusted to have survived this file's template literals), ${spills} box spill(s), ${pageOver} page(s) ` +
+          `scrolling sideways`,
+        );
+        okLine(
+          `THE CASCADE HALF: ${CONVERTED.size} converted site(s) — ${[...CONVERTED].join(", ")} — asserted to ` +
+          `compute word-break:normal + overflow-wrap:anywhere on the SHIPPED sheet, read before the substitution. ` +
+          `\`anywhere\` and the alias it replaces are identical to the decimal at every cell here, which is ` +
+          `precisely why this assertion exists: restore \`word-break: break-word\` in app.css and this half reds ` +
+          `by site name while every geometry number below stays green`,
+        );
+        okLine(
+          `THE GEOMETRY HALF, which is what the cheap remedy loses: \`overflow-wrap: break-word\` preserves ` +
+          `min-content, and at the three converted sites that measured 681/224 (.bp-console-line), 629/230 and ` +
+          `562/230 (.deploy-console-line) and a 561.59px box in a 248px clipping parent (.wh-del-err). A bare ` +
+          `deletion lands the same way AND, at the four sites this row did NOT convert, drives the page to ` +
+          `668/320 (.rail-row .v) and 657/320 (.new-step-probe) — so the written reason at each of those four ` +
+          `declarations is falsifiable here rather than decorative. EVERY NUMBER IN THIS SENTENCE WAS RE-EARNED ` +
+          `by driving those mutations again after the walk's split was corrected from \`/(s+)/\` to \`/(\\s+)/\`: ` +
+          `the cruel host now REPLACES a whole token instead of being concatenated onto the rest of a word, and ` +
+          `735/658/583/561.61/665 were that concatenation's numbers, not this leg's`,
+        );
+        okLine(
+          `THE TIMESTAMP COLUMN'S CEILING, MEASURED: ${tsSeen} painted \`.bp-console-ts\`/\`.deploy-console-ts\` read across ` +
+          `this run, ${tsBad} outside \`HH:MM:SS\`. That column is \`flex: 0 0 auto\` and the cruel-host walk steps ` +
+          `around it — legitimately, because \`newFmtConsoleTime\` is its only producer and it returns "" or eight ` +
+          `characters. Delete the skip and the unbounded column drives .bp-console-line to 626/224 (1993.9px of ` +
+          `single-character line boxes) and .deploy-console-line to 579/230, so the ceiling is what makes the skip ` +
+          `discipline instead of a blind spot, and it is checked here rather than asserted at the declaration alone`,
+        );
+        okLine(
+          `VERTICAL COST, REPORTED AND NOT PINNED: the tallest box the cruel host produced anywhere in this run ` +
+          `was ${tallest}px. Lowering min-content is what keeps the string inside its box and it is paid for in ` +
+          `lines, so a pixel pinned here would make the leg unsatisfiable by the very remedy it certifies`,
         );
       }
     }

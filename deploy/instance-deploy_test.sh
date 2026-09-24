@@ -1038,16 +1038,21 @@ rc="$(BARKPARK_CLOUD_EGRESS_IPS=10.0.0.0/8 run_deploy 200 cidrsha)"
 check "CIDR: deploy still exit 0 (non-fatal)"     "[ '$rc' = '0' ]"
 check "CIDR: NOT written"                         "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
 check "CIDR: refused loudly"                      "grep -q 'WARN: BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+check "CIDR: the refusal NAMES the entry it refused" "grep -q \"REFUSED by the validator: entry '10.0.0.0/8'\" '$TMP/out.log'"
+check "CIDR: a refusal never reads as 'nothing supplied'" "! grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+check "CIDR: a refusal writes no placeholder"      "! grep -q '^# BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
 rm -rf "$TMP"
 setup_case
 rc="$(BARKPARK_CLOUD_EGRESS_IPS=barkpark.cloud run_deploy 200 hostsha)"
 check "hostname: NOT written (runtime.exs takes IPs only)" "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
 check "hostname: refused loudly"                  "grep -q 'WARN: BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+check "hostname: the refusal NAMES the entry"     "grep -q \"REFUSED by the validator: entry 'barkpark.cloud'\" '$TMP/out.log'"
 rm -rf "$TMP"
 # A mixed list must be refused WHOLE — one good hop does not license a bad one.
 setup_case
 rc="$(BARKPARK_CLOUD_EGRESS_IPS='203.0.113.7,notanip' run_deploy 200 mixedsha)"
 check "mixed list: refused whole (no partial write)" "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "mixed list: names the BAD entry, not the good one" "grep -q \"entry 'notanip'\" '$TMP/out.log' && ! grep -q \"entry '203.0.113.7'\" '$TMP/out.log'"
 rm -rf "$TMP"
 # A valid v4+v6 pair IS accepted (a CP that reaches instances over both).
 setup_case
@@ -1064,6 +1069,7 @@ check "absent: exit 0"                            "[ '$rc' = '0' ]"
 check "absent: no live line written"              "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
 check "absent: commented placeholder written"     "grep -q '^# BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env'"
 check "absent: gap logged loudly"                 "grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
+check "absent: never reads as a refusal"          "! grep -q 'REFUSED by the validator' '$TMP/out.log' && grep -q 'nothing was refused' '$TMP/out.log'"
 # The placeholder must survive being SOURCED (the script does `set -a; . ./.env`)
 # and must not become a live value on the next deploy either.
 : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
@@ -1074,6 +1080,214 @@ check "absent redeploy: still no live line"       "! grep -q '^BARKPARK_TRUSTED_
 check "absent redeploy: placeholder NOT re-appended (.env does not grow)" "[ \"\$(grep -c '^# BARKPARK_TRUSTED_PROXIES=' '$APP/.env')\" = '1' ]"
 check "absent redeploy: gap still logged (visible every deploy)" "grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS' '$TMP/out.log'"
 rm -rf "$TMP"
+
+# Blank: SET but holding only separators/whitespace. That is "nothing supplied",
+# not "the validator refused an entry" — it takes the absent branch (placeholder +
+# the no-IPs WARN) and says the variable was set, so the two stay apart in a log.
+setup_case
+rc="$(BARKPARK_CLOUD_EGRESS_IPS=' , ' run_deploy 200 blankxffsha)"
+check "blank: exit 0"                             "[ '$rc' = '0' ]"
+check "blank: no live line written"               "! grep -q '^BARKPARK_TRUSTED_PROXIES=' '$APP/.env'"
+check "blank: treated as EMPTY (placeholder + no-IPs WARN)" "grep -q '^# BARKPARK_TRUSTED_PROXIES=203.0.113.7\$' '$APP/.env' && grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS supplied' '$TMP/out.log'"
+check "blank: says it was SET but empty, and never reads as a refusal" "grep -q 'is set but holds no entries' '$TMP/out.log' && ! grep -q 'REFUSED by the validator' '$TMP/out.log'"
+rm -rf "$TMP"
+
+echo "== Case 16b: the egress validator gives ONE verdict whichever awk the host ships =="
+# task-0d0f4563784fa12f. The validator used to be an awk regex, and its verdict
+# was the HOST AWK's: its IPv4 arm needed the ERE interval {3}, and mawk 1.3.4
+# 20200120 (Ubuntu 22.04 / Debian 12), mawk 1.3.4 20240123 (Ubuntu 24.04) and
+# original-awk 20180827 all REFUSED 203.0.113.7 while accepting IPv6 (no interval
+# in that arm) — the list was never written. gawk, BSD awk and mawk 20250131+
+# accepted it, which is why a single-interpreter green (macOS, GitHub's gawk
+# runner) never saw it. Two arms:
+#   ARM 1 (behavioural, no awk at all): the validator functions are lifted out of
+#   the REAL script and run with a POISON awk first on PATH — every verdict must
+#   be right AND the poison must never be called.
+#   ARM 2 (the whole artifact under every awk this host can reach): each awk is
+#   planted as `awk` in the fake bin and the three outcomes are driven end to end
+#   — valid -> written, invalid -> refused BY NAME, blank -> refused as EMPTY. The
+#   per-awk verdicts print beside each awk's version string. Fixed check count
+#   (aggregated over awks) so the README count guard stays host-independent.
+EGV="$(mktemp -d)"
+sed -n '/^egress_ip[a-z0-9_]*() {/,/^}/p' "$SCRIPT" > "$EGV/fns.sh"
+check "egress arm1: all four validator functions lifted from the real script" \
+  "grep -q '^egress_ip_ok() {' '$EGV/fns.sh' && grep -q '^egress_ip4_ok() {' '$EGV/fns.sh' && grep -q '^egress_ip6_ok() {' '$EGV/fns.sh' && grep -q '^egress_ips_check() {' '$EGV/fns.sh'"
+mkdir -p "$EGV/poison"
+printf '#!/bin/sh\necho called >> "%s/poison.hit"\nexit 97\n' "$EGV" > "$EGV/poison/awk"
+chmod +x "$EGV/poison/awk"
+# want|input ; <TAB> becomes a literal tab. REFUSE(x) = refused NAMING x.
+cat > "$EGV/specimens" <<'SPEC'
+ACCEPT|203.0.113.7
+ACCEPT|198.51.100.9
+ACCEPT|203.0.113.7, 2a01:4f9::1
+ACCEPT|2a01:4f9::1
+ACCEPT|::1
+REFUSE(010.0.0.1)|010.0.0.1
+ACCEPT|<TAB>203.0.113.7 ,<TAB>198.51.100.9,
+REFUSE(not-an-ip)|not-an-ip
+REFUSE(10.0.0.0/8)|10.0.0.0/8
+REFUSE(barkpark.cloud)|barkpark.cloud
+REFUSE(notanip)|203.0.113.7,notanip
+REFUSE(256.1.1.1)|256.1.1.1
+REFUSE(1.2.3)|1.2.3
+REFUSE(1..2.3)|1..2.3
+REFUSE(fe80:::1)|fe80:::1
+REFUSE(99999999999999999999.1.1.1)|99999999999999999999.1.1.1
+EMPTY|
+EMPTY| , ,<TAB>
+SPEC
+egv_bad="$(PATH="$EGV/poison:$PATH" bash -c '
+  . "$1"; tab=$(printf "\t"); bad=""
+  while IFS="|" read -r want s; do
+    s="${s//<TAB>/$tab}"
+    out="$(egress_ips_check "$s")"; rc=$?
+    case $rc in 0) v=ACCEPT ;; 1) v="REFUSE($out)" ;; 2) v=EMPTY ;; *) v="rc=$rc" ;; esac
+    [ "$v" = "$want" ] || bad="$bad [$s: want $want got $v]"
+  done < "$2"
+  printf "%s" "$bad"' _ "$EGV/fns.sh" "$EGV/specimens")"
+check "egress arm1: every specimen verdict right with NO working awk ($(grep -c . "$EGV/specimens") specimens)${egv_bad:+ -$egv_bad}" "[ -z \"\$egv_bad\" ]"
+check "egress arm1: the POISON awk was never called (the verdict is bash's, not awk's)" "[ ! -e '$EGV/poison.hit' ]"
+
+# ARM 2. Every awk reachable here, de-duplicated by resolved path.
+egv_awks=""
+for egv_c in awk mawk gawk nawk original-awk /usr/bin/awk /opt/homebrew/bin/mawk /opt/homebrew/bin/gawk; do
+  egv_p="$(command -v "$egv_c" 2>/dev/null)" || continue
+  egv_r="$(cd "$(dirname "$egv_p")" && pwd -P)/$(basename "$egv_p")"
+  case " $egv_awks " in *" $egv_r "*) continue ;; esac
+  egv_awks="$egv_awks $egv_r"
+done
+egv_bb="$(command -v busybox 2>/dev/null || true)"
+egv_n=0; egv_valid_bad=""; egv_invalid_bad=""; egv_empty_bad=""
+for egv_a in $egv_awks ${egv_bb:+busybox}; do
+  if [ "$egv_a" = busybox ]; then
+    egv_ver="$("$egv_bb" 2>&1 </dev/null | sed -n 1p)"
+    egv_shim="exec '$egv_bb' awk \"\$@\""
+  else
+    egv_ver="$("$egv_a" -W version </dev/null 2>/dev/null | sed -n 1p)"
+    [ -n "$egv_ver" ] || egv_ver="$("$egv_a" --version </dev/null 2>/dev/null | sed -n 1p)"
+    egv_shim="exec '$egv_a' \"\$@\""
+  fi
+  egv_n=$((egv_n + 1))
+  # valid -> accepted and written
+  setup_case; printf '#!/bin/sh\n%s\n' "$egv_shim" > "$FAKE/awk"; chmod +x "$FAKE/awk"
+  BARKPARK_CLOUD_EGRESS_IPS='203.0.113.7, 2a01:4f9::1' run_deploy 200 egvok >/dev/null
+  if grep -q '^BARKPARK_TRUSTED_PROXIES=203.0.113.7, 2a01:4f9::1$' "$APP/.env"; then egv_v1=ACCEPT+WRITTEN; else egv_v1=NOT-WRITTEN; egv_valid_bad="$egv_valid_bad [$egv_ver]"; fi
+  rm -rf "$TMP"
+  # invalid -> refused BY NAME, nothing written
+  setup_case; printf '#!/bin/sh\n%s\n' "$egv_shim" > "$FAKE/awk"; chmod +x "$FAKE/awk"
+  BARKPARK_CLOUD_EGRESS_IPS='203.0.113.7,10.0.0.0/8' run_deploy 200 egvbad >/dev/null
+  if ! grep -q '^BARKPARK_TRUSTED_PROXIES=' "$APP/.env" && grep -q "REFUSED by the validator: entry '10.0.0.0/8'" "$TMP/out.log"; then egv_v2="REFUSED(10.0.0.0/8)"; else egv_v2=WRONG; egv_invalid_bad="$egv_invalid_bad [$egv_ver]"; fi
+  rm -rf "$TMP"
+  # blank -> refused as EMPTY, not as invalid
+  setup_case; printf '#!/bin/sh\n%s\n' "$egv_shim" > "$FAKE/awk"; chmod +x "$FAKE/awk"
+  BARKPARK_CLOUD_EGRESS_IPS=' , ' run_deploy 200 egvempty >/dev/null
+  if ! grep -q '^BARKPARK_TRUSTED_PROXIES=' "$APP/.env" && grep -q 'WARN: no BARKPARK_CLOUD_EGRESS_IPS supplied' "$TMP/out.log" && ! grep -q 'REFUSED by the validator' "$TMP/out.log"; then egv_v3=EMPTY; else egv_v3=WRONG; egv_empty_bad="$egv_empty_bad [$egv_ver]"; fi
+  rm -rf "$TMP"
+  echo "  awk: $egv_a [$egv_ver] -> valid=$egv_v1 invalid=$egv_v2 blank=$egv_v3"
+done
+check "egress arm2: at least one awk was reachable to drive the artifact under ($egv_n found)" "[ '$egv_n' -ge 1 ]"
+check "egress arm2: valid list ACCEPTED and WRITTEN under every awk${egv_valid_bad:+ - failed under:$egv_valid_bad}" "[ -z \"\$egv_valid_bad\" ]"
+check "egress arm2: invalid entry REFUSED BY NAME under every awk${egv_invalid_bad:+ - failed under:$egv_invalid_bad}" "[ -z \"\$egv_invalid_bad\" ]"
+check "egress arm2: blank list refused as EMPTY (not as invalid) under every awk${egv_empty_bad:+ - failed under:$egv_empty_bad}" "[ -z \"\$egv_empty_bad\" ]"
+rm -rf "$EGV"
+
+echo "== Case 16c: the egress validator answers with the RUNTIME's grammar (:inet.parse_address) =="
+# task-74d16d239fff7df7. runtime.exs raises at boot on any BARKPARK_TRUSTED_PROXIES
+# entry :inet.parse_address/1 refuses, so a validator verdict of ACCEPT on such an
+# entry writes a down instance. The IPv6 arm used to check SHAPE only and accepted
+# 1:2, 1::2::3 and a nine-group address; the IPv4 arm stripped leading zeros and
+# accepted 1.2.3.08 (octal to the runtime, refused).
+# Each row: RUNTIME verdict | VALIDATOR verdict wanted | specimen.
+#   RUNTIME is :inet.parse_address(String.to_charlist(s)) — recorded from real runs
+#   (Elixir 1.19.5 / OTP 28); when elixir is on PATH this case re-derives it live.
+#   AGREE rows must match exactly. STRICT rows are forms the runtime accepts but
+#   re-reads as a DIFFERENT address (BSD inet_aton shorthand/octal/hex, IPv6 zone
+#   ids): the validator refuses them on purpose, the safe direction.
+# MUTATION PROOF: put the old shape-only IPv6 arm back (hex digits + colons, no
+# ':::' -> accept) and the AGREE check reds naming 1:2, 1::2::3,
+# 1:2:3:4:5:6:7:8:9 and the other malformed rows; the boot-failure check reds too.
+AGR="$(mktemp -d)"
+sed -n '/^egress_ip[a-z0-9_]*() {/,/^}/p' "$SCRIPT" > "$AGR/fns.sh"
+cat > "$AGR/table" <<'SPEC'
+A|A|203.0.113.7
+A|A|2a01:4f9::1
+A|A|::1
+R|R|1:2
+R|R|1::2::3
+R|R|1:2:3:4:5:6:7:8:9
+A|A|1:2:3:4:5:6:7:8
+A|A|::ffff:203.0.113.7
+R|R|10.0.0.0/8
+R|R|256.1.1.1
+R|R|not-an-ip
+R|R|
+A|A|::
+A|A|0.0.0.0
+A|A|1:2:3:4:5:6:7::
+A|A|::1:2:3:4:5:6:7
+A|A|1:2:3:4:5:6:1.2.3.4
+A|A|FE80::ABCD
+R|R|1::2:3:4:5:6:7:8
+R|R|1:2:3:4:5:6:7::8
+R|R|1:2:3:4:5:6:7:1.2.3.4
+R|R|12345::1
+R|R|1:::2
+R|R|:1::2
+R|R|1::2:
+R|R|g::1
+R|R|::ffff:1.2.3.04
+R|R|::ffff:256.1.1.1
+R|R|1.2.3.08
+R|R|1.2.3.4.5
+R|R|1.2.3.
+STRICT|R|010.0.0.1
+STRICT|R|203.0.113.07
+STRICT|R|127.1
+STRICT|R|1
+STRICT|R|0x7f.1
+STRICT|R|fe80::1%eth0
+SPEC
+agr_out="$(bash -c '
+  . "$1"
+  while IFS="|" read -r rt want s; do
+    if egress_ip_ok "$s"; then v=A; else v=R; fi
+    printf "%s|%s|%s|%s\n" "$rt" "$want" "$v" "$s"
+  done < "$2"' _ "$AGR/fns.sh" "$AGR/table")"
+echo "  runtime | validator | specimen"
+while IFS="|" read -r rt _ v s; do
+  printf '  %-7s | %-9s | %s\n' "$rt" "$v" "'$s'"
+done <<<"$agr_out"
+agr_n="$(grep -c '^[AR]|' "$AGR/table")"; agr_s="$(grep -c '^STRICT|' "$AGR/table")"
+agr_bad=""; agr_strict_bad=""; agr_boot_bad=""
+while IFS="|" read -r rt _ v s; do
+  case "$rt" in
+    A|R) [ "$v" = "$rt" ] || agr_bad="$agr_bad [$s: runtime $rt validator $v]" ;;
+    STRICT) [ "$v" = R ] || agr_strict_bad="$agr_strict_bad [$s]" ;;
+  esac
+  [ "$rt" = R ] && [ "$v" = A ] && agr_boot_bad="$agr_boot_bad [$s]"
+done <<<"$agr_out"
+check "runtime-agreement: validator == :inet.parse_address on every AGREE specimen ($agr_n)${agr_bad:+ -$agr_bad}" "[ -z \"\$agr_bad\" ]"
+check "runtime-agreement: no specimen the runtime REFUSES is accepted (a write that fails boot)${agr_boot_bad:+ - accepted:$agr_boot_bad}" "[ -z \"\$agr_boot_bad\" ]"
+check "runtime-agreement: the $agr_s STRICT forms (runtime re-reads them as another address) are refused${agr_strict_bad:+ - accepted:$agr_strict_bad}" "[ -z \"\$agr_strict_bad\" ]"
+# The table names ONE parser. If runtime.exs stops calling it, the recorded column
+# no longer describes the consumer and this case must be re-derived.
+check "runtime-agreement: runtime.exs still parses each entry with :inet.parse_address (the table's parser)" \
+  "grep -q ':inet.parse_address(String.to_charlist(proxy))' '$HERE/../api/config/runtime.exs'"
+# Live re-derivation of the RUNTIME column where elixir exists (developer hosts);
+# the CI runner has no elixir, and the label says which column was checked.
+agr_live_bad=""; agr_live="RECORDED column only (no elixir on PATH)"
+if command -v elixir >/dev/null 2>&1; then
+  agr_live_out="$(cut -d'|' -f3- "$AGR/table" | elixir -e '
+    IO.stream(:stdio, :line) |> Enum.each(fn l ->
+      s = String.trim_trailing(l, "\n")
+      v = case :inet.parse_address(String.to_charlist(s)) do {:ok, _} -> "A"; _ -> "R" end
+      IO.puts(v) end)' 2>&1)"
+  agr_rec="$(cut -d'|' -f1 "$AGR/table" | sed 's/^STRICT$/A/')"
+  agr_live="re-derived LIVE under OTP $(elixir -e 'IO.write(:erlang.system_info(:otp_release))' 2>/dev/null)"
+  [ "$agr_live_out" = "$agr_rec" ] || agr_live_bad=" - live column differs from the recorded one: $(paste -d' ' <(printf '%s\n' "$agr_rec") <(printf '%s\n' "$agr_live_out") <(cut -d'|' -f3- "$AGR/table") | grep -v '^\(.\) \1 ' | tr '\n' ';')"
+fi
+check "runtime-agreement: the RUNTIME column is true ($agr_live)$agr_live_bad" "[ -z \"\$agr_live_bad\" ]"
+rm -rf "$AGR"
 
 echo "== Case 17: ADVANCE vs STALL — a deploy that reports SUCCESS without moving HEAD is now VISIBLE =="
 # THE FAILURE CLASS (D292): "deploy said SUCCESS while the box stayed one commit
@@ -1825,6 +2039,273 @@ check "maint/upgrade: a THIRD deploy is a no-op (still exactly one header)" \
 check "maint/upgrade: the no-op deploy logs 'already armed', not another upgrade" \
   "grep -q 'caddy maintenance page already armed' '$TMP/out.log'"
 rm -rf "$TMP"
+
+echo "== Case: the deploy lock names its HOLDER, and the stale policy is proved in BOTH directions (task-e0e4fa0b709c093e) =="
+# THE DEFECT THIS REPLAYS. On 2026-09-22 fifteen deploy.yml `instance` jobs
+# exited 15 after ~30 min each behind one holder, and NOT ONE of them could say
+# who held the lock. These cases hold the lock deliberately, with a process this
+# harness started and whose pid it knows, and assert the log NAMES it.
+#
+# The stale-holder policy is the dangerous half: a policy that can break a LIVE
+# deploy is worse than the stall it replaces. So it is proved in both
+# directions here — a holder showing work is NEVER broken, a holder showing none
+# always is — and the LIVE arm is asserted on a holder whose child process this
+# harness also started, not on a mock.
+#
+# REAPING. Every holder below is (a) recorded in LOCKPIDS, (b) self-bounded
+# (`exec sleep <n>` or a bounded spin, so an abandoned one dies on its own), and
+# (c) killed by reap_holders at the end of each arm and again from an EXIT trap.
+if ! command -v flock >/dev/null 2>&1; then
+  SELFTEST_SKIPPED=1
+  echo "  SKIP: flock(1) required (absent on macOS) — run this case on Linux/CI"
+elif ! command -v fuser >/dev/null 2>&1 && ! command -v lsof >/dev/null 2>&1; then
+  SELFTEST_SKIPPED=1
+  echo "  SKIP: fuser(1) or lsof(1) required — the holder cannot be identified without one"
+else
+  LOCKPIDS=""
+  reap_holders() {
+    local _p
+    for _p in $LOCKPIDS; do
+      kill -KILL "$_p" 2>/dev/null || true
+      pkill -KILL -P "$_p" 2>/dev/null || true
+    done
+    LOCKPIDS=""
+  }
+  trap 'reap_holders' EXIT
+  # A holder of $TMP/lock. $1 = the shell body it runs AFTER taking the lock and
+  # announcing itself. Returns once the lock is provably held, so no arm below
+  # races the handshake. Bounded by `timeout` on the wait, never on the holder
+  # (a `timeout` wrapper would itself be a child and make every holder look LIVE).
+  start_holder() { # <body>
+    local ready="$TMP/holder.ready" _i
+    rm -f "$ready"
+    bash -c "exec 9>\"$TMP/lock\"; flock -n 9 || exit 1; echo \$\$ > \"$ready\"; $1" &
+    LOCKPIDS="$LOCKPIDS $!"
+    # Off the job table: reaping a holder otherwise prints bash's own
+    # "Killed: 9" notice into the harness output, right beside the lock checks,
+    # where the next reader has every reason to misread it as a crash.
+    disown %% 2>/dev/null || true
+    for _i in $(seq 1 200); do [ -s "$ready" ] && return 0; /bin/sleep 0.05; done
+    return 1
+  }
+  holder_pid() { cat "$TMP/holder.ready" 2>/dev/null; }
+  # THE PRECONDITION, ASSERTED — this is the check whose absence let a Linux-only
+  # inversion look like a policy bug. `bash -c '...; sleep 120'` does NOT build a
+  # holder with a child on every platform: bash 5.2 (Ubuntu 24.04) EXEC-OPTIMISES
+  # the last simple command of a -c string, replacing the shell with `sleep`, so
+  # the "live" specimen was a CHILDLESS, zero-CPU process and the policy broke it
+  # — correctly. bash 3.2 (macOS) forks, so the same fixture built a real parent
+  # and the arm passed locally. MEASURED on both: Ubuntu 24.04 holder pid 385 is
+  # `sleep 120` with ppid 1 and zero children; macOS holder 70957 is the bash
+  # with child 70961.
+  # A trailing `; :` or `& wait` defeats the optimisation. The arms below use the
+  # `& wait` shape because that is what a real deploy blocked on mix/git looks
+  # like — but the SHAPE is not the fix. This assertion is: no arm may conclude
+  # anything about liveness from a specimen ps says has no child.
+  holder_child_count() { ps -eo pid=,ppid= 2>/dev/null | awk -v r="$1" '$2==r' | wc -l | tr -d ' '; }
+  # The lock arms never reach the deploy body, so they want REAL tools: the
+  # harness's $FAKE/sleep is instant and would collapse the liveness window into
+  # a measurement of nothing.
+  run_locked() { # env assignments come from the caller
+    env BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
+      BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
+      BARKPARK_CADDYFILE_LOCK="$TMP/caddyfile.lock" \
+      HOME="$TMP/home" FAKE_SHA=locksha HEALTH_CODE=200 \
+      BARKPARK_LOCK_HEARTBEAT_SECS=1 \
+      BARKPARK_DEPLOY_LOCK_QUEUE_SECS="${QUEUE_SECS:-2}" \
+      BARKPARK_DEPLOY_LOCK_STALE_SECS="${STALE_SECS:-2700}" \
+      BARKPARK_DEPLOY_LOCK_LIVENESS_SECS="${LIVENESS_SECS:-1}" \
+      BARKPARK_DEPLOY_LOCK_BREAK="${BREAK_LOCK:-0}" \
+      bash "$SCRIPT" > "$TMP/lock.log" 2>&1
+    echo $?
+  }
+
+  # --- ARM 1 (criterion 1): the holder is NAMED, by pid, elapsed and command.
+  setup_case
+  start_holder 'exec sleep 120'
+  hp="$(holder_pid)"
+  rc="$(run_locked)"
+  check "holder: the run exits 15 when it cannot get the lock (unchanged)" "[ '$rc' = '15' ]"
+  check "holder: the log names the holder's PID — the thing fifteen runs could not print" \
+    "grep -qE 'lock holder: pid=$hp ' '$TMP/lock.log'"
+  check "holder: ... and its ELAPSED time"  "grep -qE 'lock holder: pid=$hp elapsed=[0-9]+s' '$TMP/lock.log'"
+  check "holder: ... and its COMMAND line"  "grep -qE 'lock holder: pid=$hp elapsed=[0-9]+s cmd=.*sleep' '$TMP/lock.log'"
+  check "holder: the pid logged is the one this harness started, not some other process" \
+    "[ -n '$hp' ] && kill -0 '$hp' 2>/dev/null"
+  check "holder: the queue HEARTBEAT carries the holder too, not just the clock" \
+    "grep -qE 'still queued for the deploy lock .*holder pid\\(s\\): .*$hp' '$TMP/lock.log'"
+  check "holder: the holder RECORD the winner wrote is read back and printed" \
+    "grep -q 'lock holder record: absent' '$TMP/lock.log'"
+  reap_holders; rm -rf "$TMP"
+
+  # --- ARM 2 (criterion 2, LIVE direction): a holder WITH a running child is
+  # NEVER broken, even when its age is forced past the threshold. This is the
+  # arm that protects a real deploy: mix/git/curl/npm/systemctl/sleep are all
+  # children, so "has a child" is the signature of work in progress.
+  setup_case
+  # `& wait`: the shape of a deploy blocked on a child, and immune to bash's
+  # last-command exec optimisation on every bash this runs under.
+  start_holder 'sleep 120 & wait'
+  hp="$(holder_pid)"
+  check "stale/LIVE [PRECONDITION]: the specimen really HAS a child — without this the arm inverts silently" \
+    "[ \"\$(holder_child_count '$hp')\" != '0' ]"
+  rc="$(STALE_SECS=0 LIVENESS_SECS=1 run_locked)"
+  check "stale/LIVE: the policy declines — a working holder is never broken" \
+    "grep -q 'stale-holder policy: NOT APPLIED — the holder is over the age threshold but is STILL WORKING' '$TMP/lock.log'"
+  check "stale/LIVE: it says WHY it judged it live (a named child process)" \
+    "grep -qE 'lock liveness: holder pid=$hp has running child process' '$TMP/lock.log'"
+  check "stale/LIVE: the holder is STILL ALIVE after the run — nothing was killed" \
+    "kill -0 '$hp' 2>/dev/null"
+  check "stale/LIVE: the run exits 15 rather than deploying unserialised" "[ '$rc' = '15' ]"
+  check "stale/LIVE: no break was even attempted" "! grep -q 'lock break: ending holder' '$TMP/lock.log'"
+  reap_holders; rm -rf "$TMP"
+
+  # --- ARM 2b: the child may be a GRANDCHILD. A real deploy is bash -> mix ->
+  # beam, so an enumerator that only looks one level down would call the middle
+  # of a compile "childless". Proved transitively on Ubuntu 24.04/mawk while
+  # diagnosing this arm: holder 468 -> 472 -> 473, both reported.
+  setup_case
+  start_holder 'bash -c "sleep 120; :" & wait'
+  hp="$(holder_pid)"
+  check "stale/GRANDCHILD [PRECONDITION]: the specimen has a child, which has a child of its own" \
+    "[ \"\$(holder_child_count '$hp')\" != '0' ] && [ -n \"\$(ps -eo pid=,ppid= | awk -v r=\"\$(ps -eo pid=,ppid= | awk -v r='$hp' '\$2==r{print \$1; exit}')\" '\$2==r{print \$1}')\" ]"
+  rc="$(STALE_SECS=0 LIVENESS_SECS=1 run_locked)"
+  check "stale/GRANDCHILD: a holder whose work is two levels down is still LIVE" \
+    "grep -q 'stale-holder policy: NOT APPLIED — the holder is over the age threshold but is STILL WORKING' '$TMP/lock.log'"
+  check "stale/GRANDCHILD: the descendant set the sampler MEASURED is printed, so a CI log alone says which branch ran" \
+    "grep -qE 'lock liveness: sample 1 pid=[0-9]+ descendants = \\[[0-9]' '$TMP/lock.log'"
+  check "stale/GRANDCHILD: the holder survives"  "kill -0 '$hp' 2>/dev/null"
+  reap_holders; rm -rf "$TMP"
+
+  # --- ARM 3 (criterion 2, LIVE direction, the harder half): a CHILDLESS holder
+  # that is burning CPU is still LIVE. A single instant with no children proves
+  # nothing, which is why the test samples twice and watches CPU.
+  setup_case
+  start_holder 'end=$((SECONDS+20)); while [ $SECONDS -lt $end ]; do :; done'
+  hp="$(holder_pid)"
+  rc="$(STALE_SECS=0 LIVENESS_SECS=3 run_locked)"
+  check "stale/CPU: a childless holder that is BURNING CPU is judged live" \
+    "grep -q 'lock liveness: holder CPU advanced' '$TMP/lock.log'"
+  check "stale/CPU: so the policy declines to break it" \
+    "grep -q 'stale-holder policy: NOT APPLIED — the holder is over the age threshold but is STILL WORKING' '$TMP/lock.log'"
+  check "stale/CPU: the holder survives"          "kill -0 '$hp' 2>/dev/null"
+  check "stale/CPU: exit 15"                      "[ '$rc' = '15' ]"
+  reap_holders; rm -rf "$TMP"
+
+  # --- ARM 4 (criterion 2, the AGE gate on its own): a holder INSIDE the
+  # threshold is left alone without the liveness test ever running. N is 2700 s
+  # here (the shipped default); the holder is seconds old.
+  setup_case
+  start_holder 'exec sleep 120'
+  hp="$(holder_pid)"
+  rc="$(run_locked)"
+  check "stale/AGE: a young holder is not even tested for liveness" \
+    "grep -qE 'stale-holder policy: NOT APPLIED — the holder is [0-9]+s old .*under the 2700s threshold' '$TMP/lock.log'"
+  check "stale/AGE: the liveness sampler never ran"  "! grep -q 'lock liveness:' '$TMP/lock.log'"
+  check "stale/AGE: the holder survives"             "kill -0 '$hp' 2>/dev/null"
+  check "stale/AGE: exit 15"                         "[ '$rc' = '15' ]"
+  reap_holders; rm -rf "$TMP"
+
+  # --- ARM 5 (criterion 2, DEAD direction): a holder past N with NO child and
+  # NO CPU IS broken, and the run SAYS WHY. `exec sleep` leaves a process that
+  # holds fd 9, has no descendant and burns nothing — the shape of a wedged
+  # holder. It is also self-bounded, so an abandoned one dies on its own.
+  setup_case
+  start_holder 'exec sleep 120'
+  hp="$(holder_pid)"
+  check "stale/DEAD [PRECONDITION]: the specimen really has NO child — the opposite precondition, asserted for the same reason" \
+    "[ \"\$(holder_child_count '$hp')\" = '0' ]"
+  rc="$(STALE_SECS=0 LIVENESS_SECS=2 run_locked)"
+  check "stale/DEAD: the policy FIRES on a holder showing no work" \
+    "grep -q 'stale-holder policy: APPLIED — AUTOMATIC' '$TMP/lock.log'"
+  check "stale/DEAD: it states WHY it judged the holder broken, not merely that it broke it" \
+    "grep -qE 'stale-holder policy: APPLIED — AUTOMATIC. Judged broken because it held the lock for [0-9]+s .*AND showed no child process and no CPU advance over a 2s window' '$TMP/lock.log'"
+  check "stale/DEAD: the liveness verdict is printed with its measurements" \
+    "grep -qE 'lock liveness: NO SIGN OF WORK — over 2s .*zero child processes in both samples, and burned zero CPU' '$TMP/lock.log'"
+  check "stale/DEAD: the holder this harness started is GONE" \
+    "! kill -0 '$hp' 2>/dev/null"
+  check "stale/DEAD: and the break is recorded as the AUTOMATIC path, distinguishable from a manual one" \
+    "grep -q 'lock break: ending holder pid(s).*AUTOMATIC stale-holder policy' '$TMP/lock.log' && ! grep -q 'MANUAL break requested' '$TMP/lock.log'"
+  check "stale/DEAD: the lock was actually obtained afterwards" \
+    "grep -q 'lock break: SUCCEEDED' '$TMP/lock.log'"
+  reap_holders; rm -rf "$TMP"
+
+  # --- ARM 6 (criterion 3): the DELIBERATE break. Off by default (proved by
+  # arms 1 and 4, which ran with BARKPARK_DEPLOY_LOCK_BREAK unset and never
+  # broke anything), and when on it fires IMMEDIATELY — no 30-minute queue, no
+  # age test, no liveness test — because a human asserted the holder is gone.
+  setup_case
+  start_holder 'sleep 120 & wait'   # a LIVE holder: the manual path does not care
+  hp="$(holder_pid)"
+  check "manual [PRECONDITION]: the specimen really HAS a child, so this proves the manual path ignores liveness" \
+    "[ \"\$(holder_child_count '$hp')\" != '0' ]"
+  rc="$(BREAK_LOCK=1 run_locked)"
+  check "manual: the break fires and is labelled MANUAL" \
+    "grep -q 'lock break: MANUAL — requested by the break_deploy_lock workflow_dispatch input' '$TMP/lock.log'"
+  check "manual: an operator can tell it from the automatic path in the run output" \
+    "grep -q 'MANUAL break requested by an operator' '$TMP/lock.log' && ! grep -q 'AUTOMATIC' '$TMP/lock.log'"
+  check "manual: it does NOT consult the age or liveness tests" \
+    "! grep -q 'stale-holder policy' '$TMP/lock.log' && ! grep -q 'lock liveness' '$TMP/lock.log'"
+  check "manual: it does not queue for 30 minutes first" \
+    "! grep -q 'still queued for the deploy lock' '$TMP/lock.log'"
+  check "manual: the holder is gone and the lock was obtained" \
+    "! kill -0 '$hp' 2>/dev/null && grep -q 'lock break: SUCCEEDED' '$TMP/lock.log'"
+  check "manual: the holder is still NAMED before it is ended" \
+    "grep -qE 'lock holder: pid=$hp elapsed=[0-9]+s cmd=' '$TMP/lock.log'"
+  reap_holders; rm -rf "$TMP"
+
+  # --- ARM 7: an UNIDENTIFIABLE holder is never broken. Refusing to break what
+  # cannot be named is the fail-closed direction: a blind break would only race
+  # the real holder. Fixtured by hiding fuser(1) and lsof(1) behind stubs that
+  # answer nothing, which is exactly what a box missing both looks like.
+  setup_case
+  NOID="$TMP/noid"; mkdir -p "$NOID"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$NOID/fuser"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$NOID/lsof"
+  chmod +x "$NOID/fuser" "$NOID/lsof"
+  start_holder 'exec sleep 120'
+  hp="$(holder_pid)"
+  rc="$(PATH="$NOID:$PATH" STALE_SECS=0 LIVENESS_SECS=1 run_locked)"
+  check "unnamed: the log SAYS it could not identify a holder, and what to install" \
+    "grep -q 'lock holder: NO pid could be identified as holding' '$TMP/lock.log'"
+  check "unnamed: the stale policy refuses for want of an age" \
+    "grep -q 'stale-holder policy: NOT APPLIED — the holder could not be identified' '$TMP/lock.log'"
+  check "unnamed: nothing was broken"   "kill -0 '$hp' 2>/dev/null"
+  check "unnamed: exit 15"              "[ '$rc' = '15' ]"
+  reap_holders; rm -rf "$TMP"
+
+  # --- ARM 8 (criterion 5): NOT ONE line on the refused path may read as a
+  # success. deploy.yml's `Production serves the newest deploy-relevant main
+  # commit` check reported SUCCESS on all fifteen of 2026-09-22's exit-15 runs
+  # because it answers about a different leg; this arm pins that this script
+  # never adds a second way to read a stall as a ship.
+  setup_case
+  start_holder 'exec sleep 120'
+  hp="$(holder_pid)"
+  rc="$(run_locked)"
+  check "no-vacuous-green: exit 15, the honest refusal"  "[ '$rc' = '15' ]"
+  check "no-vacuous-green: the run never claims it deployed, flipped, or is healthy" \
+    "! grep -qiE '(HEALTHY|deployed|flipped to|swap complete|deploy complete)' '$TMP/lock.log'"
+  check "no-vacuous-green: the last word is that it GAVE UP, not that it finished" \
+    "[ \"\$(grep -c 'gave up waiting for the deploy lock' '$TMP/lock.log')\" = '1' ]"
+  check "no-vacuous-green: the box was never touched (no git, no systemctl)" \
+    "[ ! -s '$TMP/git.log' ] && [ ! -s '$TMP/sysctl.log' ]"
+  reap_holders; rm -rf "$TMP"
+
+  # --- ARM 9: the WINNER writes a holder record, and takes it away on exit, so
+  # the next contender is told who to blame without depending on fuser/lsof.
+  # Written to a SIDECAR: `exec 9>"$LOCK"` truncates the lock file at open, so a
+  # record kept inside it would be wiped by the very run that came to read it.
+  setup_case
+  rm -f "$FAKE/flock"                               # the REAL lock, uncontended
+  rc="$(run_deploy 200 recordsha)"
+  check "record: an uncontended deploy still succeeds with the record machinery in place" "[ '$rc' = '0' ]"
+  check "record: the record is REMOVED when the holder exits" "[ ! -e '$TMP/lock.holder' ]"
+  check "record: the sidecar is not the lock file itself" \
+    "grep -q 'LOCK_HOLDER_RECORD=\"\${LOCK}.holder\"' '$SCRIPT'"
+  rm -rf "$TMP"
+  trap - EXIT
+fi
 
 echo
 echo "[selftest] $((TESTS - fails))/$TESTS checks passed"

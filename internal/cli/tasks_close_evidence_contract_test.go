@@ -223,14 +223,22 @@ func helpEnvNoManifestAtAll(t *testing.T) {
 // THE PREDICATE, not a hand-listed pair: a `bp <noun> <verb> --help` page is
 // server-free IFF the noun is intercepted CLI-natively in Execute before
 // loadManifest; everything that reaches the manifest tree renders from the
-// manifest and cannot print help without one. Measured at origin/main
-// 7bc83e643b against docs/cli/fixtures/full-manifest.json: of its 143 commands,
-// 136 refuse with "no server configured" under the isolation above and 7 (all
-// of them `chat …`, shadowed by the `case "chat"` built-in) exit 0. With the
-// fixture installed, 143 of 143 exit 0.
+// manifest and cannot print help without one.
+//
+// RE-MEASURED 2026-09-20 on the refreshed fixture (212 commands, generated_at
+// 2026-09-20T18:38:19Z), by running `bp <noun> <verb> --help` for EVERY command
+// under the two isolations below: 201 refuse with "no server configured" and 11
+// (all of them `chat …`, shadowed by the `case "chat"` built-in) exit 0. With
+// the fixture installed, 211 of 212 exit 0 — the one holdout is `paper access`,
+// and it is the predicate proving itself from the other side: `paper` is a
+// WHOLE-NOUN CLI built-in that renders its own help and never consults the
+// manifest tree, so no fixture can teach it the verb.
+// The previous reading was 143 / 136 / 7 at origin/main 7bc83e643b against the
+// 2026-07-23 fixture; the counts move with the server's surface, the PREDICATE
+// does not.
 //
 // So a server-free `--help` for a manifest verb is not a short-circuit — it is
-// a baked fallback command tree for 136 commands, which this row does not
+// a baked fallback command tree for 201 commands, which this row does not
 // carry. What the CLI owes the reader instead is the REASON, and that is the
 // arm below: the refusal must name that help is manifest-derived and name the
 // offline route, or an operator reads "run `bp setup`" and thinks help is

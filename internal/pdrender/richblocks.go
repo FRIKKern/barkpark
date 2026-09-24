@@ -528,6 +528,19 @@ func (embedRenderer) Render(b Block, ctx RenderCtx) []string {
 	return []string{line}
 }
 
+// ── master-ref ──────────────────────────────────────────────────────────────
+// Mirrors the Elixir walker's PdMasterRef (compose_block("master-ref") → walk
+// PdMasterRef) for a caller that does not resolve masters: a linked master
+// instance is resolved at READ time by the web renderer from the master
+// document (task-59f078a2fd248698), and the terminal has no master palette, so
+// it shows the same neutral "Linked master" placeholder the Elixir walker
+// emits when no `:masters` map is supplied — never the "unknown block" box.
+type masterRefRenderer struct{}
+
+func (masterRefRenderer) Render(_ Block, ctx RenderCtx) []string {
+	return []string{ctx.Theme.Dim.Render("⧉ Linked master")}
+}
+
 // ── pullquote ──────────────────────────────────────────────────────────────
 // Mirrors compose_block(pullquote): italic + muted + a left terracotta bar (▌),
 // indented. Body is inline `content` wrapped to width-2 (bar + space).

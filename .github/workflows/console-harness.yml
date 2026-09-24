@@ -318,16 +318,21 @@ jobs:
           #     `"cloud/priv/static/we\"ird.js"`, the anchored ERE below misses
           #     it, and this job reports a GREEN required context over a harness
           #     that never looked. `-z` emits the raw bytes, which cannot be
-          #     quoted; `tr` restores the line format the matcher reads.
+          #     quoted, and the matcher reads those NUL records itself (`--null`).
           #   * rename detection (default-on since git 2.9) prints only the
           #     DESTINATION, so `git mv cloud/priv/static/app.js docs/app.js`
           #     yields console=false while the file under test moved out from
           #     under the harness. `--no-renames` prints both sides.
-          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          # NUL-separated, ON DISK, never re-lined: the old `tr` back to lines
+          # split a path holding a NEWLINE into two pseudo-paths before the
+          # matcher saw it (cch-bl-nul-native-path-matcher). A file, not a
+          # variable: command substitution drops NUL bytes.
+          changed_z="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/console-dispatcher-changed.XXXXXX")"
+          git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" >"$changed_z"
           echo "changed files:"
-          printf '%s\n' "$changed"
+          while IFS= read -r -d '' f; do printf '%s\n' "$f"; done <"$changed_z"
 
-          if [ -z "$changed" ]; then
+          if [ ! -s "$changed_z" ]; then
             # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
             # PR, nets to nothing against the base. The old polarity failed here
             # — a permanently red required context on a legal PR, with no
@@ -392,12 +397,21 @@ jobs:
           # the script refuses rather than return it). Left bare under
           # `set -euo pipefail` that 2 killed this step with no classification,
           # and the merge button read a refusal as an ordinary failure.
+          # THE `--null` SKEW. A copy of the script that predates `--match … --null`
+          # does not refuse the flag, it IGNORES it and greps the NUL stream as
+          # ONE line: a silent false, not a refusal. The MATCH-INPUT-NUL token
+          # is how this step tells the two apart.
+          if [ -f "$pin_script" ] && ! grep -qF MATCH-INPUT-NUL "$pin_script"; then
+            verdict REFUSED
+            echo "::error::dispatcher REFUSED: ${pin_script} (read from ${pin_src}) predates '--match … --null' and would read the NUL-separated diff as ONE line. No path verdict is emitted — the harness runs or the gate reds, never a silent skip."
+            exit 1
+          fi
           rc=0
-          # A HERE-STRING, not a pipe (house D37): `--match` answers through
+          # A FILE REDIRECT, not a pipe (house D37): `--match` answers through
           # `grep -Eq`, which exits the instant it matches, and a writer still
           # holding bytes then takes SIGPIPE that `set -o pipefail` promotes
           # over the match that DID occur.
-          console="$(bash "$pin_script" --match console <<<"$changed")" || rc=$?
+          console="$(bash "$pin_script" --match console --null <"$changed_z")" || rc=$?
           if [ "$rc" -ne 0 ]; then
             case "$rc" in
               2) v=REFUSED ;;
@@ -653,6 +667,42 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1536 — bumped 2026-09-24 from 1535 on console/w73-newcreaterepo
+      # (cch-w73-bl-newcreaterepo-success-fields-unasserted): +1 test pinning
+      # newCreateRepo's success arm to both fields POST /v1/github/repos returns.
+      # RE-MEASURED, not added: `node --test cloud/priv/static/__app.test.mjs` on
+      # node 20 printed `# pass 1536 / # fail 0` on the branch, and
+      # `bash scripts/console-pins.sh --write` measured 1536 and rewrote the literal.
+      # PIN 1535 — bumped 2026-09-23 from 1534 on console/1614-bidi-hosts (task-1614ac4ba29eec9b):
+      # +1 test. Every user-text host derived from app.js rides its name/email in
+      # its own <bdi>; one __app.test.mjs test pins the hooked hosts by render and
+      # the unmountable ones by source. RE-MEASURED, not added: `node --test
+      # cloud/priv/static/__app.test.mjs` on node 20 over the untouched base
+      # e2c084e7e printed `# pass 1534 / # fail 0`, and on the branch
+      # `bash scripts/console-pins.sh --write` measured 1535 and rewrote the literal.
+      # PIN 1534 — bumped 2026-09-23 from 1533 on console/rtl-isolate (cch-rtl-script-neutral-borrowing):
+      # +1 test. activityRow's and memberRowHtml's user-authored spans ride in their
+      # own <bdi>; one __app.test.mjs test pins the isolate at both hosts. RE-MEASURED,
+      # not added: `node --test cloud/priv/static/__app.test.mjs` on node 20 over the
+      # untouched origin/main 04840f235 printed `# pass 1533 / # fail 0`, and
+      # `sh scripts/console-harness.sh` on the branch printed `ran 1534 test(s)`;
+      # `bash scripts/console-pins.sh --write` rewrote the literal from that run.
+      # PIN 1502 — bumped 2026-09-21 from 1500 on console-r21m-defect-d (task-9f09b84ae8248a71):
+      # +2 tests. The instance detail header's address slot stops printing an orphan
+      # em-dash failure fragment on the two failed arms (accent-matrix DEFECT-D); two
+      # tests in cloud/priv/static/__app.test.mjs pin the corrected slot. RE-MEASURED
+      # after merging main at 793a03ad7 (pin 1500, #19523): `sh scripts/console-harness.sh`
+      # printed the figure below — the instrument's, not 1500 + 2.
+      # PIN 1500 — bumped 2026-09-21 from 1499 on console-r21k-coherence-durable (gr-backlog-coherence-fixture-durable):
+      # one __app.test.mjs test added (coherence.html reads the TUI goldens); the harness printed
+      # `ran 1500 test(s)` against the 1499 pin in CI run 35550741163.
+      # PIN 1499 — bumped 2026-09-20 from 1497 on console-r21k-w55-onboarding (cch-w55-bl):
+      # +2 tests. The onboarding published-doc step gets the ack control it never
+      # had, and the census's own comprehension no longer filters out the words it
+      # guards. RE-MEASURED after the rebase onto 2cc676f15 (pin 1497, #19498):
+      # `sh scripts/console-harness.sh` printed `# tests 1499 / # pass 1499 /
+      # # fail 0`. The figure is the instrument's, not 1497 + 2.
+      #
       # PIN 1497 — bumped 2026-09-20 from 1496 on console-r21k-w48-chip (cch-w48-bl):
       # +1 test. The site badges row stops carrying a metadata pill (the repo
       # fact is already in the rail); one new test in
@@ -743,6 +793,48 @@ jobs:
       # red, the quiet arm green. `bash scripts/console-pins.sh --selftest` was
       # run after the bump, which is what reads the step `name:` slot a grep from
       # inside the shell step cannot see.
+      #
+      # PIN 1529 — bumped 2026-09-22 on console-w31-webhook-test-send-chip
+      # (task-4c5779cbc66281a8): the webhook card's action bar gets a
+      # chip-completeness PREDICATE. +1 test, ADDED, none deleted — the old
+      # `for (const verb of [...6 verbs])` loop is an ENUMERATION that passes
+      # unchanged the day a seventh chipless action ships (exactly how the
+      # `Send test` button shipped chipless), so the new arm DERIVES the expected
+      # set from the buttons webhookCardHtml renders inside .wh-actions and
+      # demands a copyable `bp cloud webhook <verb>` chip in .wh-cli for each.
+      # It carries its own two controls (an unmapped seventh action; a mapped
+      # action whose chip is removed), so the deepEqual([]) above it is known to
+      # be able to lose.
+      # RE-MEASURED, never arithmetic: `sh scripts/console-harness.sh` on this
+      # branch's base, origin/main fb7fe91dc, printed
+      # `# tests 1528 / # pass 1528 / # fail 0` and the script agreed with the
+      # committed 1528; the same command after the change printed
+      # `# tests 1529 / # pass 1529 / # fail 0`. The literal was rewritten by
+      # `bash scripts/console-pins.sh --write` (the seal-predicate pin was NOT
+      # reached and NOT moved — it hangs on a developer box, the same reason the
+      # 1528 bump below excluded it; `git diff` on this file shows the
+      # __app.test.mjs pin as the only literal that changed).
+      #
+      # PIN 1528 — bumped 2026-09-22 on console-w28-cloudflare-identity
+      # (task-cc5125ed3a4da0c2): the Cloudflare connection card and its account
+      # echo. +8 tests, all ADDED, none deleted — the two connectable axes
+      # (connectable vs available, with the launch picker asserted unchanged),
+      # the three connect fields against cloudflare_credential_blob/1 plus the
+      # POST body shape, the four reused wave-13 client states, the
+      # 502-credential_unreadable-is-not-a-nil-identity pair WITH its
+      # source-mutation control, the never-verified label rule over every state,
+      # and three driven loadProviderIdentity legs (the /identity URL off a
+      # recording fetch, the 502 paint, the transport paint).
+      # RE-MEASURED, never arithmetic: `bash scripts/console-harness.sh` on this
+      # branch printed `# tests 1528 / # pass 1528 / # fail 0`. CONTROL: a
+      # separate detached worktree at this branch's base, origin/main 98a2f23e1,
+      # ran the same command and printed `# tests 1520 / # pass 1520 / # fail 0`
+      # — so main's own committed 1520 is what main MEASURES, and 1528 is that
+      # plus exactly these eight arms. The literal was rewritten by
+      # `bash scripts/console-pins.sh --write --skip 'Seal predicate'` (the
+      # seal-predicate pin is RED on a developer box at origin/main too — 10+
+      # reds there against 3 here — so it was deliberately excluded rather than
+      # read off a red suite), and `--selftest` was run after the bump: 23/0.
       #
       # PIN 1485 — bumped 2026-09-17 from 1481 on console-r21-w14-studio-login:
       # the "Log in with Barkpark Cloud" resume path moved from a client-side
@@ -899,7 +991,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1497-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1536-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -915,14 +1007,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1497 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1497 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1536 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1536 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1497 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1497 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1497 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1536 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1536 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1536 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1497 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1536 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -1161,12 +1253,121 @@ jobs:
           # appears twice per step — the self-test arm and the comparison — plus
           # the step name and the two messages.
           #
+          # PIN 152 — RE-DERIVED 2026-09-24 (task-88edd0348e6f703d), which adds TWO arms:
+          #   `w88: a Node of the declared major found ONLY under RUNNER_TOOL_CACHE resolves; without that root it is refused`, and
+          #   `w88: LOCK — seal-predicate's and console-harness.sh's Node search roots are the SAME set, and both refusals name them`.
+          #   MEASURED, not added: `node --test cloud/priv/static/__preview__/seal-predicate.test.mjs` under
+          #   Node v20.20.2 -> `# tests 152 / # pass 152 / # fail 0`, rc=0, with `git rev-list --count HEAD..origin/main`
+          #   = 0 at both the start and the end of the run.
+          # PIN 150 — RE-DERIVED 2026-09-23 (task-5f6267283fe7a277), which adds TWO arms:
+          #   `R9: a successor ABOVE the epic is REFUSED — its subtree holds the whole roster, and it sealed`, and
+          #   `a GATE-LABELLED considering row is named again, with its status, on the re-disclosure line`.
+          #   MEASURED, not added: `node --test cloud/priv/static/__preview__/seal-predicate.test.mjs` under
+          #   Node v20.20.2 -> `# tests 150 / # pass 150 / # fail 0`, rc=0 (see the PR body for the run).
+          # PIN 148 — RE-DERIVED 2026-09-23 (task-0217190472c7aad7), which adds FOUR arms:
+          #   `task-0217 THE PRUNE CHANGES THE COST AND NOTHING ELSE: a depth-2 tree reads its 3 parents, not its 12 nodes`,
+          #   `task-0217 ABSENCE IS NEVER A LEAF: a list with no child_count prunes nothing, and a bad list REFUSES by name`,
+          #   `task-0217 a roster row under ANOTHER parent is a dropped filter[] and REFUSES (ROSTER-UNFILTERED)`, and
+          #   `task-0217 A RUN THAT SPANS A MOVE OF origin/main REFUSES BY NAME; one that does not carries head AND head-end`.
+          #   MEASURED, not added: `node --test cloud/priv/static/__preview__/seal-predicate.test.mjs` under
+          #   Node v20.20.2 -> `# tests 148 / # pass 148 / # fail 0`, rc=0, in a clone whose origin/main
+          #   ref was pinned so no concurrent fetch could move it (0 behind at the start AND the end).
+          # PIN 144 — RE-DERIVED 2026-09-23 (task-8532dae7b075f4b3), which adds FOUR arms:
+          #   `task-8532: a fixture listing one _id under TWO parents is REFUSED by name — and its legal twin still seals`,
+          #   `task-8532: the `forwarded`-seed spelling of a second parent is refused too — and R4 is not mistaken for it`,
+          #   `task-8532 MUTATION: with the refusal removed, the planted two-parent world SCORES a green`, and
+          #   `task-8532: EVERY committed fixture is producible — the population is read off the directory, not a list`.
+          #   MEASURED, not added: `node --test cloud/priv/static/__preview__/seal-predicate.test.mjs` under
+          #   Node v20.20.2 -> `# tests 144 / # pass 144 / # fail 0`, rc=0, in a clone whose origin/main
+          #   ref was pinned so no concurrent fetch could move it (0 behind at the start AND the end).
+          # PIN 140 — RE-EARNED 2026-09-23 (task-3e2226c69000587d), same row, one arm later:
+          #   `w37: THE RUNNER'S SHAPE — the ambient `node` IS the declaration, and nothing is
+          #   located`, added after the Console gate redded three of the FIRST cut's arms.
+          #
+          #   WHY THIS ONE IS DERIVED FROM THE ANCHORED COUNT AND CONFIRMED BY CI, not from a
+          #   local tally. `grep -c '^test(' cloud/priv/static/__preview__/seal-predicate.test.mjs`
+          #   -> 140. The precedent that makes that trustworthy is one run old: at anchored 139
+          #   CI's own run of this step printed `# tests 139` exactly (with `# pass 136 / # fail 3`,
+          #   the three arms this row then fixed). CI tallies the anchored count, because CI is
+          #   never BEHIND — it reads the merge commit.
+          #
+          #   A LOCAL TALLY COULD NOT BE TAKEN, and saying so is the honest thing. This suite
+          #   needs ~15 minutes and main merged mid-run on THREE consecutive attempts
+          #   (0 behind at the start, 1 / 1 / 3 behind at the end). The predicate refuses a
+          #   BEHIND tree with INFRA `REPO-BEHIND-ORIGIN-MAIN`, so every live-path arm still
+          #   pending when the merge lands fails on that refusal, not on its subject. The last
+          #   attempt read 140 registered / 135 pass / 5 fail, and the five were arms 136-140 —
+          #   the ones that happened to run last. Read the behind-count at BOTH ends of a run
+          #   before believing its pass count.
+          #
+          #   What WAS measured, in both environments that matter:
+          #     whole-history tree, `--test-name-pattern w37`      -> 5 pass, 0 fail
+          #     depth-1 clone built to the runner's shape, same    -> 5 pass, 0 fail
+          # PIN 139 — RE-DERIVED 2026-09-23 (task-3e2226c69000587d), which adds FOUR arms:
+          #   `w37: a guard whose DECLARED Node major does not exist here reads UNREADABLE, never measured`,
+          #   `w37: THE OTHER DIRECTION — a guard that declares NO runtime and reds is still a measured defect`,
+          #   `w37: and a guard that declares the runtime it GOT and reds is a measured defect too`, and
+          #   `w37: the live ladder states the runtime it resolved for every guard it spawned`.
+          #
+          #   THE LOCAL FLOOR THE 2026-09-23 ENTRY BELOW DESCRIBES IS GONE, AND IT WAS THIS
+          #   DEFECT. That entry records `135 registered, 130 pass, 5 fail` on a developer box
+          #   at origin/main and tells you to derive the pin from the ANCHORED count instead.
+          #   Those five reds were clause-(b) guard/ladder arms failing because seal-predicate
+          #   spawned CCH-D1's guard as `node` OFF PATH — node 22 on that box — and the guard's
+          #   own cchi-w61-bl runtime self-check redded. CI never saw it because this job pins
+          #   node-version: 20. This PR spawns each guard on the major it DECLARES, so the two
+          #   derivations now AGREE: `grep -c '^test(' cloud/priv/static/__preview__/seal-predicate.test.mjs`
+          #   -> 139, and `node --test cloud/priv/static/__preview__/seal-predicate.test.mjs`
+          #   on a node-22 host printed `# tests 139 / # pass 139 / # fail 0`. The pin is the
+          #   number that run PRINTED, not 135 plus a delta.
+          #
+          #   READ THE BEHIND-COUNT BEFORE AND AFTER, not just before. That 139/139/0 run was
+          #   taken start-to-finish at base 8b7219e90 with `git rev-list --count HEAD..origin/main`
+          #   = 0. Two later re-runs on this branch each STARTED at 0 behind and FINISHED at 1,
+          #   because main merged mid-run, and each printed 39-40 reds — the exact floor this
+          #   file's own precondition text names ("1 behind -> 39 reds"). A tally taken across a
+          #   merge measures the merge, not the suite, so the control is the count at BOTH ends.
+          #
+          #   The history BELOW is left exactly as it was — those numerals quote dated runs and
+          #   earlier PRs, and rewriting one would fabricate a CI line nobody ever printed. Only
+          #   the LIVE numerals (the self-test arm, the comparison, the error message, the echo)
+          #   move.
+          # PIN 135 — RE-DERIVED 2026-09-23 (task-3c620a8d3b603128), which adds THREE arms:
+          #   `wave 36: a legally re-homed row REACHES the forwarded bucket (and could not before)`,
+          #   `wave 36: a PACED roster reads re-homed and vanished in different letters`, and
+          #   `wave 36: the re-home arm cannot rescue unaddressed residue, and R4/R6 are untouched`.
+          #   `grep -c '^test(' cloud/priv/static/__preview__/seal-predicate.test.mjs` -> 135 on this
+          #   tree, and CI's own run of this step (job 107226554163) printed `# tests 135 / # pass 135
+          #   / # fail 0` against the then-committed pin of 132 — that red is what this bump answers.
+          #
+          #   READ THE TALLY RIGHT, because a local run does NOT reproduce it. The awk below sums
+          #   `# pass N`, so the literal is the PASS count, which equals the registered count only
+          #   when NOTHING fails. On a developer box at origin/main this suite reds FIVE clause-(b)
+          #   guard/ladder arms (the floor the refusal text two screens up already names: "1 behind
+          #   -> 39 reds, at origin/main -> 5"), so a local `node --test` prints `# pass 130` while
+          #   registering 135. Measured here on 2026-09-23 at origin/main: 135 registered, 130 pass,
+          #   5 fail — the same five names as an unmodified origin/main tree, so none of them are
+          #   this PR's. CI has no such floor and printed 135/135. The pin is therefore derived from
+          #   the ANCHORED registration count and confirmed against CI's run, NOT from a local tally.
+          #
+          #   The history BELOW is left exactly as it was, for the reason the 2026-09-22 entry gives:
+          #   those numerals quote dated runs and earlier PRs. `131 tests` on 2026-09-11 records what
+          #   run 34647939447 actually printed and `132` records 2026-09-22's derivation; rewriting
+          #   either to 135 would fabricate a CI line nobody ever printed. Only the LIVE numerals —
+          #   the self-test arm, the comparison, the error message and the echo — move.
+          # PIN 132 — RE-DERIVED 2026-09-22 (task-d81214d47470141d), which adds ONE arm:
+          #   `PRECONDITION: a tree BEHIND origin/main is refused, with the count named`.
+          #   `grep -c '^test(' cloud/priv/static/__preview__/seal-predicate.test.mjs` -> 132,
+          #   and `node --test` printed `# tests 132` on this tree. The history BELOW is left
+          #   exactly as it was: those numerals quote dated runs and earlier PRs, and rewriting
+          #   them to match today's pin would fabricate a CI line nobody ever printed. Only the
+          #   LIVE numerals — the two comparisons, the self-test and the two echoes — move.
           # PIN 131 — RE-DERIVED 2026-09-11 in #17906 (which adds two staleness arms; #17828 had added ten
           # transitive-roster arms) from this file's own registrations, and the
           # derivation is BOTH counts because they differ:
-          #   grep -c '^test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 131
+          #   grep -c '^test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 132
           #   grep -c  'test('  cloud/priv/static/__preview__/seal-predicate.test.mjs  -> 147
-          # 131 is the pin, and the CI run agrees: main run 34647939447 printed
+          # 131 was the pin then, and that CI run agrees: main run 34647939447 printed
           # `seal predicate tests: 131 tests` on 2026-09-11. The 16-line gap is NOT nested or loop-generated
           # registrations: every extra line is a `RegExp.prototype.test(` call
           # inside an assertion or a comment quoting one (lines 149, 261, 1045,
@@ -1208,14 +1409,14 @@ jobs:
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 131 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 131 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 152 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 152 — this pin can no longer lose"; exit 1; }
           PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
-          if [ "${tally:-0}" -ne 131 ]; then
-            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 131 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 131 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 152 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 152 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 152 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "seal predicate tests: ${tally} tests, exact pin 131 — the pin re-earned"
+          echo "seal predicate tests: ${tally} tests, exact pin 152 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"
@@ -1365,21 +1566,25 @@ jobs:
       # 20.20.2 (was a floor of 69; the suite had grown 11 arms past it), agreed
       # by main run 34647939447. Two-sided `-ne`: see the decision beside the
       # seal-predicate pin above.
-      - name: Responsive sweep unit tests (82-test exact pin)
+      # PIN 94 — re-derived 2026-09-24 on node 20.20.2 by task-1ac954ba0db927cb
+      # (was 89): five residue-verdict arms joined the suite. Read off a RUN of
+      # `node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs`
+      # (`# pass 94`), never by adding five.
+      - name: Responsive sweep unit tests (94-test exact pin)
         run: |
           set -euo pipefail
           # Same self-test as the console harness step above: the parser must still
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 82 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 82 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 94 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 94 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs 2>&1 | tee /tmp/breakpoint-sweep-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/breakpoint-sweep-tests.txt)
-          if [ "${tally:-0}" -ne 82 ]; then
-            echo "::error::responsive sweep unit tests: ran ${tally:-0} test(s), the committed pin is 82 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/breakpoint-sweep.test.mjs: bump every 82 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 94 ]; then
+            echo "::error::responsive sweep unit tests: ran ${tally:-0} test(s), the committed pin is 94 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/breakpoint-sweep.test.mjs: bump every 94 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "responsive sweep unit tests: ${tally} tests, exact pin 82 — the pin re-earned"
+          echo "responsive sweep unit tests: ${tally} tests, exact pin 94 — the pin re-earned"
 
       # THE ATTENTION-SCENARIO AXIS'S OWN TESTS (#16372, wired by task-e3bd53c0df306521).
       # attention-scenarios.mjs derives the scenario axis at run time from app.js's
@@ -1509,6 +1714,43 @@ jobs:
       # that runs the census against the SHIPPED guard and prints it.
       - name: Singular-selector population census (overflow-guard.mjs)
         run: node cloud/priv/static/__preview__/view-scope-census.mjs --list
+
+      # ── THE BROWSER-AXIS CENSUS (task-76245d1de5d9ee16, D906) ──────────────
+      # WHICH INSTRUMENTS DRIVE A BROWSER, AND WHICH ENGINE EACH ONE DRIVES —
+      # derived from the source at run time, printed with its own per-file
+      # reasoning, never a committed list.
+      #
+      # WHY IT IS A STEP AND NOT A PARAGRAPH. D904 was found by driving a real
+      # Firefox by hand: both scroll-driven edge cues compute 0px there while
+      # the element is clipped. D168 had asserted the opposite, unqualified and
+      # with no browser named, off a Chromium-only green — and stood for four
+      # waves. The fleet's axis is 1 of 3 engine families, and D906 ACCEPTS
+      # that and RECORDS it at every banner instead of buying a second engine.
+      # This step is what makes "recorded" a check rather than a habit: every
+      # launcher under cloud/priv/static must PRINT a scope line, and the
+      # engine that line names is compared against the engine derived from that
+      # file's OWN discovery candidates — neither side typed twice. Add a
+      # Firefox path to a findChrome() and it reds until the banner says Gecko.
+      #
+      # DERIVED-FIRST, by the test the block below sets: it computes both sides
+      # of its own comparison and holds no pinned population. It needs no
+      # Chrome and no port, so it cannot join the class of instruments nothing
+      # runs. Its self-tests run INSIDE it, before the measurement — a
+      # predicate that cannot say NO, or a walk that finds zero launchers in a
+      # tree that has fifteen, refuses (exit 2) rather than reporting clean.
+      - name: Browser-axis census (which engine each driven instrument drives)
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/browser-axis-census.mjs || rc=$?
+          [ "$rc" -eq 0 ] && exit 0
+          case "$rc" in
+            2) v=REFUSED ;;
+            1) v=MEASURED_DEFECT ;;
+            *) v=UNINTERPRETABLE ;;
+          esac
+          echo "::error title=console-unit ${v} — browser-axis-census.mjs::browser-axis-census.mjs exited ${rc}. It named every launcher and the exact scope line each one must print, above."
+          exit 1
 
       # ── STEP ORDER IS PART OF THE INSTRUMENT (cch-w45, wave 45) ────────────
       #
@@ -2143,11 +2385,25 @@ jobs:
       #
       # THE PIN, and the reason there is one: `node --test` on a file that
       # still LOADS but registers ZERO tests reports one passing test and exits
-      # 0 (task-2c39c3b9e1f925c2). 225 is this step's selection on 2026-09-14,
-      # re-derived on node 22.22.0 at origin/main c42fde07c across the 14 suites the
-      # predicate selects. It was 201 across 13 on 2026-09-11 (node 20.20.2, main run
-      # 34647939447, `preview suites: 201 tests`); anchored-replace.test.mjs joined the
-      # selection with its 24 arms and moved it, which is this pin working. The
+      # 0 (task-2c39c3b9e1f925c2). 264 is this step's selection on 2026-09-24,
+      # MEASURED on node 20.20.2 (this job's node-version) across the 18 suites
+      # the predicate selects, by running this step's own body under /bin/sh and
+      # reading what it printed (`# tests 264 / # pass 264 / # fail 0`,
+      # task-31d8058ed865a3bd); modal-oracle.test.mjs joined the selection with
+      # its 3 arms. It was 261 across 17 on 2026-09-21, MEASURED on node
+      # 22.22.0 (`# tests 261 / # pass 261 / # fail 0`, task-a0258bec59b256d7);
+      # identity-seed.test.mjs and byte-comparability.test.mjs joined the
+      # selection with that task. The number was NOT computed from the previous
+      # pin: an arithmetic pin is a pin nobody re-earned, and the predicate's
+      # selection is what decides, not the diff. It was 230 across 15 on
+      # 2026-09-20 (node 22.22.0, task-f8318f7734a52c52). It was 225
+      # across 14 on 2026-09-14 (node 22.22.0, origin/main c42fde07c);
+      # badcode-freeze.test.mjs — the regression guard for the caret/transition
+      # freeze #19583 lands in __preview__/mock.js — joined the selection with its
+      # 5 arms and moved it. It was 201 across 13 on 2026-09-11 (node 20.20.2, main
+      # run 34647939447, `preview suites: 201 tests`); anchored-replace.test.mjs
+      # joined the selection with its 24 arms and moved it, which is this pin
+      # working. The
       # literal said 68 — a FLOOR written when the selection was five suites; it
       # never reddened while the selection nearly tripled, which is the whole
       # reason this file no longer uses floors. THIS PIN IS ALSO SELECTION-SIZED:
@@ -2155,7 +2411,7 @@ jobs:
       # moves this number, so bump it in the PR that changes either the suites or
       # the steps that name them. Two-sided `-ne`: see the decision beside the
       # seal-predicate pin above.
-      - name: "__preview__ suites no other step runs (derived selection, 225-test exact pin)"
+      - name: "__preview__ suites no other step runs (derived selection, 264-test exact pin)"
         run: |
           set -euo pipefail
           dir=cloud/priv/static/__preview__
@@ -2181,10 +2437,50 @@ jobs:
           named "seal-predicate.test.mjs" || { echo "::error::selection self-test: the workflow scan no longer sees a suite this file demonstrably runs by name — the predicate has gone blind and would re-run everything or nothing"; exit 1; }
           named "no-such-suite-zzz.test.mjs" && { echo "::error::selection self-test: the workflow scan matches a basename that appears nowhere — the predicate cannot say NO, so it would select nothing forever"; exit 1; } || true
 
+          # SELF-TEST 3 — THE ITERATION, NOT THE PREDICATE. The two arms above
+          # exercise `named`, and `named` is NOT where this step diverges:
+          # measured 2026-09-21 on the same extracted body under /bin/sh,
+          # /bin/bash and /bin/zsh, it answers identically in all three (YES
+          # seal-predicate, NO bogus) and BOTH arms pass in all three. They were
+          # never broken. What they cannot see is the line below them: `for f in
+          # $all` word-splits an unquoted expansion under sh and bash and does
+          # NOT under zsh, which is the default shell on this repo's development
+          # Macs. Same script, same tree: sh -> 17 suites selected, bash -> 17,
+          # zsh -> ONE iteration with $f bound to the whole newline-joined list,
+          # one garbage basename, `named` says NO, and all 22 suites land in
+          # $todo — including seal-predicate.test.mjs, the one suite this step
+          # exists to exclude (see the ten-minute note above).
+          #
+          # CI IS NOT AT RISK: GitHub runs this body under `sh`. The casualty is
+          # a LOCAL re-derivation of the pin below, which is what a builder is
+          # told to do rather than trust arithmetic — observed on PR #19672,
+          # where a zsh replication selected 22 instead of 17. A smaller
+          # divergence would have produced a PLAUSIBLE wrong pin.
+          #
+          # WHY THIS ARM CANNOT ROT INTO A VACUOUS PASS, both halves deliberate:
+          #   * `want` is re-measured by a SECOND `find`, never counted off
+          #     `$all` and never off the loop, so it cannot compare a number to
+          #     itself: the two sides have no shared arithmetic.
+          #   * it REFUSES below two files. With one file every shell iterates
+          #     once, so the comparison could not tell the shells apart — an arm
+          #     that cannot distinguish them is not an arm, and 0 == 0 over an
+          #     empty directory must never read as agreement.
+          want=$(find "$dir" -name '*.test.mjs' | wc -l | tr -d '[:space:]')
+          if [ "${want:-0}" -lt 2 ]; then
+            echo "::error title=The iteration self-test cannot measure anything::$dir holds ${want:-0} *.test.mjs file(s). Below two, one iteration and N iterations are the same number, so this arm would pass under every shell while proving nothing. Either the directory was emptied or the find above stopped matching — decide which, deliberately."
+            exit 1
+          fi
+
           todo=""
+          iters=0
           for f in $all; do
+            iters=$((iters + 1))
             named "$(basename "$f")" || todo="$todo $f"
           done
+          if [ "$iters" -ne "$want" ]; then
+            echo "::error title=selection self-test: this shell did not split the file list::The selection loop ran ${iters} iteration(s) over ${want} file(s) that find returned. This shell does not word-split an unquoted \$all the way sh does — zsh does not. Every suite is about to be selected, including the ones other steps already run, and the tally below would be a number nobody can reproduce. Re-run this step under /bin/sh; do NOT re-derive the pin from this run."
+            exit 1
+          fi
           if [ -z "$todo" ]; then
             echo "::error title=This step selected nothing::Every preview suite is claimed by another step. That may be correct, but an empty selection is indistinguishable from a broken predicate, so say so deliberately and lower the floor below."
             exit 1
@@ -2192,16 +2488,16 @@ jobs:
           echo "selected (run by no other step):$todo"
 
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 225 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 225 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 264 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 264 — this pin can no longer lose"; exit 1; }
 
           # shellcheck disable=SC2086 # word splitting is the selection
           node --test $todo 2>&1 | tee /tmp/preview-unrun-suites.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/preview-unrun-suites.txt)
-          if [ "${tally:-0}" -ne 225 ]; then
-            echo "::error::preview suites: ran ${tally:-0} test(s), the committed pin is 225 — this pin is EXACT (two-sided). If the tally is HIGHER you grew the derived selection printed above: bump every 225 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 264 ]; then
+            echo "::error::preview suites: ran ${tally:-0} test(s), the committed pin is 264 — this pin is EXACT (two-sided). If the tally is HIGHER you grew the derived selection printed above: bump every 264 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "preview suites: ${tally} tests, exact pin 225 — the pin re-earned"
+          echo "preview suites: ${tally} tests, exact pin 264 — the pin re-earned"
 
   # ── cssom-parity — the only check here that PARSES the artifact ──────────────
   # Every other CSS gate in this repo asks a question about the FILE: it regexes
@@ -2802,6 +3098,53 @@ jobs:
               ;;
           esac
 
+      # ── task-1614ac4ba29eec9b: bidi isolation of user-authored text ─────────
+      # A THIRD browser instrument on this job, for the same reason as the
+      # hashchange step above: node + an explicit CHROME are already here, and
+      # `Console gate` is fail-closed on `needs.modal-oracle.result`, so a red
+      # here BLOCKS the merge with no aggregator edit. Like that step it
+      # publishes no verdict; a failure shows up as result=failure with the
+      # oracle's verdict=OK, which the gate reads as red.
+      #
+      # WHAT IT ASSERTS: every console host that renders a user-authored name or
+      # email (and can be mounted from __bpTestHook) paints that string exactly
+      # as it paints alone in its own <bdi> — measured per code unit from glyph
+      # rects in headless Chrome, never innerText. Two CONTROL rows render an RTL
+      # string WITHOUT an isolate and must read BORROWED, or the run exits 3.
+      # Measured on a developer host (Chrome 153, 2026-09-23): 76/76 host rows
+      # across 22 hosts green; removing the <bdi> from fleetRow's .fleet-name
+      # alone reds 2 rows and exits 1. It launches Chrome over
+      # --remote-debugging-pipe, so it needs no WebSocket and runs on this job's
+      # node 22 as well as node 20.
+      - name: Bidi isolation — does every user-authored host paint its text as it paints alone?
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/bidi-isolation.mjs || rc=$?
+          case "$rc" in
+            0)
+              echo "Bidi isolation: every host row held both verdicts and every control row borrowed (the per-row table and the count are printed above)."
+              ;;
+            1)
+              echo "::error title=Bidi isolation DEFECT::A measured defect in a real browser (exit 1) — this IS about the console's own bytes. A host that renders a user-authored name or email painted it differently from the same string alone in a <bdi>: a neutral at the string's edge (a trailing '.' '-' '!') resolved against the LTR paragraph and painted on the wrong side of the RTL run, or a system span moved. The FAIL row above names the host and prints DOM vs painted order. The usual cause is a dropped <bdi> around an esc()'d user string in app.js."
+              exit 1
+              ;;
+            2)
+              echo "::error title=Bidi isolation REFUSED::The instrument refused to measure (exit 2) — no usable Chrome at CHROME. NO claim is being made about bidi isolation in either direction."
+              exit 1
+              ;;
+            3)
+              echo "::error title=Bidi isolation BROKEN/BLIND::The instrument broke or went blind (exit 3): it threw, or a CONTROL row that renders an RTL string WITHOUT an isolate did not read BORROWED — so this run cannot tell an isolated host from a broken one. Read the log above; nothing is being claimed about the hosts."
+              exit 1
+              ;;
+            *)
+              echo "::error title=Bidi isolation UNINTERPRETABLE::bidi-isolation.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal / 3 broken or blind). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
       # ── cch-w42-bl — THE CROSS-TAB TEAM PIN, IN TWO REAL CHROME TABS ────────
       # A THIRD browser instrument riding this job, for the reasons the block
       # above gives verbatim: node 22 and an explicit CHROME are already
@@ -2937,6 +3280,65 @@ jobs:
             *)
               verdict UNINTERPRETABLE
               echo "::error title=Adjacency guard UNINTERPRETABLE::adjacency-guard.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+      # ── task-b96e83407f325986, accent-matrix DEFECT-B ───────────────────────
+      # A SECOND instrument riding this job, and riding THIS one on purpose: the
+      # step above asks whether a destroy-tier control sits close enough to a
+      # primary action to be misclicked; this one asks whether, once they ARE
+      # adjacent, the eye can tell them apart. Same subject, same pair of
+      # controls, opposite half of the question — geometry there, resolved
+      # colour here. Node 22 and an explicit CHROME are already provisioned in
+      # this job (node 20 has no global WebSocket and CDP bring-up exits 2
+      # there), and `Console gate` is fail-closed on `needs.adjacency-guard
+      # .result`, so a red here BLOCKS the merge with no edit to the aggregator,
+      # no new job in `needs:`, and no change to the "decide calls == length of
+      # needs:" count scripts/console-path-escape-check.test.sh walks.
+      #
+      # It publishes NO verdict output, exactly as the hashchange-wiring step
+      # does on the modal-oracle job, and for the same stated reason: the
+      # `verdict` output belongs to the step above and is already written by the
+      # time this runs. If that step passes and this one fails, `Console gate`
+      # sees result=failure with verdict=OK and takes its "verdict='OK' but the
+      # job FAILED — cannot tell, therefore red" arm. Fail-closed and honest; it
+      # simply names this step one line later, in this job's log.
+      #
+      # WHAT IT ASSERTS, and why no existing gate could. It loads the real SPA
+      # at 1440 over webhooks-panel / rollback / shell-site x five accents x two
+      # themes and reads the COMPUTED background and border of the first visible
+      # `.btn-danger` and `.btn-primary`, scoring each cell
+      # max(dE76(background), dE76(border)) against a floor of 55.
+      # `__css_check.mjs` reads TOKENS and can never see which rule a button
+      # finally wins; `cssom-parity.mjs` parses declarations, not resolved
+      # colours; the PNG accent matrix sees it but only by eye — and by eye is
+      # exactly how it was found, 2760 shots in. On the pre-fix bytes this exits
+      # 1 on SIX cells (the three screens x ember x light+dark, scoring 21.0 and
+      # 34.7) while the other 24 pass, so it is non-vacuous in both directions.
+      #
+      # ~40s wall for all 30 cells on a developer host.
+      - name: Accent role separation — can the eye tell destroy from primary at every accent?
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/accent-role-separation.mjs || rc=$?
+          case "$rc" in
+            0)
+              echo "Accent role separation: every cell it declared cleared the dE76 floor (the cell roster, the floor and each cell's score are printed above)."
+              ;;
+            2)
+              echo "::error title=Accent role separation REFUSED::The instrument refused to measure (exit 2) — an ENVIRONMENT, VOCABULARY or PRECONDITION fault, not a colour defect. NO claim is being made about any screen in either direction. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a server rooted at another tree squatting the preview port, an unknown scenario name — or a cell whose PRECONDITION never held, meaning one of the two controls never rendered. That last class lives in cloud/priv/static, not on the runner: a guard whose subject never arrived must never be counted as a pass."
+              exit 1
+              ;;
+            1)
+              echo "::error title=Accent role separation DEFECT::A measured colour collision in a real browser (exit 1) — this IS about the console's own bytes. The destructive control and the primary control are not visually separable in the cells listed above, which print both controls' computed background and border and the dE76 score of each channel. The remedy is NOT a hue move: --primary-hsl/--ok-hsl track the brand per identity (GR6) and GR90 ruled in writing that --ok-hsl is not to be touched, while --danger-hsl is pinned at hue 0 — both ends of the pair are fixed by doctrine. The separation has to come off the weight axis; the .btn-danger block in cloud/priv/static/app.css carries the ruling, the rejected lightness route and the numbers."
+              exit 1
+              ;;
+            *)
+              echo "::error title=Accent role separation UNINTERPRETABLE::accent-role-separation.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
               exit 1
               ;;
           esac

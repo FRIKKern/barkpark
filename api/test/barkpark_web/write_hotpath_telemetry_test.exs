@@ -166,14 +166,11 @@ defmodule BarkparkWeb.WriteHotpathTelemetryTest do
   # plugin contributed any route" — a standing, run-order-dependent flake,
   # not a defect in that test or in this PR's BPML changes.
   defp set_plugins_env(modules) do
-    prior = Application.get_env(:barkpark, :plugins, :unset)
-    Application.put_env(:barkpark, :plugins, modules)
+    prior = Barkpark.PluginEnv.capture()
+    Barkpark.PluginEnv.put!(modules)
 
     on_exit(fn ->
-      case prior do
-        :unset -> Application.delete_env(:barkpark, :plugins)
-        v -> Application.put_env(:barkpark, :plugins, v)
-      end
+      Barkpark.PluginEnv.restore(prior)
     end)
   end
 

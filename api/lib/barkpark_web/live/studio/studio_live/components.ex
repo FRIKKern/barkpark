@@ -52,6 +52,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # the Edit-mode boundary widgets paint (Shared.push_task_previews fills it).
   attr(:task_previews, :map, default: %{})
   attr(:paper_links, :map, default: %{})
+  # Paper masters (task-3b6e562e916c8ce4): the open paper's in-scope masters,
+  # or nil when this pane may not write (no Save action, no slash picker).
+  attr(:paper_masters, :any, default: nil)
+  attr(:paper_masters_impl, :any, default: nil)
+  # Linked master instances (task-59f078a2fd248698): `%{key => html}` or nil.
+  attr(:paper_master_render, :any, default: nil)
   attr(:shares_admin?, :boolean, default: false)
   attr(:dataset, :string, required: true)
   attr(:api_token_raw, :string, default: "")
@@ -344,6 +350,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   canvas_resume_state={@paper_canvas_resume_status}
                   task_previews={@task_previews}
                   paper_links={@paper_links}
+                  masters={@paper_masters}
+                  masters_impl={@paper_masters_impl}
+                  master_render={@paper_master_render}
                   save_status={@save_status}
                   paper_halt={@paper_halt}
                 />
@@ -485,6 +494,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               a paper carries a single calm metadata column. Collapsing it (or any
               section) never reflows or transforms the body — chrome around
               content. --%>
+        <%!-- PAPERS ONLY, BY DECISION (inspector-destination-for-sheet-graph-media,
+              ruled by main 2026-09-23): sheet, graph and media editors get NO
+              metadata inspector and no Tier-3 summoned destination. They have no
+              metadata surface to show, so this :if is the intended scope, not a
+              gap; sidebar_user_opened is seeded only on the paper path
+              (Shared.Paper sidebar_assigns). Widening it is a new product row. --%>
         <.paper_metadata_sidebar
           :if={@paper_doc}
           paper_doc={@paper_doc}
@@ -635,6 +650,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
 
+  # Rendered for PAPERS ONLY (the caller gates it on @paper_doc). Sheet, graph
+  # and media editors deliberately have no inspector: see the ruling recorded at
+  # the render site (inspector-destination-for-sheet-graph-media, 2026-09-23).
   def paper_metadata_sidebar(assigns) do
     paper = assigns.paper_doc
     status = (paper && Map.get(paper, :status)) || "draft"
@@ -1695,6 +1713,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_edit_mode={@paper_edit_mode}
           task_previews={@paper_task_previews}
           paper_links={@paper_link_details}
+          paper_masters={Map.get(assigns, :paper_masters)}
+          paper_masters_impl={Map.get(assigns, :paper_masters_impl)}
+          paper_master_render={Map.get(assigns, :paper_master_render)}
           save_status={Map.get(assigns, :save_status, "")}
           paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}

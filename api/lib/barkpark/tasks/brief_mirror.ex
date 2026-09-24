@@ -81,6 +81,18 @@ defmodule Barkpark.Tasks.BriefMirror do
   # description carrying them would otherwise differ from its own mirror
   # forever, by design. Mirrored here EXACTLY — a normaliser more aggressive
   # than the Go source would rewrite prose the composer would have kept.
+  #
+  # "EXACTLY" was FALSE from this module's first commit until the fix below,
+  # and the word itself is why nobody checked: this line claimed the property
+  # while `strip_markdown/1` reduced `String.replace/3` over the three patterns,
+  # THREE passes each over the previous pass's output. That form RESCANS —
+  # removing `**` from `foo_**_bar` brings two `_` together and the next pass
+  # eats them — while `strings.NewReplacer` has already advanced past that
+  # position. Measured on both real runtimes over the shared corpus: 19 of 1,313
+  # inputs diverged, every one of them containing the substring `_**_`, and 10
+  # of those reduced the whole description to "" and so replaced the author's
+  # prose with the auto-stub. The asymmetry names the mechanism: `_**_` diverged
+  # and its mirror image `*__*` did not, because `**` was reduced FIRST.
   @stripped ["**", "__", "`"]
 
   @doc """
@@ -158,7 +170,20 @@ defmodule Barkpark.Tasks.BriefMirror do
     |> Enum.reject(&(&1 == ""))
   end
 
-  defp strip_markdown(text), do: Enum.reduce(@stripped, text, &String.replace(&2, &1, ""))
+  # ONE non-overlapping left-to-right pass over all three patterns at once, the
+  # shape of `strings.NewReplacer("**", "", "__", "", "`", "")`. `:binary.replace/4`
+  # with a pattern LIST resumes AFTER each match and never rescans what it has
+  # already emitted, so it removes exactly the byte ranges that were delimiters
+  # IN THE INPUT. Reducing over the patterns instead — any number of sequential
+  # `String.replace/3` calls — reinstates the rescan and reds the corpus arm in
+  # test/barkpark/tasks/brief_mirror_strip_corpus_test.exs on those same rows.
+  #
+  # The pattern ORDER is not load-bearing here and must not be relied on: the
+  # three patterns begin with disjoint bytes, so no two can match at the same
+  # position and leftmost-match makes the list order inert (measured: reversing
+  # @stripped changes 0 of 1,313 corpus outputs). Under the OLD reducing form
+  # order WAS load-bearing, which is how the defect hid.
+  defp strip_markdown(text), do: :binary.replace(text, @stripped, "", [:global])
 
   defp to_text(value) when is_binary(value), do: value
   defp to_text(_), do: ""

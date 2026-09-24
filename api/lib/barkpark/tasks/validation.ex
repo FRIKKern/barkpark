@@ -233,6 +233,38 @@ defmodule Barkpark.Tasks.Validation do
     {:error, %{"kind" => ["unknown kind #{inspect(other)}; must be one of #{inspect(@kinds)}"]}}
   end
 
+  @doc """
+  The write-door kind check, formerly `Barkpark.Content.Writer.validate_task_kind/2`
+  (moved by task-aed4f02e57d3a760; its body and error shape are unchanged).
+
+  W7a step 1 — task documents carry a tight `content` field contract
+  (`validate_kind_content/2`) on top of the generic schema-field validation.
+  Enforced at the write boundary so neither `create_document/4` nor
+  `upsert_document/4` can land a malformed task row: the Tasks plugin
+  declares it as a `:check` step of `pre_write_transforms/0`, right after the
+  brief re-sync, which is where the writer called it. Defense-in-depth:
+  migration `20260528100000_w7a_task_schema` adds a DB CHECK constraint that
+  catches raw-Repo writes that bypass this hook.
+
+  Returns `:ok` for non-task types so the post/page/paper write path is
+  unaffected; a task whose content fails the contract returns
+  `{:error, {:invalid_task_content, errors}}`.
+  """
+  @spec validate_task_kind(String.t(), map()) :: :ok | {:error, {:invalid_task_content, map()}}
+  def validate_task_kind("task", attrs) do
+    content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
+
+    case validate_kind_content("task", content) do
+      :ok ->
+        :ok
+
+      {:error, errors} ->
+        {:error, {:invalid_task_content, errors}}
+    end
+  end
+
+  def validate_task_kind(_type, _attrs), do: :ok
+
   # The shared "content.kind == <type>" check — every kind must self-identify.
   defp validate_kind_field(errors, expected_kind, content) do
     case fetch(content, "kind") do

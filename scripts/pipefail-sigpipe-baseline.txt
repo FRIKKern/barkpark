@@ -421,4 +421,114 @@
 # must be banked — and may never RISE. A rise is a NEW site; fix the site.
 #
 # Filed under task-e3a2a8341256b805.
-90
+
+# ── RE-MEASURED 2026-09-20 (task-cb57c7ff5f6d6479): 90 → 89 ───────────────────
+# ONE SITE FIXED, AND THE SCANNER CHANGE MOVED THE NUMBER BY ZERO.
+# This lands directly on top of #19574 (task-e3a2a8341256b805), which banked the
+# seven counts of arrears this file had been carrying and bounded the slack at
+# PIPEFAIL_SCAN_MAX_SLACK=2. Main is TIGHT at 90 as of that merge; the arrears
+# story belongs to the block above and is not repeated here. This change is one
+# high-confidence site converted, so the number falls by exactly one.
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --count-only
+#     → pipefail-sigpipe-scan: 89 finding(s) — high 89 · medium 0 · low 0 — over 466 file(s)
+#     (all confidences on the same tree: 261 — high 89 · medium 168 · low 4)
+#     base    origin/main e922f67e6cb0af763c75210e1e12ba19370644d1, which MEASURES 90 and BANKS 90.
+#     utc     2026-09-20T20:03:06Z
+#
+# THE SITE FIXED — the only one this number moves:
+#   scripts/required-checks-ack-derive.sh:271
+#     VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head -1)"   under set -euo pipefail
+#   reported here as `[high] reader=head; status captured into an assignment
+#   under set -e; truncating reader (head closes the pipe at N) on a producer not
+#   provably bounded`. `comm` writes 166 names into a pipe `head -1` closes after
+#   the first; pipefail adopts comm's 141 and errexit kills the selftest.
+#   MEASURED on console #19336 (the ratchet reddened on a PR whose diff never
+#   touched it) and reproduced directly: a 200k-line intersection through that
+#   exact shape returned rc=141 on 20/20 runs under 4x `yes >/dev/null`; the
+#   pipe-free replacement (comm > file; one `read`) returned 0 on 20/20 in the
+#   same loop. A CONTROL at the REAL tree size — a 166-line intersection, 40 runs
+#   under 8x load — passed 40/40: at ~5KB the whole output fits the 64KB pipe
+#   buffer, so this site is LATENT at today's size, not firing. It is fixed
+#   because the exclusions ledger only grows, and because an instrument that reds
+#   by LOAD teaches its readers to rerun rather than to read.
+#
+# THE SCANNER ALSO CHANGED IN THIS COMMIT, AND IT MOVED THE NUMBER BY ZERO.
+# The `head` reader pattern required a trailing space, so a BARE `head` ending a
+# command substitution or a line (`x="$(producer | head)"`) matched no reader at
+# any tier. The delimiters are now folded to spaces on a copy before the match.
+# PROVED to be a no-op on this tree rather than asserted: the full finding list
+# at --min-confidence low was captured from the PRE-change scanner and from the
+# post-change scanner over the same tree and diffed —
+#     old=261  new=261  ·  comm -13 → empty  ·  comm -23 → empty
+# so the 90 → 89 move is the site fix alone and nothing is laundered in behind a
+# widened detector.
+#
+# THE VARIABLE-PRODUCER BASELINE NEEDS NO RE-BANK: it reads 105 against a banked
+# 105 on this tree (exact, rc 0), before and after both halves of this change.
+#
+# Filed under task-cb57c7ff5f6d6479.
+#
+# ── 2026-09-22: 90 -> 86, BANKED DOWN (this is not the forbidden raise) ──────
+# MEASURED on origin/main 8fc90963649eee28b6774c952031247e46d606a9 plus this
+# change, by exactly:
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --baseline scripts/pipefail-sigpipe-baseline.txt
+#     -> pipefail-sigpipe-scan: 86 finding(s) - high 86 - medium 0 - low 0 - over 472 file(s)
+#
+# WHAT MOVED, and it is exactly the four sites this change removes. #19772
+# (merged 691e96c0e) added 271 lines to scripts/required-checks.test.sh, four of
+# which ended a command substitution in a truncating reader:
+#     :3471 :3477  $(grep -F "$X" <<<"$S6_OUT" | head -1)
+#     :3869 :3877  $(grep -F "$X" <<<"$S7_OUT" | head -1)
+# `head` closes the pipe at N, so the upstream grep dies of SIGPIPE and the
+# substitution yields 141 under pipefail. That file's high-confidence count went
+# 41 -> 42 (net +1; the same rewrite removed older sites), taking the tree to 90.
+# The fix drops the PIPE rather than the truncation - `grep -m1` stops in the
+# producer, so there is no reader to close it - and 90 - 4 = 86.
+#
+# PROVENANCE CHECK RUN FIRST, because a LOOSE ratchet is also what a STALE
+# CHECKOUT looks like (this file records a 107-against-108 read 38 commits
+# behind on 2026-09-16):
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --verify-against-origin-main
+#     -> sha 8fc90963649eee28b6774c952031247e46d606a9, scan 90, baseline 89,
+#        "RATCHET BROKEN ON origin/main - 90 finding(s), baseline 89. A NEW site
+#        is on main." (this checkout read 86, reported as drift because it
+#        carries the fix below)
+#
+# So the 90 on main is real and the 86 here is this change, not a stale tree.
+# BANKED DOWN rather than left loose because the scanner refused the slack by
+# name: "SLACK EXCEEDED - the arrears are 3, the documented bound is 2. 3 NEW
+# site(s) could land here and this gate would still say green."
+#
+# Filed under task-195cfabc13d7e9a3.
+#
+# ── 2026-09-22: 86 -> 85, BANKED DOWN (again not the forbidden raise) ────────
+# MEASURED on origin/main fb7fe91dc05ff5fc137e5fe06eb1db85a9b37077 by exactly:
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --min-confidence high --baseline scripts/pipefail-sigpipe-baseline.txt
+#     -> pipefail-sigpipe-scan: 85 finding(s) - high 85 - medium 0 - low 0 - over 472 file(s)
+#
+# WHAT MOVED: #19824 (ca079dae2) removed the last `| head -1` reader from
+# scripts/elixir-path-escape-check.sh:926 and did NOT bank the number, leaving
+# slack 1 against a documented bound of 2. A per-file site diff between
+# ca079dae2~1 and ca079dae2 shows -1 on that one file and nothing else.
+#
+# I LEFT THAT SLACK AND AN AUDITOR CAUGHT IT. The ratchet exits 0 at slack 1, so
+# nothing red and nothing asked; a ratchet's LOOSE direction is silent by
+# construction. Two more removals would have reached the refusal with no one
+# having decided anything.
+#
+# PROVENANCE CHECK RUN FIRST, because a LOOSE ratchet and a STALE CHECKOUT look
+# identical (this file records a 107-against-108 read taken 38 commits behind):
+#
+#     bash scripts/pipefail-sigpipe-scan.sh --verify-against-origin-main
+#     -> sha fb7fe91dc05ff5fc137e5fe06eb1db85a9b37077, scan 85, baseline 86,
+#        "RATCHET LOOSE ON origin/main - 85 finding(s), baseline still says 86
+#         (slack 1, bound 2)"
+#
+# So the 85 is origin/main's own number, not this checkout's.
+#
+# Filed under task-2f62b64c32be3780.
+85

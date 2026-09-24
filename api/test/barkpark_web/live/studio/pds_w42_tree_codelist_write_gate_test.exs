@@ -46,6 +46,7 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
+  import BarkparkWeb.LiveSettle, only: [settle!: 2]
 
   alias Barkpark.{Auth, Content}
   alias Barkpark.Content.Codelists
@@ -73,8 +74,23 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
     seed_paper_schema!()
     seed_codelist!()
 
-    {:ok, _} = Auth.create_token(@readonly, "pds w42 tree readonly", @dataset, ["read"])
-    {:ok, _} = Auth.create_token(@writer, "pds w42 tree writer", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @readonly,
+        "pds w42 tree readonly",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        @writer,
+        "pds w42 tree writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     :ok
   end
@@ -174,16 +190,50 @@ defmodule BarkparkWeb.Studio.PdsW42TreeCodelistWriteGateTest do
   end
 
   # THE CHAIN, driven at its real entry point: the cid-targeted
-  # `tree_node_select` on the nested TreeCodelistField. The trailing `render/1`
-  # forces the parent to drain BOTH handle_info hops before anything is read —
-  # reading straight after `render_hook/3` reads before the messages are
-  # processed and reports a false "no write".
+  # `tree_node_select` on the nested TreeCodelistField.
+  #
+  # WHY THE TRAILING BARRIER IS A LOOP AND NOT A SINGLE `render/1`
+  # (task-30f870d54301df4b — this helper reddened main 12/20 at :308).
+  #
+  # The chain crosses THREE separate mailbox generations of the SAME LiveView
+  # process, each one enqueued by the process itself while handling the one
+  # before it:
+  #
+  #   G1  `send(self(), {:tree_codelist_change, …})`
+  #         tree_codelist_field.ex:179 (`maybe_notify_select/2`), during handle_EVENT
+  #   G2  `send(pid, {:phoenix, :send_update, …})`
+  #         Channel.send_update/3 — what `send_update/3` in
+  #         `Lifecycle.tree_codelist_change/2` compiles to — during G1's handle_INFO
+  #   G3  `send(self(), {:paper_op, …})`
+  #         paper_field_block.ex:352 (`persist/4`), during G2's component update
+  #
+  # ONLY G3's handler reaches the store. `render/1` is ONE barrier: it is
+  # `ClientProxy.ping!/3` -> `Phoenix.LiveView.Channel.ping/1` -> a single
+  # `GenServer.call`, which orders itself against the messages ALREADY in the
+  # mailbox WHEN IT ARRIVES — and G2/G3 are enqueued later, by the LiveView,
+  # at a moment the test process cannot order against. So how many hops one
+  # `render/1` drains is decided by the scheduler, not by the code: on an idle
+  # box the LiveView runs ahead and all three land before the ping (green); on
+  # a loaded one the ping overtakes G2, `render/1` returns, and
+  # `stored_value/1` — a direct SELECT that never touches the LiveView —
+  # reports the OLD value. That is the red: `left: "FBA"`, `right: "ESCALATED"`.
+  #
+  # The barrier below is therefore a convergence, not a count and not a sleep:
+  # ping, then ask whether the LiveView has anything left, and ping again until
+  # it is twice-quiet. Each iteration strictly advances the chain, so it
+  # terminates; the fuel only turns a hang into a named failure.
+  #
+  # The convergence itself is `BarkparkWeb.LiveSettle.settle!/2` — shared, not
+  # a third copy: `flush_form/3`-shaped chains in the studio tree need the same
+  # loop, and #19712's latency probe needs it with a DIFFERENT barrier, so the
+  # barrier is a parameter there. See that module for the scope limit (a
+  # `Process.send_after` generation is not in the mailbox and is not covered).
   defp tree_node_select(view, code) do
     view
     |> with_target("#tree-" <> @block_id)
     |> render_hook("tree_node_select", %{"code" => code})
 
-    render(view)
+    settle!(view, label: "tree_node_select/2")
     :ok
   end
 

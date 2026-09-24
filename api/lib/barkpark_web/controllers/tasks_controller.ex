@@ -119,6 +119,19 @@ defmodule BarkparkWeb.TasksController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
+  # Session auto-log (task-bc34e83515bbd91f): arm the before_send callback that
+  # appends a `task-closed` event when `close/2`'s `:closed` arm `mark/3`ed the
+  # conn. Scoped to the WORKSPACE the close itself resolved, not its project: a
+  # session is a workspace-level agent record (the ingest door that writes it
+  # infers `{workspace, nil}` for a scope-less token), and the flat /v1/tasks
+  # route pins the Default project, so a project-strict read would miss every
+  # such session. `:shared_only` (no tenant resolved) stays fail-narrow. A plug,
+  # not a call from the receipt body: see `BarkparkWeb.SessionAutolog`.
+  plug(:arm_session_autolog when action in [:close])
+
+  defp arm_session_autolog(conn, _opts),
+    do: BarkparkWeb.SessionAutolog.arm(conn, &Keyword.take(scope_opts(&1), [:workspace_id]))
+
   # ─── GET /v1/tasks/ready ────────────────────────────────────────────────
 
   # task-e1b74c19174cb2c1: the `filter[...]` container is PARSED here too, and
@@ -334,6 +347,15 @@ defmodule BarkparkWeb.TasksController do
           &Params.render_brief(&1, child_counts, live_child_counts, live_parents)
         )
 
+      # task-1ca34359dc0805df: `?view=board` runs the SAME two queries and the
+      # SAME builder as `:full` — it differs only in the `content` key being
+      # deleted from each card, so no count, no ordering and no other field can
+      # drift between the default view and the board's.
+      :board ->
+        counts = Params.batch_edge_counts(docs)
+        child_counts = Params.batch_child_counts(docs, scope_opts(conn))
+        Enum.map(docs, &Params.render_board_with_counts(&1, counts, child_counts))
+
       :full ->
         counts = Params.batch_edge_counts(docs)
         # task-3e0eda896a247776: the SAME batched grouped query the brief card
@@ -404,11 +426,19 @@ defmodule BarkparkWeb.TasksController do
 
             {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
 
-          :full ->
+          # task-1ca34359dc0805df: prime honours `?view=board` on the same terms
+          # the index does — the full card minus the `content` echo. Prime's
+          # `?view=` stays LENIENT (an undeclared value is still `:full`); only
+          # the index fail-closes the value, see `Params.parse_index_view/1`.
+          full_or_board when full_or_board in [:full, :board] ->
             counts = Params.batch_edge_counts(sealed_in_progress ++ sealed_ready)
             child_counts = Params.batch_child_counts(sealed_in_progress ++ sealed_ready, scope)
 
-            render = &Params.render_doc_with_counts(&1, counts, child_counts)
+            render =
+              case full_or_board do
+                :board -> &Params.render_board_with_counts(&1, counts, child_counts)
+                :full -> &Params.render_doc_with_counts(&1, counts, child_counts)
+              end
 
             {Enum.map(sealed_in_progress, render), Enum.map(sealed_ready, render)}
         end
@@ -552,8 +582,17 @@ defmodule BarkparkWeb.TasksController do
     # fail-closed by #12780 while the top level stayed fail-OPEN, so
     # `?parent_id=X` and `?bogus=1` both returned a 200 carrying the UNFILTERED
     # page — a false confirmation, not a missing feature.
+    # task-1ca34359dc0805df: the `?view=` VALUE is fail-closed on this route,
+    # beside the flat-namespace and filter-container doors above. The flat key
+    # `view` was already accepted; its value was not checked, so `?view=boad`
+    # fell back to the default and served the whole `content` echo — ~11 MB per
+    # page on the live ledger — behind a 200 the caller cannot tell from the
+    # cheap answer it asked for. That silent-expensive-fallback IS the defect
+    # class `view=board` exists to close, so the refusal ships with it.
+    # `Params.parse_index_view/1` documents why ready/prime stay lenient.
     with :ok <- Params.reject_unknown_flat_params(params, :index),
-         {:ok, filters} <- Params.parse_index_filters(params) do
+         {:ok, filters} <- Params.parse_index_filters(params),
+         {:ok, _view} <- Params.parse_index_view(params) do
       # cchi-bl-task-get-needs-a-server-side-prefix-lookup: `id_prefix` is the
       # one narrowing that answers with a DIFFERENT, lean body (doc_id + title),
       # so it branches here rather than composing as another where-clause below.
@@ -573,8 +612,31 @@ defmodule BarkparkWeb.TasksController do
           end
       end
     else
+      {:error, {:unknown_view, value}} -> unknown_view(conn, value)
       {:error, reason} -> invalid_filter(conn, reason)
     end
+  end
+
+  # An undeclared `?view=` on the index (task-1ca34359dc0805df).
+  #
+  # Emitted through `BarkparkWeb.ErrorResponse` — the ONE emitter of the §9
+  # envelope `{"error":{"code","message","request_id"}}` — so the refusal is
+  # correlatable to a log line, not another hand-built body. The code is the
+  # ALREADY-DECLARED `invalid_filter` (`Barkpark.Content.Errors`), because this
+  # IS a refused query narrowing and inventing a code would add a variant the
+  # public `Error.code` enum, the OpenAPI document and every generated SDK have
+  # never been told about (`error_code_coverage_test.exs` guards exactly that).
+  # The machine-readable half rides `details`: the param, what was sent, and
+  # the accepted set — so a client branches without parsing prose.
+  defp unknown_view(conn, value) do
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      :bad_request,
+      "invalid_filter",
+      "view must be one of #{Enum.join(Params.views(), ", ")}; got #{inspect(value)}",
+      %{param: "view", value: value, accepted: Params.views()},
+      "Drop ?view= for the default full card, ?view=board for the full card without the content echo, or ?view=brief for the agent list card."
+    )
   end
 
   # ─── GET /v1/tasks?id_prefix=… ──────────────────────────────────────────
@@ -1449,6 +1511,15 @@ defmodule BarkparkWeb.TasksController do
           )
 
         {:ok, %Document{} = doc, :closed} ->
+          # Session auto-log (task-bc34e83515bbd91f): the close has COMMITTED.
+          # `mark/3` writes nothing — the `arm_session_autolog` plug's
+          # before_send callback appends, best-effort, on the 2xx below.
+          conn =
+            BarkparkWeb.SessionAutolog.mark(conn, "task-closed", %{
+              "ref" => doc.doc_id,
+              "note" => get_in(doc.content || %{}, ["lifecycle_status"])
+            })
+
           # Graduated enforcement (living-values §12): unmet criteria are
           # SURFACED as a soft warning on the (already successful) close —
           # never a gate (close_response below, shipped with lvw-t6).
@@ -1900,6 +1971,19 @@ defmodule BarkparkWeb.TasksController do
   #                                          withdrawals[] record appended. On a
   #                                          row with no claim it also needs
   #                                          observed_rev=<the rev you read>.
+  #   amend=true    + amended_criterion=<non-empty> + note=<non-empty>
+  #                                        → CORRECT THE WORDING
+  #                                          (task-a1df012e89b1e289): the
+  #                                          criterion text is replaced, the
+  #                                          superseded sentence is preserved on
+  #                                          a signed amendments[] record, and
+  #                                          met/evidence are PINNED. The brief's
+  #                                          criteria-list mirror is re-derived in
+  #                                          the SAME rev-fenced write, so both
+  #                                          surfaces move or neither does. Same
+  #                                          fence as withdraw: holder+epoch on an
+  #                                          in_progress row, observed_rev on any
+  #                                          other.
   # doc_id resolves via find_task_by_doc_id (close's pattern) and the
   # primitive locks task:<uuid> — the close family, serialized with close over
   # the same criteria. Progress is advisory: the response is the fresh doc
@@ -2667,7 +2751,9 @@ defmodule BarkparkWeb.TasksController do
   # lengthen every derivation, which crosses the TTL more often. Fail-open in
   # the only regime where the cap matters. The deadline arm is now GONE; the
   # deadline itself stays on the row as diagnostic data.
-  @graph_corpus_slots :barkpark_graph_corpus_slots
+  # The table itself is CORE (`Barkpark.Content.Graph.CorpusSlots`), created at
+  # boot by `Barkpark.Application.start/2` so it exists with every plugin off.
+  @graph_corpus_slots Barkpark.Content.Graph.CorpusSlots.table()
   @graph_corpus_max_concurrency 4
   @graph_corpus_slot_ttl_ms 60_000
 
@@ -3032,7 +3118,8 @@ defmodule BarkparkWeb.TasksController do
 
   defp acquire_graph_corpus_slot do
     # NO lazy `:ets.new` here. The table is created once from
-    # `Barkpark.Application.start/2`; a request-path create would hand ownership
+    # `Barkpark.Application.start/2` via the core
+    # `Barkpark.Content.Graph.CorpusSlots.init/0`; a request-path create would hand ownership
     # of the bound to a transient request process, and the bound would die (and
     # silently RESET) with it. If the table is somehow absent the `rescue` below
     # sheds rather than 500s.
@@ -3156,33 +3243,6 @@ defmodule BarkparkWeb.TasksController do
     end
 
     :ok
-  end
-
-  @doc """
-  Create the `/v1/graph` admission-cap slot table, owned by the caller.
-
-  Called ONCE from `Barkpark.Application.start/2` so the table's owner is the
-  application process rather than whichever request happened to arrive first —
-  a bound whose bookkeeping dies with a request is not a bound. Idempotent: a
-  second call (a re-boot in the test VM) is a no-op, and the rows are slots, so
-  nothing is lost by NOT clearing them.
-  """
-  def init_graph_corpus_slots, do: ensure_graph_corpus_slots()
-
-  defp ensure_graph_corpus_slots do
-    case :ets.whereis(@graph_corpus_slots) do
-      :undefined ->
-        try do
-          :ets.new(@graph_corpus_slots, [:named_table, :public, :set, read_concurrency: true])
-        rescue
-          # Lost the create race to a concurrent boot (the test VM re-starts the
-          # supervision tree) — the table exists, which is all this needs.
-          ArgumentError -> :ok
-        end
-
-      _ref ->
-        :ok
-    end
   end
 
   defp graph_corpus_max_concurrency,
@@ -3851,6 +3911,13 @@ defmodule BarkparkWeb.TasksController do
           conn,
           "invalid_capacity",
           "capacity must be a free-form string or an object with size_class (light | standard | heavy | xl), non-negative slots_total/slots_free (slots_free <= slots_total), and an optional non-negative budget"
+        )
+
+      {:error, :invalid_feed} ->
+        unprocessable(
+          conn,
+          "invalid_feed",
+          "feed must be one of: " <> Enum.join(Fleet.feeds(), " | ")
         )
 
       {:error, :stale_beat} ->

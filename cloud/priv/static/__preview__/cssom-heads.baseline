@@ -305,6 +305,32 @@
 # only heads is quoting half the instrument), MISSES 0, PARITY PASS.
 # THE THREE NEW SELECTORS ARE THE THREE NEW FLATTENED ONES: 1218 -> 1221, one selector
 # per head, because none of the three rule heads is a selector list.
+# ^ SUPERSEDED 2026-09-24 (task-13f830a9c36314e0): the two lines above are the original
+# record, kept verbatim, and they are WRONG. The correction:
+# CORRECTION — THIS SLICE MOVED FLATTENED BY ZERO; 1218 -> 1221 IS W18-S1'S. The
+# flattened census is DISTINCT selectors, not one per head: authoredIndex() in
+# cssom-parity.mjs keys its `authored` Map by normalise()d selector (each head
+# splitGroup()-flattened first) and a repeat only bumps that entry's count — re-derive
+# with `grep -n 'const authored = new Map' cssom-parity.mjs`. All three of this
+# slice's selectors were already authored before its block (`grep -nE '^\.topbar
+# [{]|^\.billing-chip [{]' app.css`; `.topbar-right` sits inside an existing selector
+# list that splitGroup() flattens), so a scoped re-declaration of an existing selector
+# is +1 HEAD and +0 FLATTENED — the same signature W20-S8 below records for `.topbar`.
+# MEASURED, not argued: each commit's OWN cssom-parity.mjs run on its OWN app.css and
+# sidecar (Chrome 153.0.8010.53, node v22.22.0; every run exit 0, CSSOM == authored
+# on both halves, MISSES 0), first-parent — every commit between the W16-S8 reading
+# and this one that touched app.css (the two parents not listed measure identically
+# to the row above them):
+#   cee6024ab (W16-S8's parent)            heads 1253  flattened 1218
+#   626466a0c #8851 W16-S8                 heads 1252  flattened 1218
+#   e3f47c585 #8888 W18-S1                 heads 1256  flattened 1221   <- +3 HERE
+#   87e8726c4 #8945 W19-S2 (this entry)    heads 1259  flattened 1221   (+0)
+# The three distinct selectors W18-S1 added (authoredIndex() key diff between
+# e3f47c585's parent and e3f47c585): `.instance-card-head .status-pill`,
+# `.instance-card-head .status-pill-dot`, `.instance-card-head .status-pill-detail` —
+# its fourth head re-declares `.instance-card-head` and adds no selector, so W18-S1
+# is 4 heads / 3 flattened. The W18-S1 entry recorded heads only, which is how the
+# +3 went unattributed until this slice's reading claimed it.
 # FOR THE LEAD: this slice is the wave's SOLE holder of this file in round 1 (D202).
 # A round-2 or round-3 app.css slice WILL collide here, and D158 stands: re-run the tool
 # on the MERGED tree and take what it prints. Never merge-resolve this number, never add
@@ -682,7 +708,89 @@
 # ("1332 authored rule heads, sidecar baseline is 1331"), never by adding one, and
 # re-run AFTER the final rebase onto origin/main — a baseline shot before the last
 # rebase is stale on arrival and reds the merge nobody re-ran.
-1332
+# cch-r21l pill-families 2026-09-20 (console/r21l-pill-families, task-c74cf3120f6bca69):
+# 1332 -> 1329, -3 authored rule heads, ZERO added. `.inst-life-pill`, `.inst-life-dot`
+# and `.inst-life-label` are RETIRED: the instance lifecycle chip was a second grammar
+# for the state the fleet row already paints through statusMetaPill, and it is absorbed
+# into `.status-pill` + a LIFECYCLE_PILL_ROLE role (see the tombstone in app.css and
+# __css_check E13 arms (f)/(g), which now red BY NAME if any of the three comes back as
+# a rule or as a class literal).
+# NOT arithmetic. 1329 is the return of cssom-parity.mjs's own exported
+# `authoredHeads(app.css).length` run on this branch; the SAME call on origin/main's
+# app.css returned 1332, matching the baseline it replaces, and that control is what
+# says the -3 is this diff and not a resolver difference. The multiset diff of the two
+# head lists is exactly [.inst-life-pill, .inst-life-dot, .inst-life-label] removed and
+# NOTHING added.
+# MISSES is not re-measured here (it needs a browser) and nothing in this diff adds a
+# construct the CSSOM parses differently from the authored text: every head removed is
+# a plain class selector in the top-level cascade, and none is added.
+# Re-measured 2026-09-21 (task-4f071458f1c59358, the member instance header's title
+# floor): 1329 -> 1331, +2 authored rule heads, ZERO removed. Both are inside ONE new
+# `@media (min-width: 900px)` block above the existing 899 stack:
+# `.detail-head--inst .detail-head-main` and `.detail-head--inst .detail-actions`.
+# MISSES 0 in the same run, which is what makes this an unrecorded ADD rather than a
+# parity defect — the distinction the ratchet's own failure text tells you to confirm
+# before bumping.
+# NOT arithmetic — and this entry is the second measurement, not the first: the branch
+# was cut when the baseline read 1332 and recorded 1334, then the pill-families retirement
+# above landed 1332 -> 1329 underneath it. The rebase conflict was resolved by RE-RUNNING
+# the instrument on the rebased tree, never by re-adding 2 to the new floor. 1331 is the
+# return of cssom-parity.mjs's own exported `authoredHeads(app.css).length` on this branch;
+# the SAME call on origin/main's app.css returned 1329, matching the baseline it replaces,
+# and that control is what says the +2 is this diff and not a resolver difference. The
+# multiset diff of the two head lists is exactly [.detail-head--inst .detail-head-main,
+# .detail-head--inst .detail-actions] ADDED and NOTHING removed.
+#
+# Re-measured 2026-09-22 (pdf-bl-fleet-group-view, the PDF-D11 group surface):
+# 1331 -> 1357, +26 authored rule heads, ZERO removed. All 26 are the `.group-*`
+# block appended at the tail of app.css: .group-view / -head / -title / -detail /
+# -empty, the .group-state badge plus its EIGHT static state modifiers (empty,
+# roster-conflict, blocked, offline, provisioning, cap-hit, working and the unreachable-
+# today `unknown` else arm, which __css_check E2 requires painted because app.js
+# emits its literal), .group-table / .group-row / .group-row--head / .group-cell
+# and its five column modifiers incl. .group-cell--name:hover, and the two
+# re-declarations inside the `max-width: 899px` block.
+# NOT arithmetic. 1357 is the return of cssom-parity.mjs's own exported
+# `authoredHeads(app.css).length` run on this branch; the SAME call on
+# origin/main's app.css returned 1331, matching the baseline it replaces, and
+# that control is what says the +26 is this diff and not a resolver difference.
+# A head-by-head multiset diff against origin/main lists exactly those 26 as
+# ADDED and ZERO as REMOVED.
+# The instrument reported the mismatch with MISSES 0, which is the distinction
+# its own failure text tells you to confirm before bumping: an unrecorded ADD,
+# not a parity defect. MISSES is not re-measured here (it needs a browser) and
+# nothing in this diff adds a construct the CSSOM parses differently from the
+# authored text — every added head is a plain class selector, one of them with a
+# :hover pseudo-class, two of them inside an existing-shape media block.
+# 1357 -> 1358, +1 authored rule head, pdf-bl-fleet-group-route: `.group-others`,
+# the muted sentence the routed PDF-D11 group panel prints under its table when the
+# roster carries a listener row no support of this main accounts for. ONE plain class
+# selector in the top-level cascade — no media query, no nesting, nothing the CSSOM
+# parses differently from the authored text.
+# NOT arithmetic: 1358 is what cssom-parity.mjs PRINTED on this branch ("1358 authored
+# rule heads, sidecar baseline is 1357 (+1)") with MISSES 0, which is what makes this
+# an unrecorded ADD rather than a parity defect — the distinction the ratchet's own
+# failure text says to confirm before bumping.
+#
+# 1358 -> 1359, +1 authored rule head, console-w28 (the Cloudflare connection card
+# and its account echo): `.brand-cloudflare`, the picker/roster tile for the third
+# CONNECTABLE provider kind. ONE plain class selector in the top-level cascade — no
+# media query, no nesting, nothing the CSSOM parses differently from the authored
+# text, and it carries a RAW HEX rather than a `--provider-*` token: a token row would
+# have to live in design/tokens.json's `color.provider` family, which also emits
+# GenProviderMark into the Go CLI chrome, and Cloudflare has no CLI glyph and no fleet
+# chip. A first pass DID hand-write `--provider-cloudflare` into this file's GENERATED
+# token block; design/emit-fence.test.mjs refused it (`emit --check` printed
+# `DRIFT cloud SPA`) and the hue moved to __css_check's ALLOW_RAW_COLORS beside
+# .brand-do / .brand-aws / .brand-vultr. The wave's other app.css edit adds NO head
+# either: `flex-wrap: wrap` is a declaration added to the existing
+# `.prov-connect-picker` rule (the 9px page overflow overflow-guard.mjs found at 320px
+# once the picker held three segments).
+# NOT arithmetic: 1359 is what cssom-parity.mjs PRINTED on this branch ("1359 authored
+# rule heads, sidecar baseline is 1358 (+1)") against Chrome 153.0.8010.53 / node
+# v22.22.0, with MISSES 0 and MULTISET DEFICITS 0 — which is what makes this an
+# unrecorded ADD rather than a parity defect.
+1365
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
@@ -790,3 +898,26 @@
 # MISSES is not re-measured here (it needs a browser) and nothing in this diff adds a
 # construct the CSSOM parses differently from the authored text: every head removed is
 # a plain class selector in the top-level cascade, and none is added.
+
+# cch-bl-scroll-driven-cue-firefox-fallback 2026-09-22 (console-w34-firefox-cue):
+# 1359 -> 1363, +4 authored rule heads, ZERO removed. The console's two horizontal
+# edge cues are `animation-timeline: scroll(self inline)`, which Firefox does not
+# ship — DRIVEN on Firefox 156.0.1 over WebDriver BiDi: `--set-matrix-fade` computes
+# 0px at 768/430/390 with the matrix clipped 520 vs 446/356/316, `--archive-cli-fade`
+# 0px at 390/430 with the chip clipped 367 vs 290/330. The +4 are ONE `@supports not
+# (animation-timeline: scroll())` block's inner rules — `.set-matrix`,
+# `.set-matrix.is-matrix-clipped`, `.archive-resurrect .cli-chip-code` and
+# `.archive-resurrect .cli-chip-code.is-cli-clipped`. The `@supports` head itself
+# contributes ZERO by design: it is in cssom-parity's GROUPING_AT set, so the parser
+# descends into it and the CSSOM walk does the same — the first `@supports` in this
+# file, and that symmetry is why the delta is 4 and not 5.
+# NOT arithmetic: 1363 is what cssom-parity.mjs PRINTED on this branch ("1363 authored
+# rule heads, sidecar baseline is 1359 (+4)") with MISSES 0 and MULTISET DEFICITS 0,
+# which is what makes this an unrecorded ADD rather than a parity defect.
+# task-db582d05e675115d 2026-09-24 (console-w23 db58-ff-cue): 1363 -> 1365, +2
+# authored rule heads, ZERO removed. #20103 gave `nav.inst-tabs` the same
+# scroll-driven edge fade (`--inst-tabs-fade`), so the no-timeline fallback block
+# gains `.inst-tabs` (animation-name: none) and `.inst-tabs.is-tabs-clipped`
+# (the 32px `from` keyframe), keyed on the class app.js's EDGE_CUES table measures.
+# NOT arithmetic: 1365 is what cssom-parity.mjs PRINTED on this branch ("1365 authored
+# rule heads, sidecar baseline is 1363 (+2)") with MISSES 0 and MULTISET DEFICITS 0.

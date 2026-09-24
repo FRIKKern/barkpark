@@ -47,13 +47,20 @@ defmodule Barkpark.Sites.PrebuiltArtifactCodeCensusTest do
     internal = PrebuiltArtifact.internal_failure_codes()
 
     assert length(caller) > 0
-    assert length(internal) == 3
     assert MapSet.disjoint?(MapSet.new(caller), MapSet.new(internal))
     assert length(caller) + length(internal) == length(PrebuiltArtifact.codes())
+
+    # The box-side half WRITTEN OUT rather than counted. A bare `length == N` is
+    # satisfied by swapping one code for another, which is the exact drift this
+    # file exists to catch; and a loop over `internal_failure_codes/0` asserting
+    # `internal_failure?/1` would be reading the answer back out of the thing
+    # under test. So: the literal set, and a reason is owed for every edit to it.
+    assert Enum.sort(internal) ==
+             ~w(E_EXTRACT_EXHAUSTED E_STAGING_FAILED E_SWAP_FAILED E_WRITE_FAILED)
   end
 
-  test "internal_failure?/1 answers for the three box-side codes and NOT for the refusals" do
-    for code <- ~w(E_STAGING_FAILED E_SWAP_FAILED E_WRITE_FAILED) do
+  test "internal_failure?/1 answers for the box-side codes and NOT for the refusals" do
+    for code <- ~w(E_EXTRACT_EXHAUSTED E_STAGING_FAILED E_SWAP_FAILED E_WRITE_FAILED) do
       assert PrebuiltArtifact.internal_failure?(code), "#{code} must be a BOX fault"
     end
 

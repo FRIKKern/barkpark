@@ -76,6 +76,19 @@ await check("hovering the link shows its host and address; Edit shows in edit mo
   canvas.remove();
 });
 
+await check("the body portal follows the hovered paper theme on each opening", async () => {
+  const { canvas, a } = await mount();
+  a.style.setProperty("--paper-ink", "#123456");
+  a.style.setProperty("--paper-chrome-bg", "#f0f1f2");
+  canvas._linkPreview.showFor(a);
+  assert.equal(canvas._linkPreview.el.style.getPropertyValue("--paper-ink"), "#123456");
+  assert.equal(canvas._linkPreview.el.style.getPropertyValue("--paper-chrome-bg"), "#f0f1f2");
+  a.style.setProperty("--paper-ink", "#fedcba");
+  canvas._linkPreview.showFor(a);
+  assert.equal(canvas._linkPreview.el.style.getPropertyValue("--paper-ink"), "#fedcba");
+  canvas.remove();
+});
+
 await check("hovering the wikilink shows [[target]] at once, then the resolved title and first line", async () => {
   const { canvas, w } = await mount();
   const lp = canvas._linkPreview;

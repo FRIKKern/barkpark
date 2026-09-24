@@ -218,7 +218,7 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   }
 
   # The card's FIXED render order (mirrors the PRIVATE slot order in
-  # `Components.card_html/2`, components.ex:355-358). The projection derives the
+  # `Components.card_html/2`). The projection derives the
   # PRESENT slots by filtering this order to the slots the card actually carries
   # (read through `Slots.slot_elements`, the SAME accessor the emitter recurses),
   # so the ordered slot list is a STRUCTURAL render contract — a reorder in the

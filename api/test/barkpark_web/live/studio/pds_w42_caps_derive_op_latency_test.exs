@@ -37,6 +37,15 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
   decision: the marginal cost this row was filed to price is ONE derive, and on
   the EVENT route the second derive is the pre-existing gate, not this fix.
 
+  AND THE COMPONENT-ROUTE PIN BELOW READS 2, WHICH IS NOT A CONTRADICTION —
+  it is the trap. "1 per op" is the per-OP rate above; the pin is a WINDOW
+  total, and the component-route window below holds TWO `render_hook/3` calls,
+  hence two ops, hence two gates. Read as a duplicate inside one op it produced
+  task-c6e13ed8b2729bb4, a proposal to delete one of the two. The per-op
+  decomposition that refutes it — each hook measured alone — is
+  `pds_w42_component_route_op_decomposition_test.exs`, which also pins that the
+  first of those two ops is a write seam a denied principal reaches ALONE.
+
   ## THE PRICE, and why no millisecond is asserted (PDS-D633 / PDS-D656)
 
   `:erlang.statistics(:runtime)` is VM-GLOBAL: blind to port children, blind to
@@ -85,6 +94,28 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
   # editor enters the write seam twice per field commit (`inner-change`, then
   # `inner-flush`), and it has no socket gate at all — that blindness is the
   # bypass `pds_w42_paper_op_principal_gate_test.exs` was filed to close.
+  #
+  # `@write_denied_per_component_op` STAYS AT 2 — task-c6e13ed8b2729bb4, which
+  # was filed to take it to 1. RE-MEASURED on origin/main at 170e1af81 by this
+  # very file (`derives per COMPONENT-route paper op: 2`, 3 tests / 0 failures)
+  # and then DECOMPOSED, because a count taken over a window says nothing about
+  # what is inside it. This window spans TWO `render_hook/3` calls, and
+  # `pds_w42_component_route_op_decomposition_test.exs` runs them ONE AT A TIME:
+  # a lone `inner-change` prices at 1 derive / 1 `write_denied?`, and so does a
+  # lone `inner-flush`. So the 2 is 1 + 1 ACROSS TWO OPS — each op's own gate on
+  # its own trip to `Content.apply_paper_block_op/4` — and NOT a duplicate
+  # inside one. THERE IS NOTHING TO COLLAPSE, and the measured saving from
+  # collapsing is 0%, not the ~50% the filing predicted.
+  #
+  # The filing named the disqualifying check itself: "verify by run that
+  # inner-change is not itself a write seam a denied principal could reach
+  # independently". It is. A lone `inner-change` — what every keystroke in a
+  # composite field emits, `phx-change="inner-change"` on the form — moves the
+  # store on its own, and a write-denied principal is refused AT THAT ENTRY with
+  # no flush involved. Both directions are pinned in the decomposition file.
+  # Deleting either gate is a real bypass: with the first removed, `ESCALATED`
+  # lands for a read-only token; with the second removed, a token downgraded
+  # BETWEEN the two ops still writes on the flush.
   @derives_per_component_op 2
   @derives_per_event_op 2
   @write_denied_per_component_op 2
@@ -140,7 +171,14 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
     # A WRITE-capable api token. The denial path short-circuits before the
     # write, so a denied principal would price the CHEAP arm; the cost this row
     # asks about is the one a real editor pays.
-    {:ok, _} = Auth.create_token(@writer, "pds w42 latency", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @writer,
+        "pds w42 latency",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     :ok
   end
@@ -217,13 +255,74 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
 
     try do
       fun.()
-      # Force the view to drain its mailbox: the component route writes in a
-      # LATER handle_info, and counting before that drains reports a false 0.
-      :sys.get_state(view_pid)
+      # Drain the view's mailbox before counting: the component route writes in
+      # a LATER handle_info, and counting before that drains reports a false 0.
+      #
+      # This was ONE `:sys.get_state(view_pid)` until task-97bb0fb9c044192f. A
+      # `:sys.get_state` — like `Phoenix.LiveViewTest.render/1`, which resolves
+      # to a single `GenServer.call(pid, {:phoenix, :ping})`
+      # (deps/phoenix_live_view/lib/phoenix_live_view/channel.ex:53-55) — is ONE
+      # BARRIER, NOT A DRAIN. It orders itself only against messages ALREADY in
+      # the mailbox when it arrives, and says nothing about messages the
+      # LiveView enqueues TO ITSELF while handling the current one. CH-PAPEROP
+      # does exactly that: `PaperFieldBlock.persist/4` runs
+      # `send(self(), {:paper_op, ...})` from inside `handle_event`
+      # (paper_field_block.ex:350/352), so every op under measurement lands a
+      # generation LATER than the hook that caused it.
+      #
+      # Measured on this file at bd804ca23: with BOTH in-window barriers removed
+      # (this call and the tail `render(view)` in the component-route test) the
+      # site reds 8 of 10 — and it reds on the DERIVE COUNT, not on the store:
+      # `assert n == @derives_per_component_op` / `left: 1, right: 2`. The
+      # direct SELECT that follows is slow enough to let the write land, but the
+      # trace has already been drained. So the quantity a missed generation
+      # destroys here is the count this file exists to publish.
+      settle!(view_pid)
       drain_calls(%{})
     after
       :erlang.trace(view_pid, false, [:call])
       for mfa <- @probed, do: :erlang.trace_pattern(mfa, false, [:local])
+    end
+  end
+
+  # Barrier until the LiveView has nothing queued on two consecutive readings.
+  # One empty reading can be the window between a message arriving and the
+  # process dequeuing it; two, with a full barrier in between, cannot be the
+  # middle of a self-send chain — every generation here is enqueued BEFORE the
+  # barrier that precedes it is answered. Each iteration strictly advances the
+  # chain, so it terminates; the fuel only turns a hang into a named failure.
+  #
+  # The barrier is `:sys.get_state/1` and DELIBERATELY NOT `render/1`, and it is
+  # for the same reason this test hoisted `rev = paper_rev(view)` ABOVE its two
+  # `render_hook` calls: everything inside this window is COUNTED. `render/1`
+  # re-renders the LiveView and its components, which can itself reach a probed
+  # function and inflate the number the caller is measuring; `:sys.get_state/1`
+  # is a gen_server system message that calls none of `@probed`, so looping it
+  # adds exactly zero to every counter. A settle that changed the count would
+  # have loosened the measurement rather than protected it.
+  #
+  # Re-introducing `paper_rev(view)` between the hooks would NOT be an
+  # acceptable substitute: `paper_rev/1` is `:sys.get_state(view.pid)` reached
+  # through `socket_of/1`, i.e. a derive-window call placed at exactly the point
+  # the hoist removed it from — a barrier bought by corrupting the measurement.
+  defp settle!(view_pid, quiet \\ 0, fuel \\ 50)
+
+  defp settle!(_view_pid, 2, _fuel), do: :ok
+
+  defp settle!(_view_pid, _quiet, 0) do
+    flunk("""
+    the LiveView never went quiet inside derives_during/2: 50 :sys.get_state/1 \
+    barriers and its mailbox was still non-empty. Either a door under \
+    measurement grew a repeating self-message, or the process is wedged.
+    """)
+  end
+
+  defp settle!(view_pid, quiet, fuel) do
+    :sys.get_state(view_pid)
+
+    case :erlang.process_info(view_pid, :message_queue_len) do
+      {:message_queue_len, 0} -> settle!(view_pid, quiet + 1, fuel - 1)
+      _ -> settle!(view_pid, 0, fuel - 1)
     end
   end
 
@@ -274,7 +373,7 @@ defmodule BarkparkWeb.Studio.PdsW42CapsDeriveOpLatencyTest do
   # ── 1. HOW MANY derives does one op cost? ───────────────────────────────────
 
   describe "derive/1 calls per paper write op, counted by trace on the live socket" do
-    test "the component route (handle_info → paper_pane_op/2) costs exactly one derive",
+    test "the component route (handle_info → paper_pane_op/2) costs two derives: one per op, and this window holds two ops",
          %{conn: conn} do
       System.put_env("BARKPARK_PAPER_CANVAS", "0")
       slug = "pds-w42-lat-component"

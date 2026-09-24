@@ -372,17 +372,12 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   specs ride this same UI under a "Plugins" sidebar category seeded by
   `Barkpark.ApiTester.Endpoints.all/1`.
 
-  The `:nav_section` assign is preserved for backwards compatibility
-  but no longer drives active-state — `default_top_menu_entries/4`'s
-  `:active_when` rules cover the same routes.
-
   Caller wraps with `:if={assigns[:dataset]}` — the component itself
   does NOT guard, so an empty `<div class="studio-bar-tabs">` does not
   leak into the topbar when no dataset is set.
   """
   attr :dataset, :string, required: true
   attr :scope_prefix, :string, default: ""
-  attr :nav_section, :atom, default: nil
   attr :current_path, :string, default: nil
   attr :admin?, :boolean, default: false
   attr :workspace_id, :string, default: nil
@@ -435,14 +430,32 @@ defmodule BarkparkWeb.StudioComponents.Nav do
               dev/prod while RAISING in :test, and a truthy non-binary
               (`:folder || "file"` is `:folder`) did the same. Both shapes
               collapse here, at the call site, where "file" is a decision. --%>
-        <a
-          href={tab.path}
-          class={"studio-tab #{if active, do: "active"}"}
-          aria-current={if active, do: "page"}
-          title={tab.label}
-          aria-label={tab.label}
-          data-test-id="top-menu-tab"
-        ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></a>
+        <%!-- task-e34595f816cd4bd2: a tab the current workspace does not
+              surface, but another workspace does, arrives carrying
+              `disabled: true` + `reason`. It renders as a NON-link — a
+              <span>, no href, aria-disabled — so it cannot navigate, and the
+              reason rides the same title/aria-label channel the enabled tab
+              uses for its label. Anything without the flag renders exactly as
+              before. --%>
+        <%= if tab[:disabled] do %>
+          <span
+            class="studio-tab studio-tab-disabled"
+            aria-disabled="true"
+            style="opacity:0.45;cursor:not-allowed;"
+            title={"#{tab.label} — #{tab[:reason] || "Disabled in this workspace"}"}
+            aria-label={"#{tab.label} — #{tab[:reason] || "Disabled in this workspace"}"}
+            data-test-id="top-menu-tab-disabled"
+          ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></span>
+        <% else %>
+          <a
+            href={tab.path}
+            class={"studio-tab #{if active, do: "active"}"}
+            aria-current={if active, do: "page"}
+            title={tab.label}
+            aria-label={tab.label}
+            data-test-id="top-menu-tab"
+          ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></a>
+        <% end %>
       <% end %>
     </div>
     """
@@ -719,8 +732,9 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   def plugin_tab_active?(_tab, _current_path), do: false
 
   @doc """
-  Studio topbar wrapper. Emits the canonical `<div class="studio-bar">`
-  shell and renders three slots in order: `:brand` (single, optional),
+  Studio topbar wrapper. Emits the canonical `.studio-bar` shell — as
+  `<div class="studio-bar" id="studio-bar" phx-hook="PressAnswer">`, see below —
+  and renders three slots in order: `:brand` (single, optional),
   `:tabs` (single, optional), `:actions` (multi, optional).
 
   Each slot is rendered verbatim — slot content is responsible for its
@@ -731,6 +745,22 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   Callers use `:if=` on each slot invocation to gate rendering — e.g.
   `<:actions :if={assigns[:api_token]}>…</:actions>`. This avoids
   empty-wrapper leak when the gate is false.
+
+  ## Why this element carries `phx-hook="PressAnswer"`
+
+  This bar is the ONE piece of Studio chrome every Studio route renders inside
+  its LiveView root, so it is where the press answer (`#bp-press-answer`,
+  spd-w19 / charter D263) mounts. The hook used to ride `#studio-panes` via
+  `WidthBucket`, and `#studio-panes` is rendered by StudioLive's desk alone —
+  so on `…/studio/media` and `…/studio/api-tester`, which are their own
+  LiveViews, nothing installed the listener while the region and this whole bar
+  were served in full. Measured on deployed guerrilla (served `e02e4296d`) by
+  enumerating `phx-hook` on the authenticated served bodies: the desk reports
+  four hooks including `WidthBucket#studio-panes`, media and api-tester report
+  `ThemeToggle#studio-theme-toggle` and nothing else, and all three serve
+  exactly one `.studio-bar` with 10 `.studio-tab` anchors in it.
+
+  The `id` is required because LiveView refuses a `phx-hook` without one.
   """
   slot :brand
   slot :tabs
@@ -738,7 +768,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   def studio_topbar(assigns) do
     ~H"""
-    <div class="studio-bar">
+    <div class="studio-bar" id="studio-bar" phx-hook="PressAnswer">
       <%= render_slot(@brand) %>
       <%= render_slot(@tabs) %>
       <%= for a <- @actions do %><%= render_slot(a) %><% end %>

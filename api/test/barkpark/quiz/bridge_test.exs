@@ -75,6 +75,26 @@ defmodule Barkpark.Quiz.BridgeTest do
     assert Quiz.state(pin).question.prompt == "EDITED LIVE"
   end
 
+  test "a REAL publish reaches the Bridge over the Default workspace's keyed topic", %{
+    pin: pin,
+    qid: qid
+  } do
+    # task-b7e81f26e959106c: the global `documents:<dataset>` topic no longer
+    # announces a workspace-owned document in ANY shape, and a flat quiz write
+    # lands in the seeded Default workspace — so the Bridge only hears a quiz
+    # publish if it joined `documents:ws:<default>:<dataset>`. No hand-driven
+    # `{:document_changed, …}` here: the producer's real frame is the subject.
+    publish_quiz(qid, "Original?", [%{"id" => "a", "label" => "A"}])
+    Quiz.join(pin, "p1", "Alice")
+    Quiz.bind_quiz(pin, qid)
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin))
+
+    publish_quiz(qid, "EDITED FOR REAL", [%{"id" => "a", "label" => "A"}])
+
+    assert_receive {:quiz, ^pin, {:question_updated, %{prompt: "EDITED FOR REAL"}}}, 2000
+    assert Quiz.state(pin).question.prompt == "EDITED FOR REAL"
+  end
+
   test "the same quiz_id bound in two datasets does not cross-inject content", %{qid: qid} do
     Content.upsert_schema(
       %{

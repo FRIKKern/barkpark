@@ -39,20 +39,54 @@ defmodule BarkparkWeb.FinderCorpusQueryCostTest do
   the `:schemas` prefetch and the removed second document scan — real, but
   CONSTANT in the corpus size, which is why the assertion is the delta.
 
-  COUNTING METHOD: the Ecto telemetry event `[:barkpark, :repo, :query]` — the
-  same instrument `Barkpark.Content.EdgesTest` uses for the `/v1/graph` half of
-  this defect. It is attached for the duration of one mount and counts events
-  from ANY process, because `graph_payload/3` runs in a `start_async` Task and
-  a self()-filtered handler would count zero of the queries under test. That is
-  why this module is `async: false`: sync tests run alone, so no concurrent
-  ExUnit case can inflate the count. Query COUNT (not wall clock) is the
-  measure on purpose — this machine runs many agents and milliseconds are noise.
+  COUNTING METHOD: `Barkpark.QueryCounter` (test/support/query_counter.ex), the
+  shared LINEAGE-SCOPED census over the Ecto telemetry event
+  `[:barkpark, :repo, :query]`. Query COUNT (not wall clock) is the measure on
+  purpose — this machine runs many agents and milliseconds are noise.
+
+  ## The counter has a SUBJECT, not an ambient
+
+  This module used to attach its OWN handler and count the event from ANY
+  process in the VM. That is what made it a flaky REQUIRED gate: it reddened a
+  comment-only CSS diff on studio PR #19949 with `delta -> 1 (expected <= 0)`,
+  and a rebase carrying no change to this file turned it green.
+
+  `async: false` is kept, but it is NOT what makes the count safe, and an
+  earlier version of this note claimed it was. `async: false` fences sibling
+  ExUnit CASES. It fences nothing in the running OTP application — a
+  `StudioChat.BlockedSweeper` tick, an Oban plugin tick, a lingering
+  `start_async` Task from an EARLIER test's LiveView all keep issuing
+  statements inside the measured window, and each was +1 against a ZERO-slack
+  assertion guarding a +24 signal. The exposure is asymmetric toward false
+  positives, because the second window mounts twice the corpus and is strictly
+  longer than the first.
+
+  `QueryCounter` resolves OWNERSHIP instead: a statement counts only when its
+  issuing process is this test process, a pid named with `own/1` (the LiveView
+  serving the connected mount, see `mount_corpus/1`), or a process spawned by
+  either — `$callers` / `$ancestors`. A process the application supervisor
+  started at boot satisfies none of those and is excluded BY CONSTRUCTION. That
+  exclusion has its own permanent leak trap in `Barkpark.QueryCounterTest`:
+  a lineage-less `spawn/1` issues a real statement inside a measured window and
+  the census must not move, while a LiveView mount in the same window must be
+  counted.
+
+  A self()-ONLY filter would instead make THIS module vacuous, because
+  `graph_payload/3` runs inside the LiveView's `start_async` Task. Measured on
+  the fixture below, the 7 small-corpus statements split 1 (the test process) /
+  1 (the LiveView, `$callers` = [test]) / 5 (the async Task, `$callers` =
+  [view, test]) — the same 7 the old whole-application handler saw. The
+  measurement asserts that the count raised OUTSIDE the test process is
+  non-zero for exactly that reason: if ownership ever stops reaching the Task,
+  the count collapses toward zero, the delta assertion passes trivially, and
+  that control fails first and loudly instead.
   """
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content
+  alias Barkpark.QueryCounter
 
   @dataset "findercost"
   @type_name "findercostptr"
@@ -126,38 +160,34 @@ defmodule BarkparkWeb.FinderCorpusQueryCostTest do
     end
   end
 
-  # Count [:barkpark, :repo, :query] emissions raised by ANY process while
-  # `fun` runs. Cross-process on purpose: the corpus derivation runs inside the
-  # LiveView's `start_async` Task, not in the test process.
+  # Count the statements OWNED by this measurement while `fun` runs — the test
+  # process, the LiveView `mount_corpus/1` names with `QueryCounter.own/1`, and
+  # anything either of them spawned. Cross-process on purpose (the corpus
+  # derivation runs in the LiveView's `start_async` Task); application-wide
+  # never again (see the "SUBJECT, not an ambient" note above).
+  #
+  # Returns `%{total: n, outside_test_process: n}`. The second figure is the
+  # anti-vacuity control: it is the part of the count that proves the Task's own
+  # statements are still being seen.
   defp count_queries(fun) do
     test_pid = self()
-    handler_id = {:finder_cost_counter, System.unique_integer([:positive])}
+    {result, events} = QueryCounter.capture(fun)
 
-    :telemetry.attach(
-      handler_id,
-      [:barkpark, :repo, :query],
-      fn _event, _measurements, _meta, _config -> send(test_pid, :repo_query) end,
-      nil
-    )
-
-    try do
-      result = fun.()
-      {result, drain(0)}
-    after
-      :telemetry.detach(handler_id)
-    end
-  end
-
-  defp drain(n) do
-    receive do
-      :repo_query -> drain(n + 1)
-    after
-      0 -> n
-    end
+    {result,
+     %{
+       total: length(events),
+       outside_test_process: Enum.count(events, &(&1.pid != test_pid))
+     }}
   end
 
   defp mount_corpus(conn) do
     {:ok, view, _html} = live(conn, "/finder?dataset=#{@dataset}")
+
+    # The connected mount runs IN the LiveView process, which is where the
+    # corpus fold's `start_async` Task is spawned from. Naming it here is what
+    # keeps the measurement's subject whole.
+    QueryCounter.own(view.pid)
+
     render_async(view, 10_000)
   end
 
@@ -168,7 +198,7 @@ defmodule BarkparkWeb.FinderCorpusQueryCostTest do
 
       # CONTROL, the permit direction first: the corpus actually landed, so the
       # counts below are read off a real derivation and not off an empty page.
-      {html_small, small_queries} = count_queries(fn -> mount_corpus(conn) end)
+      {html_small, small} = count_queries(fn -> mount_corpus(conn) end)
 
       assert html_small =~ "fc-ptr-1",
              "the corpus payload is empty — the query counts measure nothing"
@@ -176,13 +206,32 @@ defmodule BarkparkWeb.FinderCorpusQueryCostTest do
       assert html_small =~ "fc-missing-1",
              "phantom (dangling-target) nodes are missing — the edge fold did not run"
 
+      # ANTI-VACUITY CONTROL, and the one that guards the ownership scoping:
+      # the corpus fold runs in the LiveView's `start_async` Task, so MOST of
+      # this count must come from outside the test process. Narrow ownership
+      # too far and this reads 0 — at which point the delta assertion below
+      # would be passing on a counter that sees nothing.
+      assert small.outside_test_process > 0,
+             """
+             the census owns NO statement outside the test process, so the
+             LiveView's `start_async` corpus fold is not being counted at all —
+             the delta assertion below would be vacuous:
+               total -> #{small.total}
+             """
+
       seed_pointers!(scope, @small + 1, @grow)
 
-      {html_grown, grown_queries} = count_queries(fn -> mount_corpus(conn) end)
+      {html_grown, grown} = count_queries(fn -> mount_corpus(conn) end)
 
       # CONTROL: the second mount really did derive the LARGER corpus.
       assert html_grown =~ "fc-ptr-#{@small + @grow}",
              "the grown corpus is missing its new documents — the delta measures nothing"
+
+      assert grown.outside_test_process > 0,
+             "the grown mount owns no out-of-test-process statement — see above"
+
+      small_queries = small.total
+      grown_queries = grown.total
 
       # THE MEASUREMENT. Every per-document DB round-trip is gone, so adding
       # @grow documents (2 * @grow reference values) adds ZERO queries.

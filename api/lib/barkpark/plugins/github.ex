@@ -173,6 +173,11 @@ defmodule Barkpark.Plugins.Github do
   at the settings gate keeps the failure honest and in front of the operator.
   """
   @impl Barkpark.Plugin
+  # `String.to_atom/1` is applied to `"github." <> key` where `key` comes from
+  # the module's compile-time `@required_creds` list — a fixed, finite set, so
+  # the atom table cannot grow. Inline rather than a line-pinned
+  # `.sobelow-skips` row, which would shift on any edit above the call.
+  # sobelow_skip ["DOS.StringToAtom"]
   def validate_settings(settings) when is_map(settings) do
     # A present-but-non-map `github` row (e.g. `%{"github" => "junk"}`) must
     # fail CLOSED, not crash: `Map.get(non_map, key)` raises BadMapError, and
@@ -387,6 +392,31 @@ defmodule Barkpark.Plugins.Github do
   @impl Barkpark.Plugin
   def register_workers(_ctx) do
     [Barkpark.Plugins.Github.Auth | drain_worker_child()]
+  end
+
+  @doc """
+  ONE `after_delete` hook: retire the mirror Issue of a HARD-DELETED task
+  (spd-b45-deleted-task-orphans-github-mirror).
+
+  The publish gate's `MirrorJob.retract/4` already closes the issue when a
+  mirrored task is UNPUBLISHED — that arm can read `content.github` off the
+  surviving draft. A hard delete removes BOTH variants, so the next reconcile
+  finds nothing and cancels `:task_gone` with no issue number to close, leaving
+  an open issue whose body names an id that answers not_found (five found and
+  closed by hand: #2355 #2356 #2357 #2358 #2516).
+
+  `after_delete` is the last moment the number is knowable: the payload carries
+  the just-deleted document. The hook reads it and enqueues a
+  `RetireJob`; the GitHub call itself is NOT made here, because `after_delete`
+  hooks run under a discarded-return 5s `Task.async_stream` timeout that would
+  kill a slow close mid-flight.
+
+  Non-task documents, never-mirrored tasks, `detached` links (D7) and
+  un-adopted `intake` links (D13) all pass untouched — see `RetireJob`.
+  """
+  @impl Barkpark.Plugin
+  def lifecycle_hooks do
+    %{after_delete: [&Barkpark.Plugins.Github.RetireJob.enqueue_for_deleted/1]}
   end
 
   # Auth is a LAZY singleton (no boot DB, no timer — safe to supervise always,

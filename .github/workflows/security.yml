@@ -49,13 +49,10 @@ name: security
 #     per-class — `grep -v '^[[:space:]]*$' api/.sobelow-skips |
 #                  sed 's/:.*//' | sort | uniq -c`
 #
-#     census: total=24
+#     census: total=9
 #     census: Config.CSRF=6
 #     census: Config.HTTPS=1
-#     census: DOS.StringToAtom=4
-#     census: Traversal.FileModule=9
-#     census: XSS.Raw=3
-#     census: XSS.SendResp=1
+#     census: XSS.Raw=2
 #
 #   2. mix-audit  — dependency CVE scan over mix.lock. No continue-on-error, so
 #                   a red DOES fail `Security gate` — but `Security gate` is not
@@ -289,11 +286,16 @@ jobs:
           # arm below and the ENTIRE security scan is skipped. Rename detection
           # prints only the DESTINATION, so `git mv api/lib/a.ex docs/a.ex`
           # yields api=false while analysed code just left the tree.
-          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          # NUL-separated, ON DISK, never re-lined: the old `tr` back to lines
+          # split a path holding a NEWLINE into two pseudo-paths before the
+          # matcher saw it (cch-bl-nul-native-path-matcher). A file, not a
+          # variable: command substitution drops NUL bytes.
+          changed_z="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/security-dispatcher-changed.XXXXXX")"
+          git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" >"$changed_z"
           echo "changed files:"
-          printf '%s\n' "$changed"
+          while IFS= read -r -d '' f; do printf '%s\n' "$f"; done <"$changed_z"
 
-          if [ -z "$changed" ]; then
+          if [ ! -s "$changed_z" ]; then
             # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
             # PR, nets to nothing against the base. Failing here would red a
             # legal PR with no self-service fix for its author. Run everything
@@ -350,7 +352,9 @@ jobs:
           # whole of it, and they are severe alone.
           api=false
           locks=false
-          while IFS= read -r f; do
+          # One NUL-terminated record per path (`-d ''`), so a path holding a
+          # NEWLINE reaches the case arms whole.
+          while IFS= read -r -d '' f; do
             [ -n "$f" ] || continue
             case "$f" in
               api/* | .github/workflows/security.yml) api=true ;;
@@ -370,9 +374,7 @@ jobs:
               | scripts/breaker-capture.sh \
               | scripts/run-instrument.sh) locks=true ;;
             esac
-          done <<EOF
-          $changed
-          EOF
+          done <"$changed_z"
 
           case "${api}" in
             true | false) ;;

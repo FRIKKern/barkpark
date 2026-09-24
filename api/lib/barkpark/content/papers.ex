@@ -35,6 +35,7 @@ defmodule Barkpark.Content.Papers do
     DraftId,
     Envelope,
     Labels,
+    PaperTaskResolver,
     SchemaDefinition
   }
 
@@ -714,18 +715,25 @@ defmodule Barkpark.Content.Papers do
         )
       end
 
+    # The chip criteria resolver, resolved ONCE per palette (an enablement
+    # read touches the workspace row) and only when a task row resolved. Keyed
+    # by the tenant scope's workspace — every render site threads the rendered
+    # paper's own `workspace_id` there (task-857c9f987268a75a).
+    task_resolver =
+      if task_rows == [], do: nil, else: PaperTaskResolver.get(scope_workspace_id(opts))
+
     by_target =
       Enum.reduce(targets, %{}, fn target, acc ->
         case pick_row_for_target(target, paper_rows) || pick_row_for_target(target, task_rows) do
           nil -> acc
-          row -> Map.put(acc, target, wikilink_hit(row))
+          row -> Map.put(acc, target, wikilink_hit(row, task_resolver))
         end
       end)
 
     Enum.reduce(pinned_ids, by_target, fn id, acc ->
       case pick_row_for_id(id, paper_rows) || pick_row_for_id(id, task_rows) do
         nil -> acc
-        row -> Map.put(acc, {:id, id}, wikilink_hit(row))
+        row -> Map.put(acc, {:id, id}, wikilink_hit(row, task_resolver))
       end
     end)
   end
@@ -762,7 +770,7 @@ defmodule Barkpark.Content.Papers do
   # id is normalized to the published spelling (chips are not /papers/ links —
   # the id only feeds data-* attrs), `status`/`priority` are read nil-tolerant,
   # and `criteria` is the `%{met, total}` count or nil when absent.
-  defp wikilink_hit(%Document{type: "task"} = doc) do
+  defp wikilink_hit(%Document{type: "task"} = doc, task_resolver) do
     content = doc.content || %{}
 
     %{
@@ -770,15 +778,18 @@ defmodule Barkpark.Content.Papers do
       title: doc.title,
       kind: "task",
       status: task_chip_status(content),
-      # {met,total} semantics owned by Barkpark.Tasks.Criteria (lvw-t6; the
-      # canonical task-criteria-progress impl): met === true only,
-      # garbage-tolerant, nil when absent → renderers omit the segment.
+      # {met,total} semantics owned by the Tasks plugin's resolver, read
+      # through the content-owned PaperTaskResolver seam (task-9c59aa555e1e015e):
+      # met === true only, garbage-tolerant, nil when absent → renderers omit
+      # the segment; `:unavailable` when no resolver is loaded, or Tasks is
+      # switched off for the paper's workspace → renderers show an explicit
+      # placeholder segment.
       priority: task_chip_priority(content),
-      criteria: Barkpark.Tasks.criteria_progress(content)
+      criteria: task_chip_criteria(content, task_resolver)
     }
   end
 
-  defp wikilink_hit(%Document{doc_id: id, title: title}),
+  defp wikilink_hit(%Document{doc_id: id, title: title}, _task_resolver),
     do: %{id: id, title: title, kind: "paper"}
 
   defp task_chip_status(content) do
@@ -787,6 +798,15 @@ defmodule Barkpark.Content.Papers do
       _ -> nil
     end
   end
+
+  defp task_chip_criteria(_content, nil), do: :unavailable
+  defp task_chip_criteria(content, resolver), do: resolver.criteria_progress(content)
+
+  # The workspace a paper render is scoped to. Render sites pass a keyword
+  # scope; tolerate a map so a non-keyword caller never crashes the render.
+  defp scope_workspace_id(scope) when is_list(scope), do: Keyword.get(scope, :workspace_id)
+  defp scope_workspace_id(%{workspace_id: ws}), do: ws
+  defp scope_workspace_id(_), do: nil
 
   defp task_chip_priority(content) do
     case Map.get(content, "priority") do
@@ -907,8 +927,10 @@ defmodule Barkpark.Content.Papers do
       simply does not resolve.
     * RENDER-THEN-READ: each resolved doc is passed through
       `Envelope.render(doc, schema, caller_context)` and the field is read off
-      the REDACTED envelope — never `field_readable?` alone (a caller-less call
-      returns true by design; that would be an active bypass). A redacted /
+      the REDACTED envelope — never `field_readable?` alone. Since ctx-s3 a
+      caller-less call fails CLOSED, so the hazard is no longer a bypass, but
+      `field_readable?` gates the field NAME for filter/order and does not read
+      the VALUE: render-then-read is still the rule here. A redacted /
       undeclared-invisible field is simply absent → fallback.
     * `:caller_context` DEFAULTS to the anonymous principal `%CallerContext{}`
       (fail closed). Any palette feeding body_html or broadcast delta frames
@@ -1261,19 +1283,33 @@ defmodule Barkpark.Content.Papers do
     # come from. The schema is loaded lazily inside `agg_for_query` and ONLY for
     # a non-count (sum/avg/min/max) block, so a count-only / rows-only paper pays
     # no schema query.
-    Barkpark.PortableDoc.TaskResolver.resolve(
-      blocks,
-      fn query ->
-        query
-        |> task_query_dataset(dataset)
-        |> Barkpark.Tasks.Query.rows_for_query(scope, dataset: dataset)
-      end,
-      fn query ->
-        query
-        |> task_query_dataset(dataset)
-        |> Barkpark.Tasks.Query.agg_for_query(scope, dataset: dataset)
-      end
-    )
+    #
+    # The rows and aggregates come from the resolver a plugin declares through
+    # the content-owned PaperTaskResolver seam (task-9c59aa555e1e015e). With
+    # none loaded — or Tasks switched off for the paper's workspace, which
+    # every render site threads as `scope[:workspace_id]`
+    # (task-857c9f987268a75a) — every query-carrying task block is marked
+    # `unavailable` so each renderer shows an explicit placeholder, never an
+    # empty board and never another workspace's enablement answer.
+    case PaperTaskResolver.get(scope_workspace_id(scope)) do
+      nil ->
+        Barkpark.PortableDoc.TaskResolver.mark_unavailable(blocks)
+
+      resolver ->
+        Barkpark.PortableDoc.TaskResolver.resolve(
+          blocks,
+          fn query ->
+            query
+            |> task_query_dataset(dataset)
+            |> resolver.rows_for_query(scope, dataset: dataset)
+          end,
+          fn query ->
+            query
+            |> task_query_dataset(dataset)
+            |> resolver.agg_for_query(scope, dataset: dataset)
+          end
+        )
+    end
   end
 
   def resolve_tasks_in_blocks(blocks, _scope, _dataset), do: blocks

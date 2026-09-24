@@ -16,7 +16,14 @@ defmodule BarkparkWeb.MutateNestedValidationTest do
   setup do
     dataset = "e111enf_#{System.unique_integer([:positive])}"
     token = "barkpark-dev-token-e111-#{System.unique_integer([:positive])}"
-    Auth.create_token(token, "dev", dataset, ["read", "write", "admin"])
+
+    Auth.create_token(
+      token,
+      "dev",
+      dataset,
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     previous = Application.get_env(:barkpark, Validation, [])
     Application.put_env(:barkpark, Validation, enforce_datasets: [dataset])

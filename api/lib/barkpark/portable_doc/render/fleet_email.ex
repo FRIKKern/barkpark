@@ -41,7 +41,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
   """
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
-  alias Barkpark.PortableDoc.Render.{Palettes, StatusVocab}
+  alias Barkpark.PortableDoc.Render.{Components, Palettes, StatusVocab}
 
   # ── tasks / task-list ────────────────────────────────────────────────────────
 
@@ -81,6 +81,19 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
   def tasks_email_html(_, theme), do: empty_email("tasks", "No tasks yet.", theme)
 
+  @doc """
+  The email twin of `Components.task_unavailable_html/1`: a query-carrying
+  task block with no task resolver loaded (task-9c59aa555e1e015e) renders the
+  named "tasks unavailable" note in the same dashed frame as the empty states.
+  """
+  def task_unavailable_email_html(block, theme \\ :evergreen) do
+    empty_email(
+      Components.task_unavailable_kind(block),
+      Components.task_unavailable_note(),
+      theme
+    )
+  end
+
   # ── task-detail ──────────────────────────────────────────────────────────────
 
   @doc "Email-safe task detail: a single-column stack of conditional sections."
@@ -99,7 +112,13 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
     case title do
       "" ->
-        ""
+        # The block IS a task-detail whose query resolved to nothing. The article
+        # twin renders `bp-tdetail--empty` here; an email that returned "" would
+        # drop the block out of the message with no trace, so the two surfaces
+        # would disagree about whether the document even has a block there. Same
+        # dashed-note family and the SAME copy every other unresolved task-family
+        # block uses on this surface.
+        empty_email("task-detail", "No matching tasks.", theme)
 
       _ ->
         role = t |> get("status") |> stringish() |> role_of()
@@ -409,19 +428,57 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
         empty_email("roadmap", "No roadmap items.", theme)
 
       _ ->
-        scale = roadmap_scale(block, sk)
+        if not Enum.any?(rows, &roadmap_placeable?(&1, block)) do
+          # No timeline to draw — but the ITEMS still exist, so they render
+          # through the task-list email emitter under the note. The article twin
+          # degrades the same way.
+          empty_email("roadmap", Components.roadmap_unplaced_copy(), theme) <>
+            tasks_email_html(%{"snapshot" => rows}, theme)
+        else
+          roadmap_lanes_email(block, rows, sk)
+        end
+    end
+  end
 
-        lanes =
-          rows
-          |> Enum.map_join("", fn r ->
-            role = r |> get("status") |> stringish() |> role_of()
-            title = r |> get("title") |> stringish() |> escape_html()
-            phase = truthy(get(r, "phase_row"))
+  def roadmap_email_html(_, theme), do: empty_email("roadmap", "No roadmap items.", theme)
+
+  # Geometry trust, the email twin of `Components.roadmap_placeable?/2`. Email
+  # has no date-rail MATH (it has never derived a lane off the block span — see
+  # the module doc's honest-degrade list), but it must agree with the article
+  # surface on the QUESTION "does this row have geometry at all", or the same
+  # document would say "not scheduled" in the reader and paint a bar in the
+  # inbox. So a date-railed row counts as placeable here and keeps the literal
+  # pct path it has always taken — byte-identical to before — while a row with
+  # NEITHER source takes the new unplaced state.
+  defp roadmap_placeable?(r, block) do
+    dated? =
+      iso_date?(get(block, "start")) and iso_date?(get(block, "end")) and
+        iso_date?(get(r, "start")) and iso_date?(get(r, "end"))
+
+    dated? or is_number(get(r, "left")) or is_number(get(r, "width"))
+  end
+
+  defp iso_date?(v) when is_binary(v),
+    do: match?({:ok, _}, v |> String.trim() |> Date.from_iso8601())
+
+  defp iso_date?(_), do: false
+
+  defp roadmap_lanes_email(block, rows, sk) do
+    scale = roadmap_scale(block, sk)
+
+    lanes =
+      rows
+      |> Enum.map_join("", fn r ->
+        role = r |> get("status") |> stringish() |> role_of()
+        title = r |> get("title") |> stringish() |> escape_html()
+        phase = truthy(get(r, "phase_row"))
+        weight = if phase, do: "700", else: "500"
+
+        track =
+          if roadmap_placeable?(r, block) do
             left = r |> get("left") |> clampf()
             width = r |> get("width") |> clampf_width(left)
             remaining = 100 - left - width
-
-            weight = if phase, do: "700", else: "500"
 
             spacer_left =
               if left > 0,
@@ -436,18 +493,22 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
             bar =
               ~s|<td width="#{width}%" style="height:8px;background:#{role_color(role, sk)};border-radius:4px;font-size:0;line-height:0">&nbsp;</td>|
 
-            ~s|<tr><td width="34%" valign="middle" style="font-size:12px;font-weight:#{weight};color:#{sk.ink};padding:4px 8px 4px 0">#{title}</td><td valign="middle" style="padding:4px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#{mix_hex(0.1, sk)};border-radius:4px"><tr>#{spacer_left}#{bar}#{spacer_right}</tr></table></td></tr>|
-          end)
+            ~s|<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#{mix_hex(0.1, sk)};border-radius:4px"><tr>#{spacer_left}#{bar}#{spacer_right}</tr></table>|
+          else
+            # No bar. A geometry-less row would clamp to the full width and
+            # read as "runs the whole plan" — a claim the row never made.
+            ~s|<span style="font-family:#{mono()};font-size:11px;color:#{sk.muted}">#{escape_html(Components.roadmap_lane_unplaced_copy())}</span>|
+          end
 
-        card(
-          scale <>
-            ~s|<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">#{lanes}</table>|,
-          sk
-        )
-    end
+        ~s|<tr><td width="34%" valign="middle" style="font-size:12px;font-weight:#{weight};color:#{sk.ink};padding:4px 8px 4px 0">#{title}</td><td valign="middle" style="padding:4px 0">#{track}</td></tr>|
+      end)
+
+    card(
+      scale <>
+        ~s|<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">#{lanes}</table>|,
+      sk
+    )
   end
-
-  def roadmap_email_html(_, theme), do: empty_email("roadmap", "No roadmap items.", theme)
 
   defp roadmap_scale(block, sk) do
     case block |> get("scale") |> as_list() do
