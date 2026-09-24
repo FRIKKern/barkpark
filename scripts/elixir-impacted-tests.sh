@@ -491,7 +491,80 @@ xref_probe() {
     echo "elixir-impacted-tests: the xref positive control found NO dependents of ${probe}, which the whole application compile-depends on. The instrument is not answering — falling back to ALL." >&2
     return 1
   fi
+  xref_discriminates || return 1
   XREF_PROBE_OK=1
+  return 0
+}
+
+# ── THE DISCRIMINATING CONTROL (task-37b4448cb9ccb000) ────────────────────
+# The positive control above proves xref ANSWERS. It cannot prove the answer
+# depends on the sink, and on this repo it does not: `--sink S --label
+# compile-connected` prints the SAME edge set for every S. MEASURED on CI's own
+# pin (mix-test job: Elixir 1.18.4 / OTP 27), fresh `mix compile` of 7c028e699,
+# MIX_ENV=test:
+#
+#   --sink lib/barkpark/tasks/landed.ex  10 lines  md5 6d8d306d06f1628f5a38755f53898b71
+#   --sink lib/barkpark/media.ex         10 lines  md5 6d8d306d06f1628f5a38755f53898b71
+#   --sink lib/barkpark/accounts.ex      10 lines  md5 6d8d306d06f1628f5a38755f53898b71
+#   --sink lib/barkpark/plugin.ex        10 lines  md5 6d8d306d06f1628f5a38755f53898b71
+#   --sink lib/barkpark/repo.ex          12 lines  (the same 5 edges + one)
+#
+# None of those outputs names its own sink. For plugin.ex — which 13 plugin
+# modules `use` — not one of those 13 appears; `--label compile --only-direct`
+# lists them. WHY, from Mix.Tasks.Xref (identical in 1.18.4 and 1.19.5):
+# `sink_tree` walks reverse edges of EVERY type, runtime included, so any sink
+# inside the app's big runtime cycle reaches nearly the whole app; the label
+# filter is applied AFTER that, and prints the app-wide compile-connected edge
+# set. `--sink` is honoured. The closure it yields just is not "what recompiles
+# when S changes".
+#
+# The repo.ex control passes that (12 lines, all `.ex`). So does "a leaf's
+# closure is strictly smaller than repo.ex's" — 10 < 12 on the measured pin.
+# The pair has to be one whose TRUE answers differ:
+#
+#   hub  lib/barkpark/plugin.ex         13 direct compile dependents (`use Barkpark.Plugin`)
+#   leaf lib/barkpark/tasks/landed.ex   0 direct compile dependents (--only-direct: empty)
+#
+# A working instrument prints the plugin modules for the hub and nothing (or
+# strictly less) for the leaf. IDENTICAL output for the two means the closure
+# is a constant, and a selection computed from a constant is refused -> ALL.
+XREF_PROBE_HUB="lib/barkpark/plugin.ex"
+XREF_PROBE_LEAF="lib/barkpark/tasks/landed.ex"
+
+# graph lines only, decorations stripped, one file per line — so a banner line
+# from a wrapper (`mix: waiting for a compile slot`) cannot make two identical
+# graphs look different.
+xref_nodes() {
+  grep '\.ex' | sed -e 's/ ([a-z-]*)$//' -e 's/^[[:space:]|`-]*//' | sed '/^$/d' | LC_ALL=C sort -u
+}
+
+xref_discriminates() {
+  local f hub_raw leaf_raw hub leaf hub_n leaf_n rc=0
+  for f in "$XREF_PROBE_HUB" "$XREF_PROBE_LEAF"; do
+    if [ ! -f "$API_DIR/$f" ]; then
+      echo "elixir-impacted-tests: the xref discriminating control ${f} is gone — cannot tell a sink-dependent closure from a constant, falling back to ALL." >&2
+      return 1
+    fi
+  done
+  hub_raw="$(cd -- "$API_DIR" && mix xref graph --sink "$XREF_PROBE_HUB" --label compile-connected --format plain 2>&1 </dev/null)" || rc=$?
+  [ "$rc" -eq 0 ] && { leaf_raw="$(cd -- "$API_DIR" && mix xref graph --sink "$XREF_PROBE_LEAF" --label compile-connected --format plain 2>&1 </dev/null)" || rc=$?; }
+  if [ "$rc" -ne 0 ]; then
+    echo "elixir-impacted-tests: the xref discriminating control exited rc=${rc} — falling back to ALL." >&2
+    return 1
+  fi
+  hub="$(xref_nodes <<<"$hub_raw")"
+  leaf="$(xref_nodes <<<"$leaf_raw")"
+  hub_n="$(printf '%s' "$hub" | awk 'NF{n++} END{print n+0}')"
+  leaf_n="$(printf '%s' "$leaf" | awk 'NF{n++} END{print n+0}')"
+  if [ "$hub" = "$leaf" ]; then
+    echo "elixir-impacted-tests: xref is SINK-INVARIANT: --sink ${XREF_PROBE_HUB} and --sink ${XREF_PROBE_LEAF} returned the IDENTICAL closure (${hub_n} files), so a closure here does not depend on the changed file. Refusing to narrow on a constant — falling back to ALL. The identical output:" >&2
+    printf '%s\n' "$hub" | sed -n '1,20s/^/    /p' >&2
+    return 1
+  fi
+  if [ "$leaf_n" -ge "$hub_n" ]; then
+    echo "elixir-impacted-tests: xref does not discriminate: the leaf ${XREF_PROBE_LEAF} (0 compile dependents) has a closure of ${leaf_n} files, not smaller than the hub ${XREF_PROBE_HUB}'s ${hub_n} — falling back to ALL." >&2
+    return 1
+  fi
   return 0
 }
 
@@ -827,6 +900,7 @@ select_tests() {
         return 0
       fi
       if ! xref_probe || ! closure="$(compile_closure "$p")"; then
+        echo "elixir-impacted-tests: narrowing unavailable: running ALL (the compile-closure instrument failed its probe or could not close ${p})." >&2
         echo "ALL"
         return 0
       fi
@@ -894,6 +968,7 @@ select_tests() {
               return 0
             fi
             if ! xref_probe || ! closure="$(compile_closure "$r")"; then
+              echo "elixir-impacted-tests: narrowing unavailable: running ALL (the compile-closure instrument failed its probe or could not close ${r})." >&2
               echo "ALL"
               return 0
             fi
@@ -979,7 +1054,7 @@ case "${1:---select}" in
     # between "the closure was not needed" and "the closure has been dead since
     # August".
     if xref_probe; then
-      echo "xref-probe: OK — mix xref answers, so an empty closure means a leaf."
+      echo "xref-probe: OK — mix xref answers, and its closure depends on the sink (hub and leaf differ), so an empty closure means a leaf."
       exit 0
     fi
     echo "xref-probe: DEAD — the compile closure is unavailable; every selection will fall back to ALL."
@@ -1020,6 +1095,14 @@ case "${1:---select}" in
     done <<EOF
 $(pins_paths)
 EOF
+    # The xref controls are pins too: a renamed one turns every selection into
+    # ALL for good, safely but with no symptom. Red on it here instead.
+    for p in lib/barkpark/repo.ex "$XREF_PROBE_HUB" "$XREF_PROBE_LEAF"; do
+      if [ ! -f "$API_DIR/$p" ]; then
+        echo "elixir-impacted-tests: xref control '$p' does not exist — pick a replacement with the same property (see xref_discriminates in $0)." >&2
+        rc=1
+      fi
+    done
     if [ "$rc" -eq 0 ]; then
       # `grep -c` prints a count AND exits 1 on zero, so it is not usable bare
       # under `set -e`; count with awk, which cannot.
