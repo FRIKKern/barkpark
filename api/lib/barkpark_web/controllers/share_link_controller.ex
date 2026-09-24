@@ -670,8 +670,9 @@ defmodule BarkparkWeb.ShareLinkController do
 
   defp paper_body_html(_paper, _link), do: {:error, :not_found}
 
-  defp paper_article?(%{content: content}),
-    do: Map.get(content || %{}, "style") in ["article", "article-wide"]
+  # The SAME chrome decision as BulldocsLive's `@article?` (article, or no
+  # style at all — the web default); one predicate so the doors cannot drift.
+  defp paper_article?(paper), do: BarkparkWeb.PaperReaderStyle.article?(paper)
 
   # Canonical v1 error envelope (code + request_id) for the JSON API paths — the
   # same contract as the content endpoints; was a bare `%{error: msg}` with
