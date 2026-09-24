@@ -542,7 +542,8 @@ defmodule Barkpark.Content.Lifecycle do
   # `drafts.` id and `bp task ls` all answered 404/empty. A REFUSAL destroyed
   # a claimed row.
   #
-  # Same ruling as the SUCCESS arm (`task_door_field_fence/2`,
+  # Same ruling as the SUCCESS arm (the Tasks publish door's field fence in
+  # `Barkpark.Tasks.PublishGuards`,
   # task-9b5e1a6a688d27fc): the DOCUMENT door is the one that must yield. A
   # publish that names no task-door field carries no authorial intent about
   # the claim, so it may neither silently rewrite it (success arm) nor destroy
