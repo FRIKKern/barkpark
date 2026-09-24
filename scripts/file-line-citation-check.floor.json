@@ -3,17 +3,17 @@
   "owner": "lead-console",
   "task": "task-8390f73ced655243",
   "charter": ".claude/workflows/bp-cloud-console-hardening-charter.md",
-  "derived_at": "70e21ced462d6f1dbbac1c8394e79ae459adc09d",
+  "derived_at": "c2e73ce3a7b60c0b39d9bec29f5c015f7a2b7f0f",
   "derived_on": "2026-09-24",
-  "derivation": "one run per target at derived_at: node scripts/file-line-citation-check.mjs --charter <charter> --map <base>=<path> --json > file (NOT a pipe: the checker exits before a piped stdout drains and truncates at 65536 bytes); every count below is copied from that JSON, none typed. Slack is the checker default (+/-3).",
+  "derivation": "one run per target at derived_at: node scripts/file-line-citation-check.mjs --charter <charter> --map <base>=<path> --json > file (NOT a pipe: the checker exits before a piped stdout drains and truncates at 65536 bytes); every count below is copied from that JSON, none typed. Slack is the checker default (+/-3). LOWERED 2026-09-24 by task-776e34f0e1f10330 (PR #20128) from the floor derived at 70e21ced4 (unresolved app.js 203, app.css 48, index.html 4, __app.test.mjs 55). Two causes, both in that PR: (1) the checker now reads pinned citations `<base> (<thing> @ <sha>, L<n>)` verified at THEIR sha, and 88 rule-pinnable citations were pinned; (2) `F:N-M` is now a range credited only inside [N, M], no longer read as N +/-3. derived_at is that PR's merge of origin/main (c2e73ce3a), so the target files are main's at 80e3e60d1. It is reachable via refs/pull/20128/head; pinned citations need full history (git show <sha>:<path>), which this job's fetch-depth: 0 gives.",
   "targets": [
     {
       "base": "app.js",
       "path": "cloud/priv/static/app.js",
       "citations": 311,
       "decidable": 304,
-      "resolved": 101,
-      "unresolved": 203,
+      "resolved": 154,
+      "unresolved": 150,
       "proseOnly": 7,
       "beyondEof": 0
     },
@@ -22,8 +22,8 @@
       "path": "cloud/priv/static/app.css",
       "citations": 116,
       "decidable": 113,
-      "resolved": 65,
-      "unresolved": 48,
+      "resolved": 76,
+      "unresolved": 37,
       "proseOnly": 3,
       "beyondEof": 0
     },
@@ -42,8 +42,8 @@
       "path": "cloud/priv/static/__app.test.mjs",
       "citations": 70,
       "decidable": 69,
-      "resolved": 14,
-      "unresolved": 55,
+      "resolved": 23,
+      "unresolved": 46,
       "proseOnly": 1,
       "beyondEof": 0
     }
