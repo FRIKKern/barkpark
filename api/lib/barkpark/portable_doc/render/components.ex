@@ -399,13 +399,19 @@ defmodule Barkpark.PortableDoc.Render.Components do
     block
     |> Slots.slot_elements("media")
     |> Enum.map(&normalize_media_element/1)
-    |> Barkpark.PortableDoc.Render.Compose.render_children(style)
+    |> Barkpark.PortableDoc.Render.Compose.render_children(
+      style,
+      Barkpark.PortableDoc.Render.Compose.render_opts(block)
+    )
   end
 
   defp card_slot_html(block, name, style) do
     block
     |> Slots.slot_elements(name)
-    |> Barkpark.PortableDoc.Render.Compose.render_children(style)
+    |> Barkpark.PortableDoc.Render.Compose.render_children(
+      style,
+      Barkpark.PortableDoc.Render.Compose.render_opts(block)
+    )
   end
 
   # A media element persisted WITHOUT a `type` key (a bare `{src, alt}` map from an
