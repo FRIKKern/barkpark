@@ -258,6 +258,50 @@ defmodule Barkpark.Plugins.Bulldocs.MastersLinkedTest do
       assert many_count <= 2
     end
 
+    # task-59be65118320fa0e item 2: instances NESTED in sections and columns
+    # of the paper are in the same map, read in the same single batch.
+    test "instances nested in sections and columns resolve in the same batch", ctx do
+      masters =
+        for i <- 1..6 do
+          raw_master!(
+            [workspace_id: ctx.ws.id, project_id: ctx.project.id],
+            %{"id" => "n#{i}", "type" => "paragraph", "text" => "Nested body #{i}"},
+            "N#{i}"
+          )
+        end
+
+      [a, b, c, d, e, f] = Enum.map(masters, &Masters.master_id/1)
+
+      blocks = [
+        ref("top", a),
+        %{"id" => "s1", "type" => "section", "blocks" => [ref("in-s1", b)]},
+        %{
+          "id" => "s2",
+          "type" => "section",
+          "blocks" => [%{"id" => "s3", "type" => "section", "blocks" => [ref("in-s3", c)]}]
+        },
+        %{
+          "id" => "cols",
+          "type" => "columns",
+          "columns" => [[ref("in-c0", d)], [ref("in-c1", e)]]
+        },
+        %{"id" => "s4", "type" => "section", "blocks" => [ref("in-s4", f)]}
+      ]
+
+      scope = %{workspace_id: ctx.ws.id, project_id: ctx.project.id, dataset: @dataset}
+      {map, count} = QueryCounter.count(fn -> Masters.render_map(scope, blocks) end)
+
+      assert map_size(map) == 6
+      assert count == 1
+      # Sections (at any depth) walk with the map. A `columns` block composes
+      # its children at compose time without render opts, so the renderer
+      # itself shows them as the neutral placeholder (0010 §6); Studio's
+      # columns editor renders each child through `paper_block_fields`, which
+      # does carry the map.
+      html = Render.render_blocks(blocks, %{style: :article, masters: map})
+      for i <- [1, 2, 3, 6], do: assert(html =~ "Nested body #{i}")
+    end
+
     test "a cycle between masters renders once and stops", ctx do
       scope = [workspace_id: ctx.ws.id, project_id: ctx.project.id]
       a = raw_master!(scope, %{"id" => "pa", "type" => "paragraph", "text" => "A body"}, "A")

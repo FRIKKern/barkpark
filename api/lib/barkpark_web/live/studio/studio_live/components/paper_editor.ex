@@ -551,6 +551,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             tree_identity_safe={@tree_identity_safe}
             table_editor_target_ids={@table_editor_target_ids}
             canvas_retained={@canvas_retained}
+            master_render={@master_render}
           />
         </div>
       <% end %>
@@ -1150,16 +1151,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           >🔒 Locked</span>
         </span>
       </div>
-      <%!-- Linked master instance (task-59f078a2fd248698): the master's
-            current (or pinned) content, rendered by the reader's own producer
-            from the per-read render map — never stored in this paper. --%>
-      <div
-        :if={Map.get(@block, "type") == "master-ref"}
-        class="bp-paper-surface bp-paper-master-ref-preview"
-        data-test-id="paper-master-ref-preview"
-      >
-        {raw(Render.render_block(@block, %{style: :article, masters: @master_render}))}
-      </div>
       <.task_block_preview
         :if={task_preview_block?(@block)}
         block={@block}
@@ -1181,6 +1172,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         tree_identity_safe={@tree_identity_safe}
         table_editor_target_ids={@table_editor_target_ids}
         canvas_retained={@canvas_retained}
+        master_render={@master_render}
       />
     </div>
     """
@@ -2190,6 +2182,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:tree_identity_safe, :boolean, default: nil)
   attr(:table_editor_target_ids, :any, default: nil)
   attr(:canvas_retained, :any, default: nil)
+  # Linked master instances (task-59f078a2fd248698): the open paper's
+  # `%{key => html}` render map. Threaded through every nested
+  # `paper_block_fields` call, so a `master-ref` inside a section or a column
+  # previews its master too (task-59be65118320fa0e item 2); nil shows the
+  # neutral "Linked master" placeholder.
+  attr(:master_render, :any, default: nil)
 
   def paper_block_fields(assigns) do
     tree_identity_safe =
@@ -2642,6 +2640,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
                           canvas_retained={@canvas_retained}
+                          master_render={@master_render}
                         />
                     <% end %>
                   <% end %>
@@ -2952,6 +2951,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -3402,6 +3402,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       tree_identity_safe={@tree_identity_safe}
                       table_editor_target_ids={@table_editor_target_ids}
                       canvas_retained={@canvas_retained}
+                      master_render={@master_render}
                     />
                   </div>
                 </div>
@@ -3431,6 +3432,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -3468,7 +3470,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </div>
             </details>
           <% else %>
-            <div :if={section_renderable?(@block)} class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
+            <div :if={section_renderable?(@block)} class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article, masters: @master_render})) %></div>
             <p class="bp-paper-edit-readonly">This Section's child structure needs stable identities before editing; original content is preserved.</p>
           <% end %>
         </div>
@@ -3501,6 +3503,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -3542,7 +3545,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </div>
             </details>
           <% else %>
-            <div class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article})) %></div>
+            <div class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article, masters: @master_render})) %></div>
             <p class="bp-paper-edit-readonly">This Columns block has malformed column data; original content is preserved.</p>
           <% end %>
         </div>
@@ -3962,6 +3965,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
                           canvas_retained={@canvas_retained}
+                          master_render={@master_render}
                         />
                     <% end %>
                   <% end %>
@@ -4075,6 +4079,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         tree_identity_safe={@tree_identity_safe}
                         table_editor_target_ids={@table_editor_target_ids}
                         canvas_retained={@canvas_retained}
+                        master_render={@master_render}
                       />
                   <% end %>
                 <% end %>
@@ -4186,6 +4191,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           tree_identity_safe={@tree_identity_safe}
                           table_editor_target_ids={@table_editor_target_ids}
                           canvas_retained={@canvas_retained}
+                          master_render={@master_render}
                         />
                       </div>
                   <% end %>
@@ -4213,6 +4219,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     tree_identity_safe={@tree_identity_safe}
                     table_editor_target_ids={@table_editor_target_ids}
                     canvas_retained={@canvas_retained}
+                    master_render={@master_render}
                   />
                 </div>
               <% end %>
@@ -4670,6 +4677,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         />
 
       <% "master-ref" -> %>
+        <%!-- Linked master instance (task-59f078a2fd248698): the master's
+              current (or pinned) content, rendered by the reader's own
+              producer from the per-read render map — never stored in this
+              paper. Here, not in `edit_block`, so a nested instance gets it
+              too (task-59be65118320fa0e item 2). --%>
+        <div
+          class="bp-paper-surface bp-paper-master-ref-preview"
+          data-test-id="paper-master-ref-preview"
+          data-master-ref-id={Map.get(@block, "id")}
+        >
+          {raw(Render.render_block(@block, %{style: :article, masters: @master_render}))}
+        </div>
         <p class="bp-paper-edit-readonly" data-test-id="paper-master-ref-note">
           Linked master — it shows the master's content. Edit the master, or Detach to edit it here.
         </p>

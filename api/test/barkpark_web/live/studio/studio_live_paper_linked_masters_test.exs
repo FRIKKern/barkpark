@@ -199,6 +199,57 @@ defmodule BarkparkWeb.Studio.StudioLivePaperLinkedMastersTest do
     refute Enum.any?(blocks(slug), &(&1["type"] == "master-ref"))
   end
 
+  # task-59be65118320fa0e item 2: a master-ref NESTED inside a section or a
+  # column renders its master in Studio edit mode, from the same per-read
+  # render map (which already walks every depth, batched per level).
+  test "a linked instance nested in a section or a column previews its master",
+       %{conn: conn, paper: paper, master: master} do
+    slug = "paper-linked-nested-#{System.unique_integer([:positive])}"
+    mid = Masters.master_id(master)
+    nested = fn id -> %{"id" => id, "type" => "master-ref", "master" => mid, "version" => nil} end
+
+    {:ok, _} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          dataset: @dataset,
+          blocks: [
+            %{"id" => "ln-h", "type" => "heading", "level" => 1, "text" => "Nested paper"},
+            %{
+              "id" => "ln-sec",
+              "type" => "section",
+              "title" => "Holder",
+              "blocks" => [
+                %{"id" => "ln-p", "type" => "paragraph", "text" => "Section intro."},
+                nested.("ln-in-section")
+              ]
+            },
+            %{
+              "id" => "ln-cols",
+              "type" => "columns",
+              "columns" => [
+                [%{"id" => "ln-c0", "type" => "paragraph", "text" => "Left."}],
+                [nested.("ln-in-column")]
+              ]
+            }
+          ]
+        })
+        |> Map.merge(%{"workspace_id" => paper.workspace_id, "project_id" => paper.project_id})
+      )
+
+    view = open(conn, slug)
+
+    for id <- ["ln-in-section", "ln-in-column"] do
+      html =
+        view
+        |> element(~s([data-test-id="paper-master-ref-preview"][data-master-ref-id="#{id}"]))
+        |> render()
+
+      assert html =~ "Original master copy"
+      refute html =~ "Linked master"
+    end
+  end
+
   test "an instance of a foreign-tenant master previews as unavailable and cannot be detached",
        %{conn: conn, slug: slug} do
     other_ws = Barkpark.TenancyFixtures.create_workspace!()
