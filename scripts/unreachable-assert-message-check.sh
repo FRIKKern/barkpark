@@ -98,6 +98,17 @@
 #   scripts/unreachable-assert-message-check.sh --list     # print every site, file:line
 #   scripts/unreachable-assert-message-check.sh --baseline # emit a fresh baseline
 #   scripts/unreachable-assert-message-check.sh --selftest  # prove the gate can fail
+#   scripts/unreachable-assert-message-check.sh --files <path>...  # judge ONLY these files
+#
+# --files is the pre-commit door (.githooks/pre-commit passes the staged
+# api/test *.ex/*.exs). Paths are repo-root-relative or absolute. It applies the
+# SAME baseline and prints the SAME RED line as the whole-corpus run, but only
+# over the named files: the FELL arm is limited to baseline rows for those
+# files (a row for a file not named is not a fall), and SCAN_FLOOR does not
+# apply (a floor guards a corpus; a list of two staged files is not one). An
+# empty list REFUSES (exit 3) and a named file that cannot be read REFUSES
+# like any parse failure. CI never passes --files, so CI's verdict is the
+# whole-corpus one above, unchanged.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -121,6 +132,22 @@ BASELINE="${UNREACHABLE_ASSERT_BASELINE:-$ROOT/.github/unreachable-assert-messag
 # Overridable ONLY so --selftest can drive synthetic trees of two or three
 # files. CI passes nothing, so CI gets the literal.
 SCAN_FLOOR="${UNREACHABLE_ASSERT_SCAN_FLOOR:-1200}"
+
+# --files <path>...: an explicit list, newline-joined for the scanner. Empty
+# unless --files was passed, so an inherited UAMC_FILES can never narrow CI.
+FILES_MODE=0
+FILES_LIST=""
+if [ "${1:-}" = "--files" ]; then
+  shift
+  if [ "$#" -eq 0 ]; then
+    echo "unreachable-assert-message-check: REFUSING — --files was given no paths." >&2
+    echo "  An empty list judges nothing; a caller with nothing to check should not call." >&2
+    exit 3
+  fi
+  FILES_MODE=1
+  FILES_LIST="$(printf '%s\n' "$@")"
+  set --
+fi
 
 command -v elixir >/dev/null 2>&1 || {
   echo "unreachable-assert-message-check: elixir is not on PATH — REFUSING." >&2
@@ -150,7 +177,12 @@ cat > "$SCANNER" <<'ELIXIR'
 # Emits one line per defective site: "<path>\t<line>", then a trailing
 # "PARSE_FAILURES\t<n>" and one "PARSE_FAIL\t<path>" per unreadable file.
 root = System.get_env("UAMC_SCANDIR")
-files = Path.wildcard(Path.join(root, "**/*.{ex,exs}")) |> Enum.sort()
+
+files =
+  case System.get_env("UAMC_FILES", "") do
+    "" -> Path.wildcard(Path.join(root, "**/*.{ex,exs}")) |> Enum.sort()
+    list -> list |> String.split("\n", trim: true) |> Enum.map(&Path.expand/1) |> Enum.sort()
+  end
 
 {hits, parse_failures} =
   Enum.reduce(files, {[], []}, fn file, {hits, fails} ->
@@ -183,12 +215,15 @@ files = Path.wildcard(Path.join(root, "**/*.{ex,exs}")) |> Enum.sort()
 for {f, l} <- hits, do: IO.puts("HIT\t#{Path.relative_to(f, File.cwd!())}\t#{l}")
 for f <- Enum.sort(parse_failures),
     do: IO.puts("PARSE_FAIL\t#{Path.relative_to(f, File.cwd!())}")
+if System.get_env("UAMC_FILES", "") != "",
+  do: for(f <- files, do: IO.puts("FILE\t#{Path.relative_to(f, File.cwd!())}"))
+
 IO.puts("SCANNED\t#{length(files)}")
 IO.puts("PARSE_FAILURES\t#{length(parse_failures)}")
 ELIXIR
 
 run_scan() {
-  ( cd "$ROOT" && UAMC_SCANDIR="$SCANDIR" elixir "$SCANNER" )
+  ( cd "$ROOT" && UAMC_SCANDIR="$SCANDIR" UAMC_FILES="$FILES_LIST" elixir "$SCANNER" )
 }
 
 # --- selftest ---------------------------------------------------------------
@@ -294,6 +329,37 @@ EX
     arm "FAIL" "(d) an unparseable file was skipped silently — the scanner reports a tree it never read"
   fi
 
+  # ---- --files (the pre-commit door) --------------------------------------
+  # No floor override in (i)/(j): a 1- or 2-file list must pass the floor
+  # untouched, or the hook could never green.
+  # (i) --files naming the defective file reds with the SAME RED line.
+  rc_i=0; out="$(UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline" \
+        bash "$0" --files "$TMP/test/bad_test.exs" 2>&1)" || rc_i=$?
+  if [ "$rc_i" = 1 ] && grep -q "^RED  .*bad_test.exs — 1 unreachable assert message(s), baseline 0" <<<"$out"; then
+    arm "ok" "(i) --files on a defective file reds (rc 1) with the whole-corpus RED line"
+  else
+    arm "FAIL" "(i) --files on a defective file did not red with the RED line (rc $rc_i)"
+  fi
+
+  # (j) --files naming only a CLEAN file passes even though the baseline holds
+  #     a row (bad_test, inflated) for a file NOT named — that row is not a FELL.
+  rc_j=0; out="$(UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline3" \
+        bash "$0" --files "$TMP/test/clean_test.exs" 2>&1)" || rc_j=$?
+  if [ "$rc_j" = 0 ] && grep -q "1 named file(s) scanned" <<<"$out"; then
+    arm "ok" "(j) --files on a clean file passes; an unnamed file's baseline row is not a FELL"
+  else
+    arm "FAIL" "(j) --files on a clean file did not pass (rc $rc_j): $(tail -n 1 <<<"$out")"
+  fi
+
+  # (k) --files with NO paths refuses (exit 3) rather than judging nothing.
+  rc_k=0; out="$(UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline" \
+        bash "$0" --files 2>&1)" || rc_k=$?
+  if [ "$rc_k" = 3 ] && grep -q "REFUSING" <<<"$out"; then
+    arm "ok" "(k) --files with no paths refuses (rc 3)"
+  else
+    arm "FAIL" "(k) --files with no paths did not refuse (rc $rc_k)"
+  fi
+
   # ---- REAL corpus path, on a scratch copy -------------------------------
   # cp -R, find and mv only: POSIX on both the macOS box this is written on and
   # the ubuntu runner it is judged on. No `cp -a`, no GNU-only flags.
@@ -363,10 +429,10 @@ EX
 
   echo
   if [ "$fails" -gt 0 ]; then
-    echo "SELFTEST FAILED: $fails of 9 arms failed"
+    echo "SELFTEST FAILED: $fails of 12 arms failed"
     exit 1
   fi
-  echo "SELFTEST PASSED: 9 of 9 arms"
+  echo "SELFTEST PASSED: 12 of 12 arms"
   exit 0
 fi
 
@@ -390,7 +456,7 @@ if [ "${SCANNED:-0}" -eq 0 ]; then
   exit 3
 fi
 
-if [ "$SCANNED" -lt "$SCAN_FLOOR" ]; then
+if [ "$FILES_MODE" = 0 ] && [ "$SCANNED" -lt "$SCAN_FLOOR" ]; then
   echo "unreachable-assert-message-check: REFUSING — corpus below floor:" >&2
   echo "    scanned $SCANNED file(s) under $SCANDIR, floor is $SCAN_FLOOR" >&2
   echo "  A partly-deleted corpus still scans cleanly, because every count here" >&2
@@ -431,6 +497,13 @@ fi
 TMPD="$(mktemp -d)"; trap 'rm -f "$SCANNER"; rm -rf "$TMPD"' EXIT
 printf '%s\n' "$SCAN_OUT" | awk -F'\t' '$1=="HIT"{c[$2]++} END{for (f in c) printf "%d %s\n", c[f], f}' | sort -k2 > "$TMPD/now"
 grep -vE '^\s*#|^\s*$' "$BASELINE" | sort -k2 > "$TMPD/base" || true
+if [ "$FILES_MODE" = 1 ]; then
+  # Keep only baseline rows for the files named — any other row would read
+  # "now 0" and red as a FELL on a file this call never looked at.
+  printf '%s\n' "$SCAN_OUT" | awk -F'\t' '$1=="FILE"{print $2}' > "$TMPD/named"
+  awk 'NR==FNR{k[$0]=1; next} ($2 in k)' "$TMPD/named" "$TMPD/base" > "$TMPD/base.named"
+  mv "$TMPD/base.named" "$TMPD/base"
+fi
 
 rc=0
 # NEW or GROWN
@@ -459,7 +532,11 @@ done < "$TMPD/base"
 
 TOTAL="$(awk '{s+=$1} END{print s+0}' "$TMPD/now")"
 if [ "$rc" = 0 ]; then
-  echo "unreachable-assert-message-check: OK — $TOTAL site(s) at or below baseline, $SCANNED file(s) scanned (floor $SCAN_FLOOR), 0 parse failures"
+  if [ "$FILES_MODE" = 1 ]; then
+    echo "unreachable-assert-message-check: OK — $TOTAL site(s) at or below baseline, $SCANNED named file(s) scanned (--files, no floor), 0 parse failures"
+  else
+    echo "unreachable-assert-message-check: OK — $TOTAL site(s) at or below baseline, $SCANNED file(s) scanned (floor $SCAN_FLOOR), 0 parse failures"
+  fi
 else
   echo "" >&2
   echo "  FIX: bind first, then assert on a boolean, so assert/2 can use the message:" >&2
