@@ -1967,6 +1967,89 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert task_content("cchw29-grandfathered")["surface"] == "dashboard"
     end
 
+    # ── THE SECOND EPIC (task-29b971932b045394) ────────────────────────────
+    #
+    # The guard keyed on ONE literal while the law governs two epics;
+    # `cch-instruments-epic` held 35 of 45 live open rows, all filed through an
+    # unguarded door. Every test here names that parent explicitly. MUTATION:
+    # drop `cch-instruments-epic` from `@cch_epic_parents` in birth_guards.ex
+    # and the refusal tests below go 200.
+
+    @instruments_epic "cch-instruments-epic"
+
+    test "SECOND EPIC: an off-vocabulary create under cch-instruments-epic is REFUSED " <>
+           "with the first parent's error, word for word but the slug",
+         %{conn: conn} do
+      first = file_row(conn, "cchs32-first-offvocab", %{"surface" => "dashboard"})
+      second = file_under(conn, @instruments_epic, "cchs32-offvocab", %{"surface" => "dashboard"})
+
+      assert second.status == 422
+      assert first.status == 422
+      second_error = Jason.decode!(second.resp_body)["error"]
+      first_error = Jason.decode!(first.resp_body)["error"]
+      assert second_error["code"] == "validation_failed"
+      assert [second_message] = second_error["details"]["surface"]
+      assert [first_message] = first_error["details"]["surface"]
+
+      # The same refusal: identical text once the governed epic's slug is swapped —
+      # the filer is told the epic it actually filed under, nothing else differs.
+      assert second_message =~ ~s(cannot be filed under "#{@instruments_epic}" as "dashboard")
+
+      assert second_message ==
+               String.replace(first_message, ~s("#{@epic}"), ~s("#{@instruments_epic}"))
+
+      assert missing?("cchs32-offvocab")
+    end
+
+    test "SECOND EPIC: each sanctioned term PASSES and reads back", %{conn: conn} do
+      for term <- ~w(console instrument ledger) do
+        resp = file_under(conn, @instruments_epic, "cchs32-ok-#{term}", %{"surface" => term})
+
+        assert resp.status == 200
+        assert task_content("cchs32-ok-#{term}")["surface"] == term
+      end
+    end
+
+    test "SECOND EPIC: a `drafts.`-prefixed parent_id cannot dodge the guard", %{conn: conn} do
+      resp =
+        file_under(conn, "drafts." <> @instruments_epic, "cchs32-draft-parent", %{
+          "surface" => "dashboard"
+        })
+
+      assert resp.status == 422
+      assert missing?("cchs32-draft-parent")
+    end
+
+    test "SECOND EPIC: a GRANDFATHERED prose-surface row passes an unchanged update; " <>
+           "patching the prose itself is refused",
+         %{conn: conn} do
+      # The 10 prose rows under this epic predate the guard; stand one in via the
+      # non-`:api` source the door cannot see.
+      prose = "cloud control plane - probe"
+
+      assert file_row(conn, "cchs32-grandfathered", %{"surface" => prose},
+               source: :worker,
+               parent: @instruments_epic
+             ).status == 200
+
+      assert mutate(conn, [
+               %{
+                 "patch" => %{
+                   "id" => "cchs32-grandfathered",
+                   "type" => "task",
+                   "set" => %{"priority" => 3}
+                 }
+               }
+             ]).status == 200
+
+      assert task_content("cchs32-grandfathered")["priority"] == 3
+      assert task_content("cchs32-grandfathered")["surface"] == prose
+
+      # CONTROL: the arm that grandfathers is the arm that refuses a new term.
+      assert set_surface(conn, "cchs32-grandfathered", "other prose").status == 422
+      assert task_content("cchs32-grandfathered")["surface"] == prose
+    end
+
     # ── THE UPSERT BYPASS (do_upsert_document's own INSERT branch) ──────────
     #
     # `POST /api/documents/task` (LegacyController.create) reaches
@@ -2016,10 +2099,16 @@ defmodule BarkparkWeb.MutateControllerTest do
     defp file_row(conn, id, content_extra),
       do: create_row(conn, id, Map.put(content_extra, "parent_id", @epic))
 
+    defp file_under(conn, parent, id, content_extra),
+      do: create_row(conn, id, Map.put(content_extra, "parent_id", parent))
+
     # A birth the guard cannot see: `:source` is server-set on every HTTP door,
     # so this writes through the Writer directly to stand in for a row that
     # already carried an off-vocabulary term before the door existed.
-    defp file_row(_conn, id, content_extra, source: source) do
+    defp file_row(_conn, id, content_extra, opts) do
+      source = Keyword.fetch!(opts, :source)
+      parent = Keyword.get(opts, :parent, @epic)
+
       {:ok, _doc} =
         Barkpark.Content.Writer.create_document(
           "task",
@@ -2033,7 +2122,7 @@ defmodule BarkparkWeb.MutateControllerTest do
                   "brief" => Barkpark.TaskBriefFixtures.brief(),
                   "lifecycle_status" => "open",
                   "priority" => 1,
-                  "parent_id" => @epic
+                  "parent_id" => parent
                 },
                 content_extra
               )
