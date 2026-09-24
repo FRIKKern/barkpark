@@ -91,9 +91,22 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	// ordinary flag and can never drift from it. The wording therefore reaches
 	// the server byte-for-byte off disk, with no shell anywhere in its path.
 	fromFile := stampTextCameFromFile(tail)
+	if stampStdinClaimedTwice(tail) {
+		return useError(out, criterionTextSourceCode,
+			"only ONE of "+criterionTextFileFlag+" and "+amendedCriterionFileFlag+" can read `-` (stdin) — there is one stdin; put the other text in a file",
+			exitValidation)
+	}
 	tail, err := resolveCriterionTextFile(tail)
 	if err != nil {
 		return useError(out, criterionTextSourceCode, err.Error(), exitValidation)
+	}
+	// The amendment's REPLACEMENT wording rides the same kind of door, resolved
+	// the same way into the inline `--amended-criterion=<bytes>` spelling
+	// (tasks_stamp_amend_file.go) — the flag the manifest documents and no
+	// parser implemented until task-f65368969b1a2471.
+	tail, err = resolveAmendedCriterionFile(tail)
+	if err != nil {
+		return useError(out, amendedCriterionSourceCode, err.Error(), exitValidation)
 	}
 
 	sa, forward := parseStampArgs(tail, gatedType)
@@ -300,6 +313,11 @@ type stampRequest struct {
 	// stampMismatches): a withdrawal that "landed" while met is still true is
 	// exactly the class of lie this verb exists to end.
 	withdraw bool
+	// amend / amended are the wording correction (#19930): the stored text at
+	// index is REPLACED by amended. text is then the SUPERSEDED wording, so the
+	// read-back confirms against amended instead (see stampMismatches).
+	amend   bool
+	amended string
 	// pin is the author-typed `--expect` expectation, or nil. It is the ONE
 	// field here the row cannot supply, which is why the read-back's alignment
 	// check (stampMismatches) is keyed on it rather than on --criterion-text.
@@ -348,6 +366,8 @@ func stampRequestOf(cmd manifest.Command, forward []string) (stampRequest, bool)
 		miss:     last("miss") == "true",
 		note:     last("note"),
 		withdraw: last("withdraw") == "true",
+		amend:    last("amend") == "true",
+		amended:  last("amended-criterion"),
 	}, true
 }
 
@@ -575,7 +595,7 @@ func stampMissFieldRefusal(sa stampArgs) (string, string) {
 	// server's, which reports it as a USAGE error). Firing here would relabel a
 	// two-verb command line as a miss-field mistake and move its exit code —
 	// TestTaskStampExit_LostLeaseAndBadCommandLineDiffer measures exactly that.
-	if !sa.miss || sa.met || sa.withdraw {
+	if !sa.miss || sa.met || sa.withdraw || sa.amend {
 		return "", ""
 	}
 	if sa.hasEvidence {
@@ -663,6 +683,17 @@ func stampMismatches(req stampRequest, stored taskboard.CriterionItem) []string 
 	// below asks "did the value land"; this one asks "did it land where the
 	// AUTHOR said it should", which is a question no value read from the row can
 	// pose (tasks_stamp_expect_pin.go).
+	// AN AMENDMENT CHANGES THE WORDING ON PURPOSE, so the two wording checks
+	// below would read its success as failure: --criterion-text and the pin
+	// both name the SUPERSEDED sentence, which the server already matched
+	// under its lock before replacing it. What proves an amendment landed is
+	// that the row now holds the REPLACEMENT.
+	if req.amend {
+		if want := strings.TrimSpace(req.amended); want != "" && want != strings.TrimSpace(stored.Criterion) {
+			out = append(out, "the row at that index does not hold the replacement wording — the amendment did not land")
+		}
+		return out
+	}
 	if req.pin != nil {
 		if p := stampPinReadbackProblem(*req.pin, req.index, stored.Criterion); p != "" {
 			out = append(out, p)
@@ -737,6 +768,7 @@ type stampArgs struct {
 	met           bool
 	miss          bool
 	withdraw      bool
+	amend         bool
 	// expect is the AUTHOR-TYPED pin, verbatim as it was typed
 	// (`<index>:<first words>`), or "" when none was given. It is the one value
 	// in this struct that does not come from the row being stamped — see
@@ -824,6 +856,8 @@ func parseStampArgs(tail []string, mergeGatedType string) (stampArgs, []string) 
 			sa.miss = true
 		case "--withdraw":
 			sa.withdraw = true
+		case "--amend":
+			sa.amend = true
 		case "--criterion":
 			if n, err := strconv.Atoi(strings.TrimSpace(spaceVal())); err == nil {
 				sa.criterion = &n
@@ -930,6 +964,9 @@ func stampEchoLine(sa stampArgs) string {
 		// board's number go DOWN, and an operator who typed the wrong index
 		// should see that before the write, not after.
 		outcome = "WITHDRAW (met → false; the evidence is kept, the lock is lowered)"
+	case sa.amend:
+		// The text quoted after this line is the wording being REPLACED.
+		outcome = "AMEND the wording (met and evidence are pinned) — replacing"
 	}
 	line := fmt.Sprintf("→ criterion index %d (0-based) = criterion #%d as boards/rubric number them → %s", idx, idx+1, outcome)
 	if t := strings.TrimSpace(sa.criterionText); t != "" {

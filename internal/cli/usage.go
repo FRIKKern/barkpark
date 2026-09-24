@@ -328,6 +328,10 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		for _, line := range stampCriterionTextHelpLines() {
 			out.errf("%s", line)
 		}
+		out.errf("")
+		for _, line := range stampAmendHelpLines() {
+			out.errf("%s", line)
+		}
 		// The out-of-row pin is undeclarable for the same reason
 		// --criterion-text-file is (tasks_stamp_expect_pin.go), and it is the
 		// ONLY guard on this verb that a scripted caller cannot satisfy by
