@@ -137,6 +137,7 @@ A scattered board is a defect; fit every task to this structure:
 4. **Labels** (`content.labels`): `proj:<mission>` (required), `phase:<goal|design|decision|build|verify>`, `kind:<deferred|low|…>`, plus gates `needs-human`/`decision`/`security`.
 5. **Real work tasks carry `acceptance_criteria`** — 1–3 checkable conditions. **State a CHECK TO RE-RUN, not a predicted state**: one opening **If / Once / When / Should** names the OBSERVABLE that flips it (a file, a symbol, a PR, a command exiting 0); sweep: `scripts/ledger/conditional-criteria-census.py`. Name REAL test files and gate them with `scripts/mix-test-strict.sh`; bare `mix test` drops a missing path silently whenever another matches. Decisions/goals may omit them; a row with none closes `done` only if `close_reason` names the PR + sha or the run. Merge gates need `merge_gate:true`: a `landed` close flips only the flag, wording alone warns.
 6. **Blockers are explicit** — `blocks` edges keep a gated task out of "ready"; one waiting on a human carries `needs-human`/`decision`.
+7. **Cite code by SYMBOL** (`api/lib/x.ex fun/2`); a line number is a hint that carries its sha; a basename is not an address. **A claim about code carries the grep or run behind it** — line checkers miss claim rot. Report stale anchors (`scripts/pds-task-anchor-report.sh`), never auto-rewrite: a moved anchor and a gone finding differ.
 
 ## Workspaces, projects, datasets
 
