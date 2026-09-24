@@ -88,6 +88,16 @@ defmodule Barkpark.PortableDoc.Render.ContainerRenderOptsTest do
     assert html =~ "LIVE-TITLE"
   end
 
+  # A stack section composes its children through compose_block/2, so a
+  # terminal inside it at :email takes the /2 email clause, not the /3 one
+  # render_block/2 dispatches to — a separate recursion site.
+  test "a terminal inside a stack section at email (the compose_block/2 email clause)" do
+    html =
+      Render.render_block(section_stack(terminal(@paper_links)), Map.put(@opts, :style, :email))
+
+    assert html =~ "LIVE-TITLE"
+  end
+
   test "a nested child still renders at evergreen when the caller passes a theme (charter D8)" do
     theme = %{brand: "#ff0000", text: "#00ff00", muted: "#0000ff", rule: "#ff00ff"}
 
