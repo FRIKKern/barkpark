@@ -16,8 +16,11 @@ defmodule Barkpark.Content.PaperTaskResolver do
   `:barkpark, :plugins` load order at READ time with the same precedence as
   `PreWriteFences.list/0` (a configured list wins, in its order; otherwise
   alphabetical by plugin name), and the FIRST declared resolver wins.
-  Follow-up: switch this read to `Barkpark.Content.PluginLoadOrder` once
-  PR #20148 lands (it unifies the load-order read the holders copy).
+  Configured entries are interpreted by
+  `Barkpark.Content.PluginLoadOrder.plugins/3` (task-21f5264a452b7cf9): an
+  entry that published no declaration (a loadable module that never
+  registered, an unknown name, a malformed entry) is skipped with a
+  `Logger.warning` naming it — never silently.
 
   `nil` — nothing published (the `BARKPARK_PLUGINS=""` kill switch registers
   nothing; Registry init publishes `[]`) or no plugin in the load order
@@ -67,20 +70,13 @@ defmodule Barkpark.Content.PaperTaskResolver do
     declared = :persistent_term.get(@key, [])
 
     case Application.get_env(:barkpark, :plugins, []) do
-      [_ | _] = configured -> Enum.find_value(configured, &resolver_for(declared, &1))
-      _ -> Enum.find_value(declared, & &1.resolver)
-    end
-  end
+      [_ | _] = configured ->
+        configured
+        |> Barkpark.Content.PluginLoadOrder.plugins(declared, __MODULE__)
+        |> Enum.find_value(& &1.resolver)
 
-  defp resolver_for(declared, name) when is_binary(name), do: by(declared, :name, name)
-  defp resolver_for(declared, {name, _mod}) when is_binary(name), do: by(declared, :name, name)
-  defp resolver_for(declared, mod) when is_atom(mod), do: by(declared, :module, mod)
-  defp resolver_for(_declared, _other), do: nil
-
-  defp by(declared, field, value) do
-    case Enum.find(declared, &(Map.fetch!(&1, field) == value)) do
-      nil -> nil
-      entry -> entry.resolver
+      _ ->
+        Enum.find_value(declared, & &1.resolver)
     end
   end
 end

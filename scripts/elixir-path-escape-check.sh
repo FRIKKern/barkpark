@@ -380,6 +380,11 @@ scripts/prod-build-cache-guard.sh'
 #   nothing in CI ever reads pg_indexes. A stray hand-created index on prod is
 #   caught by `--check` run out of band on a credentialed box, never here. The
 #   rider's @moduledoc states the same decision at the other end.
+#   THE PRE-COMMIT HOOK HARNESS (2026-09-24, task-eb42388a71b8d277):
+#   .githooks/pre-commit and scripts/pre-commit-hook.test.sh. The harness is a
+#   STEP of mix-test (beside the unreachable-assert ratchet it drives), so
+#   without these two entries a PR editing only the hook computes
+#   test == 'false' and skips the one job that proves the hook still refuses.
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 CLAUDE.md
 js/CLAUDE.md
@@ -457,6 +462,8 @@ scripts/test-env-leak-allowlist.txt
 scripts/test-env-leak-gate.sh
 scripts/test-env-leak-gate.test.sh
 scripts/unreachable-assert-message-check.sh
+.githooks/pre-commit
+scripts/pre-commit-hook.test.sh
 templates/astro-search-starter/public/bp-graph.js
 templates/search-starter/lib/__test-stub-barkpark-core.mjs
 templates/search-starter/public/bp-graph.js

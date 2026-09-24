@@ -39,8 +39,7 @@ lib/barkpark/plugins/onixedit/schemas/contributor.ex	definition_map
 lib/barkpark/plugins/onixedit/schemas/text_content.ex	definition_map
 lib/barkpark/plugins/onixedit/web/export_controller.ex	render_onix
 lib/barkpark/plugins/registry/boot_collectors.ex	module_from_plugin_dir
-lib/barkpark/plugins/registry/boot_collectors.ex	module_of_configured_entry
-lib/barkpark/plugins/registry/discovery.ex	manifest_names_for_module
+lib/barkpark/plugins/registry/discovery.ex	manifest_index_entry
 lib/barkpark/plugins/registry/discovery.ex	try_register_plugin_dir
 lib/barkpark/plugins/registry/discovery.ex	try_register_plugin_dir_in_whitelist
 lib/barkpark/plugins/scaffy.ex	register_schemas

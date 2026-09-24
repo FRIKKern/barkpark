@@ -49,11 +49,14 @@ defmodule Barkpark.PluginEnv do
   ## Every load-order SETTER goes through `put!/1`
 
   Every reader of the load order (`Plugins.Hooks`, `Registry.ResolverChain`,
-  `Registry.BootCollectors`, `Registry.Discovery`, `Content.PreWriteFences`)
-  accepts exactly three entry shapes — a module atom, a `{plugin_name, module}`
-  tuple, a plugin-name string — and DROPS anything else without a word. A
-  test that sets the order to something else runs with that plugin silently
-  OFF and passes vacuously for the plugin half:
+  `Registry.BootCollectors`, `Registry.Discovery`, `Content.PreWriteFences`,
+  `Content.PrePublishFences`) interprets entries through ONE lib normaliser,
+  `Barkpark.Content.PluginLoadOrder`, which accepts exactly three entry shapes
+  — a module atom, a `{plugin_name, module}` tuple, a plugin-name string — and
+  DROPS anything else with a single `Logger.warning` (task-3fbd48182b1d35ea).
+  No assertion reads that warning, so a test that sets the order to
+  something else still runs with that plugin OFF and passes vacuously for the
+  plugin half:
   `stamp_publish_lost_update_test.exs` passed the Registry's ENTRY MAPS
   (`Registry.all()`), so the Tasks plugin was out of its load order all along
   (task-05ea4e4c31dbc750).
@@ -142,9 +145,18 @@ defmodule Barkpark.PluginEnv do
   non-empty plugin-name string.
 
   A string is not resolved here: an unregistered name is skipped by the
-  readers by design, and `pre_write_fences_test.exs` exercises exactly that
-  skip. A module atom IS checked for loadability — a misspelt module is as
-  silently dropped as a map.
+  readers by design (with a warning), and `pre_write_fences_test.exs`
+  exercises exactly that skip. A module atom IS checked for loadability — a
+  misspelt module is as surely dropped as a map.
+
+  Consistency with the lib rule (`Barkpark.Content.PluginLoadOrder`): every
+  shape accepted here is one the lib normaliser accepts, and every shape it
+  classifies `:bad_shape` / `:not_loadable` is refused here. This check is
+  STRICTER in one corner only: a `{plugin_name, module}` tuple whose module
+  does not load is refused here, while the lib still resolves it by name when
+  that name is registered. A loadable module that is not a registered plugin
+  is accepted here as in lib — module-dispatch readers (Hooks, BootCollectors)
+  run it; plugin-record readers skip it with a warning.
   """
   def validate!(order) when is_list(order) do
     order
@@ -188,7 +200,8 @@ defmodule Barkpark.PluginEnv do
           "refusing :barkpark, :plugins load-order entry #{index} " <>
             "(#{inspect(entry, limit: 5)}): every load-order reader DROPS an " <>
             "entry that is not a module atom, a {plugin_name, module} tuple, or " <>
-            "a plugin-name string, so this plugin would be silently OFF for the " <>
-            "test." <> hint <> " Full order: #{inspect(order, limit: 8)}"
+            "a plugin-name string (with one log warning no assertion reads), " <>
+            "so this plugin would be silently OFF for the test." <>
+            hint <> " Full order: #{inspect(order, limit: 8)}"
   end
 end
