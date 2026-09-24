@@ -405,11 +405,51 @@ GO
   if [ "$n_globs" -ge 10 ]; then pass=$((pass+1)); else
     fail=$((fail+1)); echo "FAIL [declared-set parse]: parsed only $n_globs glob(s) from $WORKFLOW"; fi
 
+  # THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817).
+  # Every case above grades list_reads / declared_globs IN PROCESS; none
+  # executes the --check tail that turns a non-empty $uncovered into the
+  # PROCESS exit, so flipping its `exit 1` to `exit 0` kept this selftest green
+  # while the required check certified an undeclared read. Same idiom as PR
+  # #13405 / #20180: RE-EXEC THE WHOLE PROGRAM on a synthetic root through the
+  # EXISTING GO_PATH_ESCAPE_ROOT / GO_PATH_ESCAPE_WORKFLOW proof-run overrides
+  # and assert the PROCESS exit. The root is built just above both floors
+  # ($GO_ESCAPE_MIN reads, 10 globs), so the plant alone moves the verdict;
+  # the real-run path is not touched.
+  e2e="$tmp/e2e"
+  mkdir -p "$e2e/internal/e2e" "$e2e/docs/e2e"
+  i=0
+  {
+    echo 'package e2e'
+    while [ "$i" -lt "$GO_ESCAPE_MIN" ]; do
+      : >"$e2e/docs/e2e/f$i.md"
+      echo "var v$i = \"../../docs/e2e/f$i.md\""
+      i=$((i+1))
+    done
+  } >"$e2e/internal/e2e/a_test.go"
+  e2e_wf() { # e2e_wf <glob covering docs/e2e> -> a go-tests.yml with 10 push paths
+    printf 'on:\n  push:\n    paths:\n      - "**/*.go"\n      - "go.mod"\n      - "go.sum"\n'
+    for g in a b c d e f; do printf '      - "e2e-%s/**"\n' "$g"; done
+    printf '      - "%s"\n' "$1"
+  }
+  e2e_wf "docs/other/**" >"$tmp/e2e-planted.yml"
+  e2e_wf "docs/e2e/**" >"$tmp/e2e-removed.yml"
+  e2e_run() { GO_PATH_ESCAPE_ROOT="$1" GO_PATH_ESCAPE_WORKFLOW="$2" bash "${BASH_SOURCE[0]}" --check >"$tmp/e2e.out" 2>&1; }
+  if e2e_run "$e2e" "$tmp/e2e-planted.yml"; then rc=0; else rc=$?; fi
+  if [ "$rc" -eq 1 ] && grep -qF "docs/e2e/f0.md" "$tmp/e2e.out"; then pass=$((pass+1)); else
+    fail=$((fail+1)); echo "FAIL [whole program, planted]: $GO_ESCAPE_MIN undeclared reads must exit 1 naming them, got rc=$rc"; sed 's/^/  | /' "$tmp/e2e.out"; fi
+  if e2e_run "$e2e" "$tmp/e2e-removed.yml"; then rc=0; else rc=$?; fi
+  if [ "$rc" -eq 0 ]; then pass=$((pass+1)); else
+    fail=$((fail+1)); echo "FAIL [whole program, plant removed]: every read declared must exit 0, got rc=$rc"; sed 's/^/  | /' "$tmp/e2e.out"; fi
+  mkdir -p "$tmp/e2e-empty/internal"
+  if e2e_run "$tmp/e2e-empty" "$tmp/e2e-removed.yml"; then rc=0; else rc=$?; fi
+  if [ "$rc" -ne 0 ]; then pass=$((pass+1)); else
+    fail=$((fail+1)); echo "FAIL [whole program, empty root]: a root with zero reads exited 0 — a green over nothing"; fi
+
   echo "go-path-escape-check --selftest: $pass passed, $fail failed"
   # COUNT FLOOR. Zero assertions executed is a pass in every runner; say the
   # number out loud and refuse a run that produced fewer than the cases above.
-  if [ "$pass" -lt 8 ] && [ "$fail" -eq 0 ]; then
-    echo "::error::go-path-escape-check --selftest: only $pass assertion(s) ran, expected at least 8. The harness itself is broken." >&2
+  if [ "$pass" -lt 11 ] && [ "$fail" -eq 0 ]; then
+    echo "::error::go-path-escape-check --selftest: only $pass assertion(s) ran, expected at least 11. The harness itself is broken." >&2
     exit 1
   fi
   [ "$fail" -eq 0 ] || exit 1
