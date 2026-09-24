@@ -122,19 +122,23 @@ defmodule Barkpark.Content.TagRegistryTrgmTest do
     # test had no such competitor). At the ~3000-row sandbox corpus the planner
     # prefers scanning a type-btree and filtering `%` over paying the GIN trgm
     # start-up cost, so it would NOT reveal the trgm index's eligibility. To
-    # prove REACHABILITY deterministically we drop the competing indexes for the
-    # duration of this test (transaction-scoped in the sandbox — every DROP rolls
-    # back at test end), leaving the partial GIN as the ONLY applicable index for
-    # the `%` arm. `similarity()>x` is index-OPAQUE, so with `enable_seqscan=off`
-    # it still falls back to a Seq Scan even with the trgm index present — the
-    # exact correctness/preparedness distinction the `%` rewrite buys.
-    for [name] <-
-          Repo.query!(
-            "SELECT indexname FROM pg_indexes WHERE tablename='documents' " <>
-              "AND indexname NOT IN ('documents_doc_id_trgm_idx','documents_pkey')"
-          ).rows do
-      Repo.query!(~s(DROP INDEX "#{name}"))
-    end
+    # prove REACHABILITY deterministically the partial GIN must be the ONLY
+    # applicable index for the `%` arm. `similarity()>x` is index-OPAQUE, so with
+    # `enable_seqscan=off` it still falls back to a scan even with the trgm index
+    # present — the exact correctness/preparedness distinction the `%` rewrite
+    # buys.
+    #
+    # The competitors are removed CONNECTION-LOCALLY, never by `DROP INDEX` on
+    # `public.documents`: that takes ACCESS EXCLUSIVE on the busiest table in
+    # the ONE database CI shares, and this module is async, so every other
+    # session touching `documents` would park behind it until this test's
+    # sandbox rolled back (same race class as main red 35980575238). Instead a
+    # TEMP TABLE named `documents` shadows the public one — pg_temp is searched
+    # first for relations, so the unqualified `FROM "documents"` Ecto emits
+    # resolves to it — carrying the same columns and rows and ONLY the trgm
+    # index, rebuilt from `public.documents_doc_id_trgm_idx`'s own catalog
+    # definition so a migration that changes that index changes this proof.
+    shadow_documents_with_only_trgm_index!()
 
     Repo.query!("SET LOCAL enable_seqscan = off")
 
@@ -158,6 +162,36 @@ defmodule Barkpark.Content.TagRegistryTrgmTest do
 
     assert old_plan =~ ~r/(Filter|Recheck Cond): [^\n]*similarity/,
            "expected `similarity() > x` to be a post-scan Filter/Recheck (index-opaque), got:\n#{old_plan}"
+
+    # The shared table was never locked against other sessions' writes.
+    assert strong_locks_on_public_documents() == [],
+           "this test must not hold a write-blocking lock on public.documents"
+  end
+
+  # Only the partial trgm index's definition, read from the catalog. Raises if
+  # the index is gone — the proof would otherwise plan against nothing.
+  defp shadow_documents_with_only_trgm_index! do
+    [[indexdef]] =
+      Repo.query!("SELECT pg_get_indexdef('public.documents_doc_id_trgm_idx'::regclass)").rows
+
+    Repo.query!("CREATE TEMP TABLE documents (LIKE public.documents INCLUDING DEFAULTS)")
+    Repo.query!("INSERT INTO pg_temp.documents SELECT * FROM public.documents")
+
+    temp_indexdef = String.replace(indexdef, " ON public.documents ", " ON pg_temp.documents ")
+    assert temp_indexdef != indexdef, "unexpected index definition shape: #{indexdef}"
+    Repo.query!(temp_indexdef)
+
+    Repo.query!("ANALYZE pg_temp.documents")
+  end
+
+  # Lock modes on public.documents that block other sessions' INSERT/UPDATE
+  # (DROP INDEX takes ACCESS EXCLUSIVE; CREATE INDEX takes SHARE).
+  defp strong_locks_on_public_documents do
+    Repo.query!(
+      "SELECT mode FROM pg_locks WHERE pid = pg_backend_pid() " <>
+        "AND relation = 'public.documents'::regclass " <>
+        "AND mode IN ('ShareLock','ShareRowExclusiveLock','ExclusiveLock','AccessExclusiveLock')"
+    ).rows
   end
 
   test "recall preserved: nearest_registered still surfaces a ~0.15 gray-zone near-match" do
