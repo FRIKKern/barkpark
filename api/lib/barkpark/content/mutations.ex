@@ -489,6 +489,11 @@ defmodule Barkpark.Content.Mutations do
          do: {:ok, doc, "discardDraft"}
   end
 
+  defp apply_one(%{"deleteExactDraft" => %{"id" => id, "type" => type} = op}, dataset, opts) do
+    with {:ok, doc} <- Content.delete_exact_draft(id, type, dataset, if_rev(op), opts),
+         do: {:ok, doc, "deleteExactDraft"}
+  end
+
   defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
     case if_rev(op) do
       nil ->
@@ -672,7 +677,7 @@ defmodule Barkpark.Content.Mutations do
   # `patch` that carries id+type but no recognized op (it has both keys, so
   # nothing is "missing" — it fails for a different reason and must not be
   # mislabelled).
-  @id_type_verbs ~w(publish unpublish discardDraft delete patch)
+  @id_type_verbs ~w(publish unpublish discardDraft delete deleteExactDraft patch)
 
   defp apply_one(mutation, _dataset, _opts) when is_map(mutation) do
     case missing_id_type(mutation) do

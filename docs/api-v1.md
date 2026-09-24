@@ -5,11 +5,7 @@
 
 Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
-**Reading this from a JavaScript or TypeScript app?** Use the SDK rather than raw
-`fetch`: `@barkpark/core` wraps these routes (query builder, mutations, media,
-`listen()`), and `@barkpark/nextjs` adds App Router integration. Consumption
-guide: [cards/js-sdk.md](cards/js-sdk.md). Prose docs site: `pnpm -C js install
-&& pnpm -C js --filter @barkpark/docs dev`.
+**JS/TS:** use `@barkpark/core` (queries, mutations, media, listen) and `@barkpark/nextjs` (App Router). [SDK guide](cards/js-sdk.md). Docs site: `pnpm -C js install && pnpm -C js --filter @barkpark/docs dev`.
 
 ## 1a. Workspace → Project → Dataset hierarchy
 
@@ -66,7 +62,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 Fetch one document. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin — so the bare `_publishedId` reaches an unpublished document under both, exactly as `patch`/`publish`/`discardDraft`/`delete` do.
 
-**Read-after-write is IMMEDIATE, not eventual.** A mutation is visible on the next read — 63 reads across 3 timed trials on live production, first sample t+0.45s, zero misses (`pds-bl-doc-patch-propagation-lag`). Responses carry `cache-control: max-age=0, private, must-revalidate` and the ETag is folded from the row's own `_id:_rev`, so no shared cache can serve a stale body. What looks like propagation lag is the **draft/published split**: a write that lands on `drafts.<id>` is served by `?perspective=drafts`, and by `raw` when the document has no published row — `published` and `bp task get` do an exact-id lookup and keep returning the published row until the draft is published. Diagnose a "missing" write by reading `?perspective=drafts` once, not by polling `published`.
+**Read-after-write is immediate.** Responses use `cache-control: max-age=0, private, must-revalidate`; ETags include row `_id:_rev`. Check the **draft/published split** before polling: writes to `drafts.<id>` appear under `?perspective=drafts`, or `raw` without a published row. `published` and `bp task get` read the exact ID and retain the published row until publication. Diagnose a missing write with one drafts read. Original 63-read production proof: `pds-bl-doc-patch-propagation-lag`.
 
 ### 5a. Reference Expansion
 
@@ -85,6 +81,8 @@ A batch of mutations, applied atomically (any failure rolls back the batch). Bod
 **`Idempotency-Key`** (optional, this route). A repeat with the same key replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
 
 ### Mutation kinds
+
+**`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<opaque _rev>" } }`. Requires an exact draft ID and revision; missing row →404, stale revision →412. Removes only that draft, preserves its published twin, and commits recovery history/event with the delete. Receipt names the exact removed row. Generic `delete` retains its both-variant behavior. Lost replies require reconciliation; never retry against a recreated row with a new revision.
 
 **`create`** — new draft; `conflict` if a draft already exists at that id: `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
