@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
@@ -50,6 +51,15 @@ func sessionDocFor(g globals, ctx manifest.Context, cmd manifest.Command) string
 	if !sessionDocCommands[cmd.ID] {
 		return ""
 	}
+	return sessionDocBinding(g, ctx)
+}
+
+// sessionDocBinding is the precedence walk above WITHOUT the armed-door gate —
+// the one resolver for the bound slug. sessionDocFor gates it per manifest
+// command; apiSessionConfig hands it to an apiclient whose only header-bearing
+// door is the close (task-e4cbf4cd9f672c33), so both surfaces bind the same
+// session under the same ambient rule.
+func sessionDocBinding(g globals, ctx manifest.Context) string {
 	if s := strings.TrimSpace(g.session); s != "" {
 		return s
 	}
@@ -63,4 +73,16 @@ func sessionDocFor(g globals, ctx manifest.Context, cmd manifest.Command) string
 		return strings.TrimSpace(c.Session)
 	}
 	return ""
+}
+
+// apiSessionConfig stamps the two session headers onto an apiclient.Config the
+// CLI builds for a surface that closes tasks OUTSIDE buildManifestRequest — the
+// desk TUI (ResolvedAPIConfig), the board (runTasksBoard) and the cmux Stop
+// hook (newHookClient). apiclient sits below this package and cannot import
+// these resolvers, so the values are resolved HERE, by the same sessionKey and
+// sessionDocBinding the manifest path uses, and carried down as data.
+func apiSessionConfig(cfg apiclient.Config, g globals, ctx manifest.Context) apiclient.Config {
+	cfg.SessionKey = sessionKey()
+	cfg.SessionDoc = sessionDocBinding(g, ctx)
+	return cfg
 }

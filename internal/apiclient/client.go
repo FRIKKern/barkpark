@@ -68,6 +68,18 @@ type Config struct {
 	// Timeout is the per-request HTTP timeout. Zero means DefaultTimeout.
 	// (The SSE listener always uses an unbounded timeout, independent of this.)
 	Timeout time.Duration
+
+	// SessionKey and SessionDoc are the two session headers a task close
+	// carries (task-e4cbf4cd9f672c33): X-Barkpark-Session, the SECRET
+	// claim-session key the server HMACs onto claim.closed_session, and
+	// X-Barkpark-Session-Doc, the PUBLIC slug of the type:session document the
+	// server auto-logs a `task-closed` event to. apiclient sits BELOW
+	// internal/cli and cannot import its resolvers, so it never resolves these
+	// itself: the CLI fills them through the same sessionKey / session-doc
+	// binding its manifest path uses (internal/cli/session_doc_header.go).
+	// Empty sends no header — a sessionless close stays byte-identical.
+	SessionKey string
+	SessionDoc string
 }
 
 // firstEnv returns the value of the first name set to a non-empty string, or ""
@@ -159,6 +171,10 @@ type Client struct {
 	// Empty means "send no perspective param" — the server defaults to published.
 	Perspective string
 	client      *http.Client
+	// sessionKey / sessionDoc: see Config.SessionKey / Config.SessionDoc. Sent
+	// on the close door only (closeHeaders).
+	sessionKey string
+	sessionDoc string
 	// OnChange, if set, is invoked when a real SSE mutation frame reports that
 	// the dataset changed. It replaces the old tea.Program coupling: the TUI sets
 	// it to program.Send(DataStoreRefreshMsg{}); a CLI may leave it nil. The
@@ -226,6 +242,8 @@ func New(cfg Config) *Client {
 		Project:     cfg.Project,
 		Dataset:     cfg.Dataset,
 		Perspective: cfg.Perspective,
+		sessionKey:  strings.TrimSpace(cfg.SessionKey),
+		sessionDoc:  strings.TrimSpace(cfg.SessionDoc),
 		// httpx.CheckRedirect for the same reason the retry lives here: ONE owner.
 		// Go's default policy rewrites a redirected POST into a bodyless GET, so
 		// every typed write on this client could silently become a read that
@@ -1276,7 +1294,14 @@ type TaskNotice struct {
 // builds; tenancy comes from the bearer token. An ok:false envelope surfaces
 // the server's reason string VERBATIM as the error.
 func (c *Client) taskPost(path string, payload map[string]interface{}) (*taskEnvelope, error) {
-	env, status, err := c.taskPostRaw(path, payload)
+	return c.taskPostWith(path, payload, nil)
+}
+
+// taskPostWith is taskPost plus extra request headers (nil = none). Only the
+// close door passes any (closeHeaders); every other /v1/tasks write is
+// byte-identical to before.
+func (c *Client) taskPostWith(path string, payload map[string]interface{}, headers map[string]string) (*taskEnvelope, error) {
+	env, status, err := c.taskPostRawWith(path, payload, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -1298,6 +1323,10 @@ func (c *Client) taskPost(path string, payload map[string]interface{}) (*taskEnv
 // returned envelope, never the error. taskPost wraps this for the common
 // reason-as-error contract every other /v1/tasks caller relies on.
 func (c *Client) taskPostRaw(path string, payload map[string]interface{}) (*taskEnvelope, int, error) {
+	return c.taskPostRawWith(path, payload, nil)
+}
+
+func (c *Client) taskPostRawWith(path string, payload map[string]interface{}, headers map[string]string) (*taskEnvelope, int, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, 0, err
@@ -1310,6 +1339,9 @@ func (c *Client) taskPostRaw(path string, payload map[string]interface{}) (*task
 	req.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	resp, err := c.client.Do(req)
@@ -1478,13 +1510,13 @@ func (c *Client) TaskClose(docID, workerID string, observedEpoch int) error {
 // rev is the sanctioned bypass (Tasks.close/3 :observed_rev). The worker match
 // still prevents theft.
 func (c *Client) TaskCloseRevN(docID, workerID string, observedEpoch int, observedRev string) ([]TaskNotice, []string, error) {
-	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
+	env, err := c.taskPostWith("/v1/tasks/"+url.PathEscape(docID)+"/close",
 		map[string]interface{}{
 			"worker_id":        workerID,
 			"observed_epoch":   observedEpoch,
 			"observed_rev":     observedRev,
 			"lifecycle_status": "done",
-		})
+		}, c.closeHeaders())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1492,16 +1524,43 @@ func (c *Client) TaskCloseRevN(docID, workerID string, observedEpoch int, observ
 }
 
 func (c *Client) TaskCloseN(docID, workerID string, observedEpoch int) ([]TaskNotice, []string, error) {
-	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
+	env, err := c.taskPostWith("/v1/tasks/"+url.PathEscape(docID)+"/close",
 		map[string]interface{}{
 			"worker_id":        workerID,
 			"observed_epoch":   observedEpoch,
 			"lifecycle_status": "done",
-		})
+		}, c.closeHeaders())
 	if err != nil {
 		return nil, nil, err
 	}
 	return env.Notices, env.Help, nil
+}
+
+// Session header names on the close door — the SAME names bp's manifest path
+// sends (internal/cli: sessionHeader, sessionDocHeader). Server readers:
+// TasksController.session_id/2 and BarkparkWeb.SessionAutolog.
+const (
+	SessionKeyHeader = "X-Barkpark-Session"
+	SessionDocHeader = "X-Barkpark-Session-Doc"
+)
+
+// closeHeaders is what a close sends beyond auth (task-e4cbf4cd9f672c33):
+// the secret session key, so the server stamps claim.closed_session and the
+// task.close event's session like it does for `bp task close`; and the
+// session-doc slug, so SessionAutolog appends `task-closed` to the bound
+// session. Either is omitted when empty; nil when both are.
+func (c *Client) closeHeaders() map[string]string {
+	if c.sessionKey == "" && c.sessionDoc == "" {
+		return nil
+	}
+	h := map[string]string{}
+	if c.sessionKey != "" {
+		h[SessionKeyHeader] = c.sessionKey
+	}
+	if c.sessionDoc != "" {
+		h[SessionDocHeader] = c.sessionDoc
+	}
+	return h
 }
 
 // TaskPulse writes the claim's now-line AND renews the lease in one atomic
