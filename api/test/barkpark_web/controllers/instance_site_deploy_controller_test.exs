@@ -279,7 +279,7 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       assert first["door"]["census_interval_ms"] == 2_500
 
       put_runner_cfg(census_interval_ms: 60_000)
-      second = build_conn() |> authed(token) |> get(@route) |> json_response(200)
+      second = scoped_conn() |> authed(token) |> get(@route) |> json_response(200)
       assert second["door"]["census_interval_ms"] == 60_000
     end
 
