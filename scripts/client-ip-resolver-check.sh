@@ -74,6 +74,15 @@ scan() {
     exit 3
   }
 
+  # THE FLOOR (task-92a213f01ca30817). CLIENT_IP_SCANDIR can point this scan
+  # anywhere; a directory holding no Elixir source at all would scan nothing
+  # and print OK. A green over zero files is the failure this gate exists to
+  # prevent, so an empty corpus REFUSES like a missing one.
+  if [ -z "$(find "$dir" \( -name '*.ex' -o -name '*.exs' \) -type f -print -quit)" ]; then
+    echo "client-ip-resolver-check: $dir holds no .ex/.exs file — REFUSING." >&2
+    exit 3
+  fi
+
   # -r over the directory rather than a find|xargs pipeline: under `set -o
   # pipefail` a reader that exits early turns SIGPIPE into exit 141 and the gate
   # lies green under load.
@@ -161,7 +170,37 @@ BAD
       ;;
   esac
 
-  echo "client-ip-resolver-check --selftest: OK (clean tree passes, planted defect reds)."
+  # THE VERDICT WIRING (task-92a213f01ca30817). Both cases above grade scan()
+  # IN PROCESS; neither executes the tail that turns $violations into the
+  # process exit code, so flipping its `exit 1` to `exit 0` kept this selftest
+  # green while CI certified a planted read. Same idiom as PR #13405 / #20180:
+  # RE-EXEC THE WHOLE PROGRAM on the fixture root and assert the PROCESS exit.
+  local rc
+  set +e
+  CLIENT_IP_SCANDIR="$tmp" bash "$0" >/dev/null 2>&1; rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "client-ip-resolver-check --selftest FAILED: E2E whole program on the planted tree exited $rc, expected 1." >&2
+    exit 1
+  fi
+  rm -f "$tmp/barkpark/offender.ex"
+  set +e
+  CLIENT_IP_SCANDIR="$tmp" bash "$0" >/dev/null 2>&1; rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "client-ip-resolver-check --selftest FAILED: E2E whole program with the plant removed exited $rc, expected 0." >&2
+    exit 1
+  fi
+  mkdir -p "$tmp/empty"
+  set +e
+  CLIENT_IP_SCANDIR="$tmp/empty" bash "$0" >/dev/null 2>&1; rc=$?
+  set -e
+  if [ "$rc" -eq 0 ]; then
+    echo "client-ip-resolver-check --selftest FAILED: E2E an EMPTY scan root exited 0 — a green over zero files." >&2
+    exit 1
+  fi
+
+  echo "client-ip-resolver-check --selftest: OK (clean tree passes, planted defect reds, whole program exits 1/0, empty root refuses)."
 }
 
 case "${1:-}" in
