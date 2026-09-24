@@ -1836,7 +1836,7 @@
 .bp-paper-figure-caption-paint {
   display: block; width: 100%; padding: 0; margin: 0; border: 0;
   background: transparent; color: inherit; font: inherit; text-align: inherit;
-  letter-spacing: inherit; word-spacing: inherit;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
   white-space: normal; cursor: text;
 }
 .bp-paper-figure-caption-paint:focus-visible {
@@ -1855,6 +1855,7 @@ textarea.bp-paper-figure-caption-input {
   display: block; width: 100%; min-width: 0; box-sizing: border-box;
   margin: 0; padding: 0; border: 0; border-radius: 0;
   background: transparent; color: inherit; font: inherit;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
   resize: none; overflow: hidden; outline-offset: 3px;
 }
 textarea.bp-paper-figure-caption-input:focus-visible {
@@ -1939,6 +1940,7 @@ textarea.bp-paper-inline-text.bp-paper-card-action-label-input {
   margin: 0; padding: 0; border: 0; border-radius: 0;
   background: transparent; color: inherit; font: inherit; font-weight: inherit;
   text-align: inherit; letter-spacing: inherit; word-spacing: inherit;
+  text-rendering: inherit;
   white-space: normal; overflow-wrap: anywhere; cursor: text;
 }
 .bp-paper-section-title-paint:focus-visible,
@@ -1954,7 +1956,8 @@ textarea.bp-paper-inline-text.bp-paper-section-title-input {
   box-sizing: border-box; margin: 0; padding: 0;
   border: 0; border-radius: 0; background: transparent;
   color: inherit; font: inherit; font-weight: inherit; text-align: inherit;
-  letter-spacing: inherit; resize: none; overflow: hidden;
+  letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
+  resize: none; overflow: hidden;
   overflow-wrap: anywhere;
 }
 [data-paper-section-title-empty="true"]:not(:focus-within) {
@@ -2212,6 +2215,8 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-description-input {
   font: inherit;
   color: inherit;
   letter-spacing: inherit;
+  word-spacing: inherit;
+  text-rendering: inherit;
   resize: none;
   overflow: hidden;
   outline-offset: 3px;
