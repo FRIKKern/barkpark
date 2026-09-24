@@ -763,6 +763,48 @@ PYX
     echo "  SKIP  workflow-extractor cross-check — PyYAML not importable here (it is not a dependency of this guard; the check runs where it is present)"
   fi
 
+  # ── THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817) ─
+  # Every case above grades scan_files / derive_population IN PROCESS; none
+  # executes run_tree_scan's `return "$EX_VIOLATION"`, which IS the process
+  # exit code, so flipping it to `return "$EX_OK"` kept this selftest green
+  # while the tree scan certified a planted template. Same idiom as PR #13405 /
+  # #20180: RE-EXEC THE WHOLE PROGRAM on a fixture repo and assert the PROCESS
+  # exit. REPO_ROOT derives from the script's own location, so a copy at
+  # <fixture>/scripts/ scans only the fixture — no override is added — and the
+  # fixture is generated just above every clause floor, so the plant is the
+  # only thing that can move the verdict.
+  local e2e rc_planted rc_removed rc_empty i
+  e2e="$root/e2e"
+  mkdir -p "$e2e/scripts" "$e2e/bin" "$e2e/.github/workflows" "$root/e2e-empty/scripts"
+  cp "$SELF_PATH" "$e2e/scripts/mktemp-portability-check.sh"
+  cp "$SELF_PATH" "$root/e2e-empty/scripts/mktemp-portability-check.sh"
+  i=0; while [ "$i" -lt "$POP_FLOOR_sh_ext" ]; do printf 'echo %s\n' "$i" > "$e2e/scripts/s$i.sh"; i=$((i+1)); done
+  i=0; while [ "$i" -lt "$POP_FLOOR_sh_shebang" ]; do printf '#!/usr/bin/env bash\necho %s\n' "$i" > "$e2e/bin/t$i"; i=$((i+1)); done
+  python3 - "$e2e" "$POP_FLOOR_legs_arm" "$POP_FLOOR_workflow_run" <<'PYE2E'
+import json, os, sys
+root, arms, runs = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+legs = [{"slug": "e2e", "name": "e2e", "arms": [{"name": "a%d" % k, "run": "echo %d" % k} for k in range(arms)]}]
+open(os.path.join(root, ".github/shell-harness-legs.json"), "w").write(json.dumps(legs, indent=1))
+steps = "".join("      - run: echo %d\n" % k for k in range(runs))
+open(os.path.join(root, ".github/workflows/w.yml"), "w").write(
+    "name: t\non: [push]\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n" + steps)
+PYE2E
+  git -C "$e2e" init -q >/dev/null 2>&1 && git -C "$e2e" add -A >/dev/null 2>&1 \
+    && git -C "$root/e2e-empty" init -q >/dev/null 2>&1 && git -C "$root/e2e-empty" add -A >/dev/null 2>&1 \
+    || die "selftest could not build its E2E fixture repo (git init/add failed)"
+  printf 'x="$(mktemp -t planted-e2e)"\n' > "$e2e/scripts/s0.sh"
+  bash "$e2e/scripts/mktemp-portability-check.sh" >/dev/null 2>&1; rc_planted=$?
+  printf 'x="$(mktemp "${TMPDIR:-/tmp}/planted-e2e.XXXXXX")"\n' > "$e2e/scripts/s0.sh"
+  bash "$e2e/scripts/mktemp-portability-check.sh" >/dev/null 2>&1; rc_removed=$?
+  bash "$root/e2e-empty/scripts/mktemp-portability-check.sh" >/dev/null 2>&1; rc_empty=$?
+  cases=$((cases+1))
+  if [ "$rc_planted" -eq "$EX_VIOLATION" ] && [ "$rc_removed" -eq "$EX_OK" ] && [ "$rc_empty" -ne "$EX_OK" ]; then
+    echo "  PASS  verdict-wiring control — the WHOLE PROGRAM exits $rc_planted on a planted template, $rc_removed once it is removed, and $rc_empty (never 0) on an empty repo"
+  else
+    echo "  FAIL  verdict-wiring control — whole program exited planted=$rc_planted (want $EX_VIOLATION), removed=$rc_removed (want $EX_OK), empty=$rc_empty (want non-zero)" >&2
+    fails=$((fails+1))
+  fi
+
   # The selftest refuses its own vacuous run.
   [ "$cases" -ge 8 ] || die "selftest ran only $cases case(s); an empty tally is not a pass"
   printf '\n=== selftest: %s case(s), %s failure(s) ===\n' "$cases" "$fails"
