@@ -54,8 +54,19 @@ reaches the plugin only via `PaperMastersSeam` (registry + enablement).
   tenant's).
 - Detach and Pin are socket events `paper-detach-master` /
   `paper-pin-master` on the request-identified op path.
+- `save_master` PUBLISHES the master (task-59be65118320fa0e): the save is the
+  author's choice to reuse it. Later edits are drafts; the reader shows the
+  published row. Rejected: the reader resolving a draft-only master (an
+  UNPUBLISHED master is draft-only too: it would re-expose what the author
+  withdrew); an insert warning only (the reader stays broken). A master-ref nested in a section or
+  column previews in Studio; the slash menu offers "(linked)".
 
-## 6. Deferred
+## 6. Deferred (deliberate)
 
-A blockref `target` is not retargeted across papers; linked instances do not
-live-push to an open editor (next read picks the edit up).
+- A blockref `target` is not retargeted across papers.
+- No live push: an open editor sees a master edit on its next read. It
+  needs a jsonpath scan over the tenant's papers per master save.
+- The 409 lists every same-tenant instance id, not grant-narrowed:
+  `:before_delete` carries no caller grants.
+- Pin takes the authoring (draft-first) rev; a draft rev never resolves
+  on the reader. A `columns` child renders the placeholder in the reader.
