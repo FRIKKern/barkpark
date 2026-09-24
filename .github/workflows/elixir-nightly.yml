@@ -51,12 +51,39 @@
 # (open since 2026-07-22, 8 comments, every one a bot) as the standing
 # counter-example. READ here means a declared channel exists, never that a
 # person was reached.
+#
+# SECOND JOB: THE VIEW/EDIT PARITY MATRIX (task-2e171ca12cb82b76). PR #20125
+# committed api/assets/paper-editor/src/__view_edit_parity_matrix.mjs, which
+# renders every block type through the reader (View) and both edit surfaces
+# (the canvas and the public /papers LiveView editor) in headless Chromium and
+# diffs the computed style of the element that paints each run of text. Until
+# this job NOTHING ran it (`git grep test:view-edit-parity .github` was empty),
+# so a CSS change that broke View/Edit parity reddened nowhere. Its needs are a
+# compiled MIX_ENV=test api tree (it shells `mix run --no-compile --no-start`,
+# no database), Chromium and the paper-editor package's esbuild.
+#
+# WHY HERE AND NOT A NEW WORKFLOW. This file already is the scheduled,
+# advisory, MIX_ENV=test venue: it is classified in cron-overdue-probe.sh's
+# table, owned in .github/workflow-owners.json, and scored READ by
+# cron-scream-coverage.sh — a new file would need a row in each. The job gets
+# its OWN notifier key (view-edit-parity), so its red files its own issue and
+# never appends to the full suite's. The `view_edit_parity_only` dispatch input
+# exists so a manual run of the matrix does not also buy a 60-minute suite.
+#
+# NOT on pull_request and NOT in .github/required-checks.json, on purpose: the
+# matrix is host-dependent Chromium measurement, and its failure is a review
+# item for the studio lane that owns the instrument, never a merge block.
 name: elixir-nightly
 
 on:
   schedule:
     - cron: "17 3 * * *" # 03:17 UTC — after chronicle-paper (00:17), before required-checks-drift (04:17)
   workflow_dispatch:
+    inputs:
+      view_edit_parity_only:
+        description: "Run only the View/Edit parity matrix job (skip the 60-minute full suite)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -69,6 +96,9 @@ concurrency:
 jobs:
   full-suite:
     name: Full suite (--include flaky --include requires_node --slowest 100)
+    # A schedule has no inputs, so `!inputs.view_edit_parity_only` is `!null`,
+    # i.e. true: the nightly always runs the suite.
+    if: ${{ !inputs.view_edit_parity_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     services:
@@ -237,4 +267,220 @@ jobs:
             (runs 35499914600 and 35323296944).
             Exit on the `Install libxml2-utils` step instead means the runner's
             apt index, not this repository, and the step log says which.
+        run: bash scripts/file-ci-failure-issue.sh
+
+  view-edit-parity:
+    name: View/Edit parity matrix (BP_PARITY_REQUIRE_CHROME=1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write # the notifier step at the bottom files this job's red
+    env:
+      MIX_ENV: test
+      # The matrix runs `mix run --no-compile --no-start`: the Repo never
+      # starts, so there is no database and no postgres service. These are the
+      # config/runtime.exs-shaped vars the test env still wants present — the
+      # same set paper-rig.yml's rig job (also DB-less) carries.
+      SECRET_KEY_BASE: ci-secret-key-base-not-used-in-test-env-just-needs-64-chars-padding
+      BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
+      PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
+      # No Chromium is a FAILURE here, not a SKIP: without this the instrument
+      # prints SKIP and exits 0, and the job would be green having measured nothing.
+      BP_PARITY_REQUIRE_CHROME: "1"
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same pins as the full-suite job above and elixir.yml's blocking Test job.
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "27.0"
+          elixir-version: "1.18.4"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # elixir.yml mix-test's two caches, READ-ONLY. Sources keep the prefix
+      # (mix deps.get reconciles them against mix.lock); compiled dependency
+      # artifacts restore on the EXACT key only and are audited below by the
+      # same guard that job runs. `cache/restore`, never `cache`: this job
+      # compiles our own application into _build/test, and a post-job auto-save
+      # would put it into the gate's namespace. The gate owns those entries.
+      - name: Restore deps (dependency SOURCES)
+        uses: actions/cache/restore@v4
+        with:
+          path: api/deps
+          key: ${{ runner.os }}-mix-test-deps-v2-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-test-deps-v2-27.0-1.18.4-
+
+      - name: Restore compiled dependency artifacts (test)
+        uses: actions/cache/restore@v4
+        with:
+          path: api/_build/test/lib
+          key: ${{ runner.os }}-mix-test-depbuild-v1-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
+
+      - name: Fetch deps
+        run: mix deps.get
+
+      # elixir.yml's audit, verbatim in effect: 0 = dependency-only and
+      # complete, 3 = unusable (rebuild from nothing), anything else =
+      # CONTAMINATED and a hard fail.
+      - name: Audit the restored dependency build tree
+        id: depbuild_audit
+        run: |
+          set -uo pipefail
+          sed -n 's/^  "\([a-z0-9_][a-z0-9_]*\)".*/\1/p' mix.lock | sort -u > "$RUNNER_TEMP/dep-allowlist.txt"
+          # MIX_ENV=test comes from the job env, which makes this the TEST dep set.
+          (mix deps 2>/dev/null || true) \
+            | sed -n 's/^\* \([a-z0-9_][a-z0-9_]*\) .*/\1/p' | sort -u > "$RUNNER_TEMP/dep-required.txt"
+          echo "mix.lock names: $(wc -l < "$RUNNER_TEMP/dep-allowlist.txt")   test deps: $(wc -l < "$RUNNER_TEMP/dep-required.txt")"
+          verdict=0
+          bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" \
+            _build/test/lib "$RUNNER_TEMP/dep-allowlist.txt" "$RUNNER_TEMP/dep-required.txt" || verdict=$?
+          case "$verdict" in
+            0) echo "mode=cached" >> "$GITHUB_OUTPUT" ;;
+            3)
+              echo "FALLBACK: no usable dependency build cache — rm -rf _build/test + mix deps.compile --force (Past Mistake #2)."
+              rm -rf _build/test
+              echo "mode=rebuild" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::test dependency build cache is CONTAMINATED (guard exit $verdict) — see the CONTAMINANT lines above"
+              exit 1
+              ;;
+          esac
+
+      - name: Compile deps (test)
+        env:
+          DEPBUILD_MODE: ${{ steps.depbuild_audit.outputs.mode }}
+        run: |
+          if [ "$DEPBUILD_MODE" = "cached" ]; then
+            mix deps.compile
+          else
+            mix deps.compile --force
+          fi
+
+      # Not --warnings-as-errors: the blocking gate owns warnings. A warning
+      # must not stop the one instrument that measures View/Edit parity.
+      - name: Compile (test)
+        run: mix compile
+
+      - name: Install paper-editor (esbuild, pinned via lockfile)
+        working-directory: api/assets/paper-editor
+        run: npm ci
+
+      # Same browser, cache and install as paper-editor.yml's narrow-render job:
+      # chrome-headless-shell, with BP_CHROME pinned from the path `install`
+      # prints rather than from the harness guessing a cache layout.
+      - name: Cache chrome-headless-shell
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: ${{ runner.os }}-puppeteer-chrome-headless-shell-stable
+
+      - name: Install chrome-headless-shell
+        working-directory: api/assets/paper-editor
+        run: |
+          set -euo pipefail
+          npx --yes @puppeteer/browsers install chrome-headless-shell@stable \
+            --path "$HOME/.cache/puppeteer" | tee "$RUNNER_TEMP/chrome-install.txt"
+          bin="$(tail -1 "$RUNNER_TEMP/chrome-install.txt")"
+          bin="${bin##* }"
+          if [ ! -x "$bin" ]; then
+            echo "::error::chrome-headless-shell reported '$bin', which is not an executable. Refusing to run the matrix without a browser."
+            exit 1
+          fi
+          echo "BP_CHROME=$bin" >> "$GITHUB_ENV"
+
+      # THE MEASUREMENT. Exit is the instrument's: non-zero on any divergence
+      # not in src/view-edit-parity.known.json, on a STALE ledger entry, or on
+      # a run that compared zero owner pairs. The TOTAL line is asserted too, so
+      # a run that exited before its verdict cannot read as one.
+      - name: View/Edit parity matrix
+        id: matrix
+        working-directory: api/assets/paper-editor
+        env:
+          BP_PARITY_ARTIFACTS: ${{ runner.temp }}/view-edit-parity/clean
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/view-edit-parity/clean.log"
+          mkdir -p "$RUNNER_TEMP/view-edit-parity"
+          status=0
+          npm run test:view-edit-parity > "$out" 2>&1 || status=$?
+          cat "$out"
+          total=$(grep '^TOTAL view/edit style divergences: ' "$out" || true)
+          {
+            echo '### View/Edit parity matrix'
+            echo "exit: $status"
+            echo "${total:-(no TOTAL line — the run ended before its verdict)}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$total" ]; then
+            echo "::error::the matrix printed no TOTAL line; it did not reach a verdict."
+            exit 1
+          fi
+          exit "$status"
+
+      # THE CONTROL. The same run with one rule planted on the Edit pages only
+      # (the plant PR #20125 measured: 904 total, 4 unexpected, exit 1). It MUST
+      # fail and MUST name the divergence; if it passes, the matrix has stopped
+      # being able to red and the green above means nothing.
+      - name: Planted divergence must red (control)
+        if: ${{ !cancelled() && steps.matrix.conclusion != 'skipped' }}
+        working-directory: api/assets/paper-editor
+        env:
+          BP_PARITY_ARTIFACTS: ${{ runner.temp }}/view-edit-parity/planted
+          BP_PARITY_PLANT: "textarea.bp-paper-figure-caption-input{letter-spacing:.05em}"
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/view-edit-parity/planted.log"
+          status=0
+          npm run test:view-edit-parity > "$out" 2>&1 || status=$?
+          cat "$out"
+          if [ "$status" -eq 0 ]; then
+            echo "::error::the planted divergence exited 0 — the matrix can no longer red."
+            exit 1
+          fi
+          if ! grep -q '^      figure \[.*\] letterSpacing: view=' "$out"; then
+            echo "::error::the planted run exited $status but did not name the planted figure-caption letterSpacing divergence."
+            exit 1
+          fi
+          echo "control OK: planted run exited $status and named the divergence"
+
+      - name: Upload parity artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: view-edit-parity-${{ github.sha }}
+          path: ${{ runner.temp }}/view-edit-parity
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Report a failed View/Edit parity run to a human
+        # Own key, so this red never appends to the full suite's issue. The ref
+        # conjunct keeps a dispatch on a topic branch from filing a public issue.
+        if: (failure() || cancelled()) && github.ref == 'refs/heads/main'
+        working-directory: ${{ github.workspace }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: view-edit-parity
+          CI_FAILURE_DETAIL: |
+            The nightly View/Edit parity matrix failed on main
+            (api/assets/paper-editor/src/__view_edit_parity_matrix.mjs, owned by
+            the studio lane). Read the `View/Edit parity matrix` step: each FAIL
+            line names the scenario and surface, and the indented lines under it
+            name fixture, text, axis, and the View and Edit values. A STALE line
+            means a ledger entry in src/view-edit-parity.known.json no longer
+            fires and should be deleted. A red on `Planted divergence must red`
+            means the matrix can no longer fail at all. A red before the matrix
+            (compile, npm ci, chrome-headless-shell install) is the venue, not
+            parity. Screenshots and report.json are in the
+            `view-edit-parity-<sha>` artifact.
+            Reproduce: cd api/assets/paper-editor && npm run test:view-edit-parity
         run: bash scripts/file-ci-failure-issue.sh

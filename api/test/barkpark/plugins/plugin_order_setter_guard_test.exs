@@ -30,24 +30,21 @@ defmodule Barkpark.Plugins.PluginOrderSetterGuardTest do
   Restores go through `PluginEnv.restore/1`; `Application.delete_env/2` (the
   "unset" baseline) is not a write of a load order and is not flagged.
 
-  ## The exemption, and when it must go
+  ## Exemptions
 
-  `test/barkpark/tasks/stamp_publish_lost_update_test.exs` — the file that
-  surfaced the shape — is being fixed in open PR #20129 (which maps its entries
-  to modules) and is outside this change's fence. It still writes the env
-  directly, so it is exempt BY NAME until someone routes it through
-  `PluginEnv.put!/1`. The exemption is self-expiring: if that file stops
-  carrying a direct setter, the stale-exemption test reds and the entry must
-  be deleted here.
+  None. The file that surfaced the shape, `stamp_publish_lost_update_test.exs`,
+  was fixed by PR #20129 and routed through `PluginEnv` by
+  task-19947e55b2fc7e66. An exemption, if one is ever needed, is named with a
+  reason and self-expiring: if its file stops carrying a direct setter, the
+  stale-exemption test reds and the entry must be deleted.
   """
   use ExUnit.Case, async: false
 
   @allowed "test/support/plugin_env.ex"
 
-  @exempt %{
-    "test/barkpark/tasks/stamp_publish_lost_update_test.exs" =>
-      "fixed in open PR #20129 (entry maps -> modules); migrate to PluginEnv.put!/1 after it lands"
-  }
+  # Empty since task-19947e55b2fc7e66 routed the last exempt file through
+  # PluginEnv. A future entry must name a file and why, and expires the same way.
+  @exempt %{}
 
   test "no test writes the :plugins load order except through Barkpark.PluginEnv" do
     files = Path.wildcard("test/**/*.{ex,exs}")
