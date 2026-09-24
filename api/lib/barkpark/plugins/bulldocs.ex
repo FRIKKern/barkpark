@@ -174,7 +174,7 @@ defmodule Barkpark.Plugins.Bulldocs do
   end
 
   @impl Barkpark.Plugin
-  # Reachability: the only path read is `schemas_dir()` joined with one of three
+  # Reachability: the only path read is `schemas_dir()` joined with one of four
   # compile-time literal filenames — no runtime input reaches `File.read!/1`.
   # sobelow_skip ["Traversal.FileModule"]
   def register_schemas(_opts) do
@@ -186,8 +186,11 @@ defmodule Barkpark.Plugins.Bulldocs do
     # transcript ref, so it must never be anonymously readable. Sessions are
     # deliberately NOT in `AuthoringWall`'s `@walled_types`: they are
     # machine-generated lifecycle records, and being private already removes
-    # the exposure the wall's curation exists to gate).
-    for file <- ["paper.json", "form_response.json", "session.json"] do
+    # the exposure the wall's curation exists to gate) +
+    # paper_master (paper_master.json — PRIVATE: a saved, reusable node an author
+    # inserts as a detached copy; a library record, never a reader artifact.
+    # `Barkpark.Plugins.Bulldocs.Masters`, docs/decisions/0010-paper-masters.md).
+    for file <- ["paper.json", "form_response.json", "session.json", "paper_master.json"] do
       raw =
         schemas_dir()
         |> Path.join(file)
