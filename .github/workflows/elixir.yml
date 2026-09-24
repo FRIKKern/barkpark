@@ -1516,6 +1516,16 @@ jobs:
         working-directory: .
         run: bash scripts/unreachable-assert-message-check.sh
 
+      # The LOCAL half of the ratchet above: .githooks/pre-commit runs it with
+      # --files over staged api/test files (task-eb42388a71b8d277). This drives
+      # the hook through real `git commit` calls in a temp repo: a defective
+      # staged test is refused with the RED line, the fixed file commits, a
+      # .md/.go-only commit runs neither check. Needs only git + elixir + mix,
+      # all on PATH here, and no deps — so it rides BEFORE deps/compile too.
+      - name: The pre-commit hook refuses an unreachable assert message
+        working-directory: .
+        run: bash scripts/pre-commit-hook.test.sh
+
       # ── comment-status-literal ratchet, riding this job ──────────────────
       # A STEP, not a job, for exactly the reason the ratchet above records:
       # security-gate-shape.test.sh and the *-path-escape-check.test.sh suite

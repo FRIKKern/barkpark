@@ -36,6 +36,12 @@ type Config struct {
 	Dataset     string `json:"dataset,omitempty"`
 	Output      string `json:"output,omitempty"`
 
+	// Session is the config binding of the session-doc header: the slug of the
+	// type:session document a task close / paper publish logs to, below
+	// --session and BARKPARK_SESSION (session_doc_header.go). A pointer, not a
+	// credential — MarshalJSON leaves it unredacted.
+	Session string `json:"session,omitempty"`
+
 	// Theme is the persisted theme IDENTITY the CLI/TUI renders with (the emitted
 	// skin — "evergreen" today). It is ORTHOGONAL to light/dark MODE (the --theme
 	// flag still selects mode this wave, D30). Empty → the evergreen default.

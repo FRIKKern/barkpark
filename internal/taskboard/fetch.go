@@ -115,15 +115,13 @@ const inflightFetchPath = "/v1/tasks?lifecycle_status=in_progress&limit=" + task
 // code_refs, purpose, the disposition strips — which is why the board hydrates
 // an OPEN detail pane from the always-full row route (FetchTaskDetailByID).
 //
-// THE ONE FIELD STILL MISSING, named rather than worked around (c1): the board
-// projection carries no `content.design_doc`. `papers` is lifted to the top
-// level and survives, `design_doc` is not, and `content_digest.has_paper`
-// collapses the two into ONE boolean — so the SLUG is unrecoverable from a
-// board card. That is the input to the paper→tasks inversion (`DrivenTasks` /
-// `TaskDetail.PaperRefs`, detail_data.go), which runs over the WHOLE corpus,
-// not just the open row, so per-row hydration cannot restore it. Until the api
-// lane adds it to the digest, a live board's FramePaper lists only the tasks
-// that name the paper in `papers`, and not those that name it in `design_doc`.
+// `content.design_doc` — the paper slug the paper→tasks inversion reads
+// (`DrivenTasks` / `TaskDetail.PaperRefs`, detail_data.go) over the WHOLE
+// corpus — now ARRIVES on the board card as `content_digest.design_doc`
+// (task-cf0395706361aa2e): the stored slug unchanged, omitted when absent or
+// when it contains whitespace. toDetail reads it where `content` is absent, so
+// a live board's FramePaper lists tasks that name the paper in `design_doc` as
+// well as in `papers` (which is lifted to the top level and always survived).
 const boardViewParam = "&view=board"
 
 // ─── exhaustive keyset paging (task-6c59bff7cb6b36ee) ────────────────────
@@ -668,6 +666,10 @@ type contentDigest struct {
 	HasDescription  bool   `json:"has_description"`
 	HasDependencies bool   `json:"has_dependencies"`
 	HasPaper        bool   `json:"has_paper"`
+	// DesignDoc is content.design_doc's paper slug, stored spelling (a
+	// "drafts." prefix included — namesPaper/PaperRefs compare on bareID).
+	// Omitted by the producer when absent or not slug-shaped.
+	DesignDoc string `json:"design_doc"`
 }
 
 // decodeContentDigest reads the board projection's content_digest, or nil when
@@ -1069,6 +1071,15 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	d.BriefRaw = rawPortableDoc(m["brief"])
 	d.Design = strField(m, "design")
 	d.DesignDoc = strField(m, "design_doc")
+	if d.DesignDoc == "" {
+		// The board projection deletes `content`; the slug rides the digest
+		// instead. Only read where content has none, so the full view is
+		// unchanged. Stored raw like the content read above — the drafts.
+		// prefix is stripped at comparison (bareID), identically on both views.
+		if digest := decodeContentDigest(w.ContentDigest); digest != nil {
+			d.DesignDoc = digest.DesignDoc
+		}
+	}
 	d.Papers = strList(m["papers"])
 	if len(d.Papers) == 0 {
 		// The server also lifts papers to the envelope top level (live the two

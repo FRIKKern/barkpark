@@ -86,6 +86,7 @@ func usageTop(out *writer) {
 	out.errf("      --dry-run          print the request, do not send")
 	out.errf("      --yes              skip the prod write confirmation")
 	out.errf("      --limit/--offset/--all   pagination")
+	out.errf("      --session <slug>   session doc a task close / paper publish logs to (or BARKPARK_SESSION)")
 	// The help line NAMES THE WRITER. A flag that takes a file and never says
 	// which file sent every reader to `bp capabilities -o json`, whose rendered
 	// brief this loader cannot use (task-9f726e783347b60e).
