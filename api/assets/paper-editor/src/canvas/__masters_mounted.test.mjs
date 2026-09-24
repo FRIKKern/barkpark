@@ -16,6 +16,10 @@
 //   * NO CARRIER — outside a masters-enabled editor there is no Masters group
 //     and no Save item (the public reader, a field canvas).
 //
+//   * LINKED — the same master is offered a second time as a LINKED insert
+//     (task-59be65118320fa0e item 3); choosing it dispatches bp-master-insert
+//     with `mode: "linked"`, which the hook forwards to `paper-insert-master`.
+//
 // Mutation-checked: dropping the `item.master` branch in _chooseSlash, the
 // masters readExtraItems, or the block-menu item reds this file.
 
@@ -111,10 +115,18 @@ try {
     const el = document.createElement("div");
     el.setAttribute("data-paper-masters", JSON.stringify(MASTERS));
     root.appendChild(el);
-    const [row] = readMasterItems(root);
+    const [row, linkedRow] = readMasterItems(root);
     assert.equal(row.group, "Masters");
     assert.equal(row.master, "m-1");
     assert.equal(row.label, "Pricing block");
+    assert.ok(!row.linked, "the first row inserts a detached copy");
+    // task-59be65118320fa0e item 3: the same master is offered LINKED beside it.
+    assert.ok(linkedRow, "a second row for the same master");
+    assert.equal(linkedRow.group, "Masters");
+    assert.equal(linkedRow.master, "m-1");
+    assert.equal(linkedRow.linked, true);
+    assert.match(linkedRow.label, /Pricing block/);
+    assert.match(linkedRow.desc, /linked/);
   });
 
   // ── SLASH PICK ────────────────────────────────────────────────────────────
@@ -158,6 +170,33 @@ try {
 
     check("the editor is blurred so the server echo renders at once", () => {
       assert.equal(editor.isFocused, false);
+    });
+  }
+
+  // ── LINKED SLASH PICK (task-59be65118320fa0e item 3) ──────────────────────
+  {
+    const { canvas } = await mount({ carrier: true });
+    const editor = canvas._editor;
+    const inserts = [];
+    canvas.addEventListener("bp-master-insert", (e) => inserts.push(e.detail));
+
+    typeSlashAfterFirst(editor);
+    const menu = canvas._slash;
+    const linkedRow = menu && menu.isOpen()
+      ? menu._items.find((it) => it.master === "m-1" && it.linked === true)
+      : null;
+
+    check("the slash menu offers the master as a LINKED insert beside the detached one", () => {
+      assert.ok(linkedRow, "a linked row for the carrier's master");
+      assert.equal(linkedRow.group, "Masters");
+    });
+
+    if (linkedRow) canvas._chooseSlash(linkedRow);
+    check("choosing it dispatches bp-master-insert with mode linked", () => {
+      assert.deepEqual(inserts, [{ master_id: "m-1", after_id: "p-a", mode: "linked" }]);
+    });
+    check("the /query line is gone after a linked pick too", () => {
+      assert.ok(!editor.state.doc.textContent.includes("/pri"));
     });
   }
 

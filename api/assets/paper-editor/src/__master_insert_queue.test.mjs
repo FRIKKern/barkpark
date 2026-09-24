@@ -9,6 +9,7 @@
 //      the insert and releases the queue — the next canvas batch still sends.
 //      Without the terminal-refusal arms the coordinator would pause every
 //      later save behind the refused insert (mutation-checked).
+//   2b. LINKED: a linked pick forwards `mode: "linked"` (task-59be65118320fa0e).
 //   3. SAVE: bp-save-master pushes `paper-save-master` {block_id}.
 
 import assert from "node:assert/strict";
@@ -113,6 +114,21 @@ const later = sent("paper-ops");
 assert.equal(later.length, 2, "a later canvas batch still sends after a refused insert");
 assert.equal(later[1].payload.if_rev, 9, "and it is based on the last acknowledged revision");
 replies.shift().resolve({ saved: true, request_id: later[1].payload.request_id, rev: 10 });
+await tick();
+
+// ── 2b. LINKED (task-59be65118320fa0e item 3) ───────────────────────────────
+// A "linked" pick forwards `mode: "linked"`, so the server inserts a
+// `master-ref` instead of a detached copy; a detached pick sends no mode.
+assert.equal("mode" in insert, false, "a detached insert carries no mode");
+canvas.dispatchEvent(new window.CustomEvent("bp-master-insert", {
+  bubbles: true,
+  detail: { master_id: "m-1", after_id: "p-a", mode: "linked" },
+}));
+await tick();
+const linked = sent("paper-insert-master")[2].payload;
+assert.equal(linked.mode, "linked", "the linked pick is forwarded as mode: linked");
+assert.equal(linked.master_id, "m-1");
+replies.shift().resolve({ saved: true, request_id: linked.request_id, rev: 11 });
 await tick();
 
 // ── 3. SAVE ─────────────────────────────────────────────────────────────────

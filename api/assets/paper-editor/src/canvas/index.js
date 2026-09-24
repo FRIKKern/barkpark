@@ -2384,8 +2384,9 @@ class BpPaperCanvas extends HTMLElement {
       return;
     }
     // A MASTER row (the Masters group): the SERVER inserts the detached copy.
+    // A linked row (`item.linked`) asks for a LINKED instance instead.
     if (item && item.master) {
-      this._insertMaster(item.master);
+      this._insertMaster(item.master, item.linked === true ? "linked" : null);
       return;
     }
     // A SECTION PRESET row (the Presets group): insert the whole ORDERED SEQUENCE of
@@ -2451,7 +2452,9 @@ class BpPaperCanvas extends HTMLElement {
   // a block the server already holds (masterInsertAnchor). The editor is blurred
   // so the server echo carrying the copy renders as soon as it lands instead of
   // waiting for the author to leave the editor.
-  _insertMaster(masterId) {
+  // `mode` "linked" (task-59be65118320fa0e) asks for a `master-ref` instance;
+  // null keeps the detached copy (no mode on the wire).
+  _insertMaster(masterId, mode = null) {
     const editor = this._editor;
     if (!editor || typeof masterId !== "string" || masterId === "") return false;
     const slashIndex = topLevelIndexAtSelection(editor);
@@ -2473,7 +2476,9 @@ class BpPaperCanvas extends HTMLElement {
 
     this.dispatchEvent(
       new CustomEvent("bp-master-insert", {
-        detail: { master_id: masterId, after_id: afterId },
+        detail: mode === "linked"
+          ? { master_id: masterId, after_id: afterId, mode: "linked" }
+          : { master_id: masterId, after_id: afterId },
         bubbles: true,
         composed: true,
       }),
