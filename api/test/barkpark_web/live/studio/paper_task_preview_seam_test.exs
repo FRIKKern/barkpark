@@ -64,7 +64,7 @@ defmodule BarkparkWeb.Studio.PaperTaskPreviewSeamTest do
       assigns: %{current_workspace: ws, current_project: project, dataset: @dataset}
     }
 
-    %{ws: ws, block: block, socket: socket, title: title}
+    %{ws: ws, scope: scope, block: block, socket: socket, title: title}
   end
 
   defp disable_tasks!(ws) do
@@ -89,6 +89,11 @@ defmodule BarkparkWeb.Studio.PaperTaskPreviewSeamTest do
     assert widget =~ ~s(data-unavailable="tasks")
     refute widget =~ "Loading live tasks"
     refute widget =~ ctx.title
+
+    # Studio's read-only view render gets the same placeholder.
+    assert [%{html: view_html}] = StudioPaper.paper_stream_items([ctx.block], @dataset, ctx.scope)
+    assert view_html =~ ~s(data-unavailable="tasks")
+    refute view_html =~ ctx.title
   end
 
   test "tasks enabled: the editor preview renders the query's rows (control)", ctx do
@@ -102,6 +107,10 @@ defmodule BarkparkWeb.Studio.PaperTaskPreviewSeamTest do
     %{"html" => html} = StudioPaper.fleet_render(ctx.block, %{"pts-list" => entry})
     assert html =~ ctx.title
     refute html =~ "data-unavailable"
+
+    assert [%{html: view_html}] = StudioPaper.paper_stream_items([ctx.block], @dataset, ctx.scope)
+    assert view_html =~ ctx.title
+    refute view_html =~ "data-unavailable"
   end
 
   test "tasks disabled for the workspace: the editor preview renders the unavailable placeholder",
