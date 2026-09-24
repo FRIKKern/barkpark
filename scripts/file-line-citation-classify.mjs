@@ -128,6 +128,82 @@ const STOP = new Set([
 const PIN_RE = /\b[\w.-]+\.[A-Za-z0-9]+ \(([^@()\n]+?) @ ([0-9a-f]{7,40}), L(\d+)(?:[-\u2013]L?(\d+))?\)/g;
 const RULE_PINNABLE = new Set(["PIN-EXACT", "PIN-OLDER", "PIN-NEWER"]);
 
+// ── THE ADJACENCY RULE, exported ─────────────────────────────────────────────
+// tokensOf / spansOf / localAnchors / quotesNear are the ONE definition of "the
+// subject adjacent to a citation". scripts/file-line-citation-check.mjs imports
+// them to credit an unpinned citation only by its adjacent subject, so the
+// checker and the classifier cannot drift apart. They read only the constants
+// above; everything that parses argv, runs git or exits sits behind IS_MAIN.
+export const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export function tokensOf(span, base, keepHyphen) {
+  const own = new Set(base.toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean));
+  const out = new Set();
+  const parts = keepHyphen ? span.split(/[^A-Za-z0-9_$-]+/).flatMap((t) => [t, ...t.split("-")]) : span.split(/[^A-Za-z0-9_$]+/);
+  for (let tok of parts) {
+    tok = tok.replace(/^-+|-+$/g, "");
+    if (tok.length < MIN_TOKEN) continue;
+    if (/^[0-9-]+$/.test(tok)) continue;
+    if (/^[0-9a-f]{7,40}$/.test(tok)) continue; // a sha is provenance, not a subject
+    if (STOP.has(tok.toLowerCase())) continue;
+    if (own.has(tok.toLowerCase().replace(/^_+/, ""))) continue;
+    out.add(tok);
+  }
+  return [...out];
+}
+
+export function spansOf(text) {
+  const spans = [];
+  let i = 0;
+  while (true) {
+    const a = text.indexOf("`", i); if (a < 0) break;
+    const b = text.indexOf("`", a + 1); if (b < 0) break;
+    spans.push({ s: a, e: b + 1, body: text.slice(a + 1, b) });
+    i = b + 1;
+  }
+  return spans;
+}
+
+export function localAnchors(text, base, p, e) {
+  const spans = spansOf(text);
+  const inside = spans.find((sp) => sp.s < p && sp.e > e);
+  const keepHyphen = base.endsWith(".css") || base.endsWith(".html");
+  let toks = [];
+  if (inside) toks = tokensOf(inside.body.replace(PIN_RE, " "), base, keepHyphen);
+  if (toks.length === 0) {
+    const before = spans.filter((sp) => sp.e <= p && p - sp.e <= 80 && !(inside && sp === inside)).pop();
+    const after = spans.find((sp) => sp.s >= e && sp.s - e <= 40);
+    for (const sp of [before, after]) if (sp) toks.push(...tokensOf(sp.body.replace(PIN_RE, " "), base, keepHyphen));
+  }
+  return [...new Set(toks)];
+}
+
+// A quoted sentence next to the citation is a subject too: the charter often
+// cites copy ("Only the team owner can manage billing.") rather than a symbol.
+// Its first 24 chars (>= 12) are matched as a literal substring.
+export function quotesNear(text, p, e) {
+  const win = text.slice(Math.max(0, p - 140), e + 140);
+  const out = [];
+  for (const m of win.matchAll(/["\u201c]([^"\u201d]{12,})["\u201d]/g)) {
+    const q = m[1].replace(/[\u2026].*$/, "").replace(/\.\.\..*$/, "").slice(0, 24);
+    if (q.length < 12 || /app\.(js|css)|\.mjs|index\.html/.test(q)) continue;
+    out.push({ label: `"${q}"`, re: new RegExp(esc(q)) });
+  }
+  return out;
+}
+
+// Run the CLI only when executed directly (`node file-line-citation-classify.mjs`),
+// never on import: the checker imports the four functions above, and an import
+// that parsed the checker's argv, ran git blame and called process.exit would
+// kill the importing process.
+const IS_MAIN = (() => {
+  try { return !!process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url)); }
+  catch { return false; }
+})();
+if (IS_MAIN) {
+// (the CLI body below is deliberately NOT re-indented, so the diff stays reviewable)
+
+
 const o = { charter: ".claude/workflows/bp-cloud-console-hardening-charter.md", maps: [],
   depth: 80, ahead: 20, slack: 3, weak: 10, cap: 30, apply: false, json: false, residue: false, only: null,
   root: null, subjects: [], selftest: false };
@@ -178,7 +254,6 @@ for (const spec of o.maps) {
   targets.set(base, { rel, head: fs.readFileSync(path.resolve(root, rel), "utf8").split("\n") });
 }
 
-const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const wordRe = (tok) => new RegExp(`(^|[^A-Za-z0-9_$-])${esc(tok)}([^A-Za-z0-9_$-]|$)`);
 const checkerWordRe = (tok) => new RegExp(`(^|[^A-Za-z0-9_$])${esc(tok)}([^A-Za-z0-9_$]|$)`);
 // The checker's PIN test for a named thing — must mirror thingRe() in
@@ -190,21 +265,6 @@ function checkerThingRe(thing) {
   return new RegExp(`(^|[^A-Za-z0-9_$-])${esc(thing)}([^A-Za-z0-9_$-]|$)`);
 }
 
-function tokensOf(span, base, keepHyphen) {
-  const own = new Set(base.toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean));
-  const out = new Set();
-  const parts = keepHyphen ? span.split(/[^A-Za-z0-9_$-]+/).flatMap((t) => [t, ...t.split("-")]) : span.split(/[^A-Za-z0-9_$]+/);
-  for (let tok of parts) {
-    tok = tok.replace(/^-+|-+$/g, "");
-    if (tok.length < MIN_TOKEN) continue;
-    if (/^[0-9-]+$/.test(tok)) continue;
-    if (/^[0-9a-f]{7,40}$/.test(tok)) continue; // a sha is provenance, not a subject
-    if (STOP.has(tok.toLowerCase())) continue;
-    if (own.has(tok.toLowerCase().replace(/^_+/, ""))) continue;
-    out.add(tok);
-  }
-  return [...out];
-}
 
 // The checker's own anchor set (whole line, pins stripped) — must mirror
 // anchorsOf() in file-line-citation-check.mjs.
@@ -217,31 +277,7 @@ function lineAnchors(text, base) {
   return [...out];
 }
 
-function spansOf(text) {
-  const spans = [];
-  let i = 0;
-  while (true) {
-    const a = text.indexOf("`", i); if (a < 0) break;
-    const b = text.indexOf("`", a + 1); if (b < 0) break;
-    spans.push({ s: a, e: b + 1, body: text.slice(a + 1, b) });
-    i = b + 1;
-  }
-  return spans;
-}
 
-function localAnchors(text, base, p, e) {
-  const spans = spansOf(text);
-  const inside = spans.find((sp) => sp.s < p && sp.e > e);
-  const keepHyphen = base.endsWith(".css") || base.endsWith(".html");
-  let toks = [];
-  if (inside) toks = tokensOf(inside.body.replace(PIN_RE, " "), base, keepHyphen);
-  if (toks.length === 0) {
-    const before = spans.filter((sp) => sp.e <= p && p - sp.e <= 80 && !(inside && sp === inside)).pop();
-    const after = spans.find((sp) => sp.s >= e && sp.s - e <= 40);
-    for (const sp of [before, after]) if (sp) toks.push(...tokensOf(sp.body.replace(PIN_RE, " "), base, keepHyphen));
-  }
-  return [...new Set(toks)];
-}
 
 // ── parse ────────────────────────────────────────────────────────────────────
 const alt = [...targets.keys()].map(esc).join("|");
@@ -276,19 +312,6 @@ function lands(fileLines, c, toks, re) {
   return null;
 }
 
-// A quoted sentence next to the citation is a subject too: the charter often
-// cites copy ("Only the team owner can manage billing.") rather than a symbol.
-// Its first 24 chars (>= 12) are matched as a literal substring.
-function quotesNear(text, p, e) {
-  const win = text.slice(Math.max(0, p - 140), e + 140);
-  const out = [];
-  for (const m of win.matchAll(/["\u201c]([^"\u201d]{12,})["\u201d]/g)) {
-    const q = m[1].replace(/[\u2026].*$/, "").replace(/\.\.\..*$/, "").slice(0, 24);
-    if (q.length < 12 || /app\.(js|css)|\.mjs|index\.html/.test(q)) continue;
-    out.push({ label: `"${q}"`, re: new RegExp(esc(q)) });
-  }
-  return out;
-}
 const countIn = (fl, r) => fl.reduce((n, l) => n + (r.test(l) ? 1 : 0), 0);
 
 // ── dating: when was each citation's OWN text written? (see DATING above) ────
@@ -720,3 +743,4 @@ function selftest() {
   process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${arms - fails}/${arms} arms\n`);
   return fails === 0 ? 0 : 1;
 }
+} // IS_MAIN

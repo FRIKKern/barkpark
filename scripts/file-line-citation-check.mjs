@@ -19,32 +19,39 @@
 // citing line names. The worst measured case drifts by more than two thousand
 // lines, pointing a builder at an unrelated handler.
 //
-// ── THE TEST, AND IT IS DELIBERATELY GENEROUS ─────────────────────────────────
+// ── THE TEST: ONLY THE ADJACENT SUBJECT CREDITS ───────────────────────────────
 //
-// For each citation `F:N` on a charter line L:
-//   IDENTIFIERS  every backticked span on L is split into identifier tokens.
-//                Tokens shorter than MIN_TOKEN, pure JS keywords, and the
-//                cited basename's own words are dropped. What survives is the
-//                citation's ANCHOR SET.
-//   DECIDABLE    a citation with a non-empty anchor set. A citation whose line
-//                names its subject only in prose has nothing to match and is
-//                counted separately, never as a miss.
-//   RESOLVES     any anchor token appears as a whole word within +/-SLACK lines
-//                of N in F.
+// For each unpinned citation `F:N` at position p on a charter line L:
+//   SUBJECT      the backticked span that CONTAINS the citation; else the nearest
+//                span ending <= 80 chars before it and the nearest starting
+//                <= 40 chars after it; else a quoted sentence (>= 12 chars) within
+//                140 chars. Tokens shorter than 4, JS keywords, shas and the cited
+//                file's own words (leading underscores stripped) are dropped. This
+//                is localAnchors()/quotesNear(), IMPORTED from
+//                scripts/file-line-citation-classify.mjs — one definition of
+//                adjacency, shared, never a second copy here.
+//   DECIDABLE    a citation with a non-empty subject. A citation with no adjacent
+//                subject has nothing to match and is counted separately (prose
+//                only), never as a miss and never as a resolve.
+//   RESOLVES     a subject token appears as a whole word (`-` counts as a word
+//                character, as in a pin) within +/-SLACK lines of N in F, or
+//                inside [N, M] for a range; a quoted subject as a substring.
 //
-// TWO BIASES, BOTH REAL, BOTH IN THE SAME REPORT:
-//   OVER-CREDIT  the anchor set is scraped from the WHOLE citing line, not from
-//                the citation's own subject. A line naming ~30 tokens resolves
-//                if ANY ONE of them lands in the window. So RESOLVED is an
-//                upper bound on correctness, and UNRESOLVED a lower bound on
-//                drift.
-//   OVER-FLAG    a token can be absent from the window and the citation still
+// WHY NOT THE WHOLE LINE. Until task-b3961db653fbbf58 the anchor set was every
+// backticked token ANYWHERE on L, and a citation resolved if any one of them
+// landed in the window. A charter row names 30-60 tokens, so a wrong citation
+// was credited by whichever unrelated word happened to sit near N: a 17-sample
+// hand audit of app.js's resolves (every 6th line of --list at 0db9b0f4a) found
+// 17 of 17 wrong at HEAD. --selftest ARM 21 reds if that whole-line credit
+// returns.
+//
+// ONE BIAS REMAINS, and it is the safe direction:
+//   OVER-FLAG    a subject can be absent from the window and the citation still
 //                be morally right — the line may cite a BLOCK whose name sits
-//                outside +/-SLACK, or name the subject in prose while the
-//                backticks hold something else.
-// Neither bias is removable without a human reading every line. The number is a
-// directional floor on drift, not a census of wrongness, and `--report` prints
-// it with its denominator so nobody quotes it as the latter.
+//                outside +/-SLACK. The classifier's BLOCK-NEAR bucket is where
+//                those go; the repair is a pin, not a looser test.
+// The number is a directional floor on drift, not a census of wrongness, and
+// `--report` prints it with its denominator so nobody quotes it as the latter.
 //
 // ── WHY IT FAILS IN BOTH DIRECTIONS ───────────────────────────────────────────
 //
@@ -87,8 +94,9 @@
 // as `F:N` (the old parser stopped at the dash and gave N +/-slack). A single
 // line keeps +/-slack. The same holds for a pinned range.
 //
-// Pins are stripped from a line before its anchor set is scraped, so the sha,
-// the `L<n>` and the pinned thing never become anchors for a sibling citation.
+// A pin inside an adjacent span is blanked before its tokens are read (the
+// classifier's localAnchors does this), so a sha, an `L<n>` or a pinned thing
+// never becomes the subject of a sibling citation.
 //
 // ── VACUITY REFUSAL ───────────────────────────────────────────────────────────
 //
@@ -117,20 +125,10 @@ import path from "node:path";
 import os from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+// THE ADJACENCY RULE — one definition, owned by the classifier (see THE TEST).
+import { localAnchors, quotesNear } from "./file-line-citation-classify.mjs";
 
 const SLACK_DEFAULT = 3;
-const MIN_TOKEN = 4;
-
-// Words that carry no location information: JS/DOM vocabulary common enough to
-// land inside ANY +/-3 window, which would manufacture false resolutions.
-const STOP = new Set([
-  "const", "function", "return", "async", "await", "class", "this", "null",
-  "true", "false", "undefined", "typeof", "instanceof", "import", "export",
-  "default", "break", "continue", "throw", "catch", "finally", "else",
-  "case", "switch", "while", "document", "window", "console", "value",
-  "length", "push", "then", "true", "data", "text", "json", "html", "http",
-  "https", "type", "name", "node", "item", "list", "true", "void",
-]);
 
 function usage(msg) {
   process.stderr.write(`UNCHECKED: ${msg}\n`);
@@ -192,7 +190,6 @@ function pinRe(bases) {
   const alt = bases.map(escRe).join("|");
   return new RegExp(`(?<![\\w.-])(${alt}) \\(([^@()\\n]+?) @ ([0-9a-f]{7,40}), L(\\d+)(?:[-\u2013]L?(\\d+))?\\)`, "g");
 }
-const stripPins = (line) => line.replace(PIN_ANY, " ");
 
 // A pinned thing: "quoted" -> literal substring; otherwise a whole word where
 // `-` is a word character (CSS class names), so a prefix never credits.
@@ -202,25 +199,15 @@ function thingRe(thing) {
   return new RegExp(`(^|[^A-Za-z0-9_$-])${escRe(thing)}([^A-Za-z0-9_$-]|$)`);
 }
 
-// ── the anchor set of a charter line ─────────────────────────────────────────
-function anchorsOf(line, citedBase) {
-  const own = new Set(citedBase.toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean));
-  const out = new Set();
-  for (const m of stripPins(line).matchAll(/`([^`]+)`/g)) {
-    for (const tok of m[1].split(/[^A-Za-z0-9_$]+/)) {
-      if (tok.length < MIN_TOKEN) continue;
-      if (/^[0-9]+$/.test(tok)) continue;
-      if (STOP.has(tok.toLowerCase())) continue;
-      // `__app` is the cited file's own word too: the split above keeps `_`, so
-      // `__app.test.mjs` yields `__app`, which the own-name set (split on
-      // non-alphanumerics: app/test/mjs) never held. Strip leading underscores
-      // before the test — the same rule as tokensOf() in
-      // scripts/file-line-citation-classify.mjs.
-      if (own.has(tok.toLowerCase().replace(/^_+/, ""))) continue;
-      out.add(tok);
-    }
-  }
-  return [...out];
+// ── the subject of an unpinned citation: ADJACENT only ───────────────────────
+// localAnchors() (backtick span holding it, else nearest before/after), else
+// quotesNear() — both imported from the classifier. Each subject is returned as
+// { label, re }: a token matches as a whole word (thingRe, `-` is a word
+// character), a quoted sentence as a substring.
+function subjectOf(c) {
+  const toks = localAnchors(c.text, c.base, c.p, c.e);
+  if (toks.length) return toks.map((t) => ({ label: t, re: thingRe(t) }));
+  return quotesNear(c.text, c.p, c.e).map((q) => ({ label: q.label, re: q.re }));
 }
 
 // ── parse every `<base>:<N>` citation in a charter ───────────────────────────
@@ -236,7 +223,7 @@ function parseCitations(charterText, bases) {
     for (const m of text.matchAll(re)) {
       const n = Number(m[2]);
       const hi = m[3] && Number(m[3]) >= n ? Number(m[3]) : null;
-      cites.push({ base: m[1], line: n, hi, charterLine: idx + 1, text });
+      cites.push({ base: m[1], line: n, hi, charterLine: idx + 1, text, p: m.index, e: m.index + m[0].length });
     }
     for (const m of text.matchAll(pre)) {
       const n = Number(m[4]);
@@ -296,22 +283,19 @@ function evaluatePin(c, tgt, root, slack) {
   }
 }
 
-function wordRe(tok) {
-  return new RegExp(`(^|[^A-Za-z0-9_$])${tok.replace(/[.*+?^${}()|[\]\\$]/g, "\\$&")}([^A-Za-z0-9_$]|$)`);
-}
 
 function evaluate(cites, targets, slack, root) {
   for (const c of cites) {
     const tgt = targets.get(c.base);
     if (c.pin) { evaluatePin(c, tgt, root, slack); continue; }
-    c.anchors = anchorsOf(c.text, c.base);
-    c.decidable = c.anchors.length > 0;
+    const subject = subjectOf(c);
+    c.anchors = subject.map((x) => x.label);
+    c.decidable = subject.length > 0;
     c.beyondEof = c.line > tgt.lines.length;
     if (!c.decidable) { c.resolved = null; continue; }
     const [lo, hi] = windowOf(c, tgt.lines.length, slack);
     let hit = null;
-    for (const tok of c.anchors) {
-      const re = wordRe(tok);
+    for (const { label: tok, re } of subject) {
       for (let n = lo; n <= hi; n++) {
         if (re.test(tgt.lines[n - 1])) { hit = { tok, at: n }; break; }
       }
@@ -325,8 +309,7 @@ function evaluate(cites, targets, slack, root) {
       // distance to line ~100 for a symbol that also sits 20 lines from the
       // citation, and would overstate every drift it prints.
       c.elsewhere = [];
-      for (const tok of c.anchors) {
-        const re = wordRe(tok);
+      for (const { label: tok, re } of subject) {
         let best = null;
         for (let n = 1; n <= tgt.lines.length; n++) {
           if (!re.test(tgt.lines[n - 1])) continue;
@@ -433,10 +416,12 @@ function run(o) {
       `FAILED ${pinned.filter((c) => c.resolved === false).length}, sha copy unreadable ${unreadable.length}) — checked at THEIR sha, not HEAD\n`);
     process.stdout.write(`  ranges         : ${ranges.length}   (credit only INSIDE [N, M]; never read as N)\n`);
     process.stdout.write(
-      "  BIASES         : anchors are scraped from the WHOLE citing line, so a citation\n" +
-      "                   RESOLVES if any one of them lands in the window (over-credit),\n" +
-      "                   and a line naming its subject in prose has nothing to match\n" +
-      "                   (over-flag, mitigated by excluding the prose-only citations above).\n" +
+      "  CREDIT         : only the citation's ADJACENT subject credits it (the backtick span\n" +
+      "                   holding it, else the nearest span or quoted sentence beside it —\n" +
+      "                   the classifier's localAnchors), never another word on the line.\n" +
+      "  BIAS           : a citation of a BLOCK whose name sits outside the window is\n" +
+      "                   flagged though morally right (over-flag); a line with no adjacent\n" +
+      "                   subject is prose-only above, never a miss.\n" +
       `                   Read ${unresolved.length}/${decidable.length} as a DIRECTIONAL FLOOR on drift, not a census.\n`);
     if (o.list) {
       process.stdout.write(
@@ -675,7 +660,20 @@ async function selftest() {
     if (!ok) fails++;
   }
 
-  const ARMS = 20;
+  // ARM 21 — ADJACENCY: a word elsewhere on the line must not credit a citation
+  // whose own subject is not there. Working copy (B): paintChip at 20, makeWidget
+  // deleted. The citation sits beside `makeWidget`; `paintChip` is named > 80
+  // chars earlier on the same line and DOES land at 20. Whole-line credit (the
+  // pre-task-b3961 test) passes this; adjacency must red it.
+  const pad = "this clause is filler prose that pushes the first span well over eighty characters away";
+  show("ARM 21 a far word on the line (`paintChip` lands at 20) does not credit a citation beside `makeWidget` (absent) -> RED",
+    call(cite(`\`paintChip\` paints the chip; ${pad}. The widget \`makeWidget\` is built at widget.js:20`)), 1, /FAIL — 1 unresolved/);
+  // ARM 22 — control for ARM 21: the SAME line with the citation moved beside
+  // `paintChip` resolves, so ARM 21's red is the adjacency rule, not a parse.
+  show("ARM 22 control for ARM 21: same line, citation beside `paintChip` -> GREEN",
+    call(cite(`\`paintChip\` paints the chip at widget.js:20; ${pad}. The widget \`makeWidget\` is built elsewhere`)), 0, /PASS — 1\/1/);
+
+  const ARMS = 22;
   fs.rmSync(t, { recursive: true, force: true });
   process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${ARMS - fails}/${ARMS} arms\n`);
   return fails === 0 ? 0 : 1;
