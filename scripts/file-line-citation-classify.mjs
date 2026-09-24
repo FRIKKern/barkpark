@@ -85,7 +85,10 @@
 //                (default 10; was > 25 until the lead's ruling on #20128: a pin
 //                records "verified at sha", so pinning a word common enough to
 //                land by chance — `index` landing on `o.index` — makes a false
-//                citation look confirmed)
+//                citation look confirmed). Also a DEFINITION pin found by the
+//                version search that is not unique in its version, or that sits
+//                more than --def-depth versions from the dated one (see
+//                DEFINITION PINS BY CHANCE below)
 //   BLOCK-NEAR   the local subject sits <= 40 lines off at the dated version
 //                (cites a block body, or an off-main base) -> hand
 //   FAR          the local subject sits > 40 lines off -> hand
@@ -106,6 +109,38 @@
 // Pins are proposed for resolved citations too: a resolved citation in a dated
 // record rots on the next insertion above it.
 //
+// ── DEFINITION PINS BY CHANCE (task-257445567641688c) ───────────────────────
+// Since task-eb534ada6569c7da a function (or CSS rule) is credited only on its
+// DEFINITION line. A definition occurs once per version, so it never reaches
+// --weak; the weak rule that stops a common word landing by chance cannot stop
+// a definition doing so. And the pin search reads up to --depth + --ahead
+// versions: each one is another chance for SOME definition to sit in the
+// +/-slack window. Measured on the console charter: L920 cites "the intact
+// fence at app.js:14314" beside a span of three bypass CALLS
+// (`renderPlanState(box); renderBillingManage(true); renderBillingCancel(true)`);
+// two versions back, renderBillingCancel's definition sat at 14313, so the
+// search proposed PIN-OLDER on it — a pin recording that the fence IS
+// renderBillingCancel. Control, same charter: moving each of the 59 definition
+// pins' cited line 20, 40, 80 or 160 lines up or down (472 WRONG lines) still
+// landed a definition pin on 122 (26%), found 0 to 75 versions from the dated
+// one — no distance is safe. So a definition-matched pin now needs:
+//   SUBJECT   the defined name is the citation's subject — the FIRST (nearest)
+//             candidate subjectOf() returns. A lower-ranked token whose
+//             definition lands is refused outright (never proposed, never
+//             PIN-WEAK): it is a different function drifting past, and the
+//             search goes on. A lower-ranked token the version does NOT define
+//             still matches by name, as before.
+//   UNIQUE    when found by searching (any version but the dated one), the
+//             thing is defined on exactly one line of that version; at the
+//             dated version the --weak limit alone bounds it, as before (a CSS
+//             class repeats its head in @media blocks; a JS name like `fail`
+//             can be a method here and a local 21,000 lines away).
+//   NEAR      found within --def-depth versions of the dated one (default 20,
+//             = --ahead: a definition is searched no farther back than forward).
+// Failing UNIQUE or NEAR is PIN-WEAK — the candidate is shown, a human decides;
+// it is not written by --apply. Name-matched and quoted pins are unchanged:
+// their chance is what --weak bounds. --selftest ARMS 11-13.
+//
 // ── USAGE ─────────────────────────────────────────────────────────────────────
 //   node scripts/file-line-citation-classify.mjs                # buckets + samples
 //   node scripts/file-line-citation-classify.mjs --residue      # every residue row
@@ -122,7 +157,7 @@
 //        the classifier dates and verifies what a reader chose. A --subject that
 //        matches no citation exits 2.
 //   node scripts/file-line-citation-classify.mjs --selftest
-//   [--root D] [--charter P] [--map base=path]... [--depth K] [--ahead K] [--weak K] [--cap N] [--slack K]
+//   [--root D] [--charter P] [--map base=path]... [--depth K] [--ahead K] [--def-depth K] [--weak K] [--cap N] [--slack K]
 //   exit 0 residue <= cap · 1 residue > cap (STOP) · 2 bad argument / UNCHECKED
 //
 import fs from "node:fs";
@@ -472,7 +507,7 @@ if (IS_MAIN) {
 
 
 const o = { charter: ".claude/workflows/bp-cloud-console-hardening-charter.md", maps: [],
-  depth: 80, ahead: 20, slack: 3, weak: WEAK_MIN, cap: 30, apply: false, json: false, residue: false, only: null,
+  depth: 80, ahead: 20, defDepth: 20, slack: 3, weak: WEAK_MIN, cap: 30, apply: false, json: false, residue: false, only: null,
   root: null, subjects: [], selftest: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
@@ -489,6 +524,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === "--map") o.maps.push(need());
   else if (a === "--depth") o.depth = Number(need());
   else if (a === "--ahead") o.ahead = Number(need());
+  else if (a === "--def-depth") o.defDepth = Number(need());
   else if (a === "--cap") o.cap = Number(need());
   else if (a === "--weak") o.weak = Number(need());
   else if (a === "--slack") o.slack = Number(need());
@@ -548,13 +584,21 @@ lines.forEach((text, idx) => {
 // `mk(tok, fileLines)` builds the line test for a string token; a quote object
 // carries its own `re`. The pin test is thingMatcher() (definition, not use).
 const byThing = (base) => (tok, fl) => thingMatcher(tok, base, fl);
-function lands(fileLines, c, toks, mk) {
+// `accept(rank, r)`, when given, may refuse a token that LANDED; it is asked
+// only after a hit, so a version's whole-file definition scan runs only for a
+// token already in the window (asking first ran it for every version and every
+// token, and the comment-blanked copies of ~100 app.js versions ran node out of
+// heap).
+function lands(fileLines, c, toks, mk, accept) {
   const lo = c.hi !== c.n ? Math.max(1, c.n) : Math.max(1, c.n - o.slack);
   const hi = c.hi !== c.n ? Math.min(fileLines.length, c.hi) : Math.min(fileLines.length, c.n + o.slack);
-  for (const tok of toks) {
+  for (const [rank, tok] of toks.entries()) {
     const r = typeof tok === "object" ? tok.re : mk(tok, fileLines);
     const name = typeof tok === "object" ? tok.label : tok;
-    for (let k = lo; k <= hi; k++) if (r.test(fileLines[k - 1], k - 1)) return { tok: name, at: k, re: r };
+    for (let k = lo; k <= hi; k++) if (r.test(fileLines[k - 1], k - 1)) {
+      if (accept && !accept(rank, r)) break;
+      return { tok: name, at: k, re: r };
+    }
   }
   return null;
 }
@@ -706,19 +750,30 @@ for (const c of cites) {
     if (start + d < vs.length) order.push(start + d);
     if (d > 0 && d <= o.ahead && start - d >= 0) order.push(start - d);
   }
+  // SUBJECT (see DEFINITION PINS BY CHANCE): only the first candidate may be
+  // matched by its definition; a lower-ranked token the version defines is a
+  // different function, refused once it lands.
+  const subjectOnlyDefines = (rank, r) => rank === 0 || !(r.kind && r.kind() === "definition");
   for (const k of order) {
     const fl = blob(vs[k].sha, t.rel);
     if (!fl) continue;
     // The checker's pin test, and only it (see THE LOCAL ANCHOR).
-    const lh = lands(fl, c, pinCandidates, byThing(c.base));
+    const lh = lands(fl, c, pinCandidates, byThing(c.base), subjectOnlyDefines);
     if (!lh) continue;
-    pin = { sha: vs[k].sha, back: k - start, tok: lh.tok, at: lh.at, freq: countIn(fl, lh.re) };
+    pin = { sha: vs[k].sha, back: k - start, tok: lh.tok, at: lh.at, freq: countIn(fl, lh.re),
+      kind: lh.re.kind ? lh.re.kind() : "quote" };
+    // UNIQUE and NEAR: a definition found by SEARCHING is evidence only when it
+    // is the one definition in its version, within --def-depth versions.
+    if (pin.kind === "definition" && pin.back !== 0) {
+      if (pin.freq > 1) pin.weakWhy = `defined on ${pin.freq} lines of the version the search found`;
+      else if (Math.abs(pin.back) > o.defDepth) pin.weakWhy = `definition found ${Math.abs(pin.back)} versions from the dated one (--def-depth ${o.defDepth})`;
+    }
     break;
   }
   c.pinTo = pin;
   if (c.headResolved) {
     c.bucket = "R-HEAD";
-  } else if (pin && pin.freq >= o.weak) {
+  } else if (pin && (pin.freq >= o.weak || pin.weakWhy)) {
     c.bucket = "PIN-WEAK";
   } else if (pin) {
     c.bucket = pin.back === 0 ? "PIN-EXACT" : pin.back > 0 ? "PIN-OLDER" : "PIN-NEWER";
@@ -751,7 +806,7 @@ const RULES = {
   "PIN-EXACT": "local set lands at the version current when the line was written -> rewrite to <file> (<thing> @ <sha>, L<n>)",
   "PIN-OLDER": "local set lands only at an older version (cited on a stale base) -> rewrite to <file> (<thing> @ <sha>, L<n>)",
   "PIN-NEWER": `local set lands only at a NEWER version (<=${o.ahead}; cited from a base carrying unmerged siblings) -> rewrite to <file> (<thing> @ <sha>, L<n>)`,
-  "PIN-WEAK": `would pin, but the crediting local token occurs >= ${o.weak} times in the pinned file (generic word) -> RESIDUE (hand)`,
+  "PIN-WEAK": `would pin, but the crediting local token occurs >= ${o.weak} times in the pinned file (generic word), or it is a definition the search found that is not unique in its version or sits > ${o.defDepth} versions from the dated one -> RESIDUE (hand)`,
   "BLOCK-NEAR": "local set never lands in +/-slack, but sits <=40 lines off at the dated version (cites a block body, or a sibling base) -> RESIDUE (hand)",
   "FAR": "local set sits >40 lines off at the dated version -> RESIDUE (hand)",
   "ABSENT-THEN": "no local token exists anywhere in the dated file (prose word, other file, or later rename) -> RESIDUE (hand)",
@@ -768,7 +823,7 @@ for (const c of cites) byBucket.get(c.bucket).push(c);
 // and counted (THING-UNWRITABLE), never mangled.
 const writableThing = (t) => !/[()@\n]/.test(t);
 function withPin(c) {
-  if (!c.pinTo || c.bucket === "PIN-WEAK" || (c.bucket.startsWith("R-") && c.pinTo.freq >= o.weak)) return null;
+  if (!c.pinTo || c.bucket === "PIN-WEAK" || c.pinTo.weakWhy || (c.bucket.startsWith("R-") && c.pinTo.freq >= o.weak)) return null;
   if (!writableThing(c.pinTo.tok)) return null;
   const range = c.hi !== c.n ? `L${c.n}-${c.hi}` : `L${c.n}`;
   return { at: c.p, end: c.e, str: `${c.base} (${c.pinTo.tok} @ ${shortSha(c.pinTo.sha)}, ${range})` };
@@ -805,7 +860,7 @@ if (o.json) {
     for (const c of row.slice(0, 3)) {
       const w = withPin(c);
       process.stdout.write(`    L${c.charterLine} ${c.base}:${c.n}${c.hi !== c.n ? "-" + c.hi : ""} local=[${c.local.slice(0, 5).map((x) => x.label || x).join(",")}]` +
-        (c.credit ? ` credit=${c.credit.tok}@${c.credit.at}` : "") + (c.pinTo ? ` pin=${shortSha(c.pinTo.sha)} (${c.pinTo.back} versions from dated, ${c.pinTo.tok}@${c.pinTo.at} x${c.pinTo.freq})` : "") + "\n");
+        (c.credit ? ` credit=${c.credit.tok}@${c.credit.at}` : "") + (c.pinTo ? ` pin=${shortSha(c.pinTo.sha)} (${c.pinTo.back} versions from dated, ${c.pinTo.tok}@${c.pinTo.at} x${c.pinTo.freq}${c.pinTo.weakWhy ? "; " + c.pinTo.weakWhy : ""})` : "") + "\n");
       process.stdout.write(`      before: …${excerpt(c.text, c.p - 60, c.e + 30)}…\n`);
       if (w) {
         const after = c.text.slice(0, w.at) + w.str + c.text.slice(w.end);
@@ -816,7 +871,7 @@ if (o.json) {
   if (o.residue) {
     process.stdout.write("\n  --- RESIDUE, every row ---\n");
     for (const c of residue) {
-      process.stdout.write(`  [${c.bucket}${c.near ? " " + c.near.tok + "@" + c.near.at + " d=" + c.near.d : ""}] L${c.charterLine} ${c.base}:${c.n}${c.hi !== c.n ? "-" + c.hi : ""} local=[${c.local.map((x) => x.label || x).join(",")}]\n      …${excerpt(c.text, c.p - 160, c.e + 80)}…\n`);
+      process.stdout.write(`  [${c.bucket}${c.near ? " " + c.near.tok + "@" + c.near.at + " d=" + c.near.d : ""}${c.pinTo && c.pinTo.weakWhy ? " " + c.pinTo.tok + ": " + c.pinTo.weakWhy : ""}] L${c.charterLine} ${c.base}:${c.n}${c.hi !== c.n ? "-" + c.hi : ""} local=[${c.local.map((x) => x.label || x).join(",")}]\n      …${excerpt(c.text, c.p - 160, c.e + 80)}…\n`);
     }
   }
 }
@@ -866,7 +921,8 @@ if (residueN > o.cap && !(o.apply && ruleOnly)) {
 // is its positive control; arm 3 guards the working-tree replay, which blame of
 // HEAD never saw). PIN SEARCH: arms 4 and 6 red when the pin search demands the
 // whole-line anchors; arm 5 is the negative control (a subject off its line is
-// still no pin). ONE CREDITING: arm 11 runs this file and the checker on one
+// still no pin). DEFINITION BY CHANCE: arms 11-13 (see that header). ONE
+// CREDITING: arm 14 runs this file and the checker on one
 // fixture and reds if R-HEAD holds a citation the checker misses, or the
 // unresolved counts differ (a far word, and a common word, each credited by
 // the retired whole-line copy).
@@ -1038,6 +1094,59 @@ function selftest() {
       arm("DEFINITION: a function whose name lands only as a CALL at the dated version is not pinned there -> PIN-OLDER at its definition",
         r.bucket === "PIN-OLDER" && r.pin && r.pin.sha === shaA && r.pin.at === 22,
         `bucket ${r.bucket}${r.pin ? ` pin ${s10(r.pin.sha)} at ${r.pin.at}` : ""} (want PIN-OLDER at ${s10(shaA)} L22; name matching gives PIN-EXACT at ${s10(shaB)} via the call)`);
+    }
+
+    // ── DEFINITION PINS BY CHANCE (task-257445567641688c). Charter L920's
+    // shape: the citation names a fence LINE beside a span of calls; an OLDER
+    // version has a sibling's DEFINITION in the window. D1's subject (first
+    // candidate) is paintPlan; paintCancel, second in the span, is defined at
+    // 21 in A and at 50 in B (dated). The old search proposed PIN-OLDER on
+    // paintCancel at A. D2 is the control: the same cited line with paintCancel
+    // AS its subject still pins at A, so the rule is about WHICH name, not about
+    // definitions found by searching.
+    {
+      const { t, commit } = repo();
+      const shaA = commit("src/widget.js", widget({ 20: "  if (!isOwner) return;", 21: "function paintCancel(on) {", 45: "function paintPlan(box) {" }));
+      commit("src/widget.js", widget({ 20: "  if (!isOwner) return;", 45: "function paintPlan(box) {", 50: "function paintCancel(on) {" }));
+      commit("charter.md", "# fixture\n\n" +
+        "| D1 | insert `if (1) { paintPlan(box); paintCancel(true); return; }` above the fence at widget.js:20 |\n" +
+        "| D2 | `paintCancel` draws the cancel button at widget.js:20 |\n");
+      const rows = buckets(t) || [];
+      const d1 = rows.find((x) => x.charterLine === 3) || { bucket: "(missing)" };
+      const d2 = rows.find((x) => x.charterLine === 4) || { bucket: "(missing)" };
+      arm("DEFINITION BY CHANCE: a SIBLING's definition drifting into the window in an older version is not proposed; the same line with that name AS its subject still pins",
+        (d1.local || [])[0] === "paintPlan" && !d1.pin && !d1.bucket.startsWith("PIN-") &&
+          d2.bucket === "PIN-OLDER" && d2.pin && d2.pin.sha === shaA && d2.pin.tok === "paintCancel",
+        `D1 bucket ${d1.bucket}${d1.pin ? ` pin ${d1.pin.tok} at ${s10(d1.pin.sha)}` : " (no pin)"} local=[${(d1.local || []).join(",")}] ` +
+        `(want no pin; the old search gives PIN-OLDER paintCancel at ${s10(shaA)}); control D2 ${d2.bucket}${d2.pin ? ` ${d2.pin.tok} at ${s10(d2.pin.sha)}` : ""} (want PIN-OLDER paintCancel at ${s10(shaA)})`);
+    }
+    // UNIQUE: the subject's own definition lands one version back, but that
+    // version defines it TWICE -> PIN-WEAK (hand), never a rule pin. Arm 10 is
+    // the positive control (unique there -> PIN-OLDER).
+    {
+      const { t, commit } = repo();
+      commit("src/widget.js", widget({ 22: "  function tokenRow(t) {", 50: "  function tokenRow(u) {" }));
+      commit("src/widget.js", widget({ 32: "  function tokenRow(t) {" }));
+      commit("charter.md", "# fixture\n\n| D1 | the rows come from `tokenRow` at widget.js:22 |\n");
+      const r = find(buckets(t), "widget.js:22");
+      arm("DEFINITION BY CHANCE: a definition found one version back that is not unique in its version -> PIN-WEAK, not PIN-OLDER",
+        r.bucket === "PIN-WEAK" && r.pin && r.pin.back === 1 && /defined on 2 lines/.test(r.pin.weakWhy || ""),
+        `bucket ${r.bucket}${r.pin ? ` back ${r.pin.back} x${r.pin.freq} (${r.pin.weakWhy || "no reason"})` : ""} (want PIN-WEAK, defined on 2 lines; without UNIQUE it is PIN-OLDER)`);
+    }
+    // NEAR: the subject's unique definition lands only 3 versions back.
+    // --def-depth 2 -> PIN-WEAK; the default (20) -> PIN-OLDER (the control).
+    {
+      const { t, commit } = repo();
+      const shaA = commit("src/widget.js", widget({ 22: "function tokenRow(t) {" }));
+      for (const v of [2, 3, 4]) commit("src/widget.js", widget({ 1: `// version ${v}`, 32: "function tokenRow(t) {" }));
+      commit("charter.md", "# fixture\n\n| D1 | the rows come from `tokenRow` at widget.js:22 |\n");
+      const far = find((() => { const x = run(t, ["--json", "--def-depth", "2"]); try { return JSON.parse(x.out); } catch { return null; } })(), "widget.js:22");
+      const ok = find(buckets(t), "widget.js:22");
+      arm("DEFINITION BY CHANCE: a definition found more than --def-depth versions from the dated one -> PIN-WEAK; within it -> PIN-OLDER",
+        far.bucket === "PIN-WEAK" && far.pin && far.pin.back === 3 && /--def-depth 2/.test(far.pin.weakWhy || "") &&
+          ok.bucket === "PIN-OLDER" && ok.pin && ok.pin.sha === shaA && ok.pin.back === 3,
+        `--def-depth 2: ${far.bucket}${far.pin ? ` back ${far.pin.back} (${far.pin.weakWhy || "no reason"})` : ""} (want PIN-WEAK); ` +
+        `default: ${ok.bucket}${ok.pin ? ` back ${ok.pin.back} at ${s10(ok.pin.sha)}` : ""} (want PIN-OLDER back 3 at ${s10(shaA)})`);
     }
 
     // ── ONE CREDITING (task-12d6e8868ef5d88a): the classifier's R-HEAD bucket
