@@ -305,6 +305,14 @@ jobs:
       # NEVER PIPE THE CHECKER'S --json. It calls process.exit() before a piped
       # stdout drains and truncates at 65536 bytes (measured: app.js's JSON is
       # ~184 KB; `| wc -c` reads 65536). Every call below redirects to a file.
+      # The citation CLASSIFIER's own arms (task-d4448021560b99c5). Unlike the
+      # drift step below, this one CAN go red: a failing arm means the
+      # classifier's dating or pin search regressed. The job is advisory and
+      # gates no merge, and a step adds no check-run name.
+      - name: citation classifier self-test (owner lead-console)
+        if: ${{ !cancelled() }}
+        run: node scripts/file-line-citation-classify.mjs --selftest
+
       - name: charter file:line citation drift (advisory, owner lead-console)
         if: ${{ !cancelled() }}
         env:
