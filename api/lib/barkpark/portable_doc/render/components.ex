@@ -63,6 +63,28 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   def tasks_html(_), do: ""
 
+  @task_unavailable_note "tasks unavailable — the Tasks plugin is not loaded"
+
+  @doc """
+  The explicit placeholder a query-carrying task block renders when no task
+  resolver is loaded (`TaskResolver.mark_unavailable/1` set
+  `"unavailable" => true`, task-9c59aa555e1e015e): the block's type and a
+  named "tasks unavailable" note in the dashed `bp-dataviz--empty` frame, so
+  the block keeps its place and never reads as an empty "no tasks" board.
+  """
+  def task_unavailable_html(block) do
+    ~s|<div class="bp-dataviz--empty bp-task-unavailable" data-unavailable="tasks" role="note">| <>
+      escape_html(task_unavailable_kind(block)) <>
+      " — " <> @task_unavailable_note <> "</div>"
+  end
+
+  @doc "The placeholder note text (shared with the email variant)."
+  def task_unavailable_note, do: @task_unavailable_note
+
+  @doc "The block type a placeholder names (`\"tasks\"` for a malformed block)."
+  def task_unavailable_kind(%{"type" => t}) when is_binary(t) and t != "", do: t
+  def task_unavailable_kind(_), do: "tasks"
+
   @doc """
   Render a `task-detail` block: the "open a task and SEE it" card — a vertical
   stack of CONDITIONAL sections (a thin task stays thin), matching the design

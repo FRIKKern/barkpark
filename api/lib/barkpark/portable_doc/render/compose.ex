@@ -56,7 +56,20 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # theme-threaded. This is a ratified accepted tradeoff, NOT a filed follow-on —
   # no bp task exists for nested panel theming (the email envelope renders evergreen;
   # "dark" in a mail client is the client's transform of these bytes, not a re-render).
+  # A query-carrying task block marked `unavailable` (no task resolver loaded —
+  # `TaskResolver.mark_unavailable/1`, task-9c59aa555e1e015e) renders the
+  # explicit placeholder on EVERY style, ahead of its type's own emitter, which
+  # would otherwise paint an empty board that reads as "no tasks".
+  @task_unavailable_types Barkpark.PortableDoc.TaskResolver.unavailable_types()
+
   @doc false
+  def compose_block(%{"type" => t, "unavailable" => true} = b, style, theme)
+      when style != :article and t in @task_unavailable_types,
+      do: %{
+        "kind" => "_raw",
+        "html" => Barkpark.PortableDoc.Render.FleetEmail.task_unavailable_email_html(b, theme)
+      }
+
   def compose_block(%{"type" => "field-color"} = b, style, theme) when style != :article,
     do: compose_field_color(b, theme)
 
@@ -185,6 +198,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   def compose_block(b, style, _theme), do: compose_block(b, style)
 
   @doc false
+  def compose_block(%{"type" => t, "unavailable" => true} = b, style)
+      when t in @task_unavailable_types do
+    html =
+      if style == :article,
+        do: Barkpark.PortableDoc.Render.Components.task_unavailable_html(b),
+        else: Barkpark.PortableDoc.Render.FleetEmail.task_unavailable_email_html(b)
+
+    %{"kind" => "_raw", "html" => html}
+  end
+
   def compose_block(%{"type" => "heading"} = b, style) do
     # `text` is coerced through the tolerant `stringish/1` — a raw mutate can
     # persist a map/list where the heading string was expected, which used to

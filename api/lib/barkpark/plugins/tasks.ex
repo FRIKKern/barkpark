@@ -206,6 +206,15 @@ defmodule Barkpark.Plugins.Tasks do
     ]
   end
 
+  @doc """
+  The module papers read task data through — a task chip's criteria segment
+  and a task query block's rows and aggregates (task-9c59aa555e1e015e). With
+  this plugin out of the load order papers render an explicit "unavailable"
+  placeholder instead; `paper_task_resolver_test.exs` pins both paths.
+  """
+  @impl Barkpark.Plugin
+  def paper_task_resolver, do: Barkpark.Tasks.PaperResolver
+
   @tui_block_types ~w(
     heading paragraph list callout divider section code table figure action
     pullquote embed ingress eyebrow byline diagram asciicast image composite

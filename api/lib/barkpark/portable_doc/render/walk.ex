@@ -822,6 +822,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         %{met: met, total: total} when is_integer(met) and is_integer(total) and total > 0 ->
           "#{met}/#{total}"
 
+        # No task resolver loaded (task-9c59aa555e1e015e): the count cannot be
+        # read, so the chip SAYS so rather than omitting the segment (which
+        # would read as "this task has no criteria").
+        :unavailable ->
+          "criteria unavailable"
+
         _ ->
           nil
       end
@@ -841,16 +847,21 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # (nowrap) + `bp-task-chip__badge` (the pill border/padding/accent), styled by
   # `.bp-paper-surface`; `:email` keeps the inline pill verbatim.
   defp task_chip_html(target, hit, status, chip_text, label, %{style: :article}) do
-    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)} class="bp-task-chip">) <>
+    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)}#{task_unavailable_attr(hit)} class="bp-task-chip">) <>
       ~s(<span class="bp-task-chip__badge">#{chip_text}</span> ) <>
       label <> "</span>"
   end
 
   defp task_chip_html(target, hit, status, chip_text, label, pal) do
-    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)} style="white-space:nowrap">) <>
+    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)}#{task_unavailable_attr(hit)} style="white-space:nowrap">) <>
       ~s(<span style="border:1px solid #{pal.link_color};border-radius:10px;padding:0 6px;color:#{pal.link_color};font-size:0.85em">#{chip_text}</span> ) <>
       label <> "</span>"
   end
+
+  # Emitted ONLY for the unavailable chip, so every resolved chip is
+  # byte-identical to before.
+  defp task_unavailable_attr(%{criteria: :unavailable}), do: ~s( data-unavailable="tasks")
+  defp task_unavailable_attr(_hit), do: ""
 
   defp task_status_attr(nil), do: ""
   defp task_status_attr(s), do: ~s( data-task-status="#{escape_html(s)}")
