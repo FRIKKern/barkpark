@@ -1,0 +1,289 @@
+defmodule BarkparkWeb.Studio.StudioLivePaperLinkedMastersTest do
+  @moduledoc """
+  LINKED paper-master instances (task-59f078a2fd248698), driven through the
+  mounted Studio paper editor:
+
+    * INSERT — `paper-insert-master` with `mode: "linked"` inserts ONE
+      `master-ref` block (no copy) through the request-identified op path;
+    * RENDER — the boundary preview shows the master's content, resolved per
+      read; a master edit shows on the next open while the paper document is
+      never written;
+    * PIN / DETACH — the toolbar buttons freeze the instance to the master's
+      current revision, and replace it with a detached copy;
+    * TENANCY / PLUGIN OFF — a foreign master previews as "Master unavailable";
+      with Bulldocs disabled the buttons are absent and the events refuse.
+  """
+  use BarkparkWeb.ConnCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  alias Barkpark.Content
+  alias Barkpark.Plugins.Bulldocs.Masters
+
+  @dataset "production"
+
+  @section %{
+    "id" => "lm-sec",
+    "type" => "section",
+    "title" => "Pricing block",
+    "blocks" => [
+      %{"id" => "lm-sec-h", "type" => "heading", "level" => 2, "text" => "Pricing"},
+      %{"id" => "lm-sec-p", "type" => "paragraph", "text" => "Original master copy"}
+    ]
+  }
+
+  setup do
+    prev = System.get_env("BARKPARK_PAPER_CANVAS")
+    System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+    on_exit(fn ->
+      case prev do
+        nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+        v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+      end
+    end)
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "paper",
+          "title" => "Papers",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        @dataset
+      )
+
+    slug = "paper-linked-ui-#{System.unique_integer([:positive])}"
+
+    blocks = [
+      %{"id" => "lm-h", "type" => "heading", "level" => 1, "text" => "Linked paper"},
+      %{"id" => "lm-p", "type" => "paragraph", "text" => "Intro."},
+      @section
+    ]
+
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{slug: slug, dataset: @dataset, blocks: blocks})
+      )
+
+    {:ok, master} =
+      Masters.save_master(slug, "lm-sec", @dataset,
+        workspace_id: paper.workspace_id,
+        project_id: paper.project_id
+      )
+
+    %{slug: slug, paper: paper, master: master}
+  end
+
+  defp open(conn, slug) do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{slug}"))
+    view
+  end
+
+  defp assigns(view), do: :sys.get_state(view.pid).socket.assigns
+  defp blocks(slug), do: Content.paper_blocks(slug, @dataset)
+
+  defp paper_row(slug, paper),
+    do:
+      Content.get_paper(slug, @dataset,
+        workspace_id: paper.workspace_id,
+        project_id: paper.project_id
+      )
+
+  defp edit_master!(master, text) do
+    node = put_in(@section, ["blocks", Access.at(1), "text"], text)
+
+    {:ok, _} =
+      Content.upsert_document(
+        Masters.type_name(),
+        %{
+          "doc_id" => master.doc_id,
+          "title" => master.title,
+          "content" => Map.put(master.content, "node", node)
+        },
+        @dataset,
+        workspace_id: master.workspace_id,
+        project_id: master.project_id
+      )
+
+    Content.get_document(master.doc_id, Masters.type_name(), @dataset,
+      workspace_id: master.workspace_id,
+      project_id: master.project_id
+    )
+    |> elem(1)
+  end
+
+  defp preview(view, id),
+    do:
+      view
+      |> element(~s([data-edit-block-id="#{id}"] [data-test-id="paper-master-ref-preview"]))
+      |> render()
+
+  defp insert_linked!(view, master) do
+    request_id = Ecto.UUID.generate()
+
+    render_hook(view, "paper-insert-master", %{
+      "master_id" => Masters.master_id(master),
+      "after_id" => "lm-p",
+      "request_id" => request_id,
+      "if_rev" => assigns(view).paper_rev,
+      "mode" => "linked"
+    })
+
+    assert_reply(view, %{saved: true, replayed: false, request_id: ^request_id})
+    request_id
+  end
+
+  test "insert linked, render the master, follow its edits without writing the paper, Pin, Detach",
+       %{conn: conn, slug: slug, paper: paper, master: master} do
+    view = open(conn, slug)
+    insert_linked!(view, master)
+
+    assert ["lm-h", "lm-p", ref_id, "lm-sec"] = Enum.map(blocks(slug), & &1["id"])
+    ref = Enum.at(blocks(slug), 2)
+
+    assert ref == %{
+             "id" => ref_id,
+             "type" => "master-ref",
+             "master" => Masters.master_id(master),
+             "version" => nil
+           }
+
+    # The boundary preview shows the master's content — nothing was copied.
+    assert preview(view, ref_id) =~ "Original master copy"
+
+    # ── the master changes; the instance paper is not written ───────────────
+    before = paper_row(slug, paper)
+    master = edit_master!(master, "Edited master copy")
+
+    view = open(conn, slug)
+    html = preview(view, ref_id)
+    assert html =~ "Edited master copy"
+    refute html =~ "Original master copy"
+
+    after_edit = paper_row(slug, paper)
+    assert after_edit.rev == before.rev
+    assert after_edit.content["blocks"] == before.content["blocks"]
+
+    # ── PIN: freeze to the master's current revision ────────────────────────
+    view
+    |> element(~s([data-edit-block-id="#{ref_id}"] [data-test-id="paper-pin-master"]))
+    |> render_click()
+
+    assert %{"version" => pinned} = Enum.at(blocks(slug), 2)
+    assert pinned == master.rev
+
+    edit_master!(master, "Later master copy")
+    view = open(conn, slug)
+    assert preview(view, ref_id) =~ "Edited master copy"
+    refute preview(view, ref_id) =~ "Later master copy"
+
+    assert view
+           |> element(~s([data-edit-block-id="#{ref_id}"] [data-test-id="paper-pin-master"]))
+           |> render() =~ "Unpin"
+
+    # ── DETACH: the pinned content comes in as plain blocks ─────────────────
+    view
+    |> element(~s([data-edit-block-id="#{ref_id}"] [data-test-id="paper-detach-master"]))
+    |> render_click()
+
+    assert ["lm-h", "lm-p", copy_id, "lm-sec"] = Enum.map(blocks(slug), & &1["id"])
+    copy = Enum.at(blocks(slug), 2)
+    refute copy_id == ref_id
+    assert copy["type"] == "section"
+    assert copy["master"]["mode"] == "detached"
+    assert Enum.map(copy["blocks"], & &1["text"]) == ["Pricing", "Edited master copy"]
+    refute Enum.any?(blocks(slug), &(&1["type"] == "master-ref"))
+  end
+
+  test "an instance of a foreign-tenant master previews as unavailable and cannot be detached",
+       %{conn: conn, slug: slug} do
+    other_ws = Barkpark.TenancyFixtures.create_workspace!()
+    other_project = Barkpark.TenancyFixtures.create_project!(other_ws)
+    foreign_slug = "paper-linked-foreign-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: foreign_slug,
+          dataset: @dataset,
+          blocks: [@section]
+        })
+        |> Map.merge(%{"workspace_id" => other_ws.id, "project_id" => other_project.id})
+      )
+
+    {:ok, foreign} =
+      Masters.save_master(foreign_slug, "lm-sec", @dataset,
+        workspace_id: other_ws.id,
+        project_id: other_project.id
+      )
+
+    edit_master!(foreign, "Foreign secret copy")
+
+    # A raw write can name any id; the reference must still not resolve.
+    view = open(conn, slug)
+
+    render_hook(view, "paper-ops", %{
+      "ops" => [
+        %{
+          "op" => "insert-after",
+          "afterId" => "lm-p",
+          "block" => %{
+            "id" => "lm-foreign",
+            "type" => "master-ref",
+            "master" => Masters.master_id(foreign),
+            "version" => nil
+          }
+        }
+      ],
+      "request_id" => Ecto.UUID.generate(),
+      "if_rev" => assigns(view).paper_rev
+    })
+
+    assert Enum.any?(blocks(slug), &(&1["id"] == "lm-foreign"))
+
+    view = open(conn, slug)
+    html = preview(view, "lm-foreign")
+    assert html =~ "Master unavailable"
+    refute html =~ "Foreign secret copy"
+    refute html =~ "Pricing"
+
+    request_id = Ecto.UUID.generate()
+
+    render_hook(view, "paper-detach-master", %{
+      "block_id" => "lm-foreign",
+      "request_id" => request_id,
+      "if_rev" => assigns(view).paper_rev
+    })
+
+    assert_reply(view, %{saved: false, rejected: "master_not_found", request_id: ^request_id})
+    assert Enum.at(blocks(slug), 2)["type"] == "master-ref"
+  end
+
+  test "with the Bulldocs plugin disabled, no Pin/Detach renders and both events refuse",
+       %{conn: conn, slug: slug, paper: paper, master: master} do
+    view = open(conn, slug)
+    insert_linked!(view, master)
+    ref_id = Enum.at(blocks(slug), 2)["id"]
+
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_plugin_settings(paper.workspace_id, %{
+        "bulldocs" => %{"enabled" => false}
+      })
+
+    view = open(conn, slug)
+    refute has_element?(view, ~s([data-test-id="paper-pin-master"]))
+    refute has_element?(view, ~s([data-test-id="paper-detach-master"]))
+    assert preview(view, ref_id) =~ "Master unavailable"
+
+    render_hook(view, "paper-pin-master", %{"block_id" => ref_id, "pin" => "true"})
+    assert_reply(view, %{saved: false, rejected: "masters_unavailable"})
+
+    render_hook(view, "paper-detach-master", %{"block_id" => ref_id})
+    assert_reply(view, %{saved: false, rejected: "masters_unavailable"})
+
+    assert Process.alive?(view.pid)
+    assert Enum.at(blocks(slug), 2)["type"] == "master-ref"
+  end
+end
