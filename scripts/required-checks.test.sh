@@ -4030,6 +4030,20 @@ section "18. no UNPINNED in-repo text still claims this repo's \`main\` is unpro
 # re-reviewed on edit rather than auto-classified — an edited line loses its pin
 # and comes back for a human reading.
 #
+# THE DECISION ON THAT LIMIT (cchi-bl-protection-claim-paraphrase-escape,
+# 2026-09-24): KEEP THE PINNED CENSUS, and refuse a semantic detector. A prose
+# detector that reds on "the gates are discipline" must also stay green on the
+# dated retractions (class B) and records (class C) that quote the same idea,
+# and the only thing that tells those apart is a reader. A detector that guesses
+# would red truths or be tuned until it cannot fire; either is worse than a
+# census that states its blind spot. The claim it hunts is also now checkable at
+# its source rather than in prose: main requires four contexts under
+# enforce_admins (scripts/required-checks-verify.sh reads live protection), and
+# scripts/merge-authority-claim-check.sh reds the OPPOSITE phantom on a required
+# context. So the escape sentence above stays green on purpose, and the term
+# list widens only by the rule this section already states: a new wording is
+# added together with a hand classification of every member it matches.
+#
 # THE PIN LIST BELOW IS CLASSIFIED, and the classes are the review contract:
 #   B  a CORRECT dated retraction or correction — the line says the claim is now
 #      false, and quotes it in order to retire it. Green because it is TRUE.
