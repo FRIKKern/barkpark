@@ -194,13 +194,34 @@ defmodule Barkpark.Plugins.Bulldocs.MastersLinkedTest do
     end
 
     test "the public reader resolves only published master rows", ctx do
-      master = master!(ctx)
+      # A master that exists only as a DRAFT (written through the generic
+      # create door, not the editor's save, which publishes): authoring
+      # resolves it, the public reader does not.
+      scope = [workspace_id: ctx.ws.id, project_id: ctx.project.id]
+      master = raw_master!(scope, @section, "Draft only")
       blocks = [ref("r1", Masters.master_id(master))]
-      {_slug, paper} = seed_paper!(blocks, scope_opts(master))
+      {_slug, paper} = seed_paper!(blocks, scope)
 
-      # save_master births a DRAFT master: authoring resolves it, the reader not.
       assert render(paper, blocks) =~ "Master body copy"
       assert render(paper, blocks, published_only: true) =~ "Master unavailable"
+    end
+
+    test "save_master publishes: the public reader resolves it, a newer draft stays private",
+         ctx do
+      master = master!(ctx)
+      mid = Masters.master_id(master)
+      assert master.doc_id == mid
+      blocks = [ref("r1", mid)]
+      {_slug, paper} = seed_paper!(blocks, scope_opts(master))
+
+      assert render(paper, blocks, published_only: true) =~ "Master body copy"
+
+      edit_master!(master, put_in(@section, ["blocks", Access.at(1), "text"], "Draft edit"))
+
+      assert render(paper, blocks) =~ "Draft edit"
+      public = render(paper, blocks, published_only: true)
+      assert public =~ "Master body copy"
+      refute public =~ "Draft edit"
     end
   end
 

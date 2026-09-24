@@ -3,7 +3,9 @@ defmodule BarkparkWeb.BulldocsLinkedMastersReaderTest do
   The public `/papers/:slug` reader resolves LINKED master instances
   (task-59f078a2fd248698) per page load, inside the paper's own tenant and
   from PUBLISHED master rows only: a draft-only master, a foreign-tenant master
-  and a missing master all read "Master unavailable".
+  and a missing master all read "Master unavailable". A master saved from the
+  editor is published by that save (task-59be65118320fa0e item 1), and a newer
+  unpublished draft of a published master never reaches the public reader.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -35,32 +37,102 @@ defmodule BarkparkWeb.BulldocsLinkedMastersReaderTest do
       )
   end
 
-  test "an instance renders its published master; a draft-only master is unavailable",
+  defp instance_paper!(slug, master_id) do
+    paper!(slug, [
+      %{"id" => "t", "type" => "heading", "level" => 1, "text" => "Instance paper"},
+      ref("r1", master_id)
+    ])
+  end
+
+  defp source_paper!(slug, text) do
+    paper!(slug, [
+      %{"id" => "t", "type" => "heading", "level" => 1, "text" => "Source"},
+      %{"id" => "m", "type" => "paragraph", "text" => text}
+    ])
+  end
+
+  # task-59be65118320fa0e item 1: `save_master/4` goes through
+  # `Content.create_document/4`, which births every document as a DRAFT. The
+  # editor's own save now publishes that draft (docs/decisions/0010 §5a), so a
+  # linked instance on a published paper renders its master for the public.
+  test "a master saved from the editor (draft-born) renders on the public reader",
        %{conn: conn} do
     n = System.unique_integer([:positive])
-    source = "linked-reader-source-#{n}"
-    instance = "linked-reader-instance-#{n}"
+    source_paper!("linked-reader-source-#{n}", "Shared pricing copy")
 
-    paper!(source, [
-      %{"id" => "t", "type" => "heading", "level" => 1, "text" => "Source"},
-      %{"id" => "m", "type" => "paragraph", "text" => "Shared pricing copy"}
-    ])
+    {:ok, master} = Masters.save_master("linked-reader-source-#{n}", "m", @dataset)
+    mid = Masters.master_id(master)
 
-    {:ok, master} = Masters.save_master(source, "m", @dataset)
+    # Born through the draft door, left with no draft behind: one published row.
+    assert {:ok, %{doc_id: ^mid}} = Content.get_document(mid, Masters.type_name(), @dataset)
 
-    paper!(instance, [
-      %{"id" => "t", "type" => "heading", "level" => 1, "text" => "Instance paper"},
-      ref("r1", Masters.master_id(master))
-    ])
+    assert {:error, :not_found} =
+             Content.get_document("drafts." <> mid, Masters.type_name(), @dataset)
 
-    {:ok, _view, html} = live(conn, "/papers/#{instance}")
-    assert html =~ "Master unavailable"
-    refute html =~ "Shared pricing copy"
+    instance_paper!("linked-reader-instance-#{n}", mid)
 
-    publish!(master)
-
-    {:ok, _view, html} = live(conn, "/papers/#{instance}")
+    {:ok, _view, html} = live(conn, "/papers/linked-reader-instance-#{n}")
     assert html =~ "Shared pricing copy"
+    refute html =~ "Master unavailable"
+  end
+
+  test "a newer master DRAFT never reaches the public reader; the published row does",
+       %{conn: conn} do
+    n = System.unique_integer([:positive])
+    source_paper!("linked-reader-src2-#{n}", "Published pricing copy")
+    {:ok, master} = Masters.save_master("linked-reader-src2-#{n}", "m", @dataset)
+    mid = Masters.master_id(master)
+
+    # The author edits the master and does NOT publish the edit.
+    {:ok, _draft} =
+      Content.upsert_document(
+        Masters.type_name(),
+        %{
+          "doc_id" => mid,
+          "title" => master.title,
+          "content" => put_in(master.content, ["node", "text"], "Unpublished draft copy")
+        },
+        @dataset
+      )
+
+    paper = instance_paper!("linked-reader-inst2-#{n}", mid)
+
+    {:ok, _view, html} = live(conn, "/papers/linked-reader-inst2-#{n}")
+    assert html =~ "Published pricing copy"
+    refute html =~ "Unpublished draft copy"
+
+    # The authoring view (Studio) follows the draft.
+    authoring = Masters.render_map(paper, paper.content["blocks"])
+    assert Enum.any?(Map.values(authoring), &(&1 =~ "Unpublished draft copy"))
+  end
+
+  test "a master that exists only as a draft (created through another door) stays unavailable",
+       %{conn: conn} do
+    n = System.unique_integer([:positive])
+
+    {:ok, draft_only} =
+      Content.create_document(
+        Masters.type_name(),
+        %{
+          "title" => "Draft only",
+          "content" => %{
+            "tier" => "element",
+            "node" => %{"id" => "m", "type" => "paragraph", "text" => "Never published copy"}
+          }
+        },
+        @dataset
+      )
+
+    instance_paper!("linked-reader-inst3-#{n}", Masters.master_id(draft_only))
+
+    {:ok, _view, html} = live(conn, "/papers/linked-reader-inst3-#{n}")
+    assert html =~ "Master unavailable"
+    refute html =~ "Never published copy"
+
+    publish!(draft_only)
+
+    {:ok, _view, html} = live(conn, "/papers/linked-reader-inst3-#{n}")
+    assert html =~ "Never published copy"
     refute html =~ "Master unavailable"
   end
 
@@ -81,8 +153,6 @@ defmodule BarkparkWeb.BulldocsLinkedMastersReaderTest do
 
     {:ok, foreign} =
       Masters.save_master(foreign_source, "m", @dataset, workspace_id: other_ws.id)
-
-    publish!(foreign)
 
     heading = %{"id" => "t", "type" => "heading", "level" => 1, "text" => "Instance paper"}
     paper!("linked-reader-a-#{n}", [heading, ref("r1", Masters.master_id(foreign))])

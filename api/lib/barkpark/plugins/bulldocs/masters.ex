@@ -66,7 +66,9 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
   `opts`: `:workspace_id` / `:project_id` scope the paper lookup exactly like
   the block-op path; `:title` names the master (defaults to the node's own
   `title`, else its type).
-  Returns `{:ok, %Document{}}` or `{:error, reason}` —
+  The master is PUBLISHED by the save (0010 §5a), so a linked instance on a
+  published paper renders it for the public reader.
+  Returns `{:ok, %Document{}}` (the published row) or `{:error, reason}` —
   `:paper_not_found`, `:block_not_found`, `:not_masterable` (unclassified
   type), `:locked_block` (a template-locked or slot-role node) or
   `:bound_field` (a node carrying a `fieldName` binding: a copy would bind a
@@ -88,10 +90,18 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
         }
       }
 
-      Content.create_document(@type_name, attrs, dataset,
-        workspace_id: paper.workspace_id,
-        project_id: paper.project_id
-      )
+      scope = [workspace_id: paper.workspace_id, project_id: paper.project_id]
+
+      # PUBLISHED ON SAVE (task-59be65118320fa0e, 0010 §5a). `create_document`
+      # births every document as a draft, and the public reader resolves
+      # published master rows only, so a draft-born master read "Master
+      # unavailable" on every published paper. Saving a block as a master IS
+      # the author's choice to make it a reusable component, so the save
+      # publishes it. Later edits land as drafts again (`upsert_document`) and
+      # stay off the public reader until published.
+      with {:ok, draft} <- Content.create_document(@type_name, attrs, dataset, scope) do
+        Content.publish_document(draft.doc_id, @type_name, dataset, scope)
+      end
     else
       nil -> {:error, :paper_not_found}
       {:error, _} = err -> err

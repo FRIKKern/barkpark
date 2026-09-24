@@ -107,7 +107,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperLinkedMastersTest do
         project_id: master.project_id
       )
 
-    Content.get_document(master.doc_id, Masters.type_name(), @dataset,
+    # The save published the master, so an edit lands as its DRAFT: the row
+    # Studio's authoring view (and Pin) reads.
+    Content.get_document("drafts." <> Masters.master_id(master), Masters.type_name(), @dataset,
       workspace_id: master.workspace_id,
       project_id: master.project_id
     )
