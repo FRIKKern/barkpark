@@ -34,17 +34,38 @@
 // resolves if any one word lands in a +/-3 window (over-credit). The classifier
 // uses a LOCAL anchor set instead: tokens from the backtick span that CONTAINS
 // the citation, else the nearest span ending within 80 chars before it and the
-// nearest starting within 40 chars after it. A pin is only proposed when the
-// local set lands at the pinned version AND the checker's own whole-line test
-// also passes there (so the checker will accept what the classifier writes).
+// nearest starting within 40 chars after it. A pin is proposed when a local
+// token lands at the pinned version under the checker's OWN pin test — thingRe()
+// of the exact thing the pin will name, in windowOf() — and nothing else. The
+// checker verifies a pin by its named thing alone and strips pins before it
+// builds whole-line anchors, so requiring the whole-line anchors to land too
+// (the rule until task-d4448021560b99c5) tested something the checker never
+// asks, and sent quote-subject citations sitting EXACTLY on their line to
+// BLOCK-NEAR (#20145's L447: `"seven fleet ticks after one boot"` at d=0).
+//
+// ── DATING — which version a citation is checked against ─────────────────────
+//
+// Each citation is dated by the charter commit that INTRODUCED ITS OWN TEXT,
+// never by the last edit to the line it sits on. A pin rewrites a line, so
+// dating by `git blame` of the line (the rule until task-d4448021560b99c5)
+// moved every UNPINNED sibling on it to the pin commit and re-bucketed it:
+// #20145 measured three moves from pinning alone. The dating now replays the
+// charter's first-parent history (`git log -p -U0`) and carries each
+// `<file>:<N>` occurrence through every commit that rewrites its line: an
+// occurrence on an added line INHERITS the date of an unconsumed removed
+// occurrence of the same token in the same commit (same hunk first, then by
+// surrounding text), and is NEW — dated to that commit — only when none
+// exists. A pin removes exactly its own token, so it cannot move a sibling's
+// date. Uncommitted edits are replayed last and dated "now". The replay must
+// reproduce the working charter byte-for-byte or the run exits 2 (UNCHECKED).
 //
 // ── BUCKETS ───────────────────────────────────────────────────────────────────
 //   R-LOCAL      checker resolves at HEAD and a LOCAL token lands too
 //   R-FOREIGN    checker resolves at HEAD only via a token NOT in the local set
 //                (over-credit suspects — the resolved-side audit samples these)
 //   R-NO-LOCAL   checker resolves at HEAD; no local subject to test it by
-//   PIN-EXACT    local set lands at the version current when the citing line
-//                was last written (git blame) -> pin there
+//   PIN-EXACT    local set lands at the version current when the citation's
+//                own text was written (see DATING) -> pin there
 //   PIN-OLDER    lands only at an OLDER version, within --depth versions
 //                (cited from a stale base)
 //   PIN-NEWER    lands only at a NEWER version, within --ahead versions (cited
@@ -57,10 +78,10 @@
 //                citation look confirmed)
 //   NO-LOCAL     no backticked subject and no quoted sentence near the citation
 //                -> hand (no rule can pick the subject out of prose)
-//   BLOCK-NEAR   the local subject sits <= 40 lines off at the blame-era version
+//   BLOCK-NEAR   the local subject sits <= 40 lines off at the dated version
 //                (cites a block body, or an off-main base) -> hand
 //   FAR          the local subject sits > 40 lines off -> hand
-//   ABSENT-THEN  no local token exists anywhere in the blame-era file -> hand
+//   ABSENT-THEN  no local token exists anywhere in the dated file -> hand
 //   UNDECIDABLE  no backticked anchor on the line (the checker skips it too)
 // RESIDUE = PIN-WEAK + NO-LOCAL + BLOCK-NEAR + FAR + ABSENT-THEN. Per the lead's
 // ruling the hand pass is capped (--cap, default 30): over the cap this exits 1
@@ -79,11 +100,19 @@
 //        write: the cap bounds HAND work, and these buckets are settled by rule.
 //        The residue is left untouched either way.
 //   node scripts/file-line-citation-classify.mjs --json
-//   [--charter P] [--map base=path]... [--depth K] [--ahead K] [--weak K] [--cap N] [--slack K]
-//   exit 0 residue <= cap · 1 residue > cap (STOP) · 2 bad argument
+//   node scripts/file-line-citation-classify.mjs --subject '447:__app.test.mjs:328="seven fleet ticks"'
+//        a hand-named subject for ONE citation (<charter line>:<file>:<N>=<thing>,
+//        repeatable; "quoted" = literal substring) — replaces its local set, so
+//        the classifier dates and verifies what a reader chose. A --subject that
+//        matches no citation exits 2.
+//   node scripts/file-line-citation-classify.mjs --selftest
+//   [--root D] [--charter P] [--map base=path]... [--depth K] [--ahead K] [--weak K] [--cap N] [--slack K]
+//   exit 0 residue <= cap · 1 residue > cap (STOP) · 2 bad argument / UNCHECKED
 //
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 const MIN_TOKEN = 4;
@@ -100,12 +129,20 @@ const PIN_RE = /\b[\w.-]+\.[A-Za-z0-9]+ \(([^@()\n]+?) @ ([0-9a-f]{7,40}), L(\d+
 const RULE_PINNABLE = new Set(["PIN-EXACT", "PIN-OLDER", "PIN-NEWER"]);
 
 const o = { charter: ".claude/workflows/bp-cloud-console-hardening-charter.md", maps: [],
-  depth: 80, ahead: 20, slack: 3, weak: 10, cap: 30, apply: false, json: false, residue: false, only: null };
+  depth: 80, ahead: 20, slack: 3, weak: 10, cap: 30, apply: false, json: false, residue: false, only: null,
+  root: null, subjects: [], selftest: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   const need = () => argv[++i];
   if (a === "--charter") o.charter = need();
+  else if (a === "--root") o.root = need();
+  else if (a === "--selftest") o.selftest = true;
+  else if (a === "--subject") {
+    const m = String(need() || "").match(/^(\d+):([^=]+)=(.+)$/);
+    if (!m) { process.stderr.write("UNCHECKED: --subject wants <charter line>:<file>:<N>=<thing>\n"); process.exit(2); }
+    o.subjects.push({ line: Number(m[1]), cite: m[2], thing: m[3], used: false });
+  }
   else if (a === "--map") o.maps.push(need());
   else if (a === "--depth") o.depth = Number(need());
   else if (a === "--ahead") o.ahead = Number(need());
@@ -123,7 +160,10 @@ if (o.maps.length === 0) {
     "index.html=cloud/priv/static/index.html", "__app.test.mjs=cloud/priv/static/__app.test.mjs"];
 }
 
-const git = (args, opts = {}) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 30, ...opts });
+if (o.selftest) process.exit(selftest());
+
+const git = (args, opts = {}) => execFileSync("git", o.root ? ["-C", o.root, ...args] : args,
+  { encoding: "utf8", maxBuffer: 1 << 30, ...opts });
 const root = git(["rev-parse", "--show-toplevel"]).trim();
 const charterPath = path.resolve(root, o.charter);
 const charterRel = path.relative(root, charterPath);
@@ -141,6 +181,14 @@ for (const spec of o.maps) {
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const wordRe = (tok) => new RegExp(`(^|[^A-Za-z0-9_$-])${esc(tok)}([^A-Za-z0-9_$-]|$)`);
 const checkerWordRe = (tok) => new RegExp(`(^|[^A-Za-z0-9_$])${esc(tok)}([^A-Za-z0-9_$]|$)`);
+// The checker's PIN test for a named thing — must mirror thingRe() in
+// file-line-citation-check.mjs: "quoted" -> literal substring, else a whole word
+// where `-` is a word character.
+function checkerThingRe(thing) {
+  const q = thing.match(/^["\u201c](.+)["\u201d]$/);
+  if (q) return new RegExp(esc(q[1]));
+  return new RegExp(`(^|[^A-Za-z0-9_$-])${esc(thing)}([^A-Za-z0-9_$-]|$)`);
+}
 
 function tokensOf(span, base, keepHyphen) {
   const own = new Set(base.toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean));
@@ -201,11 +249,12 @@ const CITE = new RegExp(`\\b(${alt}):(\\d+)(?:[-–](\\d+))?`, "g");
 const PINNED = new RegExp(`(?<![\\w.-])(${alt}) \\(([^@()\\n]+?) @ ([0-9a-f]{7,40}), L(\\d+)(?:[-\u2013]L?(\\d+))?\\)`, "g");
 const cites = [];
 lines.forEach((text, idx) => {
+  let k = 0;
   for (const m of text.matchAll(CITE)) {
     const n = Number(m[2]);
     const hi = m[3] ? Number(m[3]) : n;
     const end = m.index + m[0].length;
-    cites.push({ base: m[1], n, hi: hi >= n ? hi : n, charterLine: idx + 1, text, p: m.index, e: end, pin: null });
+    cites.push({ base: m[1], n, hi: hi >= n ? hi : n, charterLine: idx + 1, text, p: m.index, e: end, pin: null, k: k++ });
   }
   for (const m of text.matchAll(PINNED)) {
     const n = Number(m[4]);
@@ -242,18 +291,91 @@ function quotesNear(text, p, e) {
 }
 const countIn = (fl, r) => fl.reduce((n, l) => n + (r.test(l) ? 1 : 0), 0);
 
-// ── blame: when was each citing line last written? ────────────────────────────
-const blame = new Map();
-{
-  const out = git(["blame", "--line-porcelain", "HEAD", "--", charterRel]);
-  let cur = null, ct = null;
-  for (const l of out.split("\n")) {
-    const h = l.match(/^([0-9a-f]{40}) \d+ (\d+)/);
-    if (h) { cur = { sha: h[1], line: Number(h[2]) }; continue; }
-    const t = l.match(/^committer-time (\d+)/);
-    if (t && cur) { ct = Number(t[1]); blame.set(cur.line, { sha: cur.sha, time: ct }); }
-  }
+// ── dating: when was each citation's OWN text written? (see DATING above) ────
+// Replays the charter's first-parent history as -U0 diffs, carrying each
+// `<file>:<N>` occurrence across line rewrites. dateOf(line, k) answers for the
+// k-th citation token on a working-charter line.
+const occRe = () => new RegExp(CITE.source, "g");
+function occurrences(text, date) {
+  return [...text.matchAll(occRe())].map((m) => ({ tok: m[0], p: m.index, date }));
 }
+// Tiebreak between same-token candidates: shared text either side (<= 40 chars).
+function contextScore(aText, a, bText, b) {
+  let s = 0;
+  for (let i = 1; i <= 40 && a.p - i >= 0 && b.p - i >= 0 && aText[a.p - i] === bText[b.p - i]; i++) s++;
+  const ae = a.p + a.tok.length, be = b.p + b.tok.length;
+  for (let i = 0; i < 40 && ae + i < aText.length && be + i < bText.length && aText[ae + i] === bText[be + i]; i++) s++;
+  return s;
+}
+function applyDiff(cur, diffText, date) {
+  const hunks = [];
+  let h = null, left = 0, right = 0;
+  for (const l of diffText.split("\n")) {
+    if (h && (left > 0 || right > 0)) {
+      if (l.startsWith("-") && left > 0) { h.removed.push(l.slice(1)); left--; continue; }
+      if (l.startsWith("+") && right > 0) { h.added.push(l.slice(1)); right--; continue; }
+      if (l.startsWith("\\")) continue;
+    }
+    const m = l.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+    if (m) {
+      h = { a: Number(m[1]), b: m[2] === undefined ? 1 : Number(m[2]), removed: [], added: [] };
+      left = h.b; right = m[4] === undefined ? 1 : Number(m[4]);
+      hunks.push(h);
+    }
+  }
+  if (hunks.length === 0) return cur;
+  // Pool every removed occurrence in the commit, tagged with its hunk.
+  const pool = [];
+  hunks.forEach((hk, hi) => {
+    const start = hk.b === 0 ? hk.a : hk.a - 1;
+    for (let j = 0; j < hk.b; j++) {
+      const old = cur[start + j];
+      for (const oc of old.occ) pool.push({ ...oc, text: old.text, hunk: hi, used: false });
+    }
+  });
+  const out = [];
+  let ptr = 0;
+  hunks.forEach((hk, hi) => {
+    const start = hk.b === 0 ? hk.a : hk.a - 1;
+    while (ptr < start) out.push(cur[ptr++]);
+    ptr += hk.b;
+    for (const text of hk.added) {
+      const occ = occurrences(text, date);
+      for (const oc of occ) {
+        let best = null, bestScore = -1;
+        for (const cand of pool) {
+          if (cand.used || cand.tok !== oc.tok) continue;
+          const sc = (cand.hunk === hi ? 1000 : 0) + contextScore(text, oc, cand.text, cand);
+          if (sc > bestScore) { best = cand; bestScore = sc; }
+        }
+        if (best) { best.used = true; oc.date = best.date; }
+      }
+      out.push({ text, occ });
+    }
+  });
+  while (ptr < cur.length) out.push(cur[ptr++]);
+  return out;
+}
+const dateOf = (() => {
+  let cur = [];
+  const log = git(["log", "--first-parent", "--diff-merges=first-parent", "--reverse", "-p", "-U0", "--no-color",
+    "--no-ext-diff", "--no-renames", "--format=%x00%H %ct", "HEAD", "--", charterRel]);
+  for (const chunk of log.split("\0").slice(1)) {
+    const nl = chunk.indexOf("\n");
+    const [sha, t] = chunk.slice(0, nl < 0 ? chunk.length : nl).split(" ");
+    cur = applyDiff(cur, nl < 0 ? "" : chunk.slice(nl + 1), { sha, time: Number(t) });
+  }
+  cur = applyDiff(cur, git(["diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "HEAD", "--", charterRel]),
+    { sha: "WORKTREE", time: Math.floor(Date.now() / 1000) });
+  const want = charterText.endsWith("\n") ? lines.slice(0, -1) : lines;
+  const bad = want.length !== cur.length ? `line count ${cur.length} vs ${want.length}`
+    : (() => { const k = want.findIndex((t, i) => t !== cur[i].text); return k < 0 ? null : `line ${k + 1} differs`; })();
+  if (bad) {
+    process.stderr.write(`UNCHECKED: the dating replay of ${charterRel} does not reproduce the working charter (${bad}); no date is trustworthy.\n`);
+    process.exit(2);
+  }
+  return (line, k) => cur[line - 1].occ[k].date;
+})();
 
 // ── versions of each target on HEAD's first-parent line, newest first ────────
 const versionCache = new Map();
@@ -280,6 +402,14 @@ for (const c of cites) {
   c.lineAnchors = lineAnchors(c.text, c.base);
   c.local = localAnchors(c.text, c.base, c.p, c.e);
   if (c.local.length === 0) c.local = quotesNear(c.text, c.p, c.e);
+  if (!c.pin) {
+    const label = `${c.base}:${c.n}${c.hi !== c.n ? "-" + c.hi : ""}`;
+    for (const s of o.subjects) if (s.line === c.charterLine && s.cite === label) {
+      s.used = true;
+      const q = s.thing.match(/^["\u201c](.+)["\u201d]$/);
+      c.local = [q ? { label: s.thing, re: new RegExp(esc(q[1])) } : s.thing];
+    }
+  }
   c.decidable = c.lineAnchors.length > 0;
   if (c.pin) { c.bucket = "ALREADY-PINNED"; continue; }
   const headHit = c.decidable ? lands(t.head, c, c.lineAnchors, checkerWordRe) : null;
@@ -289,12 +419,17 @@ for (const c of cites) {
   if (!c.decidable) { c.bucket = "UNDECIDABLE"; continue; }
   if (c.local.length === 0) { c.bucket = c.headResolved ? "R-NO-LOCAL" : "NO-LOCAL"; continue; }
 
-  // pin search: newest version at or before the blame commit, walking older.
-  const b = blame.get(c.charterLine);
+  // pin search: newest version at or before the commit that wrote THIS
+  // citation's text (DATING), walking older.
+  c.dated = dateOf(c.charterLine, c.k);
   const vs = versions(t.rel);
-  let start = vs.findIndex((v) => v.time <= b.time);
+  let start = vs.findIndex((v) => v.time <= c.dated.time);
   if (start < 0) start = vs.length;
   let pin = null;
+  const pinCandidates = c.local.map((tok) => {
+    const label = typeof tok === "object" ? tok.label : tok;
+    return { label, re: checkerThingRe(label) };
+  });
   const order = [];
   for (let d = 0; d < o.depth; d++) {
     if (start + d < vs.length) order.push(start + d);
@@ -303,10 +438,9 @@ for (const c of cites) {
   for (const k of order) {
     const fl = blob(vs[k].sha, t.rel);
     if (!fl) continue;
-    const lh = lands(fl, c, c.local, wordRe);
+    // The checker's pin test, and only it (see THE LOCAL ANCHOR).
+    const lh = lands(fl, c, pinCandidates, null);
     if (!lh) continue;
-    const wh = lands(fl, c, c.lineAnchors, checkerWordRe);
-    if (!wh) continue;
     pin = { sha: vs[k].sha, back: k - start, tok: lh.tok, at: lh.at, freq: countIn(fl, lh.re) };
     break;
   }
@@ -318,7 +452,7 @@ for (const c of cites) {
   } else if (pin) {
     c.bucket = pin.back === 0 ? "PIN-EXACT" : pin.back > 0 ? "PIN-OLDER" : "PIN-NEWER";
   } else {
-    // shape the residue: how close did the local set EVER come, at the blame-era version?
+    // shape the residue: how close did the local set EVER come, at the dated version?
     const fl = blob(vs[Math.min(start, vs.length - 1)].sha, t.rel) || t.head;
     let best = null;
     for (const tok of c.local) {
@@ -333,10 +467,17 @@ for (const c of cites) {
   }
   c.localHead = localHead;
 }
+{
+  const unused = o.subjects.filter((x) => !x.used);
+  if (unused.length) {
+    process.stderr.write("UNCHECKED: --subject matched no unpinned citation: " + unused.map((x) => `${x.line}:${x.cite}`).join(", ") + "\n");
+    process.exit(2);
+  }
+}
 
 // ── report ───────────────────────────────────────────────────────────────────
 const RULES = {
-  "R-LOCAL": "resolves at HEAD by a local token; pinned (at the blame-era version) so it cannot rot",
+  "R-LOCAL": "resolves at HEAD by a local token; pinned (at the dated version) so it cannot rot",
   "R-FOREIGN": "checker credits it at HEAD by a NON-local token (over-credit suspect); pinned if the local set lands historically",
   "R-NO-LOCAL": "checker credits it at HEAD; no local anchor, so no rule can pin it -> left unpinned",
   "PIN-EXACT": "local set lands at the version current when the line was written -> rewrite to <file> (<thing> @ <sha>, L<n>)",
@@ -344,9 +485,9 @@ const RULES = {
   "PIN-NEWER": `local set lands only at a NEWER version (<=${o.ahead}; cited from a base carrying unmerged siblings) -> rewrite to <file> (<thing> @ <sha>, L<n>)`,
   "PIN-WEAK": `would pin, but the crediting local token occurs >= ${o.weak} times in the pinned file (generic word) -> RESIDUE (hand)`,
   "NO-LOCAL": "no backticked subject and no quoted sentence near the citation -> RESIDUE (hand)",
-  "BLOCK-NEAR": "local set never lands in +/-slack, but sits <=40 lines off at the blame-era version (cites a block body, or a sibling base) -> RESIDUE (hand)",
-  "FAR": "local set sits >40 lines off at the blame-era version -> RESIDUE (hand)",
-  "ABSENT-THEN": "no local token exists anywhere in the blame-era file (prose word, other file, or later rename) -> RESIDUE (hand)",
+  "BLOCK-NEAR": "local set never lands in +/-slack, but sits <=40 lines off at the dated version (cites a block body, or a sibling base) -> RESIDUE (hand)",
+  "FAR": "local set sits >40 lines off at the dated version -> RESIDUE (hand)",
+  "ABSENT-THEN": "no local token exists anywhere in the dated file (prose word, other file, or later rename) -> RESIDUE (hand)",
   "UNDECIDABLE": "no backticked anchor on the line at all (checker does not count it)",
   "ALREADY-PINNED": "already in the pin form <file> (<thing> @ <sha>, L<n>)",
 };
@@ -371,6 +512,7 @@ if (o.json) {
   process.stdout.write(JSON.stringify(cites.map((c) => ({
     cite: `${c.base}:${c.n}${c.hi !== c.n ? "-" + c.hi : ""}`, charterLine: c.charterLine, bucket: c.bucket,
     local: c.local, credit: c.credit, localHead: c.localHead, pin: c.pinTo,
+    dated: c.dated || null, near: c.near || null,
   })), null, 1) + "\n");
 } else {
   process.stdout.write(`FILE:LINE CITATION CLASSIFIER — ${charterRel}\n`);
@@ -392,7 +534,7 @@ if (o.json) {
     for (const c of row.slice(0, 3)) {
       const w = withPin(c);
       process.stdout.write(`    L${c.charterLine} ${c.base}:${c.n}${c.hi !== c.n ? "-" + c.hi : ""} local=[${c.local.slice(0, 5).map((x) => x.label || x).join(",")}]` +
-        (c.credit ? ` credit=${c.credit.tok}@${c.credit.at}` : "") + (c.pinTo ? ` pin=${shortSha(c.pinTo.sha)} (${c.pinTo.back} versions from blame, ${c.pinTo.tok}@${c.pinTo.at} x${c.pinTo.freq})` : "") + "\n");
+        (c.credit ? ` credit=${c.credit.tok}@${c.credit.at}` : "") + (c.pinTo ? ` pin=${shortSha(c.pinTo.sha)} (${c.pinTo.back} versions from dated, ${c.pinTo.tok}@${c.pinTo.at} x${c.pinTo.freq})` : "") + "\n");
       process.stdout.write(`      before: …${excerpt(c.text, c.p - 60, c.e + 30)}…\n`);
       if (w) {
         const after = c.text.slice(0, w.at) + w.str + c.text.slice(w.end);
@@ -417,9 +559,10 @@ const ruleOnly = o.only && [...o.only].every((b) => RULE_PINNABLE.has(b));
 if (residueN > o.cap && !(o.apply && ruleOnly)) {
   if (!o.json) process.stdout.write(`\nSTOP — residue ${residueN} exceeds the hand-adjudication cap ${o.cap}. Split it; do not apply.\n`);
   if (o.apply) process.stderr.write("REFUSED: --apply with residue over the cap writes nothing (unless --only names rule-pinnable buckets alone).\n");
-  process.exit(1);
-}
-if (o.apply) {
+  // exitCode, never process.exit(): stdout to a PIPE is asynchronous on macOS,
+  // and exiting here cut --json at 64 KiB mid-string (seen building #20146).
+  process.exitCode = 1;
+} else if (o.apply) {
   const edits = new Map();
   const perBucket = new Map();
   const unwritable = [];
@@ -445,4 +588,135 @@ if (o.apply) {
     process.stdout.write(`  THING-UNWRITABLE ${unwritable.length} (rule-pinnable, but the thing holds ( ) @ or a newline — left unpinned):\n`);
     for (const c of unwritable) process.stdout.write(`    L${c.charterLine} ${c.base}:${c.n} thing=${c.pinTo.tok}\n`);
   }
+}
+
+// ── SELFTEST — a fixture git history per arm; each arm reds on the old rule ──
+// DATING: arm 2 reds when a citation is dated by git blame of its LINE (arm 1
+// is its positive control; arm 3 guards the working-tree replay, which blame of
+// HEAD never saw). PIN SEARCH: arms 4 and 6 red when the pin search demands the
+// whole-line anchors; arm 5 is the negative control (a subject off its line is
+// still no pin).
+function selftest() {
+  const self = fileURLToPath(import.meta.url);
+  const checker = path.join(path.dirname(self), "file-line-citation-check.mjs");
+  let fails = 0, arms = 0;
+  const repos = [];
+  const repo = () => {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), "flcx-"));
+    repos.push(t);
+    fs.mkdirSync(path.join(t, "src"));
+    let clock = 1000;
+    const g = (...a) => execFileSync("git", ["-C", t, "-c", "user.email=selftest@example.invalid", "-c", "user.name=selftest",
+      "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, GIT_AUTHOR_DATE: `@${clock} +0000`, GIT_COMMITTER_DATE: `@${clock} +0000` } }).trim();
+    g("init", "-q");
+    const commit = (file, body) => {
+      clock += 1000;
+      fs.writeFileSync(path.join(t, file), body);
+      g("add", file); g("commit", "-q", "-m", `c${clock}`);
+      return g("rev-parse", "HEAD");
+    };
+    return { t, commit };
+  };
+  const widget = (at) => {
+    const b = [];
+    for (let i = 1; i <= 60; i++) b.push(`// filler line ${i}`);
+    for (const [n, l] of Object.entries(at)) b[n - 1] = l;
+    return b.join("\n") + "\n";
+  };
+  const run = (t, extra = []) => {
+    try {
+      return { code: 0, out: execFileSync(process.execPath, [self, "--root", t, "--charter", "charter.md", "--map", "widget.js=src/widget.js", ...extra],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) };
+    } catch (e) { return { code: e.status, out: (e.stdout || "") + (e.stderr || "") }; }
+  };
+  const buckets = (t) => { const r = run(t, ["--json"]); try { return JSON.parse(r.out); } catch { return null; } };
+  const arm = (label, ok, detail) => {
+    arms++;
+    process.stdout.write(`\n=== ARM ${arms}  ${label} ===\n    ${detail}\n    -> ${ok ? "ok" : "ARM FAILED"}\n`);
+    if (!ok) fails++;
+  };
+  const find = (rows, cite) => (rows || []).find((x) => x.cite === cite) || { bucket: "(missing)" };
+  const s10 = (s) => s.slice(0, 10);
+
+  try {
+    // ── DATING fixture: two citations on ONE charter line, then a pin of one.
+    // A: widget.js has paintChip at 20, makeWidget at 30.
+    // B: the charter cites both on one line.
+    // C: widget.js drops both (neither resolves at HEAD).
+    // D: the charter pins paintChip, rewriting the line.
+    // makeWidget's text was written at B, so its dated version is A -> PIN-EXACT.
+    // Blame of its LINE says D, whose dated version is C -> walks back to A -> PIN-OLDER.
+    const pad = " — a spacer phrase long enough to keep the two backtick spans apart — ";
+    const line = "| D1 | `makeWidget widget.js:30` builds it" + pad + "`paintChip widget.js:20` paints it |";
+    const both = { 20: "function paintChip(el) { return el; }", 30: "function makeWidget(o) { return o; }" };
+    {
+      const { t, commit } = repo();
+      const shaA = commit("src/widget.js", widget(both));
+      commit("charter.md", `# fixture\n\n${line}\n`);
+      commit("src/widget.js", widget({}));
+      const b0 = find(buckets(t), "widget.js:30");
+      arm("DATING positive control: before any pin, makeWidget widget.js:30 is PIN-EXACT at A",
+        b0.bucket === "PIN-EXACT" && b0.pin && b0.pin.sha === shaA,
+        `bucket ${b0.bucket}${b0.pin ? ` pin ${s10(b0.pin.sha)}` : ""} (want PIN-EXACT at ${s10(shaA)})`);
+      commit("charter.md", `# fixture\n\n${line.replace("widget.js:20", `widget.js (paintChip @ ${s10(shaA)}, L20)`)}\n`);
+      const after = buckets(t);
+      const a0 = find(after, "widget.js:30");
+      arm("DATING: a COMMITTED pin of the sibling paintChip on the same line leaves makeWidget PIN-EXACT at A",
+        a0.bucket === "PIN-EXACT" && a0.pin && a0.pin.sha === shaA && (after || []).some((x) => x.bucket === "ALREADY-PINNED"),
+        `bucket ${a0.bucket}${a0.pin ? ` pin ${s10(a0.pin.sha)} back ${a0.pin.back}` : ""} (want PIN-EXACT at ${s10(shaA)}; blame-of-line dating gives PIN-OLDER)`);
+    }
+    {
+      // The same shape, pinned by --apply and left UNCOMMITTED: the working-tree
+      // diff is replayed too, so a partial apply cannot re-date the rest.
+      const { t, commit } = repo();
+      const shaA = commit("src/widget.js", widget(both));
+      commit("charter.md", `# fixture\n\n${line}\n`);
+      commit("src/widget.js", widget({}));
+      const cp = path.join(t, "charter.md");
+      fs.writeFileSync(cp, fs.readFileSync(cp, "utf8").replace("widget.js:20", `widget.js (paintChip @ ${s10(shaA)}, L20)`));
+      const a0 = find(buckets(t), "widget.js:30");
+      arm("DATING: the same sibling pin UNCOMMITTED leaves makeWidget PIN-EXACT at A",
+        a0.bucket === "PIN-EXACT" && a0.pin && a0.pin.sha === shaA,
+        `bucket ${a0.bucket}${a0.pin ? ` pin ${s10(a0.pin.sha)}` : ""} (want PIN-EXACT at ${s10(shaA)})`);
+    }
+
+    // ── PIN-SEARCH fixture: a quote subject exactly on its cited line, and no
+    // whole-line anchor landing there. The checker verifies a pin by the thing
+    // alone, so this is PIN-EXACT; the old rule sent it to BLOCK-NEAR at d=0.
+    {
+      const { t, commit } = repo();
+      const shaA = commit("src/widget.js", widget({ 12: "test(\"seven fleet ticks after one boot cost 12 requests\", () => {});",
+        50: "test(\"a second titled case well away\", () => {});" }));
+      const far = "`farAwayAnchor` is named at the start of this row and then a long stretch of plain prose follows it, well over eighty characters wide, before";
+      commit("charter.md", `# fixture\n\n| D1 | ${far} the guard (widget.js:12 counts requests: "seven fleet ticks after one boot cost 12") |\n` +
+        `| D2 | ${far} the case (widget.js:42 is "a second titled case well away") |\n`);
+      commit("src/widget.js", widget({}));
+      const rows = buckets(t);
+      const q = find(rows, "widget.js:12");
+      arm("PIN SEARCH: quote subject on the cited line, whole-line anchor elsewhere -> PIN-EXACT",
+        q.bucket === "PIN-EXACT" && q.pin && q.pin.sha === shaA && q.pin.at === 12,
+        `bucket ${q.bucket}${q.pin ? ` pin ${s10(q.pin.sha)} at ${q.pin.at}` : ""}${q.near ? ` near d=${q.near.d}` : ""} (want PIN-EXACT at ${s10(shaA)} L12; the whole-line-anchor rule gives BLOCK-NEAR d=0)`);
+      const n = find(rows, "widget.js:42");
+      arm("PIN SEARCH negative control: the same shape with the subject 8 lines off -> BLOCK-NEAR d=8, no pin",
+        n.bucket === "BLOCK-NEAR" && !n.pin && n.near && n.near.d === 8, `bucket ${n.bucket}${n.near ? ` d=${n.near.d}` : ""}`);
+      const r = run(t, ["--apply", "--only", "PIN-EXACT"]);
+      let ck;
+      try {
+        ck = { code: 0, out: execFileSync(process.execPath, [checker, "--root", t, "--charter", "charter.md", "--map", "widget.js=src/widget.js",
+          "--max-unresolved", "1", "--report"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) };
+      } catch (e) { ck = { code: e.status, out: (e.stdout || "") + (e.stderr || "") }; }
+      const pinLine = fs.readFileSync(path.join(t, "charter.md"), "utf8").split("\n")[2];
+      arm("PIN SEARCH: the checker ACCEPTS the pin the classifier wrote",
+        r.code === 0 && /widget\.js \("seven fleet ticks after " @ [0-9a-f]{10}, L12\)/.test(pinLine) && ck.code === 0 && /verified 1/.test(ck.out),
+        `apply exit ${r.code}, checker exit ${ck.code}; ${(ck.out.match(/pinned[^\n]*/) || ["(no pinned line in checker output)"])[0].trim()}`);
+    }
+  } catch (e) {
+    fails++;
+    process.stdout.write(`\nSELFTEST CRASHED: ${e.stack || e}\n`);
+  } finally {
+    for (const t of repos) fs.rmSync(t, { recursive: true, force: true });
+  }
+  process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${arms - fails}/${arms} arms\n`);
+  return fails === 0 ? 0 : 1;
 }
