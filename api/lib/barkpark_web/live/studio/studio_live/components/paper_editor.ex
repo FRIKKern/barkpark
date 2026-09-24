@@ -27,6 +27,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
+  alias Barkpark.Plugins.Bulldocs.Masters
   alias Barkpark.PortableDoc.{Projection, Render, Slots, TaskResolver}
   alias Barkpark.PortableDoc.Render.{Compose, Figures, SectionLayout}
   alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
@@ -148,6 +149,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # neither) keeps the quiet, unhalted footer.
   attr(:save_status, :string, default: "")
   attr(:paper_halt, :string, default: nil)
+  # Paper masters (task-3b6e562e916c8ce4). A LIST (possibly empty) turns the
+  # masters affordances on: the `[data-paper-masters]` carrier the canvas slash
+  # menu reads its Masters group from, the canvas block menu's "Save as
+  # master", and the boundary toolbar's save button. `nil` (the default — the
+  # public reader, the Beta document editor, a pane that may not write) renders
+  # none of them, so those surfaces are byte-unchanged.
+  attr(:masters, :any, default: nil)
 
   def paper_block_editor(assigns) do
     if assigns.canvas_resume_halt do
@@ -318,6 +326,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         hidden
       ></div>
 
+      <%!-- Paper masters carrier (task-3b6e562e916c8ce4). Same contract as the
+            expected-fields carrier above: LiveView-driven, outside every
+            phx-update="ignore" wrapper, read fresh by the canvas slash menu on
+            each open, so a master saved a moment ago is offered at once. Lists
+            only masters in THIS paper's workspace, project and dataset
+            (`Masters.list_for_paper/1`). Absent unless the pane may write. --%>
+      <div
+        :if={is_list(@masters)}
+        id="bp-paper-masters"
+        data-paper-masters={Jason.encode!(@masters)}
+        data-test-id="bp-paper-masters"
+        hidden
+      ></div>
+
       <%!-- Right-click block context-menu host. A zero-layout hidden carrier for
             the BarkparkPaperContextMenu hook (defined in root.html.heex). It is a
             SEPARATE hook because BarkparkPaperSortable already owns this editor
@@ -417,6 +439,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 tree_identity_safe={@tree_identity_safe}
                 table_editor_target_ids={@table_editor_target_ids}
                 canvas_retained={@canvas_retained}
+                masters_enabled={is_list(@masters)}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -1002,6 +1025,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:tree_identity_safe, :boolean, default: true)
   attr(:table_editor_target_ids, :any, default: nil)
   attr(:canvas_retained, :any, default: nil)
+  attr(:masters_enabled, :boolean, default: false)
 
   def edit_block(assigns) do
     ~H"""
@@ -1060,6 +1084,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             disabled={@index == @last_index}
             data-test-id="paper-move-down"
           >▼</button>
+          <%!-- Paper masters (task-3b6e562e916c8ce4): save this element,
+                widget or section as a master. Offered only where the pane may
+                write (masters_enabled) and the block is masterable — the same
+                refusal set `Masters.save_master/4` enforces server-side. --%>
+          <button
+            :if={@masters_enabled and Masters.masterable?(@block)}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title="Save as master"
+            aria-label="Save block as master"
+            phx-click="paper-save-master"
+            phx-value-block_id={Map.get(@block, "id")}
+            data-test-id="paper-save-master"
+          >☆</button>
           <button
             :if={Map.get(@block, "locked") != true}
             type="button"

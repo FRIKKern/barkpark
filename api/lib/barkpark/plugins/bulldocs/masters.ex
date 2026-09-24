@@ -133,8 +133,10 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
   def detached_copy(%Document{} = master, seed) when is_binary(seed) do
     node = get_in(master.content || %{}, ["node"])
 
+    ids = id_map(node, seed)
+
     node
-    |> fresh_ids(seed)
+    |> fresh_ids(ids)
     |> Map.put("master", %{
       "id" => master_id(master),
       "rev" => master.rev,
@@ -154,15 +156,54 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
   def insert_detached(slug, master_id, after_id, dataset, request_id, principal_key, opts \\ [])
       when is_binary(slug) and is_binary(master_id) and is_binary(dataset) do
     with %Document{} = paper <- resolve_paper(slug, dataset, opts),
-         %Document{} = master <- get_master_in_scope(master_id, paper),
-         seed = "#{canonical_request_id(request_id)}\u0000#{master_id(master)}",
-         op = detached_insert_op(master, after_id, seed) do
+         {:ok, op} <- insert_op(paper, master_id, after_id, request_id) do
       Content.apply_paper_block_ops_once(slug, [op], dataset, request_id, principal_key, opts)
     else
       nil -> {:error, :paper_not_found}
-      :master_not_found -> {:error, :master_not_found}
+      {:error, :master_not_found} = err -> err
     end
   end
+
+  @doc """
+  The detached-insert op for master `master_id` into the already-resolved
+  `paper`, or `{:error, :master_not_found}`. The master is looked up INSIDE the
+  paper's workspace, project and dataset (the same rule as `insert_detached/7`);
+  the ids are seeded off the canonical `request_id`, so a retried request builds
+  the byte-identical op. This is the seam a caller that owns its own guard
+  ladder and op path (the Studio paper socket) uses instead of
+  `insert_detached/7`.
+  """
+  def insert_op(%Document{} = paper, master_id, after_id, request_id)
+      when is_binary(master_id) do
+    case get_master_in_scope(master_id, paper) do
+      %Document{} = master ->
+        seed = "#{canonical_request_id(request_id)}\u0000#{master_id(master)}"
+        {:ok, detached_insert_op(master, after_id, seed)}
+
+      :master_not_found ->
+        {:error, :master_not_found}
+    end
+  end
+
+  @doc """
+  The masters an author may insert into `paper`: exactly the masters in the
+  paper's own workspace, project and dataset (`list_masters/2` with the
+  paper's scope, the same scope `insert_op/4` resolves in).
+  """
+  def list_for_paper(%Document{} = paper) do
+    list_masters(paper.dataset,
+      workspace_id: paper.workspace_id,
+      project_id: paper.project_id
+    )
+  end
+
+  @doc """
+  Pure: may `node` be saved as a master? The same refusal set as
+  `save_master/4` (`:not_masterable`, `:locked_block`, `:bound_field`), as a
+  boolean the editor uses to decide whether to offer the action.
+  """
+  def masterable?(node) when is_map(node), do: match?({:ok, _}, masterable(node))
+  def masterable?(_), do: false
 
   # ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -259,16 +300,46 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
   # Every map carrying a binary "id" gets a fresh one: `mst-` + 12 hex of
   # sha256(seed, old id). One mapping per old id, so ids the node repeats stay
   # consistent; deterministic, so a retried request rebuilds the same op.
-  defp fresh_ids(%{} = map, seed) do
-    map
-    |> Map.new(fn
-      {"id", id} when is_binary(id) and id != "" -> {"id", fresh_id(seed, id)}
-      {k, v} -> {k, fresh_ids(v, seed)}
+  defp id_map(node, seed) do
+    node
+    |> collect_ids([])
+    |> Map.new(fn id -> {id, fresh_id(seed, id)} end)
+  end
+
+  defp collect_ids(%{} = map, acc) do
+    acc =
+      case map do
+        %{"id" => id} when is_binary(id) and id != "" -> [id | acc]
+        _ -> acc
+      end
+
+    map |> Map.delete("id") |> Map.values() |> collect_ids(acc)
+  end
+
+  defp collect_ids(list, acc) when is_list(list), do: Enum.reduce(list, acc, &collect_ids/2)
+  defp collect_ids(_other, acc), do: acc
+
+  # Replace every id with its fresh twin AND rewrite every INTERNAL reference —
+  # a value that names one of the node's own old ids — so it points at the
+  # copy, not at the source block it was saved from. A reference to an id that
+  # is NOT inside the node (another block of the source paper, another paper)
+  # is left alone: only the node's own ids are in `ids`.
+  #
+  # The reference shapes PortableDoc carries by block id:
+  #   * `anchor` — a blockref's `^anchor` (node or mark attrs) and a TOC
+  #     entry's anchor;
+  #   * `href` of the form `#<id>` — an in-page link mark.
+  defp fresh_ids(%{} = map, ids) do
+    Map.new(map, fn
+      {"id", id} when is_binary(id) and id != "" -> {"id", Map.get(ids, id, id)}
+      {"anchor", ref} when is_binary(ref) -> {"anchor", Map.get(ids, ref, ref)}
+      {"href", "#" <> ref} -> {"href", "#" <> Map.get(ids, ref, ref)}
+      {k, v} -> {k, fresh_ids(v, ids)}
     end)
   end
 
-  defp fresh_ids(list, seed) when is_list(list), do: Enum.map(list, &fresh_ids(&1, seed))
-  defp fresh_ids(other, _seed), do: other
+  defp fresh_ids(list, ids) when is_list(list), do: Enum.map(list, &fresh_ids(&1, ids))
+  defp fresh_ids(other, _ids), do: other
 
   defp fresh_id(seed, id) do
     hex =

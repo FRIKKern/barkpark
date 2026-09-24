@@ -52,6 +52,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # the Edit-mode boundary widgets paint (Shared.push_task_previews fills it).
   attr(:task_previews, :map, default: %{})
   attr(:paper_links, :map, default: %{})
+  # Paper masters (task-3b6e562e916c8ce4): the open paper's in-scope masters,
+  # or nil when this pane may not write (no Save action, no slash picker).
+  attr(:paper_masters, :any, default: nil)
   attr(:shares_admin?, :boolean, default: false)
   attr(:dataset, :string, required: true)
   attr(:api_token_raw, :string, default: "")
@@ -344,6 +347,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   canvas_resume_state={@paper_canvas_resume_status}
                   task_previews={@task_previews}
                   paper_links={@paper_links}
+                  masters={@paper_masters}
                   save_status={@save_status}
                   paper_halt={@paper_halt}
                 />
@@ -1704,6 +1708,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_edit_mode={@paper_edit_mode}
           task_previews={@paper_task_previews}
           paper_links={@paper_link_details}
+          paper_masters={Map.get(assigns, :paper_masters)}
           save_status={Map.get(assigns, :save_status, "")}
           paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}

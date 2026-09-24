@@ -23,6 +23,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias Barkpark.Content.Labels
   alias Barkpark.Content.Papers.CanvasRunContext
   alias Barkpark.Content.Papers.PreGateRegister
+  alias Barkpark.Plugins.Bulldocs.Masters
   alias Barkpark.PortableDoc.Render.SectionLayout
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
@@ -561,6 +562,147 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       )
     end
   end
+
+  # ── Paper masters, editor half (task-3b6e562e916c8ce4) ─────────────────────
+  #
+  # Save-as-master and insert-master ride the paper socket, not an HTTP route.
+  # Both answer the SAME principal ladder `paper_ops/6` walks before it writes
+  # (`master_write_refusal/1`); the insert then goes THROUGH `paper_ops/5`
+  # itself, so the op meets every guard, the request-identified replay store,
+  # the echo and the canvas lease exactly like a canvas batch. The master is
+  # resolved by `Masters.insert_op/4` inside the open paper's own workspace,
+  # project and dataset — never wider.
+
+  @doc """
+  The masters the open paper's picker lists, or `nil` when this socket may not
+  write the paper (no Save action, no picker). Masters in the paper's own
+  scope only (`Masters.list_for_paper/1`).
+  """
+  def paper_masters(socket, paper) do
+    if match?(%Content.Document{}, paper) and canvas_resume_authorized?(socket, paper) do
+      paper
+      |> Masters.list_for_paper()
+      |> Enum.map(fn master ->
+        %{
+          "id" => Masters.master_id(master),
+          "title" => master.title || get_in(master.content || %{}, ["block_type"]),
+          "tier" => get_in(master.content || %{}, ["tier"]),
+          "block_type" => get_in(master.content || %{}, ["block_type"])
+        }
+      end)
+    end
+  end
+
+  @doc """
+  Save block `block_id` of the open paper as a master. Returns
+  `{:ok, socket, master}` or `{:error, socket, reason}`.
+  """
+  def paper_save_master(socket, block_id, title) when is_binary(block_id) do
+    paper = socket.assigns[:paper_doc]
+
+    case master_write_refusal(socket) do
+      {:refused, socket} ->
+        {:error, socket, :write_denied}
+
+      :ok ->
+        opts =
+          ScopeHelpers.scope_opts(socket) ++
+            if(is_binary(title) and String.trim(title) != "", do: [title: title], else: [])
+
+        case Masters.save_master(paper.doc_id, block_id, socket.assigns.dataset, opts) do
+          {:ok, master} ->
+            socket =
+              socket
+              |> assign(paper_masters: paper_masters(socket, paper))
+              |> put_flash(:info, "Saved as master: #{master.title}")
+
+            {:ok, socket, master}
+
+          {:error, reason} ->
+            {:error, put_flash(socket, :error, master_refusal_flash(reason)), reason}
+        end
+    end
+  end
+
+  @doc """
+  Insert a DETACHED copy of master `master_id` after block `after_id` (or at
+  the end when `after_id` is nil) through `paper_ops/5`. Same return shape as
+  `paper_ops/5`; a master outside the paper's scope (or missing) is
+  `{:error, socket}` with `last_paper_save_result.rejected = "master_not_found"`.
+  """
+  def paper_insert_master(socket, master_id, after_id, request_id, supplied_rev)
+      when is_binary(master_id) do
+    paper = socket.assigns[:paper_doc]
+
+    case master_write_refusal(socket) do
+      {:refused, socket} ->
+        {:error, socket}
+
+      :ok ->
+        case Masters.insert_op(paper, master_id, after_id, request_id) do
+          {:ok, op} ->
+            paper_ops(socket, [op], request_id, supplied_rev)
+
+          {:error, :master_not_found} ->
+            {:error,
+             socket
+             |> put_flash(:error, master_refusal_flash(:master_not_found))
+             |> assign(save_status: "Save failed", last_paper_save_ok?: false)
+             |> assign(
+               last_paper_save_result: %{
+                 saved: false,
+                 request_id: request_id,
+                 rejected: "master_not_found"
+               }
+             )}
+        end
+    end
+  end
+
+  # The principal ladder `paper_ops/6` applies before any write, for the two
+  # master seams (a save writes a new document, not a paper op, so it cannot
+  # borrow `paper_ops/6` itself). Same predicates, same refusals.
+  defp master_write_refusal(socket) do
+    {socket, revoked_token?} = refresh_replay_token(socket)
+    paper = socket.assigns[:paper_doc]
+
+    invalid_credential? =
+      socket.assigns[:api_token_credential_present?] == true and
+        is_nil(socket.assigns[:api_token]) and is_nil(socket.assigns[:current_user])
+
+    cond do
+      invalid_credential? ->
+        {:refused, refuse_write_denied(socket)}
+
+      revoked_token? and is_nil(socket.assigns[:current_user]) ->
+        {:refused, refuse_write_denied(socket)}
+
+      write_denied?(socket) ->
+        {:refused, refuse_write_denied(socket)}
+
+      doc_field(paper, :type) != Content.paper_type() ->
+        {:refused, refuse_read_only_pane(socket)}
+
+      grant_target_denied?(socket, doc_field(paper, :type), doc_field(paper, :doc_id)) ->
+        {:refused, refuse_outside_grant(socket)}
+
+      read_only_pane?(socket) ->
+        {:refused, refuse_read_only_pane(socket)}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp master_refusal_flash(:master_not_found), do: "That master is not available in this paper."
+  defp master_refusal_flash(:block_not_found), do: "That block no longer exists."
+  defp master_refusal_flash(:not_masterable), do: "This block can't be saved as a master."
+  defp master_refusal_flash(:locked_block), do: "Template blocks can't be saved as a master."
+
+  defp master_refusal_flash(:bound_field),
+    do: "A block bound to a field can't be saved as a master."
+
+  defp master_refusal_flash(_), do: "Saving the master failed."
 
   @doc false
   def paper_history_step(socket, params) do
@@ -2329,6 +2471,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_edit_mode: false,
         paper_canvas_retained: retained,
         paper_link_details: paper_link_details(socket, paper, blocks),
+        paper_masters: paper_masters(socket, paper),
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
@@ -2379,6 +2522,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_edit_mode: false,
         paper_canvas_retained: nil,
         paper_link_details: %{},
+        paper_masters: nil,
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
@@ -2511,6 +2655,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_edit_mode: false,
         paper_task_previews: %{},
         paper_link_details: %{},
+        paper_masters: nil,
         backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: []
