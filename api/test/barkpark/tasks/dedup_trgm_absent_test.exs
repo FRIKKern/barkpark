@@ -27,6 +27,11 @@ defmodule Barkpark.Tasks.DedupTrgmAbsentTest do
       return false (or narrow its code set to the wrong error) and this test
       goes red with `{:error, {:dedup_unavailable, …}}` — the fresh-install
       lockout, reproduced.
+    * `the rescue code set stays NARROW` replaces the `<->` operator with one
+      that raises a chosen SQLSTATE, so only the KNN query fails and the
+      unfiltered fallback still succeeds. Add ANY code outside the three above
+      to `trgm_unavailable?/1` and the sweep reds naming it (`undefined_column`
+      also has its own named test). Its CONTROL reds if the set is narrowed.
 
   Neither module drops the extension: `hide_pg_trgm!/0` hides the `<->`
   operator from `search_path` instead, so the real 42883 still fires without
@@ -230,7 +235,8 @@ defmodule Barkpark.Tasks.DedupTrgmAbsentTest do
       # `right: :ok`. WIDENING `trgm_unavailable?/1` to include 42703 does NOT:
       # the unfiltered retry also selects `d.title`, raises the same 42703, and
       # still degrades. This test guards the degrade branch, not the code set's
-      # narrowness — that needs an error only the `<->` query raises.
+      # narrowness — that needs an error only the `<->` query raises, which is
+      # the describe block below (task-51f83d61cb1f8223).
       hide_title_column!()
 
       # PRECONDITION, measured: the shadow really does raise 42703 on the column
@@ -256,6 +262,165 @@ defmodule Barkpark.Tasks.DedupTrgmAbsentTest do
                )
 
       assert message =~ "could not complete"
+    end
+  end
+
+  describe "the rescue code set stays NARROW (task-51f83d61cb1f8223)" do
+    # WHY THE CONTROL ABOVE CANNOT DO THIS. Any error injected by reshaping
+    # `documents` also breaks the unfiltered fallback, which reads the same
+    # relation and the same columns. Widen `trgm_unavailable?/1` and the retry
+    # raises the same error and degrades anyway, so the test stays green.
+    #
+    # THE ONE THING ONLY THE KNN QUERY DOES is call the `<->` operator. So these
+    # tests replace that operator and leave everything else alone. A new schema
+    # that exists only inside this test's sandbox transaction holds a
+    # `<->(text, text)` whose plpgsql body raises whatever SQLSTATE the
+    # `barkpark_test.knn_sqlstate` setting names. `SET LOCAL search_path` puts
+    # that schema ahead of `public`. For the identical `(text, text)` signature,
+    # the earlier schema in the path wins over pg_trgm's operator. `documents`
+    # still resolves to `public.documents`, so the fallback query runs
+    # untouched and SUCCEEDS. If the rescue matches the code, the result is
+    # `:ok`. If it does not, the result is the named 503. The only thing that
+    # decides between the two is `trgm_unavailable?/1`.
+    #
+    # WHY A SCHEMA, NOT pg_temp. Postgres never searches the temp schema for
+    # operators (namespace.c skips it), so an operator there cannot shadow `<->`.
+    # The schema, function and operator are uncommitted catalog INSERTS on this
+    # backend. No other session can see them, they lock no existing object, and
+    # the sandbox rollback removes them. That is not the DROP EXTENSION / ALTER
+    # TABLE race (see `hide_pg_trgm!/0`), which DELETED or LOCKED objects other
+    # sessions were using. The name is unique per call, so two runs never wait
+    # on each other's pg_namespace row.
+    defp shadow_knn_operator! do
+      schema = "bp_dedup_knn_#{System.unique_integer([:positive])}"
+
+      Repo.query!("CREATE SCHEMA #{schema}")
+
+      Repo.query!("""
+      CREATE FUNCTION #{schema}.knn_raise(text, text) RETURNS real
+      LANGUAGE plpgsql VOLATILE AS $fn$
+      BEGIN
+        RAISE EXCEPTION 'DedupTrgmAbsentTest: injected into the <-> operator only'
+          USING ERRCODE = current_setting('barkpark_test.knn_sqlstate');
+      END
+      $fn$
+      """)
+
+      Repo.query!(
+        "CREATE OPERATOR #{schema}.<-> " <>
+          "(LEFTARG = text, RIGHTARG = text, FUNCTION = #{schema}.knn_raise)"
+      )
+
+      Repo.query!("SET LOCAL search_path TO #{schema}, public")
+    end
+
+    defp knn_raises!(pg_code) do
+      Repo.query!("SELECT set_config('barkpark_test.knn_sqlstate', $1, true)", [pg_code])
+    end
+
+    # Every SQLSTATE Postgrex knows, read from the table Postgrex itself compiles
+    # `Postgrex.ErrorCode` from. Classes 00/01/02 are success, warning and
+    # no-data. They are not errors, and `RAISE EXCEPTION` cannot raise them.
+    # Duplicate code lines without a name are skipped, as Postgrex skips them.
+    @errcodes_path Path.join(Mix.Project.deps_paths()[:postgrex], "lib/postgrex/errcodes.txt")
+    @outside_codes for line <- File.read!(@errcodes_path) |> String.split("\n"),
+                       [pg_code, _sev, _macro, _name] <- [String.split(line, " ", trim: true)],
+                       String.match?(pg_code, ~r/^[0-9A-Z]{5}$/),
+                       String.slice(pg_code, 0, 2) not in ["00", "01", "02"],
+                       name = Postgrex.ErrorCode.code_to_name(pg_code),
+                       name not in @rescued_codes,
+                       uniq: true,
+                       do: {pg_code, name}
+
+    defp check_new(scope) do
+      check(
+        "trgm-narrow-new",
+        "publish the quarterly royalty statement exporter",
+        "emit ONIX royalty statements as a quarterly CSV for finance",
+        scope
+      )
+    end
+
+    test "PRECONDITION: only the `<->` query raises; the fallback's shape reads cleanly" do
+      shadow_knn_operator!()
+      knn_raises!("42703")
+
+      # The KNN shape raises the injected code...
+      assert {:error, %Postgrex.Error{postgres: %{code: :undefined_column, pg_code: "42703"}}} =
+               Repo.query("SELECT title <-> $1 FROM documents LIMIT 1", ["probe"])
+
+      # ...and the columns and relation the unfiltered fallback reads do not. The
+      # rescue's retry therefore SUCCEEDS whenever it is allowed to run.
+      assert {:ok, %{rows: [_ | _]}} =
+               Repo.query(
+                 "SELECT doc_id, title, content FROM documents " <>
+                   "WHERE type = 'task' AND content->>'kind' = 'task'"
+               )
+
+      # The sweep below is the whole population, not a sample.
+      assert length(@outside_codes) > 200
+      assert {"42703", :undefined_column} in @outside_codes
+      refute Enum.any?(@outside_codes, fn {_, name} -> name in @rescued_codes end)
+    end
+
+    test "CONTROL: each rescued code, raised by `<->` alone, falls back to `:ok`", %{
+      scope: scope
+    } do
+      # Without this, a `{:dedup_unavailable, _}` below would also come from an
+      # injection that never reached the rescue, or from a fallback that fails for
+      # its own reasons. Here the SAME injection with an in-set code produces the
+      # fallback's `:ok`. That is exactly what a widened set would produce for an
+      # out-of-set code. It also reds if the set is NARROWED.
+      shadow_knn_operator!()
+
+      for name <- @rescued_codes do
+        knn_raises!(Postgrex.ErrorCode.name_to_code(name))
+
+        {result, log} = with_log(fn -> check_new(scope) end)
+        assert result == :ok, "#{name} did not fall back: #{inspect(result)}"
+        assert log =~ "pg_trgm is unavailable", "#{name} did not take the rescue"
+      end
+    end
+
+    test "an `undefined_column` raised by `<->` alone degrades LOUD, not to the fallback", %{
+      scope: scope
+    } do
+      shadow_knn_operator!()
+      knn_raises!("42703")
+
+      log =
+        capture_log(fn ->
+          assert {:error, {:dedup_unavailable, message}} = check_new(scope)
+          assert message =~ "could not complete"
+        end)
+
+      assert log =~ "undefined_column"
+      refute log =~ "pg_trgm is unavailable"
+    end
+
+    test "EVERY SQLSTATE outside the rescued set, raised by `<->` alone, degrades LOUD", %{
+      scope: scope
+    } do
+      # The named test above covers the one code the row named. This covers the
+      # rest: adding ANY other code to `trgm_unavailable?/1` turns that code's
+      # entry here into `:ok`. The failures are collected so one run names every
+      # code that fell back, not just the first.
+      shadow_knn_operator!()
+
+      fell_back =
+        Enum.reject(
+          for {pg_code, name} <- @outside_codes do
+            knn_raises!(pg_code)
+            {result, _log} = with_log(fn -> check_new(scope) end)
+            {pg_code, name, result}
+          end,
+          &match?({_, _, {:error, {:dedup_unavailable, _}}}, &1)
+        )
+
+      assert fell_back == [],
+             "these out-of-set SQLSTATEs did NOT degrade to the named 503 " <>
+               "(a widened rescue code set, or a degrade branch that fails open): " <>
+               inspect(fell_back)
     end
   end
 end
