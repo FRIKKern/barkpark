@@ -73,8 +73,8 @@
 // lockfile's integrity and re-stamps.
 
 import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, utimesSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1070,6 +1070,54 @@ function selftest() {
           if (ds.length > 0) throw new Error(`${pkg} @ ${tpl}: ${ds.join('; ')}`)
         }
       }
+    })
+
+    // --- THE VERDICT WIRING, graded on the whole program ------------------
+    //
+    // task-92a213f01ca30817. Every check above grades adjudicate / measure /
+    // blessingRefusals IN PROCESS; none executes main()'s `return gate() ? 0 : 1`,
+    // the one line that turns the verdict into the PROCESS exit, so disarming it
+    // kept this selftest green while CI certified a stale vendor. Same idiom as
+    // PR #13405 / #20180: RE-EXEC THE WHOLE PROGRAM on a fixture root and assert
+    // the PROCESS exit. REPO_ROOT derives from the script's own location, so a
+    // copy at <root>/scripts/ reads only the fixture — no override — and the
+    // fixture is a COPY of every input the gate reads (stamp, both templates'
+    // tarballs, both package sources, the external build inputs), so the plant
+    // lands in the copy and the real tree is never written.
+
+    check('E2E: the whole program exits 1 on a stale build input, 0 once restored, 1 on an empty root', () => {
+      const root = join(dir, 'e2e-root')
+      const copy = (rel) => cpSync(join(REPO_ROOT, rel), join(root, rel), { recursive: true })
+      mkdirSync(join(root, 'scripts'), { recursive: true })
+      copy('scripts/check-vendor-freshness.mjs')
+      copy(STAMP_REL)
+      for (const tpl of TEMPLATES) {
+        for (const spec of Object.values(VENDORED)) copy(`${tpl}/vendor/${spec.tarball}`)
+      }
+      for (const spec of Object.values(VENDORED)) {
+        for (const d of SOURCE_INPUTS.dirs) copy(`${spec.source}/${d}`)
+        for (const f of SOURCE_INPUTS.files) if (existsSync(join(REPO_ROOT, spec.source, f))) copy(`${spec.source}/${f}`)
+        for (const e of spec.external || []) if (!existsSync(join(root, e))) copy(e)
+      }
+      const exec = (r) =>
+        spawnSync(process.execPath, [join(r, 'scripts/check-vendor-freshness.mjs')], { encoding: 'utf8' })
+
+      const css = join(root, 'api/assets/paper-surface/paper-surface.css')
+      const original = readFileSync(css)
+      writeFileSync(css, Buffer.concat([original, Buffer.from('\n/* vendor-freshness e2e plant */\n')]))
+      const planted = exec(root)
+      if (planted.status !== 1) throw new Error(`planted stale input must exit 1, got ${planted.status}\n${planted.stdout}${planted.stderr}`)
+      if (!/FAIL STALE-SOURCE @barkpark\/react/.test(planted.stdout)) throw new Error(`exit 1 but not for the plant:\n${planted.stdout}`)
+
+      writeFileSync(css, original)
+      const removed = exec(root)
+      if (removed.status !== 0) throw new Error(`restored input must exit 0, got ${removed.status}\n${removed.stdout}${removed.stderr}`)
+
+      const empty = join(dir, 'e2e-empty')
+      mkdirSync(join(empty, 'scripts'), { recursive: true })
+      cpSync(join(REPO_ROOT, 'scripts/check-vendor-freshness.mjs'), join(empty, 'scripts/check-vendor-freshness.mjs'))
+      const none = exec(empty)
+      if (none.status === 0) throw new Error('an EMPTY root exited 0 — a green over nothing')
     })
 
     let passed = 0

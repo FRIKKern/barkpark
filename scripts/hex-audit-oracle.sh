@@ -76,7 +76,11 @@ done
 # A FILE, not an inline heredoc, so --selftest drives the very same code over
 # deliberately-broken fixtures. A detector never pointed at a broken input has
 # not been shown to detect anything.
-PARSER="$(mktemp "${TMPDIR:-/tmp}/hex-audit-parse.XXXXXX.py")"
+# The X run ENDS the template: BSD/macOS mktemp randomises only TRAILING X, so
+# the old `.XXXXXX.py` created the literal name `hex-audit-parse.XXXXXX.py`
+# and a second concurrent run (the selftest's own re-exec arm) died on
+# "mkstemp failed … File exists". python3 does not need the .py suffix.
+PARSER="$(mktemp "${TMPDIR:-/tmp}/hex-audit-parse.XXXXXX")"
 trap 'rm -f "$PARSER"' EXIT
 cat >"$PARSER" <<'PY'
 import re, sys
@@ -278,6 +282,41 @@ FIX
   else
     no "the committed baseline .github/hex-audit-baseline.txt is missing"
   fi
+
+  # ── THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817) ─
+  # Every arm above grades summarise/baseline_verdict IN PROCESS; none executes
+  # the real run's tail that turns B_NEW / any_high into the process exit code,
+  # so flipping its `exit 1` to `exit 0` kept this selftest green while CI's
+  # ratchet step certified an unrecorded advisory. Same idiom as PR #13405 /
+  # #20180: RE-EXEC THE WHOLE PROGRAM on a fixture root and assert the PROCESS
+  # exit. ROOT derives from the script's own location, so a copy at
+  # $T/root/scripts/ reads only the fixture lock; `mix` is a stub on PATH that
+  # replays a captured report, so no network and no project are needed.
+  mkdir -p "$T/root/scripts" "$T/root/fake" "$T/bin"
+  cp "${BASH_SOURCE[0]}" "$T/root/scripts/hex-audit-oracle.sh"
+  : >"$T/root/fake/mix.lock"
+  cat >"$T/bin/mix" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  deps.audit) echo "No vulnerabilities found." ;;
+  hex.audit) cat "$HEX_AUDIT_STUB_REPORT" ;;
+  *) exit 2 ;;
+esac
+STUB
+  chmod +x "$T/bin/mix"
+  printf 'fake:EEF-CVE-2026-54893 swoosh LOW\n' >"$T/e2e-base.txt"
+  e2e() {  # <label> <want-rc> <report> [args…]
+    local label="$1" want="$2" report="$3" rc; shift 3
+    HEX_AUDIT_STUB_REPORT="$report" PATH="$T/bin:$PATH" \
+      bash "$T/root/scripts/hex-audit-oracle.sh" --dir fake "$@" >"$T/e2e.out" 2>&1
+    rc=$?
+    [ "$rc" = "$want" ] && ok "E2E: $label -> whole program exit $rc" || { no "E2E: $label -> whole program exit $rc, wanted $want"; sed 's/^/       | /' "$T/e2e.out" >&2; }
+  }
+  e2e "ratchet, planted unrecorded HIGH id" 1 "$T/high.txt" --baseline "$T/e2e-base.txt"
+  e2e "ratchet, plant removed (only the recorded id)" 0 "$T/lowonly.txt" --baseline "$T/e2e-base.txt"
+  e2e "absolute, planted HIGH" 1 "$T/high.txt"
+  e2e "absolute, plant removed" 0 "$T/lowonly.txt"
+  e2e "an unreadable feed is CANNOT READ, never green" 3 "$T/unreadable.txt"
 
   rm -rf "$T"
   echo

@@ -286,12 +286,17 @@ defmodule BadTest do
   end
 end
 EX
-  out="$(UNREACHABLE_ASSERT_SCAN_FLOOR=1 UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline" \
-        bash "$0" 2>&1 || true)"
-  if grep -q "bad_test.exs" <<<"$out"; then
-    arm "ok" "(a) a NEW defective site reds, naming bad_test.exs"
+  # THE PROCESS EXIT IS PART OF THE VERDICT (task-92a213f01ca30817). (a) and
+  # (c) re-exec the whole program but used to grade only its OUTPUT (`|| true`),
+  # so flipping the final `exit "$rc"` to `exit 0` kept every arm green while
+  # the REQUIRED Elixir gate certified a new site: the RED line still printed.
+  # Both now also assert exit 1; arm (0) is the removed-plant -> 0 half.
+  rc_a=0; out="$(UNREACHABLE_ASSERT_SCAN_FLOOR=1 UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline" \
+        bash "$0" 2>&1)" || rc_a=$?
+  if grep -q "bad_test.exs" <<<"$out" && [ "$rc_a" = 1 ]; then
+    arm "ok" "(a) a NEW defective site reds, naming bad_test.exs, and the PROCESS exits 1"
   else
-    arm "FAIL" "(a) a new defective site did NOT red — the gate is asleep"
+    arm "FAIL" "(a) a new defective site did NOT red with exit 1 (rc $rc_a) — the gate is asleep"
   fi
 
   # (b) the same site AT baseline must PASS (never-worse, not clean-tree).
@@ -311,12 +316,12 @@ EX
   # (c) a count that FELL below baseline must RED, telling you to lower it.
   #     Same generated baseline with the count inflated, so the path is real.
   awk '/^#/{print; next} {printf "%d %s\n", $1 + 4, $2}' "$TMP/baseline2" > "$TMP/baseline3"
-  out="$(UNREACHABLE_ASSERT_SCAN_FLOOR=1 UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline3" \
-        bash "$0" 2>&1 || true)"
-  if grep -qi "lower the baseline\|ratchet" <<<"$out"; then
-    arm "ok" "(c) a FIXED site reds until the baseline is lowered — the ratchet cannot rust"
+  rc_c=0; out="$(UNREACHABLE_ASSERT_SCAN_FLOOR=1 UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline3" \
+        bash "$0" 2>&1)" || rc_c=$?
+  if grep -qi "lower the baseline\|ratchet" <<<"$out" && [ "$rc_c" = 1 ]; then
+    arm "ok" "(c) a FIXED site reds (exit 1) until the baseline is lowered — the ratchet cannot rust"
   else
-    arm "FAIL" "(c) a fallen count did not demand the baseline be lowered — the ratchet goes stale"
+    arm "FAIL" "(c) a fallen count did not demand the baseline be lowered with exit 1 (rc $rc_c) — the ratchet goes stale"
   fi
 
   # (d) an UNPARSEABLE file must RED, not be silently skipped.
