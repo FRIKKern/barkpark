@@ -49,8 +49,12 @@
 //                (cited from a stale base)
 //   PIN-NEWER    lands only at a NEWER version, within --ahead versions (cited
 //                from a base carrying siblings that merged after the charter)
-//   PIN-WEAK     would pin, but the crediting token occurs > --weak times in the
+//   PIN-WEAK     would pin, but the crediting token occurs >= --weak times in the
 //                pinned file: a generic word, so the pin is not evidence -> hand
+//                (default 10; was > 25 until the lead's ruling on #20128: a pin
+//                records "verified at sha", so pinning a word common enough to
+//                land by chance — `index` landing on `o.index` — makes a false
+//                citation look confirmed)
 //   NO-LOCAL     no backticked subject and no quoted sentence near the citation
 //                -> hand (no rule can pick the subject out of prose)
 //   BLOCK-NEAR   the local subject sits <= 40 lines off at the blame-era version
@@ -96,7 +100,7 @@ const PIN_RE = /\b[\w.-]+\.[A-Za-z0-9]+ \(([^@()\n]+?) @ ([0-9a-f]{7,40}), L(\d+
 const RULE_PINNABLE = new Set(["PIN-EXACT", "PIN-OLDER", "PIN-NEWER"]);
 
 const o = { charter: ".claude/workflows/bp-cloud-console-hardening-charter.md", maps: [],
-  depth: 80, ahead: 20, slack: 3, weak: 25, cap: 30, apply: false, json: false, residue: false, only: null };
+  depth: 80, ahead: 20, slack: 3, weak: 10, cap: 30, apply: false, json: false, residue: false, only: null };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -309,7 +313,7 @@ for (const c of cites) {
   c.pinTo = pin;
   if (c.headResolved) {
     c.bucket = localHead ? "R-LOCAL" : "R-FOREIGN";
-  } else if (pin && pin.freq > o.weak) {
+  } else if (pin && pin.freq >= o.weak) {
     c.bucket = "PIN-WEAK";
   } else if (pin) {
     c.bucket = pin.back === 0 ? "PIN-EXACT" : pin.back > 0 ? "PIN-OLDER" : "PIN-NEWER";
@@ -338,7 +342,7 @@ const RULES = {
   "PIN-EXACT": "local set lands at the version current when the line was written -> rewrite to <file> (<thing> @ <sha>, L<n>)",
   "PIN-OLDER": "local set lands only at an older version (cited on a stale base) -> rewrite to <file> (<thing> @ <sha>, L<n>)",
   "PIN-NEWER": `local set lands only at a NEWER version (<=${o.ahead}; cited from a base carrying unmerged siblings) -> rewrite to <file> (<thing> @ <sha>, L<n>)`,
-  "PIN-WEAK": `would pin, but the crediting local token occurs > ${o.weak} times in the pinned file (generic word) -> RESIDUE (hand)`,
+  "PIN-WEAK": `would pin, but the crediting local token occurs >= ${o.weak} times in the pinned file (generic word) -> RESIDUE (hand)`,
   "NO-LOCAL": "no backticked subject and no quoted sentence near the citation -> RESIDUE (hand)",
   "BLOCK-NEAR": "local set never lands in +/-slack, but sits <=40 lines off at the blame-era version (cites a block body, or a sibling base) -> RESIDUE (hand)",
   "FAR": "local set sits >40 lines off at the blame-era version -> RESIDUE (hand)",
@@ -356,7 +360,7 @@ for (const c of cites) byBucket.get(c.bucket).push(c);
 // and counted (THING-UNWRITABLE), never mangled.
 const writableThing = (t) => !/[()@\n]/.test(t);
 function withPin(c) {
-  if (!c.pinTo || c.bucket === "PIN-WEAK" || (c.bucket.startsWith("R-") && c.pinTo.freq > o.weak)) return null;
+  if (!c.pinTo || c.bucket === "PIN-WEAK" || (c.bucket.startsWith("R-") && c.pinTo.freq >= o.weak)) return null;
   if (!writableThing(c.pinTo.tok)) return null;
   const range = c.hi !== c.n ? `L${c.n}-${c.hi}` : `L${c.n}`;
   return { at: c.p, end: c.e, str: `${c.base} (${c.pinTo.tok} @ ${shortSha(c.pinTo.sha)}, ${range})` };
