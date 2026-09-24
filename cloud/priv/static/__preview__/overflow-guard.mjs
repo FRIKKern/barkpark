@@ -14371,9 +14371,13 @@ async function main() {
               // LINE BOXES, not the element rect. A Range over the text node
               // reports one rect per line box; the H1's own getBoundingClientRect
               // merges them and reads ONE box however many lines are painted.
+              // The first NON-EMPTY TEXT NODE under the H1, at any depth: since
+              // task-1614ac4ba29eec9b the instance name rides inside its own
+              // <bdi>, so a direct-children scan found no text node and the leg
+              // refused every cell ("ZERO line boxes") on a correct render.
               `var lines=0,lh=0,tn=null;` +
-              `for(var i=0;i<h1.childNodes.length;i++){var n=h1.childNodes[i];` +
-              ` if(n.nodeType===3&&n.nodeValue.trim()){tn=n;break;}}` +
+              `var tw=document.createTreeWalker(h1,NodeFilter.SHOW_TEXT,null),n;` +
+              `while((n=tw.nextNode())){if(n.nodeValue.trim()){tn=n;break;}}` +
               `if(tn){var rg=document.createRange();rg.selectNodeContents(tn);` +
               ` var rs=rg.getClientRects(),tops=[];` +
               ` for(var j=0;j<rs.length;j++){var t=Math.round(rs[j].top*2)/2;` +

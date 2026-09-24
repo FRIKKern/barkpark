@@ -176,7 +176,7 @@ defmodule Barkpark.Tasks.Schema do
         },
 
         # The birth fence's SECOND refusal branch, mirrored as a Studio nudge
-        # (`Writer.ensure_task_born_adjudicated/5`: `term in
+        # (`Tasks.BirthGuards.born_adjudicated/6`: `term in
         # Stage.trigger_required_dispositions() and blank?(trigger)` -> 422).
         # A nudge, never a block: the API is still the single enforcing writer
         # and the raw door already 422s a hollow park. The list is DERIVED --
@@ -598,7 +598,7 @@ defmodule Barkpark.Tasks.Schema do
 
         # -- THE ADJUDICATION KEYS (PDS waves 23/24/28; DECLARED by wave 29) --
         # All three keys have PERSISTED since wave 24 and are fenced at birth
-        # by `Content.Writer.ensure_task_born_adjudicated/5` -- but they were
+        # by `Tasks.BirthGuards.born_adjudicated/6` -- but they were
         # never DECLARED, so every schema-derived surface (the Studio form,
         # the export shape, the SDK types, `bp schema get task`) was blind to
         # three live keys. Measured on this repo: `task_schema/1` returned 30

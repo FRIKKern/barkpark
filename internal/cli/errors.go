@@ -377,6 +377,11 @@ var codeExit = map[string]int{
 	"workspace_slug_conflict":     exitConflict, // 409, workspace_controller.ex:513
 	"import_constraint_violation": exitConflict, // 409, workspace_controller.ex:651
 	"blob_path_conflict":          exitConflict, // 409, workspace_controller.ex:592
+	// Reversible workspace archive (task-55474a106554e65a): the workspace is in
+	// a state that refuses the request; the remedy is a restore, not a retry
+	// of the same call — but it IS the world's state, not the payload's.
+	"workspace_archived":               exitConflict, // 409, errors.ex:465
+	"default_workspace_not_archivable": exitConflict, // 409, errors.ex:475
 
 	// 5xx → server. The box failed, not the request: the ONE class where a
 	// retry is the right reflex, and the class exit 1 made indistinguishable

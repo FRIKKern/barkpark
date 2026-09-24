@@ -101,6 +101,13 @@ defmodule Barkpark.Content.Errors do
     # `documents.search_vector` column (task-655f368ae5c72120). Was a bare 500.
     "searchable_text_too_large" =>
       "This document's searchable text (its title plus every string in content) exceeds Postgres' 1048575-byte full-text index limit. Shorten or split the document — details.field names the longest string in your payload, which is the likely culprit. Note the limit is on the derived index, not the request: a long, repetitive body can pass where a shorter, high-entropy one fails.",
+    # Reversible workspace archive (task-55474a106554e65a). 409, NOT the 404 a
+    # deleted workspace answers and NOT a bare 403: the workspace exists, the
+    # caller may well be entitled to it, and the remedy is a restore.
+    "workspace_archived" =>
+      "This workspace is archived: its content is intact but it accepts no reads or writes until a workspace admin restores it (POST /api/workspaces/:workspace_slug/restore).",
+    "default_workspace_not_archivable" =>
+      "The instance-Default workspace cannot be archived — every unscoped route resolves to it. Archive a named workspace instead.",
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
@@ -450,6 +457,28 @@ defmodule Barkpark.Content.Errors do
   # 403 write-block; over-quota = 402 Payment Required (the honest "you hit your
   # plan's write cap" semantic, distinct from a 429 rate limit that clears on
   # backoff). `reason`/`quota` ride details so a client can surface the wall.
+  # Reversible workspace archive (task-55474a106554e65a). One status for the
+  # read AND the write refusal, because the state is the workspace's, not the
+  # verb's. `details.workspace` names the slug so a caller holding several
+  # workspaces knows WHICH one to restore.
+  defp build({:error, :workspace_archived}),
+    do: %{code: "workspace_archived", message: "workspace is archived", status: 409}
+
+  defp build({:error, {:workspace_archived, slug}}),
+    do: %{
+      code: "workspace_archived",
+      message: "workspace is archived",
+      status: 409,
+      details: %{workspace: slug}
+    }
+
+  defp build({:error, :default_workspace_not_archivable}),
+    do: %{
+      code: "default_workspace_not_archivable",
+      message: "the instance-Default workspace cannot be archived",
+      status: 409
+    }
+
   defp build({:error, :workspace_suspended}),
     do: %{code: "workspace_suspended", message: "workspace is suspended", status: 403}
 

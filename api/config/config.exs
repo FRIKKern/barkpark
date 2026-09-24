@@ -99,6 +99,13 @@ config :barkpark, :mail,
 
 config :barkpark, :idempotency, ttl_seconds: 86_400
 
+# Per-kind DEFAULT expiry (days) for NEWLY minted api tokens that request none
+# (task-a0f8cfd7f4800236; `Barkpark.Auth.TokenExpiry`). SHIPS nil = no default:
+# every mint behaves exactly as before until the owner sets a value (owner item
+# 36 proposes api: 90). Override per deploy with BARKPARK_TOKEN_DEFAULT_EXPIRY_DAYS_API
+# / _SHARE (runtime.exs). Max ages (api 365, share 365) are code, not config.
+config :barkpark, :token_default_expiry_days, %{api: nil, share: nil}
+
 config :barkpark, :rate_limits,
   read_per_minute: 300,
   write_per_minute: 60,

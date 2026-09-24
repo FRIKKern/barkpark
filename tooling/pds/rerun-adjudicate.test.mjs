@@ -158,7 +158,7 @@ function sh(cmd) {
     new Set(coarse.map((f) => f.subject)).size === 1);
 }
 
-// ── 3. THE FOUR FORBIDDEN SPELLINGS ──────────────────────────────────────────
+// ── 3. THE FIVE FORBIDDEN SPELLINGS ──────────────────────────────────────────
 {
   const cases = [
     ["GIT-DASH-C", "git -C /tmp show origin/main:README.md"],
@@ -167,13 +167,14 @@ function sh(cmd) {
     ["TEST-F", "test -f tooling/pds/adjudicate.mjs"],
     ["COMMAND-SUBSTITUTION", "git rev-list --count origin/main..$(git rev-parse HEAD) | grep -x 0"],
     ["MERGE-BASE-IS-ANCESTOR", "git merge-base --is-ancestor abc123 origin/main"],
+    ["PREFIX-MATCH-PROBE", "git grep -n 'defp apply_engagement' origin/main -- api/lib/barkpark/tasks/stage.ex"],
   ];
   for (const [name, cmd] of cases) {
     const r = forbiddenSpelling(cmd);
     ok(`3.1 ${name} refused: ${cmd}`, r?.name === name, JSON.stringify(r));
     ok(`3.2 ${name} names a legal substitute`, /git (cat-file|grep|rev-list)/.test(r?.message ?? ""), r?.message);
   }
-  eq("3.3 four named rules and no more", FORBIDDEN_NAMES.length, 4);
+  eq("3.3 five named rules and no more", FORBIDDEN_NAMES.length, 5);
 
   // NEVER CRY WOLF. Each legal substitute must pass this layer untouched, or
   // the screen would push honest authors straight back into prose.
