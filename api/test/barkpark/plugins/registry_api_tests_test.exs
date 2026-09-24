@@ -17,7 +17,7 @@ defmodule Barkpark.Plugins.RegistryApiTestsTest do
   The Registry is a process-global singleton, so this file is
   `async: false` and uses unique plugin names per test to avoid
   cross-test pollution. Tests that touch
-  `Application.put_env(:barkpark, :plugins, …)` restore on exit so the
+  `Barkpark.PluginEnv.put!(…)` restore on exit so the
   load-order list does not leak into sibling test files.
   """
 
@@ -99,7 +99,7 @@ defmodule Barkpark.Plugins.RegistryApiTestsTest do
     # `capture/0` (an `:unset` sentinel), not `get_env(…, [])`: a `[]` default
     # would restore an EXPLICIT `[]` — the discovery kill switch.
     prev = Barkpark.PluginEnv.capture()
-    Application.put_env(:barkpark, :plugins, names)
+    Barkpark.PluginEnv.put!(names)
     on_exit(fn -> Barkpark.PluginEnv.restore(prev) end)
   end
 

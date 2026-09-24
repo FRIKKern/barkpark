@@ -226,14 +226,10 @@ defmodule BarkparkWeb.Studio.StudioLiveValuerefWritebackTest do
     # Arm the halting plugin ONLY for the confirm-time propagate-publish, then
     # restore. The writeback patches the draft, then re-publishes the (published)
     # canonical row → before_publish halts → {:error,{:publish_failed,{:halted,…}}}.
-    prior = Application.get_env(:barkpark, :plugins)
-    Application.put_env(:barkpark, :plugins, [HaltPublishPlugin])
+    prior = Barkpark.PluginEnv.capture()
+    Barkpark.PluginEnv.put!([HaltPublishPlugin])
 
-    on_exit(fn ->
-      if prior == nil,
-        do: Application.delete_env(:barkpark, :plugins),
-        else: Application.put_env(:barkpark, :plugins, prior)
-    end)
+    on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
 
     html =
       view

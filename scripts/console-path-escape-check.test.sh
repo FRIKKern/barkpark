@@ -1890,6 +1890,50 @@ git -C "$DR" mv docs/guide.md cloud/priv/static/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA"
 
+# ── (4) A NEWLINE INSIDE A PATH (cch-bl-nul-native-path-matcher) ────────────
+# `-z` closed quoting, but the old producer's `| tr '\0' '\n'` re-opened ONE
+# class: a path holding a literal NEWLINE was split into two pseudo-paths
+# before the anchored ERE saw it. The dispatcher now hands the NUL records
+# straight to `--match … --null`. MUTATION HOOK: CONSOLE_DISPATCH_WF=<a pre-fix copy
+# of the workflow> drives these same arms through the tr producer.
+# The console set is `dir/**` trees and exact literals only, so NO in-set path
+# can be skipped by a split (the false skip is reachable in elixir's two-ended
+# families, not here). What a split CAN do here is misclassify the other way:
+#   (4b) cloud/priv/static/li<LF>b/x.js — in the set, console=true on both
+#        producers; the TRUE this row asks for.
+#   (4c) cloud/priv/static<LF>foo/x.js is NOT under cloud/priv/static/ (that
+#        directory is `static<LF>foo`), so the true answer is console=false.
+#        The tr producer answered true off its `cloud/priv/static` fragment —
+#        RED on the pre-fix workflow.
+#   (4d) THE --null SKEW: a pinned copy without MATCH-INPUT-NUL would IGNORE
+#        `--null` and read the NUL stream as ONE line (a silent false). This
+#        dispatcher's polarity is to REFUSE out loud.
+git -C "$DR" checkout -q -b nldir "$BASE_SHA"
+mkdir -p "$DR/cloud/priv/static/li"$'\n'"b"
+printf 'x\n' >"$DR/cloud/priv/static/li"$'\n'"b/x.js"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nldir >/dev/null 2>&1
+dispatch '(4b) a NEWLINE inside the directory of an in-set path (cloud/priv/static/li<LF>b/x.js)' 0 true pull_request "$BASE_SHA"
+git -C "$DR" checkout -q -b nltop "$BASE_SHA"
+mkdir -p "$DR/cloud/priv/static"$'\n'"foo"
+printf 'x\n' >"$DR/cloud/priv/static"$'\n'"foo/x.js"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nltop >/dev/null 2>&1
+dispatch '(4c) cloud/priv/static<LF>foo/x.js is NOT under the static tree — one record, not two' 0 false pull_request "$BASE_SHA"
+git -C "$DR" checkout -q -b prenul "$BASE_SHA"
+grep -v MATCH-INPUT-NUL "$HERE/console-path-escape-check.sh" >"$DR/scripts/console-path-escape-check.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm prenul >/dev/null 2>&1
+if grep -q MATCH-INPUT-NUL "$DR/scripts/console-path-escape-check.sh"; then
+  no "(4d) the fixture head still carries MATCH-INPUT-NUL — the skew arm measures nothing"
+else
+  ok "(4d) the fixture head's copy carries no MATCH-INPUT-NUL token"
+fi
+PIN_REF=refs/heads/no-such-merge-ref \
+  dispatch '(4d) a copy that predates --null: refuses out loud, never a silent false' 1 - pull_request "$BASE_SHA"
+gate_says "predates '--match … --null'" "  …and names the --null skew"
+gate_says "dispatcher REFUSED" "  …as a classified REFUSAL"
+
 # ── THE WORKFLOW/SCRIPT VERSION SKEW (task-3a81e68f7027ca98) ───────────────
 # GitHub takes the WORKFLOW FILE for a pull_request run from the MERGE REF while
 # this job checks out the PR HEAD (D34), so main's invocation used to run against
@@ -2101,6 +2145,49 @@ if has "$out" "stub cssom-parity.mjs, exiting 0"; then
   ok "the injected exit code really came from the stub"
 else
   no "the stub never ran — cases (b) measured something else entirely"
+fi
+echo
+
+# ── case NUL: `--match … --null` reads one path per NUL record ─────────────
+# (cch-bl-nul-native-path-matcher) The dispatchers now feed `git diff -z`
+# output straight in. A path holding a NEWLINE must reach the anchored ERE as
+# ONE record, in both directions; newline-mode stdin must keep working for
+# every other caller (scripts/which-gates.sh).
+echo "case NUL: --match console --null reads NUL-terminated records"
+NUL_IN="$TMPROOT/nul-match.in"
+printf '%s\0%s\0' docs/x.md "cloud/priv/static/li"$'\n'"b/x.js" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match console --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: cloud/priv/static/li<LF>b/x.js is IN the set -> true"
+else
+  no "--null: cloud/priv/static/li<LF>b/x.js answered '$nul_out', wanted true"
+fi
+printf '%s\0' docs/x.md "cloud/priv/static"$'\n'"foo/x.js" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match console --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = false ]; then
+  ok "--null: cloud/priv/static<LF>foo/x.js is ONE record, not in the set -> false"
+else
+  no "--null: cloud/priv/static<LF>foo/x.js answered '$nul_out', wanted false — the matcher still splits records"
+fi
+printf '%s\0%s' docs/x.md "cloud/priv/static/li"$'\n'"b/x.js" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match console --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: an unterminated LAST record is still read"
+else
+  no "--null: an unterminated last record was dropped ('$nul_out')"
+fi
+nul_out="$(printf '%s\n%s\n' docs/x.md "cloud/priv/static/li"$'\n'"b/x.js" | bash "$SCRIPT" --match console 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "control: the same bytes read as LINES answer true — newline mode is unchanged"
+else
+  no "control: newline mode answered '$nul_out', wanted true"
+fi
+nul_rc=0
+nul_out="$(bash "$SCRIPT" --match console --nul </dev/null 2>&1)" || nul_rc=$?
+if [ "$nul_rc" -eq 2 ]; then
+  ok "--nul (a typo) is REFUSED with exit 2, never read as newline mode"
+else
+  no "--nul exited $nul_rc ('$nul_out'), wanted 2"
 fi
 echo
 

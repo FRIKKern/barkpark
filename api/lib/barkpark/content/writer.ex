@@ -1,7 +1,7 @@
 defmodule Barkpark.Content.Writer do
   @moduledoc """
   The document WRITE concern (E) — create / clone / upsert plus the write-path
-  helpers: envelope coercion, id/rev generation, task-kind validation, schema
+  helpers: envelope coercion, id/rev generation, plugin pre-write transforms, schema
   initial-values + Expectation scaffolding, deep-merge, and dynamic-token
   resolution.
 
@@ -31,46 +31,29 @@ defmodule Barkpark.Content.Writer do
   }
 
   alias Barkpark.Content.Papers.BlockOps
-  alias Barkpark.Content.PreWriteFences
+  alias Barkpark.Content.{PreWriteFences, PreWriteTransforms}
 
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
-  alias Barkpark.Tasks.BriefMirror
-  alias Barkpark.Tasks.Transitions
 
   require Logger
 
-  # The terminal lifecycle states, for the tombstone fence below. DUPLICATED
-  # from `Barkpark.Tasks.Close`'s private `@closed_lifecycle_statuses` because
-  # a module attribute cannot be read across modules — and pinned against it by
-  # `TombstoneFenceTest`'s "the terminal set matches Close's", which reads
-  # close.ex's own bytes and reds if either list moves without the other. A
-  # fence keyed on a stale copy of "what closed means" would let a mint through
-  # on whichever status the two disagree about.
-  @terminal_lifecycle_statuses ~w(done cancelled blocked)
+  @doc """
+  Run the registered pre-write `:check` steps over `attrs` and answer `:ok`
+  or the first refusal, verbatim.
 
-  # W7a step 1 — task documents carry a tight `content` field contract
-  # (`Barkpark.Tasks.validate_kind_content/2`) on top of the generic
-  # schema-field validation. Enforced here at the write boundary so neither
-  # `create_document/4` nor `upsert_document/4` can land a malformed task
-  # row. Defense-in-depth: migration `20260528100000_w7a_task_schema` adds a
-  # DB CHECK constraint that catches raw-Repo writes that bypass this hook.
-  #
-  # Everything is a task — goals/phases/events are gone as document types.
-  # Returns `:ok` for non-task types so the existing post/page/paper write
-  # path is unaffected.
-  def validate_task_kind("task", attrs) do
-    content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
-
-    case Barkpark.Tasks.validate_kind_content("task", content) do
-      :ok ->
-        :ok
-
-      {:error, errors} ->
-        {:error, {:invalid_task_content, errors}}
+  Kept for callers of the old name: the task kind check that used to live
+  here is now the Tasks plugin's `Validation.validate_task_kind/2`, declared by
+  that plugin as a `pre_write_transforms/0` `:check` and run by the two
+  write doors through `Barkpark.Content.PreWriteTransforms` (task-aed4f02e57d3a760).
+  With plugins off nothing is registered and every write answers `:ok`.
+  """
+  @spec validate_task_kind(String.t(), map()) :: :ok | term()
+  def validate_task_kind(type, attrs) do
+    case PreWriteTransforms.run(PreWriteTransforms.list(), type, attrs) do
+      {:ok, _attrs} -> :ok
+      refusal -> refusal
     end
   end
-
-  def validate_task_kind(_type, _attrs), do: :ok
 
   @doc """
   Validate document content against its schema. Returns {:ok, content} or
@@ -278,14 +261,13 @@ defmodule Barkpark.Content.Writer do
            # continuous canvas keys its diff on block id, and an id-less block
            # projects to bpId:null → spurious insert-after → duplicate-block
            # corruption on the next edit. Additive (present ids preserved), idempotent.
-           |> maybe_ensure_block_ids()
-           # A task brief's `purpose-copy` and `criteria-list` blocks are composed
-           # from `description` and `acceptance_criteria`; only the CLI create path
-           # ever composed them, so every later edit froze the brief a dispatched
-           # worker reads first. Re-derive on every write, matching by exact block
-           # id and preserving every other block untouched.
-           |> BriefMirror.maybe_resync_task_brief(type),
-         :ok <- validate_task_kind(type, attrs),
+           |> maybe_ensure_block_ids(),
+         # THE PLUGIN PRE-WRITE TRANSFORMS (task-aed4f02e57d3a760): the last
+         # attrs step, then the checks that judge the result — the position the
+         # task brief re-sync and the task kind check held when this pipe named
+         # them (the Tasks plugin declares both, in that order). With plugins
+         # off the list is empty and the attrs pass through untouched.
+         {:ok, attrs} <- PreWriteTransforms.run(PreWriteTransforms.list(), type, attrs),
          :ok <- refuse_malformed_label_spine(type, attrs) do
       do_create_document(type, attrs, dataset, doc_id, opts)
     end
@@ -303,7 +285,7 @@ defmodule Barkpark.Content.Writer do
   # validating a write; it is committing half of one.
   #
   # This runs the SHAPE half BEFORE any row is persisted. It sits here — inside
-  # `create_document/4`'s pre-write `with`, beside `validate_task_kind/2` — for
+  # `create_document/4`'s pre-write `with`, beside the pre-write checks — for
   # the same reason the two collision gates sit at the top of that function: all
   # four create-family verbs (create / createOrReplace / createIfNotExists /
   # replace) funnel through this one function, so the gate covers the family
@@ -336,8 +318,8 @@ defmodule Barkpark.Content.Writer do
   # OUTSIDE this function, so the rescue/catch below never see it." Every OTHER
   # Repo call on the create path sits outside that guard — the `Content.
   # get_document` prev-doc lookup below, the four birth guards
-  # (`ensure_task_transition_legal`, `ensure_close_reason_lands_with_a_close`,
-  # and the Tasks plugin's `BirthGuards` pre-write fences), and the
+  # (the Tasks plugin's `ChangeGuards` and `BirthGuards` pre-write fences,
+  # task-d91ccf54d43b9800), and the
   # `Repo.insert` in `create_after_dedup/6`. A dropped checkout at any of them
   # propagated uncaught to Phoenix RenderErrors → `BarkparkWeb.ErrorJSON`, and
   # the caller got 500 `internal_error / "unknown error
@@ -439,8 +421,9 @@ defmodule Barkpark.Content.Writer do
         _ -> nil
       end
 
-    # Transition gate first (side-effect-free refusal, before dedup and
-    # :before_save), then the find-or-create gate (task-obsession layer 1): a
+    # Transition gate first (the Tasks plugin's first pre-write fence,
+    # `Tasks.ChangeGuards.transition_legal/6`: a side-effect-free refusal,
+    # before dedup and :before_save), then the find-or-create gate (task-obsession layer 1): a
     # NEW kind:task birth is refused if it duplicates an existing task. The dedup
     # gate only fires when prev_doc is nil (a genuine create — updates/autosaves/
     # publishes pass straight through) and fails LOUD: a scan that times out or
@@ -449,18 +432,15 @@ defmodule Barkpark.Content.Writer do
     # The dedup gate is the Tasks plugin's last pre-write fence.
     fences = PreWriteFences.list()
 
-    with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
-         :ok <-
-           ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
-         # THE PLUGIN PRE-WRITE FENCES (task-e5baaaa14ddf2e1c,
-         # task-2978357a0701cd10). Declared by plugins via
-         # `pre_write_fences/0`, resolved once above in load order, run in
-         # that one order. The Tasks plugin's seven (draft-only terminal,
-         # dataset twin, terminal criteria, criteria required, born
-         # adjudicated, surface declared, find-or-create dedup) keep the order
-         # they had when this chain named them. With plugins off the list is
-         # empty and this step is `:ok`.
-         :ok <- PreWriteFences.run(fences, [type, attrs, dataset, doc_id, prev_doc, opts]) do
+    # THE PLUGIN PRE-WRITE FENCES (task-e5baaaa14ddf2e1c,
+    # task-2978357a0701cd10, task-d91ccf54d43b9800). Declared by plugins via
+    # `pre_write_fences/0`, resolved once above in load order, run in that one
+    # order. The Tasks plugin's nine (transition legal, close reason lands with
+    # a close, draft-only terminal, dataset twin, terminal criteria, criteria
+    # required, born adjudicated, surface declared, find-or-create dedup) keep
+    # the order they had when this chain named them. With plugins off the list
+    # is empty and this step is `:ok`.
+    with :ok <- PreWriteFences.run(fences, [type, attrs, dataset, doc_id, prev_doc, opts]) do
       create_after_dedup(type, attrs, dataset, doc_id, ctx, prev_doc, opts)
     end
   end
@@ -860,11 +840,11 @@ defmodule Barkpark.Content.Writer do
            # XSS hardening (mirror of create_after_dedup): scrub a verbatim
            # content["body_html"] on the patch/autosave path so poisoned markup
            # never persists as a draft that publish later promotes unchanged.
-           |> maybe_sanitize_paper_body_html(type)
-           # Same brief re-sync as the create path — this is the door a `patch`
-           # comes through, and the one the drift was measured on.
-           |> BriefMirror.maybe_resync_task_brief(type),
-         :ok <- validate_task_kind(type, attrs) do
+           |> maybe_sanitize_paper_body_html(type),
+         # Same plugin pre-write transforms as the create path, at the position
+         # the brief re-sync and kind check held — this is the door a `patch`
+         # comes through (task-aed4f02e57d3a760).
+         {:ok, attrs} <- PreWriteTransforms.run(PreWriteTransforms.list(), type, attrs) do
       do_upsert_document(type, attrs, dataset, doc_id, opts)
     end
   end
@@ -946,8 +926,9 @@ defmodule Barkpark.Content.Writer do
         _ -> nil
       end
 
-    # Transition gate immediately after prev-doc resolution, BEFORE
-    # :before_save fires — a refusal is side-effect-free (the validate_task_kind
+    # Transition gate (`Tasks.ChangeGuards.transition_legal/6`, the first
+    # pre-write fence) immediately after prev-doc resolution, BEFORE
+    # :before_save fires — a refusal is side-effect-free (the pre-write check
     # position precedent).
     #
     # THE BIRTH GUARDS RIDE HERE TOO (cch-w28, D331). This function has its own
@@ -972,18 +953,15 @@ defmodule Barkpark.Content.Writer do
     # structurally untouched — parity with `do_create_document:175`.
     fences = PreWriteFences.list()
 
-    with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
-         :ok <-
-           ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
-         # THE PLUGIN PRE-WRITE FENCES (task-e5baaaa14ddf2e1c,
-         # task-2978357a0701cd10). Declared by plugins via
-         # `pre_write_fences/0`, resolved once above in load order, run in
-         # that one order. The Tasks plugin's seven (draft-only terminal,
-         # dataset twin, terminal criteria, criteria required, born
-         # adjudicated, surface declared, find-or-create dedup) keep the order
-         # they had when this chain named them. With plugins off the list is
-         # empty and this step is `:ok`.
-         :ok <- PreWriteFences.run(fences, [type, attrs, dataset, doc_id, prev_doc, opts]) do
+    # THE PLUGIN PRE-WRITE FENCES (task-e5baaaa14ddf2e1c,
+    # task-2978357a0701cd10, task-d91ccf54d43b9800). Declared by plugins via
+    # `pre_write_fences/0`, resolved once above in load order, run in that one
+    # order. The Tasks plugin's nine (transition legal, close reason lands with
+    # a close, draft-only terminal, dataset twin, terminal criteria, criteria
+    # required, born adjudicated, surface declared, find-or-create dedup) keep
+    # the order they had when this chain named them. With plugins off the list
+    # is empty and this step is `:ok`.
+    with :ok <- PreWriteFences.run(fences, [type, attrs, dataset, doc_id, prev_doc, opts]) do
       upsert_after_gate(type, attrs, dataset, doc_id, ctx, prev_doc, opts)
     end
   end
@@ -1000,7 +978,7 @@ defmodule Barkpark.Content.Writer do
     # FINAL whole-document content (patch merging, projection and block-id fill
     # all ran in `upsert_document/4`), so there is no pre-merge shape to warn
     # about. Placed before `:before_save` fires so an enforcing refusal is
-    # side-effect-free — the `validate_task_kind` position precedent.
+    # side-effect-free — the pre-write check position precedent.
     with :ok <- check_document_schema(type, attrs, dataset) do
       do_upsert_after_gate(type, attrs, dataset, ctx, prev_doc, opts)
     end
@@ -1099,157 +1077,6 @@ defmodule Barkpark.Content.Writer do
 
   defp defer_after_save(result, _payload), do: result
 
-  # ── The Writer-seam transition gate (task-lifecycle-visibility, D7b + D21) ─
-  #
-  # Every HTTP door that can change a `type:task` row's `lifecycle_status`
-  # funnels through do_create_document/do_upsert_document, so the ONE
-  # transition-legality table (`Barkpark.Tasks.Transitions`, charter D7) is
-  # enforced HERE — immediately after prev-doc resolution, BEFORE
-  # `:before_save` fires, so a refusal is side-effect-free.
-  #
-  # `was` is resolved PUBLISHED-FALLBACK (get_patch_base-style: the Writer's
-  # own drafts-exact prev_doc first, then the bare id), NOT drafts-exact.
-  # Proven open at L1 (run probe 2026-07-22): with the drafts-exact lookup, a
-  # createOrReplace on a PUBLISHED-ONLY open task births a `drafts.<id>` done
-  # twin that Queue.ready's done-CTE (which regexp-strips the `drafts.` prefix)
-  # counts — flipping a gated dependent to ready with zero attribution. A BIRTH
-  # is when NEITHER spelling exists. Both lookups ride the caller's scope opts
-  # (the B3 rule), so a same-id row in a foreign workspace never gates a birth.
-  #
-  # Exemptions — never consult `legal?/2` on a birth (`legal?(nil, x)` is false
-  # by design and would refuse every task birth):
-  #   * `was == nil` — a birth, or a legacy row with no lifecycle. The importer
-  #     shape (migration 20260528100000 seeds already-`done` rows) depends on
-  #     the birth being exempt.
-  #   * `source == :sync` — `Sync.Applier` mirrors upstream transitions
-  #     verbatim; `:source` is server-set (MutateController prepends
-  #     `source: :api`), so a request body can never reach the exemption.
-  #
-  # `bp migrate` arrives `source: :api` via /v1/data/mutate: a fresh target is
-  # birth-exempt, a steady re-migrate is same→same legal, and forcing a LIVE
-  # target's lifecycle to mirror a since-closed source is REFUSED BY DESIGN —
-  # divergence repair is Sync's job.
-  #
-  # This SUPERSEDES the mutations.ex revision escape for ILLEGAL transitions
-  # (D7a): `ensure_task_close_is_cas`'s `ifRevisionID` escape still proves the
-  # caller read the row, but a read no longer licenses an illegal transition —
-  # this downstream gate wins for e.g. `open → done`. mutations.ex is untouched
-  # (its rev-escape ordering is load-bearing for the claim fence), and LEGAL
-  # terminal transitions (`open → blocked`, `open → cancelled`) still pass with
-  # the rev escape exactly as before.
-  defp ensure_task_transition_legal("task", attrs, dataset, doc_id, prev_doc, opts) do
-    content = Map.get(attrs, "content") || %{}
-    now = Map.get(content, "lifecycle_status") || Map.get(content, :lifecycle_status)
-    was = resolve_lifecycle_was(prev_doc, doc_id, dataset, opts)
-
-    cond do
-      # Birth (neither id spelling exists) or a legacy no-lifecycle row.
-      is_nil(was) -> :ok
-      # Replication mirrors upstream transitions verbatim.
-      Keyword.get(opts, :source, :api) == :sync -> :ok
-      Transitions.legal?(was, now) -> :ok
-      true -> {:error, {:invalid_task_content, illegal_transition_error(was, now)}}
-    end
-  end
-
-  defp ensure_task_transition_legal(_type, _attrs, _dataset, _doc_id, _prev_doc, _opts), do: :ok
-
-  # ── THE TOMBSTONE FENCE (cch-w39-bl) ──────────────────────────────────────
-  #
-  # A DISPOSAL REASON IS A CLAIM, NOT A MEASUREMENT. `close_reason` is written
-  # once and re-read by nobody, so nothing can ever contradict it — the exact
-  # property this codebase refuses in a guard ("a guard that can only stay green
-  # while the disease stays untreated is not a guard"). Two live specimens, from
-  # ONE disposal loop, failing in OPPOSITE directions:
-  #
-  #   * cch-w36-bl-mecache-unknown-arms-remaining — a cancel aimed at a
-  #     `drafts.` twin that HAS NEVER EXISTED (none of the store's 403 `drafts.`
-  #     rows carries that slug) landed its reason on the PUBLISHED ROW OF RECORD
-  #     and killed it. The tombstone's own words were "The published row is the
-  #     one of record and is NOT touched here" — written onto the row it killed.
-  #   * cch-w36-s6-invalid-precedence-details-win — the reason landed and the
-  #     CLOSE DID NOT: `lifecycle_status` stayed `in_progress` with
-  #     `claim.closed_at` nil. A row wearing an epitaph while still alive.
-  #
-  # THE FENCE: a close_reason may be MINTED only by a write that also lands a
-  # terminal `lifecycle_status`. The reason and the close become ONE atomic
-  # fact, so a two-step loop (patch the reason, then attempt the close) can no
-  # longer leave the first half standing when the second half loses its CAS —
-  # and a reason aimed at a row nobody is closing is refused AT THE MOMENT IT IS
-  # WRITTEN, rather than discovered by a reader months later.
-  #
-  # WHAT IT DELIBERATELY DOES NOT DO, and this is the placement lesson the birth
-  # fence below already paid for: it is `prev_doc`-AWARE, never a content-only
-  # rule. `/v1/data/mutate` merges patches BEFORE validation, so a content-only
-  # "close_reason implies terminal" would be RETROACTIVE and 422 every future
-  # patch to a row that already carries one. So CORRECTING an existing tombstone
-  # stays legal at any status — not a loophole but a REQUIREMENT: cch-w36-bl was
-  # reopened and its false tombstone corrected in place, and a fence that
-  # forbade that would forbid the repair it exists to enable.
-  defp ensure_close_reason_lands_with_a_close("task", attrs, dataset, doc_id, prev_doc, opts) do
-    content = Map.get(attrs, "content") || %{}
-    now = present_string(Map.get(content, "close_reason") || Map.get(content, :close_reason))
-    was = present_string(resolve_close_reason_was(prev_doc, doc_id, dataset, opts))
-    status = Map.get(content, "lifecycle_status") || Map.get(content, :lifecycle_status)
-
-    cond do
-      # No tombstone in this write, or an unchanged one carried through a patch.
-      is_nil(now) -> :ok
-      now == was -> :ok
-      # CORRECTING an existing reason — the audit action, always legal.
-      not is_nil(was) -> :ok
-      # Replication mirrors upstream verbatim (the same exemption its siblings take).
-      Keyword.get(opts, :source, :api) == :sync -> :ok
-      # MINTING one: the close must land in this same write.
-      status in @terminal_lifecycle_statuses -> :ok
-      true -> {:error, {:invalid_task_content, orphan_close_reason_error(status)}}
-    end
-  end
-
-  defp ensure_close_reason_lands_with_a_close(_t, _a, _d, _i, _p, _o), do: :ok
-
-  # The row's CURRENT close_reason, resolved published-fallback — the same two
-  # steps `resolve_lifecycle_was/4` takes, for the same reason: the drafts-exact
-  # prev_doc the writer already loaded, then the bare (published) id.
-  defp resolve_close_reason_was(%Document{content: content}, _doc_id, _dataset, _opts),
-    do: (content || %{})["close_reason"]
-
-  defp resolve_close_reason_was(_prev_doc, doc_id, dataset, opts) do
-    with id when is_binary(id) <- doc_id,
-         pid when pid != "" and pid != id <- DraftId.published_id(id),
-         {:ok, %Document{content: content}} <-
-           Content.get_document(pid, "task", dataset, opts) do
-      (content || %{})["close_reason"]
-    else
-      _ -> nil
-    end
-  end
-
-  # Blank is not a value. `nil`, `""`, whitespace and non-strings are all "no
-  # tombstone" — an empty reason must not license a mint, and must not read as a
-  # PREVIOUS reason that would make the next write a mere "correction".
-  defp present_string(v) when is_binary(v) do
-    case String.trim(v) do
-      "" -> nil
-      trimmed -> trimmed
-    end
-  end
-
-  defp present_string(_), do: nil
-
-  defp orphan_close_reason_error(status) do
-    %{
-      "close_reason" => [
-        "a close_reason may not be minted on a row this write does not close " <>
-          "(lifecycle_status #{inspect(status)}): the reason and the close are ONE fact. " <>
-          "Close through the close primitive (`bp task close <id> <worker> <epoch> " <>
-          "<status> <reason>`, POST /v1/tasks/:id/close), which writes both together and " <>
-          "rolls BOTH back when its CAS loses. A reason written beside a close that never " <>
-          "landed is an epitaph on a living row."
-      ]
-    }
-  end
-
   # ── THE CREATOR STAMP (task-aa3502ad7645afbd) ────────────────────────────────
   #
   # THE INVARIANT: `content.created_by` on a task document is a fact the SERVER
@@ -1336,8 +1163,9 @@ defmodule Barkpark.Content.Writer do
   # and the stamp read that as a birth and credited the EDITOR as the filer,
   # which the publish then promoted onto a row born weeks earlier. Measured
   # live: 3 of the first 45 stamps. So the counterpart is consulted BEFORE the
-  # caller, published-fallback — the same two steps `resolve_lifecycle_was/4`
-  # and `resolve_close_reason_was/4` take, through the same scoped opts.
+  # caller, published-fallback — the same two steps `Tasks.ChangeGuards`'
+  # `resolve_lifecycle_was/4` and `resolve_close_reason_was/4` take, through
+  # the same scoped opts.
   #
   # Its `created_by` is what an update restores, whatever that value is: the
   # ORIGINAL filer on an attributed row, and `nil` on a LEGACY one — so a
@@ -1411,58 +1239,6 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp put_created_by(attrs, _stamp), do: attrs
-
-  # The row's CURRENT lifecycle_status, resolved published-fallback: the
-  # drafts-exact prev_doc the writer already loaded first, then the bare
-  # (published) id — mirroring Mutations.get_patch_base/4, and scoped through
-  # the same opts as the prev-doc lookup.
-  defp resolve_lifecycle_was(%Document{content: content}, _doc_id, _dataset, _opts),
-    do: (content || %{})["lifecycle_status"]
-
-  defp resolve_lifecycle_was(_prev_doc, doc_id, dataset, opts) do
-    with id when is_binary(id) <- doc_id,
-         pid when pid != "" and pid != id <- DraftId.published_id(id),
-         {:ok, %Document{content: content}} <-
-           Content.get_document(pid, "task", dataset, opts) do
-      (content || %{})["lifecycle_status"]
-    else
-      _ -> nil
-    end
-  end
-
-  # Renders through the existing `invalid_task_content` family →
-  # `Content.Errors` 422 validation_failed envelope, keyed on the field. The
-  # message names from, to and the sanctioned verb — the refusal TEACHES
-  # (tasks_controller stage/close precedent). Never the `{:halted, _}` shape,
-  # which is reserved for plugin vetoes.
-  defp illegal_transition_error(from, to) do
-    %{
-      "lifecycle_status" => [
-        "illegal lifecycle transition #{inspect(from)} → #{inspect(to)}: no document " <>
-          "write may perform it — " <> sanctioned_verb(to)
-      ]
-    }
-  end
-
-  defp sanctioned_verb("done"),
-    do:
-      "`done` is reached only through the close primitive (`bp task close <id> <worker> " <>
-        "<epoch>`, POST /v1/tasks/:id/close), which records who closed it."
-
-  defp sanctioned_verb("in_progress"),
-    do:
-      "a live claim is minted only by the claim primitive (`bp task claim <id> <worker>`, " <>
-        "POST /v1/tasks/:id/claim), which fences on the claim epoch."
-
-  defp sanctioned_verb(to) when to in ~w(considering researching),
-    do:
-      "thought states move through the sanctioned stage verb (`bp task stage <id> #{to}`, " <>
-        "POST /v1/tasks/:id/stage), which enforces the same legality table."
-
-  defp sanctioned_verb(_to),
-    do:
-      "move through the sanctioned task lifecycle verbs instead (`bp task stage` for " <>
-        "considering|researching|open, `bp task claim`, `bp task close`)."
 
   # THE ELEMENT-TYPE FLOOR ON THE WRITE PATH (task-f8c7b0387f50534e).
   #

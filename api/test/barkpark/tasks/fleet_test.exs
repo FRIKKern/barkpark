@@ -467,6 +467,232 @@ defmodule Barkpark.Tasks.FleetTest do
              Fleet.beat(%{"worker" => uniq("w"), "ttl" => -5}, @dataset, scope)
   end
 
+  # ── 7b. read-time decorations (pdf-bl-roster-enrichment) ────────────────
+
+  describe "contradiction + feed decorations (read-time, never stored)" do
+    defp open_task!(scope) do
+      task_id = uniq("enrich-task")
+
+      {:ok, task} =
+        Content.create_document(
+          "task",
+          %{
+            "doc_id" => task_id,
+            "title" => task_id,
+            "content" => %{
+              "kind" => "task",
+              "acceptance_criteria" => [
+                %{
+                  "criterion" => "the fixture states its bar",
+                  "met" => true,
+                  "evidence" => "fixture"
+                }
+              ],
+              "lifecycle_status" => "open"
+            }
+          },
+          @dataset,
+          scope
+        )
+
+      task
+    end
+
+    # Rewrite a task row's content in place — pins lifecycle/claim shapes the
+    # engines write (reap/close receipts) at an exact age.
+    defp put_task_content!(doc_uuid, fun) do
+      fresh = Repo.get!(Document, doc_uuid)
+
+      {1, _} =
+        from(d in Document, where: d.id == ^doc_uuid)
+        |> Repo.update_all(set: [content: fun.(fresh.content)])
+
+      :ok
+    end
+
+    defp lease_ttl_s, do: Barkpark.Tasks.QueueGate.lease_ttl_seconds()
+
+    test "an idle declaration beside a LIVE claim under the same worker is flagged", %{
+      scope: scope
+    } do
+      worker = uniq("contra")
+      task = open_task!(scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, worker, scope)
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "status" => "idle"}, @dataset, scope)
+
+      row = roster_row(@dataset, worker, now: DateTime.utc_now())
+
+      assert row["status"] == "idle"
+
+      assert row["contradiction"] == %{
+               "kind" => "idle_with_live_claim",
+               "task" => Content.published_id(task.doc_id),
+               "claim_ts_iso" => claimed.content["claim"]["ts_iso"]
+             }
+
+      # Derived, never stored: the listener row carries no such key.
+      [listener] = listener_rows(worker)
+      refute Map.has_key?(listener.content, "contradiction")
+    end
+
+    test "working beside a live claim, and idle with no claim at all, are NOT contradictions",
+         %{scope: scope} do
+      busy = uniq("contra-working")
+      task = open_task!(scope)
+      {:ok, _} = Tasks.claim_by_id(task.doc_id, busy, scope)
+      assert {:ok, _} = Fleet.beat(%{"worker" => busy, "status" => "working"}, @dataset, scope)
+      assert roster_row(@dataset, busy)["contradiction"] == nil
+
+      quiet = uniq("contra-quiet")
+      assert {:ok, _} = Fleet.beat(%{"worker" => quiet}, @dataset, scope)
+      assert roster_row(@dataset, quiet)["contradiction"] == nil
+    end
+
+    test "a claim whose lease lapsed (still in_progress, sweeper not yet run) is NO evidence",
+         %{scope: scope} do
+      worker = uniq("contra-expired")
+      task = open_task!(scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, worker, scope)
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker}, @dataset, scope)
+      now = DateTime.utc_now()
+
+      put_task_content!(claimed.id, fn c ->
+        put_in(c, ["claim", "ts_iso"], iso_ago(now, lease_ttl_s() + 60))
+      end)
+
+      row = roster_row(@dataset, worker, now: now)
+      assert Repo.get!(Document, claimed.id).content["lifecycle_status"] == "in_progress"
+      assert row["contradiction"] == nil
+
+      # CONTROL: the same row one minute INSIDE the window is flagged — the
+      # boundary, not the fixture, is what said no above.
+      put_task_content!(claimed.id, fn c ->
+        put_in(c, ["claim", "ts_iso"], iso_ago(now, lease_ttl_s() - 60))
+      end)
+
+      assert %{"kind" => "idle_with_live_claim"} =
+               roster_row(@dataset, worker, now: now)["contradiction"]
+    end
+
+    test "a RELEASED claim (object left behind, worker nil) is NO evidence", %{scope: scope} do
+      worker = uniq("contra-released")
+      task = open_task!(scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, worker, scope)
+
+      {:ok, _} =
+        Tasks.release(claimed.id, worker, observed_epoch: claimed.content["claim"]["epoch"])
+
+      released = Repo.get!(Document, claimed.id).content
+      assert is_map(released["claim"]) and released["claim"]["worker"] == nil
+      assert released["claim"]["released_by"] == worker
+
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker}, @dataset, scope)
+      assert roster_row(@dataset, worker)["contradiction"] == nil
+
+      # Precision against a released claim that somehow still reads
+      # in_progress: the nulled worker alone must keep it out.
+      put_task_content!(claimed.id, &Map.put(&1, "lifecycle_status", "in_progress"))
+      assert roster_row(@dataset, worker)["contradiction"] == nil
+    end
+
+    test "a CLOSED row's claim receipt (worker kept, closed_at stamped) is NO evidence", %{
+      scope: scope
+    } do
+      worker = uniq("contra-closed")
+      task = open_task!(scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, worker, scope)
+      now_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+
+      # The shape `Tasks.Close` leaves: terminal lifecycle, claim kept as a
+      # receipt with the holder still named and a fresh ts.
+      put_task_content!(claimed.id, fn c ->
+        c
+        |> Map.put("lifecycle_status", "done")
+        |> Map.update!("claim", fn cl ->
+          cl |> Map.put("closed_by", worker) |> Map.put("closed_at", now_iso)
+        end)
+      end)
+
+      assert Repo.get!(Document, claimed.id).content["claim"]["worker"] == worker
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker}, @dataset, scope)
+      assert roster_row(@dataset, worker)["contradiction"] == nil
+    end
+
+    test "a live claim under a DIFFERENT worker, or an assignee-only row, is NO evidence", %{
+      scope: scope
+    } do
+      worker = uniq("contra-mine")
+      other = uniq("contra-foreign")
+      task = open_task!(scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, other, scope)
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker}, @dataset, scope)
+      assert roster_row(@dataset, worker)["contradiction"] == nil
+
+      # Assignee names this worker, claim.worker names nobody: the `task`
+      # column's fallback joins it, the contradiction join must not.
+      put_task_content!(claimed.id, fn c ->
+        c |> Map.put("assignee", worker) |> Map.update!("claim", &Map.put(&1, "worker", nil))
+      end)
+
+      row = roster_row(@dataset, worker)
+      assert row["task"] == Content.published_id(task.doc_id)
+      assert row["contradiction"] == nil
+    end
+
+    test "an OFFLINE row is not a current declaration and is never flagged", %{scope: scope} do
+      worker = uniq("contra-offline")
+      now = DateTime.utc_now()
+      mk_listener!(worker, %{"status" => "idle", "last_seen" => iso_ago(now, 600)}, scope)
+      task = open_task!(scope)
+      {:ok, _} = Tasks.claim_by_id(task.doc_id, worker, scope)
+
+      row = roster_row(@dataset, worker, now: now)
+      assert row["status"] == "offline"
+      assert row["contradiction"] == nil
+    end
+
+    test "feed round-trips through a beat, survives an omitting beat, and renders", %{
+      scope: scope
+    } do
+      worker = uniq("feed")
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "feed" => "sse"}, @dataset, scope)
+      assert roster_row(@dataset, worker)["feed"] == "sse"
+
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "status" => "working"}, @dataset, scope)
+      assert roster_row(@dataset, worker)["feed"] == "sse"
+
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker, "feed" => "poll"}, @dataset, scope)
+      assert roster_row(@dataset, worker)["feed"] == "poll"
+    end
+
+    test "absent feed renders unknown and is not stored; off-vocab feed is refused", %{
+      scope: scope
+    } do
+      worker = uniq("feed-absent")
+      assert {:ok, _} = Fleet.beat(%{"worker" => worker}, @dataset, scope)
+      assert roster_row(@dataset, worker)["feed"] == "unknown"
+      [listener] = listener_rows(worker)
+      refute Map.has_key?(listener.content, "feed")
+
+      # A stored off-vocab value (not beat-writable) still reads unknown.
+      legacy = uniq("feed-legacy")
+
+      mk_listener!(
+        legacy,
+        %{"feed" => "websocket", "last_seen" => iso_ago(DateTime.utc_now(), 0)},
+        scope
+      )
+
+      assert roster_row(@dataset, legacy)["feed"] == "unknown"
+
+      assert {:error, :invalid_feed} =
+               Fleet.beat(%{"worker" => uniq("w"), "feed" => "websocket"}, @dataset, scope)
+
+      assert {:error, :invalid_feed} =
+               Fleet.beat(%{"worker" => uniq("w"), "feed" => "unknown"}, @dataset, scope)
+    end
+  end
+
   # ── 8. manifest wiring (zero Go — PDF-D21) ───────────────────────────────
 
   test "plugin mounts /v1/fleet routes and mints fleet.roster + fleet.beat verbs" do
@@ -909,6 +1135,38 @@ defmodule BarkparkWeb.FleetControllerTest do
       |> json_response(422)
 
     assert %{"ok" => false, "reason" => "invalid_capacity"} = body
+  end
+
+  test "POST /v1/fleet/beat carries feed onto the roster row; off-vocab feed is a 422", %{
+    conn: conn
+  } do
+    worker = uniq("http-feed")
+
+    _ =
+      conn
+      |> authed()
+      |> post("/v1/fleet/beat", %{"worker" => worker, "feed" => "sse"})
+      |> json_response(200)
+
+    documents =
+      scoped_conn()
+      |> authed()
+      |> get("/v1/fleet/roster")
+      |> json_response(200)
+      |> Map.fetch!("documents")
+
+    row = Enum.find(documents, &(&1["worker"] == worker))
+    assert row["feed"] == "sse"
+    assert Map.has_key?(row, "contradiction")
+    assert row["contradiction"] == nil
+
+    body =
+      scoped_conn()
+      |> authed()
+      |> post("/v1/fleet/beat", %{"worker" => worker, "feed" => "carrier-pigeon"})
+      |> json_response(422)
+
+    assert %{"ok" => false, "reason" => "invalid_feed"} = body
   end
 
   test "fleet endpoints refuse an anonymous caller", %{conn: conn} do

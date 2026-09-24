@@ -160,9 +160,9 @@ defmodule BarkparkWeb.Contract.HistoryTest do
 
     # The doc + revisions already exist; register the before_save veto now so it
     # only bites the restore's re-upsert, not the setup writes.
-    original = Application.get_env(:barkpark, :plugins)
-    on_exit(fn -> Application.put_env(:barkpark, :plugins, original) end)
-    Application.put_env(:barkpark, :plugins, [HaltSavePlugin])
+    original = Barkpark.PluginEnv.capture()
+    on_exit(fn -> Barkpark.PluginEnv.restore(original) end)
+    Barkpark.PluginEnv.put!([HaltSavePlugin])
 
     resp =
       conn

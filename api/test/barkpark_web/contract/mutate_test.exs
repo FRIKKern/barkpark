@@ -486,7 +486,7 @@ defmodule BarkparkWeb.Contract.MutateTest do
       # a `[]` default would restore an EXPLICIT `[]`, which BootCollectors
       # reads as the discovery kill switch and leaks to later tests.
       prior = Barkpark.PluginEnv.capture()
-      Application.put_env(:barkpark, :plugins, [Barkpark.Plugins.Bulldocs])
+      Barkpark.PluginEnv.put!([Barkpark.Plugins.Bulldocs])
       on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
       Barkpark.LabelFixtures.register_tags!("test")
       :ok

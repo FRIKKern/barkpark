@@ -78,7 +78,14 @@
 # event lands while run k is holding the group, run k+1 starts no later than
 # max(start_k + P, end_k), and runs at most T. With P = 20 and T = 20:
 #   NAME_NOT_IN_RUN, RERUN_DELETED  the producing run's own completion IS
-#                   the event -> <= 40 min (PR #16709's specimen).
+#                   the event -> <= 40 min.
+#   CANCELLED_CURRENT  PR #16709's specimen (first filed NAME_NOT_IN_RUN):
+#                   its run was cancelled while still pending, with ZERO
+#                   jobs. Whether a cancel-before-dispatch fires
+#                   workflow_run is NOT measured here (a startup_failure,
+#                   the other zero-job completion, measurably does not), so
+#                   the bound claimed is the sibling one: <= the first
+#                   sibling producer's run time + 40 min.
 #   NO_RUN          the first sibling producer to complete on the same head
 #                   is the event -> <= that sibling's run time + 40 min.
 #   STARTUP_FAILURE no event of its own; the first sibling completion reads
@@ -339,6 +346,12 @@ jobs:
             - `NAME_NOT_IN_RUN` — the producing run executed and carried no job
               of that name (a head predating the context, a renamed job).
               Rebase the PR, or fix the spec. Never re-dispatch.
+            - `CANCELLED_CURRENT` — the newest producing run on the head was
+              cancelled before it rendered the context (usually evicted from
+              its concurrency group). Re-dispatch: `gh pr update-branch <n>`,
+              or push a new sha.
+            - `STARTUP_FAILURE` — the run was refused at creation. Re-arm the
+              head the same way: `gh pr update-branch <n>`, or push.
             - `NO_RUN` — no producing run exists for the head. Push, or close.
             - `ZOMBIED` / stale-queued — a run was created and never
               dispatched. Cancel it or re-run it.

@@ -408,6 +408,127 @@ else
   bad "2.3 two classes collapsed: [$Z] [$R] [$N] [$C]"
 fi
 
+# ═══ 2c. CANCELLED_CURRENT — the other class a `completed` run can hide inside ═
+#
+# THE SPECIMEN (task-faadd040f770153f). PR #16709, head ebc4fb514. Its ONLY
+# pr-task-gate run, 35890853900 (pull_request, created 2026-09-23T16:44:38Z),
+# concluded `cancelled` with ZERO jobs: a same-second run for the OLD head
+# evicted it as the pending run of its concurrency group. GitHub's
+# `status: completed` covers success, failure AND cancelled, so the census run
+# 35892264098 filed it NAME_NOT_IN_RUN, remedy "NEVER re-dispatch". A
+# re-dispatch — update-branch — is exactly what fixed it: the context rendered
+# on the new head (check run 107438093928, success).
+#
+# FOUR ARMS OVER ONE CORPUS: the cancelled-and-current head is reported under
+# its own class with a re-dispatch remedy; the same fixture with conclusion
+# `success` is still NAME_NOT_IN_RUN with its original remedy; a cancelled OLDER
+# run beside a newer current one stays invisible, and a disarm of the
+# `sort_by(.created_at, .id) | last` selection proves that selection is what
+# hides it; and a head whose context renders stays silent beside a cancelled run.
+CANCEL_ARMS=0
+
+# ARM ONE — completed + cancelled, newest, no rendered check run.
+D2K="$(derive cancelled-current)"
+drop_victim_checkrun "$D2K"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .conclusion = "cancelled" else . end]}' \
+  "$D2K/runs-$SHA.json" > "$D2K/.tmp" && mv "$D2K/.tmp" "$D2K/runs-$SHA.json"
+OUT="$(run_census "$D2K")"; RC=$?
+CANCEL_ARMS=$((CANCEL_ARMS + 1))
+if [ "$RC" = "1" ] && grep -qE '^ +class +CANCELLED_CURRENT$' <<<"$OUT" \
+   && grep -qF "context \"$VICTIM\" renders nowhere" <<<"$OUT" && ! grep -q 'NAME_NOT_IN_RUN' <<<"$OUT"; then
+  ok "2c.1 ARM ONE — a COMPLETED run with conclusion cancelled ⇒ CANCELLED_CURRENT (exit 1, \"$VICTIM\" named), not NAME_NOT_IN_RUN"
+else
+  bad "2c.1 expected class CANCELLED_CURRENT at exit 1 naming \"$VICTIM\"; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+if grep -qE '^ +remedy +re-dispatch .*update-branch' <<<"$OUT" && ! grep -q 'NEVER re-dispatch' <<<"$OUT"; then
+  ok "2c.2 …and its remedy says RE-DISPATCH (update-branch) and not 'NEVER re-dispatch' — $(grep -E '^ +remedy ' <<<"$OUT" | head -1 | sed 's/^ *//' | cut -c1-96)"
+else
+  bad "2c.2 the cancelled row does not carry a re-dispatch remedy"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# ARM TWO — THE CONTROL. Same fixture, conclusion `success`: the run executed
+# and carried no job of this name. A genuine NAME_NOT_IN_RUN, original remedy.
+D2L="$(derive cancelled-control-success)"
+drop_victim_checkrun "$D2L"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .conclusion = "success" else . end]}' \
+  "$D2L/runs-$SHA.json" > "$D2L/.tmp" && mv "$D2L/.tmp" "$D2L/runs-$SHA.json"
+OUT="$(run_census "$D2L")"; RC=$?
+CANCEL_ARMS=$((CANCEL_ARMS + 1))
+if [ "$RC" = "1" ] && grep -qE '^ +class +NAME_NOT_IN_RUN$' <<<"$OUT" && ! grep -q 'CANCELLED_CURRENT' <<<"$OUT" \
+   && grep -qE '^ +remedy +rebase, or edit the spec.*NEVER re-dispatch' <<<"$OUT"; then
+  ok "2c.3 ARM TWO (control) — conclusion \`success\` stays NAME_NOT_IN_RUN with its original 'rebase, or edit the spec … NEVER re-dispatch' remedy"
+else
+  bad "2c.3 conclusion 'success' must stay NAME_NOT_IN_RUN with its original remedy; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# ARM THREE — CANCELLED-BUT-SUPERSEDED IS INVISIBLE. The victim's producer has
+# TWO runs on the head: the current one (completed success, created 22:00Z) and
+# an OLDER evicted one (completed cancelled, created 21:00Z, a LOWER id). The
+# older one is appended LAST in the array on purpose, so a selector that trusts
+# array order would pick it; only `sort_by(.created_at, .id) | last` does not.
+D2M="$(derive cancelled-superseded)"
+drop_victim_checkrun "$D2M"
+jq --arg p "$VICTIM_PATH" '
+  {workflow_runs: ([.workflow_runs[] | if .path == $p then .conclusion = "success" else . end]
+    + [.workflow_runs[] | select(.path == $p) | .id = (.id - 1) | .created_at = "2026-08-06T21:00:00Z" | .conclusion = "cancelled"])}' \
+  "$D2M/runs-$SHA.json" > "$D2M/.tmp" && mv "$D2M/.tmp" "$D2M/runs-$SHA.json"
+OUT="$(run_census "$D2M")"; RC=$?
+CANCEL_ARMS=$((CANCEL_ARMS + 1))
+if [ "$RC" = "1" ] && grep -qE '^ +class +NAME_NOT_IN_RUN$' <<<"$OUT" && ! grep -q 'CANCELLED_CURRENT' <<<"$OUT" \
+   && grep -qE "^ +run +$VICTIM_RUN " <<<"$OUT"; then
+  ok "2c.4 ARM THREE — a cancelled OLDER run beside a newer current one is never examined: NAME_NOT_IN_RUN off run $VICTIM_RUN, no CANCELLED_CURRENT"
+else
+  bad "2c.4 a superseded cancelled run reached the classifier; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+# DISARM: drop the sort, keep `last`. The array-last row is the superseded
+# cancelled one, so the census must now report it — proving it is the SELECTION,
+# not the classifier, that keeps the superseded population out.
+MUT2C="$TMP/mut2c"; mkdir -p "$MUT2C/scripts"
+sed "s/jq -sc 'sort_by(.created_at, .id) | last \/\/ empty'/jq -sc 'last \/\/ empty'/" "$CENSUS" > "$MUT2C/scripts/absent-context-census.sh"
+if cmp -s "$CENSUS" "$MUT2C/scripts/absent-context-census.sh"; then
+  bad "2c.5 the selection disarm did not change the census (the sort_by line moved?)"
+else
+  OUT="$(env BARKPARK_CHECK_RUNS_LIB="$REPO_ROOT/scripts/lib/check-runs.sh" PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
+    bash "$MUT2C/scripts/absent-context-census.sh" --fixtures "$D2M" --now "$NOW" --spec "$SPEC" --workflows "$WORKFLOWS" \
+    --repo FRIKKern/barkpark 2>&1)"
+  grep -qE '^ +class +CANCELLED_CURRENT$' <<<"$OUT" \
+    && ok "2c.5 …and with sort_by removed the SAME fixture reads CANCELLED_CURRENT off the superseded run — 2c.4 is a check the selection can lose" \
+    || { bad "2c.5 the disarmed selection still hid the superseded run — 2c.4 does not prove the sort is what excludes it"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2; }
+fi
+
+# ARM FOUR — the class tracks ABSENCE: the same cancelled run with the context
+# RENDERED (e.g. from a sibling run) reports nothing.
+D2N="$(derive cancelled-healthy)"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .conclusion = "cancelled" else . end]}' \
+  "$D2N/runs-$SHA.json" > "$D2N/.tmp" && mv "$D2N/.tmp" "$D2N/runs-$SHA.json"
+OUT="$(run_census "$D2N")"; RC=$?
+CANCEL_ARMS=$((CANCEL_ARMS + 1))
+if [ "$RC" = "0" ] && ! grep -q 'ABSENT' <<<"$OUT" && ! grep -q 'CANCELLED_CURRENT' <<<"$OUT"; then
+  ok "2c.6 ARM FOUR (control) — a head whose contexts all RENDER is silent beside a cancelled run"
+else
+  bad "2c.6 a healthy head must stay exit 0 and silent; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# THE CONCLUSION IS READ BEFORE THE ATTEMPT, as for STARTUP_FAILURE: a cancelled
+# RE-RUN rendered nothing because it was cancelled, not because a check run was
+# deleted, and its remedy is the same re-dispatch.
+D2O="$(derive cancelled-rerun)"
+drop_victim_checkrun "$D2O"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then (.conclusion = "cancelled" | .run_attempt = 2) else . end]}' \
+  "$D2O/runs-$SHA.json" > "$D2O/.tmp" && mv "$D2O/.tmp" "$D2O/runs-$SHA.json"
+OUT="$(run_census "$D2O")"; RC=$?
+if [ "$RC" = "1" ] && grep -qE '^ +class +CANCELLED_CURRENT$' <<<"$OUT" && ! grep -q 'RERUN_DELETED' <<<"$OUT"; then
+  ok "2c.7 a cancelled attempt 2 is CANCELLED_CURRENT, not RERUN_DELETED — the conclusion is read before the attempt"
+else
+  bad "2c.7 a cancelled re-run should be CANCELLED_CURRENT; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+if [ "$CANCEL_ARMS" = "4" ]; then
+  ok "2c.8 arms run: $CANCEL_ARMS of 4 — a silent section cannot masquerade as a clean one"
+else
+  bad "2c.8 CANNOT READ — $CANCEL_ARMS of 4 cancelled arms actually ran"
+fi
+
 # ═══ 3. MUTATION, DIRECTION TWO — a rendered PENDING check is NOT absent ═════
 section "3. DIRECTION TWO: a rendered-but-unconcluded check run reports NOTHING"
 
@@ -1145,7 +1266,8 @@ section "7b. the cadence: event leg derived from the spec, re-arm wired, latency
 #   (a) `on: workflow_run: types: [completed]` names EXACTLY the workflows
 #       that produce the committed required set — derived from the spec
 #       through ctx_path (§0), never typed. PR #16709's absence
-#       (NAME_NOT_IN_RUN on "PR references an active task") ends in a
+#       (CANCELLED_CURRENT on "PR references an active task" — first filed
+#       NAME_NOT_IN_RUN, see §9) ends in a
 #       pr-task-gate COMPLETION, and that completion is what fires the census.
 #   (b) the re-arm is wired end to end: census step id + opt-in env ->
 #       job output -> cadence job reads it -> dispatches this file.
@@ -1344,7 +1466,12 @@ section "9. the re-arm signal fires on PR #18045's shape and PR #16709's, and NO
 #   thing that makes the next look happen is the re-arm this section pins:
 #   9.1 at the event's moment, 9.2 one cycle later.
 #   #16709: pr-task-gate COMPLETED and rendered no "PR references an active
-#     task" — NAME_NOT_IN_RUN. Its own completion is the event (§7.8).
+#     task". Its own completion is the event (§7.8). CORRECTED 2026-09-24
+#     (task-faadd040f770153f): the live run 35890853900 COMPLETED as
+#     `cancelled` (evicted from its concurrency group, zero jobs), so the
+#     measured specimen is CANCELLED_CURRENT (9.4b), not the NAME_NOT_IN_RUN
+#     it was first filed as. 9.4 keeps the conclusion-less shape, which is
+#     still the renamed-job / predating-head NAME_NOT_IN_RUN.
 #
 # Fixtures are the §0 base with fields moved; the three non-surviving producers
 # are the ones NOT made by pr-task-gate.yml, derived from the spec.
@@ -1420,6 +1547,22 @@ if [ -n "$PTG_CTX" ] && [ "$RC" = "1" ] && grep -qE '^ +class +NAME_NOT_IN_RUN$'
   ok "9.4 #16709: \"$PTG_CTX\" NAME_NOT_IN_RUN at exit 1 on the census its own completion starts; undispatched-young=0 (no re-arm needed)"
 else
   bad "9.4 #16709 shape: expected NAME_NOT_IN_RUN exit 1, young=0; got exit $RC, young='$Y'"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# 9.4b — #16709 AS MEASURED: the pr-task-gate run concluded `cancelled`. The
+# census must name the context, exit 1, point at re-dispatch, and need no re-arm.
+D9G="$(derive rearm-16709-cancelled)"
+cp -R "$D9D/." "$D9G/"
+jq --arg p "$SURVIVOR_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then (.id = 35890853900 | .conclusion = "cancelled") else . end]}' \
+  "$D9G/runs-$SHA.json" > "$D9G/.tmp" && mv "$D9G/.tmp" "$D9G/runs-$SHA.json"
+OUT="$(run_census "$D9G")"; RC=$?
+Y="$(cadence_line "$OUT")"
+if [ -n "$PTG_CTX" ] && [ "$RC" = "1" ] && grep -qE '^ +class +CANCELLED_CURRENT$' <<<"$OUT" \
+   && grep -qF "context \"$PTG_CTX\" renders nowhere" <<<"$OUT" && grep -qE '^ +run +35890853900 ' <<<"$OUT" \
+   && grep -qE '^ +remedy +re-dispatch' <<<"$OUT" && [ "$Y" = "0" ]; then
+  ok "9.4b #16709 as measured (run 35890853900, cancelled): \"$PTG_CTX\" CANCELLED_CURRENT at exit 1, remedy re-dispatch; undispatched-young=0"
+else
+  bad "9.4b #16709 measured shape: expected CANCELLED_CURRENT exit 1 on run 35890853900, remedy re-dispatch, young=0; got exit $RC, young='$Y'"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
 
 # 9.5 — only the SILENT population re-arms. The same #18045 fixture with one

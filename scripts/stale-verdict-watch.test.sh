@@ -22,6 +22,12 @@
 #   (l) the two TRANSPORT silences are not the warning and not each
 #       other: the pull-request list unread                       → exit 6
 #       main's commit history unread                              → exit 7
+#   (t) THE AGING BOUND: a CONFLICTING row past 6h reds with its age, a
+#       younger one is printed and does not red, an unreadable age
+#       fails closed                                              → exit 10
+#   (u) a green check run names its rc: 0 and 2 carry DIFFERENT
+#       annotations, and the pin's healed arm is reachable and quiet
+#       exactly where it should be (task-87f845f92d7884c8)
 #
 # THE REQUIRED SET IS DERIVED, NEVER TYPED. Context names come out of
 # .github/required-checks.json at build time, so a renamed context rebuilds
@@ -94,6 +100,12 @@ echo "2026-08-10T00:00:00Z" >> "$COMMITS"
 
 OLD="2026-07-01T00:00:00Z"    # predates every commit above  → stale
 FRESH="2026-08-11T00:00:00Z"  # postdates every commit above → not stale
+# THE CLOCK IS PINNED TOO. The aging bound reads "now"; a harness that read the
+# wall clock would move its verdicts with the calendar. One hour after FRESH:
+# a row whose only timestamp is FRESH is YOUNG (1h), one at OLD is AGED (41d).
+# Exported so every child — fixture runs, stubbed live runs, --selftest — reads
+# the same instant. Section (t) sets it per probe where the age is the subject.
+export SVW_NOW="2026-08-11T01:00:00Z"
 
 NOGH="$TMP/nogh"; mkdir -p "$NOGH"
 run_watch() { # <fixture> [extra args…]
@@ -539,7 +551,10 @@ grep -q "^ok — no CONFLICTING" <<<"$out" \
 # script an EMPTY commits fixture — the same state a fall-through would produce
 # — over the fixture that reds at exit 1 with a real history.
 : > "$TMP/l-empty-commits.txt"
-out="$(run_watch "$TMP/a.json" --commits "$TMP/l-empty-commits.txt")"; rc=$?
+# The AGE arm is held out of this one probe (a 100-year bound): the row is 41
+# days old and would red rc 10 on its own, which says nothing about the stale
+# arm's fall-through — the thing this probe measures.
+out="$(run_watch "$TMP/a.json" --commits "$TMP/l-empty-commits.txt" --max-conflict-age-hours 876000)"; rc=$?
 [ "$rc" = "0" ] \
   && ok "(l-f) an EMPTY commit window turns the same red fixture green (exit 0) — which is exactly why 7 returns early instead of continuing" \
   || bad "(l-f) expected exit 0 over an empty commit window (got $rc); if that is no longer the fall-through outcome, re-derive why 7 must return early"
@@ -1695,6 +1710,7 @@ done <<'TABLE'
 7 RED skipped DISTANCE-UNREADABLE:-ONLY-the-fault-name-screams
 8 green RED BASELINE-DRIFT:-ONLY-'Stale-verdict-watch'-screams
 9 RED skipped ROLLUP-BUDGET:-ONLY-the-fault-name-screams
+10 green RED AGED-CONFLICT:-ONLY-'Stale-verdict-watch'-screams
 TABLE
 
 # THE TWO ROWS THAT CARRY THE WHOLE DEFECT, asserted AGAINST EACH OTHER rather
@@ -1765,7 +1781,7 @@ fi
 # named mutation). Its fault role reds on rc=1 too, so the pair assertion above
 # — which requires `fault_job 1 != RED` — must fail. Modelled by re-running the
 # pair test against the mutant rather than by re-asserting a constant.
-sed 's@^      0.1.2.8)$@      99)@' "$ROUTE" > "$TMP/route-always-fault.sh"
+sed 's@^      0.1.2.8.10)$@      99)@' "$ROUTE" > "$TMP/route-always-fault.sh"
 if grep -q '^      99)$' "$TMP/route-always-fault.sh" 2>/dev/null; then
   m_fault1=0
   bash "$TMP/route-always-fault.sh" fault 1 >/dev/null 2>&1 || m_fault1=$?
@@ -1869,6 +1885,244 @@ if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&
 else
   bad "python3+pyyaml unavailable — the wiring half of section (m) CANNOT READ, and an unread wiring is not a proven one"
 fi
+
+# ═══ (t) THE AGING BOUND (task-87f845f92d7884c8) ═════════════════════════════
+#
+# The row this replaces asked for "no CONFLICTING open PR right now", an EMPTY
+# MOMENT no repository can hold. The bound is a rule instead: past 6h a
+# CONFLICTING non-draft row no pin covers reds (rc 10) with its age; under it,
+# the row is printed and does not red. Every probe below moves ONE timestamp
+# and watches the verdict move, and the rows carry NO green at all — so the
+# stale arm (rc 1) cannot be what reds them.
+section "(t) the aging bound: past 6h reds with its age, younger is reported, unreadable fails closed"
+
+T_NOW="2026-09-24T12:00:00Z"
+t_row() { # <number> <committedDate|null> [isDraft] [head]
+  jq -c -n --argjson n "$1" --arg c "$2" --argjson d "${3:-false}" \
+    --arg h "${4:-7777777777abcdef0123456789abcdef01234567}" \
+    '{number:$n, mergeable:"CONFLICTING", mergeStateStatus:"DIRTY", headRefOid:$h,
+      updatedAt:"2026-09-24T11:59:00Z", isDraft:$d, statusCheckRollup:[]}
+     + (if $c == "null" then {} else {headCommittedDate:$c} end)'
+}
+t_run() { # <fixture> [extra…] — the default bound, the pinned T_NOW clock
+  local fx="$1"; shift
+  SVW_NOW="$T_NOW" run_watch "$fx" --baseline "$NB.empty" "$@"
+}
+
+# (t1) PAST THE BOUND: committed 7h before now, no green anywhere → rc 10.
+fixture "$TMP/t-aged.json" "$(t_row 9201 2026-09-24T05:00:00Z)"
+out="$(t_run "$TMP/t-aged.json")"; rc=$?
+[ "$rc" = "10" ] && ok "(t1) a CONFLICTING row 7h old exits 10 (AGED CONFLICT) with no stale green anywhere" \
+  || bad "(t1) expected exit 10 for a 7h-old conflicting row, got $rc: $out"
+grep -q "AGED   1 — #9201" <<<"$out" && ok "(t1) …#9201 is named AGED" || bad "(t1) #9201 not named AGED: $out"
+grep -q "~ #9201  head 777777777  age 7h0m since 2026-09-24T05:00:00Z  \[AGED — FAILS\]" <<<"$out" \
+  && ok "(t1) …and the red carries its AGE and the timestamp it was measured from" \
+  || bad "(t1) the aged row does not print its age and anchor: $out"
+grep -q "^AGED — 1 CONFLICTING" <<<"$out" && ok "(t1) …and the verdict line says AGED" || bad "(t1) no AGED verdict line: $out"
+grep -qE "NOVEL +0" <<<"$out" && ok "(t1) …while NOVEL stays 0: this red is the age arm, not the stale arm" \
+  || bad "(t1) the stale arm reported this row — the probe is not isolating the age arm: $out"
+
+# (t2) THE SAME ROW, 5h OLD → reported, NOT red. The one-field mutation.
+fixture "$TMP/t-young.json" "$(t_row 9201 2026-09-24T07:00:00Z)"
+out="$(t_run "$TMP/t-young.json")"; rc=$?
+[ "$rc" = "0" ] && ok "(t2) the SAME row 5h old exits 0 — under the bound it does not red" \
+  || bad "(t2) expected exit 0 for a 5h-old conflicting row, got $rc: $out"
+grep -q "YOUNG  1 — #9201" <<<"$out" && ok "(t2) …and it is still REPORTED as YOUNG, not silenced" \
+  || bad "(t2) the young conflicting row was not reported: $out"
+grep -q "~ #9201  head 777777777  age 5h0m since 2026-09-24T07:00:00Z  \[YOUNG — under the bound\]" <<<"$out" \
+  && ok "(t2) …with its age" || bad "(t2) the young row does not print its age: $out"
+
+# (t3) THE EDGE: exactly 6h is inside the bound, 6h + 1 minute is past it.
+fixture "$TMP/t-edge.json" "$(t_row 9201 2026-09-24T06:00:00Z)"
+out="$(t_run "$TMP/t-edge.json")"; rc=$?
+[ "$rc" = "0" ] && ok "(t3) exactly 6h0m is inside the bound (exit 0)" || bad "(t3) 6h0m exited $rc"
+fixture "$TMP/t-edge2.json" "$(t_row 9201 2026-09-24T05:59:00Z)"
+out="$(t_run "$TMP/t-edge2.json")"; rc=$?
+[ "$rc" = "10" ] && ok "(t3) 6h1m is past it (exit 10)" || bad "(t3) 6h1m exited $rc, expected 10"
+
+# (t4) AN UNREADABLE AGE FAILS CLOSED — never age 0. Three shapes: no anchor at
+# all, an anchor that does not parse, and one in the future.
+for shape in "null" "yesterday" "2026-09-24T14:00:00Z"; do
+  fixture "$TMP/t-unread.json" "$(t_row 9201 "$shape")"
+  out="$(t_run "$TMP/t-unread.json")"; rc=$?
+  if [ "$rc" = "10" ] && grep -q "age UNREADABLE" <<<"$out"; then
+    ok "(t4) committedDate='$shape' → age UNREADABLE, exit 10: it fails closed"
+  else
+    bad "(t4) committedDate='$shape' exited $rc — an unreadable age must red, never read as 0: $out"
+  fi
+done
+
+# (t5) THE SERVER TIME CAPS A FUTURE COMMITTER CLOCK. committedDate says 1h
+# from now; a check on that head COMPLETED 7h ago (server time), so the head
+# existed 7h ago. The anchor is the EARLIER one → aged, not "young" or unread.
+fixture "$TMP/t-skew.json" "$(jq -c '.headCommittedDate = "2026-09-24T13:00:00Z"
+  | .statusCheckRollup = [{__typename:"CheckRun", name:"not-required", status:"COMPLETED",
+                           conclusion:"FAILURE", completedAt:"2026-09-24T05:00:00Z"}]' <<<"$(t_row 9201 null)")"
+out="$(t_run "$TMP/t-skew.json")"; rc=$?
+[ "$rc" = "10" ] && grep -q "age 7h0m since 2026-09-24T05:00:00Z" <<<"$out" \
+  && ok "(t5) a future committedDate is capped by the head's first completed check (age 7h, exit 10)" \
+  || bad "(t5) expected exit 10 at age 7h from the check time, got $rc: $out"
+
+# (t6) A DRAFT past the bound is PRINTED with its age and NOT failed on.
+fixture "$TMP/t-draft.json" "$(t_row 9201 2026-09-24T05:00:00Z true)"
+out="$(t_run "$TMP/t-draft.json")"; rc=$?
+[ "$rc" = "0" ] && grep -q "~ #9201 .*age 7h0m.*\[DRAFT — printed, NOT failed on\]" <<<"$out" \
+  && ok "(t6) a 7h-old DRAFT is printed with its age and exits 0" \
+  || bad "(t6) expected exit 0 and a printed draft age row, got $rc: $out"
+
+# (t7) THE PIN COVERS THE AGE ARM, on the same (number, head) key.
+printf '9201 7777777777 2026-09-24 pinned by the harness to prove the age arm honours a pin\n' > "$NB.t-pin"
+out="$(SVW_NOW="$T_NOW" run_watch "$TMP/t-aged.json" --baseline "$NB.t-pin")"; rc=$?
+[ "$rc" = "0" ] && grep -q "PINNED 1 — #9201" <<<"$out" \
+  && ok "(t7) a pinned aged row is KNOWN (PINNED 1) and exits 0" \
+  || bad "(t7) expected exit 0 and PINNED 1 for a pinned aged row, got $rc: $out"
+
+# (t8) THE BOUND IS AN ARGUMENT, and a bad one is a configuration fault.
+out="$(t_run "$TMP/t-aged.json" --max-conflict-age-hours 8)"; rc=$?
+[ "$rc" = "0" ] && ok "(t8) the same 7h row under --max-conflict-age-hours 8 exits 0 — the flag is live" \
+  || bad "(t8) --max-conflict-age-hours 8 did not move the verdict (exit $rc)"
+for badv in 0 abc ""; do
+  out="$(t_run "$TMP/t-aged.json" --max-conflict-age-hours "$badv")"; rc=$?
+  [ "$rc" = "3" ] && ok "(t8) --max-conflict-age-hours '$badv' is a configuration fault (3)" \
+    || bad "(t8) --max-conflict-age-hours '$badv' exited $rc, expected 3"
+done
+out="$(SVW_NOW="not-a-time" run_watch "$TMP/t-aged.json" --baseline "$NB.empty")"; rc=$?
+[ "$rc" = "3" ] && ok "(t8) an unparseable clock is a configuration fault (3), never 'nothing is old'" \
+  || bad "(t8) an unparseable clock exited $rc, expected 3"
+
+# (t9) THE WORKFLOW STATES THE BOUND, and runs it on a SCHEDULE. A PR ages while
+# nothing happens, so the clock-driven leg is the one that enforces this.
+grep -q -- '--max-conflict-age-hours 6' "$WF" \
+  && ok "(t9) the workflow passes --max-conflict-age-hours 6 explicitly" \
+  || bad "(t9) the workflow does not state the 6h bound"
+grep -qE '^\s*- cron: "\*/30 \* \* \* \*"' "$WF" \
+  && ok "(t9) …and the */30 schedule leg is what enforces it" || bad "(t9) no */30 schedule leg"
+
+# (t10) THE LIVE PATH carries committedDate. --fixture never touches
+# ROLLUP_QUERY, so a stubbed gh serves a real page + a real per-PR rollup whose
+# ONLY timestamp is commit.committedDate.
+TSTUB="$TMP/t-stub"; mkdir -p "$TSTUB/bin"
+t_live() { # <committedDate> -> output; rc is the script's
+  jq -n '{data:{repository:{pullRequests:{pageInfo:{hasNextPage:false,endCursor:null},
+          nodes:[{number:9202, mergeable:"CONFLICTING", updatedAt:"2026-09-24T11:59:00Z",
+                  headRefOid:"5555555555abcdef0123456789abcdef01234567", isDraft:false}]}}}}' > "$TSTUB/page.json"
+  jq -n --arg c "$1" '{data:{repository:{pullRequest:{number:9202, mergeStateStatus:"DIRTY",
+          commits:{nodes:[{commit:{committedDate:$c, statusCheckRollup:{contexts:{nodes:[]}}}}]}}}}}' > "$TSTUB/rollup.json"
+  printf '#!/usr/bin/env bash\ncase "$*" in *"pullRequest(number:"*) cat "%s" ;; *graphql*) cat "%s" ;; *) echo "[]" ;; esac\n' \
+    "$TSTUB/rollup.json" "$TSTUB/page.json" > "$TSTUB/bin/gh"
+  chmod +x "$TSTUB/bin/gh"
+  env PATH="$TSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub SVW_NOW="$T_NOW" \
+    bash "$WATCH" --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark --baseline "$NB.empty" 2>&1
+}
+out="$(t_live 2026-09-24T05:00:00Z)"; rc=$?
+[ "$rc" = "10" ] && grep -q "age 7h0m since 2026-09-24T05:00:00Z" <<<"$out" \
+  && ok "(t10) LIVE path: committedDate travels ROLLUP_QUERY → the age arm (7h, exit 10)" \
+  || bad "(t10) LIVE path did not age the row from committedDate (exit $rc): $out"
+out="$(t_live 2026-09-24T11:00:00Z)"; rc=$?
+[ "$rc" = "0" ] && ok "(t10) …and the same live row committed 1h ago exits 0" \
+  || bad "(t10) the 1h live row exited $rc: $out"
+# MUTATION: drop committedDate from the live query. The row then has no anchor
+# and must FAIL CLOSED (10, UNREADABLE) — not quietly read as young.
+sed 's/commit{ committedDate statusCheckRollup{/commit{ statusCheckRollup{/' "$WATCH" > "$TMP/mut-nocd.sh"
+if cmp -s "$WATCH" "$TMP/mut-nocd.sh"; then
+  bad "(t10) the no-committedDate mutant was never BUILT — ROLLUP_QUERY moved"
+else
+  jq '.data.repository.pullRequest.commits.nodes[0].commit |= del(.committedDate)' "$TSTUB/rollup.json" > "$TSTUB/r2" && mv "$TSTUB/r2" "$TSTUB/rollup.json"
+  out="$(env PATH="$TSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub SVW_NOW="$T_NOW" \
+    bash "$TMP/mut-nocd.sh" --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark --baseline "$NB.empty" 2>&1)"; rc=$?
+  [ "$rc" = "10" ] && grep -q "age UNREADABLE" <<<"$out" \
+    && ok "(t10) MUTANT: with committedDate gone the live row FAILS CLOSED (10, UNREADABLE), never young" \
+    || bad "(t10) MUTANT: a live row with no anchor exited $rc: $out"
+fi
+
+# ═══ (u) c0 + c1: the healed arm is REACHABLE and QUIET where it should be, and
+# a green check run says WHICH green it is (task-87f845f92d7884c8) ══════════
+section "(u) the healed arm across both arms, and rc 0 vs rc 2 without a log"
+
+# (u1) FIRES. A pinned PR that recovers: rebased (new head) and now MERGEABLE.
+# Neither arm reports the pinned (number, head) → rc 8, and it says why.
+fixture "$TMP/u-rebased.json" "$(jq -c '.mergeable = "MERGEABLE" | .mergeStateStatus = "CLEAN"
+  | .headRefOid = "8888888888abcdef0123456789abcdef01234567"' <<<"$(t_row 9201 2026-09-24T11:30:00Z)")"
+out="$(SVW_NOW="$T_NOW" run_watch "$TMP/u-rebased.json" --baseline "$NB.t-pin")"; rc=$?
+[ "$rc" = "8" ] && grep -q "HEALED 1 — #9201" <<<"$out" \
+  && ok "(u1) FIRES: a pinned PR that was rebased and is now MERGEABLE exits 8, HEALED 1 — #9201" \
+  || bad "(u1) a recovered pinned PR did not fire the healed arm (exit $rc): $out"
+grep -q "still open, and no longer asserting a stale green, nor CONFLICTING past the age bound" <<<"$out" \
+  && ok "(u1) …and names BOTH arms in why it healed" || bad "(u1) healed reason does not name both arms: $out"
+
+# (u2) QUIET. The pinned PR did NOT recover: same head, still CONFLICTING and
+# 7h old, with no stale green (its greens are gone). The stale arm alone would
+# call it healed and tell a human to delete a line that re-reds as AGED on the
+# next run. It is still reported by the AGE arm, so it is not healed.
+out="$(SVW_NOW="$T_NOW" run_watch "$TMP/t-aged.json" --baseline "$NB.t-pin")"; rc=$?
+[ "$rc" = "0" ] && grep -q "HEALED 0" <<<"$out" && grep -q "PINNED 1 — #9201" <<<"$out" \
+  && ok "(u2) QUIET: a pinned PR still CONFLICTING past the bound is NOT healed (exit 0, HEALED 0, PINNED 1)" \
+  || bad "(u2) a pinned, still-aged PR was treated as healed (exit $rc): $out"
+# (u2m) MUTATION: healed consults the stale arm only. (u2) must flip to 8.
+sed 's/| (\$R + \$A) as \$RALL/| $R as $RALL/' "$WATCH" > "$TMP/mut-rall.sh"
+if cmp -s "$WATCH" "$TMP/mut-rall.sh"; then
+  bad "(u2m) the stale-only-healed mutant was never BUILT — the RALL line moved"
+else
+  out="$(env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" SVW_NOW="$T_NOW" bash "$TMP/mut-rall.sh" --fixture "$TMP/t-aged.json" \
+    --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark --baseline "$NB.t-pin" 2>&1)"; rc=$?
+  [ "$rc" = "8" ] \
+    && ok "(u2m) MUTANT: with healed reading the stale arm only, the same still-aged pin wrongly exits 8 — (u2) is load-bearing" \
+    || bad "(u2m) MUTANT survived: stale-only healed still exited $rc on a still-aged pin"
+fi
+
+# (u3) A HEALED PIN UNDER A LOUDER RED is still on the page a human opens
+# first. rc 1 wins the exit code, so without the summary headline the healed
+# fact lived only in the log.
+fixture "$TMP/u-mixed.json" "$(pr_row 9001 CONFLICTING DIRTY "$(full_set "$OLD")")"
+: > "$TMP/u-summary.md"
+out="$(GITHUB_STEP_SUMMARY="$TMP/u-summary.md" SVW_NOW="$T_NOW" run_watch "$TMP/u-mixed.json" --baseline "$NB.t-pin")"; rc=$?
+[ "$rc" = "1" ] && grep -q "^## stale-verdict-watch rc=1 — NOVEL STALE GREEN" "$TMP/u-summary.md" \
+  && grep -q "healed 1" "$TMP/u-summary.md" \
+  && ok "(u3) rc 1 masks rc 8 in the exit code, and the summary headline still says rc=1 AND healed 1" \
+  || bad "(u3) the healed pin under a novel red is not in the summary headline (exit $rc): $(cat "$TMP/u-summary.md")"
+
+# (u4) c1 — EVERY verdict rc emits exactly ONE annotation titled with its rc.
+ann() { bash "$ROUTE" verdict "$1" 2>&1 | grep -E '^::(notice|warning|error) title=stale-verdict-watch rc='"$1"' ' ; }
+for r in 0 1 2 8 10; do
+  n="$(ann "$r" | grep -c . || true)"
+  [ "$n" = "1" ] && ok "(u4) rc=$r emits exactly one annotation titled 'stale-verdict-watch rc=$r'" \
+    || bad "(u4) rc=$r emits $n rc-titled annotation(s), expected 1: $(route_say verdict "$r")"
+done
+lvl0="$(ann 0 | sed 's/^::\([a-z]*\) .*/\1/')"; lvl2="$(ann 2 | sed 's/^::\([a-z]*\) .*/\1/')"
+if [ "$(route_exit verdict 0)" = 0 ] && [ "$(route_exit verdict 2)" = 0 ] \
+   && [ "$lvl0" = notice ] && [ "$lvl2" = warning ] && [ "$(ann 0)" != "$(ann 2)" ]; then
+  ok "(u4) BOTH greens conclude success, and rc 0 is a NOTICE while rc 2 is a WARNING — distinguishable from the check run's annotations alone"
+else
+  bad "(u4) rc 0 and rc 2 are not distinguishable without the log: 0='$lvl0' 2='$lvl2'"
+fi
+: > "$TMP/u-route-summary.md"
+GITHUB_STEP_SUMMARY="$TMP/u-route-summary.md" bash "$ROUTE" verdict 2 >/dev/null 2>&1
+grep -q "^## Stale verdict watch: rc=2 PARTIAL (green, and NOT rc 0)" "$TMP/u-route-summary.md" \
+  && ok "(u4) …and rc 2 heads the verdict job's summary" \
+  || bad "(u4) rc 2 did not head the job summary: $(cat "$TMP/u-route-summary.md")"
+# (u4m) MUTATION: make rc 2 annotate exactly like rc 0. The distinguisher above
+# must then fail — otherwise it was never measuring anything.
+sed 's/::warning title=stale-verdict-watch rc=2 PARTIAL - this green is NOT rc 0::rows/::notice title=stale-verdict-watch rc=0 CLEAN::rows/' \
+  "$ROUTE" > "$TMP/route-fused-green.sh"
+if cmp -s "$ROUTE" "$TMP/route-fused-green.sh"; then
+  bad "(u4m) the fused-green mutant was never BUILT — the rc 2 annotation moved"
+else
+  m2="$(bash "$TMP/route-fused-green.sh" verdict 2 2>&1 | grep -cE '^::warning title=stale-verdict-watch rc=2 ' || true)"
+  [ "$m2" = "0" ] \
+    && ok "(u4m) MUTANT: an rc 2 annotated as rc 0 loses its rc-2 annotation, which (u4) requires — the check can fail" \
+    || bad "(u4m) MUTANT survived: the fused router still emits an rc-2 annotation"
+fi
+
+# (u5) END TO END: the WATCH's own step summary headline names rc 2 on a
+# partial-coverage run — one MERGEABLE row read, one UNKNOWN.
+fixture "$TMP/u-partial.json" \
+  "$(pr_row 9401 MERGEABLE CLEAN "$(full_set "$OLD")")" \
+  "$(pr_row 9402 UNKNOWN null "$(full_set "$OLD")")"
+: > "$TMP/u-partial.md"
+out="$(GITHUB_STEP_SUMMARY="$TMP/u-partial.md" run_watch "$TMP/u-partial.json" --baseline "$NB.empty")"; rc=$?
+[ "$rc" = "2" ] && grep -q "^## stale-verdict-watch rc=2 — PARTIAL" "$TMP/u-partial.md" \
+  && ok "(u5) a partial run exits 2 and its summary headline says rc=2 PARTIAL, not a bare green" \
+  || bad "(u5) expected exit 2 and an rc=2 headline, got $rc: $(cat "$TMP/u-partial.md")"
 
 bash -n "$ROUTE" && ok "stale-verdict-watch-route.sh passes bash -n" || bad "stale-verdict-watch-route.sh has a syntax error"
 

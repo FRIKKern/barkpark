@@ -318,7 +318,12 @@ is harmless:
   GENERATED from names observed on sampled heads, so **every paths-filtered
   workflow is invisible to that census by construction**, and the same mechanism
   drops rows the other way with no report. Read an absence from that file as
-  "the sample did not see it", never as "no such gate exists". History, with the
+  "the sample did not see it", never as "no such gate exists". That concession
+  no longer covers a name that can BLOCK a merge: `scripts/blocking-name-census.py`
+  (a step of `Elixir path-escape ratchet`, so it reds `Elixir gate`) walks each
+  required aggregator's `needs:` closure statically and reds on any job in it
+  that neither list names. Its output is the only source for census counts; `--at
+  <rev>` re-derives the wave-56 residue recipe at any commit. History, with the
   four names it lost and the regeneration that now carries this row:
   [merge-gates-history.md](merge-gates-history.md#the-generator-merge-that-lost-25-exclusion-rows).
 - **ADDING A BLOCKING JOB TO `security.yml` COSTS A SIXTH PLACE, and forgetting

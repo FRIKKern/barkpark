@@ -21,25 +21,22 @@ defmodule Barkpark.Plugins.RegistryObanCrontabTest do
 
   describe "collect_oban_crontab/0" do
     setup do
-      prev = Application.get_env(:barkpark, :plugins, :unset)
+      prev = Barkpark.PluginEnv.capture()
 
       on_exit(fn ->
-        case prev do
-          :unset -> Application.delete_env(:barkpark, :plugins)
-          v -> Application.put_env(:barkpark, :plugins, v)
-        end
+        Barkpark.PluginEnv.restore(prev)
       end)
 
       :ok
     end
 
     test "returns [] when :plugins is explicitly empty" do
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
       assert Registry.collect_oban_crontab() == []
     end
 
     test "includes a registered plugin's oban_crontab/0 entries" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.RegistryObanCrontabTest.CronFakeA,
         Barkpark.Plugins.RegistryObanCrontabTest.CronFakeB
       ])
@@ -55,7 +52,7 @@ defmodule Barkpark.Plugins.RegistryObanCrontabTest do
     end
 
     test "isolates a plugin whose oban_crontab/0 raises" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.RegistryObanCrontabTest.CronFakeA,
         Barkpark.Plugins.RegistryObanCrontabTest.CronRaisingFake
       ])
@@ -74,7 +71,7 @@ defmodule Barkpark.Plugins.RegistryObanCrontabTest do
     end
 
     test "tolerates a plugin that doesn't export oban_crontab/0" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.RegistryObanCrontabTest.NoCronFake
       ])
 

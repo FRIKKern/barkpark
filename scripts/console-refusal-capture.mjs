@@ -233,6 +233,18 @@ export const CONFORMING = [
     name: "ACCENT ROLE SEPARATION",
     sample: "!! ACCENT ROLE SEPARATION (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
   },
+  // bidi-isolation.mjs is the `run:` step of the `bidi-isolation` job
+  // (console-harness.yml, `node cloud/priv/static/__preview__/bidi-isolation.mjs`)
+  // and arrived with #20054/#20071. Its vocabulary is 0 clean / 1 defect / 2 refusal
+  // / 3 broken or blind, and its ONE exit-2 path is the no-usable-Chrome refusal in
+  // main(), which already speaks the shape under the name GUARD (two texts: CHROME
+  // set but not executable, or no Chrome at all). Its exit codes are unchanged here;
+  // nothing named it, so the DERIVED fence test was red on main's tip (2026-09-24).
+  {
+    file: "cloud/priv/static/__preview__/bidi-isolation.mjs",
+    name: "GUARD",
+    sample: "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
+  },
 ];
 
 // Files in the fence that exit 2 and publish NO capturable refusal, each with the

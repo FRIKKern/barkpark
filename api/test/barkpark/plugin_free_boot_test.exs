@@ -211,9 +211,9 @@ defmodule Barkpark.PluginFreeBootTest do
   ]
 
   setup_all do
-    prev_plugins = Application.get_env(:barkpark, :plugins, :unset)
+    prev_plugins = Barkpark.PluginEnv.capture()
 
-    Application.put_env(:barkpark, :plugins, [])
+    Barkpark.PluginEnv.put!([])
     Application.stop(:barkpark)
 
     # Erase plugin-derived `:persistent_term` snapshots that survive
@@ -268,10 +268,7 @@ defmodule Barkpark.PluginFreeBootTest do
     on_exit(fn ->
       Application.stop(:barkpark)
 
-      case prev_plugins do
-        :unset -> Application.delete_env(:barkpark, :plugins)
-        v -> Application.put_env(:barkpark, :plugins, v)
-      end
+      Barkpark.PluginEnv.restore(prev_plugins)
 
       {:ok, _} = Application.ensure_all_started(:barkpark)
       Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)
@@ -493,6 +490,20 @@ defmodule Barkpark.PluginFreeBootTest do
       # `pre_write_fences/0`; with nothing registered the list the writer
       # runs is empty, not a Tasks-shaped residue.
       assert Barkpark.Plugins.Registry.collect_pre_write_fences() == []
+    end
+
+    test "no pre-publish fence resolves: a publish runs no plugin gate under :plugins []" do
+      # task-8273f2f1b24a6de1 — the Tasks publish-door gates moved behind
+      # `pre_publish_fences/0`; with nothing registered the lifecycle runs no
+      # fence at the door or inside the publish transaction.
+      assert Barkpark.Plugins.Registry.collect_pre_publish_fences() == []
+    end
+
+    test "no pre-write transform resolves: a write runs no plugin transform or check under :plugins []" do
+      # task-aed4f02e57d3a760 — the Tasks brief re-sync and kind check moved
+      # behind `pre_write_transforms/0`; with nothing registered the writer
+      # stores a write's attrs as sent.
+      assert Barkpark.Plugins.Registry.collect_pre_write_transforms() == []
     end
 
     test "GET /studio/production renders 200 with Structure marker (following the scoped-shell redirect)" do

@@ -36222,7 +36222,7 @@ test("PDF-D11: rosterBeatAgeMs is total over junk and never renders a beat in th
 // stays green while the guarded code regresses.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// The @supports block, and the two (selector, class, keyframe) triples the rest
+// The @supports block, and the three (selector, class, keyframe) triples the rest
 // of this section measures against.
 function firefoxFallbackFixture() {
   const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
@@ -36236,7 +36236,9 @@ function firefoxFallbackFixture() {
   const table = /var EDGE_CUES = \[([\s\S]*?)\n  \];/.exec(js);
   assert.ok(table, "app.js must declare the EDGE_CUES table");
   const cues = [...table[1].matchAll(/\{ sel: "([^"]+)", cls: "([^"]+)" \}/g)].map((m) => ({ sel: m[1], cls: m[2] }));
-  assert.equal(cues.length, 2, "both scrollers, not just the newer one: .set-matrix (W12) and the archives CLI chip (W15-S2)");
+  // 2 -> 3 (task-db582d05e675115d): #20103 gave .inst-tabs the same scroll-driven
+  // fade, so Firefox needs the same measured class or the strip shows no cue.
+  assert.equal(cues.length, 3, "every scroll-driven edge fade: .set-matrix (W12), the archives CLI chip (W15-S2) and the instance tab strip (ba31)");
   return { css, js, block, cues };
 }
 
@@ -36316,7 +36318,7 @@ test("cch-bl-scroll-driven-cue-firefox-fallback: the state is MEASURED, plural, 
   assert.match(js, /document\.addEventListener\("scroll", edgeCueSync, true\)/);
   assert.match(js, /window\.addEventListener\("resize", edgeCueSync\)/);
   assert.match(js, /wireEdgeCues\(\);/, "the cue must be wired at boot");
-  // And the two PAINTS, each of which creates fresh elements whose class
+  // And the three PAINTS, each of which creates fresh elements whose class
   // nothing has measured yet. BOUNDED WINDOWS, not an open `(?:.*\n)*?` reach:
   // an unbounded one is satisfied by the OTHER paint's call a thousand lines
   // away, so deleting either trigger leaves it green. Proven by mutation — that
@@ -36324,6 +36326,7 @@ test("cch-bl-scroll-driven-cue-firefox-fallback: the state is MEASURED, plural, 
   for (const [anchor, what] of [
     ["box.innerHTML = notifPageHtml(s, { canManage: canManage, state: meSt });", "the notifications paint"],
     ["panel.innerHTML = archivesPanelHtml(model);", "the archives paint"],
+    ["box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady }, instanceAdminAuthority());", "the instance paint (the .inst-tabs strip)"],
   ]) {
     const at = js.indexOf(anchor);
     assert.ok(at > 0, `app.js must still carry ${what}`);
@@ -36332,4 +36335,25 @@ test("cch-bl-scroll-driven-cue-firefox-fallback: the state is MEASURED, plural, 
     assert.ok(window_.includes("edgeCueSync();"),
       `${what} must re-measure the cue: every element it just created carries no class, and in a no-timeline engine the class IS the cue`);
   }
+});
+
+// cch-w73-bl-newcreaterepo-success-fields-unasserted (charter D883): TEST-ONLY.
+// newCreateRepo is fully impure (DOM, api, toast) and is not exported through
+// __bpTestHook, so a driven test would be vacuously green. This pins the
+// contract at source level instead: the SUCCESS arm (between `if (r.ok && r.data) {`
+// and its `} else {`) reads both fields POST /v1/github/repos returns. The window
+// is the arm, not the whole function, so moving either read into an error branch
+// reds this too.
+test("cch-w73: newCreateRepo's success arm reads r.data.html_url and r.data.repo_full_name", () => {
+  const start = APP_SRC.indexOf("  function newCreateRepo(");
+  assert.ok(start > 0, "app.js must still define newCreateRepo");
+  assert.ok(APP_SRC.indexOf("  function newCreateRepo(", start + 1) < 0, "newCreateRepo must have exactly one definition");
+  const fn = APP_SRC.slice(start, APP_SRC.indexOf("\n  }\n", start) + 4);
+  const okAt = fn.indexOf("if (r.ok && r.data) {");
+  assert.ok(okAt > 0, "newCreateRepo must still branch on r.ok && r.data");
+  const elseAt = fn.indexOf("} else {", okAt);
+  assert.ok(elseAt > okAt, "the success arm must still be followed by its else arm");
+  const okArm = fn.slice(okAt, elseAt);
+  assert.match(okArm, /r\.data\.html_url/, "the success arm must read html_url (the Vercel clone href and the result link)");
+  assert.match(okArm, /r\.data\.repo_full_name/, "the success arm must read repo_full_name (the link text and the toast body)");
 });
