@@ -39,6 +39,19 @@
 //   RESOLVES     a subject token appears as a whole word (`-` counts as a word
 //                character, as in a pin) within +/-SLACK lines of N in F, or
 //                inside [N, M] for a range; a quoted subject as a substring.
+//   COMMON WORD  a subject on WEAK_MIN (10) or more lines of F cannot credit by
+//                itself: it lands near almost any N by chance. It stays the
+//                subject (the citation is decidable, and a miss), and --report
+//                / --json name it as `weak` with its line count. WEAK_MIN and
+//                the count, linesHolding(), are the classifier's (its PIN-WEAK
+//                bucket refuses a PIN by the same rule), imported, one
+//                definition. A function F defines is counted by its definition
+//                lines only, never its uses (thingMatcher). Until
+//                task-b3961db653fbbf58 finished, adjacency alone left L898
+//                `app.js:3143` credited by `body` (on 559 lines, a comment
+//                "resurrect sheet body") and L1210 `app.js:12667` by `code`
+//                (on 251, a parameter). --selftest ARMS 32-34; `--weak K`
+//                re-measures at another cut.
 //
 // WHY NOT THE WHOLE LINE. Until task-b3961db653fbbf58 the anchor set was every
 // backticked token ANYWHERE on L, and a citation resolved if any one of them
@@ -52,7 +65,9 @@
 //   OVER-FLAG    a subject can be absent from the window and the citation still
 //                be morally right — the line may cite a BLOCK whose name sits
 //                outside +/-SLACK. The classifier's BLOCK-NEAR bucket is where
-//                those go; the repair is a pin, not a looser test.
+//                those go; the repair is a pin, not a looser test. Likewise a
+//                right citation whose only subject is a common word (L833
+//                `app.js:116` by `getItem`, on 13 lines) is a miss; pin it.
 // The number is a directional floor on drift, not a census of wrongness, and
 // `--report` prints it with its denominator so nobody quotes it as the latter.
 //
@@ -133,6 +148,7 @@
 //   node scripts/file-line-citation-check.mjs --list      # resolved + crediting token
 //   node scripts/file-line-citation-check.mjs --charter P --map app.js=path/to/app.js
 //   node scripts/file-line-citation-check.mjs --max-unresolved 120
+//   node scripts/file-line-citation-check.mjs --weak 26    # the common-word cut (default WEAK_MIN)
 //   node scripts/file-line-citation-check.mjs --selftest
 //
 import fs from "node:fs";
@@ -141,7 +157,7 @@ import os from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 // THE ADJACENCY RULE — one definition, owned by the classifier (see THE TEST).
-import { subjectOf as adjacentSubject, thingMatcher } from "./file-line-citation-classify.mjs";
+import { subjectOf as adjacentSubject, thingMatcher, WEAK_MIN, linesHolding } from "./file-line-citation-classify.mjs";
 
 const SLACK_DEFAULT = 3;
 
@@ -149,13 +165,13 @@ function usage(msg) {
   process.stderr.write(`UNCHECKED: ${msg}\n`);
   process.stderr.write(
     "usage: node scripts/file-line-citation-check.mjs [--charter P] [--map base=path]...\n" +
-    "       [--slack K] [--max-unresolved N] [--report] [--list] [--json] [--root D] [--selftest]\n");
+    "       [--slack K] [--weak K] [--max-unresolved N] [--report] [--list] [--json] [--root D] [--selftest]\n");
   process.exit(2);
 }
 
 function parseArgs(argv) {
   const o = {
-    charter: null, maps: [], slack: SLACK_DEFAULT, maxUnresolved: 0,
+    charter: null, maps: [], slack: SLACK_DEFAULT, weak: WEAK_MIN, maxUnresolved: 0,
     report: false, json: false, root: null, selftest: false, list: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -165,6 +181,7 @@ function parseArgs(argv) {
       case "--charter": o.charter = need(); break;
       case "--map": o.maps.push(need()); break;
       case "--slack": o.slack = Number(need()); break;
+      case "--weak": o.weak = Number(need()); break;
       case "--max-unresolved": o.maxUnresolved = Number(need()); break;
       case "--root": o.root = need(); break;
       case "--report": o.report = true; break;
@@ -176,6 +193,7 @@ function parseArgs(argv) {
     }
   }
   if (!Number.isInteger(o.slack) || o.slack < 0) usage("--slack must be a non-negative integer");
+  if (!Number.isInteger(o.weak) || o.weak < 1) usage("--weak must be a positive integer");
   if (!Number.isInteger(o.maxUnresolved) || o.maxUnresolved < 0) usage("--max-unresolved must be a non-negative integer");
   return o;
 }
@@ -301,7 +319,14 @@ function evaluatePin(c, tgt, root, slack) {
 }
 
 
-function evaluate(cites, targets, slack, root) {
+// How many lines of the target hold a subject, cached per (target, label).
+function freqOf(tgt, label, re) {
+  tgt.freq ||= new Map();
+  if (!tgt.freq.has(label)) tgt.freq.set(label, linesHolding(tgt.lines, re));
+  return tgt.freq.get(label);
+}
+
+function evaluate(cites, targets, slack, root, weak) {
   for (const c of cites) {
     const tgt = targets.get(c.base);
     if (c.pin) { evaluatePin(c, tgt, root, slack); continue; }
@@ -311,12 +336,22 @@ function evaluate(cites, targets, slack, root) {
     c.beyondEof = c.line > tgt.lines.length;
     if (!c.decidable) { c.resolved = null; continue; }
     const [lo, hi] = windowOf(c, tgt.lines.length, slack);
+    // THE WEAK RULE: a subject on >= `weak` lines of the file is a common word
+    // and cannot credit by itself (it is still the subject: the citation stays
+    // decidable, and a miss). c.weak names every one that LANDED in the window
+    // and was refused, so a reader sees what the old rule would have credited.
     let hit = null;
+    c.weak = [];
     for (const { label: tok, re } of subject) {
+      let at = 0;
       for (let n = lo; n <= hi; n++) {
-        if (re.test(tgt.lines[n - 1], n - 1)) { hit = { tok, at: n }; break; }
+        if (re.test(tgt.lines[n - 1], n - 1)) { at = n; break; }
       }
-      if (hit) break;
+      if (!at) continue;
+      const freq = freqOf(tgt, tok, re);
+      if (freq >= weak) { c.weak.push({ tok, at, lines: freq }); continue; }
+      hit = { tok, at, lines: freq };
+      break;
     }
     c.resolved = !!hit;
     c.hit = hit;
@@ -326,7 +361,9 @@ function evaluate(cites, targets, slack, root) {
       // distance to line ~100 for a symbol that also sits 20 lines from the
       // citation, and would overstate every drift it prints.
       c.elsewhere = [];
+      const refused = new Set(c.weak.map((w) => w.tok));
       for (const { label: tok, re } of subject) {
+        if (refused.has(tok)) continue; // printed as "weak, refused", not as drift 0
         let best = null;
         for (let n = 1; n <= tgt.lines.length; n++) {
           if (!re.test(tgt.lines[n - 1], n - 1)) continue;
@@ -377,7 +414,7 @@ function run(o) {
       "           a silent pass on an empty parse is the exact failure this guard exists to prevent.\n");
     return 2;
   }
-  evaluate(cites, targets, o.slack, root);
+  evaluate(cites, targets, o.slack, root, o.weak);
 
   const decidable = cites.filter((c) => c.decidable);
   if (decidable.length === 0) {
@@ -394,12 +431,14 @@ function run(o) {
   const prose = cites.filter((c) => !c.decidable);
   const beyondEof = cites.filter((c) => c.beyondEof);
   const charterLines = new Set(cites.map((c) => c.charterLine));
+  const weakRefused = unresolved.filter((c) => c.weak && c.weak.length);
 
   if (o.json) {
     process.stdout.write(JSON.stringify({
       charter: path.relative(root, charter),
       targets: [...targets].map(([b, t]) => ({ base: b, path: path.relative(root, t.path), lines: t.lines.length })),
       slack: o.slack,
+      weakMin: o.weak,
       citations: cites.length,
       distinctCharterLines: charterLines.size,
       decidable: decidable.length,
@@ -412,9 +451,11 @@ function run(o) {
       pinnedFailed: pinned.filter((c) => c.resolved === false).length,
       pinnedUnreadable: unreadable.length,
       ranges: ranges.length,
+      weakRefused: weakRefused.length,
       misses: unresolved.map((c) => ({
         cite: citeLabel(c), charterLine: c.charterLine,
         anchors: c.anchors, elsewhere: c.elsewhere,
+        ...(c.weak && c.weak.length ? { weak: c.weak } : {}),
       })),
     }, null, 2) + "\n");
   } else {
@@ -432,6 +473,7 @@ function run(o) {
     process.stdout.write(`  pinned         : ${pinned.length}   (verified ${pinned.filter((c) => c.resolved).length}, ` +
       `FAILED ${pinned.filter((c) => c.resolved === false).length}, sha copy unreadable ${unreadable.length}) — checked at THEIR sha, not HEAD\n`);
     process.stdout.write(`  ranges         : ${ranges.length}   (credit only INSIDE [N, M]; never read as N)\n`);
+    process.stdout.write(`  weak refused   : ${weakRefused.length}   (unresolved though a subject landed: it sits on >= ${o.weak} lines of the file, a common word)\n`);
     process.stdout.write(
       "  CREDIT         : only the citation's ADJACENT subject credits it (the backtick span\n" +
       "                   holding it, else the nearest span or quoted sentence beside it —\n" +
@@ -447,7 +489,8 @@ function run(o) {
         "  generic word landing in the window credits a citation that is wrong by hand.\n" +
         "  Read this list before quoting the resolved count as a correctness rate.\n");
       for (const c of resolved) {
-        process.stdout.write(`  ${citeLabel(c)}  charter line ${c.charterLine}  credited by \`${c.hit.tok}\` at ${c.hit.at}\n`);
+        process.stdout.write(`  ${citeLabel(c)}  charter line ${c.charterLine}  credited by \`${c.hit.tok}\` at ${c.hit.at}` +
+          (c.pin ? "" : ` (on ${c.hit.lines} lines)`) + "\n");
       }
     }
     if (o.report) {
@@ -458,8 +501,10 @@ function run(o) {
       }).sort((a, b) => b.drift - a.drift);
       for (const { c, drift } of withDrift.slice(0, 25)) {
         const el = (c.elsewhere || []).map((e) => `${e.tok}@${e.at} (${e.dist} away)`).join(", ") || "(no anchor found anywhere in the file)";
+        const wk = (c.weak || []).map((w) => `${w.tok}@${w.at} (on ${w.lines} lines)`).join(", ");
         process.stdout.write(`  ${citeLabel(c)}  (charter line ${c.charterLine}, nearest anchor occurrence ${drift < 0 ? "n/a" : drift + " lines away"})\n`);
         process.stdout.write(`      anchors elsewhere: ${el}\n`);
+        if (wk) process.stdout.write(`      weak, refused  : ${wk}\n`);
       }
       if (withDrift.length > 25) process.stdout.write(`  ... and ${withDrift.length - 25} more\n`);
     }
@@ -749,7 +794,35 @@ async function selftest() {
       call(citeCss(`\`.chip\` — style.css (.chip @ ${shaC}, L5)`)), 0, /pinned         : 1   \(verified 1/);
   }
 
-  const ARMS = 31;
+  // ── A COMMON WORD CANNOT CREDIT (task-b3961db653fbbf58) ────────────────────
+  // The 17-sample audit's last two wrong credits: L898 `app.js:3143` credited by
+  // `body` (on 559 lines) off a comment "resurrect sheet body", L1210
+  // `app.js:12667` by `code` (on 251 lines) off a parameter. The subject is
+  // right and adjacent; the WORD is common, so it lands near any N by chance.
+  // Working copy D: `sheet` sits on exactly WEAK_MIN lines, one of them line 20
+  // (a comment). drawSheet is DEFINED at 40 and called on WEAK_MIN + 2 lines.
+  {
+    const bodyD = (sheetLines) => {
+      const b = [];
+      for (let i = 1; i <= 60; i++) b.push(`// filler line ${i}`);
+      b[19] = "      // resurrect sheet body";               // line 20
+      for (let k = 1; k < sheetLines; k++) b[44 + k] = `  var s${k} = sheet;`; // lines 46..
+      b[39] = "  function drawSheet(el) {";                  // line 40
+      for (let k = 0; k < WEAK_MIN + 2; k++) b[2 + k] = `  drawSheet(x${k});`; // lines 3..
+      return b.join("\n");
+    };
+    fs.writeFileSync(widget, bodyD(WEAK_MIN));
+    show(`ARM 32 a COMMON word (\`sheet\` on ${WEAK_MIN} lines) lands at the cited line but cannot credit it -> RED, named as weak`,
+      call(cite("the sheet is resurrected in `sheet` at widget.js:20")), 1,
+      new RegExp(`weak refused   : 1[\\s\\S]*weak, refused  : sheet@20 \\(on ${WEAK_MIN} lines\\)[\\s\\S]*FAIL — 1 unresolved`));
+    fs.writeFileSync(widget, bodyD(WEAK_MIN - 1));
+    show(`ARM 33 control for ARM 32: the same line with \`sheet\` on ${WEAK_MIN - 1} lines credits -> GREEN (the cut is WEAK_MIN, shared with the classifier)`,
+      call(cite("the sheet is resurrected in `sheet` at widget.js:20")), 0, /PASS — 1\/1/);
+    show(`ARM 34 a function DEFINED once and called on ${WEAK_MIN + 2} lines is not common: its definition credits -> GREEN (uses are not counted)`,
+      call(cite("`drawSheet` at widget.js:40 draws it")), 0, /PASS — 1\/1/);
+  }
+
+  const ARMS = 34;
   fs.rmSync(t, { recursive: true, force: true });
   process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${ARMS - fails}/${ARMS} arms\n`);
   return fails === 0 ? 0 : 1;
