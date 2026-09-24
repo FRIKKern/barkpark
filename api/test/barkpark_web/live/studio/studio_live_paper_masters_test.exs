@@ -44,6 +44,19 @@ defmodule BarkparkWeb.Studio.StudioLivePaperMastersTest do
   }
 
   setup do
+    # Masters ride the canvas path only. Pin the flag ON (it is the default, but
+    # a suite that sets the BARKPARK_PAPER_CANVAS=0 opt-out can leave it behind)
+    # and restore whatever was there.
+    prev = System.get_env("BARKPARK_PAPER_CANVAS")
+    System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+    on_exit(fn ->
+      case prev do
+        nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+        v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+      end
+    end)
+
     {:ok, _} =
       Content.upsert_schema(
         %{
