@@ -281,6 +281,29 @@ $GUARD_LINES"
     && ok "instrument: a missing roster prints CANNOT READ and exits 2" \
     || no "instrument: missing roster should exit 2 with CANNOT READ, got rc=$CRC: $(cat "$LOG")"
 
+  # ------------------------------------------------- the VERDICT WIRING, whole program
+  # task-92a213f01ca30817. Every mutation above grades run_census IN PROCESS;
+  # none executes the real-run tail that turns its return code into the
+  # PROCESS exit, so flipping that `exit 1` to `exit 0` kept this selftest
+  # green while CI certified an unrostered file. Same idiom as PR #13405 /
+  # #20180: RE-EXEC THE WHOLE PROGRAM on a fixture root and assert the PROCESS
+  # exit. REPO_ROOT and ROSTER derive from the script's own location, so a copy
+  # at <e2e>/scripts/ reads only the fixture — no override is added.
+  E2E="$TMPDIR_CENSUS/e2e"
+  mkdir -p "$E2E/scripts"
+  cp "$0" "$E2E/scripts/posix-vacuous-green-census.sh"
+  printf '%s\n' "$GUARD_TOP" > "$E2E/scripts/guarded.sh"
+  printf '%s\n' "$NOGUARD" > "$E2E/scripts/rostered.sh"
+  : > "$E2E/scripts/.posix-vacuous-green-census"
+  bash "$E2E/scripts/posix-vacuous-green-census.sh" > "$LOG" 2>&1; CRC=$?
+  { [ "$CRC" -eq 1 ] && grep -q "scripts/rostered.sh.*NOT on" "$LOG"; } \
+    && ok "whole-program[planted-unrostered]: the PROCESS exits 1, naming scripts/rostered.sh" \
+    || no "whole-program[planted-unrostered]: expected process exit 1 naming scripts/rostered.sh, got rc=$CRC: $(cat "$LOG")"
+  printf '%s\n' "$ROSTER_LINE" > "$E2E/scripts/.posix-vacuous-green-census"
+  bash "$E2E/scripts/posix-vacuous-green-census.sh" > "$LOG" 2>&1; CRC=$?
+  [ "$CRC" -eq 0 ] && ok "whole-program[plant-rostered]: the PROCESS exits 0" \
+    || no "whole-program[plant-rostered]: expected process exit 0, got rc=$CRC: $(cat "$LOG")"
+
   # ------------------------------------------------- (a) sh -n blindness, PORTABLE
   #
   # THE POINT OF THIS ARM. Everything above proves the census catches the class.
@@ -499,7 +522,7 @@ PROBE
   # under the floor and read as a smaller, clean-looking green. It is a FLOOR and
   # not an equality, which is what lets the override pass ADD four arms (21) on a
   # host that asks for one (22) without loosening anything for a host that does not.
-  ARMS_FLOOR=17
+  ARMS_FLOOR=19
   reported=$((passes + fails))
   if [ "$reported" -lt "$ARMS_FLOOR" ]; then
     echo "posix-vacuous-green-census --selftest: CANNOT READ — only $reported arms reported a verdict, floor is $ARMS_FLOOR; this run measured LESS than the selftest carries" >&2

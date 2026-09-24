@@ -125,8 +125,12 @@ const nowLineMax = 160
 // newHookClient builds the bounded, drafts-reading apiclient the hook acts
 // through. The short Timeout (hookTimeout) is the fail-safe backstop: a hung
 // server is treated as a no-op rather than stalling the agent's turn.
-func newHookClient(ctx manifest.Context) *apiclient.Client {
-	return apiclient.New(apiclient.Config{
+//
+// It carries the session headers (apiSessionConfig) because hookStopClose
+// closes through TaskCloseN — the same X-Barkpark-Session / -Doc pair
+// `bp task close` sends (task-e4cbf4cd9f672c33).
+func newHookClient(g globals, ctx manifest.Context) *apiclient.Client {
+	return apiclient.New(apiSessionConfig(apiclient.Config{
 		BaseURL:     ctx.Server,
 		Token:       ctx.Token,
 		Workspace:   ctx.Workspace,
@@ -134,7 +138,7 @@ func newHookClient(ctx manifest.Context) *apiclient.Client {
 		Dataset:     ctx.Dataset,
 		Perspective: "drafts", // the acceptance gate reads uncommitted met=true edits
 		Timeout:     hookTimeout,
-	})
+	}, g, ctx))
 }
 
 // runCmuxHook is the hook entrypoint. It ALWAYS returns exitOK — the whole point
@@ -194,11 +198,11 @@ func runCmuxHook(out *writer, g globals, ctx manifest.Context, args []string) (c
 
 	switch event {
 	case "SessionStart":
-		hookSessionStart(newHookClient(ctx), task, worker, dryRun, dbg, fail)
+		hookSessionStart(newHookClient(g, ctx), task, worker, dryRun, dbg, fail)
 	case "PreToolUse":
-		hookPreToolUse(newHookClient(ctx), task, worker, hookNowLine(hookIn), dryRun, dbg, fail)
+		hookPreToolUse(newHookClient(g, ctx), task, worker, hookNowLine(hookIn), dryRun, dbg, fail)
 	case "Stop", "SessionEnd":
-		hookStopClose(newHookClient(ctx), task, worker, dryRun, dbg, fail)
+		hookStopClose(newHookClient(g, ctx), task, worker, dryRun, dbg, fail)
 	default:
 		dbg("unhandled event — no-op (cmux's own hook may still act)")
 	}

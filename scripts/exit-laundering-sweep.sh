@@ -512,6 +512,22 @@ EOF
     *) pass=$((pass+1)); echo "  ok   falsifier — deleting the CONSUMER retracts the finding (the predicate is P3, not the grep)" ;;
   esac
 
+  # THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817).
+  # Every chk above reads classify()'s OUTPUT in process; none reads the
+  # classifier's `sys.exit(1 if high else 0)`, which is the sweep's process
+  # exit, so disarming it kept this selftest green. Same idiom as PR #13405 /
+  # #20180: RE-EXEC THE WHOLE PROGRAM through the existing --root flag and
+  # assert the PROCESS exit — the plant tree above (plant-b and plant-c still
+  # HIGH after the falsifier) must exit 1; with those two removed, 0.
+  local rc
+  bash "${BASH_SOURCE[0]}" --root "$tmp" >/dev/null 2>&1; rc=$?
+  if [ "$rc" -eq 1 ]; then pass=$((pass+1)); echo "  ok   whole program: a tree with planted HIGH sites exits 1"
+  else fail=$((fail+1)); echo "  FAIL whole program: a tree with planted HIGH sites exited $rc, not 1"; fi
+  rm -f "$tmp/scripts/plant-b.sh" "$tmp/scripts/plant-c.yml"
+  bash "${BASH_SOURCE[0]}" --root "$tmp" >/dev/null 2>&1; rc=$?
+  if [ "$rc" -eq 0 ]; then pass=$((pass+1)); echo "  ok   whole program: the HIGH plants removed, it exits 0"
+  else fail=$((fail+1)); echo "  FAIL whole program: the HIGH plants removed, it exited $rc, not 0"; fi
+
   echo "  ---- $pass passed, $fail failed ----"
   [ "$fail" -eq 0 ] || return 1
   return 0

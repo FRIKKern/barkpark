@@ -531,6 +531,33 @@ if [ "$SELFTEST" -eq 1 ]; then
   else
     printf '  RED again with it restored, reproducing the baseline red exactly (same %s MISSING, %s EXTRA) — single-variable, both directions\n' "$BASEN" "$BASEX"
   fi
+  # THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817).
+  # Every arm above calls compare() IN PROCESS; none executes the final
+  # `exit "$RC"` that IS this step's verdict in CI (the selftest is the live
+  # check), so disarming it kept this selftest green while the step certified
+  # an unacknowledged row. Same idiom as PR #13405 / #20180: RE-EXEC THE WHOLE
+  # PROGRAM and assert the PROCESS exit. The re-execs reuse this run's
+  # derivation through the existing --derived flag (no second generator pass)
+  # and point --harness at the scratch copies built above: the deleted-victim
+  # copy must exit 1; the untouched harness must exit the in-process verdict
+  # $RC (0 on a green tree — on an already-red tree 1 is the honest answer).
+  set +e
+  bash "$SELF" --repo-root "$REPO_ROOT" --derived "$DERIVED" --harness "$MUTSRC" >/dev/null 2>&1
+  WRC=$?
+  set -e
+  if [ "$WRC" -ne 1 ]; then
+    printf 'SELFTEST FAILED: the WHOLE PROGRAM exited %s with %s deleted from its harness, not 1 — the verdict never reaches the process exit\n' "$WRC" "$VICTIM" >&2
+    exit 1
+  fi
+  set +e
+  bash "$SELF" --repo-root "$REPO_ROOT" --derived "$DERIVED" --harness "$HARNESS" >/dev/null 2>&1
+  WRC=$?
+  set -e
+  if [ "$WRC" -ne "$RC" ]; then
+    printf 'SELFTEST FAILED: the WHOLE PROGRAM exited %s over the untouched harness, but the in-process verdict is %s\n' "$WRC" "$RC" >&2
+    exit 1
+  fi
+  printf '  whole program: exit 1 with the victim deleted, exit %s over the untouched harness\n' "$RC"
   if [ "$RC" -eq 0 ]; then
     printf '  selftest OK\n'
   else

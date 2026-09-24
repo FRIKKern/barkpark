@@ -1693,6 +1693,40 @@ else
 fi
 echo
 
+# ── case 6e: the FAMILY arm's verdict is the PROCESS exit ─────────────────
+# task-92a213f01ca30817. Every family case above asks `--match` / `--print-*`
+# a question and reads the ANSWER; none runs `--check` far enough to reach the
+# family arm's `exit 1`, so flipping it to `exit 0` kept this harness green
+# while the REQUIRED Elixir gate would certify a family dispatched in part.
+# Same idiom as PR #13405 / #20180: RE-EXEC THE WHOLE PROGRAM and assert the
+# PROCESS exit. The plant is the ratchet's own recorded mutation (see THE
+# FAMILY ARM in the script): a copy of "$SCRIPT" whose set_globs no longer
+# appends the derived half. It must exit 1 naming the family and must NOT red
+# on the census arm first (or the exit would be the wrong arm's); the pristine
+# script under the same env must exit 0. The copy is made FROM "$SCRIPT", so a
+# disarmed family exit in the file under test is inherited by the plant.
+echo "case 6e: the family arm's verdict is the process exit (whole program)"
+FAMX="$TMPROOT/famexit"
+mkdir -p "$FAMX"
+sed -e 's/^        derived_family_globs$/        :/' "$SCRIPT" >"$FAMX/no-derived-half.sh"
+if cmp -s "$SCRIPT" "$FAMX/no-derived-half.sh"; then
+  no "(6e) the plant did not apply — set_globs carries no derived_family_globs line to drop, so the arm would be vacuous"
+else
+  out="$(ELIXIR_PATH_ESCAPE_ROOT="$REAL_ROOT" ELIXIR_FAMILY_ROOT="$REAL_ROOT" bash "$FAMX/no-derived-half.sh" 2>&1)" && rc=0 || rc=$?
+  if [ "${rc:-0}" = 1 ] && has "$out" "UNDECLARED glob-consumed family" && ! has "$out" "UNCOVERED repo-root read"; then
+    ok "(6e) planted: the derived half dropped -> --check exits 1 from the FAMILY arm, naming the family"
+  else
+    no "(6e) planted: --check exited ${rc:-0}; family named: $(has "$out" "UNDECLARED glob-consumed family" && echo yes || echo no); census arm red first: $(has "$out" "UNCOVERED repo-root read" && echo yes || echo no)"
+  fi
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$REAL_ROOT" ELIXIR_FAMILY_ROOT="$REAL_ROOT" bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "${rc:-0}" = 0 ]; then
+  ok "(6e) removed: the pristine script under the same env exits 0"
+else
+  no "(6e) removed: the pristine script under the same env exited ${rc:-0} — the planted red above is not the plant's alone: $(grep -m3 '::error::' <<<"$out" | tr '\n' ' ')"
+fi
+echo
+
 # ── case 6d: the two halves of the test set answer different questions ─────
 # WHY THIS EXISTS, AND IT IS AN INCIDENT AND NOT A STYLE. When case 6b's
 # derivation landed, `--match test` began answering `true` for every member of

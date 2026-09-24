@@ -68,6 +68,10 @@ func runTaskNextFrontier(out *writer, g globals, ctx manifest.Context, worker st
 		return exitUsage
 	}
 
+	// SessionKey (task-9af836a40731b63a): bare `bp task next` claims through
+	// the manifest path, which sends X-Barkpark-Session; this frontier claim
+	// (TaskClaimResources) must carry the same key or its row records no
+	// session_origin. The key only — a claim carries no session doc.
 	client := apiclient.New(apiclient.Config{
 		BaseURL:     ctx.Server,
 		Token:       ctx.Token,
@@ -75,6 +79,7 @@ func runTaskNextFrontier(out *writer, g globals, ctx manifest.Context, worker st
 		Project:     ctx.Project,
 		Dataset:     ctx.Dataset,
 		Perspective: "drafts", // tasks live as drafts, exactly like `bp task frontier`
+		SessionKey:  sessionKey(),
 	})
 
 	var skips []frontierSkip

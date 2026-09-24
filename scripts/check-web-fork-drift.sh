@@ -605,6 +605,33 @@ if [ "${1:-}" = "--selftest" ]; then
   rm -rf "$empty"
 
   echo
+  echo "[8] VERDICT WIRING: re-exec the WHOLE PROGRAM on the fixture root"
+  # task-92a213f01ca30817. Every case above grades run_checks/floor_check IN
+  # PROCESS; none executes the real-check tail that turns N_FAIL into the
+  # process exit code, so flipping its `exit 1` to `exit 0` kept this
+  # selftest green. Same idiom as PR #13405 / #20180. REPO_ROOT derives from
+  # the script's own location, so a copy at $tmp/scripts/ reads only the
+  # fixture -- no override is added.
+  mkdir -p "$tmp/scripts"
+  cp "$0" "$tmp/scripts/check-web-fork-drift.sh"
+  e2e() {  # <label> <want-rc>
+    set +e
+    bash "$tmp/scripts/check-web-fork-drift.sh" > /dev/null 2>&1; _rc=$?
+    set -e
+    if [ "$_rc" -ne "$2" ]; then
+      echo "  SELFTEST FAIL  E2E $1: whole program exited $_rc, expected $2"
+      fails=$((fails + 1))
+    else
+      echo "  ok   E2E $1 -> exit $_rc"
+    fi
+  }
+  perl -0pi -e 's/^\s*readonly code\?: string;\n//m' "$tmp/$WEB_LIB/bp-fetch.ts"
+  mutated "$WEB_LIB/bp-fetch.ts" || true
+  e2e "planted INV-2 violation" 1
+  cp "$REPO_ROOT/$WEB_LIB/bp-fetch.ts" "$tmp/$WEB_LIB/bp-fetch.ts"
+  e2e "plant removed" 0
+
+  echo
   probes="$(grep -c '^INV-' <<< "$INVARIANTS" || true)"
   if [ "${probes:-0}" -lt "$MIN_INVARIANT_PROBES" ]; then
     echo "  SELFTEST FAIL  only $probes probe(s) declared, floor is $MIN_INVARIANT_PROBES"

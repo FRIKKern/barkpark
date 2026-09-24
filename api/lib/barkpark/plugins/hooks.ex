@@ -207,41 +207,29 @@ defmodule Barkpark.Plugins.Hooks do
   # Plugin module source-of-truth. Mirrors `Registry.load_ordered_plugins/0`
   # precedence: explicit config wins; otherwise fall back to Registry.all/0
   # sorted alphabetically by name. Both paths emit module atoms.
+  #
+  # Entries are interpreted by `Barkpark.Content.PluginLoadOrder.modules/3`
+  # (task-3fbd48182b1d35ea): Hooks is a MODULE-dispatch reader, so a loadable
+  # module that is not a registered plugin still fires its hooks (the test
+  # seams BumpHook / InterleavedWriter / HaltingPersist rely on it), and every
+  # entry it skips is logged by name.
   defp load_ordered_plugins do
     case Application.get_env(:barkpark, :plugins) do
       list when is_list(list) and list != [] ->
-        Enum.map(list, &module_of/1) |> Enum.reject(&is_nil/1)
+        Barkpark.Content.PluginLoadOrder.modules(list, &registered/0, __MODULE__)
 
       _ ->
-        try do
-          Barkpark.Plugins.Registry.all()
-          |> Enum.sort_by(& &1.name)
-          |> Enum.map(& &1.module)
-        rescue
-          _ -> []
-        catch
-          _, _ -> []
-        end
+        registered()
+        |> Enum.sort_by(& &1.name)
+        |> Enum.map(& &1.module)
     end
   end
 
-  # Application config entries can be a bare module atom, a {name, module}
-  # tuple, or a plugin-name string. Reduce each to a module atom.
-  defp module_of(mod) when is_atom(mod) and not is_nil(mod), do: mod
-  defp module_of({_name, mod}) when is_atom(mod), do: mod
-
-  defp module_of(name) when is_binary(name) do
-    try do
-      case Barkpark.Plugins.Registry.lookup(name) do
-        {:ok, %{module: mod}} -> mod
-        _ -> nil
-      end
-    rescue
-      _ -> nil
-    catch
-      _, _ -> nil
-    end
+  defp registered do
+    Barkpark.Plugins.Registry.all()
+  rescue
+    _ -> []
+  catch
+    _, _ -> []
   end
-
-  defp module_of(_), do: nil
 end
