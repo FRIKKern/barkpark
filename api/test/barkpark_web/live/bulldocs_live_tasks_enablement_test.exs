@@ -145,12 +145,12 @@ defmodule BarkparkWeb.BulldocsLiveTasksEnablementTest do
   test "A (Tasks ON) renders criteria + rows; B (Tasks OFF) renders the placeholders", ctx do
     :ok = tasks_disabled!(ctx.ws_b)
 
-    {:ok, _view, html_a} = live(build_conn(), ctx.a.path)
+    {:ok, _view, html_a} = live(scoped_conn(), ctx.a.path)
     assert_live!(html_a, ctx.a.title)
 
     # B's caller has no workspace of its own and the instance Default (A) has
     # Tasks ON — only B's own enablement can produce these placeholders.
-    {:ok, _view, html_b} = live(build_conn(), ctx.b.path)
+    {:ok, _view, html_b} = live(scoped_conn(), ctx.b.path)
     assert_placeholders!(html_b, ctx.b.title)
   end
 
@@ -158,10 +158,10 @@ defmodule BarkparkWeb.BulldocsLiveTasksEnablementTest do
     :ok = tasks_disabled!(ctx.ws_a)
     assert Tenancy.get_default_workspace().id == ctx.ws_a.id
 
-    {:ok, _view, html_b} = live(build_conn(), ctx.b.path)
+    {:ok, _view, html_b} = live(scoped_conn(), ctx.b.path)
     assert_live!(html_b, ctx.b.title)
 
-    {:ok, _view, html_a} = live(build_conn(), ctx.a.path)
+    {:ok, _view, html_a} = live(scoped_conn(), ctx.a.path)
     assert_placeholders!(html_a, ctx.a.title)
   end
 end
