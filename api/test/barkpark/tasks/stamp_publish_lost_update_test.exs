@@ -114,7 +114,7 @@ defmodule Barkpark.Tasks.StampPublishLostUpdateTest do
       {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
     end
 
-    previous = Application.get_env(:barkpark, :plugins)
+    previous = Barkpark.PluginEnv.capture()
 
     # Every registered plugin BY MODULE, plus the interleave seam. This used to
     # pass `Registry.all()` itself — registry ENTRY MAPS, which no load-order
@@ -124,18 +124,11 @@ defmodule Barkpark.Tasks.StampPublishLostUpdateTest do
     # the Tasks publish gates directly; since they ride
     # `pre_publish_fences/0` (task-8273f2f1b24a6de1) the load order decides
     # whether they run, and this file measures exactly those gates.
-    Application.put_env(
-      :barkpark,
-      :plugins,
+    Barkpark.PluginEnv.put!(
       Enum.map(Barkpark.Plugins.Registry.all(), & &1.module) ++ [InterleavedWriter]
     )
 
-    on_exit(fn ->
-      case previous do
-        nil -> Application.delete_env(:barkpark, :plugins)
-        list -> Application.put_env(:barkpark, :plugins, list)
-      end
-    end)
+    on_exit(fn -> Barkpark.PluginEnv.restore(previous) end)
 
     %{scope: scope}
   end
