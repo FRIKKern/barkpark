@@ -294,6 +294,97 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
     assert assigns_of(resumed).paper_rev == persisted_rev + 1
   end
 
+  test "a committed insertion whose reply and echo were lost replays once, then editing continues and View opens",
+       %{conn: conn, slug: slug} do
+    writer = writer_conn(conn)
+    {:ok, first, _html} = live(writer, "/papers/#{slug}")
+    render_click(first, "paper-toggle-edit", %{})
+    original_rev = assigns_of(first).paper_rev
+    request_id = Ecto.UUID.generate()
+
+    committed_payload = %{
+      "request_id" => request_id,
+      "if_rev" => original_rev,
+      "container_kind" => "document",
+      "container_run_ids" => ["b-head", "b-body", "b-extra"],
+      "ops" => [
+        %{
+          "op" => "append-block",
+          "block" => %{
+            "id" => "lost-reply-table",
+            "type" => "table",
+            "head" => [[], []],
+            "rows" => [[[], []]]
+          }
+        }
+      ]
+    }
+
+    # The write commits; the browser never reads this reply, its leases, or the
+    # echo, because the socket drops before they arrive.
+    render_hook(first, "paper-ops", committed_payload)
+    committed_rev = original_rev + 1
+    assert assigns_of(first).paper_rev == committed_rev
+    committed_blocks = stored_blocks(slug)
+    assert Enum.count(committed_blocks, &(&1["id"] == "lost-reply-table")) == 1
+
+    # A fresh LiveView process: the browser held no lease, only a pending batch.
+    reconnect = %{
+      "paper_editing_key" => "#{@dataset}:paper:#{slug}",
+      "paper_canvas_lease_key" => "#{@dataset}:paper:#{slug}",
+      "paper_canvas_leases" => [],
+      "paper_canvas_lease_pending" => true
+    }
+
+    {:ok, resumed, html} = live(put_connect_params(writer, reconnect), "/papers/#{slug}")
+    assert assigns_of(resumed).editing?
+    assert assigns_of(resumed).paper_canvas_resume_status == :pending
+    assert html =~ ~s(data-paper-canvas-resume-state="pending")
+
+    # The exact retry (stale if_rev included) replays the original receipt.
+    render_hook(resumed, "paper-ops", committed_payload)
+
+    assert_reply(resumed, %{
+      saved: true,
+      request_id: ^request_id,
+      replayed: true,
+      rev: ^committed_rev
+    })
+
+    assert stored_blocks(slug) == committed_blocks
+    assert assigns_of(resumed).paper_rev == committed_rev
+    assert assigns_of(resumed).paper_canvas_resume_status == :resumed
+    refute render(resumed) =~ ~s(data-paper-canvas-resume-halt="true")
+
+    # Editing typed while offline follows as its own batch on the replayed rev.
+    continued_id = Ecto.UUID.generate()
+
+    render_hook(resumed, "paper-ops", %{
+      "request_id" => continued_id,
+      "if_rev" => committed_rev,
+      "ops" => [
+        %{
+          "op" => "patch-block",
+          "id" => "b-body",
+          "patch" => %{"content" => [%{"type" => "text", "value" => "Typed after disconnect"}]}
+        }
+      ]
+    })
+
+    assert_reply(resumed, %{saved: true, request_id: ^continued_id, replayed: false})
+    assert assigns_of(resumed).paper_rev == committed_rev + 1
+    after_edit = stored_blocks(slug)
+    assert Enum.count(after_edit, &(&1["id"] == "lost-reply-table")) == 1
+
+    assert [%{"content" => [%{"value" => "Typed after disconnect"}]}] =
+             Enum.filter(after_edit, &(&1["id"] == "b-body"))
+
+    # Back to View on the same process: no remount, no refresh.
+    render_click(resumed, "paper-toggle-edit", %{})
+    refute assigns_of(resumed).editing?
+    assert Process.alive?(resumed.pid)
+  end
+
   describe "criterion 2 — anonymous: no editor markup, every edit event refused" do
     test "the anonymous render carries neither the toggle nor the editor", %{
       conn: conn,

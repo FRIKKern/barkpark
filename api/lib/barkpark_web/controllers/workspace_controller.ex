@@ -20,6 +20,11 @@ defmodule BarkparkWeb.WorkspaceController do
       workspace-blind by construction, so on its own it let any admin token
       destroy any tenant's workspace (task-a5636ad31304b23a).
 
+    * `POST /api/workspaces/:workspace_slug/archive` and `.../restore` — the
+      REVERSIBLE sibling of delete (task-55474a106554e65a). Same two-part gate
+      as delete. Archive destroys nothing; while archived, scoped traffic is
+      refused 409 `workspace_archived` (not delete's 404, not a bare 403).
+
     * `GET /api/workspaces/:workspace_slug/export` — stream that workspace's
       complete bundle. Same two-part gate, same reason: on the global
       permission alone it streamed any tenant's whole workspace to any admin
@@ -130,13 +135,15 @@ defmodule BarkparkWeb.WorkspaceController do
     case Tenancy.get_workspace_by_slug(slug) do
       %Tenancy.Workspace{} = workspace ->
         if TenancyAuth.authorize(token, workspace.id, :write) == :ok do
-          # A changeset error flows to the FallbackController (422).
-          with {:ok, project} <-
-                 Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
-            conn
-            |> put_status(:created)
-            |> json(%{project: render_project(project)})
-          end
+          unless_archived(workspace, fn ->
+            # A changeset error flows to the FallbackController (422).
+            with {:ok, project} <-
+                   Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
+              conn
+              |> put_status(:created)
+              |> json(%{project: render_project(project)})
+            end
+          end)
         else
           {:error, :forbidden}
         end
@@ -188,6 +195,16 @@ defmodule BarkparkWeb.WorkspaceController do
   unknown / `RequireWorkspaceRole` 403 unauthorized): an unknown slug is 404,
   a real workspace the caller does not administer is 403.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"workspace_slug" => slug}) do
     token = conn.assigns[:api_token]
 
@@ -206,6 +223,66 @@ defmodule BarkparkWeb.WorkspaceController do
       false -> {:error, :forbidden}
       {:error, :not_found} -> {:error, :not_found}
       {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  POST /api/workspaces/:workspace_slug/archive — archive a workspace
+  REVERSIBLY (task-55474a106554e65a). Destroys nothing: `Tenancy.archive_workspace/1`
+  sets `archived_at` and writes no other row, so `restore/2` returns the
+  workspace and every document scoped to it to exactly their pre-archive state.
+
+  SAME AUTHORISATION FLOOR AS `delete/2`, and by the same two halves: the
+  router's `[:api, :require_admin]` pipeline proves the global `admin` bit (the
+  VERB), and `authorize_workspace_admin/2` — `TenancyAuth.workspace_admin?/2`
+  against the URL's workspace, the predicate `delete/2` uses — proves the
+  TENANT. An admin whose only seat is another workspace gets 403.
+
+  Unknown slug 404 · not administered 403 · the instance-Default workspace
+  409 `default_workspace_not_archivable` · success 200 echoing the workspace
+  with its `archived_at`. Idempotent: archiving an archived workspace is 200
+  and keeps the original `archived_at`.
+  """
+  def archive(conn, %{"workspace_slug" => slug}) do
+    with {:ok, workspace} <- authorize_workspace_admin(conn, slug),
+         {:ok, archived} <- Tenancy.archive_workspace(workspace) do
+      json(conn, %{workspace: render_workspace(archived), archived: true})
+    end
+  end
+
+  @doc """
+  POST /api/workspaces/:workspace_slug/restore — lift an archive
+  (task-55474a106554e65a). Same two-half gate as `archive/2` and `delete/2`.
+  Clears `archived_at` and nothing else. Idempotent: restoring a live
+  workspace is 200.
+
+  REACHABLE WHILE ARCHIVED, by construction: this action resolves the slug
+  itself (no `ResolveWorkspace` on its pipeline), and its route carries the
+  `private:` flag that exempts it from `DeriveWorkspaceFromToken`'s archive
+  halt — so the guard does not refuse the verb that lifts it.
+  """
+  def restore(conn, %{"workspace_slug" => slug}) do
+    with {:ok, workspace} <- authorize_workspace_admin(conn, slug),
+         {:ok, restored} <- Tenancy.restore_workspace(workspace) do
+      json(conn, %{workspace: render_workspace(restored), archived: false})
+    end
+  end
+
+  # The tenant half of the archive/restore gate — the SAME predicate and the
+  # SAME denial shape as `delete/2` (unknown slug 404, real-but-not-
+  # administered 403). `workspace_admin?/2`, not `member?/2` and not
+  # `authorize/3`: see `delete/2`'s doc for why each weaker form is wrong.
+  defp authorize_workspace_admin(conn, slug) do
+    token = conn.assigns[:api_token]
+
+    case Tenancy.get_workspace_by_slug(slug) do
+      %Tenancy.Workspace{} = workspace ->
+        if TenancyAuth.workspace_admin?(token, workspace.id),
+          do: {:ok, workspace},
+          else: {:error, :forbidden}
+
+      nil ->
+        {:error, :not_found}
     end
   end
 
@@ -1425,12 +1502,14 @@ defmodule BarkparkWeb.WorkspaceController do
     case Tenancy.get_workspace_by_slug(slug) do
       %Tenancy.Workspace{} = workspace ->
         if TenancyAuth.member?(token, workspace.id) do
-          projects = Tenancy.list_projects(workspace)
+          unless_archived(workspace, fn ->
+            projects = Tenancy.list_projects(workspace)
 
-          json(conn, %{
-            workspace: render_workspace(workspace),
-            projects: Enum.map(projects, &render_project/1)
-          })
+            json(conn, %{
+              workspace: render_workspace(workspace),
+              projects: Enum.map(projects, &render_project/1)
+            })
+          end)
         else
           {:error, :forbidden}
         end
@@ -1456,19 +1535,21 @@ defmodule BarkparkWeb.WorkspaceController do
     case Tenancy.get_workspace_by_slug(ws_slug) do
       %Tenancy.Workspace{} = workspace ->
         if TenancyAuth.member?(token, workspace.id) do
-          case Tenancy.get_project(ws_slug, proj_slug) do
-            %Tenancy.Project{} = project ->
-              datasets = Tenancy.list_datasets(project)
+          unless_archived(workspace, fn ->
+            case Tenancy.get_project(ws_slug, proj_slug) do
+              %Tenancy.Project{} = project ->
+                datasets = Tenancy.list_datasets(project)
 
-              json(conn, %{
-                workspace: render_workspace(workspace),
-                project: render_project(project),
-                datasets: Enum.map(datasets, &render_dataset/1)
-              })
+                json(conn, %{
+                  workspace: render_workspace(workspace),
+                  project: render_project(project),
+                  datasets: Enum.map(datasets, &render_dataset/1)
+                })
 
-            _ ->
-              {:error, :not_found}
-          end
+              _ ->
+                {:error, :not_found}
+            end
+          end)
         else
           {:error, :forbidden}
         end
@@ -1478,8 +1559,23 @@ defmodule BarkparkWeb.WorkspaceController do
     end
   end
 
+  # `archived_at` is ADDITIVE (task-55474a106554e65a): `null` on a live
+  # workspace, an ISO-8601 timestamp on an archived one — so the LIST still
+  # shows an archived workspace to its members, marked, rather than hiding the
+  # one thing they would need to find to restore it.
   defp render_workspace(%Tenancy.Workspace{} = ws) do
-    %{id: ws.id, slug: ws.slug, name: ws.name}
+    %{id: ws.id, slug: ws.slug, name: ws.name, archived_at: ws.archived_at}
+  end
+
+  # The per-action twin of `Plugs.ResolveWorkspace`'s archive refusal, for the
+  # three `/api/workspaces/:slug/...` interior actions that resolve the slug
+  # themselves (no ResolveWorkspace on their pipeline). Called AFTER the
+  # membership / write check, so a stranger keeps its 403 and learns nothing
+  # about the workspace's state — the same disclosure order as the plug.
+  defp unless_archived(%Tenancy.Workspace{} = workspace, fun) do
+    if Tenancy.Workspace.archived?(workspace),
+      do: {:error, {:workspace_archived, workspace.slug}},
+      else: fun.()
   end
 
   defp render_project(%Tenancy.Project{} = project) do

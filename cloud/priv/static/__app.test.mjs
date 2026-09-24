@@ -8451,7 +8451,8 @@ test("readyHeroHtml renders the shared core and parametrises the studio/view wir
     { name: "Prod", id: "abc", url: "prod.example.com" },
     { studioBtnId: "inst-ready-studio", viewBtnId: "inst-ready-dismiss", viewLabel: "View details", demoteHeading: true },
   );
-  assert.match(fold, /<h2 class="new-title">Prod is ready<\/h2>/);
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.match(fold, /<h2 class="new-title"><bdi>Prod<\/bdi> is ready<\/h2>/);
   assert.match(fold, /id="inst-ready-studio"[^>]*>Open Studio</);
   assert.match(fold, /id="inst-ready-dismiss"[^>]*>View details</);
   assert.match(fold, /prod\.example\.com/);
@@ -8464,7 +8465,7 @@ test("readyHeroHtml renders the shared core and parametrises the studio/view wir
       extra: '<a class="btn btn-block btn-vercel" id="new-vercel" href="#">Deploy</a>', tail: '<div class="new-env"></div>' },
   );
   assert.match(neu, /id="new-open-studio"/);
-  assert.match(neu, /<h1 class="new-title">Site is ready<\/h1>/); // /new is a standalone page: keeps the h1
+  assert.match(neu, /<h1 class="new-title"><bdi>Site<\/bdi> is ready<\/h1>/); // /new is a standalone page: keeps the h1
   assert.match(neu, /btn-vercel/);
   assert.match(neu, /href="\/#instance\/def"/);
   assert.match(neu, /new-env/); // tail rendered after the actions
@@ -17942,7 +17943,8 @@ test("E-01 globalSiteRow: real fields only, v4 anatomy, no invented kind taxonom
   assert.ok(html.includes('class="site-host"') && html.includes("acme.com"), "the live host");
   assert.ok(html.includes("nextjs"), "the framework");
   assert.ok(html.includes('class="site-inst-link" href="#instance/bp-1"'), "on <instance> is a real link");
-  assert.ok(html.includes(">Production</a>"), "the instance name renders in the link");
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.ok(html.includes("><bdi>Production</bdi></a>"), "the instance name renders in the link");
   assert.ok(html.includes("updated "), "the recency segment");
   assert.ok(html.includes("Auto-deploy"), "the auto-deploy capability chip");
   // GR28: the invented Marketing/Docs/Blank kind taxonomy has no field, so a
@@ -18901,7 +18903,8 @@ test("attentionCanStudio: live boxes only (host set, not suspended, not tearing 
 test("attentionRowHtml: pill + linked name + reason + View instance + (live) Open Studio", () => {
   const html = hooks.attentionRowHtml({ id: "b1", name: "Reporting", host: "h", health_status: "down", agent_status: "offline", provision_status: "succeeded" });
   assert.match(html, /status-pill/);
-  assert.match(html, /href="#instance\/b1"[^>]*>Reporting<\/a>/);
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.match(html, /href="#instance\/b1"[^>]*><bdi>Reporting<\/bdi><\/a>/);
   assert.match(html, /attention-reason/);
   assert.match(html, />View instance</);
   assert.match(html, /fleet-open-studio[^>]*data-id="b1"/);
@@ -18930,7 +18933,8 @@ test("instanceCardHtml: v4 anatomy — status accent, mono url, sparkline frame,
   const live = { id: "b1", name: "Production", host: "prod.barkpark.cloud", url: "prod.barkpark.cloud", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "current", version: "0.9.2", provision_status: "succeeded" };
   const html = hooks.instanceCardHtml(live, { stats: hooks.instanceCardStats(null) });
   assert.match(html, /instance-card instance-card--ok/);
-  assert.match(html, /instance-card-name[^>]*>Production</);
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.match(html, /instance-card-name[^>]*><bdi>Production<\/bdi></);
   assert.match(html, /instance-card-spark spark--ok/);
   assert.match(html, /class="spark"/); // the honest (empty) sparkline frame
   assert.match(html, /fleet-open-studio/);
@@ -19300,7 +19304,8 @@ test("gr-p3: fleetRow — v4 anatomy: leading pill column, mono meta, badges, ch
   const html = hooks.fleetRow(fleetBp());
   assert.match(html, /class="fleet-row" data-id="i1"/);
   assert.match(html, /<div class="fleet-status"><span class="status-pill status-pill--ok/);
-  assert.match(html, /class="fleet-name">Production/);
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.match(html, /class="fleet-name"><bdi>Production<\/bdi>/);
   assert.match(html, /class="fleet-meta"/);
   assert.match(html, /provider-chip--hetzner/);
   assert.match(html, /fleet-open-studio/); // live → Open Studio
@@ -23348,7 +23353,9 @@ test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no lo
   });
   assert.ok(!row.includes(RLO), "no bidi control survives into the markup");
   // The verb the RECORD carries is the verb the row now spells, uninterrupted.
-  assert.match(row, /class="fleet-name">ops@acme\.com\u00A0etis\u00A0a\u00A0detaerc deleted a site/);
+  // (cch-rtl-script-neutral-borrowing: the email now rides in its own <bdi>, so
+  // the markup gains the tag — the verb after it is unchanged.)
+  assert.match(row, /class="fleet-name"><bdi>ops@acme\.com\u00A0etis\u00A0a\u00A0detaerc<\/bdi> deleted a site/);
   // The pre-reversed decoy text is still THERE (nothing is censored) — it just
   // cannot reorder the system's words around it any more.
   assert.ok(row.includes("etis" + NB + "a" + NB + "detaerc"), "the attacker's own letters are not laundered away");
@@ -23360,7 +23367,7 @@ test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no lo
     { role: "admin", userId: "u1" },
   );
   assert.ok(!self.includes(RLO), "the roster row carries no override either");
-  assert.match(self, /class="set-row-name">mallory@evil\.com <span class="dim">\(you\)<\/span>/);
+  assert.match(self, /class="set-row-name"><bdi>mallory@evil\.com<\/bdi> <span class="dim">\(you\)<\/span>/);
 
   // All TWELVE UAX#9 bidi formatting characters are neutralised, not just the
   // RLO: the nine explicit ones (LRE/RLE/LRO/RLO/PDF, LRI/RLI/FSI/PDI) and the
@@ -23379,6 +23386,128 @@ test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no lo
   // The strip runs BEFORE the escape, so an entity's letters can never be
   // re-read as text (the ssw8 esc-then-strip lesson, above).
   assert.equal(hooks.esc("a&" + RLO + "b"), "a&amp;b");
+});
+
+// ── cch-rtl-script-neutral-borrowing: user text rides in its own <bdi> ─────
+// esc() drops the explicit bidi controls; it cannot change IMPLICIT direction.
+// An email in Arabic or Hebrew letters is strong-RTL by script, and a neutral at
+// its edge ("." "-" "!") was resolved against the LTR paragraph around it, so it
+// painted on the far side of the RTL run. The geometry is measured in headless
+// Chrome by __preview__/bidi-isolation.mjs; this pins the markup that measurement
+// depends on — EACH user-authored span in its own <bdi>, and nothing system-
+// authored inside one.
+test("cch-rtl-script-neutral-borrowing: both hosts isolate every user-authored span, and only those", () => {
+  const email = "\u0645\u062F\u064A\u0631@\u0634\u0631\u0643\u0629.\u0645\u0635\u0631."; // Arabic IDN + trailing "."
+  const name = "\u05D0\u05EA\u05E8!"; // Hebrew + trailing "!"
+  const act = hooks.activityRow({
+    actor: { email }, action: "site.deleted", inserted_at: "2026-08-02T00:00:00Z", metadata: { name },
+  });
+  const fleetName = /<div class="fleet-name">(.*?)<\/div>/.exec(act)[1];
+  assert.equal(fleetName, "<bdi>" + email + "</bdi> deleted a site &middot; <bdi>" + name + "</bdi>");
+  // no metadata name → no second isolate, and no dangling separator
+  const bare = hooks.activityRow({ actor: { email }, action: "site.deleted" });
+  assert.equal(/<div class="fleet-name">(.*?)<\/div>/.exec(bare)[1], "<bdi>" + email + "</bdi> deleted a site");
+
+  const self = hooks.memberRowHtml(
+    { user_id: "u1", email, role: "member", joined_at: "2026-01-01T00:00:00Z" },
+    { role: "admin", userId: "u1" },
+  );
+  assert.equal(/<div class="set-row-name">(.*?)<\/div>/.exec(self)[1],
+    "<bdi>" + email + '</bdi> <span class="dim">(you)</span>');
+  const peer = hooks.memberRowHtml(
+    { user_id: "u9", email, role: "member", joined_at: "2026-01-01T00:00:00Z" },
+    { role: "admin", userId: "u1" },
+  );
+  assert.equal(/<div class="set-row-name">(.*?)<\/div>/.exec(peer)[1], "<bdi>" + email + "</bdi>");
+  // The isolate does not replace the escape: markup inside the email is still inert.
+  const hostile = hooks.memberRowHtml(
+    { user_id: "u9", email: "<b>x</b>@y.io", role: "member" }, { role: "admin", userId: "u1" },
+  );
+  assert.ok(hostile.includes("<bdi>&lt;b&gt;x&lt;/b&gt;@y.io</bdi>"));
+});
+
+// ── task-1614ac4ba29eec9b: every derived user-text host isolates in <bdi> ──
+// #20054 isolated two hosts; its own measurement showed the defect is the user
+// string's EDGE neutral resolving against the LTR paragraph, so every host that
+// renders a user-authored name or email is affected. The host set was derived
+// from app.js (esc() calls whose argument is user-authored, in element content).
+// Two layers pin it:
+//   RENDERED — the hooked, pure hosts are called here and must wrap the name in
+//     its own <bdi>. __preview__/bidi-isolation.mjs measures the same hosts'
+//     painted glyph order in headless Chrome (CI: the modal-oracle job).
+//   SOURCE — the hosts that open a modal or write the DOM themselves cannot be
+//     mounted by that harness, so their markup is pinned here by the exact
+//     isolated source text, each paired with its un-isolated twin, which must be
+//     ABSENT (dropping a <bdi> turns the first red and the second would see it).
+const BIDI_SOURCE_PINS = [
+  ["confirmRevokeToken", "Revoking <b><bdi>' + esc(name || \"this token\") + \"</bdi></b>"],
+  ["setBreadcrumb (current)", "\"</span><span><bdi>\" + esc(cr.label) + \"</bdi></span></span>\""],
+  ["setBreadcrumb (link)", "'\"><bdi>' + esc(cr.label) + \"</bdi></a>\""],
+  ["setBreadcrumb (plain)", "\"<span><bdi>\" + esc(cr.label) + \"</bdi></span>\""],
+  ["renderScopeMenu", "<span class=\"scope-name\"><bdi>' + esc(bp.name || bp.slug || bp.id) + \"</bdi></span>"],
+  ["renderTeamMenu", "<span class=\"team-name\"><bdi>' + esc(t.name || t.slug || t.id) + \"</bdi></span>"],
+  ["confirmUpdateInstance", ">Update <bdi>' + esc(bp.name) + \"</bdi>?</h2>"],
+  ["openAttachDomainModal", ">Attach a domain to <bdi>' + esc(bp.name) + \"</bdi></h2>"],
+  ["openAddSupportModal", ">Add a support server to <bdi>' + esc(bp.name) + \"</bdi></h2>"],
+  ["openPinModal", ">Pin <bdi>' + esc(bp.name) + \"</bdi> to a version</h2>"],
+  ["openCreateSiteModal", ">New site on <bdi>' + esc(bp.name || bp.slug || \"this instance\") + \"</bdi></h2>"],
+  ["siteDetailHtml (on <instance>)", "' &middot; on <a href=\"#instance/' + esc(bp.id) + '\"><bdi>' + esc(bp.name) + \"</bdi></a>\""],
+  ["showAuthInviteBanner (team)", "join <bdi>' +\n          esc(r.data.team.name) + \"</bdi>.</span>"],
+  ["showAuthInviteBanner (email)", "<span class=\"auth-invite-email\"><bdi>' + esc(r.data.email) + \"</bdi></span> to accept."],
+  ["renderLaunchPlan (blocked)", "so launching <bdi>\" + esc(name) + \"</bdi> needs a paid plan."],
+  ["renderLaunchPlan (plan)", "pick a plan to launch <bdi>\" + esc(name) + \"</bdi>. Cancel anytime."],
+  ["revealInvite", "We emailed <b><bdi>' + esc(email) + \"</bdi></b> an invitation."],
+  ["openRoleModal", "Set the team role for <b><bdi>' + esc(email || \"this member\") + \"</bdi></b>.</p>"],
+  ["confirmRevokeInvite", "The invitation for <b><bdi>' + esc(email || \"this address\") + \"</bdi></b> will stop working."],
+  ["paletteRowsHtml", "<span class=\"cmdk-row-label\"><bdi>' + esc(it.label) + \"</bdi></span>"],
+  ["openOffloadModal (title)", ">Offload a task to <bdi>' + esc(support.name) + \"</bdi></h2>"],
+  ["openOffloadModal (worker)", "File an order on this Barkpark. <b><bdi>' + esc(offloadWorkerName(support)) +\n        \"</bdi></b>"],
+];
+
+test("task-1614ac4ba29eec9b: every derived user-text host wraps the user string in its own <bdi>", () => {
+  const NAME = "\u05D0\u05EA\u05E8!"; // Hebrew + trailing "!" — the edge the borrowing is about
+  const EMAIL = "\u0645\u062F\u064A\u0631@\u0634\u0631\u0643\u0629.\u0645\u0635\u0631."; // Arabic IDN + trailing "."
+  const iso = (s) => "<bdi>" + s + "</bdi>";
+  const bp = { id: "b1", name: NAME, slug: "b1", host: "h", url: "h", provision_status: "succeeded", health_status: "up", agent_status: "online" };
+  const rendered = {
+    fleetRow: hooks.fleetRow(bp),
+    attentionRowHtml: hooks.attentionRowHtml(bp),
+    instanceCardHtml: hooks.instanceCardHtml(bp),
+    instanceHeaderHtml: hooks.instanceHeaderHtml(bp, "grant"),
+    supportRowHtml: hooks.supportRowHtml(bp),
+    groupSupportRowHtml: hooks.groupSupportRowHtml({ id: "b2", name: NAME }),
+    instanceGroupPanelHtml: hooks.instanceGroupPanelHtml({ id: "b1", name: NAME }),
+    readyHeroHtml: hooks.readyHeroHtml(bp, { studioBtnId: "x" }),
+    operatorCanaryCardHtml: hooks.operatorCanaryCardHtml({ barkparks: [bp] }, Date.now()),
+    "globalSiteRow (name)": hooks.globalSiteRow({ id: "s1", name: NAME, slug: "s1", domains: [] }, null),
+    "globalSiteRow (on <instance>)": hooks.globalSiteRow({ id: "s1", name: "s", slug: "s1", domains: [] }, bp),
+    envModalBodyHtml: hooks.envModalBodyHtml({ name: NAME }),
+    webhookCardHtml: hooks.webhookCardHtml({ id: "w1", name: NAME, url: "https://e.x/h", events: [] }, bp, "production", "grant"),
+    tokenRow: hooks.tokenRow({ id: "t1", name: NAME, abilities: [] }),
+    tokenRevealHtml: hooks.tokenRevealHtml("bp_x", { name: NAME }),
+    confirmModalHtml: hooks.confirmModalHtml({ title: "t", tier: "destroy", resourceName: NAME, confirmLabel: "Go", consequences: ["c"] }),
+    "inviteStateHtml (confirm)": hooks.inviteStateHtml("confirm", { team: NAME }),
+  };
+  for (const [host, html] of Object.entries(rendered)) {
+    assert.ok(html.includes(iso(NAME)), host + " must render the user-authored name inside its own <bdi>; got " + html.slice(0, 300));
+  }
+  // The email hosts: the invitation row (#20054's probe), the wrong-account
+  // invite card (both addresses), the account modal's local part.
+  const inv = hooks.invitationRowHtml({ id: "i1", email: EMAIL, role: "member", expires_at: "2026-12-01T00:00:00Z" }, { role: "admin" });
+  assert.equal(/<div class="set-row-name">(.*?)<\/div>/.exec(inv)[1], iso(EMAIL));
+  const wrong = hooks.inviteStateHtml("wrong_account", { email: EMAIL, meEmail: "ops@acme.com" });
+  assert.ok(wrong.includes("sent to <b>" + iso(EMAIL) + "</b>") && wrong.includes("signed in as <b>" + iso("ops@acme.com") + "</b>."));
+  const acct = hooks.accountModalHtml({ name: "\u0645\u062F\u064A\u0631.", email: EMAIL });
+  assert.ok(acct.includes('class="am-name">' + iso("\u0645\u062F\u064A\u0631.") + "</div>"));
+  // The isolate never replaces the escape.
+  assert.ok(hooks.tokenRow({ id: "t", name: "<b>x</b>", abilities: [] }).includes(iso("&lt;b&gt;x&lt;/b&gt;")));
+
+  for (const [host, snip] of BIDI_SOURCE_PINS) {
+    assert.ok(APP_SRC.includes(snip), host + ": the isolated markup is gone from app.js — " + JSON.stringify(snip));
+    const bare = snip.replace(/<\/?bdi>/g, "");
+    assert.ok(!APP_SRC.includes(bare), host + ": an UN-isolated copy of this markup is in app.js — " + JSON.stringify(bare));
+  }
+  assert.equal(BIDI_SOURCE_PINS.length, 22, "the source-pinned roster is the 22 derived unmountable sites");
 });
 
 test("cch-w22-s5 (B): relTime — a future timestamp is never 'just now', and the past is byte-identical", () => {
@@ -33990,7 +34119,8 @@ test("stw2 c1a: the dialog is LABELLED — index.html's card and the modal's own
   const raw = r.doc._reg.get("modal-body").innerHTML;
   assert.match(raw, /id="modal-title"/,
     "the create-site body must render the element index.html's aria-labelledby names");
-  assert.match(raw, /New site on Acme prod/, "…and that element must carry the dialog's actual name");
+  // (task-1614ac4ba29eec9b: the user-authored name now rides in its own <bdi>.)
+  assert.match(raw, /New site on <bdi>Acme prod<\/bdi>/, "…and that element must carry the dialog's actual name");
   // Every control the modal renders is reachable by its label.
   for (const id of ["site-nc-name", "site-nc-framework", "site-nc-template", "site-nc-dataset", "site-nc-doctype"]) {
     assert.ok(raw.includes('for="' + id + '"'), "control " + id + " must have a <label for>");

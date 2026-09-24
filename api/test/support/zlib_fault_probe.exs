@@ -59,7 +59,7 @@ Process.put(:zlib_fault_probe_owner, self())
 # differs from a real run is the injected raise.
 stub = ~S"""
 -module(zlib).
--export([open/0, inflateInit/2, safeInflate/2, inflateEnd/1, close/1]).
+-export([open/0, inflateInit/2, inflateInit/3, safeInflate/2, inflateEnd/1, close/1]).
 
 open() -> zlib_fault_probe_stream.
 
@@ -67,6 +67,11 @@ inflateInit(_Z, _WindowBits) ->
     put(zlib_fault_probe_calls, 0),
     put(zlib_fault_probe_delivered, 0),
     ok.
+
+%% `stage/4` inits with an end-of-stream behaviour (`:error`, and `:cut` for its
+%% data_error classifier); the stub has no stream to end, so it is ignored.
+inflateInit(Z, WindowBits, _EoSBehavior) ->
+    inflateInit(Z, WindowBits).
 
 safeInflate(_Z, _Data) ->
     %% `get/1` answering `undefined` here would mean the caller is NOT the

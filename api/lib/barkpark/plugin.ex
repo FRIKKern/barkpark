@@ -801,6 +801,40 @@ defmodule Barkpark.Plugin do
               ctx :: map()
             ) :: [api_test_spec()]
 
+  # ── Pre-write fences (Barkspark phase 1, task-e5baaaa14ddf2e1c) ───────
+
+  @typedoc """
+  One pre-write fence: `{module, function}`. The writer calls
+  `apply(module, function, [type, attrs, dataset, doc_id, prev_doc, opts])`
+  and expects `:ok` to pass. ANY other return halts the write and is returned
+  to the writer's caller VERBATIM (the `with :ok <- …` contract) — so a fence
+  returns `{:error, reason}` in exactly the shape its callers match on.
+  """
+  @type pre_write_fence :: {module(), atom()}
+
+  @doc """
+  Declare the ORDERED list of fences the core writer runs before a document
+  write, inside the write path, with the resolved `prev_doc` (nil on a birth)
+  and the caller's `opts`.
+
+  Published by `Barkpark.Plugins.Registry` to `Barkpark.Content.PreWriteFences`
+  and read there in plugin load order (this list's order kept within a
+  plugin). The writer runs them in that order, after its own transition
+  gate, and stops at the first non-`:ok`. There are no phases: slice B's
+  `:early` / `:late` split existed only to straddle two writer-owned task
+  birth guards, which the Tasks plugin now declares as fences itself
+  (task-2978357a0701cd10).
+
+  Unlike `lifecycle_hooks/0` `:before_*`, a fence sees `prev_doc` and `opts`
+  and its error is returned verbatim, not wrapped as `{:halted, _}`. NOT
+  filtered by per-workspace enablement: an installed plugin's data-integrity
+  gates always run. A raising declaration is NOT swallowed — silently
+  dropping an integrity fence would be fail-open.
+
+  Default (supplied by `use Barkpark.Plugin`) returns `[]`.
+  """
+  @callback pre_write_fences() :: [pre_write_fence()]
+
   # ── Lifecycle hooks callback (Goal barkpark-9lq) ─────────────────────
 
   @doc """
@@ -1004,6 +1038,7 @@ defmodule Barkpark.Plugin do
                       extract_edges: 2,
                       resolve_extract_edges: 2,
                       lifecycle_hooks: 0,
+                      pre_write_fences: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
                       cli_commands: 0,
@@ -1205,6 +1240,9 @@ defmodule Barkpark.Plugin do
       def lifecycle_hooks, do: %{}
 
       @impl Barkpark.Plugin
+      def pre_write_fences, do: []
+
+      @impl Barkpark.Plugin
       def api_tests, do: []
 
       @impl Barkpark.Plugin
@@ -1270,6 +1308,7 @@ defmodule Barkpark.Plugin do
                      extract_edges: 2,
                      resolve_extract_edges: 2,
                      lifecycle_hooks: 0,
+                     pre_write_fences: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,
                      cli_commands: 0,

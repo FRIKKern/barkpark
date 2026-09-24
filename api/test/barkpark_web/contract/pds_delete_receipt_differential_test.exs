@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Contract.PDSDeleteReceiptDifferentialTest do
     * media_controller.ex:365      DELETE /media/:id
     * share_controller.ex:141      DELETE /v1/shares/tokens/:token_id
     * share_link_controller.ex:221 DELETE /v1/shares/links/:id
-    * webhook_controller.ex:53     DELETE /v1/webhooks/:dataset/:id
+    * webhook_controller.ex delete/2  DELETE /v1/webhooks/:dataset/:id
 
   THE DIFFERENTIAL, which is the whole point: every test asserts a field the
   REQUEST CANNOT PRODUCE — a store-assigned binary_id, the store's `rev`, the

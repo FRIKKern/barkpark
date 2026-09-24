@@ -189,6 +189,19 @@ export const ROUTE_TIERS = [
   { key: "GET /v1/audit", auth_fn: A_PTADMIN, pin: null,
     why_no_pin: "a READ. The census PIN covers WRITE call sites only; no read has a row there",
     why: "the team's append-only trail is team-admin-only — a plain member is REFUSED, not narrowed" },
+  // task-cf8ef8a2da25e3aa: the provider capability matrix, which entered this
+  // table because the sweep's [data-life-retry] HOOKS row had to stay
+  // `route: null` (exempted in its ROUTE_NULL_DECLARED list) while this route
+  // was missing here — naming it would have answered `unknown` and red UNFENCED.
+  // The tier is READ OFF THE ROUTER, not off its index table: the clause
+  // `get "/v1/providers/capabilities"` in cloud/lib/barkpark_cloud/web/router.ex
+  // opens with `conn = Auth.require_user(conn, [])` and, if not halted, answers
+  // `json(conn, 200, providers_capabilities_payload())` — no cond, no
+  // team_admin? check, no with_team_* helper. The comment above that clause
+  // says why: "a static cross-surface contract, not team-scoped estate data".
+  { key: "GET /v1/providers/capabilities", auth_fn: A_USER, pin: null,
+    why_no_pin: "a READ. The census PIN covers WRITE call sites only; no read has a row there",
+    why: "any signed-in user may read the static provider capability matrix — not team-scoped, never refused to a member" },
 
   // ── site writes — ruling (a): require_ability is a no-op for a session ──
   { key: "POST /v1/sites", auth_fn: A_USER, pin: "POST /v1/sites", why: "any member may create a site" },
@@ -221,6 +234,36 @@ export const ROUTE_TIERS = [
   // label was not a router route, nothing could re-read it, and its fence answer
   // was this route's tier copied by hand.
   { key: "DELETE /v1/barkparks/:*", auth_fn: A_PTADMIN, pin: "DELETE /v1/barkparks/:*", why: "the lifecycle band's ONE console-executed write (decommission); the header's Retry removal is the second call site on it" },
+  // task-56a094e7a4c17250: the three admin-gated writes behind four of the
+  // sweep's WATCHED rows (#inst-update, [data-tl-retry], #new-retry,
+  // #new-gh-create). They answered `unknown` while this table lacked them, and
+  // the WATCHED arm did not red on unknown; it does now. Each tier is READ OFF
+  // ITS OWN ROUTER CLAUSE in cloud/lib/barkpark_cloud/web/router.ex, not off
+  // the index table at its top, and each PIN key names rows the census already
+  // carried, so (2n) re-reads all three against the router tier typed here.
+  //
+  //   `post "/v1/barkparks/:id/self-update" do` opens with
+  //   `conn = Auth.require_current_team_admin(conn)` and its cond's first arm
+  //   is `conn.halted -> conn`. No inline team_admin? cond, no with_team_*
+  //   helper; the later `bp.suspended ->` arm refuses everyone, admin included,
+  //   so it narrows nothing by role. PIN row: updateInstance.
+  { key: "POST /v1/barkparks/:*/self-update", auth_fn: A_PTADMIN, pin: "POST /v1/barkparks/:*/self-update",
+    why: "require_current_team_admin at the router; rewriting a live box's running code is admin-only, a plain member is refused 403" },
+  //   `post "/v1/barkparks/:id/retry" do` opens with
+  //   `# RBAC (rbac-roles): re-provisions a billed box → team admin only.` /
+  //   `conn = Auth.require_team_admin(conn, [])`, then `conn.halted -> conn`.
+  //   The retryable_provision_state? arm is a 409 for every caller, not a role
+  //   check. PIN rows: retryInstance ([data-tl-retry]) and newRenderFailed
+  //   (#new-retry), two call sites on one route.
+  { key: "POST /v1/barkparks/:*/retry", auth_fn: A_TADMIN, pin: "POST /v1/barkparks/:*/retry",
+    why: "require_team_admin at the router; re-provisioning a billed box is admin-only, a plain member is refused 403" },
+  //   `post "/v1/github/repos" do` opens with
+  //   `conn = Auth.require_team_admin(conn, [])`, then `conn.halted -> conn`;
+  //   the remaining cond arms (GitHub.configured?, GitHub.connected?, name and
+  //   template validation) gate on configuration and input, never on role.
+  //   PIN row: newCreateRepo.
+  { key: "POST /v1/github/repos", auth_fn: A_TADMIN, pin: "POST /v1/github/repos",
+    why: "require_team_admin at the router; creating a repo and pushing on the team's behalf is admin-only (parity with the connect side), a plain member is refused 403" },
   { key: "POST /v1/barkparks/:*/agent-key", auth_fn: A_USER_OR_PAT, pin: "POST /v1/barkparks/:*/agent-key", overlay_required: true,
     why: "require_user_or_pat at the router; the non-admin SESSION is refused inside a cond (PDF-D94)" },
 

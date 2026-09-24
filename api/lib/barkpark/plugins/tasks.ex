@@ -120,6 +120,38 @@ defmodule Barkpark.Plugins.Tasks do
     %{before_save: [&quality_gate/1], before_publish: [&portable_brief_gate/1]}
   end
 
+  @doc """
+  The task write fences, in the order `Barkpark.Content.Writer` ran them when
+  it named them directly (task-e5baaaa14ddf2e1c). Each one head-matches on
+  `type == "task"` and passes every other write through as `:ok`; each one's
+  own moduledoc says what it refuses and why. The ORDER is the contract — it
+  decides which refusal a write that trips two fences receives — and
+  `pre_write_fences_test.exs` pins it.
+
+  The two birth guards (`Barkpark.Tasks.BirthGuards`, formerly the writer's own
+  `ensure_task_born_adjudicated/5` and `ensure_task_surface_declared/5`,
+  task-2978357a0701cd10) sit where the writer ran them: after
+  `CriteriaRequiredFence`, before dedup, so the pure refusals still come
+  before dedup's trigram scan. `Dedup.check_new_task/5` takes no `doc_id`;
+  `dedup_check_new_task/6` adapts it to the uniform fence arity.
+  """
+  @impl Barkpark.Plugin
+  def pre_write_fences do
+    [
+      {Barkpark.Tasks.DraftTerminalFence, :check},
+      {Barkpark.Tasks.DatasetTwinFence, :check},
+      {Barkpark.Tasks.TerminalCriteriaFence, :check},
+      {Barkpark.Tasks.CriteriaRequiredFence, :check},
+      {Barkpark.Tasks.BirthGuards, :born_adjudicated},
+      {Barkpark.Tasks.BirthGuards, :surface_declared},
+      {__MODULE__, :dedup_check_new_task}
+    ]
+  end
+
+  @doc false
+  def dedup_check_new_task(type, attrs, dataset, _doc_id, prev_doc, opts),
+    do: Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts)
+
   @tui_block_types ~w(
     heading paragraph list callout divider section code table figure action
     pullquote embed ingress eyebrow byline diagram asciicast image composite
@@ -561,6 +593,46 @@ defmodule Barkpark.Plugins.Tasks do
     _ -> false
   catch
     _, _ -> false
+  end
+
+  @doc """
+  Plugin-contributed supervision children: one start-only boot check.
+
+  Resolves `Barkpark.Tasks.Judge.endpoint/0` once at boot
+  (task-6325dacb0e233d75), the plugin-side half of the gh-9531 FAIL-CLOSED
+  contract: a configured-but-malformed `ANTHROPIC_API_URL` refuses the node
+  instead of surfacing as a dedup judge that quietly never runs (the judge
+  fails OPEN by design, so nothing else would ever report it).
+
+  It lives HERE, not in `application.ex`, for the reason
+  `Barkpark.Plugins.OnixEdit.register_workers/1` gives: the host must not name
+  a removable plugin on a path that runs while it is disabled (`Barkpark.Plugin`
+  §Fresh-install invariant). With Tasks disabled this callback never runs.
+  The child starts under `Barkpark.Plugins.Supervisor`, which precedes
+  `BarkparkWeb.Endpoint`, so a malformed value still refuses the node before
+  it listens.
+  """
+  @impl Barkpark.Plugin
+  def register_workers(_ctx) do
+    [
+      %{
+        id: :tasks_judge_endpoint_boot_check,
+        start: {__MODULE__, :start_judge_endpoint_check, []},
+        restart: :temporary
+      }
+    ]
+  end
+
+  @doc """
+  Boot-time resolution of the judge endpoint — the child started by
+  `register_workers/1`. Returns `:ignore` on success so no process lingers;
+  `Judge.endpoint/0` RAISES on a malformed value, and a raising child start
+  takes the supervisor, and with it `Barkpark.Application.start/2`, down.
+  """
+  @spec start_judge_endpoint_check() :: :ignore
+  def start_judge_endpoint_check do
+    _ = Barkpark.Tasks.Judge.endpoint()
+    :ignore
   end
 
   @doc """

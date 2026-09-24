@@ -457,6 +457,67 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
     end
   end
 
+  # ── past the gzip member ──────────────────────────────────────────────────
+  #
+  # zlib at window bits 31 stops at the end of the FIRST gzip member, and in its
+  # default mode silently discards whatever follows — a second member, or junk —
+  # so those bytes were never inflated, parsed or counted by `max_total_bytes`.
+  # Pinned first by run (both staged `{:ok, %{entries: 5, bytes: 94}}`, the
+  # second member's `second.html` dropped); now a typed refusal. The framing
+  # block above closed the tail INSIDE the member; this is the layer outside it.
+  describe "bytes after the gzip member ends" do
+    test "a two-member .tar.gz is refused — the second member would be dropped",
+         %{dest: dest} do
+      second = tarball([file_entry("second.html", "<!doctype html><title>2</title>")])
+      raw = gz(astro_dist()) <> gz(second)
+
+      assert {:error, "E_MALFORMED", message} = stage_bytes(raw, dest)
+      assert message =~ "after its gzip member ends"
+      refute File.exists?(dest)
+    end
+
+    test "a member followed by 10 000 junk bytes is refused", %{dest: dest} do
+      raw = gz(astro_dist()) <> :crypto.strong_rand_bytes(10_000)
+
+      assert {:error, "E_MALFORMED", message} = stage_bytes(raw, dest)
+      assert message =~ "after its gzip member ends"
+      refute File.exists?(dest)
+    end
+
+    test "ONE stray byte after a member spanning several 64 KiB input chunks is refused",
+         %{dest: dest} do
+      # The member carries > 64 KiB of INCOMPRESSIBLE body, so `feed_all/3`
+      # hands it to zlib in more than one chunk: the refusal must not depend on
+      # the whole artifact arriving in a single `safeInflate/2` call.
+      big = :crypto.strong_rand_bytes(96 * 1024)
+      member = gz(tarball([file_entry("index.html", "<!doctype html>"), file_entry("b", big)]))
+      assert byte_size(member) > 64 * 1024
+
+      assert {:error, "E_MALFORMED", message} = stage_bytes(member <> <<0>>, dest)
+      assert message =~ "after its gzip member ends"
+      refute File.exists?(dest)
+    end
+
+    test "CONTROL — a corrupt member is still named corrupt, not a trailing-bytes refusal",
+         %{dest: dest} do
+      gzipped = gz(astro_dist())
+      size = byte_size(gzipped)
+      <<head::binary-size(size - 8), crc::binary-size(4), isize::binary-size(4)>> = gzipped
+      <<first, rest::binary>> = crc
+      corrupt = head <> <<Bitwise.bxor(first, 0xFF)>> <> rest <> isize
+
+      assert {:error, "E_MALFORMED", message} = stage_bytes(corrupt <> "junk", dest)
+      assert message =~ "corrupt"
+      refute message =~ "after its gzip member ends"
+    end
+
+    test "CONTROL — the same single member, with nothing after it, still stages",
+         %{dest: dest} do
+      assert {:ok, %{entries: 5, bytes: 94}} = stage_bytes(gz(astro_dist()), dest)
+      assert File.read!(Path.join(dest, "index.html")) =~ "hello"
+    end
+  end
+
   # ── the served shape ──────────────────────────────────────────────────────
 
   # The CLI already refuses to PACK a directory with no root `index.html`
@@ -825,6 +886,118 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
       assert {:ok, summary} = stage(tar, dest)
       assert summary.entries == 4
       assert File.read!(Path.join(dest, "assets/app.css")) == "body{margin:0}"
+    end
+  end
+
+  # ── a pax size and a ustar size that DISAGREE ─────────────────────────────
+  #
+  # A pax `size` record REPLACES the ustar size field. When the ustar field is
+  # also non-zero and says something ELSE, one of the two framings is a lie, and
+  # the pax one wins in every reader we have: GNU tar 1.35 and bsdtar 3.7.4 both
+  # apply the record, so a pax size LARGER than the body swallows the next
+  # header+body. Measured on a hand-crafted archive (index.html, then
+  # `x{size=1536}` over `a.txt` with a 1-byte ustar size, then victim.html):
+  #
+  #     $ gtar tvf disagree.tar; echo EXIT=$?   ->  index.html, a.txt (1536), EXIT=0
+  #     $ bsdtar tvf disagree.tar; echo EXIT=$? ->  index.html, a.txt (1536), EXIT=0
+  #
+  # victim.html vanishes in both, silently. Parity alone would say "accept". The
+  # tie-breaker is what REAL writers put in the ustar field when they emit a pax
+  # size — the raw bytes at offset 124 of the FILE header (12 bytes):
+  #
+  #   writer (entry of 8 GiB + 1)              ustar size field     meaning
+  #   Go 1.26.2 archive/tar                    "00000000000\0"      ZERO
+  #   GNU tar 1.35 --format=posix              "00000000000\0"      ZERO
+  #   bsdtar 3.7.4 --format=pax --no-read-sparse "100000000001"     SAME value,
+  #                                                                 12 digits, no NUL
+  #   Go, PAXRecords{"size": "29"} on 29 bytes "00000000035\0"      SAME value
+  #
+  # And no writer can be MADE to emit a disagreeing pair: Go silently drops a
+  # PAXRecords "size" that differs from Header.Size (no `x` block at all), GNU
+  # tar ignores `--pax-option=size:=N` and routes `size=N` into a GLOBAL `g`
+  # header (refused here on its own), and bsdtar only writes one for >= 8 GiB.
+  # So a non-zero ustar size that disagrees with the pax size is a crafted-archive
+  # tell with no legitimate producer — refusing it costs nothing a real writer
+  # emits. A ZERO ustar field is the Go/GNU convention and stays accepted.
+  #
+  # The three 8 GiB heads below are those writers' REAL first 1536 bytes (the `x`
+  # header, its record block, the file header), gzipped. Each must reach the
+  # per-entry CAP, not a disagreement refusal: that is what proves the comparison
+  # reads bsdtar's un-terminated 12-digit field as EQUAL, not as a mismatch.
+  @go_pax_size_forced_b64 "H4sIAAAAAAAA/wpIrPBITUxJLSrWM9DPzEtJrdDLKMnNYaAmMIAAXLSBgaExgg0SNzQyMjRgUKigqitwgNLiksQiBgMDetg1CIGhoUJxZlWqrZEl10A7ZRQMAKBRlkcBoExtZmKCO/8bm6Llf0MjAwMGBbrkSWrlf3TPDRFgo5iSn1xSWZCqAEoDdjYZhnYZqTk5+Tb6GYZ2A+24UTAKRsEoGAU0A4AAAAD//x8prlEADAAA"
+  @go_8gib_head_b64 "H4sIAAAAAAACAwtIrPBITUxJLSrWM9BPykzXS8rMY6AyMIAAXLSBgZExgg0SNzQ0MTFnUKhgoAMoLS5JLAJazzAygaGlQnFmVaqthamFpaWxiamlMRfDKBg5gEZZHiP/m5mY4M7/6GxDAxMjMwYFg6GU/9E9N0QAAJP9EegABgAA"
+  @gnu_tar_posix_8gib_head_b64 "H4sIAAAAAAACA+2UwQrCMAyGe/Yp+gRbsjbtctjdo6/QaSeFTcRNGD693QQPw3nSIep3yeFPIBC+JOnG9Wvvdv7UpmXYJ2U4iBcDEaP1WCPTCkgkkDIiQJuhFYBIygjZiwU4t507xVXEb4Is23DxRU45s9LEaqVANl1ofIGWAXNG5oRBa9YaeUjdo9QgGxzS7fys+PNpvEn5Wf+toZv32f0fjL9g4r9SICQs6f/R17V/0hfbqur77n8FSwzxcwAGAAA="
+  @bsdtar_pax_8gib_head_b64 "H4sIAAAAAAACA+2TwQqCQBCG9+xT7BPYzO6M6xy8d+wVtNYQNEINpKdPDaQI7JJR4Hf5Gb45zBz+XdptfXrw9SYrjmFWnNTnAYCISA/pIh4TzH0eQWaNbJgBnUGnAYktKd2pL3Bp2rTuTzn7svQze/1ans8/2aOn/BMs6H1bVD5BJ4CxGIhCZ4SRJaagt+mjRZFQkCGyxrrBVi8WiIQIJUDRTXH1ScyxiCUWG6iVX2O51r/vP8IEPvffsDNKw9r/xbkBRoq3ygAGAAA="
+
+  describe "a pax size that disagrees with a non-zero ustar size" do
+    test "an OVER-declared pax size (the swallow) is refused, not staged", %{dest: dest} do
+      tar =
+        tarball([
+          file_entry("index.html", "<!doctype html><title>bp</title>"),
+          pax_entry([{"size", "1536"}]),
+          header("a.txt", size: 1) <> pad_body("x"),
+          file_entry("victim.html", "victim")
+        ])
+
+      assert {:error, "E_MALFORMED", message} = stage(tar, dest)
+      assert message =~ "pax size record (1536)"
+      assert message =~ "ustar size field (1)"
+      refute File.exists?(dest)
+    end
+
+    test "an UNDER-declared pax size is refused the same way", %{dest: dest} do
+      tar =
+        tarball([
+          file_entry("index.html", "<!doctype html><title>bp</title>"),
+          pax_entry([{"path", "a.txt"}, {"size", "0"}]),
+          file_entry("shadow.txt", "hello")
+        ])
+
+      assert {:error, "E_MALFORMED", message} = stage(tar, dest)
+      assert message =~ "disagrees"
+      refute File.exists?(dest)
+    end
+
+    test "a ZERO ustar field under a pax size stays accepted (the Go/GNU shape)",
+         %{dest: dest} do
+      body = String.duplicate("y", 700)
+
+      tar =
+        tarball([
+          file_entry("index.html", "<!doctype html><title>bp</title>"),
+          pax_entry([{"size", "700"}]),
+          header("big.txt", size: 0) <> pad_body(body)
+        ])
+
+      assert {:ok, summary} = stage(tar, dest)
+      assert summary.entries == 2
+      assert File.read!(Path.join(dest, "big.txt")) == body
+    end
+
+    test "Go archive/tar writing an AGREEING pax size stages", %{dest: dest} do
+      assert {:ok, summary} = stage_bytes(Base.decode64!(@go_pax_size_forced_b64), dest)
+      assert summary.entries == 1
+      assert File.read!(Path.join(dest, "index.html")) == "<!doctype html><h1>hello</h1>"
+    end
+
+    for {writer, attr, field} <- [
+          {"Go 1.26.2 archive/tar", :go_8gib_head_b64, "00000000000\0"},
+          {"GNU tar 1.35 --format=posix", :gnu_tar_posix_8gib_head_b64, "00000000000\0"},
+          {"bsdtar 3.7.4 --format=pax", :bsdtar_pax_8gib_head_b64, "100000000001"}
+        ] do
+      @attr_b64 Module.get_attribute(__MODULE__, attr)
+      @field field
+
+      test "#{writer}'s real 8 GiB header reaches the entry CAP, not a disagreement",
+           %{dest: dest} do
+        raw = :zlib.gunzip(Base.decode64!(@attr_b64))
+        # The raw field really is what the table above says it is.
+        assert binary_part(raw, 2 * @block + 124, 12) == @field
+        assert binary_part(raw, 156, 1) == "x"
+
+        assert {:error, "E_ENTRY_TOO_LARGE", message} = stage_bytes(:zlib.gzip(raw), dest)
+        assert message =~ "8589934593"
+      end
     end
   end
 

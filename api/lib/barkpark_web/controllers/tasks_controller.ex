@@ -119,6 +119,19 @@ defmodule BarkparkWeb.TasksController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
+  # Session auto-log (task-bc34e83515bbd91f): arm the before_send callback that
+  # appends a `task-closed` event when `close/2`'s `:closed` arm `mark/3`ed the
+  # conn. Scoped to the WORKSPACE the close itself resolved, not its project: a
+  # session is a workspace-level agent record (the ingest door that writes it
+  # infers `{workspace, nil}` for a scope-less token), and the flat /v1/tasks
+  # route pins the Default project, so a project-strict read would miss every
+  # such session. `:shared_only` (no tenant resolved) stays fail-narrow. A plug,
+  # not a call from the receipt body: see `BarkparkWeb.SessionAutolog`.
+  plug(:arm_session_autolog when action in [:close])
+
+  defp arm_session_autolog(conn, _opts),
+    do: BarkparkWeb.SessionAutolog.arm(conn, &Keyword.take(scope_opts(&1), [:workspace_id]))
+
   # ─── GET /v1/tasks/ready ────────────────────────────────────────────────
 
   # task-e1b74c19174cb2c1: the `filter[...]` container is PARSED here too, and
@@ -1498,6 +1511,15 @@ defmodule BarkparkWeb.TasksController do
           )
 
         {:ok, %Document{} = doc, :closed} ->
+          # Session auto-log (task-bc34e83515bbd91f): the close has COMMITTED.
+          # `mark/3` writes nothing — the `arm_session_autolog` plug's
+          # before_send callback appends, best-effort, on the 2xx below.
+          conn =
+            BarkparkWeb.SessionAutolog.mark(conn, "task-closed", %{
+              "ref" => doc.doc_id,
+              "note" => get_in(doc.content || %{}, ["lifecycle_status"])
+            })
+
           # Graduated enforcement (living-values §12): unmet criteria are
           # SURFACED as a soft warning on the (already successful) close —
           # never a gate (close_response below, shipped with lvw-t6).
@@ -2729,7 +2751,9 @@ defmodule BarkparkWeb.TasksController do
   # lengthen every derivation, which crosses the TTL more often. Fail-open in
   # the only regime where the cap matters. The deadline arm is now GONE; the
   # deadline itself stays on the row as diagnostic data.
-  @graph_corpus_slots :barkpark_graph_corpus_slots
+  # The table itself is CORE (`Barkpark.Content.Graph.CorpusSlots`), created at
+  # boot by `Barkpark.Application.start/2` so it exists with every plugin off.
+  @graph_corpus_slots Barkpark.Content.Graph.CorpusSlots.table()
   @graph_corpus_max_concurrency 4
   @graph_corpus_slot_ttl_ms 60_000
 
@@ -3094,7 +3118,8 @@ defmodule BarkparkWeb.TasksController do
 
   defp acquire_graph_corpus_slot do
     # NO lazy `:ets.new` here. The table is created once from
-    # `Barkpark.Application.start/2`; a request-path create would hand ownership
+    # `Barkpark.Application.start/2` via the core
+    # `Barkpark.Content.Graph.CorpusSlots.init/0`; a request-path create would hand ownership
     # of the bound to a transient request process, and the bound would die (and
     # silently RESET) with it. If the table is somehow absent the `rescue` below
     # sheds rather than 500s.
@@ -3218,33 +3243,6 @@ defmodule BarkparkWeb.TasksController do
     end
 
     :ok
-  end
-
-  @doc """
-  Create the `/v1/graph` admission-cap slot table, owned by the caller.
-
-  Called ONCE from `Barkpark.Application.start/2` so the table's owner is the
-  application process rather than whichever request happened to arrive first —
-  a bound whose bookkeeping dies with a request is not a bound. Idempotent: a
-  second call (a re-boot in the test VM) is a no-op, and the rows are slots, so
-  nothing is lost by NOT clearing them.
-  """
-  def init_graph_corpus_slots, do: ensure_graph_corpus_slots()
-
-  defp ensure_graph_corpus_slots do
-    case :ets.whereis(@graph_corpus_slots) do
-      :undefined ->
-        try do
-          :ets.new(@graph_corpus_slots, [:named_table, :public, :set, read_concurrency: true])
-        rescue
-          # Lost the create race to a concurrent boot (the test VM re-starts the
-          # supervision tree) — the table exists, which is all this needs.
-          ArgumentError -> :ok
-        end
-
-      _ref ->
-        :ok
-    end
   end
 
   defp graph_corpus_max_concurrency,

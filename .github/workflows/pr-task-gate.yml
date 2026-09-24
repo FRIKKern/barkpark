@@ -171,7 +171,20 @@ concurrency:
   # Enforced by scripts/required-context-never-cancels-check.sh, which derives
   # the required names from .github/required-checks.json rather than a hardcoded
   # list, so a newly promoted required context is covered the day it is promoted.
-  group: pr-task-gate-${{ github.ref }}
+  #
+  # THE GROUP IS KEYED ON THE HEAD SHA, NOT THE REF (task-60c3164ece5ab5eb).
+  # `cancel-in-progress: false` stops a RUNNING run being cancelled, but GitHub
+  # still keeps ONE pending run per group and cancels the older pending run
+  # when a newer one queues. This workflow also fires on `edited`/`labeled`,
+  # whose payload can carry the PRE-push head. Measured on PR #16709,
+  # 2026-09-23T16:44:38Z: the push's run for the NEW head (35890853900) and an
+  # `edited` run for the OLD head (35890854903) were created in the same
+  # second; the old-head run queued second and evicted the new-head one, which
+  # concluded `cancelled` with ZERO jobs. The newest head never rendered this
+  # required context. Same pair on 2026-09-21 and 2026-09-07. Per-head groups
+  # mean runs for different heads never share a pending slot; re-fires on the
+  # SAME head still coalesce. Asserted in scripts/pr-task-gate.test.sh.
+  group: pr-task-gate-${{ github.event.pull_request.head.sha || github.ref }}
   cancel-in-progress: false
 
 jobs:

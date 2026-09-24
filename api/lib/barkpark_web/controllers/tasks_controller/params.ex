@@ -424,6 +424,14 @@ defmodule BarkparkWeb.TasksController.Params do
   #   `has_description`   } the booleans `ScoreCompleteness`
   #   `has_dependencies`  } (`internal/taskboard/completeness.go`) consumes,
   #   `has_paper`         } NEVER the prose they are derived from.
+  #   `design_doc`        the paper SLUG itself, task-cf0395706361aa2e: the
+  #                       Go paper->tasks inversion (`DrivenTasks`,
+  #                       detail_data.go) runs corpus-wide and matches on it,
+  #                       so the bit in `has_paper` cannot stand in. Verbatim
+  #                       (the Go side applies `bareID` to the full view's
+  #                       copy; both views must hand it the same string).
+  #                       Omitted unless the value is slug-shaped: non-empty,
+  #                       no whitespace, <= 255 B (the doc_id cap).
   #
   # WHY THOSE THREE AND NOT SEVEN. The rubric takes seven inputs. `title`,
   # `placement` (`parent_id`) and `priority` are already top-level on this
@@ -437,7 +445,8 @@ defmodule BarkparkWeb.TasksController.Params do
   # not go blank, it would render a LOWER score that looks like a real one.
   #
   # OMISSION LAW (wire §4). `criteria_marks` follows `criteria_progress`
-  # exactly: omitted when the row has no criteria, never an empty string.
+  # exactly: omitted when the row has no criteria, never an empty string;
+  # `design_doc` likewise — absent, never "" or null.
   # `content_digest` ITSELF is emitted on every board card, including the
   # all-false one, and that is the same law read correctly rather than an
   # exception to it: the law forbids an AMBIGUOUS segment ("0/0" cannot be
@@ -504,6 +513,7 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_brief_engagement(content)
     |> put_brief_disposition(content)
     |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
+    |> put_brief_claim_residue(content)
     |> prune_nils()
   end
 
@@ -570,6 +580,59 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   defp brief_claim(_), do: nil
+
+  # ── WHAT THE SUPPRESSION ABOVE COSTS, AND THE SUPPORTED WAY TO ASK ───────
+  #
+  # THE TRAP (task-4fe00055375680bb). `brief_claim/1` returning nil for a
+  # worker-less claim is right for the CARD and stays — but this view is what
+  # `bp task ready` serves, so the suppression also blinds every BOARD-WIDE
+  # SWEEP built on it. A full ready walk filtered for a claim object with a
+  # null worker cannot return anything but ZERO, on any board, forever, and
+  # the sweep cannot tell that zero from a clean board. Measured on the live
+  # board 2026-09-23 over a complete two-page walk of 724 ready rows: the
+  # lapsed filter returned 0 while its positive control (`claim.worker` NOT
+  # null) returned 19, and a per-row `bp task get` over the same 724 ids found
+  # 183 rows carrying a claim map with a null worker.
+  #
+  # DO NOT FIX THAT BY PUTTING THE BLOCK BACK. Ask on `claim_residue` instead
+  # — `put_brief_claim_residue/2` below, an additive key that says only WHAT
+  # KIND of residue is there ("expired" | "released" | "unheld") and never
+  # names a holder, because a residue row has none. The sweep is then one list
+  # read:
+  #
+  #     bp task ready --limit 400 --offset N -o json \
+  #       | jq '[.docs[] | select(.claim_residue == "expired")] | length'
+  #
+  # `claim.worker` is still the ONE ownership signal on this card, and
+  # `claim_residue` is never emitted for a row that has one.
+  defp put_brief_claim_residue(map, content) do
+    case Map.get(content, "claim") do
+      %{} = claim ->
+        case Map.get(claim, "worker") do
+          nil -> Map.put(map, :claim_residue, residue_kind(claim))
+          _worker -> map
+        end
+
+      _ ->
+        map
+    end
+  end
+
+  # EXPIRED vs RELEASED is not cosmetic and a boolean would destroy it. On the
+  # 2026-09-23 census the 183 residues split 53 swept / 130 released: a
+  # release is ordinary, correct lane behaviour, while a TTL reap is the
+  # silent return-to-ready the pulse loop exists to catch. A sweep that cannot
+  # separate them gets a 183-row haystack for a 53-row question. `expired_at`
+  # wins a tie because a row that was released and LATER reaped is, now, a
+  # reap. "unheld" is the honest third answer: a claim map with no holder and
+  # no marker — hand-written, or pre-dating both fields.
+  defp residue_kind(claim) do
+    cond do
+      is_binary(Map.get(claim, "expired_at")) -> "expired"
+      is_binary(Map.get(claim, "released_at")) -> "released"
+      true -> "unheld"
+    end
+  end
 
   # The now-line rides the card with its text capped (cut d) and its timestamp
   # trimmed to seconds (cut f); `criterion` (a small int) survives untouched.
@@ -698,7 +761,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # for and why the set is exactly this size.
   #
   # BOARD-ONLY ON PURPOSE. The full card still carries `content`, so a full
-  # reader derives all four of these from the source rather than from a
+  # reader derives every one of these from the source rather than from a
   # summary; adding the digest there would be a SECOND copy of the same facts
   # on the one card that does not need it, and two copies of a fact are two
   # things to drift.
@@ -712,9 +775,22 @@ defmodule BarkparkWeb.TasksController.Params do
             present_list?(Map.get(content, "papers"))
       }
       |> put_criteria_marks(content)
+      |> put_design_doc_slug(Map.get(content, "design_doc"))
 
     Map.put(map, :content_digest, digest)
   end
+
+  # Bounded to a SLUG: `design_doc` is validated only as "a string", so a
+  # sentence is storable. A paper id never contains whitespace and never
+  # exceeds the doc_id cap (Content.Document, max 255), so anything else is
+  # not an id and the card carries no key rather than prose.
+  @design_doc_slug_max_bytes 255
+  defp put_design_doc_slug(digest, slug)
+       when is_binary(slug) and slug != "" and byte_size(slug) <= @design_doc_slug_max_bytes do
+    if String.match?(slug, ~r/\s/u), do: digest, else: Map.put(digest, :design_doc, slug)
+  end
+
+  defp put_design_doc_slug(digest, _), do: digest
 
   # Same omission law as put_criteria_progress/2: no criteria, no key.
   defp put_criteria_marks(digest, content) do

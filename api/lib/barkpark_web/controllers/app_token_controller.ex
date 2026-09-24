@@ -121,6 +121,16 @@ defmodule BarkparkWeb.AppTokenController do
   depends on it. A selector the caller can guess (an email) and a selector the
   caller must already hold (the secret) are different powers.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, params) do
     bearer = conn.assigns.api_token
 
@@ -311,6 +321,16 @@ defmodule BarkparkWeb.AppTokenController do
   After the 200, the same bearer is rejected by `:require_token` — a repeat
   call is the HTTP-level proof of fail-closed.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete_current(conn, _params) do
     token = conn.assigns.api_token
 
@@ -458,7 +478,10 @@ defmodule BarkparkWeb.AppTokenController do
       label = fetch_label(params, email)
       dataset = fetch_dataset(params)
 
-      case Auth.create_token(raw, label, dataset, permissions, workspace.id) do
+      # `class: :app` — app tokens keep today's no-expiry mint: no max age and
+      # no configured default apply until the App shape exists
+      # (task-a0f8cfd7f4800236).
+      case Auth.create_token(raw, label, dataset, permissions, workspace.id, class: :app) do
         {:ok, minted} ->
           # Credential lifecycle event (the `revoke_token` twin): THAT a mint
           # happened, for whom, into which workspace — never the token value.

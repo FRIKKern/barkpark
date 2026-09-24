@@ -377,7 +377,7 @@ defmodule Barkpark.Plugins.Github.Intake do
   # is left ABSENT when the issue has no body (never fabricated).
   #
   # BORN ADJUDICATED, NOT EXEMPTED (PDS wave 28). The birth fence
-  # (`Content.Writer.ensure_task_born_adjudicated/5`) exempts every non-`:api`
+  # (`Tasks.BirthGuards.born_adjudicated/6`) exempts every non-`:api`
   # source, and this write is stamped `source: :github` — so the bridge would
   # pass the fence by carve-out while filing exactly the unadjudicated row the
   # fence exists to stop. It states its adjudication instead: `"open"` (the term

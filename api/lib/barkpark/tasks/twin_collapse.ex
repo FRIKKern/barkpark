@@ -59,6 +59,27 @@ defmodule Barkpark.Tasks.TwinCollapse do
   def canonical([_ | _] = twins), do: Enum.min_by(twins, &collapse_key/1)
 
   @doc """
+  True when the bucket is a TWINNED pair with NO published side: more than one
+  member and none whose `status` is `"published"`.
+
+  This is the invariant the old `hd(twins)` default left unstated
+  (task-9d0c7adbbe1a5af1, criterion 2). `canonical/1` still picks a winner here
+  — rules 2-3 are total — but the winner is chosen between two unpublished
+  rows, so a reader that paints it as an ordinary card hides that the logical
+  id has no row of record. Readers SURFACE this case instead of rendering it
+  silently.
+
+  An UNPAIRED `drafts.` row (a one-member bucket) is NOT this case: it IS the
+  row of record (PDS-D749 carve-out), so it answers `false`. So does any bucket
+  holding a published member, however many drafts sit beside it.
+  """
+  @spec unpublished_pair?([struct()]) :: boolean()
+  def unpublished_pair?([_, _ | _] = twins),
+    do: not Enum.any?(twins, &(&1.status == "published"))
+
+  def unpublished_pair?(_twins), do: false
+
+  @doc """
   The sort key rule 1-3 impose on one row. Exposed so a test can assert the
   ORDER rather than only a winner.
   """

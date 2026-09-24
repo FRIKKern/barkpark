@@ -2391,7 +2391,14 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
 # workflow landed on 2026-08-09, nine days after both frozen heads. They are
 # listed here ONE NAME AT
 # A TIME, exactly as an operator would type them, so a row that stops being
-# unrenderable reds this file instead of quietly widening a blanket waiver. §14b
+# unrenderable reds this file instead of quietly widening a blanket waiver.
+# The rule cuts both ways: a name the generator CAN re-derive leaves this list.
+# `PR task gate self-test` and `Re-land advisory (already-landed overlap)` did
+# (task-7ac46837d7b03e44): S8 PULL-REQUEST-ONLY now classifies both off the real
+# workflow tree on this very pair (generator --explain: pr-task-gate.yml job
+# 'pr-task-gate-selftest', reland-check.yml job 'reland-check'; §30h/§30j below
+# pin the first), and scripts/required-checks-ack-derive.sh reported both as
+# "did not need" on every run. §14b
 # below asserts the refusal that makes this list necessary; every section that
 # wants a successful EMIT passes "$ACK".
 #
@@ -2410,7 +2417,6 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Dispatch (compose-smoke paths)"
         --expect-unrendered "Elixir path-escape ratchet"
         --expect-unrendered "gofmt drift ceiling (blocking)"
-        --expect-unrendered "PR task gate self-test"
         --expect-unrendered "Dependabot PRs carry the standing task trailer"
         --expect-unrendered "Dependabot trailer injector self-test"
         --expect-unrendered "Prod compile gate (Elixir 1.18.1 / OTP 27.0)"
@@ -2462,7 +2468,6 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Renew every open PR's claim (20-min sweep)"
         --expect-unrendered "Report main-push failure to a human"
         --expect-unrendered "gofmt -l (advisory)"
-        --expect-unrendered "Re-land advisory (already-landed overlap)"
         --expect-unrendered "Boundary gate"
         --expect-unrendered "Dispatch (shell-harness paths)"
         --expect-unrendered ".claude/workflows engines load on a machine that is not this one"
@@ -2545,6 +2550,8 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Flagship template bp-command parse"
         --expect-unrendered "Stale verdict watch"
         --expect-unrendered "Stale verdict harness"
+        --expect-unrendered "Report stale-verdict-watch read fault to a human"
+        --expect-unrendered "Report stale-verdict-watch scream to a human"
         --expect-unrendered "Break-glass harness"
         --expect-unrendered "Generate reference"
         # ── 2026-09-09: four rows #17111 (c19d7c7ab) added to .exclusions by hand for
@@ -2750,7 +2757,22 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # these three lines to paste.
         --expect-unrendered "prod-microblock-read"
         --expect-unrendered "prod-microblock-report-scheduled-failure"
-        --expect-unrendered "prod-microblock-selftest")
+        --expect-unrendered "prod-microblock-selftest"
+        # ── 2026-09-23 (task-ef8dd830312c56a9): the console-harness pin leg. Its
+        # .exclusions row lands in the same diff. The NAME is not new — it arrived
+        # with #19567 (7da416496) under slug `console-harness-pin` — but it first
+        # RENDERED on a drift-examined sha when #19951 touched console-harness.yml,
+        # so the gap sat latent until a push-to-main made the dispatcher emit it.
+        --expect-unrendered "console-harness.sh reads CI's pin (it must be able to LOSE)"
+        # ── 2026-09-23 (task-a0abaae6f64c0a9c): absent-context-census.yml. The
+        # census job's name had no row although it renders on main commits (never
+        # on a PR head — no pull_request trigger); the workflow_run leg added in
+        # the same change makes it render there several times an hour, and the new
+        # cadence job renders beside it. Both rows land in the same diff; the frozen
+        # fixture pair predates the workflow. DERIVED by
+        # scripts/required-checks-ack-derive.sh, which named exactly these two.
+        --expect-unrendered "Absent required-context census"
+        --expect-unrendered "Census cadence (hold, re-arm)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

@@ -488,6 +488,13 @@ defmodule Barkpark.PluginFreeBootTest do
              "supervision tree contains plugin children: #{inspect(offenders)}"
     end
 
+    test "no pre-write fence resolves: the writer runs no plugin fence under :plugins []" do
+      # task-e5baaaa14ddf2e1c — the Tasks write fences moved behind
+      # `pre_write_fences/0`; with nothing registered the list the writer
+      # runs is empty, not a Tasks-shaped residue.
+      assert Barkpark.Plugins.Registry.collect_pre_write_fences() == []
+    end
+
     test "GET /studio/production renders 200 with Structure marker (following the scoped-shell redirect)" do
       conn = get_following_redirects("/studio/production")
       body = html_response(conn, 200)
@@ -580,6 +587,53 @@ defmodule Barkpark.PluginFreeBootTest do
              "GET /v1/graph/:id 404ed under :plugins [] — the route is NOT core-mounted"
 
       assert conn.status == 200
+    end
+
+    # task-6325dacb0e233d75: the corpus route's admission-cap slot table is
+    # created at boot by CORE (`Barkpark.Content.Graph.CorpusSlots.init/0` from
+    # `Barkpark.Application.start/2`), not by the Tasks plugin. This case's
+    # setup_all RESTARTED the application with :plugins [], so the table below
+    # was created by that plugin-free boot (the previous owner died with the
+    # stopped application). Were the table plugin-owned, it would be absent and
+    # `acquire_graph_corpus_slot/0` would shed EVERY request with a 503.
+    test "GET /v1/graph (the corpus) serves under :plugins [], not 503 — the slot table is core" do
+      assert :ets.whereis(Barkpark.Content.Graph.CorpusSlots.table()) != :undefined,
+             "the /v1/graph slot table was not created by the plugin-free boot"
+
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      scope = [workspace_id: ws.id, project_id: project.id]
+      doc_id = "graph-corpus-killswitch-#{System.unique_integer([:positive])}"
+
+      {:ok, _doc} =
+        Barkpark.Content.create_document(
+          "post",
+          %{"doc_id" => doc_id, "title" => doc_id, "content" => %{}},
+          "production",
+          scope
+        )
+
+      {:ok, _pub} = Barkpark.Content.publish_document(doc_id, "post", "production", scope)
+
+      raw_token = "barkpark-plugin-free-corpus-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Barkpark.Auth.create_token(raw_token, "plugin-free-corpus", "test", [
+          "read",
+          "write",
+          "admin"
+        ])
+
+      conn =
+        BarkparkWeb.ConnCase.scoped_conn()
+        |> put_req_header("authorization", "Bearer " <> raw_token)
+        |> get("/v1/graph?dataset=production")
+
+      refute conn.status == 503,
+             "GET /v1/graph shed with 503 under :plugins [] — the slot table is missing"
+
+      assert conn.status == 200
+      body = Jason.decode!(conn.resp_body)
+      assert doc_id in Enum.map(body["nodes"], & &1["id"])
     end
 
     test "read-tier manifest lists the graph.* verbs under :plugins []" do

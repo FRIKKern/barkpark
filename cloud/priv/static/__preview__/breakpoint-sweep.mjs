@@ -29,7 +29,7 @@
 //             render count stated in HEIGHT_REASONS[800], and reconciles what
 //             it asked for against the window.innerHeight it measured, so a
 //             declared-but-undriven height cannot be reported as covered.
-//   SCENARIO  144 scenarios, 25 rendered, 119 in a COMMITTED residue literal.
+//   SCENARIO  146 scenarios, 25 rendered, 121 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -535,9 +535,14 @@ export function familyOf(scen) {
   return "no-deeplink";
 }
 
-// The 13 families the residue falls into, each with the reason Leg B does not
-// render it. These are REASONS, not an allowlist: the allowlist is the 96
-// name-keyed entries below, which is what makes a 121st scenario refusable.
+// The families the residue falls into, each with the reason Leg B does not
+// render it. These are REASONS, not an allowlist: the allowlist is the
+// name-keyed entries below, which is what makes a new scenario refusable.
+// (task-1ac954ba0db927cb took the typed counts out of this sentence: they had
+// rotted against the literal. `>> scenarios` prints the live census.)
+// A family reason says why the FAMILY is residue. Whether it is true of each
+// ENTRY is that entry's own verdict (RESIDUE VERDICTS, below the literal) —
+// where the two disagree, the entry's verdict is the finding.
 export const RESIDUE_FAMILY_REASONS = {
   "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 34 vary the CONTENT of a panel already rendered at all 18 widths — a new geometry only if the panel's own shape changes, which the five cells would see. The last two (task-499cab525e65018b) vary it by putting a DIALOG over it: `instance-pin-version` and `instance-update-conflict` are `instance-behind`'s fixture with a declared `modal` driver, so the panel beneath each one is the very panel the five cells already walk at all 18 widths, and the dialog's own geometry is modal-oracle's axis — the same split the account family and cch-w45-bl's render-state fixtures are already explained by.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 13 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all), and cch-w12-followup-login-fixture-gap's `activity-identity-change` (the corpus's ONLY successful-login fixture, a DRIVE through three states rather than a screen — smoke.mjs steps it from Activity to signed out to signed in as another team, and a transition is not a width) — over a grid already walked at all 18 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
@@ -555,8 +560,10 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#activity": "The Activity feed is swept by the `activity` cell at all 18 widths. cch-w36-bl's `activity-denied` is the plain-MEMBER twin of that same screen, and it renders STRICTLY LESS: /v1/audit answers 403, so loadActivity replaces the whole coalesced feed with ONE .empty-state block — the identical geometry the refusal fixtures in `hash:#operator` and `hash:#billing` already occupy, and narrower at every width than the grid the cell walks. What it exists to measure is an AUTHORITY answer, not a width: it was the first fixture in this corpus able to reach that refusal arm at all, because the only other #activity scenario is an owner and the only other auditDenied fixture sits on the instance timeline, where the same 403 degrades to events-only instead of taking over the view.",
 };
 
-// THE RESIDUE — 110 scenarios that exist and are NOT rendered by any cell,
-// COMMITTED AS A LITERAL, name-keyed to the family that explains them.
+// THE RESIDUE — the scenarios that exist and are NOT rendered by any cell,
+// COMMITTED AS A LITERAL, name-keyed to the family that explains them and, per
+// entry, to a content verdict: { family, verdict, why } plus `by` (superseded)
+// or `cover` (genuinely-uncovered). See RESIDUE VERDICTS below the literal.
 //
 // WHY A COMMITTED LITERAL AND NOT A COMPUTED ONE (charter D180). An allowlist
 // derived from the current residue is green under EVERY mutation, because it
@@ -567,8 +574,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 22-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 144 scenarios · 26 cells over 25 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 119 · 14 families.
+// THE CENSUS THIS RECONCILES AGAINST: 146 scenarios · 26 cells over 25 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 121 · 14 families.
 // cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
 // the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
 // \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
@@ -767,6 +774,17 @@ export const RESIDUE_FAMILY_REASONS = {
 // (`144 scenarios · 25 distinct covered by 26 cells · 119 residue over 14
 // families`), never by adding one.
 //
+// task-679663d0bee42b15 moved it by TWO, both residue: `new-launch-limit-reached`
+// and `new-launch-forbidden` (family path:/new) are the 145th and 146th
+// scenarios and the 120th and 121st residue entries — the /new launch step's
+// own fixture with only POST /v1/launch's 403 answer changed, so their subject
+// is a toast smoke.mjs asserts, not geometry. Cells (26), distinct (25) and
+// families (14) are DELIBERATELY UNMOVED. The sweep refused at exit 2
+// (`UNLISTED scenario "new-launch-limit-reached" (family path:/new)`) until
+// both entries were written; every integer was RE-DERIVED by RUNNING
+// `node breakpoint-sweep.mjs` and reading the line it PRINTED (`146 scenarios ·
+// 25 distinct covered by 26 cells · 121 residue over 14 families`).
+//
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527; recut by
 // cch-w48-bl-the-scenario-census-five-numerals-cannot-lose). The old header here
 // read "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed
@@ -783,7 +801,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // this epic exists to end. So: every LIVE numeral above the HISTORICAL rule
 // below is now recounted, either from `scenarioReport` or from these same
 // committed bytes, by a NAMED arm in breakpoint-sweep.test.mjs:
-//   * 144 / 26 / 25 / 119 / 14 — "the census five in breakpoint-sweep.mjs's
+//   * 146 / 26 / 25 / 121 / 14 — "the census five in breakpoint-sweep.mjs's
 //     prose are recounted from the derived report", which reads BOTH typed
 //     copies out of the committed bytes (this bullet and "THE CENSUS THIS
 //     RECONCILES AGAINST:" above) and names the drifted numeral by axis and by
@@ -844,29 +862,29 @@ export const RESIDUE_FAMILY_REASONS = {
 //     over four entries, and a `These 9` over ten.
 export const SCENARIO_RESIDUE = {
   // hash:#instance — 34
-  "sites-on-instance": "hash:#instance",
-  "panel-overview-member": "hash:#instance",
-  "instance-cruel-detail": "hash:#instance",
-  "provisioning": "hash:#instance",
-  "usage-quota": "hash:#instance",
-  "failed": "hash:#instance",
-  "timeline-events-only": "hash:#instance",
-  "verify-pass": "hash:#instance",
-  "verify-fail": "hash:#instance",
-  "verify-never": "hash:#instance",
-  "shell-instance": "hash:#instance",
-  "timeline-coalesced": "hash:#instance",
-  "webhooks-autodisabled": "hash:#instance",
-  "metrics-stale": "hash:#instance",
-  "metrics-absent": "hash:#instance",
-  "fleet-support-provisioning": "hash:#instance",
-  "fleet-support-online": "hash:#instance",
-  "fleet-support-failed": "hash:#instance",
-  "fleet-support-empty": "hash:#instance",
-  "offload-filing": "hash:#instance",
-  "offload-working": "hash:#instance",
-  "offload-done": "hash:#instance",
-  "offload-blocked": "hash:#instance",
+  "sites-on-instance": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the Sites card inside the instance workspace paints instance-detail's width-@media selectors plus .fleet-badges, which the `fleet` cell walks; its rows' phone band is overflow-guard W50-site-row-three-hosts-cruel-by-fixture" },
+  "panel-overview-member": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "panel-overview's fixture with a member actor: the same instance panel and the same @media selectors; the up-front refusal is a fence answer, not geometry" },
+  "instance-cruel-detail": { family: "hash:#instance", verdict: "adjudicated", why: "the cruel twin of the instance detail: a server-cap custom_host in .detail-url-text is content length, which overflow-guard W21-detail-url-text-page-bound walks at DETAIL_WIDTHS; the layout around it is instance-detail's" },
+  "provisioning": { family: "hash:#instance", verdict: "genuinely-uncovered", cover: "a cell on `provisioning` at its #instance deep link, sentinel `#instance-tabpanel .new-step`", why: "the provision timeline paints the shared newStepsHtml rows and the bp-console (.new-step, .new-step-time, .new-step-detail, .new-step-probe, .bp-console-body, .bp-console-toggle), all re-laid by app.css's @media (max-width: 720px) theater block; no cell paints a single .new-step, so 719/720/721 is walked for none of them" },
+  "usage-quota": { family: "hash:#instance", verdict: "genuinely-uncovered", cover: "an `inst-usage` cell on `usage-quota` at #instance/<id>/usage, sentinel on the quota bars", why: "the Usage sub-tab is a tabpanel no cell opens and no overflow-guard leg names; it has no @media rule of its own, but its quota bars reflow with every content-width step the 720 shell fold and 899 head breakpoints cause, and nothing measures them at any width" },
+  "failed": { family: "hash:#instance", verdict: "genuinely-uncovered", cover: "a cell on `failed` at its #instance deep link, sentinel `#instance-tabpanel .new-step.failed`", why: "the failed provision timeline: the same @720 .new-step and .bp-console rules as `provisioning` in the snap state, plus the docked Retry; no cell renders a failed box on the instance route, so its 719/720/721 is walked by nothing" },
+  "timeline-events-only": { family: "hash:#instance", verdict: "superseded", by: "inst-timeline", why: "the audit 403 degrades the timeline to events plus one line: it paints exactly the inst-timeline cell's @media selectors, over fewer rows" },
+  "verify-pass": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "verify-card chip content (all green) inside the instance panel; paints instance-detail's selectors plus .fleet-badges, which `fleet` walks — the three verify-* entries share this cause" },
+  "verify-fail": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "verify-card chip content (a 502 probe) inside the instance panel; same selectors and same cause as verify-pass" },
+  "verify-never": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "verify-card chip content (never run) inside the instance panel; same selectors and same cause as verify-pass" },
+  "shell-instance": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the sidebar morph to the instance layer: the morphed shell is the one every instance cell already renders at every walked width" },
+  "timeline-coalesced": { family: "hash:#instance", verdict: "superseded", by: "inst-timeline", why: "the burst folds into one tlvGroupRowHtml row; the inst-timeline cell (and `activity`) already paint .tlv-coalesce-meta, the only coalesce selector app.css re-lays at 720" },
+  "webhooks-autodisabled": { family: "hash:#instance", verdict: "superseded", by: "inst-webhooks", why: "an auto-disabled banner and one failed delivery inside the webhooks tab: exactly the inst-webhooks cell's @media selectors (.wh-card-head, .wh-dataset-input)" },
+  "metrics-stale": { family: "hash:#instance", verdict: "superseded", by: "inst-metrics", why: "last-known vitals flagged offline in the same metrics grid the inst-metrics cell walks: same @media selectors" },
+  "metrics-absent": { family: "hash:#instance", verdict: "superseded", by: "inst-metrics", why: "the waiting panel replaces the metrics grid: strictly less than the inst-metrics cell paints" },
+  "fleet-support-provisioning": { family: "hash:#instance", verdict: "genuinely-uncovered", cover: "a cell on `fleet-support-provisioning` at its #instance deep link, sentinel `.fleet-support-theater .new-step`", why: "the SUPPORT theater renders newStepsHtml rows inside .fleet-support-theater under the same @720 .new-step block no cell paints — a different container from the timeline's rows, so the `provisioning` cell would not close it" },
+  "fleet-support-online": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the roster presence chip and capacity on the fleet card add no width-@media selector beyond instance-detail's" },
+  "fleet-support-failed": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the failed support card adds no width-@media selector beyond instance-detail's; its money message is walked across the tablet band by overflow-guard's FLEET_WIDTHS legs" },
+  "fleet-support-empty": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the add-a-support CTA on a live main is one button inside instance-detail's panel; no new @media selector" },
+  "offload-filing": { family: "hash:#instance", verdict: "superseded", by: "offload-working", why: "the same .offload-watch ladder at its first stage; it paints no selector offload-working does not, so one cell there closes both" },
+  "offload-working": { family: "hash:#instance", verdict: "genuinely-uncovered", cover: "a click-driven cell (press File) on `offload-working`, sentinel `.offload-watch .new-step` — CELLS has no click driver today", why: "the offload ladder is newStepsHtml inside .offload-watch, with a .toast-stack toast beside it: both are re-laid by @media (max-width: 720px) rules and no cell paints either" },
+  "offload-done": { family: "hash:#instance", verdict: "superseded", by: "offload-working", why: "the ladder at its terminal success plus a .notice banner, which has no @media rule; the gap is offload-working's" },
+  "offload-blocked": { family: "hash:#instance", verdict: "superseded", by: "offload-working", why: "the ladder at its blocked terminal plus a .notice banner, which has no @media rule; the gap is offload-working's" },
   // cch-w45-bl — the three instance states no cell renders and no scenario used
   // to produce: a box one release BEHIND (#inst-update), a teardown that FAILED
   // (#inst-remove-retry) and a /verify that answers 404 no_admin_token
@@ -876,9 +894,9 @@ export const SCENARIO_RESIDUE = {
   // cell here would re-measure a geometry this sweep has 23 samples of and add
   // nothing. What they carry that no cell can score is a BUTTON that exists,
   // which is smoke.mjs's axis.
-  "instance-behind": "hash:#instance",
-  "instance-remove-failed": "hash:#instance",
-  "verify-no-credentials": "hash:#instance",
+  "instance-behind": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "#inst-update sits in .detail-head--inst .detail-actions, the head row instance-detail walks across the 899/900 edge; whether the button exists is smoke.mjs's axis" },
+  "instance-remove-failed": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the Retry-removal CTA and the server's error sit in the same instance head actions row instance-detail walks" },
+  "verify-no-credentials": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "the verify card's note and its offer: the same card inside instance-detail's panel, no new @media selector" },
   // task-499cab525e65018b — `instance-behind`'s fixture with a declared `modal`
   // driver, one per dialog. They are the first two scenarios in this corpus to
   // reach `openPinModal` and `openUpdateConflictModal`, the two openModal call
@@ -887,8 +905,8 @@ export const SCENARIO_RESIDUE = {
   // screen UNDER each dialog is the instance-detail layout the five cells above
   // already walk at every declared breakpoint, and modal geometry has its own
   // instrument (modal-oracle), which drives both of these.
-  "instance-pin-version": "hash:#instance",
-  "instance-update-conflict": "hash:#instance",
+  "instance-pin-version": { family: "hash:#instance", verdict: "adjudicated", why: "a declared dialog over instance-behind's panel: the dialog's geometry is modal-oracle's (PIN_FORM_SCEN drives it) and has no width @media rule; the panel beneath is instance-detail's" },
+  "instance-update-conflict": { family: "hash:#instance", verdict: "adjudicated", why: "a declared dialog over instance-behind's panel: the conflict sheet is modal-oracle's (UPDATE_CONFLICT_SCEN drives it) and has no width @media rule; the panel beneath is instance-detail's" },
   // cch-w38-s1-fu (task-8cf413b005cbcd40) — the MEMBER arm of the three states
   // directly above. Same argument, and it is the argument for a residue entry
   // rather than a cell TWICE OVER: each one paints the instance-detail layout
@@ -897,9 +915,9 @@ export const SCENARIO_RESIDUE = {
   // already swept by the `update-refused` cell. What they carry that no cell can
   // score is a button that must NOT be live for a member, which is
   // member-authority-sweep.mjs's axis (and smoke.mjs's).
-  "instance-behind-member": "hash:#instance",
-  "instance-remove-failed-member": "hash:#instance",
-  "instance-failed-member": "hash:#instance",
+  "instance-behind-member": { family: "hash:#instance", verdict: "superseded", by: "inst-update-refused", why: "the self-update control rendered disabled-and-explained, the shape the inst-update-refused cell walks; only the actor moves" },
+  "instance-remove-failed-member": { family: "hash:#instance", verdict: "superseded", by: "inst-update-refused", why: "the Retry-removal control rendered disabled-and-explained in the head actions row, the shape the inst-update-refused cell walks" },
+  "instance-failed-member": { family: "hash:#instance", verdict: "superseded", by: "failed", why: "failed's timeline with the docked Retry disabled-and-explained: it paints no selector `failed` does not, so it shares that gap" },
   // cch-w34-bl-preview-scenario-for-a-failed-sites-read — the FAILED
   // /v1/sites read. Residue rather than a cell for the same reason as the
   // six above and one of its own: it paints the instance-detail layout every
@@ -914,7 +932,7 @@ export const SCENARIO_RESIDUE = {
   // overflow-guard.mjs's W34-sites-read-failed-bounded leg walks it at
   // 320/390/620/900/1440 x 2 themes beside the kind control that renders the
   // SAME fixture with a 200.
-  "instance-sites-unreadable": "hash:#instance",
+  "instance-sites-unreadable": { family: "hash:#instance", verdict: "superseded", by: "instance-detail", why: "#instance-sites swaps its rows for one .empty-state, narrower than the rows; phone band walked by overflow-guard W34-sites-read-failed-bounded" },
   // cch-w45-s5-fu (the Updates strip's still-checking arm) — the two /v1/me
   // UNREADABLE fixtures, on a SUSPENDED box and on a LIVE behind box. Residue
   // rather than a cell for the same reason as the block above: each paints the
@@ -924,19 +942,19 @@ export const SCENARIO_RESIDUE = {
   // own exit, geometry the `update-refused` cell already samples. What they
   // carry that no width can score is whether that arm OFFERS an exit at all,
   // which is smoke.mjs's and __app.test.mjs's axis.
-  "instance-suspended-me-unreadable": "hash:#instance",
-  "instance-behind-me-unreadable": "hash:#instance",
+  "instance-suspended-me-unreadable": { family: "hash:#instance", verdict: "superseded", by: "inst-update-refused", why: "the Updates strip's still-checking arm plus its exit, inside the strip the inst-update-refused cell walks" },
+  "instance-behind-me-unreadable": { family: "hash:#instance", verdict: "superseded", by: "inst-update-refused", why: "two still-checking strips with their exits, inside the Updates strip the inst-update-refused cell walks" },
   // hash:#overview — 13
-  "loggedout": "hash:#overview",
-  "empty": "hash:#overview",
-  "fleet-usage": "hash:#overview",
-  "shell-root": "hash:#overview",
-  "operator-visible": "hash:#overview",
-  "identity-iris": "hash:#overview",
-  "loggedout-twofactor": "hash:#overview",
-  "overview-trial-runway": "hash:#overview",
-  "overview-attention": "hash:#overview",
-  "overview-never-reported": "hash:#overview",
+  "loggedout": { family: "hash:#overview", verdict: "adjudicated", why: "the sign-in surface (main.auth-screen): no shell, and app.css has no width @media rule for anything it paints, so a centred max-width card has no breakpoint to fold at" },
+  "empty": { family: "hash:#overview", verdict: "superseded", by: "overview-past-due", why: "first-run onboarding in #overview paints .instances-grid and .overview-head, a subset of the overview-past-due cell's @media selectors" },
+  "fleet-usage": { family: "hash:#overview", verdict: "superseded", by: "overview-fleet", why: "per-instance stats inside the instances grid: exactly the overview-fleet cell's @media selectors" },
+  "shell-root": { family: "hash:#overview", verdict: "superseded", by: "overview-fleet", why: "the ROOT nav layer of the shell, which every #overview cell renders at every walked width" },
+  "operator-visible": { family: "hash:#overview", verdict: "superseded", by: "overview-fleet", why: "one extra sidebar entry; the sidebar fold at 720 is walked by every cell" },
+  "identity-iris": { family: "hash:#overview", verdict: "adjudicated", why: "accent identity (data-bp-theme) is a declared non-axis of this sweep, owned by gr-blk-accent-scenario-sweep; the geometry under it is overview-fleet's" },
+  "loggedout-twofactor": { family: "hash:#overview", verdict: "adjudicated", why: "the shared two-factor card on the sign-in surface (main.auth-screen): no shell, and app.css has no width @media rule for anything it paints, so a centred max-width card has no breakpoint to fold at" },
+  "overview-trial-runway": { family: "hash:#overview", verdict: "superseded", by: "overview-past-due", why: "the runway card in #overview paints a subset of the overview-past-due cell's @media selectors" },
+  "overview-attention": { family: "hash:#overview", verdict: "superseded", by: "overview-fleet", why: "a degraded box heading the attention queue: .attention-row and its 768 and 769-904 bands are painted by the overview-fleet cell, whose mixed fleet carries attention rows" },
+  "overview-never-reported": { family: "hash:#overview", verdict: "superseded", by: "overview-fleet", why: "a never-reported box in the attention queue: the same .attention-row bands the overview-fleet cell walks" },
   // cch-w20-bl — the ORDINARY LONG NAME. Residue rather than a cell for the
   // reason its two siblings directly above are residue and one of its own: it
   // paints the #overview grid both cells already walk at all 18 widths, and the
@@ -945,8 +963,8 @@ export const SCENARIO_RESIDUE = {
   // 800/830/860/890/900/905/1000 x 2 themes by overflow-guard's
   // W20-attention-name-column leg, beside `overview-attention` as the kind
   // control — engaged there, never needed here.
-  "overview-attention-long-name": "hash:#overview",
-  "overview-member-empty-fleet": "hash:#overview",
+  "overview-attention-long-name": { family: "hash:#overview", verdict: "adjudicated", why: "the content-length twin of overview-attention: whether .attention-name's ellipsis engages is overflow-guard's axis (W20-attention-name-column), not a width walk" },
+  "overview-member-empty-fleet": { family: "hash:#overview", verdict: "superseded", by: "overview-fleet", why: "the refusal card replaces the runway with one .empty-state; it paints only .overview-head, which overview-fleet walks" },
   // cch-w12-followup-login-fixture-gap — a DRIVE fixture, not a screen. It boots
   // the same #overview grid the two cells already walk at all 18 widths and then
   // moves through three states smoke.mjs steps it through by hand (Activity →
@@ -955,110 +973,117 @@ export const SCENARIO_RESIDUE = {
   // a COMPLETED sign-in, so render()'s logged-out arm can be entered and left
   // with an account change across it. Its terminal geometry is the `activity`
   // cell's, which this sweep already renders.
-  "activity-identity-change": "hash:#overview",
+  "activity-identity-change": { family: "hash:#overview", verdict: "adjudicated", why: "a DRIVE across sign-out and sign-in as another team; a transition is not a width, and its terminal screen is the `activity` cell's" },
   // hash:#site — 14
-  "deploy-detail-cruel": "hash:#site",
-  "promote-failure": "hash:#site",
-  "promote-in-flight": "hash:#site",
-  "promote-retry": "hash:#site",
-  "promote-migrated": "hash:#site",
-  "shell-site": "hash:#site",
-  "site-deploy-rail-failed": "hash:#site",
-  "site-deploy-rail-failed-classified": "hash:#site",
-  "site-deploy-rail-live": "hash:#site",
-  "site-binding-bound": "hash:#site",
-  "site-binding-unknown": "hash:#site",
-  "site-binding-mismatch": "hash:#site",
-  "site-member": "hash:#site",
+  "deploy-detail-cruel": { family: "hash:#site", verdict: "adjudicated", why: "the cruel twin of the deploy detail: a store-cap sub-caption bounded vertically, which overflow-guard W34-deploy-detail-render-bound owns; the rail rows it also paints are site-deploy-rail-live's gap" },
+  "promote-failure": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "the 409 renders inside the promote confirm over the site-rollback cell's grid; no new @media selector" },
+  "promote-in-flight": { family: "hash:#site", verdict: "superseded", by: "site-deploy-rail-live", why: "the streaming build paints the deploy rail's .new-step rows over site-rollback's grid; that rail is the one uncovered selector, and it is site-deploy-rail-live's gap" },
+  "promote-retry": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "Try again inside the promote confirm over the site-rollback cell's grid; no new @media selector" },
+  "promote-migrated": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "the Current chip moved to another deploy row: the same grid and the same @media selectors" },
+  "shell-site": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "the sidebar morph to the site layer, which every site cell renders at every walked width" },
+  "site-deploy-rail-failed": { family: "hash:#site", verdict: "adjudicated", why: "the cruel twin of the rail: an unbreakable builder error in .deploy-rail-fail is content length, which overflow-guard W25-deploy-rail-fail-wrap owns; its rail rows are site-deploy-rail-live's gap" },
+  "site-deploy-rail-failed-classified": { family: "hash:#site", verdict: "adjudicated", why: "a caption-length instrument fixture for overflow-guard W25-deploy-rail-fail-wrap's classified route; its rail rows are site-deploy-rail-live's gap" },
+  "site-deploy-rail-live": { family: "hash:#site", verdict: "genuinely-uncovered", cover: "a cell on `site-deploy-rail-live` at its #site deep link, sentinel `#deploy-rail-slot .new-step`", why: "the deploy rail renders newStepsHtml rows (.new-step, .new-step-time, .new-step-detail) under the @720 block; neither site cell paints a rail, and overflow-guard's LIVE_WIDTHS and RAIL_WIDTHS never touch 719-721" },
+  "site-binding-bound": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "binding-rail content inside the same .detail-grid; the three site-binding-* entries share this cause" },
+  "site-binding-unknown": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "binding-rail content inside the same .detail-grid; same cause as site-binding-bound" },
+  "site-binding-mismatch": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "binding-rail content inside the same .detail-grid; same cause as site-binding-bound" },
+  "site-member": { family: "hash:#site", verdict: "superseded", by: "site-rollback", why: "rollback's fixtures with a member actor: the same deploy history grid, no new @media selector" },
   // cch-w53-bl env-var Option A (ruled 2026-09-02): `env-editor` is the SITE
   // env-blob editor (E-03), a different feature from the deleted team env-var
   // page. Its cell drove it at `#settings/env` — the route that no longer
   // exists — so the cell went with the page and the scenario lands here, in the
   // family its own deepLink (`#site/<id>`) has always named. Its geometry is the
   // .detail-grid the `rollback` and `states` cells already walk at all 18 widths.
-  "env-editor": "hash:#site",
+  "env-editor": { family: "hash:#site", verdict: "superseded", by: "site-states", why: "the Edit-environment affordance inside the .detail-grid the site cells walk; its sheet is driven by overflow-guard's floor leg" },
   // hash:#settings — 10
-  "members-admin-actor": "hash:#settings",
-  "members-self-role-drift": "hash:#settings",
-  "members-peer-owner": "hash:#settings",
-  "members-cruel-content": "hash:#settings",
-  "tokens-empty": "hash:#settings",
-  "tokens-revoke": "hash:#settings",
-  "tokens-reveal": "hash:#settings",
+  "members-admin-actor": { family: "hash:#settings", verdict: "superseded", by: "members", why: "fewer controls on the .set-row the members cell walks across 620/621; a row with fewer buttons is narrower" },
+  "members-self-role-drift": { family: "hash:#settings", verdict: "superseded", by: "members", why: "one chip word changed on one .set-row of the members cell's roster" },
+  "members-peer-owner": { family: "hash:#settings", verdict: "superseded", by: "members", why: "Remove offered and Change role not, on the .set-row the members cell walks; fewer buttons, narrower row" },
+  "members-cruel-content": { family: "hash:#settings", verdict: "adjudicated", why: "the cruel twin of the roster: a server-cap email is content length, which overflow-guard W21-members-roster-identity-and-remove owns" },
+  "tokens-empty": { family: "hash:#settings", verdict: "superseded", by: "tokens", why: "the empty state replaces the token list: strictly less than the tokens cell paints" },
+  "tokens-revoke": { family: "hash:#settings", verdict: "adjudicated", why: "a click-driven revoke through a confirm sheet; the sheet is modal-oracle's and has no width @media rule, the list beneath is the tokens cell's" },
+  "tokens-reveal": { family: "hash:#settings", verdict: "adjudicated", why: "the plaintext-once reveal sheet: modal-oracle drives it (TOKEN_REVEAL_SCEN), overflow-guard W21-token-reveal-readable walks its phone band, and no width @media rule targets it" },
   // task-5ffdec2b609404bc — `tokens-revoke`'s fixture with ONE field added
   // (`modal: "revoke-token"`), so it paints the SAME #settings/tokens list this
   // family is already explained by, plus the confirm sheet over it. Modal
   // geometry is modal-oracle's axis, exactly as the account family's is.
-  "tokens-revoke-confirm": "hash:#settings",
-  "providers-unverified": "hash:#settings",
-  "providers-member": "hash:#settings",
+  "tokens-revoke-confirm": { family: "hash:#settings", verdict: "adjudicated", why: "a declared modal over the tokens list: the confirm sheet has no width @media rule and its geometry is modal-oracle's" },
+  "providers-unverified": { family: "hash:#settings", verdict: "superseded", by: "providers-connect", why: "remediation copy inside the connect card the providers-connect cell walks; its length is overflow-guard W23-cred-remediation-reachable's" },
+  "providers-member": { family: "hash:#settings", verdict: "superseded", by: "providers-connected", why: "a read-only roster with no connect card: less than the providers-connected cell paints" },
   // hash:# — 6
-  "loggedout-invited": "hash:#",
-  "invite-joined": "hash:#",
-  "invite-expired": "hash:#",
-  "invite-already-member": "hash:#",
-  "invite-invalid": "hash:#",
-  "loggedout-reset": "hash:#",
+  "loggedout-invited": { family: "hash:#", verdict: "adjudicated", why: "the parked-invitation banner on the sign-in surface (main.auth-screen): no shell, and app.css has no width @media rule for anything it paints, so a centred max-width card has no breakpoint to fold at" },
+  "invite-joined": { family: "hash:#", verdict: "adjudicated", why: "the invitation card on the sign-in surface (main.auth-screen): no shell, and app.css has no width @media rule for anything it paints, so a centred max-width card has no breakpoint to fold at — the four invite-* entries share this cause" },
+  "invite-expired": { family: "hash:#", verdict: "adjudicated", why: "the invitation dead-end card on the sign-in surface; same cause as invite-joined" },
+  "invite-already-member": { family: "hash:#", verdict: "adjudicated", why: "the invitation dead-end card on the sign-in surface; same cause as invite-joined" },
+  "invite-invalid": { family: "hash:#", verdict: "adjudicated", why: "the invitation dead-end card on the sign-in surface; same cause as invite-joined" },
+  "loggedout-reset": { family: "hash:#", verdict: "adjudicated", why: "the set-new-password card on the sign-in surface (main.auth-screen): no shell, and app.css has no width @media rule for anything it paints, so a centred max-width card has no breakpoint to fold at" },
   // no-deeplink — 7
-  "account-modal": "no-deeplink",
-  "account-modal-tall": "no-deeplink",
-  "account-modal-revoke": "no-deeplink",
-  "account-modal-cruel-identity": "no-deeplink",
-  "account-modal-2fa-badcode": "no-deeplink",
-  "account-modal-2fa-on": "no-deeplink",
+  "account-modal": { family: "no-deeplink", verdict: "genuinely-uncovered", cover: "621 in overflow-guard's AM_WIDTHS (or a modal-capable cell here; CELLS has no modal field)", why: "the .am-modal block (.am-identity, .am-who, .am-head, .session-row) flips at @media (max-width: 620px); overflow-guard opens modal=account at FLOOR_WIDTHS and AM_WIDTHS and modal-oracle at 1440, and none holds 621 — the narrowest width the unfolded modal must fit" },
+  "account-modal-tall": { family: "no-deeplink", verdict: "superseded", by: "account-modal", why: "more session rows is height, not width: the same .am-modal selectors as account-modal" },
+  "account-modal-revoke": { family: "no-deeplink", verdict: "superseded", by: "account-modal", why: "the revoke path's rows and confirm inside the same .am-modal selectors as account-modal" },
+  "account-modal-cruel-identity": { family: "no-deeplink", verdict: "adjudicated", why: "the cruel twin of the modal: a server-cap email local part in .am-name is content length, which overflow-guard W23-account-modal-identity-bounded owns" },
+  "account-modal-2fa-badcode": { family: "no-deeplink", verdict: "genuinely-uncovered", cover: "620 and 621 in overflow-guard's A2F_WIDTHS (W22-2fa-enroll-phone-band)", why: "the enrollment rows (.a2f-enroll, .a2f-qr, .a2f-manual, .a2f-otp, .a2f-confirm-row) sit in the same @620 block, and the only legs that open enrollment walk FLOOR_WIDTHS and A2F_WIDTHS, both of which stop below the band edge" },
+  "account-modal-2fa-on": { family: "no-deeplink", verdict: "superseded", by: "account-modal", why: "the 2FA-on row inside the same .am-modal selectors as account-modal; no enrollment rows" },
   // cch-w39-s2-fu — the unknown two-factor arm, over a /v1/me that never lands.
   // Same residue reason as its six siblings and for the same owner: the state's
   // whole subject is a MODAL control's reachability (#a2f-retry), and that is
   // modal-oracle's question, not this sweep's. modal-oracle drives it as a
   // first-class state, so this is a reason, not a gap.
-  "account-modal-me-unreadable": "no-deeplink",
+  "account-modal-me-unreadable": { family: "no-deeplink", verdict: "superseded", by: "account-modal", why: "the two-factor row reads Unknown with a Retry, inside the same .am-modal selectors as account-modal" },
   // path:/activate — 5
-  "activate-entry": "path:/activate",
-  "activate-confirm": "path:/activate",
-  "activate-gone": "path:/activate",
-  "activate-rate-limited": "path:/activate",
-  "activate-logged-out": "path:/activate",
-  // path:/new — 8
-  "new-launch": "path:/new",
-  "theater-midflight": "path:/new",
-  "theater-failed": "path:/new",
-  "theater-ready": "path:/new",
-  "new-launch-me-unreadable": "path:/new",
-  "theater-ready-github": "path:/new",
-  "theater-ready-github-member": "path:/new",
-  "theater-failed-member": "path:/new",
+  "activate-entry": { family: "path:/activate", verdict: "adjudicated", why: "the device-activation page (main.activate-screen): app.css has no width @media rule for anything it paints, so its single centred column has no breakpoint to fold at — the five activate-* entries share this cause" },
+  "activate-confirm": { family: "path:/activate", verdict: "adjudicated", why: "the Approve/Deny rail on the activation page; same cause as activate-entry" },
+  "activate-gone": { family: "path:/activate", verdict: "adjudicated", why: "the expired-code dead-end on the activation page; same cause as activate-entry" },
+  "activate-rate-limited": { family: "path:/activate", verdict: "adjudicated", why: "the paused retry countdown on the activation page; same cause as activate-entry" },
+  "activate-logged-out": { family: "path:/activate", verdict: "adjudicated", why: "the parked-code banner on the sign-in card: the sign-in surface (main.auth-screen): no shell, and app.css has no width @media rule for anything it paints, so a centred max-width card has no breakpoint to fold at" },
+  // path:/new — 10
+  "new-launch": { family: "path:/new", verdict: "adjudicated", why: "the /new launch form paints no width-@media selector (the @720 block targets the theater and the ready hero, not the form); its phone band is overflow-guard W26-new-ready-and-launch-bounded's" },
+  "theater-midflight": { family: "path:/new", verdict: "genuinely-uncovered", cover: "a pathname-capable cell (CELLS keys a hash only) on `theater-midflight` at /new, sentinel `.new-theater-grid .new-step`", why: "@media (max-width: 720px) collapses .new-theater-grid and re-lays .new-step, .new-step-time, .new-step-detail, .new-step-probe and .new-console-body; overflow-guard's theater legs drive W26_WIDTHS and FAIL_WIDTHS, all phone widths, so 719/720/721 is walked by nothing" },
+  "theater-failed": { family: "path:/new", verdict: "superseded", by: "theater-midflight", why: "the same theater grid in its snap state; it paints no selector theater-midflight does not" },
+  "theater-ready": { family: "path:/new", verdict: "genuinely-uncovered", cover: "the same pathname-capable cell on `theater-ready`, sentinel `.new-ready .new-actions .btn`", why: "`.new-ready .new-actions .btn` goes full-width under @media (max-width: 720px); the ready hero is not the theater grid, and no instrument drives it at 719/720/721" },
+  "new-launch-me-unreadable": { family: "path:/new", verdict: "adjudicated", why: "the unknown arm replaces the launch form with one block and a Retry; it paints no width-@media selector" },
+  "theater-ready-github": { family: "path:/new", verdict: "superseded", by: "theater-ready", why: "the ready hero with the GitHub action live: the same .new-actions row theater-ready carries" },
+  "theater-ready-github-member": { family: "path:/new", verdict: "superseded", by: "theater-ready", why: "the ready hero with the GitHub action disabled-and-explained: the same .new-actions row theater-ready carries" },
+  "theater-failed-member": { family: "path:/new", verdict: "superseded", by: "theater-midflight", why: "the failed theater with Retry disabled-and-explained; it paints no selector theater-midflight does not" },
+  // task-679663d0bee42b15 — the Launch press's two 403s. Residue for the same
+  // reason as new-launch-me-unreadable: the subject is a TOAST after a driven
+  // submit, which smoke.mjs asserts byte for byte; the /new step's geometry at
+  // each width is already a cell of `new-launch`, and these are its fixture
+  // with only the POST /v1/launch answer changed.
+  "new-launch-limit-reached": { family: "path:/new", verdict: "adjudicated", why: "new-launch's form plus a toast after a DRIVEN submit, which no cell performs; the .toast-stack @720 gap it would expose is recorded on billing-portal-return, which paints a toast on load" },
+  "new-launch-forbidden": { family: "path:/new", verdict: "adjudicated", why: "new-launch's form plus a toast after a DRIVEN submit; same cause as new-launch-limit-reached" },
   // hash:#billing — 9
-  "billing-forever": "hash:#billing",
-  "billing-portal-return": "hash:#billing",
-  "billing-member": "hash:#billing",
-  "billing-me-unreadable": "hash:#billing",
-  "billing-me-recovers": "hash:#billing",
-  "billing-cancelling": "hash:#billing",
-  "billing-free-owner": "hash:#billing",
-  "billing-support-plus": "hash:#billing",
-  "billing-unconfigured": "hash:#billing",
+  "billing-forever": { family: "hash:#billing", verdict: "superseded", by: "billing-past-due", why: "a comp plan as the current plan, its Manage panel prose with no button, inside the manage section the billing-past-due cell walks" },
+  "billing-portal-return": { family: "hash:#billing", verdict: "genuinely-uncovered", cover: "a cell on `billing-portal-return` at #settings/billing, sentinel `.toast-stack .toast`", why: "the portal ack is a toast, and `.toast-stack` is re-anchored by @media (max-width: 720px); it paints on load with no driver, yet no cell renders a toast, so the stack's 719/720/721 is walked by nothing" },
+  "billing-member": { family: "hash:#billing", verdict: "superseded", by: "billing-past-due", why: "a read-only plan with no manage or cancel CTA: less than the billing-past-due cell paints" },
+  "billing-me-unreadable": { family: "hash:#billing", verdict: "superseded", by: "billing-past-due", why: "the Manage section's copy swapped for one .empty-state with a retry: narrower than what billing-past-due walks" },
+  "billing-me-recovers": { family: "hash:#billing", verdict: "adjudicated", why: "a one-shot fault whose retry smoke.mjs drives: a transition between billing-me-unreadable's block and billing-past-due's panel, and a transition is not a width" },
+  "billing-cancelling": { family: "hash:#billing", verdict: "superseded", by: "billing-past-due", why: "grace copy and an Ending badge inside the manage section the billing-past-due cell walks" },
+  "billing-free-owner": { family: "hash:#billing", verdict: "superseded", by: "billing-trial", why: "the upsell is the same .card.plan-card the billing-trial cell walks, one badge and one full-width button different" },
+  "billing-support-plus": { family: "hash:#billing", verdict: "superseded", by: "billing-trial", why: "the third catalog tier as the current plan, in the plan card the billing-trial cell walks" },
+  "billing-unconfigured": { family: "hash:#billing", verdict: "superseded", by: "billing-trial", why: "billing-trial's tier grid minus the Subscribe buttons plus one .tier-omit-note row: less horizontal demand than the cell walks" },
   // hash:#operator — 5
-  "operator-zero-staging": "hash:#operator",
-  "operator-denied": "hash:#operator",
-  "operator-unreadable": "hash:#operator",
-  "operator-me-unreadable": "hash:#operator",
-  "operator-me-recovers": "hash:#operator",
+  "operator-zero-staging": { family: "hash:#operator", verdict: "superseded", by: "operator", why: "an empty staging list and warm pool inside the four cards the operator cell walks; its gate pill's band is overflow-guard W20-op-gate-pill-bounded's" },
+  "operator-denied": { family: "hash:#operator", verdict: "superseded", by: "billing-portal-return", why: "a non-operator is bounced to #overview (overview-fleet's geometry) with a toast; the one uncovered selector is .toast-stack, which is billing-portal-return's gap" },
+  "operator-unreadable": { family: "hash:#operator", verdict: "superseded", by: "operator", why: "every operator route 403s and the four cards degrade to empty-state blocks: less than the operator cell paints" },
+  "operator-me-unreadable": { family: "hash:#operator", verdict: "superseded", by: "operator", why: "one .empty-state in place of the four cards: less than the operator cell paints" },
+  "operator-me-recovers": { family: "hash:#operator", verdict: "adjudicated", why: "a CLICK fixture: the transition from operator-me-unreadable's block to the console the operator cell walks; a transition is not a width" },
   // hash:#notifications — 2
-  "notif-empty": "hash:#notifications",
-  "notif-member": "hash:#notifications",
+  "notif-empty": { family: "hash:#notifications", verdict: "superseded", by: "notifications", why: "first run — no channels and an empty log on the notifications screen: less than the notifications cell paints" },
+  "notif-member": { family: "hash:#notifications", verdict: "superseded", by: "notifications", why: "read-only, with no save rows and no admin sections: less than the notifications cell paints" },
   // hash:#fleet — 4
-  "fleet-v4": "hash:#fleet",
-  "fleet-cruel-content": "hash:#fleet",
-  "fleet-archives-member": "hash:#fleet",
+  "fleet-v4": { family: "hash:#fleet", verdict: "superseded", by: "fleet", why: "density rows and the update chip: exactly the fleet cell's @media selectors (.fleet-row, .fleet-main across 899/900)" },
+  "fleet-cruel-content": { family: "hash:#fleet", verdict: "adjudicated", why: "the cruel twin of the fleet: server-cap name and custom_host are content length, which overflow-guard W21-cruel-content-text-bounded owns" },
+  "fleet-archives-member": { family: "hash:#fleet", verdict: "superseded", by: "fleet-archives", why: "fleet-archives-stored with a member actor: one button fewer and one note line more on the rows the fleet-archives cell walks" },
   // task-5ffdec2b609404bc — `mixed-fleet`'s fixture with ONE field added
   // (`modal: "cmdk"`), so the fleet table beneath it is the one the `fleet` cell
   // already walks at all 18 widths; what is new is the command palette over it,
   // and a dialog's geometry is modal-oracle's axis, not this sweep's.
-  "cmdk-palette": "hash:#fleet",
+  "cmdk-palette": { family: "hash:#fleet", verdict: "adjudicated", why: "a declared command palette over the fleet cell's table: the palette has no width @media rule and modal-oracle drives it (openCommandPalette)" },
   // hash:#signup — 1
-  "loggedout-signup": "hash:#signup",
+  "loggedout-signup": { family: "hash:#signup", verdict: "adjudicated", why: "the Create-account tab on the sign-in surface (main.auth-screen): no shell, and app.css has no width @media rule for anything it paints, so a centred max-width card has no breakpoint to fold at" },
   // hash:#activity — 1
-  "activity-denied": "hash:#activity",
+  "activity-denied": { family: "hash:#activity", verdict: "superseded", by: "activity", why: "the audit 403 replaces the feed with one .empty-state: strictly less than the activity cell paints" },
 };
 
 // `--cell a,b,c` — SELECTION, AND A PER-NAME REFUSAL. The per-name check is the
@@ -1541,6 +1566,82 @@ export function axisCoverage(derived, declared) {
   };
 }
 
+// ── RESIDUE VERDICTS (task-1ac954ba0db927cb) ─────────────────────────────────
+// A residue entry used to be a bare family string: it said WHICH reason in
+// RESIDUE_FAMILY_REASONS applied, never whether that reason was true of the
+// entry. Every entry now carries a CONTENT verdict at its own line:
+//   adjudicated         deliberately not a breakpoint subject — the state paints
+//                       no width-@media selector of its own, or its axis belongs
+//                       to another instrument (content length to overflow-guard,
+//                       dialogs to modal-oracle, a transition to smoke.mjs).
+//   superseded          its breakpoint-bearing geometry is walked elsewhere.
+//                       `by` names the CELL that walks it, or the
+//                       genuinely-uncovered entry whose gap it shares (so the
+//                       gap is counted once, where a cell would close it).
+//   genuinely-uncovered a real layout gap: a width-@media rule this state paints
+//                       and no cell renders. `cover` names what would close it.
+// HOW THE VERDICTS WERE READ, so a reader can re-read them: each scenario was
+// loaded in Chrome and asked which selectors from app.css's width-bearing @media
+// blocks it paints (non-zero box), against the union the CELLS paint. A
+// selector no cell paints is a candidate gap; the verdict then weighs whose
+// axis it is.
+// THE POPULATION IS NEVER TYPED HERE. It is Object.keys(residue) at run time,
+// and `residueVerdictReport` asserts the verdicted count EQUALS it: an entry
+// with no verdict (the old bare-string shape, or an object missing a field) is
+// refused BY NAME, exit 2, in the bare sweep — never skipped.
+export const RESIDUE_VERDICTS = ["adjudicated", "superseded", "genuinely-uncovered"];
+
+// The family an entry records, in either shape: the bare-string shape is still
+// READ (so a pre-verdict entry reports its family correctly while it is being
+// refused), never ACCEPTED.
+export function residueFamily(entry) {
+  if (typeof entry === "string") return entry;
+  return entry && typeof entry.family === "string" ? entry.family : null;
+}
+
+// Why an entry is not a verdict, or null when it is one. A verdict is a
+// judgment with a reason: a known verdict word, a `why` long enough to say
+// something, and the field its verdict owes — `by` pointing at a CELL or at a
+// genuinely-uncovered entry (never itself, never a chain through another
+// superseded entry), `cover` naming the closing work.
+export function residueVerdictProblem(name, entry, { residue, cells = CELLS } = {}) {
+  if (typeof entry === "string") return "bare family string, no verdict";
+  if (!entry || typeof entry !== "object") return "not an object";
+  if (!RESIDUE_VERDICTS.includes(entry.verdict)) return `verdict ${JSON.stringify(entry.verdict)} is not one of ${RESIDUE_VERDICTS.join(" / ")}`;
+  if (typeof entry.why !== "string" || entry.why.trim().length < 40) return "no written `why` (a verdict is a judgment with a reason, not a label)";
+  if (entry.verdict === "superseded") {
+    const cellNames = new Set(cells.map((c) => c.name));
+    const target = residue && residue[entry.by];
+    const targetUncovered = target && typeof target === "object" && target.verdict === "genuinely-uncovered";
+    if (typeof entry.by !== "string" || !entry.by) return "superseded, but `by` names nothing";
+    if (entry.by === name) return "superseded by itself";
+    if (!cellNames.has(entry.by) && !targetUncovered) return `superseded by "${entry.by}", which is neither a cell nor a genuinely-uncovered residue entry`;
+  }
+  if (entry.verdict === "genuinely-uncovered" && (typeof entry.cover !== "string" || entry.cover.trim().length < 10)) {
+    return "genuinely-uncovered, but `cover` does not name what would close the gap";
+  }
+  return null;
+}
+
+// The population is DERIVED (the literal's own keys, read now); the verdicted
+// count is compared against it, and every shortfall is named.
+export function residueVerdictReport({ residue = SCENARIO_RESIDUE, cells = CELLS } = {}) {
+  const population = Object.keys(residue);
+  const unverdicted = [];
+  const counts = Object.fromEntries(RESIDUE_VERDICTS.map((v) => [v, 0]));
+  for (const name of population) {
+    const why = residueVerdictProblem(name, residue[name], { residue, cells });
+    if (why) unverdicted.push({ name, why });
+    else counts[residue[name].verdict]++;
+  }
+  const verdicted = population.length - unverdicted.length;
+  // A diff that stamps one verdict on every entry is a label, not a judgment.
+  const uniform = verdicted > 1 && RESIDUE_VERDICTS.some((v) => counts[v] === verdicted);
+  const uncovered = population.filter((n) => !unverdicted.some((u) => u.name === n) && residue[n].verdict === "genuinely-uncovered");
+  return { population: population.length, verdicted, counts, unverdicted, uniform, uncovered,
+    ok: verdicted === population.length && !unverdicted.length && !uniform };
+}
+
 // The SCENARIO axis: every scenario is either rendered by a cell or carries a
 // committed residue entry naming its family. Four refusals, all fatal:
 //   · unlisted  — a new scenario with neither a cell nor a residue entry
@@ -1561,19 +1662,20 @@ export function scenarioReport({ scenarios, cells = CELLS, residue = SCENARIO_RE
   const promoted = listed.filter((n) => covered.has(n));
   const drift = listed
     .filter((n) => known.has(n) && !covered.has(n))
-    .map((n) => ({ name: n, was: residue[n], now: familyOf(scenarios[n]) }))
+    .map((n) => ({ name: n, was: residueFamily(residue[n]), now: familyOf(scenarios[n]) }))
     .filter((r) => r.was !== r.now);
   const phantomCells = [...covered].filter((s) => !known.has(s));
-  const families = [...new Set(listed.map((n) => residue[n]))].sort();
+  const families = [...new Set(listed.map((n) => residueFamily(residue[n])))].sort();
   const unexplained = families.filter((f) => !reasons[f]);
   const staleReasons = Object.keys(reasons).filter((f) => !families.includes(f));
+  const verdicts = residueVerdictReport({ residue, cells });
 
   return {
     total: names.length, cells: cells.length, distinctCovered: covered.size,
     residue: listed.length, families: families.length,
-    unlisted, stale, promoted, drift, phantomCells, unexplained, staleReasons,
+    unlisted, stale, promoted, drift, phantomCells, unexplained, staleReasons, verdicts,
     ok: !unlisted.length && !stale.length && !promoted.length && !drift.length &&
-      !phantomCells.length && !unexplained.length && !staleReasons.length,
+      !phantomCells.length && !unexplained.length && !staleReasons.length && verdicts.ok,
   };
 }
 
@@ -2065,6 +2167,10 @@ function legA() {
       : ` [${rep.heights.derived.join(",")}]\n`));
   out(`>> scenarios  ${rep.scenarios.total} scenarios · ${rep.scenarios.distinctCovered} distinct covered by ${rep.scenarios.cells} cells · ` +
     `${rep.scenarios.residue} residue over ${rep.scenarios.families} families (committed literal)\n`);
+  const RV = rep.scenarios.verdicts;
+  out(`>> verdicts   ${RV.verdicted} of ${RV.population} residue entries carry a content verdict · ` +
+    RESIDUE_VERDICTS.map((v) => `${RV.counts[v]} ${v}`).join(" · ") + "\n");
+  if (RV.uncovered.length) out(`>> uncovered  ${RV.uncovered.join(", ")}\n`);
 
   const problems = [];
   for (const u of rep.unresolved) problems.push(`UNPARSEABLE width condition: "${u}" — the sweep will not guess at a width it cannot read.`);
@@ -2084,6 +2190,8 @@ function legA() {
   for (const s of S.phantomCells) problems.push(`PHANTOM cell scenario "${s}" — a cell drives it but scenarios.mjs no longer defines it.`);
   for (const f of S.unexplained) problems.push(`UNEXPLAINED residue family ${f} — entries point at it and RESIDUE_FAMILY_REASONS has no written reason for it.`);
   for (const f of S.staleReasons) problems.push(`STALE residue reason ${f} — RESIDUE_FAMILY_REASONS explains a family no entry uses any more.`);
+  for (const u of S.verdicts.unverdicted) problems.push(`UNVERDICTED residue entry "${u.name}" — ${u.why}. Every SCENARIO_RESIDUE entry carries { family, verdict, why } (+ \`by\` when superseded, \`cover\` when genuinely-uncovered); ${S.verdicts.verdicted} of ${S.verdicts.population} do.`);
+  if (S.verdicts.uniform) problems.push(`UNIFORM residue verdicts — every entry says the same thing, which is a label, not a judgment.`);
 
   if (problems.length) {
     shout(`\n!! BREAKPOINT SWEEP (exit 2): the sweep has no coverage for what the artifact now declares.\n` +

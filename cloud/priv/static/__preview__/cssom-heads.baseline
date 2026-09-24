@@ -305,6 +305,32 @@
 # only heads is quoting half the instrument), MISSES 0, PARITY PASS.
 # THE THREE NEW SELECTORS ARE THE THREE NEW FLATTENED ONES: 1218 -> 1221, one selector
 # per head, because none of the three rule heads is a selector list.
+# ^ SUPERSEDED 2026-09-24 (task-13f830a9c36314e0): the two lines above are the original
+# record, kept verbatim, and they are WRONG. The correction:
+# CORRECTION — THIS SLICE MOVED FLATTENED BY ZERO; 1218 -> 1221 IS W18-S1'S. The
+# flattened census is DISTINCT selectors, not one per head: authoredIndex() in
+# cssom-parity.mjs keys its `authored` Map by normalise()d selector (each head
+# splitGroup()-flattened first) and a repeat only bumps that entry's count — re-derive
+# with `grep -n 'const authored = new Map' cssom-parity.mjs`. All three of this
+# slice's selectors were already authored before its block (`grep -nE '^\.topbar
+# [{]|^\.billing-chip [{]' app.css`; `.topbar-right` sits inside an existing selector
+# list that splitGroup() flattens), so a scoped re-declaration of an existing selector
+# is +1 HEAD and +0 FLATTENED — the same signature W20-S8 below records for `.topbar`.
+# MEASURED, not argued: each commit's OWN cssom-parity.mjs run on its OWN app.css and
+# sidecar (Chrome 153.0.8010.53, node v22.22.0; every run exit 0, CSSOM == authored
+# on both halves, MISSES 0), first-parent — every commit between the W16-S8 reading
+# and this one that touched app.css (the two parents not listed measure identically
+# to the row above them):
+#   cee6024ab (W16-S8's parent)            heads 1253  flattened 1218
+#   626466a0c #8851 W16-S8                 heads 1252  flattened 1218
+#   e3f47c585 #8888 W18-S1                 heads 1256  flattened 1221   <- +3 HERE
+#   87e8726c4 #8945 W19-S2 (this entry)    heads 1259  flattened 1221   (+0)
+# The three distinct selectors W18-S1 added (authoredIndex() key diff between
+# e3f47c585's parent and e3f47c585): `.instance-card-head .status-pill`,
+# `.instance-card-head .status-pill-dot`, `.instance-card-head .status-pill-detail` —
+# its fourth head re-declares `.instance-card-head` and adds no selector, so W18-S1
+# is 4 heads / 3 flattened. The W18-S1 entry recorded heads only, which is how the
+# +3 went unattributed until this slice's reading claimed it.
 # FOR THE LEAD: this slice is the wave's SOLE holder of this file in round 1 (D202).
 # A round-2 or round-3 app.css slice WILL collide here, and D158 stands: re-run the tool
 # on the MERGED tree and take what it prints. Never merge-resolve this number, never add

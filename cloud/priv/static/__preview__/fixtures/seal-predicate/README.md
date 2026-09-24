@@ -16,14 +16,16 @@ predicate so it is a test, not a manual run.
 | `terminal-one-live-row.json` | TERMINAL refuted by one open row — the token is not the claim |
 | `terminal-one-considering-row.json` | TERMINAL refuted by one `considering` row |
 | `considering-residue.json` | a `considering` row is residue: counted into clause (a) and named, never silently exempt |
-| `considering-forwarded.json` | the same `considering` row WITH a forwarding address — clause (a) passes and the row is still printed by name, so the wave-28 bucket split reads as a re-labelling of UNNAMED residue and not as a new red |
+| `considering-forwarded.json` | the same `considering` row WITH a forwarding address — re-parented onto the successor, so it is on the successor's roster and NOT in `children`, remembered as `considering` by `priorCensus`. Clause (a) passes and the row is still printed by name (under RE-HOMED, `was=considering`), so the wave-28 bucket split reads as a re-labelling of UNNAMED residue and not as a new red |
+| `considering-gate-labelled.json` | task-5f6267283fe7a277: the ONE path left into the `(+N considering row(s) counted on the permanent human gate line above …)` re-disclosure line — a permanent human gate whose status is `considering`. The gate bucket names it by gate, so it is named again with its status. Gates do not block clause (a), so it seals |
+| `successor-contains-epic.json` | task-5f6267283fe7a277, R9: a LEGAL world whose successor sits ABOVE the epic, so its subtree holds every roster row. Before R9 this sealed `a=PASS` with `forwarded under successor : 2` over an open row forwarded nowhere; it must refuse `SUCCESSOR-OVERLAPS-EPIC` |
 | `ladder-no-waiver.json` | the three-rung ladder unwaived — 2 measured HERE, 3 MEASURED-ELSEWHERE, 1 measured by nothing, which fails clause (b) by name |
 | `diff-is-only-the-subject.json` | a commit whose patch is only its own subject line fails clause (b) — commits are verified by DIFF, never by `%s` |
 | `filing-act-reparent.json` | wave 26: 69 OPEN rows reparented under an already-`done` sibling. Nothing is finished and the epic's DIRECT roster is one done row, so the one-level reader printed `VERDICT: SEAL a=PASS orphans=0` — a gauge emptied by a filing act |
-| `forward-to-grandchild.json` | wave 26, the same blindness the other way: a row correctly forwarded to a GRANDCHILD of the successor read as an orphan — a false FAIL beside the false PASS |
+| `forward-to-grandchild.json` | wave 26, the same blindness the other way: a row correctly forwarded to a GRANDCHILD of the successor, which a one-level reader charges as a FILING EVENT — a false FAIL beside the false PASS |
 | `census-departure.json` | wave 26: a `priorCensus` row that LEFT the counted population and still resolves to `open` — a FILING EVENT, named and blocking |
 | `census-departure-transitioned.json` | the same departure with ONE field changed (`done`): a row that left by being finished is not a filing event. The pair is the anti-filing arm's mutation proof |
-| `reparent-to-successor.json` | wave 36: a census row RE-PARENTED out of the epic and onto the successor's wave — legally placed, so it is under the successor and NOWHERE in `children`. The pre-fix file could never count it (`forwarded` is the successor's subtree, the classify loop walked the epic's, and R4/R6 keep those disjoint), so it printed `forwarded under successor : 0` and charged a correct forwarding as a filing event. This is the arm that reds if the forwarded bucket is unreachable |
+| `reparent-to-successor.json` | wave 36: a census row RE-PARENTED out of the epic and onto the successor's wave — legally placed, so it is under the successor and NOWHERE in `children`. The pre-fix file could never count it (`forwarded` is the successor's subtree, the classify loop walked the epic's, and R4/R6 — and, since task-5f6267283fe7a277, R9 — keep those disjoint), so it printed `forwarded under successor : 0` and charged a correct forwarding as a filing event. This is the arm that reds if the forwarded bucket is unreachable |
 | `paced-forwarding.json` | wave 36: THREE departures — two re-homed onto the successor's wave, one simply gone. Pre-fix all three read as `FILING EVENT(S) : 3`, so charter D93's paced forwarding was indistinguishable from a swept population. The committed file prints the two under `RE-HOMED UNDER` with `→` and the one under `FILING EVENT(S)` with `✗` |
 
 Fixture keys the predicate reads: `children`, `successor` (an id, `null`, or the
@@ -32,12 +34,16 @@ literal `TERMINAL`), `tasks` (id → task document, for successor resolution),
 standing in for `git show --format=`), and `unmeasuredWaivers` (rung-3 register
 entries a fixture may waive, named one by one and printed in the verdict).
 
-`reparent-to-successor.json` and `paced-forwarding.json` differ from
-`forward-to-grandchild.json` in a way that matters: that fixture reaches `fwd > 0` only
-by putting one `_id` in BOTH the epic's `children` and the successor's `subtrees` — a row
-with two parents, which `parent_id` cannot produce. The wave-36 pair places the re-homed
-row under the successor ONLY, which is what a real `bp task move` leaves behind, and
-scores it through the prior census.
+EVERY FIXTURE IS A WORLD `parent_id` CAN PRODUCE: no `_id` may be listed under more than
+one parent across `children` (the epic), `forwarded` (the successor) and `subtrees[<id>]`.
+The predicate refuses a fixture that breaks this with INFRA `FIXTURE-TWO-PARENTS` before any
+clause, and the suite checks every `.json` in this directory against the same function
+(task-8532dae7b075f4b3). Until then `forward-to-grandchild.json`, `considering-forwarded.json`
+and `orphan-residue.json` each listed one row under the epic AND the successor, and the first
+two were the only fixtures that scored the in-roster `forwarded` bucket above zero — a bucket
+R4/R6/R9 make empty on every legal invocation (R9 closes the one legal shape R4/R6 missed: a successor ABOVE the epic, whose subtree holds the epic's whole roster — `successor-contains-epic.json`). A forwarded row is placed the way a real
+`bp task move` leaves it: under the successor ONLY, with the epic's claim on it carried by
+`priorCensus`, and it is scored through the census as RE-HOMED.
 
 Wave 26 adds three, all optional so every fixture above reads identically:
 `subtrees` (parent id → rows, which is how a fixture describes a TREE — `children`

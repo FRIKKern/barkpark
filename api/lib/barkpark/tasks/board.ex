@@ -31,7 +31,7 @@ defmodule Barkpark.Tasks.Board do
   The loader projects each `%Document{}` into:
 
       %{doc_id, title, priority, parent_id, labels, worker, lifecycle_status,
-        draft: boolean,
+        draft: boolean, twin_unpublished_pair: boolean,
         criteria: %{met, total} | nil, github: map | nil, github_synced: boolean,
         blocker_statuses: [String.t()], sub, next_criterion, updated_at}
 
@@ -59,14 +59,14 @@ defmodule Barkpark.Tasks.Board do
       on a published row only because that row is a byte-pinned snapshot
       (`PortableDoc.TaskResolver.row_from_task/1`). Same NAME, different
       presence rule for a documented reason.
-    * **Where it is derived.** At the projection boundary — `to_card/4` and
+    * **Where it is derived.** At the projection boundary — `to_card/5` and
       `card_from_broadcast/3` — off the RAW `doc_id`, BEFORE
       `Content.published_id/1` strips the prefix off the card's own `doc_id`
       field. Downstream of that point the spelling no longer exists ON `doc_id`,
       so no painter can re-derive it; it must be carried.
 
       READ THAT LAST SENTENCE NARROWLY. It is true of `doc_id` and false of
-      `parent_id`, which `to_card/4` deliberately keeps RAW so the operator sees
+      `parent_id`, which `to_card/5` deliberately keeps RAW so the operator sees
       the value the document stores — a `drafts.` spelling therefore very much
       does survive there. Every reader that uses `parent_id` as a KEY (bucket,
       lane, chip, root test) must strip it through `parent_key/1` first; that
@@ -75,6 +75,23 @@ defmodule Barkpark.Tasks.Board do
       whose `draft` is true. The Studio board does this in
       `Plugins.Tasks.Web.BoardLive` (`data-role="draft"`); the TUI's twin lives
       in `internal/taskboard` and is a separate row.
+
+  ## THE UNPUBLISHED-PAIR FLAG (task-9d0c7adbbe1a5af1, criterion 2)
+
+  `:twin_unpublished_pair` is the `:draft` key's sibling and follows the same
+  key-presence law: a plain `boolean()`, ALWAYS present. It is `true` when the
+  card's logical id collapsed from a bucket of MORE than one row with NO
+  published member (`TwinCollapse.unpublished_pair?/1`) — the case the old
+  `hd(twins)` default rendered silently as an ordinary card. The total order in
+  `TwinCollapse.canonical/1` still picks the card's row; the flag says that
+  pick was made between two unpublished rows. An unpaired `drafts.` row is NOT
+  flagged — it IS the row of record. The Studio board paints it as
+  `data-role="twin-unpublished-pair"`.
+
+  It is a BUCKET fact, so only `snapshot/1` can derive it. `card_from_broadcast/3`
+  sees one row: it carries the previous card's flag forward, and clears it when
+  the broadcast row is itself published (the pair now has a published side).
+  The 15s `:refresh` reconcile re-derives it from the full corpus.
 
   """
 
@@ -170,6 +187,7 @@ defmodule Barkpark.Tasks.Board do
           worker: String.t() | nil,
           lifecycle_status: String.t(),
           draft: boolean(),
+          twin_unpublished_pair: boolean(),
           criteria: %{met: non_neg_integer(), total: pos_integer()} | nil,
           github: map() | nil,
           github_synced: boolean(),
@@ -250,13 +268,16 @@ defmodule Barkpark.Tasks.Board do
     dataset = Keyword.get(opts, :dataset, "production")
     now = Keyword.get(opts, :now) || DateTime.utc_now()
 
-    docs = load_task_docs(dataset)
+    collapsed = load_task_docs(dataset)
+    docs = Enum.map(collapsed, fn {doc, _pair?} -> doc end)
     status_by_pk = Map.new(docs, fn d -> {d.id, lifecycle_of(d)} end)
     blockers_by_pk = load_blocker_targets(Map.keys(status_by_pk))
     readable? = field_visibility_gate(dataset)
 
-    docs
-    |> Enum.map(&to_card(&1, blockers_by_pk, status_by_pk, readable?))
+    collapsed
+    |> Enum.map(fn {doc, pair?} ->
+      to_card(doc, pair?, blockers_by_pk, status_by_pk, readable?)
+    end)
     |> build(now: now)
   end
 
@@ -277,7 +298,7 @@ defmodule Barkpark.Tasks.Board do
   PUBLIC (felix W19): the realtime path (`board_live` mount + `:refresh`)
   computes the predicate ONCE per mount/reconcile and threads it into
   `card_from_broadcast/3`, so a broadcast card is gated by the same decisions as
-  a fetched `to_card/4` one — WITHOUT resolving the schema per broadcast.
+  a fetched `to_card/5` one — WITHOUT resolving the schema per broadcast.
   """
   @spec field_visibility_gate(String.t()) :: (String.t() -> boolean())
   def field_visibility_gate(dataset) do
@@ -357,7 +378,11 @@ defmodule Barkpark.Tasks.Board do
     # TWIN COLLAPSE POLICY: the rule, its carve-out for unpaired drafts, and
     # why it is a total order and not `hd/1`, all live in `Tasks.TwinCollapse`
     # — the ONE home the board and `Tasks.Fleet` share (task-f7d389c21c68839f).
-    |> Enum.map(fn {_lid, twins} -> TwinCollapse.canonical(twins) end)
+    # Each winner travels with its bucket's `unpublished_pair?/1` answer, which
+    # only the bucket can know (see THE UNPUBLISHED-PAIR FLAG in the moduledoc).
+    |> Enum.map(fn {_lid, twins} ->
+      {TwinCollapse.canonical(twins), TwinCollapse.unpublished_pair?(twins)}
+    end)
   end
 
   # One batched query for every outbound `blocks` edge in the corpus, grouped
@@ -384,7 +409,7 @@ defmodule Barkpark.Tasks.Board do
   # gated; the derived criteria COUNT (`Tasks.criteria_progress/1`, a pure
   # %{met,total} tally that never carries criterion text) stays UNGATED per the
   # peek's own count-vs-text law.
-  defp to_card(doc, blockers_by_pk, status_by_pk, readable?) do
+  defp to_card(doc, unpublished_pair?, blockers_by_pk, status_by_pk, readable?) do
     content = doc.content || %{}
 
     blocker_statuses =
@@ -406,6 +431,8 @@ defmodule Barkpark.Tasks.Board do
       worker: gated_worker(content, readable?),
       lifecycle_status: lifecycle_of(doc),
       draft: DraftId.draft?(doc.doc_id),
+      # A BUCKET fact, handed in by `load_task_docs/1` — never re-derived here.
+      twin_unpublished_pair: unpublished_pair?,
       criteria: Tasks.criteria_progress(content),
       github: Link.get(doc),
       github_synced: Link.synced?(doc),
@@ -571,7 +598,7 @@ defmodule Barkpark.Tasks.Board do
   # a realtime event refreshes it on the next :refresh reconcile.
   #
   # THE GROUPING KEY IS THE PUBLISHED ID, NOT THE STORED ONE (task-56bc2039bae5010f).
-  # `card.doc_id` is already `Content.published_id/1`'d by `to_card/4`, but
+  # `card.doc_id` is already `Content.published_id/1`'d by `to_card/5`, but
   # `card.parent_id` is the RAW `content.parent_id` — and a task written through
   # `/v1/data/mutate` lands in the draft shadow, so a child filed against a
   # drafts-shaped epic carries `parent_id: "drafts.<epic>"`. Grouped raw, that
@@ -582,7 +609,7 @@ defmodule Barkpark.Tasks.Board do
   # `Tasks.Query.maybe_filter_parent_id/2`, `Tasks.Rail.rail_children/2`,
   # `TasksController.Params.batch_child_counts/2` — in SQL; this is the same rule
   # in Elixir, over the already-loaded snapshot. Normalising here and not at
-  # `to_card/4` keeps `parent_id` on the card as the value the document actually
+  # `to_card/5` keeps `parent_id` on the card as the value the document actually
   # STORES, which the card still renders to the operator — the normalisation is
   # the GROUPING/MATCHING key's, never the displayed field's.
   #
@@ -645,11 +672,11 @@ defmodule Barkpark.Tasks.Board do
 
   @doc """
   Project a broadcast `doc` map into a normalized card, applying the same
-  fail-closed field-visibility gate as `to_card/4`. PURE, DB-free.
+  fail-closed field-visibility gate as `to_card/5`. PURE, DB-free.
 
   The broadcast (`Content.Broadcast`) carries only `%{doc_id, title, status,
   content, updated_at}` for the ONE changed doc — never the dependency graph. So
-  this is byte-parallel to `snapshot`'s private `to_card/4` with two differences:
+  this is byte-parallel to `snapshot`'s private `to_card/5` with two differences:
   it **carries `prev_card.blocker_statuses`/`:sub`/`:created_at` forward** (the
   event has none) so an already-known card keeps its readiness inputs, and it
   takes the visibility predicate `readable?` INJECTED by the caller instead of
@@ -658,7 +685,7 @@ defmodule Barkpark.Tasks.Board do
   FIELD-VISIBILITY SEAL (felix W19). `readable?` is `field_visibility_gate/1`'s
   fail-closed predicate, computed ONCE per mount/`:refresh` by `board_live` and
   threaded in — NEVER resolved per broadcast (no DB on the hot event path). It
-  gates EXACTLY the 7 text/PII fields `to_card/4` gates — priority, parent_id,
+  gates EXACTLY the 7 text/PII fields `to_card/5` gates — priority, parent_id,
   labels (else `[]`), worker (via `gated_worker/2`, the assignee⊕claim union),
   next_criterion + criteria_list (both under `"acceptance_criteria"`),
   description_excerpt (under `"description"`), design_doc. `lifecycle_status`,
@@ -695,6 +722,11 @@ defmodule Barkpark.Tasks.Board do
       worker: gated_worker(content, readable?),
       lifecycle_status: Map.get(content, "lifecycle_status") || "open",
       draft: DraftId.draft?(msg_doc.doc_id),
+      # One row cannot see its bucket: carry the snapshot's answer forward, and
+      # drop it once this row is published (the pair now has a published side).
+      twin_unpublished_pair:
+        msg_doc.status != "published" and
+          ((prev_card && prev_card[:twin_unpublished_pair]) || false),
       criteria: Tasks.criteria_progress(content),
       github: Link.get(synthetic),
       github_synced: Link.synced?(synthetic),

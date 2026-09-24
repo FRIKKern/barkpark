@@ -817,6 +817,19 @@ function bootScenario(name, opts) {
           teams: ((body && body.teams) || []).concat([opts.extraMembership]),
         });
       }
+      // cch-bl-preview-selector-residue — /v1/me IS SNAPSHOT, as mock.js
+      // snapshots every body and as a real fetch does (each response.json() is
+      // a fresh parse). This shim hands route()'s body over BY REFERENCE, and
+      // for /v1/me that body is the MODULE-LEVEL fixture: app.js's local 2FA
+      // echo writes `meCache.user.two_factor_enabled`, so one Turn-off click
+      // rewrote SCENARIOS["account-modal-2fa-on"] for every later reader in
+      // this process. Scoped to /v1/me on purpose: measured, a snapshot of
+      // EVERY body reds panel-overview, whose custom-host leg writes a field
+      // on the state-bag row the rail closed over — a documented by-reference
+      // seam this change must not silently remove.
+      if (res.status === 200 && body && p.split("?")[0].endsWith("/v1/me")) {
+        body = JSON.parse(JSON.stringify(body));
+      }
       return {
         ok: res.status >= 200 && res.status < 300,
         status: res.status,
@@ -1407,6 +1420,7 @@ const EXPECTATIONS = {
   //                                cloud/priv/static/app.js  → two hits.
   //   the webhook DELETE         → webhooks-panel
   //   /v1/sites/:id/github       → rollback
+  //   /v1/account/two-factor     → account-modal-2fa-on (cch-bl-preview-selector-residue)
   //
   // WHAT THIS LIST GOT WRONG WHEN IT WAS WRITTEN, recorded rather than quietly
   // fixed: it counted the two /v1/barkparks/:id hits as "six remaining" while
@@ -1498,7 +1512,9 @@ const EXPECTATIONS = {
       // actually painted. FIXTURE_SHAPE_PINS pins the same fact one layer up and
       // refuses BEFORE any scenario boots; this line is the second, independent
       // witness, and it is the one that would still red if the pin were deleted.
-      const amName = ((reg.get("modal-body").innerHTML || "").match(/class="am-name">([^<]*)</) || [])[1];
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      const amName = ((reg.get("modal-body").innerHTML || "").match(/class="am-name"><bdi>([^<]*)<\/bdi></) || [])[1];
       assert.ok(amName !== undefined,
         "no `.am-name` in the account modal openAccountModal just painted — the identity of the person " +
         "signing devices out is absent, and every assertion below is about a modal with no owner");
@@ -1800,7 +1816,9 @@ const EXPECTATIONS = {
         "rule and not by a name rule (User has no :name field at all)");
       hooks.openModal(hooks.accountModalHtml(model));
       const html = reg.get("modal-body").innerHTML || "";
-      const painted = (html.match(/class="am-name">([^<]*)</) || [])[1];
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      const painted = (html.match(/class="am-name"><bdi>([^<]*)<\/bdi></) || [])[1];
       assert.equal(painted, local,
         "the 158-character local part did not reach `.am-name` whole; got " + JSON.stringify(String(painted).slice(0, 32)) +
         "… (" + String(painted).length + " characters). A truncation on the way to the element hides the overflow " +
@@ -1838,8 +1856,8 @@ const EXPECTATIONS = {
     },
   },
   "account-modal-2fa-on": {
-    what: "2FA already ON — the on-row with regenerate + turn-off, derived from /v1/me alone (zero extra fetches)",
-    check(reg, hooks) {
+    what: "2FA already ON — the on-row with regenerate + turn-off, derived from /v1/me alone (zero extra fetches) — and Turn off is CLICKED: its danger confirm, one DELETE /v1/account/two-factor, the SERVER flag off, and the badge repaints Off with setup offered again",
+    async check(reg, hooks, ctx) {
       const model = hooks.accountModel({ team_id: "team_abc" }, SCENARIOS["account-modal-2fa-on"].data.me);
       assert.equal(model.twoFactorEnabled, true, "the on-state must come from /v1/me's two_factor_enabled");
       hooks.openModal(hooks.accountModalHtml(model));
@@ -1848,6 +1866,70 @@ const EXPECTATIONS = {
       assert.ok(html.includes('id="a2f-regen"'), "the on-row must offer regenerate");
       assert.ok(html.includes('id="a2f-disable"'), "the on-row must offer turn-off");
       assert.ok(!html.includes('id="a2f-start"'), "an enrolled account is never offered setup again");
+
+      // ── cch-bl-preview-selector-residue · TURN OFF — DELETE /v1/account/two-factor
+      // The fourth FLAG-SHAPED verb, and the only one with no click-driven
+      // oracle until this leg. Flag-shaped means there is no list to shrink:
+      // the verb flips ONE boolean (/v1/me's user.two_factor_enabled), so the
+      // oracle reads that boolean on BOTH sides of the wire — never a count of
+      // rows nobody fabricated. Re-derive the handler by symbol:
+      //   grep -n 'api("DELETE", "/v1/account/two-factor"' cloud/priv/static/app.js
+      // — one hit, the onConfirm of the #a2f-disable listener in a2fWire.
+      //
+      // Everything above rendered through hooks.openModal, which wires NOTHING
+      // (a2fWire runs only inside openAccountModal). So the modal is opened
+      // again here the way a user opens it, through #acct-btn.
+      const acct = reg.get("acct-btn");
+      assert.ok(acct, "#acct-btn was never touched — init() did not wire the shell");
+      assert.equal(acct.click(), 1, "#acct-btn must have exactly one click handler (it opens the account modal)");
+      await ctx.settle();
+      const opened = reg.get("modal-body").innerHTML || "";
+      // THE RENDER HALF: byId auto-creates a registry node for any id the app
+      // asks for, so the click below would pass on a phantom without this.
+      assert.ok(opened.includes('id="a2f-disable"') && opened.includes('id="a2f-badge"'),
+        "the REAL account modal must paint the on-row's Turn off control; got: " + opened.slice(0, 300));
+      assert.ok(/id="a2f-badge"[^>]*>On</.test(opened), "…and its badge must read On before the click");
+
+      // ─ the trigger only opens the sheet (danger tier: armed, no typed echo) ─
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/two-factor"), 0, "nothing turned off before the click");
+      assert.equal(reg.get("a2f-disable").click(), 1, "Turn off dispatched no click handler — it is DEAD");
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/two-factor"), 0,
+        "Turn off fired its DELETE on the FIRST click — the confirm gate is gone");
+      const sheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(sheet.includes('id="cm-confirm"') && sheet.includes("Turn off two-factor authentication?"),
+        "the confirm sheet did not mount, or does not name the act; got: " + sheet.slice(0, 200));
+      const parsed = parsedConfirmButton(reg);
+      assert.ok(parsed && parsed.disabled === false, "a DANGER-tier Confirm ships ARMED");
+      assert.equal(reg.get("cm-confirm").click(), 1, "the sheet's Confirm must be wired for \"click\"");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", "/v1/account/two-factor"), 1,
+        "exactly one DELETE /v1/account/two-factor must reach the wire; got " +
+        ctx.countCalls("DELETE", "/v1/account/two-factor"));
+
+      // ─ THE SERVER FLAG. Until this row the DELETE arm answered 200 {ok:true}
+      // and flipped nothing, so /v1/me kept saying two_factor_enabled: true —
+      // a disable indistinguishable from a no-op on every read after it.
+      assert.equal(ctx.state.twoFactorEnabled, false,
+        "DELETE /v1/account/two-factor did not turn anything off that the fixture can observe");
+      const meAfter = route("account-modal-2fa-on", "GET", "/v1/me", ctx.state);
+      assert.equal(meAfter.status, 200, "the account is still signed in after turning 2FA off");
+      assert.equal(meAfter.body.user.two_factor_enabled, false,
+        "/v1/me still reports two_factor_enabled: true after a successful disable");
+      assert.equal(SCENARIOS["account-modal-2fa-on"].data.me.user.two_factor_enabled, true,
+        "the disable leaked into the MODULE fixture — the next boot of this scenario would start Off");
+
+      // ─ THE UI FLAG. The success arm echoes the flag locally and re-opens the
+      // account screen; the badge it repaints is the operator's only view of it.
+      const reborn = reg.get("modal-body").innerHTML || "";
+      assert.ok(reborn.includes(">Your account<") && reborn.includes('id="a2f-badge"'),
+        "the success arm must return to the WHOLE account screen; got: " + reborn.slice(0, 200));
+      assert.ok(/id="a2f-badge"[^>]*>Off</.test(reborn),
+        "the two-factor badge must repaint Off after a successful disable; got: " +
+        (reborn.match(/id="a2f-badge"[^>]*>[^<]*</) || ["<no badge>"])[0]);
+      assert.ok(!reborn.includes('id="a2f-disable"') && !reborn.includes('id="a2f-regen"'),
+        "the account screen still offers Turn off / regenerate for a factor that is already gone");
+      assert.ok(reborn.includes('id="a2f-start"'),
+        "a disabled account must be offered setup again — the way back in");
     },
   },
   // cch-w39-s2-fu — THE UNKNOWN ARM, at rest. The browser half of this state
@@ -3163,7 +3245,9 @@ const EXPECTATIONS = {
     check(reg) {
       const body = reg.get("new-body").innerHTML || "";
       assert.ok(body.includes("new-ready"), "the shared ready hero must render");
-      assert.ok(body.includes("Hugin is ready"), "the hero names the live instance");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("<bdi>Hugin</bdi> is ready"), "the hero names the live instance");
       assert.ok(body.includes('id="new-open-studio"'), "Open Studio is the primary action");
       assert.ok(body.includes("hugin-5b2c1e.barkpark.cloud"), "the live URL renders");
       assert.ok(body.includes(">View instance<"), "the secondary View-instance affordance renders");
@@ -3196,6 +3280,43 @@ const EXPECTATIONS = {
     },
   },
 
+  // task-679663d0bee42b15 — THE LAUNCH PRESS'S TWO 403s, DRIVEN AND READ. Both
+  // bodies are go_live's own (quoted beside the fixtures in scenarios.mjs). The
+  // shared driver asserts every precondition that would otherwise let the
+  // toast assertions pass on a page where nothing was pressed: the form is
+  // rendered, its submit handler is wired, exactly ONE POST /v1/launch reached
+  // the wire, and a toast actually mounted. Each expectation then reads the
+  // arm-specific bytes, so a swapped or broken slug branch in
+  // newLaunchRefusalToast reds the scenario that owns it.
+  "new-launch-limit-reached": {
+    what: "/new Launch → POST /v1/launch 403 limit_reached: the plan-limit toast WITH the billing action, never the authority sentence",
+    async check(reg, hooks, ctx) {
+      const t = await driveLaunchRefusal(reg, ctx);
+      assert.ok(t.includes('<div class="toast-title">Plan limit reached</div>'),
+        "a 403 limit_reached must title the toast \"Plan limit reached\"; toast stack: " + t.slice(0, 400));
+      assert.ok(t.includes("You&#39;re at your plan&#39;s instance limit.") || t.includes("You're at your plan's instance limit."),
+        "the quota body must render; toast stack: " + t.slice(0, 400));
+      assert.equal(countMatches(t, '<button class="btn btn-sm toast-action">Open dashboard</button>'), 1,
+        "a quota refusal carries exactly ONE billing action (Open dashboard); toast stack: " + t.slice(0, 400));
+      assert.ok(!t.includes("can&#39;t launch for this team") && !t.includes("role on this team"),
+        "a quota refusal must not borrow the authority copy; toast stack: " + t.slice(0, 400));
+    },
+  },
+  "new-launch-forbidden": {
+    what: "/new Launch → POST /v1/launch 403 forbidden {required: admin, scope: team}: the authority toast naming admin, and NO billing action",
+    async check(reg, hooks, ctx) {
+      const t = await driveLaunchRefusal(reg, ctx);
+      assert.ok(t.includes('<div class="toast-title">You can&#39;t launch for this team</div>'),
+        "a 403 forbidden must title the toast with the authority sentence; toast stack: " + t.slice(0, 400));
+      assert.ok(t.includes("Launching needs the admin role on this team. Ask a team admin to launch it, or to give you that role."),
+        "the toast must name the role the SERVER required (admin); toast stack: " + t.slice(0, 400));
+      assert.ok(!t.includes("toast-action"),
+        "an authority refusal offers no billing action — paying does not grant a role; toast stack: " + t.slice(0, 400));
+      assert.ok(!t.includes("Plan limit reached"),
+        "an authority refusal must not read as a plan ceiling; toast stack: " + t.slice(0, 400));
+    },
+  },
+
   // ── cch-r16-w11: the launch wizard's own elevated writes, BOTH WAYS ─────────
   // The three rows this pair and `theater-failed-member` retire from
   // __binding_census.mjs's UNPREDICATED list. Each member assertion is an
@@ -3206,7 +3327,9 @@ const EXPECTATIONS = {
     what: "the /new ready hero with GitHub connected, as the OWNER — #new-gh-create is LIVE (the grant arm keeps its shipped btn-primary bytes)",
     check(reg) {
       const body = reg.get("new-body").innerHTML || "";
-      assert.ok(body.includes("Hugin is ready"), "the hero names the live instance");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("<bdi>Hugin</bdi> is ready"), "the hero names the live instance");
       assert.ok(body.includes('<button class="btn btn-primary" type="button" id="new-gh-create">Create GitHub repo</button>'),
         "the owner gets the live create button, byte for byte the class list it shipped with");
       assert.ok(body.includes('id="new-gh-name" type="text"'), "the repo-name field is live beside it");
@@ -3217,7 +3340,9 @@ const EXPECTATIONS = {
     what: "the same screen as a plain MEMBER — no live #new-gh-create anywhere in the bytes, the disabled-and-explained arm and a disabled name field instead",
     check(reg) {
       const body = reg.get("new-body").innerHTML || "";
-      assert.ok(body.includes("Hugin is ready"), "the member still reaches the ready screen — only the elevated write is withheld");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("<bdi>Hugin</bdi> is ready"), "the member still reaches the ready screen — only the elevated write is withheld");
       assert.ok(!body.includes('id="new-gh-create"'),
         "adminWriteControlHtml's refusal arm DROPS liveAttrs: there must be no mount hook at all");
       assert.ok(body.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled title="You need the admin role on this team — an admin on this team can grant it.">Create GitHub repo</button><span class="inst-life-reason">You need the admin role on this team — an admin on this team can grant it.</span></div>'),
@@ -3260,7 +3385,9 @@ const EXPECTATIONS = {
       const body = (reg.get("overview-body") || {}).innerHTML || "";
       assert.ok(body.includes("Needs attention"), "the attention section heading renders");
       assert.ok(body.includes("attention-row"), "an attention row renders");
-      assert.ok(body.includes(">Reporting</a>"), "the degraded box is named + linked");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("><bdi>Reporting</bdi></a>"), "the degraded box is named + linked");
       // cch-w18-bl: the EXACT sentence, not an OR over two halves. The old
       // disjunction was satisfied by "Agent offline" ALONE, so it held this
       // fixture to nothing at all about its health word — and the word it
@@ -3297,7 +3424,9 @@ const EXPECTATIONS = {
       const NAME = "Reporting — EU customer analytics, billing reconciliation and retention";
       assert.equal(NAME.length, 71, "the fixture name is the 71 characters this expectation is written about");
       assert.ok(body.includes("attention-row"), "an attention row renders");
-      assert.ok(body.includes(">" + NAME + "</a>"), "the whole name is the link's text — never truncated in the markup");
+      // (task-1614ac4ba29eec9b: the user-authored text now rides in its own <bdi>,
+      // so the needle names the isolate — still the whole visible text node.)
+      assert.ok(body.includes("><bdi>" + NAME + "</bdi></a>"), "the whole name is the link's text — never truncated in the markup");
       assert.ok(!body.includes("…"), "no ellipsis CHARACTER is written into the markup; the ellipsis is CSS");
       assert.ok(
         body.includes("Health unknown · Agent offline"),
@@ -3366,9 +3495,31 @@ const EXPECTATIONS = {
         "the suspended card names the day the plane stamped, and nothing else");
       assert.ok(!grid.includes("The server is stopped"), "the console never paints a stop it does not perform");
       assert.ok(!grid.includes("suspended — not deleted"), "trial-expiry copy never leaks onto the suspended card");
-      // The pill beside it moved with the copy: the WORD is Suspended, and the
-      // `bp-inst--stopped` S4 token (the hue) is deliberately unchanged.
-      assert.ok(!/inst-life-label">Stopped</.test(grid), "no pill paints the literal word Stopped");
+      // The pill beside it moved with the copy: the WORD is Suspended.
+      //
+      // task-b579afe77276b4f8 — this negative used to search a retired lifecycle
+      // label class for the word Stopped.
+      // PR #19569 retired that class; nothing in app.js emits it, so the
+      // negative could never red again. The pill on this card is statusOf()'s
+      // `suspended` arm rendered by statusMetaPill (THE ONE EMITTER), whose label
+      // bytes are `<span class="status-pill-label">WORD</span>`. The lifecycle
+      // ladder (lifecycleStatePillHtml) does not render on the overview grid, so
+      // it is not what this scenario pins.
+      //
+      // Anti-vacuity control FIRST, on the same span shape the negative reads:
+      // if the label bytes stop matching, the list is empty and the negative
+      // would be vacuous again — this reds instead. Then the negative, then the
+      // positive pin on the suspended card's own pill. Checked RED by painting
+      // "Stopped" in statusOf's suspended arm (the negative fires); the old
+      // regex stayed green under the same mutation.
+      const pillLabels = [...grid.matchAll(/<span class="status-pill-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+      assert.ok(pillLabels.length >= 2,
+        `the grid's pill labels are read at all (want the Healthy and suspended boxes' pills, got ${JSON.stringify(pillLabels)})`);
+      assert.ok(!pillLabels.some((l) => /\bStopped\b/i.test(l)),
+        `no pill paints the literal word Stopped (labels: ${JSON.stringify(pillLabels)})`);
+      assert.ok(
+        /suspended-card-banner[\s\S]*?<span class="status-pill status-pill--danger"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Suspended<\/span>/.test(grid),
+        "the suspended card's own pill is the danger pill labelled Suspended");
     },
   },
   // ── gr-p3 D-01: the v4 Fleet list + Archives (screens/01) ──────────────────
@@ -5318,7 +5469,10 @@ const EXPECTATIONS = {
       // body.includes(email) is satisfiable by markup a person cannot read —
       // measured: truncating the name render to 40 chars left that weaker
       // needle GREEN. The needle below pins the text node a person sees.
-      assert.ok(body.includes('set-row-name">' + cruel.email + "<"),
+      // (cch-rtl-script-neutral-borrowing: the email text node now sits inside
+      // the row's <bdi>, so the needle names the isolate — still the visible
+      // text node, still the WHOLE address up to the closing tag.)
+      assert.ok(body.includes('set-row-name"><bdi>' + cruel.email + "</bdi>"),
         "the 160-char email must render WHOLE as the row's visible name — CSS may clip it, the DOM must carry it");
       const rows = SCENARIOS["members-cruel-content"].data.members.length;
       assert.equal(rows, 4, "the roster is teamMembers.concat(one cruel member) — the three committed rows stay byte-for-byte unmoved");
@@ -5456,9 +5610,12 @@ const EXPECTATIONS = {
       // moved with the id — a corpus that shipped ada's email under lin's id
       // would tag the wrong row "(you)" and every predicate below would be a
       // coincidence.
-      assert.ok(body.includes("lin@acme.com <span class=\"dim\">(you)</span>"),
+      // (cch-rtl-script-neutral-borrowing: the email closes its <bdi> before the
+      // system's "(you)". The NEGATIVE needle below moves with it — left on the
+      // old markup it could never match again and would pass vacuously.)
+      assert.ok(body.includes("lin@acme.com</bdi> <span class=\"dim\">(you)</span>"),
         "lin's row must be the self row — the actor identity, not just the actor rank; got: " + body.slice(0, 400));
-      assert.ok(!body.includes("ada@acme.com <span class=\"dim\">(you)</span>"),
+      assert.ok(!body.includes("ada@acme.com</bdi> <span class=\"dim\">(you)</span>"),
         "ada must NOT be self-tagged when the acting principal is lin");
       const emailsFor = (attr) =>
         panel.querySelectorAll("[" + attr + "]").map((b) => b.getAttribute("data-email")).sort();
@@ -5490,7 +5647,7 @@ const EXPECTATIONS = {
       const panel = reg.get("members-body");
       const body = panel.innerHTML || "";
       assert.ok(body.includes("ozz@acme.com"), "the peer owner renders on the roster");
-      assert.ok(body.includes("ada@acme.com <span class=\"dim\">(you)</span>"),
+      assert.ok(body.includes("ada@acme.com</bdi> <span class=\"dim\">(you)</span>"),
         "the acting owner is still ada — this scenario moves the ROSTER, never the default actor");
       const emailsFor = (attr) =>
         panel.querySelectorAll("[" + attr + "]").map((b) => b.getAttribute("data-email")).sort();
@@ -6462,6 +6619,29 @@ const EXPECTATIONS = {
       const bodyEl = reg.get("instance-body");
       const before = (bodyEl || {}).innerHTML || "";
       assert.ok(before.length > 0, "#instance-body rendered empty");
+      // task-6878caa08b065f78 — THE LIFECYCLE LADDER'S STOPPED-STATE WORD.
+      // This is a committed scenario where lifecycleStatePillHtml renders
+      // in the `stopped` state: the suspended box's bp CLI card mounts in
+      // #inst-lifecycle-actions and its head carries the ladder's chip. The
+      // overview-past-due pin (#19998) covers statusOf's suspended arm on the
+      // grid, where the ladder does not render, so a "Stopped" painted into
+      // LIFECYCLE_PILL_LABEL.stopped left every scenario green. The word is
+      // Suspended for the same reason the suspended card's is: the console
+      // never paints a stop it does not perform.
+      //
+      // Anti-vacuity control FIRST, on the same span shape the negative reads:
+      // if the card stops rendering or the label bytes change shape, the list
+      // is empty and the negative would pass on nothing — this reds instead.
+      // Then the negative, then the exact bytes the ladder emits (class chain +
+      // label). Checked RED by painting "Stopped" in LIFECYCLE_PILL_LABEL.stopped.
+      const lifeCard = (reg.get("inst-lifecycle-actions") || {}).innerHTML || "";
+      const lifeLabels = [...lifeCard.matchAll(/<span class="status-pill-label">([^<]*)<\/span>/g)].map((m) => m[1]);
+      assert.ok(lifeLabels.length >= 1,
+        `the lifecycle card's pill labels are read at all (want the ladder's stopped chip, got ${JSON.stringify(lifeLabels)} from ${JSON.stringify(lifeCard.slice(0, 300))})`);
+      assert.ok(!lifeLabels.some((l) => /\bStopped\b/i.test(l)),
+        `the lifecycle ladder paints the literal word Stopped (labels: ${JSON.stringify(lifeLabels)})`);
+      assert.ok(lifeCard.includes('<span class="status-pill status-pill--neutral status-pill--stopped bp-inst--stopped"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Suspended</span></span>'),
+        `the ladder's stopped chip is the neutral stopped-variant pill labelled Suspended (labels: ${JSON.stringify(lifeLabels)})`);
       // 1. The precondition: the unknown arm really is on screen.
       assert.ok(before.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-update-actions-reason">Roll back&hellip;</button></div>'),
         "the Roll back offer is not in the unknown arm — there is no still-checking state here to need an exit");
@@ -6671,6 +6851,30 @@ const EXPECTATIONS = {
 
 function countMatches(hay, needle) {
   return hay.split(needle).length - 1;
+}
+
+// task-679663d0bee42b15 — press Launch on the /new step and return the toast
+// stack's markup, after proving the press really happened. Every assertion
+// here is a precondition: without them "the toast says X" could be read off a
+// form that never rendered, a submit nobody listened to, or a request that
+// never left.
+async function driveLaunchRefusal(reg, ctx) {
+  assert.equal(reg.get("new-screen").hidden, false, "the /new screen must be visible");
+  const body = reg.get("new-body").innerHTML || "";
+  assert.ok(body.includes('id="new-launch-form"') && body.includes('id="new-launch-btn"'),
+    "the launch step never rendered its form, so no press can be driven; #new-body: " + body.slice(0, 200));
+  const before = (reg.get("toast-stack") || {}).innerHTML || "";
+  assert.equal(before, "", "a toast was already mounted before the press — the assertions below could read it");
+  assert.equal(ctx.byId("new-launch-form").dispatchEvent({ type: "submit" }), 1,
+    "#new-launch-form has no \"submit\" handler — newLaunch was never wired, so nothing was pressed");
+  await ctx.settle();
+  assert.equal(ctx.countCalls("POST", "/v1/launch"), 1, "exactly one POST /v1/launch must reach the wire");
+  const btn = reg.get("new-launch-btn");
+  assert.equal(btn.disabled, false, "a refused launch must hand the button back");
+  assert.equal(btn.textContent, "Launch", "…and restore its label");
+  const t = (reg.get("toast-stack") || {}).innerHTML || "";
+  assert.ok(t.includes("toast-error"), "the refusal mounted no error toast at all; toast stack: " + JSON.stringify(t.slice(0, 200)));
+  return t;
 }
 
 // ── cch-w10: the destroy-tier confirm sheet, driven as an operator drives it ──

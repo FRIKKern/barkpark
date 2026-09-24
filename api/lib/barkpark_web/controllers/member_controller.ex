@@ -112,6 +112,16 @@ defmodule BarkparkWeb.MemberController do
   Removing a token seat does not revoke the token; it only ends its membership
   in this workspace (`DELETE /v1/tokens/:id` kills the credential itself).
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"principal_ref" => ref} = params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          {:ok, principal} <- Members.resolve_principal(ref, principal_type(params)) do
@@ -158,6 +168,16 @@ defmodule BarkparkWeb.MemberController do
   Revocation is idempotent; the audit trail is emitted by
   `Barkpark.Auth.revoke_token/1`.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def revoke_token(conn, %{"id" => token_id}) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          true <- Members.token_member?(ws_id, token_id),
@@ -177,6 +197,90 @@ defmodule BarkparkWeb.MemberController do
         unresolved_workspace(conn)
     end
   end
+
+  @doc """
+  `POST /w/:ws/p/:proj/v1/tokens/:id/rotate` — mint a successor for a token
+  that holds a seat here and put the old one on a grace clock.
+
+  Body/query: `grace_seconds` (default #{Auth.rotation_default_grace()}; `0`
+  revokes the old token now; max #{Auth.rotation_max_grace()}). Nothing else
+  is read — the successor copies the old token, so no permission or scope can
+  be requested.
+
+  Same gate as `revoke_token/2`: the `:scoped_admin` pipeline, then the token
+  must hold a seat in THIS workspace (404 otherwise). `Auth.rotate_token/3`
+  adds the ceilings a secret-returning verb needs (403). 409 for a revoked,
+  expired or non-api token. 201 carries the new secret ONCE, in the same shape
+  as the mint (`TokenController.create/2`).
+  """
+  def rotate_token(conn, %{"id" => token_id} = params) do
+    with %{id: ws_id, slug: ws_slug} <- conn.assigns[:current_workspace],
+         {:ok, grace} <- fetch_grace(params),
+         true <- Members.token_member?(ws_id, token_id),
+         {:ok, {raw, successor, old}} <-
+           Auth.rotate_token(token_id, conn.assigns.api_token,
+             grace_seconds: grace,
+             workspace_id: ws_id
+           ) do
+      conn
+      |> put_status(:created)
+      |> json(%{
+        token: raw,
+        id: successor.id,
+        inserted_at: successor.inserted_at,
+        label: successor.label,
+        name: successor.name,
+        kind: successor.kind,
+        permissions: successor.permissions,
+        dataset: successor.dataset,
+        expires_at: successor.expires_at,
+        workspace: ws_slug,
+        rotated_from: %{id: old.id, expires_at: old.expires_at, revoked_at: old.revoked_at}
+      })
+    else
+      false ->
+        not_found(conn, "no token with that id holds a seat in this workspace")
+
+      {:error, :not_found} ->
+        not_found(conn, "no token with that id holds a seat in this workspace")
+
+      {:error, :invalid_grace} ->
+        unprocessable(
+          conn,
+          "grace_seconds must be an integer from 0 to #{Auth.rotation_max_grace()}"
+        )
+
+      {:error, :not_rotatable} ->
+        conflict(conn, "conflict", "token is revoked, expired, or not an api token")
+
+      {:error, :forbidden} ->
+        conn
+        |> ErrorResponse.emit_fields(:forbidden, %{
+          code: "forbidden",
+          message:
+            "rotating would hand you a secret wider than your own: the token carries a " <>
+              "permission your token lacks, or a seat in a workspace you do not administer"
+        })
+
+      {:error, _} ->
+        unprocessable(conn, "could not rotate token")
+
+      _ ->
+        unresolved_workspace(conn)
+    end
+  end
+
+  defp fetch_grace(params) do
+    case Map.get(params, "grace_seconds") do
+      nil -> {:ok, Auth.rotation_default_grace()}
+      n when is_integer(n) -> {:ok, n}
+      s when is_binary(s) -> parse_grace(Integer.parse(s))
+      _ -> {:error, :invalid_grace}
+    end
+  end
+
+  defp parse_grace({n, ""}), do: {:ok, n}
+  defp parse_grace(_), do: {:error, :invalid_grace}
 
   # ── helpers ────────────────────────────────────────────────────────────────
 
