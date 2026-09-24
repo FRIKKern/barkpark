@@ -1085,7 +1085,8 @@ defmodule Barkpark.Sites.DeployRunner do
           refusals_since: DateTime.t() | nil,
           door_open_admissions_total: non_neg_integer() | nil,
           door_open_admissions: %{String.t() => non_neg_integer()} | nil,
-          measured_at: DateTime.t() | nil
+          measured_at: DateTime.t() | nil,
+          census_interval_ms: pos_integer()
         }
 
   @typedoc """
@@ -1139,6 +1140,25 @@ defmodule Barkpark.Sites.DeployRunner do
   (D113), and a census that called the Runner would hang exactly when it
   mattered. The cost is staleness, which is why `measured_at` is rendered too —
   every value here is "as of" that instant, not "as of now".
+
+  `census_interval_ms` is what BOUNDS that staleness, rendered so a reader does
+  not have to know a module attribute. It is the backstop tick's period, read
+  through the same `census_interval_ms/0` the ticker arms with (config
+  `:census_interval_ms`, default `@default_census_interval_ms`) — never a second
+  constant. Like `capacity` it is CONFIGURATION, not a measurement, so it
+  renders even when nothing was read. What it means:
+
+    * every door event (trigger, run completion, deadline) republishes at once,
+      so in PORT mode the census is exact;
+    * in SYSTEMD mode a transient unit can finish without sending this BEAM a
+      message, so `observed_in_flight` can read 1 for a build that already ended
+      — for at most one interval PLUS the tick's own cost (one `systemctl
+      is-active` per tracked deploy unit, each bounded by `ctl_cmd_timeout_ms`)
+      while the Runner is healthy;
+    * so `now - measured_at` well past `census_interval_ms` does not mean "old
+      but true": it means the Runner is NOT TICKING (wedged or busy), and the
+      reading has no bound at all. That is the one case this ETS read exists to
+      survive, and the interval is what makes it visible.
   """
   @spec door_census() :: door_census()
   def door_census, do: door_census(@census_table)
@@ -1169,7 +1189,8 @@ defmodule Barkpark.Sites.DeployRunner do
       refusals_since: census_get(table, :refusals_since),
       door_open_admissions_total: census_get(table, :door_open_admissions_total),
       door_open_admissions: census_get(table, :door_open_admissions),
-      measured_at: census_get(table, :measured_at)
+      measured_at: census_get(table, :measured_at),
+      census_interval_ms: census_interval_ms()
     }
   end
 

@@ -191,6 +191,7 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
 
       assert Enum.sort(Map.keys(door)) == [
                "capacity",
+               "census_interval_ms",
                "door_open_admissions",
                "door_open_admissions_total",
                "in_flight_slugs",
@@ -226,6 +227,10 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       assert is_binary(door["refusals_since"])
       assert {:ok, _, _} = DateTime.from_iso8601(door["refusals_since"])
       assert is_binary(door["measured_at"])
+
+      # The staleness BOUND beside it: the backstop tick's period, so a reader
+      # can tell "old but within one tick" from "the Runner stopped ticking".
+      assert is_integer(door["census_interval_ms"]) and door["census_interval_ms"] > 0
 
       # ── the serving clock ──
       serving = body["serving"]
@@ -267,6 +272,17 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
   # route and reads the numbers back off the wire, then refuses a second deploy
   # at the door and reads them again.
   describe "the door census, end to end on the wire" do
+    test "door.census_interval_ms is the CONFIGURED tick, read per request — not a constant",
+         %{conn: conn, token: token} do
+      put_runner_cfg(census_interval_ms: 2_500)
+      first = conn |> authed(token) |> get(@route) |> json_response(200)
+      assert first["door"]["census_interval_ms"] == 2_500
+
+      put_runner_cfg(census_interval_ms: 60_000)
+      second = build_conn() |> authed(token) |> get(@route) |> json_response(200)
+      assert second["door"]["census_interval_ms"] == 60_000
+    end
+
     test "observed_in_flight goes 0 → 1 → 0 and refusals_total RISES across a real refusal",
          %{token: token} do
       provisionable_box()
