@@ -31,7 +31,12 @@ defmodule Barkpark.Content.PaperTaskResolverTest do
   setup do
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
+    seed_paper!(scope)
+  end
 
+  # Task schemas + one task carrying 1/2 criteria under an epic, in `scope`'s
+  # workspace, and a paper block list with a chip to it and two query blocks.
+  defp seed_paper!(scope) do
     for schema_def <- Tasks.schema_definitions(@dataset) do
       attrs =
         schema_def
@@ -177,6 +182,82 @@ defmodule Barkpark.Content.PaperTaskResolverTest do
       assert [%{"unavailable" => true}] = s["blocks"]
       assert [[%{"unavailable" => true}], "junk"] = c["columns"]
       assert [%{"unavailable" => true}] = t["children"]
+    end
+  end
+
+  # task-857c9f987268a75a: Tasks REGISTERED on the instance, switched OFF for
+  # one workspace. The enablement answer must come from the RENDERED PAPER'S
+  # own workspace (the scope's `:workspace_id`, which every render site sets to
+  # `paper.workspace_id`), never from the caller's / instance default.
+  describe "per-workspace Tasks enablement" do
+    setup ctx do
+      ws_b = TenancyFixtures.create_workspace!()
+      project_b = TenancyFixtures.create_project!(ws_b)
+      b = seed_paper!(workspace_id: ws_b.id, project_id: project_b.id)
+
+      %{
+        a: Map.take(ctx, [:scope, :blocks, :title]),
+        b: b,
+        ws_a: ctx.scope[:workspace_id],
+        ws_b: ws_b.id
+      }
+    end
+
+    defp tasks_disabled!(ws_id) do
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_plugin_settings(ws_id, %{"tasks" => %{"enabled" => false}})
+
+      :ok
+    end
+
+    defp assert_live!({resolved, html}, title) do
+      [_h, _p, list, stat, _pinned] = resolved
+      refute Map.has_key?(list, "unavailable")
+      refute Map.has_key?(stat, "unavailable")
+      assert [%{"title" => ^title}] = list["snapshot"]
+      assert html =~ "1/2"
+      refute html =~ "unavailable"
+    end
+
+    defp assert_placeholders!({resolved, html}) do
+      [_h, _p, list, stat, pinned] = resolved
+      assert list["unavailable"] == true
+      assert stat["unavailable"] == true
+      refute Map.has_key?(list, "snapshot")
+      refute Map.has_key?(pinned, "unavailable")
+      assert html =~ "criteria unavailable"
+      refute html =~ "1/2"
+      assert length(Regex.scan(~r/class="bp-dataviz--empty bp-task-unavailable"/, html)) == 2
+      assert html =~ "Pinned row"
+    end
+
+    test "get/1 answers per workspace; get/0 stays the instance answer", ctx do
+      :ok = tasks_disabled!(ctx.ws_b)
+
+      assert PaperTaskResolver.get(ctx.ws_a) == Barkpark.Tasks.PaperResolver
+      assert PaperTaskResolver.get(ctx.ws_b) == nil
+      assert PaperTaskResolver.get(nil) == Barkpark.Tasks.PaperResolver
+      assert PaperTaskResolver.get() == Barkpark.Tasks.PaperResolver
+    end
+
+    test "A (enabled) renders criteria + rows; B (disabled) renders the placeholders", ctx do
+      :ok = tasks_disabled!(ctx.ws_b)
+
+      # The caller's default workspace here is A (the seeded Default, Tasks
+      # ON) — B's paper still answers from B.
+      assert_live!(render(ctx.a.blocks, ctx.a.scope, :article), ctx.a.title)
+      assert_placeholders!(render(ctx.b.blocks, ctx.b.scope, :article))
+    end
+
+    test "the caller's default workspace differs from the paper's: the paper's wins", ctx do
+      # Reverse direction: the instance Default (A) switches Tasks OFF, the
+      # paper's own workspace (B) keeps it ON. B's paper renders live data; a
+      # default-keyed check would have rendered placeholders here.
+      :ok = tasks_disabled!(ctx.ws_a)
+      assert Barkpark.Tenancy.get_default_workspace().id == ctx.ws_a
+
+      assert_live!(render(ctx.b.blocks, ctx.b.scope, :article), ctx.b.title)
+      assert_placeholders!(render(ctx.a.blocks, ctx.a.scope, :article))
     end
   end
 end

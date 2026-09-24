@@ -715,18 +715,25 @@ defmodule Barkpark.Content.Papers do
         )
       end
 
+    # The chip criteria resolver, resolved ONCE per palette (an enablement
+    # read touches the workspace row) and only when a task row resolved. Keyed
+    # by the tenant scope's workspace — every render site threads the rendered
+    # paper's own `workspace_id` there (task-857c9f987268a75a).
+    task_resolver =
+      if task_rows == [], do: nil, else: PaperTaskResolver.get(scope_workspace_id(opts))
+
     by_target =
       Enum.reduce(targets, %{}, fn target, acc ->
         case pick_row_for_target(target, paper_rows) || pick_row_for_target(target, task_rows) do
           nil -> acc
-          row -> Map.put(acc, target, wikilink_hit(row))
+          row -> Map.put(acc, target, wikilink_hit(row, task_resolver))
         end
       end)
 
     Enum.reduce(pinned_ids, by_target, fn id, acc ->
       case pick_row_for_id(id, paper_rows) || pick_row_for_id(id, task_rows) do
         nil -> acc
-        row -> Map.put(acc, {:id, id}, wikilink_hit(row))
+        row -> Map.put(acc, {:id, id}, wikilink_hit(row, task_resolver))
       end
     end)
   end
@@ -763,7 +770,7 @@ defmodule Barkpark.Content.Papers do
   # id is normalized to the published spelling (chips are not /papers/ links —
   # the id only feeds data-* attrs), `status`/`priority` are read nil-tolerant,
   # and `criteria` is the `%{met, total}` count or nil when absent.
-  defp wikilink_hit(%Document{type: "task"} = doc) do
+  defp wikilink_hit(%Document{type: "task"} = doc, task_resolver) do
     content = doc.content || %{}
 
     %{
@@ -774,14 +781,15 @@ defmodule Barkpark.Content.Papers do
       # {met,total} semantics owned by the Tasks plugin's resolver, read
       # through the content-owned PaperTaskResolver seam (task-9c59aa555e1e015e):
       # met === true only, garbage-tolerant, nil when absent → renderers omit
-      # the segment; `:unavailable` when no resolver is loaded → renderers show
-      # an explicit placeholder segment.
+      # the segment; `:unavailable` when no resolver is loaded, or Tasks is
+      # switched off for the paper's workspace → renderers show an explicit
+      # placeholder segment.
       priority: task_chip_priority(content),
-      criteria: task_chip_criteria(content)
+      criteria: task_chip_criteria(content, task_resolver)
     }
   end
 
-  defp wikilink_hit(%Document{doc_id: id, title: title}),
+  defp wikilink_hit(%Document{doc_id: id, title: title}, _task_resolver),
     do: %{id: id, title: title, kind: "paper"}
 
   defp task_chip_status(content) do
@@ -791,12 +799,14 @@ defmodule Barkpark.Content.Papers do
     end
   end
 
-  defp task_chip_criteria(content) do
-    case PaperTaskResolver.get() do
-      nil -> :unavailable
-      resolver -> resolver.criteria_progress(content)
-    end
-  end
+  defp task_chip_criteria(_content, nil), do: :unavailable
+  defp task_chip_criteria(content, resolver), do: resolver.criteria_progress(content)
+
+  # The workspace a paper render is scoped to. Render sites pass a keyword
+  # scope; tolerate a map so a non-keyword caller never crashes the render.
+  defp scope_workspace_id(scope) when is_list(scope), do: Keyword.get(scope, :workspace_id)
+  defp scope_workspace_id(%{workspace_id: ws}), do: ws
+  defp scope_workspace_id(_), do: nil
 
   defp task_chip_priority(content) do
     case Map.get(content, "priority") do
@@ -1276,9 +1286,12 @@ defmodule Barkpark.Content.Papers do
     #
     # The rows and aggregates come from the resolver a plugin declares through
     # the content-owned PaperTaskResolver seam (task-9c59aa555e1e015e). With
-    # none loaded, every query-carrying task block is marked `unavailable` so
-    # each renderer shows an explicit placeholder, never an empty board.
-    case PaperTaskResolver.get() do
+    # none loaded — or Tasks switched off for the paper's workspace, which
+    # every render site threads as `scope[:workspace_id]`
+    # (task-857c9f987268a75a) — every query-carrying task block is marked
+    # `unavailable` so each renderer shows an explicit placeholder, never an
+    # empty board and never another workspace's enablement answer.
+    case PaperTaskResolver.get(scope_workspace_id(scope)) do
       nil ->
         Barkpark.PortableDoc.TaskResolver.mark_unavailable(blocks)
 

@@ -22,12 +22,24 @@ defmodule Barkpark.Content.PaperTaskResolver do
   registered, an unknown name, a malformed entry) is skipped with a
   `Logger.warning` naming it — never silently.
 
+  PER-WORKSPACE ENABLEMENT (task-857c9f987268a75a). Registration is the
+  INSTANCE layer; a workspace can switch a registered plugin off
+  (`Barkpark.Plugins.Enablement`, `workspaces.settings["plugins"]`). A paper
+  renders task data through `get/1`, keyed by the RENDERED PAPER'S OWN
+  workspace (every render site threads `paper.workspace_id` as the task
+  scope's `:workspace_id`), and a plugin switched off there declares nothing
+  for that paper — the same `nil` answer as "not loaded". `get/0` is the
+  instance-wide answer only (which resolver is registered at all); no paper
+  render path reads it.
+
   `nil` — nothing published (the `BARKPARK_PLUGINS=""` kill switch registers
   nothing; Registry init publishes `[]`) or no plugin in the load order
   declares a resolver — is the "unavailable" answer: papers render an explicit
   placeholder for the chip criteria segment and every task query block, never
   an empty list that reads as "no tasks".
   """
+
+  alias Barkpark.Plugins.Enablement
 
   @key {__MODULE__, :declared}
 
@@ -64,19 +76,46 @@ defmodule Barkpark.Content.PaperTaskResolver do
     :ok
   end
 
-  @doc "The resolver module to read task data through, or `nil` (unavailable)."
+  @doc """
+  The instance-wide resolver (registered + in the load order), or `nil`.
+  Ignores per-workspace enablement — a paper render reads `get/1`.
+  """
   @spec get() :: module() | nil
-  def get do
+  def get, do: Enum.find_value(load_ordered(), & &1.resolver)
+
+  @doc """
+  The resolver a paper in `workspace_id` reads task data through, or `nil`
+  (unavailable). `workspace_id` is the rendered paper's own workspace. A
+  declaring plugin that `Barkpark.Plugins.Enablement` reports switched off for
+  that workspace is skipped, so with Tasks off there the paper renders the
+  same explicit placeholders as with no resolver loaded. A `nil` workspace
+  resolves against the declaration defaults (`Enablement.effective(nil)`).
+  """
+  @spec get(binary() | nil) :: module() | nil
+  def get(workspace_id) do
+    case load_ordered() do
+      [] ->
+        nil
+
+      declared ->
+        effective = Enablement.effective(workspace_id)
+
+        Enum.find_value(declared, fn %{name: name, resolver: resolver} ->
+          if Enablement.enabled?(effective, name), do: resolver
+        end)
+    end
+  end
+
+  defp load_ordered do
     declared = :persistent_term.get(@key, [])
 
     case Application.get_env(:barkpark, :plugins, []) do
       [_ | _] = configured ->
-        configured
-        |> Barkpark.Content.PluginLoadOrder.plugins(declared, __MODULE__)
-        |> Enum.find_value(& &1.resolver)
+        Barkpark.Content.PluginLoadOrder.plugins(configured, declared, __MODULE__)
 
       _ ->
-        Enum.find_value(declared, & &1.resolver)
+        declared
     end
+    |> Enum.filter(& &1.resolver)
   end
 end
