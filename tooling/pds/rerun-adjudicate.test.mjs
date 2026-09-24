@@ -72,19 +72,40 @@ function sh(cmd) {
 // ── 1. THE FENCE ─────────────────────────────────────────────────────────────
 {
   const gripDiff = sh("git diff --stat origin/main -- tooling/grip/").stdout.trim();
-  // 1.1 IS LEFT EXACTLY AS IT WAS, AND NOT BECAUSE IT IS CLEAN. Its label and
-  // its predicate already name the same scope, so it is not the mislabel 1.2
-  // was, and closing that mislabel is all this change is chartered to do. But
-  // it has a DIFFERENT fault worth a row of its own: this suite's workflow
-  // (.github/workflows/research-coverage-suite.yml) deliberately carries
-  // `tooling/grip/**` in both `paths:` twins so that a grip-side change CAN
-  // red this gate — and 1.1 guarantees it always will, for the diff itself
-  // rather than for any drift. MEASURED at 863714ac8: one comment line
-  // appended to tooling/grip/screen.mjs prints
-  //   FAIL 1.1 zero bytes changed under tooling/grip/ — expected "", got
-  //        "tooling/grip/screen.mjs | 1 +\n 1 file changed, 1 insertion(+)"
-  // Whether an epic-era "touch no grip byte" fence should outlive its epic is
-  // a doctrine call, not a relabel, so it is reported and not decided here.
+  // 1.1 WAS REMOVED BY DECISION (2026-09-24, task-b71f7affdc15671b). It asserted
+  // that `git diff --stat origin/main -- tooling/grip/` was empty — PDS-D386's
+  // "PDS MUST NOT modify tooling/grip/**", written into the slice that first
+  // adopted grip read-only (#8516).
+  //
+  // THE DECISION: D386 outlives its epic as CHARTER LAW, not as a CI predicate.
+  // It binds PDS builders, and a diff cannot say who wrote it. This file runs on
+  // every PR that touches tooling/grip/** — the workflow watches grip on purpose,
+  // so a grip change CAN red this gate — which made 1.1 a PDS authorship rule
+  // enforced on every other lane's grip PR, and a red for the diff itself rather
+  // than for any drift. MEASURED 2026-09-24: every PR run of this job that
+  // failed between 2026-09-19 and 2026-09-22 — twelve — failed on 1.1 ALONE.
+  // Eleven (eight branches) were markdown notes under tooling/grip/ledger/, a
+  // directory nothing under tooling/pds reads. The twelfth was a Dependabot
+  // workflow bump that touched no grip byte at all: the diff runs against a
+  // freshly fetched origin/main, so a grip note a sibling merged after the PR's
+  // merge ref was built showed up as 51 deletions. On push-to-main origin/main
+  // IS HEAD, so there 1.1 passed having measured nothing.
+  //
+  // WHO IT BINDS: a PDS slice still may not edit tooling/grip/** — grip-side
+  // faults go to grip as rows (D386 stands). That is enforced where authorship
+  // is visible: the PDS lane fence and PR review. Other lanes' grip edits answer
+  // to grip's charter and grip's own suite, not to this file.
+  //
+  // WHAT NOW CATCHES WHAT 1.1 STOOD IN FOR — grip changing under PDS:
+  //   - an export PDS imports is renamed or removed: this file's static imports
+  //     fail to link, node exits 1 before any check runs, and the workflow's rc
+  //     and "no summary line" clauses red. Mutation: rename grip's deriveLevel.
+  //   - grip's screen starts admitting what it refused: sections 8 and 10 red by
+  //     name. Mutation: skip the per-segment allowlist refusal in screenCommand,
+  //     and 8.8, 8.9, 8.10, 10.2 and 10.5 fail.
+  //   - grip's behaviour in general: grip's own node --test suite in
+  //     .github/workflows/grip-suite.yml (push-to-main only today); the same
+  //     screen mutation fails 82 of its 880 tests.
   eq("1.1 zero bytes changed under tooling/grip/", gripDiff, "");
   // 1.2 — THE PATH IS THE FILE THE LABEL NAMES, AND THAT WAS A RULING, NOT A
   // REFLEX. Until 2026-09-20 the path here was `scripts/`, the whole directory,
