@@ -1155,6 +1155,29 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.op",
+        "doc",
+        "op",
+        "Apply one PortableDoc block op to a document, fenced on its current _rev.",
+        "POST",
+        "/v1/data/doc/:dataset/:type/:doc_id/ops",
+        "write",
+        args: [
+          arg("type", true, "string", "Document type (schema name)."),
+          arg("doc_id", true, "string", "Document id; drafts.<id> is edited when it exists.")
+        ],
+        flags: [
+          flag(
+            "file",
+            "file",
+            "Body {\"op\": {...}, \"ifRev\": \"<_rev>\"} from a file or - for stdin."
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.publish",
         "doc",
         "publish",

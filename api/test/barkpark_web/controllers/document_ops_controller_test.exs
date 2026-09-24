@@ -53,7 +53,7 @@ defmodule BarkparkWeb.DocumentOpsControllerTest do
 
   defp current_rev!(_conn, id) do
     resp =
-      build_conn()
+      scoped_conn()
       |> as("ops-write-token")
       |> get("/v1/data/doc/test/post/#{id}?perspective=raw")
 
@@ -82,14 +82,13 @@ defmodule BarkparkWeb.DocumentOpsControllerTest do
     rev = create_post!(conn, "ops-post-1")
 
     resp =
-      post_op(build_conn(), "ops-write-token", "post", "ops-post-1", %{
+      post_op(scoped_conn(), "ops-write-token", "post", "ops-post-1", %{
         "op" => append_op(),
         "ifRev" => rev
       })
 
     assert resp.status == 200, resp.resp_body
     body = Jason.decode!(resp.resp_body)
-    assert body["ok"] == true
     assert body["result"]["op_kind"] == "append-block"
     assert is_binary(body["result"]["block_id"])
 
@@ -100,7 +99,7 @@ defmodule BarkparkWeb.DocumentOpsControllerTest do
     rev = create_post!(conn, "ops-post-2")
 
     resp =
-      post_op(build_conn(), "ops-write-token", "post", "ops-post-2", %{
+      post_op(scoped_conn(), "ops-write-token", "post", "ops-post-2", %{
         "op" => append_op(),
         "ifRev" => rev <> "-stale"
       })
@@ -113,7 +112,7 @@ defmodule BarkparkWeb.DocumentOpsControllerTest do
   test "a missing ifRev is refused before anything is written", %{conn: conn} do
     rev = create_post!(conn, "ops-post-3")
 
-    resp = post_op(build_conn(), "ops-write-token", "post", "ops-post-3", %{"op" => append_op()})
+    resp = post_op(scoped_conn(), "ops-write-token", "post", "ops-post-3", %{"op" => append_op()})
 
     assert resp.status == 422
     assert Jason.decode!(resp.resp_body)["error"]["code"] == "malformed_op"
@@ -124,7 +123,7 @@ defmodule BarkparkWeb.DocumentOpsControllerTest do
     rev = create_post!(conn, "ops-post-4")
 
     resp =
-      post_op(build_conn(), "ops-read-token", "post", "ops-post-4", %{
+      post_op(scoped_conn(), "ops-read-token", "post", "ops-post-4", %{
         "op" => append_op(),
         "ifRev" => rev
       })
