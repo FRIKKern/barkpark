@@ -58,14 +58,14 @@ defmodule Barkpark.PluginEnvTest do
 
     test "returns an explicit [] verbatim (it is a real, meaningful value)" do
       restore_true_baseline_last()
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
 
       assert PluginEnv.capture() == []
     end
 
     test "returns a load-order list verbatim" do
       restore_true_baseline_last()
-      Application.put_env(:barkpark, :plugins, [DummyPlugin])
+      Barkpark.PluginEnv.put!([DummyPlugin])
 
       assert PluginEnv.capture() == [DummyPlugin]
     end
@@ -77,7 +77,7 @@ defmodule Barkpark.PluginEnvTest do
       Application.delete_env(:barkpark, :plugins)
 
       prior = PluginEnv.capture()
-      Application.put_env(:barkpark, :plugins, [DummyPlugin])
+      Barkpark.PluginEnv.put!([DummyPlugin])
       assert Application.fetch_env(:barkpark, :plugins) == {:ok, [DummyPlugin]}
 
       PluginEnv.restore(prior)
@@ -90,10 +90,10 @@ defmodule Barkpark.PluginEnvTest do
 
     test "an explicit-[] baseline round trip restores the [] (does NOT delete it)" do
       restore_true_baseline_last()
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
 
       prior = PluginEnv.capture()
-      Application.put_env(:barkpark, :plugins, [DummyPlugin])
+      Barkpark.PluginEnv.put!([DummyPlugin])
       PluginEnv.restore(prior)
 
       assert Application.fetch_env(:barkpark, :plugins) == {:ok, []},
@@ -102,10 +102,10 @@ defmodule Barkpark.PluginEnvTest do
 
     test "a load-order baseline round trip restores the list" do
       restore_true_baseline_last()
-      Application.put_env(:barkpark, :plugins, [DummyPlugin])
+      Barkpark.PluginEnv.put!([DummyPlugin])
 
       prior = PluginEnv.capture()
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
       PluginEnv.restore(prior)
 
       assert Application.fetch_env(:barkpark, :plugins) == {:ok, [DummyPlugin]}
@@ -159,14 +159,78 @@ defmodule Barkpark.PluginEnvTest do
 
     test "a set baseline is restored verbatim after the callback chain drains", ctx do
       restore_true_baseline_last()
-      Application.put_env(:barkpark, :plugins, [:baseline_name])
+      Barkpark.PluginEnv.put!(["baseline-name"])
 
       on_exit(fn ->
-        assert Application.fetch_env(:barkpark, :plugins) == {:ok, [:baseline_name]}
+        assert Application.fetch_env(:barkpark, :plugins) == {:ok, ["baseline-name"]}
       end)
 
       assert :ok = PluginEnv.with_plugins([DummyPlugin], ctx)
       assert Application.get_env(:barkpark, :plugins) == [DummyPlugin]
+    end
+  end
+
+  describe "put!/1 — a non-plugin entry is refused, not silently dropped" do
+    # The shape that hid the Tasks plugin in stamp_publish_lost_update_test.exs:
+    # the Registry's ENTRY MAPS passed as the load order. Every reader drops a
+    # map, so the plugin was OFF and nothing said so.
+    test "a Registry entry map raises, names the entry, and says what to pass" do
+      restore_true_baseline_last()
+      Application.delete_env(:barkpark, :plugins)
+      entry = %{module: DummyPlugin, name: "dummy", manifest: %{}}
+
+      error = assert_raise ArgumentError, fn -> PluginEnv.put!([entry]) end
+
+      assert error.message =~ "load-order entry 0"
+      assert error.message =~ "silently OFF"
+      assert error.message =~ "ENTRY MAP"
+      assert error.message =~ inspect(DummyPlugin)
+
+      assert Application.fetch_env(:barkpark, :plugins) == :error,
+             "a refused order must not reach the env"
+    end
+
+    test "with_plugins/2 and run_with/2 refuse the same way" do
+      restore_true_baseline_last()
+
+      assert_raise ArgumentError, ~r/entry 1/, fn ->
+        PluginEnv.with_plugins([DummyPlugin, %{module: DummyPlugin}], %{test: :with})
+      end
+
+      assert_raise ArgumentError, fn -> PluginEnv.run_with([nil], fn -> :ran end) end
+    end
+
+    test "nil, an unloadable atom, an empty name, a bad tuple, and a non-list are refused" do
+      for bad <- [
+            [nil],
+            [Barkpark.Plugins.NoSuchPluginModule],
+            [""],
+            [{:tasks, DummyPlugin}],
+            [1]
+          ] do
+        assert_raise ArgumentError, fn -> PluginEnv.validate!(bad) end
+      end
+
+      assert_raise ArgumentError, ~r/must be a list/, fn -> PluginEnv.validate!(:all) end
+    end
+
+    test "every shape a reader accepts passes: module, {name, module}, name, and []" do
+      assert :ok = PluginEnv.validate!([DummyPlugin, {"dummy", DummyPlugin}, "media"])
+      assert :ok = PluginEnv.validate!([])
+    end
+
+    test "run_with/2 restores the prior value even when the body raises" do
+      restore_true_baseline_last()
+      Application.delete_env(:barkpark, :plugins)
+
+      assert_raise RuntimeError, fn ->
+        PluginEnv.run_with([DummyPlugin], fn -> raise "boom" end)
+      end
+
+      assert Application.fetch_env(:barkpark, :plugins) == :error
+
+      assert PluginEnv.run_with([DummyPlugin], fn -> Application.get_env(:barkpark, :plugins) end) ==
+               [DummyPlugin]
     end
   end
 end
