@@ -59,6 +59,7 @@ var mutateShapeOps = []string{
 	"unpublish",
 	"discardDraft",
 	"delete",
+	"deleteExactDraft",
 }
 
 // mutateShapeLines is the block `bp doc mutate --help` prints under
@@ -76,6 +77,8 @@ func mutateShapeLines() []string {
 		`  {"unpublish":    {"id":"<id>", "type":"<type>"}}                    id and type are BOTH required`,
 		`  {"discardDraft": {"id":"<id>", "type":"<type>"}}                    id and type are BOTH required`,
 		`  {"delete":       {"id":"<id>", "type":"<type>"}}                    id and type are BOTH required`,
+		`  {"deleteExactDraft": {"id":"drafts.<id>", "type":"<type>", "ifRevisionID":"<opaque _rev>"}}`,
+		"        deletes only that exact draft at the supplied revision; never falls back to its published twin.",
 		"  note: the create/replace family keys the document as _id/_type INSIDE the payload;",
 		"        patch/publish/unpublish/discardDraft/delete take a bare id/type pair. A shape",
 		"        that matches none of the above is a 400 `malformed: request body is malformed`,",
