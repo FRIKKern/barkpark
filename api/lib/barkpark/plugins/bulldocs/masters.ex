@@ -34,14 +34,19 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
       TOC `anchor`, an in-page `href: "#<id>"`) are rewritten to the fresh
       ids, so they point at the copy.
 
-  LINKED (live-updating) instances are deliberately NOT here — a separate row.
+  LINKED (live-updating) instances (task-59f078a2fd248698) are a `master-ref`
+  block resolved at read time — the read side lives in
+  `Barkpark.Plugins.Bulldocs.Masters.Linked`; the op builders
+  (`linked_insert_op/4`, `detach_op/3`, `pin_op/3`) live here, beside the
+  detached copy Detach reuses.
   """
 
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content
   alias Barkpark.Content.{Document, DraftId}
-  alias Barkpark.PortableDoc.{BodyWalk, Tiers}
+  alias Barkpark.Plugins.Bulldocs.Masters.Linked
+  alias Barkpark.PortableDoc.{BodyWalk, MasterRef, Tiers}
   alias Barkpark.Repo
 
   @type_name "paper_master"
@@ -186,6 +191,113 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
 
       :master_not_found ->
         {:error, :master_not_found}
+    end
+  end
+
+  # ── linked instances (task-59f078a2fd248698) ────────────────────────────────
+
+  @doc """
+  The op that inserts a LINKED instance of master `master_id` into the
+  already-resolved `paper`: ONE `master-ref` block carrying the master's
+  published id and `version: nil` (follow latest), or
+  `{:error, :master_not_found}`. Resolved in the paper's scope exactly like
+  `insert_op/4`; the block id is seeded off the canonical request id, so a
+  retry builds the byte-identical op.
+  """
+  def linked_insert_op(%Document{} = paper, master_id, after_id, request_id)
+      when is_binary(master_id) do
+    case get_master_in_scope(master_id, paper) do
+      %Document{} = master ->
+        seed = "#{canonical_request_id(request_id)}\u0000linked\u0000#{master_id(master)}"
+
+        block = %{
+          "id" => fresh_id(seed, "master-ref"),
+          "type" => MasterRef.type_name(),
+          "master" => master_id(master),
+          "version" => nil
+        }
+
+        case after_id do
+          nil ->
+            {:ok, %{"op" => "append-block", "block" => block}}
+
+          id when is_binary(id) ->
+            {:ok, %{"op" => "insert-after", "afterId" => id, "block" => block}}
+        end
+
+      :master_not_found ->
+        {:error, :master_not_found}
+    end
+  end
+
+  @doc """
+  DETACH: the op that replaces linked instance `block_id` of `paper` with a
+  detached copy of the content it currently shows (its pinned version, or the
+  master's latest), fresh ids and `master.mode = "detached"` provenance — the
+  same copy `detached_copy/2` builds for an insert. After it the block is plain
+  blocks; later master edits never reach it.
+  `{:error, :block_not_found | :not_linked | :master_not_found}`.
+  """
+  def detach_op(%Document{} = paper, block_id, request_id) when is_binary(block_id) do
+    with {:ok, ref} <- find_linked(paper, block_id),
+         {:ok, node, master} <- resolve_linked(paper, ref) do
+      seed = "#{canonical_request_id(request_id)}\u0000detach\u0000#{block_id}"
+      copy = detached_copy(%{master | content: %{"node" => node}}, seed)
+      {:ok, %{"op" => "replace-block", "id" => block_id, "block" => copy}}
+    end
+  end
+
+  @doc """
+  PIN (`pin? = true`): the op that freezes linked instance `block_id` to the
+  master's CURRENT revision (its `rev`), so later master edits no longer show.
+  UNPIN (`false`): back to `version: nil`, follow latest.
+  `{:error, :block_not_found | :not_linked | :master_not_found}`.
+  """
+  def pin_op(%Document{} = paper, block_id, pin?) when is_binary(block_id) do
+    with {:ok, {master_id, _version}} <- find_linked(paper, block_id) do
+      version =
+        if pin? do
+          case get_master_in_scope(master_id, paper) do
+            %Document{rev: rev} -> {:ok, rev}
+            :master_not_found -> {:error, :master_not_found}
+          end
+        else
+          {:ok, nil}
+        end
+
+      with {:ok, v} <- version do
+        {:ok, %{"op" => "patch-block", "id" => block_id, "patch" => %{"version" => v}}}
+      end
+    end
+  end
+
+  @doc "True when `block` is a linked instance (a `master-ref` block)."
+  def linked?(%{"type" => type}), do: type == MasterRef.type_name()
+  def linked?(_), do: false
+
+  @doc "See `Barkpark.Plugins.Bulldocs.Masters.Linked.render_map/3`."
+  defdelegate render_map(scope, blocks, opts \\ []), to: Linked
+
+  @doc "See `Barkpark.Plugins.Bulldocs.Masters.Linked.live_instances/1`."
+  defdelegate live_instances(master), to: Linked
+
+  defp find_linked(%Document{content: content}, block_id) do
+    case find_node(%Document{content: content}, block_id) do
+      {:ok, %{"type" => "master-ref", "master" => master} = block} when is_binary(master) ->
+        {:ok, {master, MasterRef.version(block)}}
+
+      {:ok, _other} ->
+        {:error, :not_linked}
+
+      {:error, :block_not_found} = err ->
+        err
+    end
+  end
+
+  defp resolve_linked(paper, ref) do
+    case Linked.resolve(paper, ref) do
+      {:ok, node, master} -> {:ok, node, master}
+      :error -> {:error, :master_not_found}
     end
   end
 

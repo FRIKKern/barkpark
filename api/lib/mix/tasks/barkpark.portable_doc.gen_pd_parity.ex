@@ -767,11 +767,14 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   }
 
   # The 15 schema-field/embed types cut by charter D7 — the ONE lever a later wave
-  # edits to pull the field-* set back into scope. Kept here as the executable
+  # edits to pull the field-* set back into scope — plus `master-ref`
+  # (task-59f078a2fd248698): a linked master instance resolves server side at
+  # read time, like `embed`, and the JS renderer emits nothing for it. Kept here as the executable
   # counterpart of the bash guard's `excluded` list (asserted equal in the test).
   @excluded ~w(
     field-string field-slug field-text field-boolean field-select field-datetime
     field-color field-reference field-image field-number composite arrayOf codelist localizedText embed
+    master-ref
   )
 
   # The 3 alias pairs — BOTH members are in-scope so alias dispatch is exercised.

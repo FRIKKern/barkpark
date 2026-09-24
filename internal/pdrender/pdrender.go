@@ -370,6 +370,7 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["action"] = actionRenderer{}
 	r.blocks["pullquote"] = pullquoteRenderer{ir: ir}
 	r.blocks["embed"] = embedRenderer{}
+	r.blocks["master-ref"] = masterRefRenderer{}
 	r.blocks["ingress"] = ingressRenderer{ir: ir}
 	r.blocks["eyebrow"] = eyebrowRenderer{}
 	r.blocks["byline"] = bylineRenderer{}

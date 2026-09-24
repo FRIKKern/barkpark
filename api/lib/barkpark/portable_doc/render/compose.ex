@@ -792,6 +792,17 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdEmbed", "target" => stringish(Map.get(b, "target", ""))}
   end
 
+  # ── linked master instance (task-59f078a2fd248698) ────────────────────────
+  # `"type" => "master-ref"` carries only a master id and a pinned version
+  # (nil = latest). Composes to a `PdMasterRef` node carrying the resolution
+  # key; the walker injects the caller's prerendered master HTML from
+  # `pal.masters[key]` (see `Barkpark.PortableDoc.MasterRef`). Pure: no DB read
+  # here, and a block with no usable `master` composes to a nil key, which the
+  # walker renders as unavailable.
+  def compose_block(%{"type" => "master-ref"} = b, _style) do
+    %{"kind" => "PdMasterRef", "key" => Barkpark.PortableDoc.MasterRef.key(b)}
+  end
+
   # TYPED COLUMNS (opt-in, CONTENT ONLY, `:article` only) — the Elixir mirror of
   # internal/pdrender/richblocks.go tableRenderer. An optional `cols` attr, an
   # index-aligned array of {type} maps, tags each column text | num | delta |

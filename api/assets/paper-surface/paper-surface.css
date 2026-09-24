@@ -942,6 +942,15 @@ html[data-theme="dark"] .bp-paper-body {
   padding: 0.5em 0.75em; border-left-color: var(--paper-bg-deep);
   color: var(--paper-ink-soft); font-style: italic;
 }
+/* Linked master instance (task-59f078a2fd248698): the resolved master renders
+   bare inside the frame; the pending / unavailable states are a muted note. */
+.bp-paper-surface .bp-master-ref { margin: 0; }
+.bp-paper-surface .bp-master-ref--pending,
+.bp-paper-surface .bp-master-ref--unavailable {
+  margin: 1em 0; padding: 0.5em 0.75em; border-left: 3px solid var(--paper-bg-deep);
+  color: var(--paper-ink-soft);
+}
+.bp-paper-surface .bp-master-ref--unavailable { font-style: italic; }
 .bp-paper-surface .bp-blockref { color: var(--paper-ink-soft); font-size: 0.9em; text-decoration: none; border-bottom: none; }
 
 /* Buttons — `bp-button` is the secondary (outline); `--primary` overrides to

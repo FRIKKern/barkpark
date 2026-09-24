@@ -86,9 +86,36 @@ defmodule Barkpark.Plugins.Bulldocs do
         &reject_hollow_published_save/1,
         &reject_unreadable_paper_body/1
       ],
-      before_publish: [&reject_hollow_paper_publish/1]
+      before_publish: [&reject_hollow_paper_publish/1],
+      before_delete: [&refuse_master_with_live_instances/1]
     }
   end
+
+  # Linked masters (task-59f078a2fd248698): deleting a paper master that live
+  # linked instances still resolve is refused — the lifecycle wall maps the halt
+  # to 409 `halted`, the message listing the instance papers' ids so the author
+  # can detach them first. Every document delete (`Content.delete_document/4`:
+  # mutate `delete`, Studio, the CLI) fires :before_delete, so this is the one
+  # door. The ids come from `Masters.live_instances/1`, which searches only the
+  # master's own workspace, project and dataset — a paper in another tenant can
+  # never resolve this master, so its id is never listed.
+  defp refuse_master_with_live_instances(%{doc: %Barkpark.Content.Document{} = doc}) do
+    if doc.type == Barkpark.Plugins.Bulldocs.Masters.type_name() do
+      case Barkpark.Plugins.Bulldocs.Masters.live_instances(doc) do
+        [] ->
+          :ok
+
+        ids ->
+          {:halt,
+           "paper master is used by #{length(ids)} linked instance(s): " <>
+             Enum.join(ids, ", ") <> " — detach or remove them before deleting the master"}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp refuse_master_with_live_instances(_payload), do: :ok
 
   # Doctrine gate (pdd-t3, paper portabledoc-doctrine): a paper that carries
   # template-locked blocks must keep the template shape — the locked title
