@@ -25,14 +25,11 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
   @capture_keys [{__MODULE__, :collected_ctx}, {__MODULE__, :route_ctx}]
 
   setup do
-    prev = Application.get_env(:barkpark, :plugins, :unset)
+    prev = Barkpark.PluginEnv.capture()
     prior_terms = Enum.map(@capture_keys, &{&1, :persistent_term.get(&1, :__absent__)})
 
     on_exit(fn ->
-      case prev do
-        :unset -> Application.delete_env(:barkpark, :plugins)
-        v -> Application.put_env(:barkpark, :plugins, v)
-      end
+      Barkpark.PluginEnv.restore(prev)
 
       # Erase when there was no prior term, so an absent key stays absent.
       Enum.each(prior_terms, fn
@@ -48,12 +45,12 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
 
   describe "collect_workers/1" do
     test "returns [] when :plugins is explicitly empty (kill-switch)" do
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
       assert BootCollectors.collect_workers(%{}) == []
     end
 
     test "returns workers from a plugin that exports register_workers/1" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.Registry.BootCollectorsTest.WorkerFakeA
       ])
 
@@ -63,7 +60,7 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
     end
 
     test "injects default :boot phase into ctx when not supplied" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.Registry.BootCollectorsTest.CtxCapturingPlugin
       ])
 
@@ -79,7 +76,7 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
     end
 
     test "isolates a plugin whose register_workers/1 raises — others still contribute" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.Registry.BootCollectorsTest.WorkerFakeA,
         Barkpark.Plugins.Registry.BootCollectorsTest.RaisingWorkerPlugin
       ])
@@ -95,7 +92,7 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
     end
 
     test "tolerates a plugin that does not export register_workers/1" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.Registry.BootCollectorsTest.NoCallbackPlugin
       ])
 
@@ -107,12 +104,12 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
 
   describe "collect_oban_crontab/0" do
     test "returns [] when :plugins is explicitly empty" do
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
       assert BootCollectors.collect_oban_crontab() == []
     end
 
     test "returns crontab entries from a plugin that exports oban_crontab/0" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.Registry.BootCollectorsTest.CronFake
       ])
 
@@ -123,7 +120,7 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
     end
 
     test "isolates a raising plugin, leaving siblings intact" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.Registry.BootCollectorsTest.CronFake,
         Barkpark.Plugins.Registry.BootCollectorsTest.RaisingCronPlugin
       ])
@@ -145,12 +142,12 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
 
   describe "collect_routes/1" do
     test "returns [] when :plugins is explicitly empty" do
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
       assert BootCollectors.collect_routes(%{}) == []
     end
 
     test "returns routes from a plugin that exports register_routes/1" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.Registry.BootCollectorsTest.RouteFake
       ])
 
@@ -162,7 +159,7 @@ defmodule Barkpark.Plugins.Registry.BootCollectorsTest do
     end
 
     test "injects default :compile phase into ctx when not supplied" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.Registry.BootCollectorsTest.RouteCtxCapturingPlugin
       ])
 

@@ -18,6 +18,8 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
 
   @epic "cloud-console-hardening-epic"
   @flag :filing_law_absent_surface_hard
+  # The second governed epic (task-29b971932b045394): one law, both epics.
+  @instruments_epic "cch-instruments-epic"
 
   setup do
     Barkpark.Auth.create_token(
@@ -68,6 +70,22 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       refute Map.has_key?(task_content("cchs4-off-absent"), "surface")
     end
 
+    test "SECOND EPIC: a surface-less create under #{@instruments_epic} PASSES and logs " <>
+           "the same warn line",
+         %{conn: conn} do
+      log =
+        capture_log([level: :warning], fn ->
+          assert create_row(conn, "cchs32-off-absent", %{"parent_id" => @instruments_epic}).status ==
+                   200
+        end)
+
+      assert log =~
+               "filing law: undeclared surface on epic task birth \"drafts.cchs32-off-absent\""
+
+      assert log =~ "Declare it with one of: console | instrument | ledger)"
+      refute Map.has_key?(task_content("cchs32-off-absent"), "surface")
+    end
+
     test "the off-vocabulary refusal still offers the omit-surface escape", %{conn: conn} do
       resp = file_row(conn, "cchs4-off-offvocab", %{"surface" => "dashboard"})
 
@@ -101,6 +119,19 @@ defmodule BarkparkWeb.SurfaceHardTierTest do
       # Refused, not warned: the warn line is the OTHER tier.
       refute log =~ "filing law: undeclared surface"
       assert missing?("cchs4-on-absent")
+    end
+
+    test "SECOND EPIC: with the flag on, a surface-less create under " <>
+           "#{@instruments_epic} is REFUSED too — the tier is part of the same guard",
+         %{conn: conn} do
+      resp = create_row(conn, "cchs32-on-absent", %{"parent_id" => @instruments_epic})
+
+      assert resp.status == 422
+      error = Jason.decode!(resp.resp_body)["error"]
+      assert error["code"] == "validation_failed"
+      assert [message] = error["details"]["surface"]
+      assert message =~ "is required under \"#{@instruments_epic}\""
+      assert missing?("cchs32-on-absent")
     end
 
     test "a BLANK surface is absent too", %{conn: conn} do

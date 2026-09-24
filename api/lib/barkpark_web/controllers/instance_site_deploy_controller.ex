@@ -85,8 +85,13 @@ defmodule BarkparkWeb.InstanceSiteDeployController do
       `door_open_admissions_total` / `door_open_admissions` beside them (the
       builds the door ADMITTED without a second opinion, by reason),
       `refusals_total` ALWAYS beside `refusals_since`, and
-      `measured_at` so the staleness is stated rather than implied. Any of them
-      may be `null`: that means nothing was read, never zero.
+      `measured_at` so the staleness is stated rather than implied, with
+      `census_interval_ms` beside it so it is also BOUNDED: the Runner
+      republishes at least that often while healthy (the systemd backstop
+      tick), so `now - measured_at` far beyond it means the Runner is not
+      ticking and the reading is unbounded. `census_interval_ms` is config, like
+      `capacity`, and always renders; every MEASUREMENT may be `null`: that
+      means nothing was read, never zero.
     * `serving` — `ServingMemory.read/1`: the sha this box is serving and when
       it FIRST saw that sha, off a durable record in the run-state dir. Not a
       process uptime — a restart with an unchanged sha does not move it, which

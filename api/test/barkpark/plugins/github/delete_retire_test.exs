@@ -50,7 +50,7 @@ defmodule Barkpark.Plugins.Github.DeleteRetireTest do
     pem = :public_key.pem_encode([:public_key.pem_entry_encode(:RSAPrivateKey, private_key)])
 
     prior = Application.get_env(:barkpark, Barkpark.Plugins.Github)
-    prior_plugins = Application.get_env(:barkpark, :plugins)
+    prior_plugins = Barkpark.PluginEnv.capture()
 
     Application.put_env(
       :barkpark,
@@ -66,7 +66,7 @@ defmodule Barkpark.Plugins.Github.DeleteRetireTest do
     # The hook only fires for a LOADED plugin. `DataCase.reset_plugins_env/0`
     # unsets `:plugins` before every test, so name the plugin explicitly rather
     # than depend on the Registry snapshot's contents.
-    Application.put_env(:barkpark, :plugins, [Barkpark.Plugins.Github])
+    Barkpark.PluginEnv.put!([Barkpark.Plugins.Github])
 
     Auth.invalidate()
 
@@ -77,11 +77,7 @@ defmodule Barkpark.Plugins.Github.DeleteRetireTest do
         Application.delete_env(:barkpark, Barkpark.Plugins.Github)
       end
 
-      if prior_plugins do
-        Application.put_env(:barkpark, :plugins, prior_plugins)
-      else
-        Application.delete_env(:barkpark, :plugins)
-      end
+      Barkpark.PluginEnv.restore(prior_plugins)
     end)
 
     {:ok, bypass: bypass, scope: scope}

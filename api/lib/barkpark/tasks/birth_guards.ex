@@ -23,6 +23,13 @@ defmodule Barkpark.Tasks.BirthGuards do
   boot by `BARKPARK_FILING_LAW_ABSENT_SURFACE_HARD`). Off, the guard is
   byte-identical to the moved code, warn line included.
 
+  And it gained a second governed epic (task-29b971932b045394): the scope is
+  now `@cch_epic_parents` — `cloud-console-hardening-epic` AND
+  `cch-instruments-epic` — with every arm (refusal, grandfather, drafts.
+  normalisation, flag-gated absent tier) applied to both. Under the first
+  epic every message and warn line is byte-identical; the refusal names the
+  epic the row was actually filed under.
+
   THE UPDATE PATH, DECIDED. The filing's residual (a) — "a patch that puts an
   off-vocabulary surface on a LIVE epic row is accepted" — was already closed
   before this row was worked: cch-w29 deleted the `nil = prev_doc` head, so an
@@ -248,7 +255,38 @@ defmodule Barkpark.Tasks.BirthGuards do
   # what keeps this a guard on the WRITE rather than a retroactive audit of the
   # corpus. The absent-surface WARN stays birth-only; counting it per patch
   # would make `grep -c` measure patch traffic instead of filings.
-  @cch_epic_parent "cloud-console-hardening-epic"
+  #
+  # TWO EPICS, AND WHY THEY ARE A LIST (task-29b971932b045394). This guard
+  # shipped keyed on ONE literal while the filing law it enforces governs TWO
+  # epics: `cch-instruments-epic` held 35 of the 45 live open rows and every one
+  # was filed through an unguarded door. The fix is a second literal, and "an
+  # enumeration is a snapshot, a predicate is a rule" was weighed before
+  # choosing it. A LIST is the honest shape here, for three reasons:
+  #   1. The only derivation on offer — a predicate on the parent's own declared
+  #      metadata (e.g. the epic row carrying `surface_law: true`) — has no
+  #      roster to read. No epic row declares any such field today, so the
+  #      predicate would guard ZERO epics on the day it merged and would need a
+  #      ledger write to arm, which is exactly the "voluntary compliance nobody
+  #      would notice stopping" this row was filed about. It would also cost a
+  #      parent read on every task write, and put the guard's scope in the hands
+  #      of anyone who can patch the epic row — the guarded population would
+  #      hold the switch to its own guard.
+  #   2. A slug predicate (prefix, suffix) is not a rule either: the two slugs
+  #      share no structure (`cloud-console-hardening-epic`, `cch-instruments-
+  #      epic`), and any pattern loose enough to match both would match epics
+  #      by naming accident — the silent-global-rule failure the scoping
+  #      paragraph above exists to prevent.
+  #   3. The vocabulary (`console | instrument | ledger`) is THIS campaign's
+  #      closed language, not a general one. An epic adopting it is a policy
+  #      decision; making that decision cost a reviewed diff to this list is
+  #      the point, not a maintenance burden.
+  # What would change the answer: epics gaining a declared, server-owned
+  # classification field. Until then the snapshot IS the rule's full extent,
+  # and a third epic joining the law is a one-line, reviewed edit here.
+  # Both epics get the WHOLE guard — off-vocabulary refusal, the grandfather
+  # arm, the drafts. normalisation, and the flag-gated absent tier — because it
+  # is one law, not two.
+  @cch_epic_parents ~w(cloud-console-hardening-epic cch-instruments-epic)
   @cch_surfaces ~w(console instrument ledger)
 
   @doc "The filing-law surface fence. See the header above."
@@ -270,7 +308,7 @@ defmodule Barkpark.Tasks.BirthGuards do
       # `:filing_law_absent_surface_hard` — see the header. Flag off, this arm
       # never matches and the warn arm below runs byte for byte as before.
       blank?(surface) and absent_surface_hard?() and absent_surface_carried_in?(prev_doc) ->
-        {:error, {:invalid_task_content, absent_surface_error()}}
+        {:error, {:invalid_task_content, absent_surface_error(epic_of(parent))}}
 
       blank?(surface) ->
         # ONE greppable line, deliberately (the birth fence's precedent): this
@@ -302,7 +340,7 @@ defmodule Barkpark.Tasks.BirthGuards do
         :ok
 
       true ->
-        {:error, {:invalid_task_content, birth_surface_term_error(surface)}}
+        {:error, {:invalid_task_content, birth_surface_term_error(epic_of(parent), surface)}}
     end
   end
 
@@ -343,22 +381,31 @@ defmodule Barkpark.Tasks.BirthGuards do
   defp absent_surface_carried_in?(_prev_doc), do: true
 
   # The epic slug, drafts-normalised: a draft filing carries
-  # `parent_id: "drafts.cloud-console-hardening-epic"` from the same
-  # draft-first write path every other task field rides, and a guard that only
-  # matched the published spelling would be bypassable by filing a draft.
-  defp cch_epic_child?(parent) when is_binary(parent),
-    do: DraftId.published_id(parent) == @cch_epic_parent
+  # `parent_id: "drafts.cloud-console-hardening-epic"` (or
+  # `"drafts.cch-instruments-epic"`) from the same draft-first write path every
+  # other task field rides, and a guard that only matched the published
+  # spelling would be bypassable by filing a draft. ONE normaliser for both
+  # epics, so the second cannot gain a published-only spelling by omission.
+  defp cch_epic_child?(parent), do: not is_nil(epic_of(parent))
 
-  defp cch_epic_child?(_parent), do: false
+  # The governed epic this parent names (published spelling), or nil. The
+  # refusal quotes THIS slug, so a filer under the instruments epic is not told
+  # it was filing under the console one.
+  defp epic_of(parent) when is_binary(parent) do
+    published = DraftId.published_id(parent)
+    if published in @cch_epic_parents, do: published
+  end
+
+  defp epic_of(_parent), do: nil
 
   # Same `invalid_task_content` family as the transition, disposition and birth
   # siblings (422 `validation_failed` with a per-field details map). The message
   # is the retry instruction: it names the vocabulary AND what each term means,
   # because the refusal is the only place a filer learns the law.
-  defp birth_surface_term_error(term) do
+  defp birth_surface_term_error(epic, term) do
     %{
       "surface" => [
-        "cannot be filed under #{inspect(@cch_epic_parent)} as #{inspect(term)}. A row in this " <>
+        "cannot be filed under #{inspect(epic)} as #{inspect(term)}. A row in this " <>
           "epic declares WHICH SURFACE it is about, drawn from a fixed, lowercase-canonical " <>
           "vocabulary (#{Enum.map_join(@cch_surfaces, ", ", &inspect/1)}): \"console\" is a " <>
           "surface a person operates, \"instrument\" is a gate/harness/generator/required-check, " <>
@@ -381,10 +428,10 @@ defmodule Barkpark.Tasks.BirthGuards do
           "surface is warned and allowed while the backfill is unproducible."
   end
 
-  defp absent_surface_error do
+  defp absent_surface_error(epic) do
     %{
       "surface" => [
-        "is required under #{inspect(@cch_epic_parent)}. A row in this epic declares WHICH " <>
+        "is required under #{inspect(epic)}. A row in this epic declares WHICH " <>
           "SURFACE it is about, drawn from a fixed, lowercase-canonical vocabulary " <>
           "(#{Enum.map_join(@cch_surfaces, ", ", &inspect/1)}): \"console\" is a surface a " <>
           "person operates, \"instrument\" is a gate/harness/generator/required-check, and " <>

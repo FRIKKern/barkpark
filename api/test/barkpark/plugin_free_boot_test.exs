@@ -211,9 +211,9 @@ defmodule Barkpark.PluginFreeBootTest do
   ]
 
   setup_all do
-    prev_plugins = Application.get_env(:barkpark, :plugins, :unset)
+    prev_plugins = Barkpark.PluginEnv.capture()
 
-    Application.put_env(:barkpark, :plugins, [])
+    Barkpark.PluginEnv.put!([])
     Application.stop(:barkpark)
 
     # Erase plugin-derived `:persistent_term` snapshots that survive
@@ -268,10 +268,7 @@ defmodule Barkpark.PluginFreeBootTest do
     on_exit(fn ->
       Application.stop(:barkpark)
 
-      case prev_plugins do
-        :unset -> Application.delete_env(:barkpark, :plugins)
-        v -> Application.put_env(:barkpark, :plugins, v)
-      end
+      Barkpark.PluginEnv.restore(prev_plugins)
 
       {:ok, _} = Application.ensure_all_started(:barkpark)
       Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)

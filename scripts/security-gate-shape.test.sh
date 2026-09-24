@@ -696,6 +696,18 @@ git -C "$DR" mv docs/guide.md api/lib/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA" false
 
+# (4) A NEWLINE INSIDE A PATH (cch-bl-nul-native-path-matcher). The case loop
+#     now reads NUL records (`read -d ''`), so `api/li<LF>b/x.ex` reaches the
+#     `api/*` arm WHOLE. Green on the old tr producer too — its `api/li`
+#     fragment still matched — so this pins the new reader rather than
+#     reproducing a skip: `api/*` cannot be skipped by a split.
+git -C "$DR" checkout -q -b nldir "$BASE_SHA"
+mkdir -p "$DR/api/li"$'\n'"b"
+printf 'x\n' >"$DR/api/li"$'\n'"b/x.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nldir >/dev/null 2>&1
+dispatch '(4) a NEWLINE inside the directory of an in-set path (api/li<LF>b/x.ex)' 0 true pull_request "$BASE_SHA" false
+
 # THE FAILURE PATHS — the polarity that makes the shim safe.
 # An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a
 # branch-sync PR nets to nothing and is perfectly legal, and an ::error:: there
