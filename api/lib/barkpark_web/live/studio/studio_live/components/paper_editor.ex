@@ -158,6 +158,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # The masters implementation (`PaperMastersSeam.impl/1`), or nil when the
   # plugin providing masters is off — then no Save action renders.
   attr(:masters_impl, :any, default: nil)
+  # Linked master instances (task-59f078a2fd248698): the open paper's
+  # `%{key => prerendered_html}` render map, resolved per read in the paper's
+  # tenant, or nil (then an instance shows the neutral placeholder).
+  attr(:master_render, :any, default: nil)
 
   def paper_block_editor(assigns) do
     if assigns.canvas_resume_halt do
@@ -444,6 +448,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 table_editor_target_ids={@table_editor_target_ids}
                 canvas_retained={@canvas_retained}
                 masters_impl={is_list(@masters) && @masters_impl}
+                master_render={@master_render}
               />
             <% {:ghosts, ghosts, anchor_id} -> %>
               <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
@@ -1030,6 +1035,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:table_editor_target_ids, :any, default: nil)
   attr(:canvas_retained, :any, default: nil)
   attr(:masters_impl, :any, default: nil)
+  attr(:master_render, :any, default: nil)
 
   def edit_block(assigns) do
     ~H"""
@@ -1102,6 +1108,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             phx-value-block_id={Map.get(@block, "id")}
             data-test-id="paper-save-master"
           >☆</button>
+          <%!-- Linked master instance (task-59f078a2fd248698): Pin freezes it
+                to the master's current revision (Unpin follows latest again);
+                Detach copies what it shows in as plain blocks. Offered only
+                where masters are available and the pane may write. --%>
+          <button
+            :if={@masters_impl && @masters_impl.linked?(@block)}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title={if linked_pinned?(@block), do: "Unpin: follow the master's latest", else: "Pin to this version"}
+            phx-click="paper-pin-master"
+            phx-value-block_id={Map.get(@block, "id")}
+            phx-value-pin={if linked_pinned?(@block), do: "false", else: "true"}
+            phx-value-if_rev={@paper_rev}
+            data-test-id="paper-pin-master"
+          >{if linked_pinned?(@block), do: "Unpin", else: "Pin"}</button>
+          <button
+            :if={@masters_impl && @masters_impl.linked?(@block)}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            title="Detach: copy the master in as plain blocks"
+            phx-click="paper-detach-master"
+            phx-value-block_id={Map.get(@block, "id")}
+            phx-value-if_rev={@paper_rev}
+            data-test-id="paper-detach-master"
+          >Detach</button>
           <button
             :if={Map.get(@block, "locked") != true}
             type="button"
@@ -1118,6 +1149,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-locked-note"
           >🔒 Locked</span>
         </span>
+      </div>
+      <%!-- Linked master instance (task-59f078a2fd248698): the master's
+            current (or pinned) content, rendered by the reader's own producer
+            from the per-read render map — never stored in this paper. --%>
+      <div
+        :if={Map.get(@block, "type") == "master-ref"}
+        class="bp-paper-surface bp-paper-master-ref-preview"
+        data-test-id="paper-master-ref-preview"
+      >
+        {raw(Render.render_block(@block, %{style: :article, masters: @master_render}))}
       </div>
       <.task_block_preview
         :if={task_preview_block?(@block)}
@@ -4628,6 +4669,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           if_rev={if(@doc_type == "paper", do: @paper_rev, else: @document_rev)}
         />
 
+      <% "master-ref" -> %>
+        <p class="bp-paper-edit-readonly" data-test-id="paper-master-ref-note">
+          Linked master — it shows the master's content. Edit the master, or Detach to edit it here.
+        </p>
       <% _ -> %>
         <%!-- Genuinely-unhandled types are read-only in the MVP (view/delete/reorder).
              `table` (editable-table) and `action` (editable-action, the CTA button) are
@@ -4639,6 +4684,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     <% end %>
     """
   end
+
+  # A linked master instance pinned to a revision (task-59f078a2fd248698).
+  defp linked_pinned?(block), do: Barkpark.PortableDoc.MasterRef.version(block) != nil
 
   defp editable_step_rows(%{"steps" => rows}) when is_list(rows),
     do: Enum.filter(rows, &(is_map(&1) and is_binary(&1["id"]) and &1["id"] != ""))

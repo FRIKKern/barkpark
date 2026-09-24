@@ -647,13 +647,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   `{:error, socket}` with `last_paper_save_result.rejected = "master_not_found"`,
   and masters being unavailable is `rejected = "masters_unavailable"`.
   """
-  def paper_insert_master(socket, master_id, after_id, request_id, supplied_rev)
+  def paper_insert_master(
+        socket,
+        master_id,
+        after_id,
+        request_id,
+        supplied_rev,
+        mode \\ :detached
+      )
       when is_binary(master_id) do
     paper = socket.assigns[:paper_doc]
 
     with :ok <- master_write_refusal(socket),
          impl when not is_nil(impl) <- paper_masters_impl(paper),
-         {:ok, op} <- impl.insert_op(paper, master_id, after_id, request_id) do
+         {:ok, op} <- master_insert_op(impl, mode, paper, master_id, after_id, request_id) do
       paper_ops(socket, [op], request_id, supplied_rev)
     else
       {:refused, socket} ->
@@ -664,6 +671,60 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       {:error, :master_not_found} ->
         {:error, master_insert_refused(socket, request_id, :master_not_found)}
+    end
+  end
+
+  # Detached (a copy, the #20110 default) or LINKED (a `master-ref` block that
+  # follows the master, task-59f078a2fd248698). Same scope rule either way.
+  defp master_insert_op(impl, :linked, paper, master_id, after_id, request_id),
+    do: impl.linked_insert_op(paper, master_id, after_id, request_id)
+
+  defp master_insert_op(impl, _detached, paper, master_id, after_id, request_id),
+    do: impl.insert_op(paper, master_id, after_id, request_id)
+
+  @doc """
+  DETACH linked instance `block_id` (task-59f078a2fd248698): replace the
+  `master-ref` block with a detached copy of the content it shows, through
+  `paper_ops/5` — the same guard ladder, request-identified replay and echo as
+  every paper op. Same return shape as `paper_insert_master/6`; a block that is
+  not a linked instance, or whose master is unavailable, is refused with
+  `last_paper_save_result.rejected` set to the reason.
+  """
+  def paper_detach_master(socket, block_id, request_id, supplied_rev)
+      when is_binary(block_id) do
+    linked_op(socket, request_id, supplied_rev, fn impl, paper ->
+      impl.detach_op(paper, block_id, request_id)
+    end)
+  end
+
+  @doc """
+  PIN (`pin? = true`) linked instance `block_id` to the master's current
+  revision, or UNPIN it back to following latest — one `patch-block` op
+  through `paper_ops/5`. Same return shape as `paper_detach_master/4`.
+  """
+  def paper_pin_master(socket, block_id, pin?, request_id, supplied_rev)
+      when is_binary(block_id) and is_boolean(pin?) do
+    linked_op(socket, request_id, supplied_rev, fn impl, paper ->
+      impl.pin_op(paper, block_id, pin?)
+    end)
+  end
+
+  defp linked_op(socket, request_id, supplied_rev, build) do
+    paper = socket.assigns[:paper_doc]
+
+    with :ok <- master_write_refusal(socket),
+         impl when not is_nil(impl) <- paper_masters_impl(paper),
+         {:ok, op} <- build.(impl, paper) do
+      paper_ops(socket, [op], request_id, supplied_rev)
+    else
+      {:refused, socket} ->
+        {:error, socket}
+
+      nil ->
+        {:error, master_insert_refused(socket, request_id, :masters_unavailable)}
+
+      {:error, reason} when reason in [:master_not_found, :not_linked, :block_not_found] ->
+        {:error, master_insert_refused(socket, request_id, reason)}
     end
   end
 
@@ -718,6 +779,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   defp master_refusal_flash(:master_not_found), do: "That master is not available in this paper."
   defp master_refusal_flash(:masters_unavailable), do: "Masters are not available here."
   defp master_refusal_flash(:block_not_found), do: "That block no longer exists."
+  defp master_refusal_flash(:not_linked), do: "That block is not a linked master instance."
   defp master_refusal_flash(:not_masterable), do: "This block can't be saved as a master."
   defp master_refusal_flash(:locked_block), do: "Template blocks can't be saved as a master."
 
@@ -2238,7 +2300,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           paper_canvas_retained:
             PaperCanvas.refresh_retained(socket.assigns[:paper_canvas_retained], slug, blocks),
           paper_rev: Map.get(content, "rev") || 0,
-          paper_link_details: paper_link_details(socket, fresh, blocks)
+          paper_link_details: paper_link_details(socket, fresh, blocks),
+          paper_master_render: PaperMastersSeam.render_map(fresh, blocks)
         )
 
       _ ->
@@ -2495,6 +2558,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_link_details: paper_link_details(socket, paper, blocks),
         paper_masters: paper_masters(socket, paper),
         paper_masters_impl: paper_masters_impl(paper),
+        paper_master_render: PaperMastersSeam.render_map(paper, blocks),
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
@@ -2522,7 +2586,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
               blocks,
               socket.assigns.dataset,
               ScopeHelpers.scope_opts(socket),
-              paper_doc_id(paper)
+              paper
             )
         ),
         reset: true
@@ -2547,6 +2611,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_link_details: %{},
         paper_masters: nil,
         paper_masters_impl: nil,
+        paper_master_render: nil,
         backlinks_used_by: used_by,
         backlinks_linked: linked,
         backlinks_unlinked: unlinked
@@ -2681,6 +2746,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_link_details: %{},
         paper_masters: nil,
         paper_masters_impl: nil,
+        paper_master_render: nil,
         backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: []
@@ -2702,7 +2768,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc false
-  def paper_stream_items(blocks, dataset, scope, paper_id \\ nil) do
+  def paper_stream_items(blocks, dataset, scope, paper_or_id \\ nil) do
+    # The 4th argument is the open paper's document (or, for legacy callers,
+    # just its id). With the document, linked master instances resolve inside
+    # the paper's own tenant (task-59f078a2fd248698); with a bare id they render
+    # as unavailable.
+    {paper, paper_id} =
+      case paper_or_id do
+        %{} = paper -> {paper, paper_doc_id(paper)}
+        id -> {nil, id}
+      end
+
     # Grandfather badge (task-597ea451072da061): the SAME seam the /papers
     # reader uses — `PreGateRegister.annotate/3` on the stored (unresolved)
     # blocks, before any resolution. Register membership AND a still-refused
@@ -2756,6 +2832,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       wikilinks: wikilinks,
       embeds: embeds,
       values: values,
+      # Linked master instances (task-59f078a2fd248698): resolved per read in
+      # the paper's tenant, batched; `%{}` without masters or without the plugin.
+      masters: PaperMastersSeam.render_map(paper, blocks),
       # lvw-t2 (D4): Studio's OWN per-request view is the one surface carrying
       # the accept-baseline control on DRIFTED valuerefs (the walker gates the
       # button on this flag AND state == "drift"). The body_html cache, delta
@@ -2876,13 +2955,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
                 blocks,
                 dataset,
                 ScopeHelpers.scope_opts(socket),
-                paper_doc_id(paper)
+                paper
               ),
               reset: true
             )
             |> assign(:paper_doc, paper)
             |> assign(:paper_rev, Map.get(content, "rev") || 0)
             |> assign(:paper_link_details, paper_link_details(socket, paper, blocks))
+            |> assign(:paper_master_render, PaperMastersSeam.render_map(paper, blocks))
             |> assign(:paper_block_mode, true)
 
           _ ->
