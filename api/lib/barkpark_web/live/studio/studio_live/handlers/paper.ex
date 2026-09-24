@@ -429,7 +429,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # `paper-detach-master` {block_id, request_id?, if_rev?} replaces a linked
   # instance with a detached copy of what it shows; `paper-pin-master`
   # {block_id, pin: "true"|"false", request_id?, if_rev?} freezes it to the
-  # master's current revision or back to latest. Both ride the request-
+  # master's latest PUBLISHED revision or back to latest. Both ride the request-
   # identified op path (`paper_ops/5`). The boundary toolbar's buttons are
   # plain phx-clicks with no client request id, so one is minted here — a
   # client that sends its own gets replay on retry.

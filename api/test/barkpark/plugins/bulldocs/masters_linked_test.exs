@@ -430,6 +430,73 @@ defmodule Barkpark.Plugins.Bulldocs.MastersLinkedTest do
       assert [%{"version" => nil}] = unpinned.content["blocks"]
       assert render(unpinned, unpinned.content["blocks"]) =~ "Edited"
     end
+
+    # task-881d4b6e857b1b65 (0010 §5b): Pin freezes the master's latest
+    # PUBLISHED revision, never the authoring view's draft. A draft rev is never
+    # published (publishing mints a new rev), so a pin to it read "Master
+    # unavailable" on the public reader forever.
+    test "Pin while an unpublished draft exists freezes the PUBLISHED revision", ctx do
+      master = master!(ctx)
+      mid = Masters.master_id(master)
+      published_rev = master.rev
+      {slug, paper} = seed_paper!([ref("r1", mid)], scope_opts(master))
+
+      draft =
+        edit_master!(master, put_in(@section, ["blocks", Access.at(1), "text"], "Draft copy"))
+
+      refute draft.rev == published_rev
+
+      assert {:ok, pin} = Masters.pin_op(paper, "r1", true)
+      pinned = apply_op!(slug, paper, pin)
+      assert [%{"version" => ^published_rev}] = pinned.content["blocks"]
+
+      # The public reader and the authoring view show the SAME pinned content.
+      public = render(pinned, pinned.content["blocks"], published_only: true)
+      assert public =~ "Master body copy"
+      refute public =~ "Master unavailable"
+      authoring = render(pinned, pinned.content["blocks"])
+      assert authoring =~ "Master body copy"
+      refute authoring =~ "Draft copy"
+
+      # Publishing the draft later mints a new rev; the pin still resolves
+      # (from the published revision history) and still shows what it froze.
+      {:ok, _} =
+        Content.publish_document(mid, Masters.type_name(), @dataset, scope_opts(master))
+
+      public = render(pinned, pinned.content["blocks"], published_only: true)
+      assert public =~ "Master body copy"
+      refute public =~ "Draft copy"
+
+      # WITHDRAWAL: once the author unpublishes the master, a pin to one of its
+      # published revisions stops rendering for the public too.
+      {:ok, _} =
+        Content.unpublish_document(mid, Masters.type_name(), @dataset, scope_opts(master))
+
+      public = render(pinned, pinned.content["blocks"], published_only: true)
+      assert public =~ "Master unavailable"
+      refute public =~ "Master body copy"
+    end
+
+    test "Pin is refused when the master has no published revision; foreign reads as missing",
+         ctx do
+      scope = scope_opts(%{workspace_id: ctx.ws.id, project_id: ctx.project.id})
+      draft_only = raw_master!(scope, %{"id" => "n", "type" => "paragraph", "text" => "x"}, "D")
+      mid = Masters.master_id(draft_only)
+      {_slug, paper} = seed_paper!([ref("r1", mid)], scope)
+
+      assert {:error, :master_unpublished} = Masters.pin_op(paper, "r1", true)
+      # Unpin needs no master revision and is never refused for it.
+      assert {:ok, %{"patch" => %{"version" => nil}}} = Masters.pin_op(paper, "r1", false)
+
+      # A PUBLISHED master in another tenant answers exactly like a missing one.
+      other_ws = TenancyFixtures.create_workspace!()
+      foreign = master!(%{ws: other_ws, project: TenancyFixtures.create_project!(other_ws)})
+      {_s, holder} = seed_paper!([ref("r1", Masters.master_id(foreign))], scope)
+      {_s, missing} = seed_paper!([ref("r1", "paper_master-missing")], scope)
+
+      assert {:error, :master_not_found} = Masters.pin_op(holder, "r1", true)
+      assert {:error, :master_not_found} = Masters.pin_op(missing, "r1", true)
+    end
   end
 
   describe "master delete refusal" do

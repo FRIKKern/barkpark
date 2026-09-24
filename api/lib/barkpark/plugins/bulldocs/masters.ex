@@ -259,21 +259,22 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
 
   @doc """
   PIN (`pin? = true`): the op that freezes linked instance `block_id` to the
-  master's CURRENT revision (its `rev`), so later master edits no longer show.
-  UNPIN (`false`): back to `version: nil`, follow latest.
-  `{:error, :block_not_found | :not_linked | :master_not_found}`.
+  master's latest PUBLISHED revision (the published row's `rev`), so later
+  master edits and publishes no longer show. UNPIN (`false`): back to
+  `version: nil`, follow latest.
+
+  Never the draft (0010 §5b, task-881d4b6e857b1b65): publishing mints a NEW
+  rev, so a draft rev is never a published revision and the public reader
+  (published rows and revisions only) could never show a pin to it. A master
+  with no published row — unpublished by its author, or born as a draft
+  through another door — has nothing the public may see, so the pin is
+  refused with `:master_unpublished`.
+  `{:error, :block_not_found | :not_linked | :master_not_found |
+  :master_unpublished}`.
   """
   def pin_op(%Document{} = paper, block_id, pin?) when is_binary(block_id) do
     with {:ok, {master_id, _version}} <- find_linked(paper, block_id) do
-      version =
-        if pin? do
-          case get_master_in_scope(master_id, paper) do
-            %Document{rev: rev} -> {:ok, rev}
-            :master_not_found -> {:error, :master_not_found}
-          end
-        else
-          {:ok, nil}
-        end
+      version = if pin?, do: published_rev_in_scope(master_id, paper), else: {:ok, nil}
 
       with {:ok, v} <- version do
         {:ok, %{"op" => "patch-block", "id" => block_id, "patch" => %{"version" => v}}}
@@ -383,6 +384,31 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
     |> case do
       %Document{} = master -> master
       nil -> :master_not_found
+    end
+  end
+
+  # The PUBLISHED row's rev of master `master_id`, in the paper's exact scope
+  # (the same rule as `get_master_in_scope/2`, so a foreign master is
+  # `:master_not_found`, exactly like a missing one). A master that exists in
+  # scope only as a draft is `:master_unpublished`.
+  defp published_rev_in_scope(master_id, %Document{} = paper) do
+    base = DraftId.published_id(master_id)
+
+    rows =
+      from(d in Document,
+        where:
+          d.type == @type_name and d.dataset == ^paper.dataset and
+            d.doc_id in ^[base, DraftId.draft_id(base)],
+        select: {d.doc_id, d.rev}
+      )
+      |> scope_eq(:workspace_id, paper.workspace_id)
+      |> scope_eq(:project_id, paper.project_id)
+      |> Repo.all()
+
+    case {List.keyfind(rows, base, 0), rows} do
+      {{^base, rev}, _} when is_binary(rev) -> {:ok, rev}
+      {_, []} -> {:error, :master_not_found}
+      {_, _draft_only} -> {:error, :master_unpublished}
     end
   end
 

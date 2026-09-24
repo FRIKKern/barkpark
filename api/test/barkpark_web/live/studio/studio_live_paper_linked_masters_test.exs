@@ -157,7 +157,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperLinkedMastersTest do
 
     # ── the master changes; the instance paper is not written ───────────────
     before = paper_row(slug, paper)
-    master = edit_master!(master, "Edited master copy")
+    published_rev = master.rev
+    draft = edit_master!(master, "Edited master copy")
 
     view = open(conn, slug)
     html = preview(view, ref_id)
@@ -168,22 +169,36 @@ defmodule BarkparkWeb.Studio.StudioLivePaperLinkedMastersTest do
     assert after_edit.rev == before.rev
     assert after_edit.content["blocks"] == before.content["blocks"]
 
-    # ── PIN: freeze to the master's current revision ────────────────────────
+    # ── PIN: freeze to the master's latest PUBLISHED revision ───────────────
+    # (task-881d4b6e857b1b65, 0010 §5b) — NOT the unpublished draft the
+    # unpinned preview follows: a draft rev is never published, so the public
+    # reader could never show it. After the pin, edit mode shows what the
+    # public reader shows.
+    assert view
+           |> element(~s([data-edit-block-id="#{ref_id}"] [data-test-id="paper-pin-master"]))
+           |> render() =~ "published version"
+
     view
     |> element(~s([data-edit-block-id="#{ref_id}"] [data-test-id="paper-pin-master"]))
     |> render_click()
 
     assert %{"version" => pinned} = Enum.at(blocks(slug), 2)
-    assert pinned == master.rev
+    assert pinned == published_rev
+    refute pinned == draft.rev
 
     edit_master!(master, "Later master copy")
     view = open(conn, slug)
-    assert preview(view, ref_id) =~ "Edited master copy"
+    assert preview(view, ref_id) =~ "Original master copy"
+    refute preview(view, ref_id) =~ "Edited master copy"
     refute preview(view, ref_id) =~ "Later master copy"
 
     assert view
            |> element(~s([data-edit-block-id="#{ref_id}"] [data-test-id="paper-pin-master"]))
            |> render() =~ "Unpin"
+
+    assert view
+           |> element(~s([data-edit-block-id="#{ref_id}"] [data-test-id="paper-master-ref-note"]))
+           |> render() =~ "Pinned to a published version"
 
     # ── DETACH: the pinned content comes in as plain blocks ─────────────────
     view
@@ -195,7 +210,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperLinkedMastersTest do
     refute copy_id == ref_id
     assert copy["type"] == "section"
     assert copy["master"]["mode"] == "detached"
-    assert Enum.map(copy["blocks"], & &1["text"]) == ["Pricing", "Edited master copy"]
+    assert Enum.map(copy["blocks"], & &1["text"]) == ["Pricing", "Original master copy"]
     refute Enum.any?(blocks(slug), &(&1["type"] == "master-ref"))
   end
 
@@ -312,6 +327,36 @@ defmodule BarkparkWeb.Studio.StudioLivePaperLinkedMastersTest do
 
     assert_reply(view, %{saved: false, rejected: "master_not_found", request_id: ^request_id})
     assert Enum.at(blocks(slug), 2)["type"] == "master-ref"
+  end
+
+  # task-881d4b6e857b1b65: a master with NO published revision (withdrawn by
+  # unpublish, or created as a draft through another door) cannot be pinned —
+  # there is no version the public reader could show. Refused with a reason.
+  test "Pin of an instance whose master has no published revision is refused with a reason",
+       %{conn: conn, slug: slug, paper: paper, master: master} do
+    view = open(conn, slug)
+    insert_linked!(view, master)
+    ref_id = Enum.at(blocks(slug), 2)["id"]
+
+    {:ok, _} =
+      Content.unpublish_document(Masters.master_id(master), Masters.type_name(), @dataset,
+        workspace_id: paper.workspace_id,
+        project_id: paper.project_id
+      )
+
+    view = open(conn, slug)
+    request_id = Ecto.UUID.generate()
+
+    render_hook(view, "paper-pin-master", %{
+      "block_id" => ref_id,
+      "pin" => "true",
+      "request_id" => request_id,
+      "if_rev" => assigns(view).paper_rev
+    })
+
+    assert_reply(view, %{saved: false, rejected: "master_unpublished", request_id: ^request_id})
+    assert render(view) =~ "Publish the master before pinning"
+    assert %{"type" => "master-ref", "version" => nil} = Enum.at(blocks(slug), 2)
   end
 
   test "with the Bulldocs plugin disabled, no Pin/Detach renders and both events refuse",

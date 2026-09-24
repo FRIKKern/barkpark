@@ -106,6 +106,65 @@ defmodule BarkparkWeb.BulldocsLinkedMastersReaderTest do
     assert Enum.any?(Map.values(authoring), &(&1 =~ "Unpublished draft copy"))
   end
 
+  # task-881d4b6e857b1b65 (0010 §5b): Pin taken while the master has an
+  # unpublished draft freezes the latest PUBLISHED revision, so the pinned
+  # instance on a published paper renders for the public reader — before the
+  # fix it froze the draft rev, which is never published, and read "Master
+  # unavailable" forever.
+  test "an instance pinned while the master has an unpublished draft renders publicly",
+       %{conn: conn} do
+    n = System.unique_integer([:positive])
+    source_paper!("linked-reader-pin-src-#{n}", "Published pinned copy")
+    {:ok, master} = Masters.save_master("linked-reader-pin-src-#{n}", "m", @dataset)
+    mid = Masters.master_id(master)
+
+    {:ok, _draft} =
+      Content.upsert_document(
+        Masters.type_name(),
+        %{
+          "doc_id" => mid,
+          "title" => master.title,
+          "content" => put_in(master.content, ["node", "text"], "Pending draft copy")
+        },
+        @dataset
+      )
+
+    slug = "linked-reader-pin-#{n}"
+    paper = instance_paper!(slug, mid)
+
+    assert {:ok, pin} = Masters.pin_op(paper, "r1", true)
+
+    assert {:ok, _receipt, :applied} =
+             Content.apply_paper_block_ops_once(
+               slug,
+               [pin],
+               @dataset,
+               Ecto.UUID.generate(),
+               "test:pin",
+               workspace_id: paper.workspace_id,
+               project_id: paper.project_id
+             )
+
+    {:ok, _view, html} = live(conn, "/papers/#{slug}")
+    refute html =~ "Master unavailable"
+    assert html =~ "Published pinned copy"
+    refute html =~ "Pending draft copy"
+
+    # The pin names the published row's rev (save_master returned it).
+    assert [_h, %{"version" => version}] = Content.paper_blocks(slug, @dataset)
+    assert version == master.rev
+
+    # The reader really reads the PIN: once the draft is published (the latest
+    # published master now says "Pending draft copy"), the pinned instance
+    # still shows what it froze.
+    publish!(master)
+
+    {:ok, _view, html} = live(conn, "/papers/#{slug}")
+    assert html =~ "Published pinned copy"
+    refute html =~ "Pending draft copy"
+    refute html =~ "Master unavailable"
+  end
+
   test "a master that exists only as a draft (created through another door) stays unavailable",
        %{conn: conn} do
     n = System.unique_integer([:positive])

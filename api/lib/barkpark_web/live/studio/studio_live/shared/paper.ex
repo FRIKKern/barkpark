@@ -698,8 +698,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc """
-  PIN (`pin? = true`) linked instance `block_id` to the master's current
-  revision, or UNPIN it back to following latest — one `patch-block` op
+  PIN (`pin? = true`) linked instance `block_id` to the master's latest
+  PUBLISHED revision (a master with none is refused, `master_unpublished`),
+  or UNPIN it back to following latest — one `patch-block` op
   through `paper_ops/5`. Same return shape as `paper_detach_master/4`.
   """
   def paper_pin_master(socket, block_id, pin?, request_id, supplied_rev)
@@ -723,7 +724,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       nil ->
         {:error, master_insert_refused(socket, request_id, :masters_unavailable)}
 
-      {:error, reason} when reason in [:master_not_found, :not_linked, :block_not_found] ->
+      {:error, reason}
+      when reason in [:master_not_found, :master_unpublished, :not_linked, :block_not_found] ->
         {:error, master_insert_refused(socket, request_id, reason)}
     end
   end
@@ -778,6 +780,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   defp master_refusal_flash(:master_not_found), do: "That master is not available in this paper."
   defp master_refusal_flash(:masters_unavailable), do: "Masters are not available here."
+
+  defp master_refusal_flash(:master_unpublished),
+    do:
+      "Publish the master before pinning: a pin freezes the master's published version, and this master has none."
+
   defp master_refusal_flash(:block_not_found), do: "That block no longer exists."
   defp master_refusal_flash(:not_linked), do: "That block is not a linked master instance."
   defp master_refusal_flash(:not_masterable), do: "This block can't be saved as a master."

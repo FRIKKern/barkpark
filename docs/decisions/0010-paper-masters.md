@@ -39,27 +39,34 @@ reaches the plugin only via `PaperMastersSeam` (registry + enablement).
 - Resolved at READ time: compose → `PdMasterRef`, the walker injects
   `:masters[key]` HTML. Callers that do not resolve (body_html cache, delta
   frames, email, Go TUI) show a neutral "Linked master". The JS renderer is
-  unchanged (its generic unknown-block degrade; out of pd-parity scope, like
-  `embed`) — `js/packages/react` is over its size budget.
+  unchanged (generic unknown-block degrade; out of pd-parity scope, like
+  `embed`).
 - `Linked.render_map/3` batches per nesting level (current rows + pinned
   revisions), at most 3 levels; a master already on the chain renders
   "Master unavailable", as do missing and foreign masters (identical bytes).
   The public reader resolves published master rows only.
 - A master edit never writes an instance paper.
-- Detach: `replace-block` with a detached copy of what it shows. Pin:
-  `patch-block` `version` = the master's current `rev`; Unpin sets nil.
-- Deleting a master with live instances (papers in ITS scope holding a
-  `master-ref` to it, any depth) is refused by a Bulldocs `before_delete`
-  hook: 409 `halted`, listing the instance paper ids (never another
-  tenant's).
-- Detach and Pin are socket events `paper-detach-master` /
-  `paper-pin-master` on the request-identified op path.
+- Detach (`paper-detach-master`): `replace-block` with a detached copy of
+  what it shows. Pin (`paper-pin-master`): `patch-block` `version` = a rev
+  (§5b); Unpin sets nil. Both ride the request-identified op path.
+- Deleting a master with live instances (same-scope papers holding a
+  `master-ref` to it, any depth) is refused (`before_delete`): 409
+  `halted`, listing their ids (never another tenant's).
 - `save_master` PUBLISHES the master (task-59be65118320fa0e): the save is the
   author's choice to reuse it. Later edits are drafts; the reader shows the
   published row. Rejected: the reader resolving a draft-only master (an
   UNPUBLISHED master is draft-only too: it would re-expose what the author
-  withdrew); an insert warning only (the reader stays broken). A master-ref nested in a section or
-  column previews in Studio; the slash menu offers "(linked)".
+  withdrew); an insert warning only. A nested master-ref previews in
+  Studio; the slash menu offers "(linked)".
+
+## 5b. Pin freezes the latest PUBLISHED rev (task-881d4b6e857b1b65)
+
+Publish mints a new rev, so a pin to a draft rev read "Master unavailable"
+publicly forever. Pin takes the published row's rev; Studio previews what
+readers see. No published row: refused, `master_unpublished`. Rejected:
+refusing while a draft exists (a pin guards a paper from that pending edit);
+the reader resolving pins in any state (a paper editor would publish a
+master draft). Unpublishing still hides every pin.
 
 ## 6. Deferred (deliberate)
 
@@ -68,5 +75,3 @@ reaches the plugin only via `PaperMastersSeam` (registry + enablement).
   needs a jsonpath scan over the tenant's papers per master save.
 - The 409 lists every same-tenant instance id, not grant-narrowed:
   `:before_delete` carries no caller grants.
-- Pin takes the authoring (draft-first) rev; a draft rev never resolves
-  on the reader. A `columns` child renders the placeholder in the reader.

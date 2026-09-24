@@ -81,7 +81,8 @@ defmodule Barkpark.Plugins.Bulldocs.Masters.Linked do
   @doc """
   The node a single reference resolves to in `scope` (draft-first, the
   authoring view), plus the master row it came from:
-  `{:ok, node, %Document{}}` or `:error`. Used by Detach and Pin.
+  `{:ok, node, %Document{}}` or `:error`. Used by Detach (Pin reads the
+  published row's rev instead, `Masters.pin_op/3`).
   """
   def resolve(scope, {master, version} = ref) when is_binary(master) do
     scope = scope_of(scope)

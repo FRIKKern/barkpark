@@ -1110,14 +1110,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-save-master"
           >☆</button>
           <%!-- Linked master instance (task-59f078a2fd248698): Pin freezes it
-                to the master's current revision (Unpin follows latest again);
+                to the master's latest PUBLISHED revision, the one the public
+                reader shows (task-881d4b6e857b1b65; Unpin follows latest again);
                 Detach copies what it shows in as plain blocks. Offered only
                 where masters are available and the pane may write. --%>
           <button
             :if={@masters_impl && @masters_impl.linked?(@block)}
             type="button"
             class="btn btn-ghost btn-sm"
-            title={if linked_pinned?(@block), do: "Unpin: follow the master's latest", else: "Pin to this version"}
+            title={if linked_pinned?(@block), do: "Unpin: follow the master's latest", else: "Pin to the master's published version"}
             phx-click="paper-pin-master"
             phx-value-block_id={Map.get(@block, "id")}
             phx-value-pin={if linked_pinned?(@block), do: "false", else: "true"}
@@ -4690,7 +4691,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           {raw(Render.render_block(@block, %{style: :article, masters: @master_render}))}
         </div>
         <p class="bp-paper-edit-readonly" data-test-id="paper-master-ref-note">
-          Linked master — it shows the master's content. Edit the master, or Detach to edit it here.
+          <%= if linked_pinned?(@block) do %>
+            Pinned to a published version of the master — readers see exactly this. Unpin to follow the master, or Detach to edit it here.
+          <% else %>
+            Linked master — it shows the master's content. Edit the master, or Detach to edit it here.
+          <% end %>
         </p>
       <% _ -> %>
         <%!-- Genuinely-unhandled types are read-only in the MVP (view/delete/reorder).
