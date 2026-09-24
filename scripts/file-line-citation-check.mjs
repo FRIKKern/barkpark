@@ -55,17 +55,55 @@
 // A guard proven in one direction is half a guard, so --selftest proves both,
 // plus a green on a hand-repaired specimen, plus the empty-read refusal.
 //
+// ── PINNED AND RANGE CITATIONS ────────────────────────────────────────────────
+//
+// Every citation in a charter sits in a DATED record, so the honest repair for
+// one that has drifted is PROVENANCE, not a new number: pin it to the commit it
+// was true at. The pin form NAMES the thing it cites and the commit:
+//
+//     app.js (renderBadge @ 0db9b0f4a1, L675)        single line
+//     app.js (renderBadge @ 0db9b0f4a1, L675-702)    range
+//     app.css ("Only the team owner" @ 0db9b0f4a1, L12)   a quoted literal
+//
+// It is verified against `git show <sha>:<path>` — THAT commit's copy, never
+// HEAD — so it cannot drift, and it still reds if the named thing is not where
+// it says at that sha (or the sha's copy cannot be read: exit 2, see below).
+// The thing is matched as a whole word (hyphen counts as a word character, so
+// `.detail-grid` does not credit `.detail-grid--instance`); a "quoted" thing is
+// matched as a literal substring. Only the NAMED thing credits a pin — never the
+// rest of the citing line, so a pin carries none of the whole-line over-credit.
+//
+// WHY THIS SHAPE, AND NOT `app.js:675 (at <sha>)`: E11 in
+// cloud/priv/static/__css_check.mjs bans `app.js` + `[:~ ]+~?` + two or more
+// digits (and `<name>.{js,mjs,sh,css}` + `:` or ` ~` + digits). A form that
+// keeps `app.js:675` still carries the banned shape. Here the filename is
+// followed by ` (`, which neither branch of E11's alternation accepts, and the
+// line number sits behind `L` with no filename before it. So the pin can be
+// quoted into any file E11 scans without redding it; --selftest proves that
+// against E11's own exported function, not against a copy of its regex.
+//
+// RANGES. `F:N-M` (hyphen or en dash) is a range: it credits only if an anchor
+// lies INSIDE [N, M] — no slack, the range is the tolerance. It is never read
+// as `F:N` (the old parser stopped at the dash and gave N +/-slack). A single
+// line keeps +/-slack. The same holds for a pinned range.
+//
+// Pins are stripped from a line before its anchor set is scraped, so the sha,
+// the `L<n>` and the pinned thing never become anchors for a sibling citation.
+//
 // ── VACUITY REFUSAL ───────────────────────────────────────────────────────────
 //
 // A run whose parser matches NOTHING exits 2 (UNCHECKED), never 0. Same for a
 // corpus whose citations are all undecidable, and for a cited file that does not
-// exist. A verdict over a corpus that was never read is not a pass.
+// exist. A verdict over a corpus that was never read is not a pass. A PIN whose
+// sha's copy of the file cannot be read (unknown sha, or a shallow clone — CI
+// needs `fetch-depth: 0`) is UNVERIFIABLE and also exits 2: an unread pin is not
+// a pass, and it is not a drift either.
 //
 // ── EXIT CODES ────────────────────────────────────────────────────────────────
 //   0  unresolved count <= --max-unresolved (default 0)
 //   1  unresolved count above the budget; every miss named with file:line
 //   2  UNCHECKED — zero citations parsed, zero decidable, charter missing,
-//      cited file missing, or a bad argument
+//      cited file missing, a pin whose sha copy is unreadable, or a bad argument
 //
 // ── USAGE ─────────────────────────────────────────────────────────────────────
 //   node scripts/file-line-citation-check.mjs --report
@@ -144,11 +182,31 @@ function repoRoot(explicit) {
   }
 }
 
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// ── the pin form: `<base> (<thing> @ <sha>, L<N>[-<M>])` ─────────────────────
+// Exported shape, mirrored by scripts/file-line-citation-classify.mjs (which
+// WRITES it). Any base: stripping must not depend on which targets are mapped.
+const PIN_ANY = /\b[\w.-]+\.[A-Za-z0-9]+ \(([^@()\n]+?) @ ([0-9a-f]{7,40}), L(\d+)(?:[-\u2013]L?(\d+))?\)/g;
+function pinRe(bases) {
+  const alt = bases.map(escRe).join("|");
+  return new RegExp(`(?<![\\w.-])(${alt}) \\(([^@()\\n]+?) @ ([0-9a-f]{7,40}), L(\\d+)(?:[-\u2013]L?(\\d+))?\\)`, "g");
+}
+const stripPins = (line) => line.replace(PIN_ANY, " ");
+
+// A pinned thing: "quoted" -> literal substring; otherwise a whole word where
+// `-` is a word character (CSS class names), so a prefix never credits.
+function thingRe(thing) {
+  const q = thing.match(/^["\u201c](.+)["\u201d]$/);
+  if (q) return new RegExp(escRe(q[1]));
+  return new RegExp(`(^|[^A-Za-z0-9_$-])${escRe(thing)}([^A-Za-z0-9_$-]|$)`);
+}
+
 // ── the anchor set of a charter line ─────────────────────────────────────────
 function anchorsOf(line, citedBase) {
   const own = new Set(citedBase.toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean));
   const out = new Set();
-  for (const m of line.matchAll(/`([^`]+)`/g)) {
+  for (const m of stripPins(line).matchAll(/`([^`]+)`/g)) {
     for (const tok of m[1].split(/[^A-Za-z0-9_$]+/)) {
       if (tok.length < MIN_TOKEN) continue;
       if (/^[0-9]+$/.test(tok)) continue;
@@ -163,30 +221,89 @@ function anchorsOf(line, citedBase) {
 // ── parse every `<base>:<N>` citation in a charter ───────────────────────────
 function parseCitations(charterText, bases) {
   const alt = bases.map((b) => b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const re = new RegExp(`\\b(${alt}):(\\d+)\\b`, "g");
+  // `F:N-M` is a RANGE and is captured whole: the old `\b(F):(\d+)\b` stopped
+  // at the dash and silently read every range as its first line.
+  const re = new RegExp(`\\b(${alt}):(\\d+)(?:[-\u2013](\\d+))?\\b`, "g");
+  const pre = pinRe(bases);
   const lines = charterText.split("\n");
   const cites = [];
   lines.forEach((text, idx) => {
     for (const m of text.matchAll(re)) {
-      cites.push({ base: m[1], line: Number(m[2]), charterLine: idx + 1, text });
+      const n = Number(m[2]);
+      const hi = m[3] && Number(m[3]) >= n ? Number(m[3]) : null;
+      cites.push({ base: m[1], line: n, hi, charterLine: idx + 1, text });
+    }
+    for (const m of text.matchAll(pre)) {
+      const n = Number(m[4]);
+      const hi = m[5] && Number(m[5]) >= n ? Number(m[5]) : null;
+      cites.push({ base: m[1], line: n, hi, charterLine: idx + 1, text,
+        pin: { thing: m[2].trim(), sha: m[3] } });
     }
   });
   return cites;
+}
+
+const citeLabel = (c) => c.pin
+  ? `${c.base} (${c.pin.thing} @ ${c.pin.sha}, L${c.line}${c.hi ? "-" + c.hi : ""})`
+  : `${c.base}:${c.line}${c.hi ? "-" + c.hi : ""}`;
+
+// The window a citation credits in: a range is its own tolerance, a single
+// line gets +/-slack.
+function windowOf(c, nLines, slack) {
+  if (c.hi) return [Math.max(1, c.line), Math.min(nLines, c.hi)];
+  return [Math.max(1, c.line - slack), Math.min(nLines, c.line + slack)];
+}
+
+// THAT commit's copy of the cited file. null = unreadable (unknown sha, or a
+// shallow clone): the caller turns it into UNCHECKED, never a pass or a miss.
+const pinBlobCache = new Map();
+function pinBlob(root, sha, rel) {
+  const k = `${sha}:${rel}`;
+  if (!pinBlobCache.has(k)) {
+    try {
+      pinBlobCache.set(k, execFileSync("git", ["-C", root, "show", k],
+        { encoding: "utf8", maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "ignore"] }).split("\n"));
+    } catch { pinBlobCache.set(k, null); }
+  }
+  return pinBlobCache.get(k);
+}
+
+function evaluatePin(c, tgt, root, slack) {
+  c.decidable = true;
+  c.anchors = [c.pin.thing];
+  const fl = pinBlob(root, c.pin.sha, tgt.rel);
+  if (!fl) { c.unreadable = true; c.resolved = null; return; }
+  c.beyondEof = c.line > fl.length;
+  const re = thingRe(c.pin.thing);
+  const [lo, hi] = windowOf(c, fl.length, slack);
+  let hit = null;
+  for (let n = lo; n <= hi; n++) if (re.test(fl[n - 1])) { hit = { tok: c.pin.thing, at: n }; break; }
+  c.resolved = !!hit;
+  c.hit = hit;
+  if (!hit) {
+    let best = null;
+    for (let n = 1; n <= fl.length; n++) {
+      if (!re.test(fl[n - 1])) continue;
+      const d = n < c.line ? c.line - n : (n > (c.hi || c.line) ? n - (c.hi || c.line) : 0);
+      if (best === null || d < best.dist) best = { tok: c.pin.thing, at: n, dist: d };
+    }
+    c.elsewhere = best ? [best] : [];
+  }
 }
 
 function wordRe(tok) {
   return new RegExp(`(^|[^A-Za-z0-9_$])${tok.replace(/[.*+?^${}()|[\]\\$]/g, "\\$&")}([^A-Za-z0-9_$]|$)`);
 }
 
-function evaluate(cites, targets, slack) {
+function evaluate(cites, targets, slack, root) {
   for (const c of cites) {
     const tgt = targets.get(c.base);
+    if (c.pin) { evaluatePin(c, tgt, root, slack); continue; }
     c.anchors = anchorsOf(c.text, c.base);
     c.decidable = c.anchors.length > 0;
     c.beyondEof = c.line > tgt.lines.length;
     if (!c.decidable) { c.resolved = null; continue; }
-    const lo = Math.max(1, c.line - slack);
-    const hi = Math.min(tgt.lines.length, c.line + slack);
+    const [lo, hi] = windowOf(c, tgt.lines.length, slack);
     let hit = null;
     for (const tok of c.anchors) {
       const re = wordRe(tok);
@@ -208,7 +325,7 @@ function evaluate(cites, targets, slack) {
         let best = null;
         for (let n = 1; n <= tgt.lines.length; n++) {
           if (!re.test(tgt.lines[n - 1])) continue;
-          const d = Math.abs(n - c.line);
+          const d = n < c.line ? c.line - n : (n > (c.hi || c.line) ? n - (c.hi || c.line) : 0);
           if (best === null || d < best.d) best = { at: n, d };
         }
         if (best) c.elsewhere.push({ tok, at: best.at, dist: best.d });
@@ -238,7 +355,8 @@ function run(o) {
         "A citation cannot be checked against a file that is not there.\n");
       return 2;
     }
-    targets.set(base, { path: p, lines: fs.readFileSync(p, "utf8").split("\n") });
+    targets.set(base, { path: p, rel: path.relative(root, p).split(path.sep).join("/"),
+      lines: fs.readFileSync(p, "utf8").split("\n") });
   }
   if (targets.size === 0) { usage("no --map given: nothing to check citations against"); }
 
@@ -254,7 +372,7 @@ function run(o) {
       "           a silent pass on an empty parse is the exact failure this guard exists to prevent.\n");
     return 2;
   }
-  evaluate(cites, targets, o.slack);
+  evaluate(cites, targets, o.slack, root);
 
   const decidable = cites.filter((c) => c.decidable);
   if (decidable.length === 0) {
@@ -263,8 +381,11 @@ function run(o) {
       "           line carries a backticked identifier to anchor on. Nothing was measured.\n");
     return 2;
   }
+  const unreadable = cites.filter((c) => c.unreadable);
   const resolved = decidable.filter((c) => c.resolved);
-  const unresolved = decidable.filter((c) => !c.resolved);
+  const unresolved = decidable.filter((c) => c.resolved === false);
+  const pinned = cites.filter((c) => c.pin);
+  const ranges = cites.filter((c) => c.hi);
   const prose = cites.filter((c) => !c.decidable);
   const beyondEof = cites.filter((c) => c.beyondEof);
   const charterLines = new Set(cites.map((c) => c.charterLine));
@@ -281,8 +402,13 @@ function run(o) {
       unresolved: unresolved.length,
       proseOnly: prose.length,
       beyondEof: beyondEof.length,
+      pinned: pinned.length,
+      pinnedVerified: pinned.filter((c) => c.resolved).length,
+      pinnedFailed: pinned.filter((c) => c.resolved === false).length,
+      pinnedUnreadable: unreadable.length,
+      ranges: ranges.length,
       misses: unresolved.map((c) => ({
-        cite: `${c.base}:${c.line}`, charterLine: c.charterLine,
+        cite: citeLabel(c), charterLine: c.charterLine,
         anchors: c.anchors, elsewhere: c.elsewhere,
       })),
     }, null, 2) + "\n");
@@ -298,6 +424,9 @@ function run(o) {
     process.stdout.write(`  resolved       : ${resolved.length} / ${decidable.length}\n`);
     process.stdout.write(`  UNRESOLVED     : ${unresolved.length} / ${decidable.length}\n`);
     process.stdout.write(`  beyond EOF     : ${beyondEof.length}   (drift, not truncation, when 0)\n`);
+    process.stdout.write(`  pinned         : ${pinned.length}   (verified ${pinned.filter((c) => c.resolved).length}, ` +
+      `FAILED ${pinned.filter((c) => c.resolved === false).length}, sha copy unreadable ${unreadable.length}) — checked at THEIR sha, not HEAD\n`);
+    process.stdout.write(`  ranges         : ${ranges.length}   (credit only INSIDE [N, M]; never read as N)\n`);
     process.stdout.write(
       "  BIASES         : anchors are scraped from the WHOLE citing line, so a citation\n" +
       "                   RESOLVES if any one of them lands in the window (over-credit),\n" +
@@ -311,7 +440,7 @@ function run(o) {
         "  generic word landing in the window credits a citation that is wrong by hand.\n" +
         "  Read this list before quoting the resolved count as a correctness rate.\n");
       for (const c of resolved) {
-        process.stdout.write(`  ${c.base}:${c.line}  charter line ${c.charterLine}  credited by \`${c.hit.tok}\` at ${c.hit.at}\n`);
+        process.stdout.write(`  ${citeLabel(c)}  charter line ${c.charterLine}  credited by \`${c.hit.tok}\` at ${c.hit.at}\n`);
       }
     }
     if (o.report) {
@@ -322,19 +451,26 @@ function run(o) {
       }).sort((a, b) => b.drift - a.drift);
       for (const { c, drift } of withDrift.slice(0, 25)) {
         const el = (c.elsewhere || []).map((e) => `${e.tok}@${e.at} (${e.dist} away)`).join(", ") || "(no anchor found anywhere in the file)";
-        process.stdout.write(`  ${c.base}:${c.line}  (charter line ${c.charterLine}, nearest anchor occurrence ${drift < 0 ? "n/a" : drift + " lines away"})\n`);
+        process.stdout.write(`  ${citeLabel(c)}  (charter line ${c.charterLine}, nearest anchor occurrence ${drift < 0 ? "n/a" : drift + " lines away"})\n`);
         process.stdout.write(`      anchors elsewhere: ${el}\n`);
       }
       if (withDrift.length > 25) process.stdout.write(`  ... and ${withDrift.length - 25} more\n`);
     }
   }
 
+  if (unreadable.length > 0) {
+    process.stderr.write(
+      `UNCHECKED: ${unreadable.length} pinned citation(s) name a sha whose copy of the cited file cannot be read ` +
+      "(unknown sha, or a shallow clone — fetch full history). An unread pin is neither a pass nor a drift:\n");
+    for (const c of unreadable.slice(0, 10)) process.stderr.write(`  ${citeLabel(c)}  charter line ${c.charterLine}\n`);
+    return 2;
+  }
   if (unresolved.length > o.maxUnresolved) {
     if (!o.json) {
       process.stdout.write(`\nFAIL — ${unresolved.length} unresolved citation(s), budget ${o.maxUnresolved}.\n`);
       if (!o.report) {
         for (const c of unresolved.slice(0, 20)) {
-          process.stdout.write(`  ${c.base}:${c.line}  charter line ${c.charterLine}  anchors: ${c.anchors.slice(0, 8).join(", ")}\n`);
+          process.stdout.write(`  ${citeLabel(c)}  charter line ${c.charterLine}  anchors: ${c.anchors.slice(0, 8).join(", ")}\n`);
         }
         if (unresolved.length > 20) process.stdout.write(`  ... and ${unresolved.length - 20} more (use --report)\n`);
       }
@@ -346,7 +482,7 @@ function run(o) {
 }
 
 // ── SELFTEST: both failure directions, the green, and the empty read ─────────
-function selftest() {
+async function selftest() {
   const t = fs.mkdtempSync(path.join(os.tmpdir(), "flcc-"));
   const self = fileURLToPath(import.meta.url);
   const wdir = path.join(t, "src");
@@ -428,13 +564,80 @@ function selftest() {
   show("ARM 7  cited file missing -> UNCHECKED (exit 2)",
     call(["--map", `widget.js=${path.join(wdir, "gone.js")}`, "--root", t, "--charter", charter]), 2, /does not exist/);
 
+  // ── PINNED + RANGE ARMS ─────────────────────────────────────────────────────
+  // A real git history under the fixture root: commit A has makeWidget at 30;
+  // commit B (HEAD, and the working copy) deletes it and adds paintChip at 20.
+  // A pin must be judged by ITS sha's copy, so each pin arm is chosen so that
+  // reading HEAD instead would give the OPPOSITE verdict.
+  const g = (...a) => execFileSync("git", ["-C", t, "-c", "user.email=selftest@example.invalid",
+    "-c", "user.name=selftest", "-c", "commit.gpgsign=false", ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  g("init", "-q");
+  fs.writeFileSync(widget, body.join("\n"));
+  g("add", "src/widget.js"); g("commit", "-q", "-m", "A");
+  const shaA = g("rev-parse", "--short=10", "HEAD");
+  const bodyB = body.slice();
+  bodyB[29] = "// filler line 30";
+  bodyB[19] = "function paintChip(el) { return el; }"; // line 20
+  fs.writeFileSync(widget, bodyB.join("\n"));
+  g("add", "src/widget.js"); g("commit", "-q", "-m", "B");
+  const shaB = g("rev-parse", "--short=10", "HEAD");
+  const pinArg = ["--map", "widget.js=src/widget.js", "--root", t, "--slack", "3"];
+  const cite = (lineText) => { fs.writeFileSync(charter, `# fixture\n\n${lineText}\n`); return [...pinArg, "--charter", charter, "--report"]; };
+
+  show("ARM 8  PIN present at its sha, ABSENT at HEAD -> GREEN (reads the sha's copy, not HEAD)",
+    call(cite(`\`makeWidget\` builds it — widget.js (makeWidget @ ${shaA}, L30)`)), 0, /pinned         : 1   \(verified 1/);
+  show("ARM 9  PIN absent at its sha (deleted by B) -> RED (exit 1)",
+    call(cite(`\`makeWidget\` builds it — widget.js (makeWidget @ ${shaB}, L30)`)), 1, /no anchor found anywhere/);
+  show("ARM 10 PIN absent at its sha but PRESENT at HEAD line 20 -> RED (HEAD cannot rescue a pin)",
+    call(cite(`\`paintChip\` paints — widget.js (paintChip @ ${shaA}, L20)`)), 1, /FAIL — 1 unresolved/);
+  show("ARM 11 PIN at the right sha, wrong line (thing 10 lines off) -> RED",
+    call(cite(`\`makeWidget\` — widget.js (makeWidget @ ${shaA}, L20)`)), 1, /10 lines away/);
+  show("ARM 12 PINNED RANGE containing the thing -> GREEN",
+    call(cite(`\`makeWidget\` — widget.js (makeWidget @ ${shaA}, L10-31)`)), 0, /PASS — 1\/1/);
+  show("ARM 13 PINNED RANGE whose slack-neighbour holds the thing -> RED (no slack on a range)",
+    call(cite(`\`makeWidget\` — widget.js (makeWidget @ ${shaA}, L31-40)`)), 1, /FAIL/);
+  show("ARM 14 PIN whose sha copy is unreadable -> UNCHECKED (exit 2), never a pass or a miss",
+    call(cite(`\`makeWidget\` — widget.js (makeWidget @ 0000000dead, L30)`)), 2, /cannot be read/);
+
+  // Unpinned ranges, against the working copy (B): paintChip at 20.
+  show("ARM 15 RANGE F:N-M credits a thing deep inside it (read as N +/-3 it would miss) -> GREEN",
+    call(cite("`paintChip` — widget.js:5-24")), 0, /ranges         : 1/);
+  show("ARM 16 RANGE F:N-M whose only hit sits in N's slack, outside [N, M] -> RED",
+    call(cite("`paintChip` — widget.js:22-30")), 1, /widget\.js:22-30/);
+  show("ARM 17 SINGLE F:N keeps +/-slack (control for ARM 16: same file, same thing) -> GREEN",
+    call(cite("`paintChip` — widget.js:22")), 0, /PASS/);
+
+  // ARM 18 — E11: the pin form must be clean under E11's OWN function; the old
+  // `(at <sha>)` form is the positive control and must red it. The banned
+  // string is assembled from parts so this file never types one whole.
+  {
+    process.stdout.write("\n=== ARM 18  pin form vs E11 (cloud/priv/static/__css_check.mjs bannedSourceCitationErrors) ===\n");
+    const e11 = path.resolve(path.dirname(self), "..", "cloud", "priv", "static", "__css_check.mjs");
+    let ok = false;
+    if (!fs.existsSync(e11)) {
+      process.stdout.write(`    E11 source not found at ${e11}\n`);
+    } else {
+      const { bannedSourceCitationErrors } = await import(e11);
+      const forms = ["app.js", "app.css", "__app.test.mjs"].map((b) => `// ${b} (makeWidget @ ${shaA}, L675-702) and ${b} ("Only the owner" @ ${shaA}, L12)`);
+      const clean = forms.map((f) => bannedSourceCitationErrors(f, "fixture.mjs").length);
+      const oldForm = `// ${"app.js"}${":"}${"675"} (at ${shaA})`;
+      const red = bannedSourceCitationErrors(oldForm, "fixture.mjs").length;
+      process.stdout.write(`    pin form E11 hits per base [app.js, app.css, __app.test.mjs]: ${clean.join(", ")} (want 0,0,0)\n`);
+      process.stdout.write(`    control: the (at <sha>) form reds E11 with ${red} hit(s) (want >= 1)\n`);
+      ok = clean.every((n) => n === 0) && red >= 1;
+    }
+    process.stdout.write(`    -> ${ok ? "ok" : "ARM FAILED"}\n`);
+    if (!ok) fails++;
+  }
+
+  const ARMS = 18;
   fs.rmSync(t, { recursive: true, force: true });
-  process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${7 - fails}/7 arms\n`);
+  process.stdout.write(`\nSELFTEST ${fails === 0 ? "PASS" : "FAIL"} — ${ARMS - fails}/${ARMS} arms\n`);
   return fails === 0 ? 0 : 1;
 }
 
 const o = parseArgs(process.argv.slice(2));
-if (o.selftest) process.exit(selftest());
+if (o.selftest) process.exit(await selftest());
 if (!o.charter) o.charter = ".claude/workflows/bp-cloud-console-hardening-charter.md";
 if (o.maps.length === 0) o.maps = ["app.js=cloud/priv/static/app.js"];
 process.exit(run(o));
