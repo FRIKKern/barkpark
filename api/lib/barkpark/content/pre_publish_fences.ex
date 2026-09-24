@@ -14,7 +14,10 @@ defmodule Barkpark.Content.PrePublishFences do
   What is stored is each plugin's declaration, NOT a pre-ordered list: `list/0`
   applies the `:barkpark, :plugins` load order at READ time, the same
   precedence as `PreWriteFences.list/0` and
-  `Barkpark.Plugins.Registry.ResolverChain.load_ordered_plugins/0`.
+  `Barkpark.Plugins.Registry.ResolverChain.load_ordered_plugins/0`, and through
+  the same interpreter, `Barkpark.Content.PluginLoadOrder.plugins/3`: an entry
+  that published no declaration (a loadable module that never registered, an
+  unknown name, a malformed entry) is skipped with a `Logger.warning` naming it.
 
   Nothing published (the `BARKPARK_PLUGINS=""` kill switch registers nothing;
   Registry init publishes `[]`) resolves `[]`, and a publish runs no fence at
@@ -71,20 +74,13 @@ defmodule Barkpark.Content.PrePublishFences do
     declared = :persistent_term.get(@key, [])
 
     case Application.get_env(:barkpark, :plugins, []) do
-      [_ | _] = configured -> Enum.flat_map(configured, &fences_for(declared, &1))
-      _ -> Enum.flat_map(declared, & &1.fences)
-    end
-  end
+      [_ | _] = configured ->
+        configured
+        |> Barkpark.Content.PluginLoadOrder.plugins(declared, __MODULE__)
+        |> Enum.flat_map(& &1.fences)
 
-  defp fences_for(declared, name) when is_binary(name), do: by(declared, :name, name)
-  defp fences_for(declared, {name, _mod}) when is_binary(name), do: by(declared, :name, name)
-  defp fences_for(declared, mod) when is_atom(mod), do: by(declared, :module, mod)
-  defp fences_for(_declared, _other), do: []
-
-  defp by(declared, field, value) do
-    case Enum.find(declared, &(Map.fetch!(&1, field) == value)) do
-      nil -> []
-      entry -> entry.fences
+      _ ->
+        Enum.flat_map(declared, & &1.fences)
     end
   end
 

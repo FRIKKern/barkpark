@@ -212,6 +212,14 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	if key := sessionKey(); key != "" {
 		headers[sessionHeader] = key
 	}
+	// THE SESSION-DOC POINTER (task-9002f2b301329f1f). A SEPARATE header from
+	// the secret key above and never a replacement for it: that one identifies
+	// the claim session, this one names the type:session DOCUMENT the server
+	// appends a task-closed / paper-published event to. Only the two doors the
+	// server arms carry it (session_doc_header.go says why).
+	if slug := sessionDocFor(g, ctx, cmd); slug != "" {
+		headers[sessionDocHeader] = slug
+	}
 	if needsPerspectiveAuth || needsDraftIDAuth {
 		// doc get/ls/query are public at their default published perspective,
 		// so their manifest tier must remain `none`. Drafts and raw are
