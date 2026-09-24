@@ -28,8 +28,12 @@ defmodule Barkpark.Tasks.DedupTrgmAbsentTest do
       goes red with `{:error, {:dedup_unavailable, …}}` — the fresh-install
       lockout, reproduced.
 
-  `DedupFallbackCapTest` already drops the extension for real and proves the
-  fallback still REFUSES an alphabetically-late duplicate. What it does not
+  Neither module drops the extension: `hide_pg_trgm!/0` hides the `<->`
+  operator from `search_path` instead, so the real 42883 still fires without
+  catalog DDL on the shared test database (see its comment).
+
+  `DedupFallbackCapTest` already proves the fallback still REFUSES an
+  alphabetically-late duplicate. What it does not
   cover — and what the 503 failure mode is actually about — is a NON-duplicate
   create surviving the same conditions, and the error code itself.
   """
@@ -95,16 +99,29 @@ defmodule Barkpark.Tasks.DedupTrgmAbsentTest do
     )
   end
 
-  # A real install without the extension, reproduced inside the sandbox
-  # transaction — CASCADE takes the GiST index with it, and the rollback at the
-  # end of the test brings both back.
-  defp drop_pg_trgm! do
-    Repo.query!("DROP EXTENSION IF EXISTS pg_trgm CASCADE")
+  # A box without the extension, as the dedup query sees it. `<->` is
+  # unqualified SQL, so Postgres resolves it through `search_path`, and pg_trgm
+  # installs it in `public`. A temp view named `documents` over
+  # `public.documents`, plus an EMPTY search_path, leaves the table reachable
+  # (pg_temp is searched first for relations) and the operator not (pg_temp is
+  # never searched for operators, pg_catalog does not have it). The query then
+  # raises the same 42883 a box without pg_trgm raises — the first test below
+  # measures that rather than assuming it.
+  #
+  # It used to `DROP EXTENSION pg_trgm CASCADE` inside the sandbox txn. That is
+  # catalog DDL on the ONE shared test database, and a concurrent session using a
+  # pg_trgm function made it fail with XX000 "cache lookup failed for function"
+  # (main run 35980575238). Both objects here are private to this backend and
+  # transaction-scoped: the rollback at test end removes the view and the SET.
+  # Twin: `DedupFallbackCapTest.hide_pg_trgm!/0`.
+  defp hide_pg_trgm! do
+    Repo.query!("CREATE TEMP VIEW documents AS SELECT * FROM public.documents")
+    Repo.query!("SET LOCAL search_path TO ''")
   end
 
   describe "what a box without pg_trgm actually reports" do
     test "the `<->` operator raises SQLSTATE 42883 undefined_function, which the rescue covers" do
-      drop_pg_trgm!()
+      hide_pg_trgm!()
 
       assert {:error, %Postgrex.Error{postgres: pg}} =
                Repo.query("SELECT title <-> $1 FROM documents LIMIT 1", ["probe"])
@@ -120,17 +137,22 @@ defmodule Barkpark.Tasks.DedupTrgmAbsentTest do
     end
 
     test "SET LOCAL pg_trgm.similarity_threshold does NOT raise, so it cannot be the probe" do
-      drop_pg_trgm!()
+      hide_pg_trgm!()
 
       # Postgres accepts any dotted "customized option" name, extension or not.
       # A fresh-install check built on this statement would report healthy.
       assert {:ok, _} = Repo.query("SET LOCAL pg_trgm.similarity_threshold = 0.3")
+
+      # The extension is only HIDDEN here, not gone, so the line above cannot by
+      # itself show "extension or not". This prefix belongs to no extension
+      # anywhere, and Postgres accepts it all the same.
+      assert {:ok, _} = Repo.query("SET LOCAL barkpark_no_such_ext.similarity_threshold = 0.3")
     end
   end
 
   describe "the rescue keeps a fresh install usable (mutant D)" do
     test "a genuinely new task still CREATES with the extension gone", %{scope: scope} do
-      drop_pg_trgm!()
+      hide_pg_trgm!()
 
       log =
         capture_log(fn ->
@@ -153,7 +175,7 @@ defmodule Barkpark.Tasks.DedupTrgmAbsentTest do
       # CONTROL for the test above: the fallback is a working gate, not a hole.
       # Without this, `:ok` above would also be produced by a scan that returned
       # nothing at all.
-      drop_pg_trgm!()
+      hide_pg_trgm!()
 
       capture_log(fn ->
         assert {:error, {:duplicate_task, payload}} =
