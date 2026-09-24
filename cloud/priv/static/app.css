@@ -4531,6 +4531,33 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   margin-bottom: 22px;
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
+  /* THE RIGHT EDGE FADES WHILE A TAB IS PAST IT — the `.set-matrix` /
+     `.archive-resurrect .cli-chip-code` idiom, reused rather than re-invented.
+     At 721px (one pixel above the shell fold) the six tabs measure 456px in a
+     441px strip, so the last tab sat 15px past the edge with nothing saying it
+     was there (breakpoint-sweep Q2 CLIP_NO_CUE nav.inst-tabs, every instance
+     cell, both themes). The fade is scroll-driven, so it is TWO-STATE BY
+     CONSTRUCTION: with nothing to scroll the timeline is inactive and
+     `--inst-tabs-fade` keeps its 0px initial value — no fade at the widths
+     where the strip fits whole, which is every other width the sweep walks.
+     It also fades the bottom hairline at the edge while clipped; that is the
+     same trade `.sidebar`'s `--nav-fade` takes — the fade IS the edge there.
+     NOT IN THE FIREFOX FALLBACK below: that block keys on a class app.js's
+     EDGE_CUES table measures, and this strip is not in that table. */
+  -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - var(--inst-tabs-fade)), transparent);
+  mask-image: linear-gradient(to right, currentColor calc(100% - var(--inst-tabs-fade)), transparent);
+  animation-name: inst-tabs-edge-fade;
+  animation-duration: auto;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+  animation-timeline: scroll(self inline);
+}
+/* Registered so the length interpolates as the strip scrolls to its end;
+   `inherits: false` so no tab reports a cue it does not own. */
+@property --inst-tabs-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes inst-tabs-edge-fade {
+  from { --inst-tabs-fade: 32px; }
+  to { --inst-tabs-fade: 0px; }
 }
 .inst-tab {
   position: relative;
