@@ -24,7 +24,7 @@ import {
   parseViewIds, boundaryWalk, coverageReport, selectCells,
   parseHeightClause, parseThemeMembers, accentIdentities, axisCoverage,
   familyOf, scenarioReport,
-  BREAKPOINTS, WIDTHS, CELLS, COVERED_VIEWS, FOLD_FRACTION,
+  BREAKPOINTS, WIDTHS, CELLS, COVERED_VIEWS, FOLD_FRACTION, cellUrl,
   SHELL_CHROME_SELECTORS, SHELL_CHROME_CEILING, CHROME_PIN_ROW, foldVerdict,
   HIDING_UTILITIES, THEMES, HEIGHTS, HEIGHT_REASONS, RENDER_HEIGHT,
   RENDER_HEIGHTS_DEFAULT, heightDriveReport, cueAxisOfMask, cueStuckVerdict,
@@ -234,12 +234,37 @@ test("an unreadable width in the stylesheet REFUSES the whole run", () => {
 
 // ── the cell table's own invariants ──────────────────────────────────────────
 
-test("every cell carries a scenario, a hash, a view and a SENTINEL", () => {
+test("every cell carries a scenario, a route, a view and a SENTINEL", () => {
   for (const c of CELLS) {
-    for (const k of ["name", "scen", "hash", "view", "sentinel"]) {
+    for (const k of ["name", "scen", "view", "sentinel"]) {
       assert.ok(c[k] && String(c[k]).length, `cell ${c.name}: missing ${k}`);
     }
-    assert.ok(c.hash.startsWith("#"), `cell ${c.name}: the hash is what ROUTES — ?scen= alone renders #overview`);
+    // task-197a30115b0d8a7d: a cell OUTSIDE the shell (/new) routes by its
+    // pathname and declares `shell: false`; every other cell still routes by
+    // hash, and ?scen= alone renders #overview.
+    if (c.shell === false) {
+      assert.ok(typeof c.pathname === "string" && c.pathname.startsWith("/") && c.pathname !== "/",
+        `cell ${c.name}: shell:false must name the document's pathname`);
+      assert.equal(SCENARIOS[c.scen].pathname, c.pathname, `cell ${c.name}: the pathname is the scenario's own`);
+    } else {
+      assert.ok(typeof c.hash === "string" && c.hash.startsWith("#"), `cell ${c.name}: the hash is what ROUTES — ?scen= alone renders #overview`);
+      assert.equal(c.pathname, undefined, `cell ${c.name}: a shell cell loads the SPA root`);
+    }
+  }
+  // cellUrl carries pathname, search and hash in the order the SPA reads them.
+  // (One arm, not a new test: console-harness.yml pins this file's count
+  // EXACTLY, and a route arm belongs beside the route invariant it checks.)
+  assert.equal(cellUrl({ scen: "fleet", hash: "#fleet" }, "dark", "http://h"), "http://h/?scen=fleet&theme=dark#fleet");
+  assert.equal(cellUrl({ scen: "b", hash: "#billing", search: "?billing=portal" }, "light", "http://h"),
+    "http://h/?billing=portal&scen=b&theme=light#billing");
+  assert.equal(cellUrl({ scen: "t", pathname: "/new", search: "?template=x&bp=1" }, "light", "http://h"),
+    "http://h/new?template=x&bp=1&scen=t&theme=light");
+  // every committed cell's URL, parsed back, carries its own scenario and theme
+  for (const c of CELLS) {
+    const u = new URL(cellUrl(c, "dark"));
+    assert.equal(u.searchParams.get("scen"), c.scen);
+    assert.equal(u.searchParams.get("theme"), "dark");
+    assert.equal(u.pathname, c.pathname || "/");
   }
 });
 
@@ -756,8 +781,11 @@ test("the DEFAULT loop is ONE height, and the decision carries its own render co
   // instead of quietly stale.
   const one = CELLS.length * THEMES.length * 1 * WIDTHS.length;
   const all = CELLS.length * THEMES.length * HEIGHTS.length * WIDTHS.length;
-  assert.equal(one, 1092);
-  assert.equal(all, 3276);
+  // task-197a30115b0d8a7d (2026-09-24): 26 -> 36 cells moved these from
+  // 1092/3276, RE-DERIVED from the tables (36 x 2 x 21, then x3), and the
+  // HEIGHT_REASONS sentence below was re-written to the new pair.
+  assert.equal(one, 1512);
+  assert.equal(all, 4536);
   const reason = HEIGHT_REASONS[RENDER_HEIGHT];
   assert.ok(reason.includes(String(one)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state the default-loop render count ${one}`);
   assert.ok(reason.includes(String(all)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state what walking all ${HEIGHTS.length} heights costs (${all})`);
@@ -1286,13 +1314,24 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // already had eight members. RE-DERIVED by RUNNING `node breakpoint-sweep.mjs`
   // and reading what it PRINTED (`146 scenarios · 25 distinct covered by 26
   // cells · 121 residue over 14 families`), never by adding two.
+  // task-197a30115b0d8a7d (2026-09-24) moves it by TEN, and it moves
+  // the residue DOWN without deleting a scenario: the five
+  // media gaps task-1ac954ba0db927cb measured became ten cells (provisioning,
+  // fleet-support-provisioning, offload-working, site-deploy-rail-live,
+  // billing-portal-return, inst-usage, account-modal, account-modal-2fa-
+  // badcode, theater-midflight, theater-ready), and the `promoted` refusal took
+  // their entries out of the literal. Total (146) and families (14) are
+  // DELIBERATELY UNMOVED; cells 26 -> 36, distinctCovered 25 -> 35, residue
+  // 121 -> 111. RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` and reading
+  // what it PRINTED (`146 scenarios · 35 distinct covered by 36 cells · 111
+  // residue over 14 families`), never by subtracting ten.
   assert.equal(r.total, 146);
-  assert.equal(r.cells, 26);
-  assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
-  assert.equal(r.residue, 121, "121 is the RESIDUE, not the census");
+  assert.equal(r.cells, 36);
+  assert.equal(r.distinctCovered, 35, "mixed-fleet is used twice — 36 cells cover 35 DISTINCT scenarios");
+  assert.equal(r.residue, 111, "111 is the RESIDUE, not the census");
   assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 121, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 111, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
@@ -1381,7 +1420,14 @@ test("every superseded entry resolves its `by`, and every genuinely-uncovered en
   const cellNames = new Set(CELLS.map((c) => c.name));
   const sup = Object.entries(SCENARIO_RESIDUE).filter(([, e]) => e.verdict === "superseded");
   const unc = Object.entries(SCENARIO_RESIDUE).filter(([, e]) => e.verdict === "genuinely-uncovered");
-  assert.ok(sup.length > 0 && unc.length > 0, "a verdict class went empty — re-read, do not keep this green");
+  // RE-READ, NOT KEPT GREEN (task-197a30115b0d8a7d): this line demanded BOTH
+  // classes non-empty, and genuinely-uncovered went to ZERO by design — each of
+  // its eleven entries either became a cell or (`failed`) is superseded by one.
+  // An empty uncovered class is the goal state, not a lost class, so it is no
+  // longer required; the `cover` loop below is vacuous today and says so here.
+  // What still guards the degenerate case is the uniform-verdict refusal, which
+  // reds a literal that says one word for every entry.
+  assert.ok(sup.length > 0, "the superseded class went empty — re-read, do not keep this green");
   for (const [name, e] of sup) {
     assert.ok(cellNames.has(e.by) || (SCENARIO_RESIDUE[e.by] && SCENARIO_RESIDUE[e.by].verdict === "genuinely-uncovered"),
       `${name} is superseded by "${e.by}", which is neither a cell nor a genuinely-uncovered entry`);
@@ -1838,7 +1884,15 @@ test("the chronicle's ordinals strictly increase and stay inside the census — 
   const r = scenarioReport({ scenarios: SCENARIOS });
   for (const [file, src] of [["breakpoint-sweep.test.mjs", TEST_SRC], ["breakpoint-sweep.mjs", SWEEP_SRC]]) {
     const ordinals = chronicleOrdinals(src);
-    for (const [axis, ords, ceiling] of [["scenario", ordinals.scenario, r.total], ["residue", ordinals.residue, r.residue]]) {
+    // THE RESIDUE CEILING IS THE SCENARIO TOTAL, NOT TODAY'S RESIDUE
+    // (task-197a30115b0d8a7d). A residue ordinal is the slot an entry landed in
+    // WHEN IT WAS WRITTEN; the residue SHRINKS when an entry gains a cell (ten
+    // did here, 121 -> 111), so the live residue count stopped being a bound on
+    // history — a true chronicle block naming residue slot 119 would read as a
+    // lie. Every residue entry is a scenario, so the total still bounds it. This
+    // is a WEAKER ceiling than the one it replaces, stated rather than hidden;
+    // the strict-increase half of this arm is untouched.
+    for (const [axis, ords, ceiling] of [["scenario", ordinals.scenario, r.total], ["residue", ordinals.residue, r.total]]) {
       assert.ok(ords.length >= 9,
         `${file}: only ${ords.length} ${axis} ordinals matched (floor 9) — the chronicle wording drifted out from under this arm; re-point the regex, never lower the floor`);
       for (let i = 1; i < ords.length; i += 1) {
