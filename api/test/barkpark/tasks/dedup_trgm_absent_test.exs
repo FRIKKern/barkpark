@@ -30,7 +30,9 @@ defmodule Barkpark.Tasks.DedupTrgmAbsentTest do
 
   Neither module drops the extension: `hide_pg_trgm!/0` hides the `<->`
   operator from `search_path` instead, so the real 42883 still fires without
-  catalog DDL on the shared test database (see its comment).
+  catalog DDL on the shared test database (see its comment). The LOUD-degrade
+  control likewise hides `title` behind a temp view (`hide_title_column!/0`)
+  rather than dropping the column.
 
   `DedupFallbackCapTest` already proves the fallback still REFUSES an
   alphabetically-late duplicate. What it does not
@@ -119,6 +121,30 @@ defmodule Barkpark.Tasks.DedupTrgmAbsentTest do
     Repo.query!("SET LOCAL search_path TO ''")
   end
 
+  # A `documents` with no `title` column, as the dedup query sees it — for the
+  # LOUD-degrade control below, which needs a Postgres error OUTSIDE the rescued
+  # code set. Same seam as `hide_pg_trgm!/0`: a temp view named `documents`
+  # shadows `public.documents` (pg_temp is searched first for relations, and
+  # `Document` is an unprefixed schema), here projecting every column EXCEPT
+  # `title`, so `d0.title` raises 42703 undefined_column.
+  #
+  # It used to `ALTER TABLE documents DROP COLUMN title CASCADE` inside the
+  # sandbox txn: an ACCESS EXCLUSIVE lock on the shared `documents` table until
+  # rollback, plus catalog DDL on the ONE shared test database — the race class
+  # of the DROP EXTENSION above (task-97d01059eb906830). The view is private to
+  # this backend and dropped by the test's rollback.
+  defp hide_title_column! do
+    %{rows: [[cols]]} =
+      Repo.query!("""
+      SELECT string_agg(quote_ident(attname), ', ' ORDER BY attnum)
+      FROM pg_attribute
+      WHERE attrelid = 'public.documents'::regclass
+        AND attnum > 0 AND NOT attisdropped AND attname <> 'title'
+      """)
+
+    Repo.query!("CREATE TEMP VIEW documents AS SELECT #{cols} FROM public.documents")
+  end
+
   describe "what a box without pg_trgm actually reports" do
     test "the `<->` operator raises SQLSTATE 42883 undefined_function, which the rescue covers" do
       hide_pg_trgm!()
@@ -198,7 +224,28 @@ defmodule Barkpark.Tasks.DedupTrgmAbsentTest do
       # failure answering "no duplicate" from an empty set — and nothing above
       # would notice. `undefined_column` (42703) is outside
       # #{inspect(@rescued_codes)} by construction.
-      Repo.query!("ALTER TABLE documents DROP COLUMN title CASCADE")
+      #
+      # WHAT REDS THIS, measured (task-97d01059eb906830): neutering the degrade
+      # branch in `fetch_candidates/2` (fail open to `{:ok, [], _}`) reds it with
+      # `right: :ok`. WIDENING `trgm_unavailable?/1` to include 42703 does NOT:
+      # the unfiltered retry also selects `d.title`, raises the same 42703, and
+      # still degrades. This test guards the degrade branch, not the code set's
+      # narrowness — that needs an error only the `<->` query raises.
+      hide_title_column!()
+
+      # PRECONDITION, measured: the shadow really does raise 42703 on the column
+      # the dedup query reads, and the table itself is untouched for everyone else.
+      assert {:error, %Postgrex.Error{postgres: %{code: :undefined_column, pg_code: "42703"}}} =
+               Repo.query("SELECT title FROM documents LIMIT 1")
+
+      refute :undefined_column in @rescued_codes
+
+      assert {:ok, %{rows: [[1]]}} =
+               Repo.query(
+                 "SELECT 1 FROM information_schema.columns " <>
+                   "WHERE table_schema = 'public' AND table_name = 'documents' " <>
+                   "AND column_name = 'title'"
+               )
 
       assert {:error, {:dedup_unavailable, message}} =
                check(
