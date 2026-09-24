@@ -23,6 +23,7 @@ defmodule Barkpark.StudioChat.Recorder do
   require Logger
 
   alias Barkpark.Content.Broadcast
+  alias Barkpark.Plugins.Enablement
   alias Barkpark.{CycleFleet, StudioChat}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
@@ -34,6 +35,7 @@ defmodule Barkpark.StudioChat.Recorder do
   @registry Barkpark.StudioChat.RecorderRegistry
   @supervisor Barkpark.StudioChat.RuntimeSupervisor
   @idle_after_ms 30 * 60 * 1000
+  @tasks_plugin "tasks"
 
   # ── the durable accumulator's per-turn byte cap (charter D169) ──────────────
   #
@@ -1037,6 +1039,13 @@ defmodule Barkpark.StudioChat.Recorder do
   # no lifecycle_status — and emit a phantom "released" transition. Require a
   # `doc` map so the stripped twin falls through to the catch-all below and
   # only the payload-bearing frame is projected.
+  # PER-WORKSPACE ENABLEMENT (task-b428d724ad80434f). A workspace that switched
+  # Tasks off still WRITES task rows: enablement is the surfaced layer only, so
+  # the plugin's routes and write fences keep running and the claim broadcasts
+  # on this stream as usual. The transition is therefore dropped here, keyed by
+  # the session's own workspace through the same `Enablement` call
+  # `PaperMastersSeam` makes. Checked per projected transition, not cached at
+  # init, so a toggle takes effect on the next frame.
   def handle_info({:document_changed, %{type: "task", doc: doc} = msg}, state)
       when is_map(doc) do
     worker = Runtime.worker_id(state.provider, state.session_id)
@@ -1045,7 +1054,8 @@ defmodule Barkpark.StudioChat.Recorder do
       {:ok, transition, touched} ->
         state = %{state | touched_tasks: touched}
 
-        if MapSet.member?(state.seen_task_events, transition.key) do
+        if MapSet.member?(state.seen_task_events, transition.key) or
+             not tasks_enabled?(state.owner_workspace_id) do
           {:noreply, state}
         else
           broadcast(
@@ -1066,6 +1076,9 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info({:document_changed, _msg}, state), do: {:noreply, state}
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp tasks_enabled?(workspace_id),
+    do: Enablement.enabled?(Enablement.effective(workspace_id), @tasks_plugin)
 
   # The compact wire summary the SSE `event: task` frame carries — the SAME
   # fields Studio renders, so `bp chat` prints the identical `label` string
