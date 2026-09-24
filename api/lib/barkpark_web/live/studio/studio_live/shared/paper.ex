@@ -30,6 +30,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias BarkparkWeb.Studio.StudioLive.PaperMastersSeam
+  alias BarkparkWeb.Studio.StudioLive.PaperTaskSeam
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias BarkparkWeb.PaperCanvasLease
 
@@ -1462,29 +1463,39 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc false
   # Build the id-keyed live-task previews for `blocks` under the SESSION's tenant
-  # scope. Fail-closed: `scope_opts` carries the session's workspace/project — a
-  # nil workspace resolves to ZERO rows/aggregate values in Tasks.Query, never a
-  # cross-tenant leak. The row fetch may RAISE with the Tasks plugin off;
-  # `TaskResolver.preview/3` rescues each row fetch into an `{ error: true }` stub.
-  # Aggregate failure produces no preview entry, leaving the query block's dim
-  # placeholder unchanged. Returns ONLY previews — `blocks` stays unresolved.
+  # scope. Task rows and aggregates are read ONLY through the paper task resolver
+  # seam (`PaperTaskSeam.resolver/1` → `Barkpark.Content.PaperTaskResolver`,
+  # task-f4d19b64198780b6) — Studio never names the Tasks plugin's substrate.
+  # With no resolver (plugin out of the load order, or disabled for the
+  # workspace) every query-carrying task block gets an `unavailable` entry, and
+  # `TaskResolver.apply_preview/2` turns it into the reader's placeholder.
+  # Fail-closed: `scope_opts` carries the session's workspace/project — a nil
+  # workspace resolves to ZERO rows/aggregate values in the resolver, never a
+  # cross-tenant leak. A raising row fetch is rescued by `TaskResolver.preview/3`
+  # into an `{ error: true }` stub. Aggregate failure produces no preview entry,
+  # leaving the query block's dim placeholder unchanged. Returns ONLY previews —
+  # `blocks` stays unresolved.
   def task_previews(blocks, socket) do
     scope = ScopeHelpers.scope_opts(socket)
+    dataset = socket.assigns.dataset
 
-    TaskResolver.preview(
-      blocks,
-      # The preview path NEVER stamps `dataset` into the block query, so the
-      # visibility gate MUST be threaded the session dataset explicitly (the same
-      # `socket.assigns.dataset` the agg fetcher below already carries) — deriving
-      # it from the raw query map would seal against the wrong (production
-      # default) schema on a cross-dataset preview. Charter W-one decision 10.
-      fn query ->
-        Barkpark.Tasks.Query.rows_for_query(query, scope, dataset: socket.assigns.dataset)
-      end,
-      fn query ->
-        Barkpark.Tasks.Query.agg_for_query(query, scope, dataset: socket.assigns.dataset)
-      end
-    )
+    case PaperTaskSeam.resolver(Keyword.get(scope, :workspace_id)) do
+      nil ->
+        TaskResolver.unavailable_previews(blocks)
+
+      resolver ->
+        TaskResolver.preview(
+          blocks,
+          # The preview path NEVER stamps `dataset` into the block query, so the
+          # visibility gate MUST be threaded the session dataset explicitly (the
+          # same `socket.assigns.dataset` the agg fetcher below already carries) —
+          # deriving it from the raw query map would seal against the wrong
+          # (production default) schema on a cross-dataset preview. Charter W-one
+          # decision 10.
+          fn query -> resolver.rows_for_query(query, scope, dataset: dataset) end,
+          fn query -> resolver.agg_for_query(query, scope, dataset: dataset) end
+        )
+    end
   end
 
   @doc false
@@ -2717,13 +2728,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     # producer (doctrine rule 3). Without this, the Studio read-only VIEW render
     # left a paper's embedded board/list/roadmap as an empty query block while
     # the public reader showed real `bp` rows. Session-tenant scoped + fail-closed
-    # (a nil workspace resolves ZERO rows via Tasks.Query → Scope.scope_to_workspace,
+    # (a nil workspace resolves ZERO rows in the task resolver's scoped read,
     # never a cross-tenant leak). DISPLAY-ONLY (D5): this feeds the render stream
     # only — the paper_doc's stored `blocks` (the save baseline the canvas diffs
     # against) stay UNresolved, so a save right after a view never freezes a stale
     # snapshot into the doc (D3 byte-stability). An author-pinned literal snapshot
-    # (no `query`) is left untouched, so plugin-off papers still render.
-    blocks = Content.Papers.resolve_tasks_in_blocks(blocks, scope, dataset)
+    # (no `query`) is left untouched, so plugin-off papers still render. The
+    # reader's seam answers from the boot load order only; Studio also honours
+    # the workspace's plugin enablement (`PaperTaskSeam`, task-f4d19b64198780b6),
+    # so a workspace with Tasks disabled gets the same explicit placeholder here
+    # as in the editor preview.
+    blocks =
+      if PaperTaskSeam.resolver(Keyword.get(scope, :workspace_id)),
+        do: Content.Papers.resolve_tasks_in_blocks(blocks, scope, dataset),
+        else: TaskResolver.mark_unavailable(blocks)
 
     resolver = fn value, ref_type -> Content.reference_title(value, ref_type, dataset, scope) end
 
