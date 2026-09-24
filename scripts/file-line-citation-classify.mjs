@@ -32,9 +32,11 @@
 //
 // The checker scrapes anchors from the WHOLE charter line, so a 60-token row
 // resolves if any one word lands in a +/-3 window (over-credit). The classifier
-// uses a LOCAL anchor set instead: tokens from the backtick span that CONTAINS
-// the citation, else the nearest span ending within 80 chars before it and the
-// nearest starting within 40 chars after it. A pin is proposed when a local
+// uses a LOCAL anchor set instead — subjectOf() below: tokens from the backtick
+// span that CONTAINS the citation, else the spans and quotes beside it (nearest
+// span ending within 80 chars before, nearest starting within 40 after, quotes
+// in the same window), ranked by distance; a directory prefix is never one.
+// The pin names the nearest candidate that lands. A pin is proposed when a local
 // token lands at the pinned version under the checker's OWN pin test — thingRe()
 // of the exact thing the pin will name, in windowOf() — and nothing else. The
 // checker verifies a pin by its named thing alone and strips pins before it
@@ -129,16 +131,29 @@ const PIN_RE = /\b[\w.-]+\.[A-Za-z0-9]+ \(([^@()\n]+?) @ ([0-9a-f]{7,40}), L(\d+
 const RULE_PINNABLE = new Set(["PIN-EXACT", "PIN-OLDER", "PIN-NEWER"]);
 
 // ── THE ADJACENCY RULE, exported ─────────────────────────────────────────────
-// tokensOf / spansOf / localAnchors / quotesNear are the ONE definition of "the
+// tokensOf / spansOf / quotesNear / subjectOf are the ONE definition of "the
 // subject adjacent to a citation". scripts/file-line-citation-check.mjs imports
-// them to credit an unpinned citation only by its adjacent subject, so the
-// checker and the classifier cannot drift apart. They read only the constants
-// above; everything that parses argv, runs git or exits sits behind IS_MAIN.
+// subjectOf() to credit an unpinned citation only by its adjacent subject, so
+// the checker and the classifier cannot drift apart. They read only the
+// constants above; everything that parses argv, runs git or exits sits behind
+// IS_MAIN.
 export const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// A directory component is where a file LIVES, never what a citation names:
+// `cloud/priv/static/__app.test.mjs:1585` cites __app.test.mjs, and `cloud`,
+// `priv` and `static` are not its subject. Every `<segment>/` is blanked before
+// a span is tokenized, so a path contributes at most its last segment (a file
+// name, which the own-name filter then drops for the cited file itself).
+// Until task-c99f9579606babbd the prefix was tokenized like any other word, and
+// `cloud` became the subject of #20145's L575 (22 lines off). --selftest ARM 7.
+// A `/` followed by a bare number is an ARITY (`crash_slug/2`,
+// `Sites.Deploy.rollback/2`), not a directory, and is kept.
+const PATH_DIRS = /(?:[A-Za-z0-9_.$-]+\/(?!\d+\b))+/g;
 
 export function tokensOf(span, base, keepHyphen) {
   const own = new Set(base.toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean));
   const out = new Set();
+  span = span.replace(PATH_DIRS, " ");
   const parts = keepHyphen ? span.split(/[^A-Za-z0-9_$-]+/).flatMap((t) => [t, ...t.split("-")]) : span.split(/[^A-Za-z0-9_$]+/);
   for (let tok of parts) {
     tok = tok.replace(/^-+|-+$/g, "");
@@ -164,32 +179,74 @@ export function spansOf(text) {
   return spans;
 }
 
-export function localAnchors(text, base, p, e) {
-  const spans = spansOf(text);
-  const inside = spans.find((sp) => sp.s < p && sp.e > e);
-  const keepHyphen = base.endsWith(".css") || base.endsWith(".html");
-  let toks = [];
-  if (inside) toks = tokensOf(inside.body.replace(PIN_RE, " "), base, keepHyphen);
-  if (toks.length === 0) {
-    const before = spans.filter((sp) => sp.e <= p && p - sp.e <= 80 && !(inside && sp === inside)).pop();
-    const after = spans.find((sp) => sp.s >= e && sp.s - e <= 40);
-    for (const sp of [before, after]) if (sp) toks.push(...tokensOf(sp.body.replace(PIN_RE, " "), base, keepHyphen));
-  }
-  return [...new Set(toks)];
+// A quote's matchable text: its first 24 chars, cut at an ellipsis. A quote
+// that names a cited file is a citation, not a subject.
+function quoteSubject(raw, min) {
+  const q = raw.replace(/[\u2026].*$/, "").replace(/\.\.\..*$/, "").slice(0, 24);
+  if (q.length < min || /app\.(js|css)|\.mjs|index\.html/.test(q)) return null;
+  return { label: `"${q}"`, re: new RegExp(esc(q)) };
 }
+const QUOTE = /["\u201c]([^"\u201d]{4,})["\u201d]/g;
 
-// A quoted sentence next to the citation is a subject too: the charter often
-// cites copy ("Only the team owner can manage billing.") rather than a symbol.
-// Its first 24 chars (>= 12) are matched as a literal substring.
+// FALLBACK only: a quoted sentence (>= 12 chars) anywhere within 140 chars,
+// used when no backtick span or quote sits in the adjacency window. The
+// charter often cites copy ("Only the team owner can manage billing.") rather
+// than a symbol.
 export function quotesNear(text, p, e) {
   const win = text.slice(Math.max(0, p - 140), e + 140);
   const out = [];
-  for (const m of win.matchAll(/["\u201c]([^"\u201d]{12,})["\u201d]/g)) {
-    const q = m[1].replace(/[\u2026].*$/, "").replace(/\.\.\..*$/, "").slice(0, 24);
-    if (q.length < 12 || /app\.(js|css)|\.mjs|index\.html/.test(q)) continue;
-    out.push({ label: `"${q}"`, re: new RegExp(esc(q)) });
+  for (const m of win.matchAll(QUOTE)) {
+    const q = m[1].length >= 12 ? quoteSubject(m[1], 12) : null;
+    if (q) out.push(q);
   }
   return out;
+}
+
+// THE SUBJECT of the citation at [p, e) on a charter line, NEAREST FIRST.
+//   1. The backtick span CONTAINING the citation, if it names anything once its
+//      path prefix and the cited file's own words are dropped (`makeWidget
+//      widget.js:30`): that span is the subject, alone.
+//   2. Else every candidate in the adjacency window — the nearest span ending
+//      <= 80 chars before, the nearest span starting <= 40 chars after, and each
+//      quote (>= 8 chars) ending <= 80 before or starting <= 40 after — ranked
+//      by DISTANCE, a span before a quote on a tie.
+//   3. Else quotesNear()'s 140-char fallback.
+// Until task-c99f9579606babbd a quote was read only when no span existed, so a
+// backticked span beat a quote beside the citation at ANY distance (#20145's
+// L4743: `operatorRowState` 23 lines off won over "Autoupdate off" on the cited
+// line). The checker credits a citation if ANY candidate lands; the classifier
+// pins the nearest candidate that lands. --selftest ARMS 8 and 9.
+// Returns tokens as strings and quotes as { label, re }.
+export function subjectOf(text, base, p, e) {
+  const spans = spansOf(text);
+  const keepHyphen = base.endsWith(".css") || base.endsWith(".html");
+  const toksOf = (sp) => tokensOf(sp.body.replace(PIN_RE, " "), base, keepHyphen);
+  const inside = spans.find((sp) => sp.s < p && sp.e > e);
+  if (inside) {
+    const own = toksOf(inside);
+    if (own.length) return own;
+  }
+  const cands = [];
+  const before = spans.filter((sp) => sp.e <= p && p - sp.e <= 80 && sp !== inside).pop();
+  const after = spans.find((sp) => sp.s >= e && sp.s - e <= 40);
+  if (before) for (const t of toksOf(before)) cands.push({ d: p - before.e, sub: t });
+  if (after) for (const t of toksOf(after)) cands.push({ d: after.s - e, sub: t });
+  for (const m of text.matchAll(QUOTE)) {
+    const s = m.index, qe = m.index + m[0].length;
+    const d = qe <= p ? p - qe : s >= e ? s - e : null;
+    if (d === null || (qe <= p && d > 80) || (s >= e && d > 40)) continue;
+    // a quote inside a backtick span is code, not copy — the span already
+    // speaks; a "quote" holding a backtick paired across a span, not copy
+    if (m[1].includes("`") || spans.some((sp) => sp.s < s && sp.e > qe)) continue;
+    const q = quoteSubject(m[1], 8);
+    if (q) cands.push({ d, sub: q });
+  }
+  if (cands.length) {
+    const seen = new Set();
+    return cands.map((c, i) => ({ ...c, i })).sort((a, b) => a.d - b.d || a.i - b.i)
+      .map((c) => c.sub).filter((x) => { const k = x.label || x; if (seen.has(k)) return false; seen.add(k); return true; });
+  }
+  return quotesNear(text, p, e);
 }
 
 // Run the CLI only when executed directly (`node file-line-citation-classify.mjs`),
@@ -423,8 +480,7 @@ function blob(sha, rel) {
 for (const c of cites) {
   const t = targets.get(c.base);
   c.lineAnchors = lineAnchors(c.text, c.base);
-  c.local = localAnchors(c.text, c.base, c.p, c.e);
-  if (c.local.length === 0) c.local = quotesNear(c.text, c.p, c.e);
+  c.local = subjectOf(c.text, c.base, c.p, c.e);
   if (!c.pin) {
     const label = `${c.base}:${c.n}${c.hi !== c.n ? "-" + c.hi : ""}`;
     for (const s of o.subjects) if (s.line === c.charterLine && s.cite === label) {
@@ -733,6 +789,43 @@ function selftest() {
       arm("PIN SEARCH: the checker ACCEPTS the pin the classifier wrote",
         r.code === 0 && /widget\.js \("seven fleet ticks after " @ [0-9a-f]{10}, L12\)/.test(pinLine) && ck.code === 0 && /verified 1/.test(ck.out),
         `apply exit ${r.code}, checker exit ${ck.code}; ${(ck.out.match(/pinned[^\n]*/) || ["(no pinned line in checker output)"])[0].trim()}`);
+    }
+
+    // ── SUBJECT fixture (task-c99f9579606babbd): which adjacent thing is the
+    // subject. Each widget.js version A holds the named thing on the cited line;
+    // C empties the file, so nothing resolves at HEAD and the pin search decides.
+    {
+      const { t, commit } = repo();
+      const shaA = commit("src/widget.js", widget({
+        11: "// static fixture",
+        12: "// a 230px-wide floor, measured",
+        20: "function paintChip() { return \"Only the owner can pay here\"; }",
+        30: "    if (st === \"off\") return { label: \"Autoupdate is off here\" };",
+        8: "function operatorRow(bp) {",
+      }));
+      const far = "a long stretch of plain prose that keeps the next span apart";
+      commit("charter.md", "# fixture\n\n" +
+        `| D1 | \`farAwayAnchor\` keeps the row decidable; ${far}, well over eighty characters — stale copy ("230px-wide"), \`cloud/priv/static/widget.js:12\` |\n` +
+        "| D2 | `paintChip` renders the owner copy — see widget.js:20 (\"Only the owner can pay here\") |\n" +
+        "| D3 | (\"Autoupdate is off here\" — echoed from `operatorRow` at `widget.js:30`, verified) |\n");
+      commit("src/widget.js", widget({}));
+      const rows = buckets(t);
+      const labelOf = (x) => (x && x.pin ? x.pin.tok : "(no pin)");
+      const a = find(rows, "widget.js:12");
+      // #20145's L575 shape: the quote is 10 chars, under the 140-char fallback's
+      // 12, so this also reds if an ADJACENT quote needs 12 again.
+      arm("SUBJECT: a path prefix is never the subject — `cloud/priv/static/widget.js:12` pins the adjacent short quote \"230px-wide\", not `static`",
+        a.bucket === "PIN-EXACT" && a.pin && a.pin.sha === shaA && a.pin.tok === '"230px-wide"' &&
+          !(a.local || []).some((x) => ["cloud", "priv", "static"].includes(x.label || x)),
+        `bucket ${a.bucket} pin ${labelOf(a)} local=[${(a.local || []).map((x) => x.label || x).join(",")}] (want PIN-EXACT on the quote; the prefix rule pins \`static\` at 11)`);
+      const b = find(rows, "widget.js:20");
+      arm("SUBJECT: a quote beside the citation outranks a span farther away, when both land -> the pin names the quote",
+        b.bucket === "PIN-EXACT" && b.pin && /^"Only the owner/.test(b.pin.tok),
+        `bucket ${b.bucket} pin ${labelOf(b)} (want the quote; span-beats-quote pins paintChip)`);
+      const c = find(rows, "widget.js:30");
+      arm("SUBJECT: the nearer span 22 lines off does not hide a quote that lands on the cited line -> PIN-EXACT on the quote",
+        c.bucket === "PIN-EXACT" && c.pin && c.pin.sha === shaA && /^"Autoupdate is off/.test(c.pin.tok),
+        `bucket ${c.bucket} pin ${labelOf(c)}${c.near ? ` near ${c.near.tok} d=${c.near.d}` : ""} (want PIN-EXACT on the quote; span-only gives BLOCK-NEAR d=22)`);
     }
   } catch (e) {
     fails++;
