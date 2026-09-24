@@ -351,6 +351,17 @@ defmodule Barkpark.Plugins.Registry do
   defdelegate collect_pre_publish_fences, to: Barkpark.Content.PrePublishFences, as: :list
 
   @doc """
+  The pre-write transforms the writer will run over a write's attrs, in load
+  order — a read of `Barkpark.Content.PreWriteTransforms.list/0`, which this
+  Registry PUBLISHES to exactly as it does the pre-write fences (see
+  `publish_pre_write_transforms/1`). The writer reads the content-side holder
+  directly; this delegate exists for callers already holding the Registry
+  (boot checks, release eval).
+  """
+  @spec collect_pre_write_transforms() :: [Barkpark.Plugin.pre_write_transform()]
+  defdelegate collect_pre_write_transforms, to: Barkpark.Content.PreWriteTransforms, as: :list
+
+  @doc """
   Drives the `resolve_api_tests/2` chain → flat list of `api_test_spec()` maps
   the runner fires on demand. Not cached; accepts `:baseline` / `:ctx`. Plugins
   usually implement additive `api_tests/0` (default resolver lifts via
@@ -525,6 +536,7 @@ defmodule Barkpark.Plugins.Registry do
 
     publish_pre_write_fences(plugins)
     publish_pre_publish_fences(plugins)
+    publish_pre_write_transforms(plugins)
 
     state
   end
@@ -592,6 +604,36 @@ defmodule Barkpark.Plugins.Registry do
             "#{inspect(other)}; expected {:door | :in_transaction, module, function}"
   end
 
+  # The attrs-shaping twin of `publish_pre_write_fences/1`
+  # (task-aed4f02e57d3a760): every registered plugin's `pre_write_transforms/0`
+  # declaration, into the content-owned holder the writer reads. Same rules —
+  # not routed through `reduce_resolvers/3`, a raising declaration or a
+  # malformed entry raises.
+  defp publish_pre_write_transforms(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_pre_write_transforms/1)
+    |> Barkpark.Content.PreWriteTransforms.publish()
+  end
+
+  defp declared_pre_write_transforms(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :pre_write_transforms, 0) do
+      steps = Enum.map(mod.pre_write_transforms(), &validate_pre_write_transform!(&1, name))
+      [%{name: name, module: mod, steps: steps}]
+    else
+      []
+    end
+  end
+
+  defp validate_pre_write_transform!({kind, mod, fun} = step, _name)
+       when kind in [:transform, :check] and is_atom(mod) and is_atom(fun),
+       do: step
+
+  defp validate_pre_write_transform!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed pre-write transform " <>
+            "#{inspect(other)}; expected {:transform | :check, module, function}"
+  end
+
   # ─── GenServer ──────────────────────────────────────────────────────────
 
   @impl true
@@ -603,11 +645,13 @@ defmodule Barkpark.Plugins.Registry do
     # that set the kill-switch env before any reset). See
     # `handle_call(:capture_baseline, …)` and `handle_call(:reset, …)`.
     #
-    # A fresh Registry has no plugins, so it publishes NO pre-write and NO pre-publish fences —
+    # A fresh Registry has no plugins, so it publishes NO pre-write fences, NO
+    # pre-publish fences and NO pre-write transforms —
     # the kill-switch boot never registers, and a `:persistent_term` left by a
     # previous start of the app in the same VM must not survive it.
     publish_pre_write_fences([])
     publish_pre_publish_fences([])
+    publish_pre_write_transforms([])
     {:ok, %{plugins: %{}, baseline_plugins: nil}}
   end
 

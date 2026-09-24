@@ -182,6 +182,30 @@ defmodule Barkpark.Plugins.Tasks do
     ]
   end
 
+  @doc """
+  The two task steps the writer ran over a write's attrs at the end of its
+  attrs pipeline, on both write doors, when it named them directly
+  (task-aed4f02e57d3a760), in the order it ran them:
+
+    * `{:transform, BriefMirror, :maybe_resync_task_brief}` — re-derive the
+      brief's `purpose-copy` / `criteria-list` blocks from `description` and
+      `acceptance_criteria`.
+    * `{:check, Validation, :validate_task_kind}` — the §1 content contract,
+      judged on the re-synced attrs. A `:check` here, not a pre-write fence:
+      the fences run later (after the prev-doc read and, on create, after the
+      label-spine shape gate), so moving it there would change which refusal
+      a write that trips both receives.
+
+  `pre_write_transforms_test.exs` pins the order.
+  """
+  @impl Barkpark.Plugin
+  def pre_write_transforms do
+    [
+      {:transform, Barkpark.Tasks.BriefMirror, :maybe_resync_task_brief},
+      {:check, Barkpark.Tasks.Validation, :validate_task_kind}
+    ]
+  end
+
   @tui_block_types ~w(
     heading paragraph list callout divider section code table figure action
     pullquote embed ingress eyebrow byline diagram asciicast image composite
