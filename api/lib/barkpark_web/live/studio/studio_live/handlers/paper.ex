@@ -377,6 +377,68 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     end
   end
 
+  # ── Paper masters (task-3b6e562e916c8ce4) ──────────────────────────────────
+  #
+  # `paper-save-master` {block_id, title?}: save a block of the open paper as a
+  # `paper_master` document (the canvas block menu and the boundary toolbar
+  # push it). `paper-insert-master` {master_id, after_id, request_id, if_rev}:
+  # insert a DETACHED copy through the same request-identified op path as
+  # `paper-ops`, so a retry with the same request_id replays its receipt. The
+  # reply mirrors `paper_ops/2`'s so the save coordinator settles it the same.
+  def paper_save_master(%{"block_id" => block_id} = params, socket)
+      when is_binary(block_id) and block_id != "" do
+    case SharedPaper.paper_save_master(socket, block_id, params["title"]) do
+      {:ok, socket, master} ->
+        {:reply, %{saved: true, master: master}, socket}
+
+      {:error, socket, reason} ->
+        {:reply, %{saved: false, rejected: to_string(reason)}, socket}
+    end
+  end
+
+  def paper_save_master(_params, socket),
+    do: {:reply, %{saved: false, rejected: "invalid_master_request"}, socket}
+
+  def paper_insert_master(
+        %{"master_id" => master_id, "request_id" => request_id} = params,
+        socket
+      )
+      when is_binary(master_id) and master_id != "" and is_binary(request_id) do
+    after_id =
+      case params["after_id"] do
+        id when is_binary(id) and id != "" -> id
+        _ -> nil
+      end
+
+    case SharedPaper.paper_insert_master(
+           socket,
+           master_id,
+           after_id,
+           request_id,
+           params["if_rev"]
+         ) do
+      {:ok, socket, receipt, outcome} ->
+        {:reply,
+         %{
+           saved: true,
+           changed: SharedPaper.receipt_changed?(receipt),
+           request_id: request_id,
+           replayed: outcome == :replayed,
+           rev: receipt.rev,
+           history_step: SharedPaper.receipt_history_step(receipt, request_id)
+         }, socket}
+
+      {:error, socket} ->
+        reply = socket.assigns[:last_paper_save_result] || %{saved: false}
+        {:reply, Map.put_new(reply, :request_id, request_id), socket}
+    end
+  end
+
+  def paper_insert_master(params, socket) do
+    request_id = if is_map(params), do: params["request_id"]
+    {:reply, %{saved: false, request_id: request_id, rejected: "invalid_master_request"}, socket}
+  end
+
   @history_step_keys ~w(action history_ref if_rev request_id)
 
   def paper_history_step(params, socket) when is_map(params) do

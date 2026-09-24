@@ -48,12 +48,21 @@ The copy:
   the key;
 - nothing links it back. Later master edits never reach it.
 
-## 4. Deferred
+## 4. Editor half (task-3b6e562e916c8ce4)
+
+Two LiveView events on the Studio paper socket, no HTTP route:
+`paper-save-master` (canvas block menu, boundary toolbar) and
+`paper-insert-master` (the canvas slash menu's Masters group, read from the
+`[data-paper-masters]` carrier). The insert goes through `paper_ops/5` with
+a request id, so a retry replays. The picker lists `Masters.list_for_paper/1`
+only. The public reader does not offer either action.
+
+References inside the copy that name one of the node's own ids follow the
+fresh ids: `anchor` (blockref, TOC entry) and `href: "#<id>"`.
+
+## 5. Deferred
 
 - LINKED (live-updating) instances: a separate row. The `master.mode` key
   leaves room for a `linked` value without reshaping detached copies.
-- The editor UI (a save-as-master action, a master picker in the slash
-  menu) and any HTTP surface: no route exists yet; this slice is the server
-  capability.
-- Id references INSIDE a node (an anchor link to a sibling block's id) are
-  not rewritten to the fresh ids.
+- A blockref's `target` (a paper title) is not retargeted when the copy
+  lands in another paper.

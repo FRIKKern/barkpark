@@ -1525,6 +1525,22 @@
         coordinator._pumpMutations();
         return true;
       };
+      // Paper masters (task-3b6e562e916c8ce4): a master insert the server
+      // REFUSED (the master is gone or outside this paper's scope) will never
+      // succeed by retrying. Settle it and release the queue instead of pausing
+      // every later save behind it — the history-failure precedent above.
+      coordinator._terminalMasterFailure = (entry, reply) => {
+        if (entry.kind !== "master" || reply?.request_id !== entry.requestId) return false;
+        if (!["master_not_found", "masters_unavailable", "invalid_master_request"].includes(reply?.rejected)) return false;
+        mutationQueue.shift();
+        mutationById.delete(entry.requestId);
+        mutationPaused = false;
+        coordinator._notifyResult(entry, false, reply);
+        coordinator._resolveWaiters(entry, false);
+        renderHistoryControls();
+        coordinator._pumpMutations();
+        return true;
+      };
       coordinator._requestHistory = (direction, source) => {
         const pending = historyPendingEntry();
         if (pending) {
@@ -2338,7 +2354,8 @@
             (entry.kind !== "history" || Boolean(replyHistoryStep));
           mutationActive = false;
           coordinator.finishSave(token, saved);
-          if (!saved && coordinator._terminalHistoryFailure(entry, reply)) {
+          if (!saved && (coordinator._terminalHistoryFailure(entry, reply) ||
+              coordinator._terminalMasterFailure(entry, reply))) {
             renderSaveStatus(false);
             return;
           }
@@ -3632,6 +3649,44 @@
               entry: entry.mutationEntry,
               promise: this._exitCoordinator.retryMutation(entry.mutationEntry),
             };
+          } else if (entry.kind === "master") {
+            // Paper masters: a slash-menu master pick, queued BEHIND any canvas
+            // batch already waiting (the "/query" removal the canvas flushed
+            // just before it) and sent through the same save coordinator, so it
+            // carries a request id (a retry replays) and the current if_rev.
+            mutation = bpPaperMutation(this, this.el, "paper-insert-master", entry.payload, {
+              requestId: entry.requestId,
+              kind: "master",
+              trackDraft: false,
+              onResult: (saved, result) => {
+                this._sendingOps = false;
+                const terminal = !saved && result != null &&
+                  ["master_not_found", "masters_unavailable", "invalid_master_request"].includes(result?.rejected);
+                if ((saved || terminal) && this._opsQueue[0] === entry) {
+                  this._opsQueue.shift();
+                }
+                refreshLeasePending();
+                if (saved || terminal) {
+                  this._opsFailed = false;
+                  this._opsReconnectRetryRequested = false;
+                  if (terminal) {
+                    this.el.dispatchEvent(new CustomEvent("bp-error", {
+                      detail: {
+                        code: "paper_master_insert_refused",
+                        error: "That master is not available in this paper.",
+                      },
+                      bubbles: true,
+                      composed: true,
+                    }));
+                  }
+                  sendNextOps();
+                } else {
+                  this._opsFailed = true;
+                  entry.transportRetryable = result == null;
+                }
+              },
+            });
+            entry.mutationEntry = mutation.entry;
           } else {
             mutation = bpPaperMutation(this, this.el, "paper-ops", {
               ops: entry.ops,
@@ -3772,6 +3827,48 @@
           sendNextOps();
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
+        // Paper masters (task-3b6e562e916c8ce4). A slash-menu master pick rides
+        // the SAME ordered queue as the canvas batches (after the "/query"
+        // removal the canvas flushed just before dispatching it).
+        this._onMasterInsert = (e) => {
+          const detail = e.detail || {};
+          if (typeof detail.master_id !== "string" || detail.master_id === "") return;
+          this._exitCoordinator?.markDirty(this.el);
+          this._opsQueue.push({
+            kind: "master",
+            payload: {
+              master_id: detail.master_id,
+              ...(typeof detail.after_id === "string" && detail.after_id !== ""
+                ? { after_id: detail.after_id }
+                : {}),
+            },
+            boundaryLeasePending: false,
+            containerContext: {},
+            invalidContainerContext: false,
+            requestId: this._exitCoordinator?.requestId() || bpPaperRequestId(),
+            expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
+          });
+          refreshLeasePending();
+          sendNextOps();
+        };
+        this.el.addEventListener("bp-master-insert", this._onMasterInsert);
+        // "Save as master" from the canvas block menu: a new paper_master
+        // document, not a paper op — a plain reply-event, reported on the footer.
+        this._onSaveMaster = (e) => {
+          const blockId = e.detail && e.detail.block_id;
+          if (typeof blockId !== "string" || blockId === "") return;
+          this.pushEvent("paper-save-master", { block_id: blockId }, (reply) => {
+            const status = this.el.closest("main")?.querySelector(
+              '[data-test-id="bp-paper-footer-save"][role="status"]',
+            );
+            if (status) {
+              status.textContent = reply && reply.saved
+                ? `Saved as master: ${reply.master?.title || "master"}`
+                : "Could not save this block as a master.";
+            }
+          });
+        };
+        this.el.addEventListener("bp-save-master", this._onSaveMaster);
         this._onFlushPending = (event) => {
           const wc = this.el.querySelector("bp-paper-canvas");
           wc?.flushPendingChanges?.();
@@ -3996,6 +4093,8 @@
         delete this.el[PAPER_CANVAS_LEASE_PENDING];
         delete this.el[PAPER_CANVAS_LEASE_OVERFLOW];
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
+        if (this._onMasterInsert) this.el.removeEventListener("bp-master-insert", this._onMasterInsert);
+        if (this._onSaveMaster) this.el.removeEventListener("bp-save-master", this._onSaveMaster);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         this.el.removeEventListener("bp-ready", this._onCanvasReady);
         bpReleasePaperExitCoordinator(this);
