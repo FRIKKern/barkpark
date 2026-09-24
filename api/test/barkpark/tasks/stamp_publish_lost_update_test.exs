@@ -116,10 +116,18 @@ defmodule Barkpark.Tasks.StampPublishLostUpdateTest do
 
     previous = Application.get_env(:barkpark, :plugins)
 
+    # Every registered plugin BY MODULE, plus the interleave seam. This used to
+    # pass `Registry.all()` itself — registry ENTRY MAPS, which no load-order
+    # reader accepts (`Hooks`, `ResolverChain` and the fence holders all drop a
+    # map), so the load order was silently `[InterleavedWriter]` alone and the
+    # Tasks plugin was OUT of it. That was invisible while the lifecycle named
+    # the Tasks publish gates directly; since they ride
+    # `pre_publish_fences/0` (task-8273f2f1b24a6de1) the load order decides
+    # whether they run, and this file measures exactly those gates.
     Application.put_env(
       :barkpark,
       :plugins,
-      Barkpark.Plugins.Registry.all() ++ [InterleavedWriter]
+      Enum.map(Barkpark.Plugins.Registry.all(), & &1.module) ++ [InterleavedWriter]
     )
 
     on_exit(fn ->
@@ -154,6 +162,9 @@ defmodule Barkpark.Tasks.StampPublishLostUpdateTest do
           "title" => "Publish door must not revert a stamped criterion #{doc_id}",
           "content" => %{
             "kind" => "task",
+            # The Tasks `before_publish` brief gate runs now that the setup puts
+            # the Tasks plugin in the load order (see `setup`).
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "description" => @description,
             "tags" => [

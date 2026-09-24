@@ -340,6 +340,17 @@ defmodule Barkpark.Plugins.Registry do
   defdelegate collect_pre_write_fences, to: Barkpark.Content.PreWriteFences, as: :list
 
   @doc """
+  The pre-publish fences the publish lifecycle will run, in load order — a
+  read of `Barkpark.Content.PrePublishFences.list/0`, which this Registry
+  PUBLISHES to exactly as it does the pre-write fences (see
+  `publish_pre_publish_fences/1`). The lifecycle reads the content-side holder
+  directly; this delegate exists for callers already holding the Registry
+  (boot checks, release eval).
+  """
+  @spec collect_pre_publish_fences() :: [Barkpark.Plugin.pre_publish_fence()]
+  defdelegate collect_pre_publish_fences, to: Barkpark.Content.PrePublishFences, as: :list
+
+  @doc """
   Drives the `resolve_api_tests/2` chain → flat list of `api_test_spec()` maps
   the runner fires on demand. Not cached; accepts `:baseline` / `:ctx`. Plugins
   usually implement additive `api_tests/0` (default resolver lifts via
@@ -513,6 +524,7 @@ defmodule Barkpark.Plugins.Registry do
     })
 
     publish_pre_write_fences(plugins)
+    publish_pre_publish_fences(plugins)
 
     state
   end
@@ -550,6 +562,36 @@ defmodule Barkpark.Plugins.Registry do
             "#{inspect(other)}; expected {module, function}"
   end
 
+  # The publish-door twin of `publish_pre_write_fences/1`
+  # (task-8273f2f1b24a6de1): every registered plugin's `pre_publish_fences/0`
+  # declaration, into the content-owned holder the publish lifecycle reads.
+  # Same rules — not routed through `reduce_resolvers/3`, a raising
+  # declaration or a malformed entry raises.
+  defp publish_pre_publish_fences(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_pre_publish_fences/1)
+    |> Barkpark.Content.PrePublishFences.publish()
+  end
+
+  defp declared_pre_publish_fences(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :pre_publish_fences, 0) do
+      fences = Enum.map(mod.pre_publish_fences(), &validate_pre_publish_fence!(&1, name))
+      [%{name: name, module: mod, fences: fences}]
+    else
+      []
+    end
+  end
+
+  defp validate_pre_publish_fence!({phase, mod, fun} = fence, _name)
+       when phase in [:door, :in_transaction] and is_atom(mod) and is_atom(fun),
+       do: fence
+
+  defp validate_pre_publish_fence!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed pre-publish fence " <>
+            "#{inspect(other)}; expected {:door | :in_transaction, module, function}"
+  end
+
   # ─── GenServer ──────────────────────────────────────────────────────────
 
   @impl true
@@ -561,10 +603,11 @@ defmodule Barkpark.Plugins.Registry do
     # that set the kill-switch env before any reset). See
     # `handle_call(:capture_baseline, …)` and `handle_call(:reset, …)`.
     #
-    # A fresh Registry has no plugins, so it publishes NO pre-write fences —
+    # A fresh Registry has no plugins, so it publishes NO pre-write and NO pre-publish fences —
     # the kill-switch boot never registers, and a `:persistent_term` left by a
     # previous start of the app in the same VM must not survive it.
     publish_pre_write_fences([])
+    publish_pre_publish_fences([])
     {:ok, %{plugins: %{}, baseline_plugins: nil}}
   end
 

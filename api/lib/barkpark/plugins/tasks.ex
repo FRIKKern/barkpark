@@ -160,6 +160,28 @@ defmodule Barkpark.Plugins.Tasks do
   def dedup_check_new_task(type, attrs, dataset, _doc_id, prev_doc, opts),
     do: Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts)
 
+  @doc """
+  The task gates at the PUBLISH door, formerly named directly in
+  `Barkpark.Content.Lifecycle` (task-8273f2f1b24a6de1), each at the position
+  it held there — see `Barkpark.Tasks.PublishGuards`:
+
+    * `:door` — `door_gate/4`: transition legality, stale claim, the
+      claim-time criteria contract, the criteria regression fence, the
+      terminal-criteria fence and the task-door field fence. Last gate before
+      the authoring wall and the `:before_publish` hooks.
+    * `:in_transaction` — `no_criteria_regression/4`: the criteria and
+      terminal fences re-evaluated on the incumbent row locked `FOR UPDATE`.
+
+  `pre_publish_fences_test.exs` pins the order.
+  """
+  @impl Barkpark.Plugin
+  def pre_publish_fences do
+    [
+      {:door, Barkpark.Tasks.PublishGuards, :door_gate},
+      {:in_transaction, Barkpark.Tasks.PublishGuards, :no_criteria_regression}
+    ]
+  end
+
   @tui_block_types ~w(
     heading paragraph list callout divider section code table figure action
     pullquote embed ingress eyebrow byline diagram asciicast image composite
