@@ -4421,7 +4421,7 @@ function harnessRoots(src) {
       if (v) {
         assert.ok(vars[v[1]], `candidates() uses $${v[1]}, which no \${A:-\${B:-default}} assignment defines`);
         keys.add(`${vars[v[1]]}|${v[2]}/<want>.*/${v[3]}`);
-      } else if (t.startsWith("/")) keys.add(t.replace("$want", "<want>"));
+      } else if (t.startsWith("/")) keys.add(t.replace(/\$want/g, "<want>"));
       else assert.fail(`unrecognised candidates() token ${tok} — teach harnessRoots()`);
     }
   }
