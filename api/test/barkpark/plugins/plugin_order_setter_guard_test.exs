@@ -7,9 +7,11 @@ defmodule Barkpark.Plugins.PluginOrderSetterGuardTest do
   ## Why
 
   Every load-order reader (`Plugins.Hooks`, `Registry.ResolverChain`,
-  `Registry.BootCollectors`, `Registry.Discovery`, `Content.PreWriteFences`)
-  accepts a module atom, a `{plugin_name, module}` tuple or a plugin-name
-  string, and DROPS anything else without a word.
+  `Registry.BootCollectors`, `Registry.Discovery`, `Content.PreWriteFences`,
+  `Content.PrePublishFences`) interprets entries through
+  `Barkpark.Content.PluginLoadOrder`: it accepts a module atom, a
+  `{plugin_name, module}` tuple or a plugin-name string, and DROPS anything
+  else — with one `Logger.warning`, which no assertion reads.
   `stamp_publish_lost_update_test.exs` set the order to `Registry.all() ++
   [InterleavedWriter]` — registry ENTRY MAPS — so the Tasks plugin was OFF in
   it all along and its gates never ran, yet the test passed
@@ -68,9 +70,10 @@ defmodule Barkpark.Plugins.PluginOrderSetterGuardTest do
 
            #{Enum.map_join(offenders, "\n", fn {f, l} -> "  #{f}:#{l}" end)}
 
-           Every load-order reader silently DROPS an entry that is not a module atom,
-           a {plugin_name, module} tuple or a plugin-name string, so a direct write can
-           leave the plugin under test OFF without a red. Use
+           Every load-order reader DROPS an entry that is not a module atom, a
+           {plugin_name, module} tuple or a plugin-name string (with one log warning no
+           assertion reads), so a direct write can leave the plugin under test
+           OFF without a red. Use
            `Barkpark.PluginEnv.put!/1` (pair with `capture/0` + `restore/1`),
            `with_plugins/2`, or `run_with/2`.
            """
