@@ -114,36 +114,48 @@ defmodule Barkpark.Plugins.Registry.Discovery do
   # Module atoms are reverse-mapped by reading every plugin.json on disk
   # — we cannot consult the live Registry here because this runs during
   # boot, before discovery has populated state.
-  defp whitelist_names_from_config(configured) do
-    name_set =
-      configured
-      |> Enum.flat_map(fn
-        name when is_binary(name) -> [name]
-        {name, _module} when is_binary(name) -> [name]
-        module when is_atom(module) and not is_nil(module) -> manifest_names_for_module(module)
-        _ -> []
-      end)
-      |> MapSet.new()
-
-    name_set
+  # Entries are interpreted by `Barkpark.Content.PluginLoadOrder.plugins/3`
+  # (task-3fbd48182b1d35ea) against the manifests on disk: Discovery is a
+  # plugin-RECORD reader (it can only register what has a `plugin.json`), so a
+  # loadable module with no manifest, a name no manifest carries, and a
+  # malformed entry are skipped with a `Logger.warning` naming them.
+  @doc false
+  def whitelist_names_from_config(configured) do
+    configured
+    |> Barkpark.Content.PluginLoadOrder.plugins(&manifest_index/0, __MODULE__)
+    |> MapSet.new(& &1.name)
   end
 
-  # The manifest path is built from a discovery root we own plus a directory
-  # entry enumerated from that root — no caller-supplied segment reaches it.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp manifest_names_for_module(module) do
+  @doc """
+  Every plugin manifest under `default_paths/0` whose module resolves, as
+  `%{name: plugin_name, module: module}` — the "known plugins" a pre-Registry
+  reader (this module's whitelist, `Registry.BootCollectors`) resolves a
+  load-order entry against.
+  """
+  @spec manifest_index() :: [%{name: String.t(), module: module()}]
+  def manifest_index do
     default_paths()
     |> Enum.flat_map(&plugin_dirs_in/1)
-    |> Enum.flat_map(fn dir ->
-      with {:ok, raw} <- File.read(Path.join(dir, "plugin.json")),
-           {:ok, manifest} <- Jason.decode(raw),
-           {:ok, ^module} <- resolve_module(manifest),
-           name when is_binary(name) and name != "" <- manifest["plugin_name"] do
-        [name]
-      else
-        _ -> []
-      end
-    end)
+    |> Enum.flat_map(&manifest_index_entry/1)
+  end
+
+  # Waiver authored FOR this def (task-3fbd48182b1d35ea; it supersedes the
+  # deleted `manifest_names_for_module/1` and BootCollectors'
+  # `module_of_configured_entry/1`, whose waivers went with them). `dir` comes
+  # only from `plugin_dirs_in(default_paths())` in `manifest_index/0` — a root
+  # we own and an entry listed under it; no load-order entry or other
+  # caller-supplied string is ever joined into the path. Verified necessary:
+  # without it `mix sobelow` reports Traversal.FileModule on the File.read below.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp manifest_index_entry(dir) do
+    with {:ok, raw} <- File.read(Path.join(dir, "plugin.json")),
+         {:ok, manifest} <- Jason.decode(raw),
+         name when is_binary(name) and name != "" <- manifest["plugin_name"],
+         {:ok, module} <- resolve_module(manifest) do
+      [%{name: name, module: module}]
+    else
+      _ -> []
+    end
   end
 
   # The manifest path is built from a discovery root we own plus a directory

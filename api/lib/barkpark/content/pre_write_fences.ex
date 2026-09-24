@@ -14,12 +14,22 @@ defmodule Barkpark.Content.PreWriteFences do
   applies the `:barkpark, :plugins` load order at READ time, the same
   precedence as `Barkpark.Plugins.Registry.ResolverChain.load_ordered_plugins/0`
   (a configured list wins, in its order; otherwise alphabetical by plugin
-  name). Freezing the order at publish time would let a registration made
-  under a temporarily narrowed load order (a test's `with_plugins`) leave a
-  fence list that outlives the narrowing.
+  name). Configured entries are interpreted by
+  `Barkpark.Content.PluginLoadOrder.plugins/3` (task-3fbd48182b1d35ea): only
+  a plugin that PUBLISHED a declaration contributes fences; a loadable module
+  that never registered, an unknown name and a malformed entry are skipped with
+  a `Logger.warning` naming them — never silently. (The "known" set here is the
+  published declarations, so a warning for a name means "no declaration was
+  published under it": unregistered, or a registered module that does not
+  export the callback at all.)
 
-  Cost per `list/0`: one `:persistent_term.get/2` and one `Application.get_env/3`
-  — no Repo read, no process call. Nothing published (the
+  Freezing the order at publish time would let a registration made under a
+  temporarily narrowed load order (a test's `with_plugins`) leave a fence list
+  that outlives the narrowing.
+
+  Cost per `list/0`: one `:persistent_term.get/2`, one `Application.get_env/3`
+  and, under a configured order, one scan of the declarations per entry
+  (`Code.ensure_loaded?/1` for a module entry) — no Repo read, no process call. Nothing published (the
   `BARKPARK_PLUGINS=""` kill switch registers nothing; Registry init publishes
   `[]`) resolves `[]`, and the writer runs no fence at all.
   """
@@ -55,20 +65,13 @@ defmodule Barkpark.Content.PreWriteFences do
     declared = :persistent_term.get(@key, [])
 
     case Application.get_env(:barkpark, :plugins, []) do
-      [_ | _] = configured -> Enum.flat_map(configured, &fences_for(declared, &1))
-      _ -> Enum.flat_map(declared, & &1.fences)
-    end
-  end
+      [_ | _] = configured ->
+        configured
+        |> Barkpark.Content.PluginLoadOrder.plugins(declared, __MODULE__)
+        |> Enum.flat_map(& &1.fences)
 
-  defp fences_for(declared, name) when is_binary(name), do: by(declared, :name, name)
-  defp fences_for(declared, {name, _mod}) when is_binary(name), do: by(declared, :name, name)
-  defp fences_for(declared, mod) when is_atom(mod), do: by(declared, :module, mod)
-  defp fences_for(_declared, _other), do: []
-
-  defp by(declared, field, value) do
-    case Enum.find(declared, &(Map.fetch!(&1, field) == value)) do
-      nil -> []
-      entry -> entry.fences
+      _ ->
+        Enum.flat_map(declared, & &1.fences)
     end
   end
 
