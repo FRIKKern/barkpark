@@ -82,7 +82,7 @@ defmodule BarkparkWeb.AuthController do
         # the address is registered. Emitting the failure inside Accounts (where
         # the User struct only exists for real accounts) would reintroduce that
         # enumeration oracle on the audit log itself.
-        audit(%{
+        Audit.emit_best_effort(%{
           category: "auth",
           action: "login_failed",
           actor_type: "anonymous",
@@ -216,7 +216,7 @@ defmodule BarkparkWeb.AuthController do
 
     case Accounts.update_user_password(user, current_password, %{password: password}) do
       {:ok, _user} ->
-        audit(%{
+        Audit.emit_best_effort(%{
           category: "auth",
           action: "password_changed",
           subject: user.id,
@@ -629,7 +629,7 @@ defmodule BarkparkWeb.AuthController do
         # COUNT the revoke actually stamped, carried from
         # Accounts.revoke_all_user_sessions/1 — the receipt reports the number
         # rather than re-asserting the claim (PDS-D503).
-        audit(%{
+        Audit.emit_best_effort(%{
           category: "auth",
           action: "password_reset",
           subject: user.id,
@@ -909,7 +909,7 @@ defmodule BarkparkWeb.AuthController do
         _ -> nil
       end
 
-    audit(%{
+    Audit.emit_best_effort(%{
       category: "auth",
       action: "logout",
       subject: subject,
@@ -917,18 +917,6 @@ defmodule BarkparkWeb.AuthController do
       actor_id: subject,
       metadata: %{}
     })
-  end
-
-  # Best-effort audit emit: an audit-bus hiccup must never break the auth flow
-  # it accompanies (the state change has already committed). Result discarded,
-  # infra raise/throw swallowed — mirrors the isolation of other emit producers.
-  defp audit(attrs) do
-    Audit.emit(attrs)
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
   end
 
   defp build_url(path, token), do: BarkparkWeb.Endpoint.url() <> path <> token
