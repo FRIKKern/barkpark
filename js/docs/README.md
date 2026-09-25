@@ -20,4 +20,4 @@ Open <http://localhost:3000>.
 
 `getting-started`, `concepts`, `reference/errors` are the highest-priority pages. Content lives in `content/docs/`.
 
-CI-generated API reference lands at `docs-site/reference/<pkg>/` (Track A consumer).
+CI-generated API reference lands at `docs/site/reference/<pkg>/` (Track A consumer).

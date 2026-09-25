@@ -219,15 +219,19 @@ function readManifests(roots) {
 
 function manifestRoots(jsRoot) {
   const roots = [path.join(jsRoot, 'package.json')]
-  const pkgDir = path.join(jsRoot, 'packages')
-  let entries = []
-  try {
-    entries = fs.readdirSync(pkgDir, { withFileTypes: true })
-  } catch {
-    entries = []
-  }
-  for (const e of entries) {
-    if (e.isDirectory()) roots.push(path.join(pkgDir, e.name, 'package.json'))
+  // packages/* and the private parity harnesses in test-harnesses/* are both
+  // workspace member roots (js/pnpm-workspace.yaml).
+  for (const memberRoot of ['packages', 'test-harnesses']) {
+    const pkgDir = path.join(jsRoot, memberRoot)
+    let entries = []
+    try {
+      entries = fs.readdirSync(pkgDir, { withFileTypes: true })
+    } catch {
+      entries = []
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) roots.push(path.join(pkgDir, e.name, 'package.json'))
+    }
   }
   return roots
 }

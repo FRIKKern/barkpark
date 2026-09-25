@@ -237,20 +237,30 @@ const (
 )
 
 func validatePrebuiltDirFor(dir string, runtime prebuiltRuntime) (string, error) {
+	abs, _, err := validatePrebuiltDirAdvising(dir, runtime)
+	return abs, err
+}
+
+// validatePrebuiltDirAdvising is validatePrebuiltDirFor plus the ADVISORY half of
+// the entry walk: the archive names of the macOS metadata entries (see
+// isAppleMetadataName) the packer is about to emit. They never refuse the deploy
+// (charter D121). Only the strict pre-mint call site in runCloudSitePrebuiltDeploy
+// asks for them; the other two walks discard them, so the notice prints once.
+func validatePrebuiltDirAdvising(dir string, runtime prebuiltRuntime) (string, []string, error) {
 	root := strings.TrimSpace(dir)
 	if root == "" {
-		return "", fmt.Errorf("--prebuilt needs a directory (e.g. --prebuilt ./dist)")
+		return "", nil, fmt.Errorf("--prebuilt needs a directory (e.g. --prebuilt ./dist)")
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		return "", fmt.Errorf("abs %q: %w", root, err)
+		return "", nil, fmt.Errorf("abs %q: %w", root, err)
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return "", fmt.Errorf("--prebuilt %s: %w", root, err)
+		return "", nil, fmt.Errorf("--prebuilt %s: %w", root, err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("--prebuilt %s is not a directory — pass the build OUTPUT directory (e.g. ./dist)", root)
+		return "", nil, fmt.Errorf("--prebuilt %s is not a directory — pass the build OUTPUT directory (e.g. ./dist)", root)
 	}
 	// RESOLVE THE ROOT. `dist -> packages/site/dist` is the monorepo shape, and
 	// os.Stat/os.ReadDir both FOLLOW it — so every guard below passes while
@@ -261,23 +271,24 @@ func validatePrebuiltDirFor(dir string, runtime prebuiltRuntime) (string, error)
 	// tree pack instead, and D93's non-empty guard stops being bypassable.
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return "", fmt.Errorf("--prebuilt %s: resolving the directory failed: %w", root, err)
+		return "", nil, fmt.Errorf("--prebuilt %s: resolving the directory failed: %w", root, err)
 	}
 	abs = resolved
 	entries, err := os.ReadDir(abs)
 	if err != nil {
-		return "", fmt.Errorf("read %q: %w", root, err)
+		return "", nil, fmt.Errorf("read %q: %w", root, err)
 	}
 	if len(entries) == 0 {
-		return "", fmt.Errorf("--prebuilt %s is empty — nothing to deploy (did the build run, and did it write here?)", root)
+		return "", nil, fmt.Errorf("--prebuilt %s is empty — nothing to deploy (did the build run, and did it write here?)", root)
 	}
 	if err := prebuiltRootFileFault(abs, root, runtime); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	if err := preflightPrebuiltEntries(abs, root); err != nil {
-		return "", err
+	metadata, err := preflightPrebuiltEntriesAdvising(abs, root)
+	if err != nil {
+		return "", nil, err
 	}
-	return abs, nil
+	return abs, metadata, nil
 }
 
 // prebuiltRootFileFault is the per-runtime root guard: the ONE file whose
@@ -350,7 +361,66 @@ var prebuiltAcceptedTypeflags = map[byte]struct{}{
 // flags `.git/refs/heads/café-branch` while the real packer never emits it,
 // because the ignore arm returns filepath.SkipDir on a directory.
 func preflightPrebuiltEntries(abs, root string) error {
-	return walkTarballEntries(abs, tarballIgnoreSet(abs, prebuiltTarballIgnores), func(path, rel string, info os.FileInfo) error {
+	_, err := preflightPrebuiltEntriesAdvising(abs, root)
+	return err
+}
+
+// isAppleMetadataName reports whether an entry's BASENAME is macOS metadata:
+// an AppleDouble `._*` file (Finder, and bsdtar's copyfile doubling) or a
+// `.DS_Store`. It feeds an advisory ONLY. It must never reach isIgnored: a file
+// named `._foo` can be real content, and dropping it by prefix would delete it
+// from every deploy (charter D121, which keeps isIgnored exact-match per D93).
+//
+// The `.DS_Store` arm is reachable only if prebuiltTarballIgnores stops listing
+// it: today that exact-basename ignore drops it before the walk ever visits it,
+// so it is neither packed nor advised about.
+func isAppleMetadataName(base string) bool {
+	return strings.HasPrefix(base, "._") || base == ".DS_Store"
+}
+
+// prebuiltMetadataNameLimit caps how many names the advisory lists; the count
+// is always exact.
+const prebuiltMetadataNameLimit = 5
+
+// prebuiltMetadataAdvisory renders the notice for the metadata entries a
+// prebuilt artifact will carry: a count, up to prebuiltMetadataNameLimit names,
+// and a remedy. It returns nil when there is nothing to say. The deploy goes
+// ahead either way — deploy/site-deploy.sh emits file_server with no hide
+// directives, so these files are fetchable, which is worth one notice and not a
+// refusal (charter D121).
+func prebuiltMetadataAdvisory(root string, names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	shown := names
+	if len(shown) > prebuiltMetadataNameLimit {
+		shown = shown[:prebuiltMetadataNameLimit]
+	}
+	list := make([]string, len(shown))
+	for i, n := range shown {
+		list[i] = sanitizeCell(n)
+	}
+	listed := strings.Join(list, ", ")
+	if more := len(names) - len(shown); more > 0 {
+		listed += fmt.Sprintf(", and %d more", more)
+	}
+	noun := "entries"
+	if len(names) == 1 {
+		noun = "entry"
+	}
+	return []string{
+		fmt.Sprintf("! %d macOS metadata %s will ship with --prebuilt %s and be served as-is: %s", len(names), noun, sanitizeCell(root), listed),
+		fmt.Sprintf("  The deploy continues. If these are Finder or tar leftovers, delete them and re-run: find %s -name '._*' -delete (bp does not drop them itself, because a file named ._foo can be real content)", sanitizeCell(root)),
+	}
+}
+
+// preflightPrebuiltEntriesAdvising is preflightPrebuiltEntries returning, beside
+// its verdict, the archive names of every EMITTED entry whose basename is macOS
+// metadata. It collects them only from entries that pass every refusal, so the
+// list is exactly what the box will stage.
+func preflightPrebuiltEntriesAdvising(abs, root string) ([]string, error) {
+	var metadata []string
+	err := walkTarballEntries(abs, tarballIgnoreSet(abs, prebuiltTarballIgnores), func(path, rel string, info os.FileInfo) error {
 		name := filepath.ToSlash(rel)
 		hdr, err := tarHeaderFor(path, rel, info)
 		if err != nil {
@@ -367,6 +437,9 @@ func preflightPrebuiltEntries(abs, root string) error {
 			return fmt.Errorf("--prebuilt %s: %s cannot be written into a tar archive at all: %w", root, name, err)
 		}
 		if _, ok := prebuiltAcceptedTypeflags[flag]; ok {
+			if isAppleMetadataName(filepath.Base(rel)) {
+				metadata = append(metadata, name)
+			}
 			return nil
 		}
 		if flag == 'g' || flag == 'L' || flag == 'K' {
@@ -374,6 +447,10 @@ func preflightPrebuiltEntries(abs, root string) error {
 		}
 		return fmt.Errorf("--prebuilt %s: %s encodes as tar typeflag %q, which the box's extractor refuses — only regular files and directories are staged. Remove it from the build output", root, name, string(flag))
 	})
+	if err != nil {
+		return nil, err
+	}
+	return metadata, nil
 }
 
 // symlinkReplaceHint renders a COPY-PASTEABLE command that replaces one symlink

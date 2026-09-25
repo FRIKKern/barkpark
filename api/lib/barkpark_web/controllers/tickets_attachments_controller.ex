@@ -331,6 +331,16 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   #     `MediaFile.serve_content_type/1` + `nosniff` + an `attachment` disposition
   #     for dangerous types — an outsider-uploaded text/html cannot execute.
   # sobelow_skip ["Traversal.SendFile", "XSS.ContentType"]
+  # The cache policy for attachment bytes. The 302 states it, and the presigned
+  # URL signs it as `response-cache-control`, so bucket-served bytes carry it
+  # instead of whatever the bucket sends. Not `Delivery.file_cache_control/1`:
+  # an attachment is an outsider-uploaded blob behind a ticket key, with no
+  # `bp_visibility` of its own, so nothing here may ever select that helper's
+  # 24h shared-cache arm. The local `send_file` arm sets no header and gets
+  # Plug's default `max-age=0, private, must-revalidate`: the same three
+  # directives in a different order.
+  @attachment_cache_control "private, max-age=0, must-revalidate"
+
   defp stream_file(conn, file) do
     mime = file.mime_type || MIME.from_path(file.path)
 
@@ -343,7 +353,8 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
     # colliding flat path's. Same seal as MediaController.serve/2.
     case Barkpark.Media.Blobstore.serve_strategy(file,
            response_content_type: MediaFile.serve_content_type(mime),
-           response_content_disposition: disposition(file, mime)
+           response_content_disposition: disposition(file, mime),
+           response_cache_control: @attachment_cache_control
          ) do
       {:file, full} ->
         conn
@@ -354,7 +365,7 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
 
       {:redirect, url} ->
         conn
-        |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
+        |> put_resp_header("cache-control", @attachment_cache_control)
         |> redirect(external: url)
 
       {:error, :not_found} ->

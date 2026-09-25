@@ -337,6 +337,10 @@ tooling-harnesses .github/workflows/compose-smoke.yml
 tooling-harnesses .github/workflows/go-format.yml
 tooling-harnesses scripts/console-slice-gate.mjs
 tooling-harnesses scripts/console-slice-gate.test.mjs
+tooling-harnesses scripts/usage-envelope-diff.mjs
+tooling-harnesses scripts/usage-envelope-diff.test.mjs
+tooling-harnesses scripts/fixtures/usage-envelope-diff/*.json
+tooling-harnesses cloud/lib/barkpark_cloud/usage.ex
 launcher-boot-selftest bin/barkpark
 launcher-boot-selftest scripts/barkpark-boot-selftest.sh
 workflow-portability scripts/workflow-portability-check.sh
@@ -354,7 +358,7 @@ exit-runner-guard scripts/deploy-reliability-exit-run.sh
 exit-runner-guard scripts/deploy-reliability-exit-run.test.sh
 exit-runner-guard internal/cloudclient/client.go
 exit-runner-guard internal/cli/cloud_deploy_census_cmd.go
-exit-runner-guard scripts/deploy-reliability-exit-2026-08-10.md
+exit-runner-guard docs/ledgers/deploy-reliability-exit-2026-08-10.md
 exit-runner-guard scripts/check-doc-budgets.sh
 exit-runner-guard scripts/seal-run.sh
 cloud-static-gz scripts/cloud-static-gz-guard.sh

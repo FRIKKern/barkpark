@@ -19,6 +19,7 @@ on:
           - grant-forever
           - cp-app-logs
           - guerrilla-logs-grep
+          - guerrilla-db-probe
           - site-runtime-install
           - site-artifact-fetch
           - box-logs
@@ -433,6 +434,59 @@ jobs:
                   | grep -F '$NEEDLE' -A 30 | head -200 \
                   || echo 'no journal match for $NEEDLE in the last 3 hours'
               "
+              ;;
+            guerrilla-db-probe)
+              # Pool-sizing evidence (task jpf-bl-guerrilla-db-probe-arm; gates
+              # jpf-bl-oban-pool-partition): guerrilla's POOL_SIZE, Postgres
+              # max_connections, and backends by state. READ-ONLY and takes NO
+              # input — the remote script is a SINGLE-QUOTED literal, so not
+              # even a runner-side variable expands into it (stricter than the
+              # guerrilla-logs-grep arm above, which must interpolate NEEDLE).
+              #
+              # WHY max_connections HEADROOM IS THE NUMBER: a blue/green flip
+              # (deploy/instance-deploy.sh) boots the TARGET slot while the
+              # ACTIVE one still serves, so at flip time guerrilla holds
+              # 2 x (pool_size + 1) backends, not pool_size + 1. A POOL_SIZE
+              # raise must fit twice under max_connections (minus superuser
+              # and other-client reservations) or the flip itself fails to
+              # connect — measure before any raise.
+              #
+              # .env HOLDS SECRETS: only lines whose key is exactly POOL_SIZE
+              # are printed, never the file. api/start.sh sources .env with
+              # set -a, so the LAST POOL_SIZE= line wins; absent, runtime.exs
+              # defaults to 10. The running slot's own environ is read too —
+              # .env may have changed since boot — again filtered to POOL_SIZE.
+              #
+              # SIGPIPE: no pipe here ends in a truncating reader (no head, no
+              # grep -q); grep reads its whole input, so no producer can die
+              # of 141 under pipefail.
+              # shellcheck disable=SC2016 # the single quotes ARE the boundary: nothing expands runner-side
+              $SSH "root@${GUERRILLA_HOST}" '
+                set -uo pipefail
+                rc=0
+                echo "== POOL_SIZE in /opt/barkpark/.env (last line wins; none = runtime.exs default 10) =="
+                grep -nE "^[[:space:]]*(export[[:space:]]+)?POOL_SIZE=" /opt/barkpark/.env \
+                  || echo "no POOL_SIZE line in /opt/barkpark/.env"
+                echo "== POOL_SIZE in each running slot environ =="
+                for s in blue green; do
+                  st=$(systemctl is-active "barkpark-slot@$s" 2>/dev/null)
+                  pid=$(systemctl show -p MainPID --value "barkpark-slot@$s" 2>/dev/null)
+                  if [ "$st" = active ] && [ -r "/proc/$pid/environ" ]; then
+                    v=$(tr "\0" "\n" < "/proc/$pid/environ" | grep -E "^POOL_SIZE=") || v="POOL_SIZE unset (runtime.exs default 10)"
+                    echo "slot $s active pid $pid: $v"
+                  else
+                    echo "slot $s: ${st:-unknown}"
+                  fi
+                done
+                cd /tmp
+                echo "== show max_connections =="
+                sudo -u postgres psql -X -v ON_ERROR_STOP=1 -Atc "show max_connections" || rc=1
+                echo "== pg_stat_activity by state (empty state = background process) =="
+                sudo -u postgres psql -X -v ON_ERROR_STOP=1 -Atc \
+                  "select state, count(*) from pg_stat_activity group by state order by state" || rc=1
+                [ "$rc" -eq 0 ] || { echo "PSQL-FAILED"; exit 1; }
+                echo guerrilla-db-probe complete
+              '
               ;;
             grant-forever)
               # UUID only — the rpc string below is built from validated parts.

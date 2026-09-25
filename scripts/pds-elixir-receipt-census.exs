@@ -556,12 +556,24 @@ defmodule PDS.Census do
   # build-free by construction, so the figures are engine-independent by design — but that
   # is a claim the required Elixir gate re-measures on every run, not one this comment
   # settles.
+  # RE-DERIVED AGAIN 2026-09-25 at task-71082f5541c13b53 (PR #20245, the Forms plugin's
+  # public intake endpoint): textual 113 -> 115, ast-literal 104 -> 106, emitted 100 ->
+  # 102, read-routed 29 -> 31. TWO ADDED SITES, both inside
+  # `Barkpark.Plugins.Forms.Web.SubmissionController.submit/2`: the `ok: true, id:` success
+  # arm and the honeypot's identical-shaped decoy (the BulldocsFormController precedent).
+  # Both land READ-routed because submit/2 reaches `Content.get_document/4` (the
+  # endpoint lookup in `Intake.resolve_endpoint/4`) within the depth budget, while the
+  # write sits deeper. `phantom` (9), `consumer` (4), `write-routed` (57) and `unrouted`
+  # (14) read `==` in the SAME run. Both sites carry register rows below. DERIVED BY THE
+  # INSTRUMENT: the numbers are the `derived` half of this census's own D448-DRIFT-REFUSES
+  # line on the rebased PR tree (pds_elixir_census_test.exs, strict runner), amended in
+  # the same commit as the change that moved them (PDS-D448a).
   @rederived %{
-    textual: 113,
-    ast: 104,
+    textual: 115,
+    ast: 106,
     phantom: 9,
     consumer: 4,
-    emitted: 100,
+    emitted: 102,
     # RE-DERIVED BY RUN AT PDS-D480/PDS-D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -663,7 +675,7 @@ defmodule PDS.Census do
     # Engine printed live by that run:
     #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
     write: 57,
-    read: 29,
+    read: 31,
     unrouted: 14
   }
 
@@ -1937,6 +1949,31 @@ defmodule PDS.Census do
   ]
 
   @register [
+    # Barkpark.Plugins.Forms.Web.SubmissionController.submit/2 — the success arm,
+    # `%{ok: true, id: stored.doc_id}` (task-71082f5541c13b53). PROVEN/end_to_end: the
+    # cited test posts to the public route and then reads the stored form_submission
+    # row back through Repo, asserting its id equals the receipt's id and its
+    # workspace/project/dataset equal the bound scope. Mutation-exercised on the PR: an
+    # unscoped endpoint lookup reds the cross-tenant tests with a 201 where a 404 belongs.
+    %{key: {"api/lib/barkpark/plugins/forms/web/submission_controller.ex",
+            "Barkpark.Plugins.Forms.Web.SubmissionController.submit/2", "39918431", "127244318"},
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence:
+        {"api/test/barkpark_web/controllers/forms_submission_controller_test.exs",
+         ~S|test "a valid post lands in the bound workspace/project/dataset only", ctx do|}},
+    # Barkpark.Plugins.Forms.Web.SubmissionController.submit/2 — the honeypot decoy,
+    # `%{ok: true}` with NO write, by design: the trap must be indistinguishable from
+    # success (the same ruling as BulldocsFormController's declared HONEYPOT row).
+    %{key: {"api/lib/barkpark/plugins/forms/web/submission_controller.ex",
+            "Barkpark.Plugins.Forms.Web.SubmissionController.submit/2", "39918431", "17468236"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "A DELIBERATE DECOY, not a laundered success: a filled `bp_hp` honeypot gets the " <>
+          "happy receipt and nothing is written, so a bot cannot tell it was caught. The " <>
+          "no-write half IS tested (forms_submission_controller_test.exs `a filled honeypot " <>
+          "gets the success shape and writes nothing` reads the table back empty); the " <>
+          "receipt-vs-stored-row question this register asks has no honest yes here, " <>
+          "because the receipt is untrue on purpose."},
     # barkpark/plugins/sheets/web/import_controller.ex:64
     %{key: {"api/lib/barkpark/plugins/sheets/web/import_controller.ex",
             "Barkpark.Plugins.Sheets.Web.ImportController.create/2", "51320322", "13286890"},

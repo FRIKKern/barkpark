@@ -900,6 +900,11 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 		reason = strings.TrimSpace(b.ProvisionError)
 	case "suspended":
 		reason = suspendedDetail(b)
+	case "degraded", "unreported":
+		// The EVIDENCE behind a non-up verdict (dr-w11-payload-divergence-close):
+		// the plane's own missed-check counter and alert latch. "" when neither
+		// says anything, so the label stands alone exactly as before.
+		reason = reachabilityEvidence(b)
 	case "strained":
 		reason = strainedReason(b)
 	case "filling":
@@ -923,11 +928,37 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	// FAILED blue is correctly `ok` and still needs the sentence). Joined with
 	// the same separator the strained reason uses for its swap clause, and every
 	// empty one drops out rather than leaving a dangling dot.
-	parts := make([]string, 0, 7)
-	for _, s := range []string{reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
+	//
+	// darkMarker LEADS (dr-bl-w9-muscle-1): how long the box has been silent is
+	// the first thing an operator needs and the one thing the rung word cannot
+	// say — muscle-1's rung is removal_failed and its reason is a 200-character
+	// deprovision error, behind which a trailing "dark 50d" would be cut off.
+	parts := make([]string, 0, 8)
+	for _, s := range []string{darkMarker(b, status), reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// reachabilityEvidence renders the two counters `health_status` is computed
+// from — the sweep's consecutive-missed-check count and the once-per-outage
+// alert latch — as EVIDENCE ONLY, the console's `missedChecksText` rule: a
+// number the control plane measured, never advice. Silence for an absent or
+// zero count (an older plane, or a box answering every check), never "0 missed
+// checks"; the latch speaks only when it is set.
+func reachabilityEvidence(b cloudclient.Barkpark) string {
+	parts := make([]string, 0, 2)
+	if n := b.UnreachableCount; n != nil && *n > 0 {
+		noun := "missed health checks"
+		if *n == 1 {
+			noun = "missed health check"
+		}
+		parts = append(parts, fmt.Sprintf("%d consecutive %s", *n, noun))
+	}
+	if b.UnreachableNotificationSent {
+		parts = append(parts, "unreachable alert sent for this outage")
 	}
 	return strings.Join(parts, " · ")
 }
@@ -970,7 +1001,15 @@ func err5xxMarker(b cloudclient.Barkpark) string {
 	if p == nil || p.Err5xxPerS == nil || *p.Err5xxPerS <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("HTTP router answering %.2f 5xx/s (60s per-slot ring — the beat's own number; a ROUTER rate, never a verdict on the box: blind to 5xx the BEAM never served, and to a LiveView killed mid-request, which emits no stop event to count)", *p.Err5xxPerS)
+	// THE DENOMINATOR RIDES WITH THE RATE (charter D103): a 5xx rate cannot be
+	// graded without the volume it came out of, so when the beat measured the
+	// request rate it is printed beside the error rate — never divided into a
+	// share here, and never invented when the beat did not carry it.
+	volume := ""
+	if p.ReqPerS != nil && *p.ReqPerS >= 0 {
+		volume = fmt.Sprintf(" of %.2f req/s", *p.ReqPerS)
+	}
+	return fmt.Sprintf("HTTP router answering %.2f 5xx/s%s (60s per-slot ring — the beat's own number; a ROUTER rate, never a verdict on the box: blind to 5xx the BEAM never served, and to a LiveView killed mid-request, which emits no stop event to count)", *p.Err5xxPerS, volume)
 }
 
 // err5xxRow is the `-o json` projection of the same reading, and it is where
@@ -982,15 +1021,24 @@ func err5xxMarker(b cloudclient.Barkpark) string {
 //     never served.
 //   - state "answering", per_s <rate> — the beat's own number, never
 //     recomputed here.
+//
+// Every state also carries `req_per_s`, the rate's DENOMINATOR (charter D103),
+// under the same law: null when the beat did not measure it (nil, or the -1
+// sentinel), the beat's own number otherwise. It is never divided into a share
+// here — a script that wants one has both halves and owns the division.
 func err5xxRow(b cloudclient.Barkpark) map[string]any {
 	p := b.Pressure
+	var req any
+	if p != nil && p.ReqPerS != nil && *p.ReqPerS >= 0 {
+		req = *p.ReqPerS
+	}
 	if p == nil || p.Err5xxPerS == nil || *p.Err5xxPerS < 0 {
-		return map[string]any{"state": "unmeasured", "per_s": nil}
+		return map[string]any{"state": "unmeasured", "per_s": nil, "req_per_s": req}
 	}
 	if *p.Err5xxPerS == 0 {
-		return map[string]any{"state": "zero", "per_s": 0.0}
+		return map[string]any{"state": "zero", "per_s": 0.0, "req_per_s": req}
 	}
-	return map[string]any{"state": "answering", "per_s": *p.Err5xxPerS}
+	return map[string]any{"state": "answering", "per_s": *p.Err5xxPerS, "req_per_s": req}
 }
 
 // --- the slot-unit marker (dr-bl-w5-failed-slot-unit-is-invisible) -----------
@@ -1314,6 +1362,12 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		// box whose stored sha was blank when a sha first arrived (that commit may
 		// have been running long before the first beat carrying it reached us).
 		"git_commit_first_seen_at": r.BP.GitCommitFirstSeenAt,
+		// dr-bl-w9-muscle-1: the raw last beat, ALWAYS present (empty when the
+		// plane has none — git_commit's rule), and its reading: state plus a
+		// duration key that exists only when a number stands behind it
+		// (cloud_status_dark.go beatRow). Never a zero for "no beat on record".
+		"last_seen_at": r.BP.LastSeenAt,
+		"beat":         beatRow(r.BP),
 		// The 5xx tri-state (dr-w5-followup): nil-as-unmeasured, zero-as-zero,
 		// rate-as-itself — the json render where the three states stay three.
 		"err_5xx":       err5xxRow(r.BP),
@@ -1347,6 +1401,36 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		"autoupdate_paused":          r.BP.AutoupdatePaused,
 		"pinned_release":             r.BP.PinnedRelease,
 		"channel":                    r.BP.Channel,
+		// dr-w11-payload-divergence-close: the launch placement/size pins and the
+		// alert latch. ALWAYS present, like `channel` beside them — an empty
+		// region/server_type is the plane's own "no pin recorded" (an adopted
+		// box), and `false` is the truthful reading of an absent latch.
+		"region":                        r.BP.Region,
+		"server_type":                   r.BP.ServerType,
+		"unreachable_notification_sent": r.BP.UnreachableNotificationSent,
+	}
+	// Tri-state, the house idiom (dr-w11-payload-divergence-close): the
+	// consecutive-missed-check count behind `health_status`. Absent key = the
+	// plane predates it; a measured 0 is a real "answering every check".
+	if r.BP.UnreachableCount != nil {
+		row["unreachable_count"] = *r.BP.UnreachableCount
+	}
+	// Tri-state: the in-flight rollout marker. Present only while a rollout is
+	// landing — which is exactly when `update_state` above is a cached verdict
+	// from before the trigger.
+	if r.BP.AutoupdateTriggeredAt != nil {
+		if at := strings.TrimSpace(*r.BP.AutoupdateTriggeredAt); at != "" {
+			row["autoupdate_triggered_at"] = at
+		}
+	}
+	// The attached custom domain, only when one is attached.
+	if h := strings.TrimSpace(r.BP.CustomHost); h != "" {
+		row["custom_host"] = h
+	}
+	// p95 latency (charter D131: a VITAL, never a fence) — emitted only when the
+	// beat measured it. The agent's -1 "unwired" sentinel is not a latency.
+	if p := r.BP.Pressure; p != nil && p.P95Ms != nil && *p.P95Ms >= 0 {
+		row["p95_ms"] = *p.P95Ms
 	}
 	// Tri-state: only emit autoupdate_enabled when the CP actually reported it, so
 	// -o json is as honest as the table (nil = policy unknown, never a fake false).
@@ -1441,6 +1525,17 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 func updateCell(b cloudclient.Barkpark) string {
 	running := strings.TrimSpace(b.UpdateRunningRelease)
 	latest := strings.TrimSpace(b.UpdateLatestRelease)
+	// IN FLIGHT OUTRANKS THE CACHED VERDICT (dr-w11-payload-divergence-close),
+	// the console's own precedence: while autoupdate_triggered_at is stamped a
+	// rollout is landing, and update_state / running are readings from BEFORE
+	// the trigger. Printing "1.4.2 → 1.5.0" over it reads as "stuck behind" on
+	// a box that is mid-update.
+	if at := b.AutoupdateTriggeredAt; at != nil && strings.TrimSpace(*at) != "" {
+		if latest != "" {
+			return "updating → " + sanitizeCell(latest)
+		}
+		return "updating"
+	}
 	if running == "" && latest == "" {
 		return ""
 	}
@@ -1558,6 +1653,9 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 			},
 			"deploy":    fleetDeploy,
 			"barkparks": rows,
+			// dr-bl-w9-muscle-1: always present, with `checked` — an empty
+			// `groups` is only evidence when the reader can see what was looked at.
+			"duplicates": duplicatesJSON(findDuplicateRows(list)),
 		})
 		return exitOK
 	}
@@ -1573,6 +1671,7 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 	renderStatusBucket(out, "IN-FLIGHT", "in-flight", ranked)
 	renderStatusBucket(out, "HEALTHY", "healthy", ranked)
 	renderStatusDeploy(out, deploy, ranked)
+	renderDuplicates(out, findDuplicateRows(list))
 	return exitOK
 }
 

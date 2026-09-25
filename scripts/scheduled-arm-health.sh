@@ -150,6 +150,44 @@
 # UNREADABLE and exits 2 — never a quiet skip back onto the `ok` path.
 # That is the route the self-test uses; it never touches the network.
 #
+# ─────────────────────────────────────────────────────────────────────────────
+#  THIS READER DOES NOT READ ITSELF (task-c3b8d7a5e1745a17, measured 2026-09-25)
+# ─────────────────────────────────────────────────────────────────────────────
+# scheduled-arm-health.yml is itself a cron'd workflow, and until this change it
+# was on its own roster. Its run exits 1 whenever ANY row is red, so its own
+# scheduled history is red on every day some other workflow is — and the next
+# run then reads that history as NEVER SUCCEEDED and reds on it. That is a
+# LATCH: fix every other row and this one still reds, forever, because its only
+# evidence is its own past verdicts. Measured: 8 of 8 scheduled runs
+# 2026-09-17..24 failed, and on run 36001198282 its own row was one of the 10
+# reds. Its silence is watched elsewhere (cron-overdue-probe.sh's table carries
+# a row for it), and its verdict IS the run it is printing, so the self row is
+# excluded by name and the exclusion is PRINTED, never silent. SAH_SELF names
+# the file (default scheduled-arm-health.yml) so the hermetic test can pin it.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#  A SKIP THE CRON NEVER DECLARED IS NOT A LAUNDER (same task, same day)
+# ─────────────────────────────────────────────────────────────────────────────
+# VACUOUS CRON reds a scheduled run that SKIPPED a job while executing nothing
+# the push arm does not. On run 36001198282 four of its five VACUOUS rows were
+# skips the cron never declared:
+#   cron-overdue-probe / crown-reconcile / main-gate-watch — the skipped job is
+#     the `… harness`, gated `if: github.event_name == 'pull_request'`: it tests
+#     a PR's diff, and a cron has no diff.
+#   main-gate-watch / twoslash — the skipped jobs are `Report … to a human`,
+#     gated on `failure()`: a reporter is skipped on EVERY green run, of any
+#     event, by design.
+# Those are the "rerun" shape (the cron re-executes the watcher on a clock),
+# not the studio-journey-smoke shape (a job the scheduled arm could run and
+# does not). So a skipped job whose `if:` is a failure()/cancelled() reporter,
+# or is confined to pull_request (contains `github.event_name ==
+# 'pull_request'` and no `||`), is EXCUSED and named as such; every other skip
+# still counts. studio-journey-smoke's `deployed` job is gated to
+# workflow_dispatch, so it still counts and that row stays VACUOUS. The `if:`
+# is read from the workflow file with python3+PyYAML (preinstalled on
+# ubuntu-latest); when that read is unavailable NOTHING is excused and the
+# line says so — the old, stricter verdict, never a quieter one.
+#
 # EXIT: 0 no red · 1 at least one red · 2 cannot measure.
 #
 # bash 3.2 compatible (macOS system bash): no associative arrays, no mapfile.
@@ -165,6 +203,7 @@ RUNS_DIR=""
 ONLY=""
 REPO_OVERRIDE=""
 NOW_ISO=""
+SELF="${SAH_SELF:-scheduled-arm-health.yml}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -271,6 +310,39 @@ summarise() {
       ] | @tsv'
 }
 
+# job_gates <workflow-file> — one `name<TAB>if` line per job, `name` being the
+# job's `name:` (or its key when it has none), which is what the jobs API
+# reports for a non-matrix job. Prints the literal UNAVAILABLE when the file
+# cannot be parsed here; the caller then excuses nothing.
+job_gates() {
+  python3 - "$1" 2>/dev/null <<'PY' || echo UNAVAILABLE
+import sys, yaml
+d = yaml.load(open(sys.argv[1]), Loader=yaml.BaseLoader) or {}
+jobs = d.get("jobs") or {}
+if not isinstance(jobs, dict):
+    raise SystemExit(1)
+for key, job in jobs.items():
+    if not isinstance(job, dict):
+        continue
+    name = str(job.get("name", key)).replace("\t", " ").replace("\n", " ")
+    cond = str(job.get("if", "")).replace("\t", " ").replace("\n", " ")
+    print(name + "\t" + cond)
+PY
+}
+
+# excused_skip <if-expression> — true when a skip under this `if:` is one the
+# cron never declared: a failure()/cancelled() reporter, or a job confined to
+# pull_request. See the header block "A SKIP THE CRON NEVER DECLARED".
+excused_skip() {
+  local cond="$1"
+  case "$cond" in *'failure()'*|*'cancelled()'*) return 0 ;; esac
+  case "$cond" in *'||'*) return 1 ;; esac
+  case "$cond" in
+    *"github.event_name == 'pull_request'"*|*'github.event_name == "pull_request"'*) return 0 ;;
+  esac
+  return 1
+}
+
 say() { printf '%s\n' "$*"; }
 
 say "scheduled-arm-health — roster = the tree at ${ROOT}, as of $NOW_ISO"
@@ -279,12 +351,14 @@ say ""
 
 FILES=""
 DENOM=0
+SELF_SEEN=0
 for f in "$WORKFLOWS_DIR"/*.yml "$WORKFLOWS_DIR"/*.yaml; do
   [ -f "$f" ] || continue
   DENOM=$((DENOM + 1))
   grep -qE '^[[:space:]]*-[[:space:]]*cron:' "$f" || continue
   b="$(basename "$f")"
   if [ -n "$ONLY" ] && [ "$b" != "$ONLY" ]; then continue; fi
+  if [ "$b" = "$SELF" ]; then SELF_SEEN=1; continue; fi
   FILES="$FILES$b
 "
 done
@@ -295,6 +369,11 @@ $FILES
 EOF
 
 say "enumerated $DENOM workflow files; $CRONNED declare a cron${ONLY:+ (scoped to --workflow $ONLY)}"
+if [ "$SELF_SEEN" -eq 1 ]; then
+  say "self            $SELF — NOT READ: this reader's own history is its past verdicts, so reading it"
+  say "                latches (one red makes every later run NEVER SUCCEEDED). Its silence is"
+  say "                cron-overdue-probe.sh's row; its verdict is this run."
+fi
 if [ "$CRONNED" -eq 0 ]; then
   say "REFUSING — nothing to measure. A report over an empty roster is not a clean report."
   exit 2
@@ -417,7 +496,31 @@ EOF
 $s_exec
 EOF
 
-    s_skipped="$(printf '%s' "$s_jobs" | jq -r '[(.jobs // [])[] | select(.conclusion == "skipped") | .name] | sort | unique | .[]')"
+    s_skipped_all="$(printf '%s' "$s_jobs" | jq -r '[(.jobs // [])[] | select(.conclusion == "skipped") | .name] | sort | unique | .[]')"
+    s_skipped=""
+    s_excused=""
+    gates=""
+    gate_note=""
+    if [ -n "$s_skipped_all" ]; then
+      gates="$(job_gates "$WORKFLOWS_DIR/$base")"
+      if [ "$gates" = UNAVAILABLE ]; then
+        gates=""
+        gate_note="(job if: read unavailable — every skip counted)"
+      fi
+    fi
+    while IFS= read -r j; do
+      [ -n "$j" ] || continue
+      cond="$(printf '%s\n' "$gates" | awk -F'\t' -v n="$j" '$1 == n { sub(/^[^\t]*\t/, ""); print; exit }')"
+      if [ -n "$gates" ] && [ -n "$cond" ] && excused_skip "$cond"; then
+        s_excused="$s_excused$j
+"
+      else
+        s_skipped="$s_skipped$j
+"
+      fi
+    done <<EOF
+$s_skipped_all
+EOF
     s_skipped_n=0
     while IFS= read -r j; do [ -n "$j" ] || continue; s_skipped_n=$((s_skipped_n + 1)); done <<EOF
 $s_skipped
@@ -435,6 +538,8 @@ EOF
       say "ok (rerun)      $base — $window; newest scheduled success $s_last (${age_days}d)."
       say "                job read: scheduled run $s_win_id executed the SAME job(s) the push arm executes and"
       say "                skipped none. A repeat of a full run, not a launder — it buys time-coverage only."
+      [ -z "$s_excused" ] || say "                excused skips (reporter or pull_request-only, never the cron's job): $(printf '%s' "$s_excused" | tr '\n' '|' | sed 's/|$//')"
+      [ -z "$gate_note" ] || say "                $gate_note"
       continue
     fi
 
@@ -442,6 +547,8 @@ EOF
       REDS=$((REDS + 1))
       say "VACUOUS CRON    $base — $window"
       say "                SKIPPED on the cron: $(printf '%s' "$s_skipped" | tr '\n' '|' | sed 's/|$//')"
+      [ -z "$s_excused" ] || say "                excused skips (reporter or pull_request-only): $(printf '%s' "$s_excused" | tr '\n' '|' | sed 's/|$//')"
+      [ -z "$gate_note" ] || say "                $gate_note"
       say "                It SUCCEEDS on the cron, and that success asserts nothing a push does not."
       say "                scheduled run $s_win_id executed: $(printf '%s' "$s_exec" | tr '\n' '|' | sed 's/|$//')"
       say "                non-schedule run $o_win_id executed: $(printf '%s' "$o_exec" | tr '\n' '|' | sed 's/|$//')"

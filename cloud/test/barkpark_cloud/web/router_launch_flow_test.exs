@@ -17,6 +17,7 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
 
   alias BarkparkCloud.{Accounts, Billing, Registry}
   alias BarkparkCloud.Accounts.Team
+  alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -73,6 +74,185 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
     assert row.template == "blog-starter"
   end
 
+  ## Double submit — dwb-launch-flow-double-submit-test
+  #
+  # The SERVER half of dwb-6 criterion 4. The /new client jumps to the progress
+  # view on `409 {barkpark: {id}}` ("already provisioning"); this block pins that
+  # the server emits exactly that for an EQUIVALENT second launch — same team,
+  # same name, same template, same provider — while the first is still in
+  # flight, and that the duplicate creates nothing: ONE barkparks row, ONE
+  # provision job, ONE trial/billing transition, ONE go-live audit. Every request
+  # carries an explicit name, so nothing here depends on a derived default name.
+  #
+  # Two billing shapes, because the pre-fix failure differed between them: a
+  # TRIAL team (ceiling 1) got the plan-limit 403 on its own double-click, a
+  # SUPPORTER team (ceiling 3) got a 422 slug-taken. Neither is the 409 the
+  # client parses. Removing the go_live reconcile reds every non-control test.
+
+  @dup_body %{name: "Dup Blog", template: "blog-starter"}
+
+  # :trial starts UN-entitled with an unused ledger, so the FIRST launch
+  # auto-starts its one free trial (dwb-13) — the trial transition under test.
+  # :supporter is already subscribed, so no billing transition may happen.
+  defp dup_team(plan) do
+    {user, team} = user_with_team()
+    if plan == :supporter, do: {:ok, _} = Billing.subscribe(team, "supporter")
+    {:ok, token} = Accounts.create_user_session_token(user)
+    {team, token}
+  end
+
+  # Everything a duplicate launch could multiply, read from the DATABASE —
+  # never from the responses.
+  defp dup_ledger(team) do
+    ids = team |> Registry.list_barkparks() |> Enum.map(& &1.id)
+
+    count = fn query -> Repo.aggregate(query, :count, :id) end
+
+    %{
+      rows: ids,
+      provision_jobs:
+        count.(
+          from(j in BarkparkCloud.Registry.ProvisionJob,
+            where: j.barkpark_id in ^ids and j.kind == "provision"
+          )
+        ),
+      subscriptions:
+        count.(from(s in BarkparkCloud.Billing.Subscription, where: s.team_id == ^team.id)),
+      go_live_audits:
+        count.(
+          from(a in BarkparkCloud.Accounts.AuditEvent,
+            where: a.team_id == ^team.id and a.action == "barkpark.go_live"
+          )
+        ),
+      trial_started_at: Repo.get!(Team, team.id).trial_started_at
+    }
+  end
+
+  defp assert_one_of_everything(ledger, id, plan) do
+    assert ledger.rows == [id]
+    assert ledger.provision_jobs == 1
+    assert ledger.subscriptions == 1
+    assert ledger.go_live_audits == 1
+
+    case plan do
+      :trial -> assert %DateTime{} = ledger.trial_started_at
+      :supporter -> assert is_nil(ledger.trial_started_at)
+    end
+  end
+
+  defp assert_already_provisioning(conn, id) do
+    assert conn.status == 409,
+           "want 409 already_provisioning, got #{conn.status} #{conn.resp_body}"
+
+    body = json_body(conn)
+    assert body["error"] == "already_provisioning"
+    assert body["barkpark"]["id"] == id
+    assert body["barkpark"]["name"] == "Dup Blog"
+  end
+
+  describe "double submit (same user, equivalent launch)" do
+    for plan <- [:trial, :supporter] do
+      test "#{plan}: sequential re-post → 409 already_provisioning naming the first id; nothing doubles" do
+        plan = unquote(plan)
+        {team, token} = dup_team(plan)
+
+        first = call(:post, "/v1/launch", @dup_body, token)
+        assert first.status == 201
+        id = json_body(first)["barkpark"]["id"]
+        after_first = dup_ledger(team)
+        assert_one_of_everything(after_first, id, plan)
+
+        assert_already_provisioning(call(:post, "/v1/launch", @dup_body, token), id)
+        # A third click gets the same answer — the reconcile is stable.
+        assert_already_provisioning(call(:post, "/v1/launch", @dup_body, token), id)
+
+        # The duplicates changed NOTHING: same row, same job count, same
+        # subscription count, the trial stamp not moved, one audit.
+        assert dup_ledger(team) == after_first
+      end
+
+      test "#{plan}: racing pair → one 201 + one 409, both naming the SAME id; nothing doubles" do
+        plan = unquote(plan)
+        {team, token} = dup_team(plan)
+        parent = self()
+
+        # The go_live_limit_test race shape: each racer borrows the test's
+        # sandbox connection. The pair interleaves at the APPLICATION level —
+        # both can read "no twin yet" before either inserts, which is where a
+        # duplicate is born. The database side (the team row FOR UPDATE and the
+        # (team_id, slug) unique index) picks the loser; the loser must still
+        # answer 409 with the WINNER's id.
+        responses =
+          for _ <- 1..2 do
+            Task.async(fn ->
+              Ecto.Adapters.SQL.Sandbox.allow(Repo, parent, self())
+              conn = call(:post, "/v1/launch", @dup_body, token)
+              {conn.status, json_body(conn)}
+            end)
+          end
+          |> Enum.map(&Task.await(&1, 30_000))
+
+        assert responses |> Enum.map(&elem(&1, 0)) |> Enum.sort() == [201, 409],
+               "want exactly one 201 and one 409, got #{inspect(responses)}"
+
+        assert [id] = responses |> Enum.map(fn {_, b} -> b["barkpark"]["id"] end) |> Enum.uniq()
+        assert is_binary(id)
+        assert {409, %{"error" => "already_provisioning"}} = List.keyfind(responses, 409, 0)
+
+        assert_one_of_everything(dup_ledger(team), id, plan)
+      end
+    end
+
+    # CONTROLS — the reconcile keys on the EQUIVALENT in-flight launch, not on
+    # "any launch by this team". Without these, a server that 409'd every second
+    # launch would pass the block above.
+    test "control: a DIFFERENT name is a new instance (201), not a reconcile" do
+      {team, token} = dup_team(:supporter)
+      a = json_body(call(:post, "/v1/launch", @dup_body, token))["barkpark"]["id"]
+
+      conn = call(:post, "/v1/launch", %{@dup_body | name: "Other Blog"}, token)
+      assert conn.status == 201
+      refute json_body(conn)["barkpark"]["id"] == a
+      assert length(dup_ledger(team).rows) == 2
+    end
+
+    test "control: the same name with a DIFFERENT template is refused, not reconciled" do
+      {team, token} = dup_team(:supporter)
+      assert call(:post, "/v1/launch", @dup_body, token).status == 201
+
+      conn = call(:post, "/v1/launch", %{@dup_body | template: "website-starter"}, token)
+      assert conn.status == 422
+      assert length(dup_ledger(team).rows) == 1
+    end
+
+    test "control: a LIVE first instance (host set) is not 'already provisioning'" do
+      {team, token} = dup_team(:supporter)
+      id = json_body(call(:post, "/v1/launch", @dup_body, token))["barkpark"]["id"]
+
+      {1, _} =
+        Repo.update_all(from(b in BarkparkCloud.Registry.Barkpark, where: b.id == ^id),
+          set: [host: "203.0.113.7"]
+        )
+
+      assert call(:post, "/v1/launch", @dup_body, token).status == 422
+      assert dup_ledger(team).rows == [id]
+    end
+
+    test "control: a FAILED first provision is not 'already provisioning' (Retry owns it)" do
+      {team, token} = dup_team(:supporter)
+      id = json_body(call(:post, "/v1/launch", @dup_body, token))["barkpark"]["id"]
+
+      {1, _} =
+        Repo.update_all(
+          from(j in BarkparkCloud.Registry.ProvisionJob, where: j.barkpark_id == ^id),
+          set: [status: "failed"]
+        )
+
+      assert call(:post, "/v1/launch", @dup_body, token).status == 422
+      assert dup_ledger(team).provision_jobs == 1
+    end
+  end
+
   test "unentitled + trial spent → 402 {no_active_subscription, checkout_path}" do
     {user, team} = user_with_team()
     exhaust_trial(team)
@@ -102,5 +282,85 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
     assert body["error"] == "limit_reached"
     assert body["upgrade_path"] == "/v1/billing/checkout"
     assert length(Registry.list_barkparks(team)) == 1
+  end
+
+  # task-ef37ebad8249e82a — the /new form labels the name "(optional)" and sends
+  # no `name` when the field is left blank. The server used to 422 name_required
+  # on exactly that request; it now defaults the name from the template's catalog
+  # title. Removing the default in go_live reds every test in this block.
+  describe "a nameless launch with a template defaults the name from the template" do
+    for {label, extra} <- [
+          {"absent", %{}},
+          {"empty", %{name: ""}},
+          {"whitespace-only", %{name: "   \t "}}
+        ] do
+      test "#{label} name → 201, named from the template title, clean FQDN" do
+        {user, team} = user_with_team()
+        {:ok, _} = Billing.subscribe(team, "supporter")
+        {:ok, token} = Accounts.create_user_session_token(user)
+
+        conn =
+          call(
+            :post,
+            "/v1/launch",
+            Map.put(unquote(Macro.escape(extra)), :template, "blog-starter"),
+            token
+          )
+
+        assert conn.status == 201, conn.resp_body
+        assert json_body(conn)["barkpark"]["name"] == "Blog Starter"
+
+        [row] = Registry.list_barkparks(team)
+        assert row.name == "Blog Starter"
+        assert row.slug == "blog-starter"
+        assert row.template == "blog-starter"
+        assert row.url == Barkpark.clean_url("blog-starter")
+      end
+    end
+
+    test "two teams launching the same template nameless both succeed with distinct FQDNs" do
+      {user_a, team_a} = user_with_team()
+      {user_b, team_b} = user_with_team()
+      {:ok, _} = Billing.subscribe(team_a, "supporter")
+      {:ok, _} = Billing.subscribe(team_b, "supporter")
+      {:ok, token_a} = Accounts.create_user_session_token(user_a)
+      {:ok, token_b} = Accounts.create_user_session_token(user_b)
+
+      assert call(:post, "/v1/launch", %{template: "blog-starter"}, token_a).status == 201
+      assert call(:post, "/v1/launch", %{template: "blog-starter"}, token_b).status == 201
+
+      [a] = Registry.list_barkparks(team_a)
+      [b] = Registry.list_barkparks(team_b)
+      # Clean-first: the first claimant gets the clean label; the second falls
+      # back to the globally-unique `<slug>-<team_short_id>` form.
+      assert a.url == Barkpark.clean_url("blog-starter")
+      assert b.url == Barkpark.provisioning_url({"blog-starter", team_b.id})
+      assert a.url != b.url
+    end
+
+    test "a given name still wins over the template default" do
+      {user, team} = user_with_team()
+      {:ok, _} = Billing.subscribe(team, "supporter")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      assert call(:post, "/v1/launch", %{name: "Mine", template: "blog-starter"}, token).status ==
+               201
+
+      assert [%{name: "Mine", slug: "mine"}] = Registry.list_barkparks(team)
+    end
+
+    test "no template and no name → 422 name_required (nothing to derive from)" do
+      {user, team} = user_with_team()
+      {:ok, _} = Billing.subscribe(team, "supporter")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      for body <- [%{}, %{name: ""}, %{name: "   "}] do
+        conn = call(:post, "/v1/launch", body, token)
+        assert conn.status == 422
+        assert json_body(conn)["error"] == "name_required"
+      end
+
+      assert Registry.list_barkparks(team) == []
+    end
   end
 end

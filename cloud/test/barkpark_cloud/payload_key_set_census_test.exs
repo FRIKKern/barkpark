@@ -1084,25 +1084,63 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     {"site_deployment_json/3", :unread, "console",
      "BROWSER-ONLY. gh-5's live build console; the CLI streams its own lines from the deploy stream rather than re-rendering this list."},
     {"barkpark_json/6", :phantom, "team",
-     "EMITTED, outside Side A's scope by design. /v1/barkparks Map.put's `team` onto the row in its all_teams? arm (router.ex:2077), i.e. in the ROUTE, not in the base serializer this census walks. The same one-level bound that stops the walk over-collecting a helper's private shapes also makes this key invisible — and `Barkpark.Team` is decoded and read (client_test.go:208), so the read lands."}
+     "EMITTED, outside Side A's scope by design. /v1/barkparks Map.put's `team` onto the row in its all_teams? arm (router.ex:2077), i.e. in the ROUTE, not in the base serializer this census walks. The same one-level bound that stops the walk over-collecting a helper's private shapes also makes this key invisible — and `Barkpark.Team` is decoded and read (client_test.go:208), so the read lands."},
+    # RULED RECONCILED, dr-w11-payload-divergence-close — the three Personal Dev
+    # Fleet keys, moved up from KNOWN OPEN. Their reader is REAL and is a Go
+    # struct; it simply lives outside this arm's union root. `bp cloud support`
+    # lists /v1/barkparks into its own `supportCPRow` (internal/cli/
+    # cloud_support_cmd.go — cited by SYMBOL: the deleted rows cited :1460-1462
+    # and the struct had already moved to :1610-1612 when this ruling was
+    # written). Widening the root to internal/cli was measured and refused
+    # (see the note that stood above these rows: +212 unrelated tag names, each
+    # a D260 collision); declaring the three on `cloudclient.Barkpark` as well
+    # would be a SECOND decode with no reader — the "closed by silence" shape
+    # this split exists to refuse.
+    {"barkpark_json/6", :unread, "fleet_role",
+     "DECODED AND READ OUTSIDE THE UNION ROOT. `supportCPRow.FleetRole` (internal/cli/cloud_support_cmd.go) decodes it and `bp cloud support` branches on it (`row.FleetRole == \"support\"`) to find the support boxes it enrols, lists and revokes."},
+    {"barkpark_json/6", :unread, "fleet_parent_id",
+     "DECODED OUTSIDE THE UNION ROOT, by the same `supportCPRow` (FleetParentID). No Go code branches on it today — `resolveParent` picks the parent main by matching a row's URL host, not by this id — so this is decode-only, stated as such, and still a CLI-side decode rather than a missing one."},
+    {"barkpark_json/6", :unread, "fleet_token_id",
+     "DECODED AND READ OUTSIDE THE UNION ROOT. `supportCPRow.FleetTokenID` is what `bp cloud support` prints as a support box's revocation-token id (the cp-read step's `(token id …)` list) and collects for revocation (`supportTokenIDs`). Not a secret (schema custody note)."}
   ]
 
   # KNOWN OPEN: a real hole. Every reason names the tracker. Do NOT move a row up
   # to RECONCILED to make a red go away — the whole point of the split is that
   # "we decided this is fine" and "nobody has looked" are different sentences.
   @known_open [
-    {"barkpark_json/6", :unread, "region",
-     "dr-w11-payload-divergence-close — launch placement the fleet table cannot show."},
-    {"barkpark_json/6", :unread, "server_type",
-     "dr-w11-payload-divergence-close — launch size, same gap as region."},
-    {"barkpark_json/6", :unread, "unreachable_count",
-     "dr-w11-payload-divergence-close — the consecutive-miss counter behind health_status. `bp` prints the health VERDICT with none of its evidence."},
-    {"barkpark_json/6", :unread, "unreachable_notification_sent",
-     "dr-w11-payload-divergence-close — the once-per-outage alert latch, unread."},
-    {"barkpark_json/6", :unread, "autoupdate_triggered_at",
-     "dr-w11-payload-divergence-close — the in-flight rollout marker; without it a CLI status can print a stale cached verdict over a landing rollout."},
-    {"barkpark_json/6", :unread, "custom_host",
-     "dr-w11-payload-divergence-close — the attached platform-zone host."},
+    # ELEVEN ROWS CLOSED, THREE MOVED UP (dr-w11-payload-divergence-close, the
+    # tracker every one of them named). Deleted because the key is now DECODED
+    # by `internal/cloudclient` — and each has a render in `bp`, since a decode
+    # nobody reads is the silence this split refuses:
+    #
+    #   barkpark_json/6 :unread  region, server_type      -> Barkpark.Region/ServerType;
+    #                                                         `bp cloud status -o json`
+    #   barkpark_json/6 :unread  unreachable_count,       -> *int / bool; the DETAIL of a
+    #                            unreachable_notification_sent  degraded/unreported row
+    #                                                         ("N consecutive missed health
+    #                                                         checks · unreachable alert sent")
+    #   barkpark_json/6 :unread  autoupdate_triggered_at  -> *string; the UPDATE cell reads
+    #                                                         "updating → <latest>" over the
+    #                                                         cached verdict, as the console does
+    #   barkpark_json/6 :unread  custom_host              -> -o json `custom_host`
+    #   pressure        :unread  req_per_s, p95_ms        -> Pressure.ReqPerS/P95Ms; req/s
+    #                                                         rides beside the 5xx rate (D103),
+    #                                                         p95 in -o json (D131: never a fence)
+    #   site_deployment_json/3 :unread preview_host,      -> SiteDeployment.PreviewHost/URL;
+    #                                  preview_url           a live preview names ITS url
+    #
+    # and one PHANTOM closed from the decoder side:
+    #
+    #   site_deployment_json/3 :phantom runtime_target    -> SiteDeployment.RuntimeTarget
+    #                                                         DELETED. The plane derives it
+    #                                                         from site.kind inside
+    #                                                         `Sites.Deploy` and sends it only
+    #                                                         to the BOX; no deployment row
+    #                                                         ever carried it.
+    #
+    # Every deletion was forced, not chosen: the "no longer unread/phantom" arm
+    # reds on a row whose key stopped diverging, and `@go_tag_pinned` moved in
+    # the same commit. The fleet_* rows moved to @reconciled with a ruling.
     # THE `suspended_at` ROW IS GONE (task-85c531c2adbf0dff, the tracker the
     # deleted row itself named). It read:
     #
@@ -1141,20 +1179,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # or json:"transition" either (`grep -rn 'json:"previous_sha"' internal/cli`
     # returns nothing), so the rollback verdict stays newly-unread under the
     # widened union too. Three correct sentences cost less than 212 blind spots.
-    {"barkpark_json/6", :unread, "fleet_role",
-     "dr-w11-payload-divergence-close — Personal Dev Fleet group record (PDF-D61). No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1460 (json:\"fleet_role\"), which is outside this arm's internal/cloudclient union root."},
-    {"barkpark_json/6", :unread, "fleet_parent_id",
-     "dr-w11-payload-divergence-close — the main this box binds to. No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1461 (json:\"fleet_parent_id\"), outside this arm's union root."},
-    {"barkpark_json/6", :unread, "fleet_token_id",
-     "dr-w11-payload-divergence-close — the opaque revocation-token id (not a secret). No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1462 (json:\"fleet_token_id\"), outside this arm's union root."},
-    {"barkpark_json/6 pressure", :unread, "p95_ms",
-     "dr-w11-payload-divergence-close — charter D131's p95 vital. The Pressure struct's own doc comment asserts its tags are @unmetered_pressure VERBATIM; that sentence is now false by two keys."},
-    {"barkpark_json/6 pressure", :unread, "req_per_s",
-     "dr-w11-payload-divergence-close — charter D103's DENOMINATOR. It rides WITH err_5xx_per_s precisely so nobody prints an error share without the volume it came from — and err_5xx_per_s IS decoded while this is not, which is the exact shape D103 forbids."},
-    {"site_deployment_json/3", :unread, "preview_host",
-     "dr-w11-payload-divergence-close — gh-6 preview identity. SiteDeployment decodes Branch and Environment but neither preview key, so a CLI preview deploy cannot name the surface it just built."},
-    {"site_deployment_json/3", :unread, "preview_url",
-     "dr-w11-payload-divergence-close — the click-through target, same gap as preview_host."},
+    #
+    # THOSE THREE ROWS ARE NOW @reconciled (dr-w11-payload-divergence-close) —
+    # the refusal above IS the ruling: a real Go reader outside the root is a
+    # reconciled divergence, not an open hole. The reasons there cite the
+    # reader by symbol (`supportCPRow`), because the :1460-1462 anchor above
+    # had already rotted to :1610-1612.
     # DELETED (task-62ed247e1dd0b960's sibling, the CLI half of the node-slot row —
     # site-spawner-backlog-node-deployment-slot-surfacing): the two `:unread` rows for
     # `slot` / `health_exit_code`. Both said "the PRODUCER half only … declares no Slot
@@ -1173,8 +1203,6 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # serializer's. The column now exists and `deployment_json/1` emits it, so
     # the hole is CLOSED and the row must go: the "no longer phantom" arm reds on
     # an allowlist row whose key is emitted.
-    {"site_deployment_json/3", :phantom, "runtime_target",
-     "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
     # DELETED (dr-w15-s3-followup-decode-refusal-phase, the CLI half of
     # dr-w15-s3-emit-the-two-corpses): the `:unread` row for `refusal_phase`. It
     # said the key was "NOT yet in `bp cloud site status`" and that the slice was
@@ -2018,7 +2046,18 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # (SiteBuildLogRecord in site_build_log.go and SiteBuildLogBytes in
   # site_build_log_bytes.go), so they move this NAME floor AND enter the SITE
   # register below at 2 apiece.
-  @go_tag_pinned 385
+  #
+  # dr-w11-payload-divergence-close, MEASURED 2026-09-25 by the PIN CO-EDIT arm
+  # on this branch off origin/main c423813d7 ("@go_tag_pinned 385 -> 395"),
+  # never by arithmetic. TEN new NAMES, one site each, every one a KNOWN OPEN
+  # :unread row this commit deletes: `Barkpark` gains region, server_type,
+  # unreachable_count, unreachable_notification_sent, autoupdate_triggered_at
+  # and custom_host; `Pressure` gains req_per_s and p95_ms; `SiteDeployment`
+  # gains preview_host and preview_url. The same commit DELETES
+  # `SiteDeployment.RuntimeTarget` (the :phantom row), which does NOT move this
+  # NAME pin — runtime_target is still declared on three other structs — and
+  # moves the SITE register's runtime_target row 4 -> 3 instead.
+  @go_tag_pinned 395
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2368,7 +2407,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "role" => 4,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 3 -> 4. `SiteBuildLogRecord.RuntimeTarget` — static/node,
     # as the record captured it.
-    "runtime_target" => 4,
+    # dr-w11-payload-divergence-close: 4 -> 3. `SiteDeployment.RuntimeTarget`
+    # DELETED — the :phantom allowlist row it carried is deleted in the same
+    # commit. No deployment serializer ever emitted runtime_target (the plane
+    # sends it only to the BOX, off site.kind), so the field decoded "" on every
+    # real response. The three that remain: SpawnSite, the rollback result, and
+    # SiteBuildLogRecord.
+    "runtime_target" => 3,
     "sample" => 6,
     "scale_mode" => 2,
     "scope" => 4,

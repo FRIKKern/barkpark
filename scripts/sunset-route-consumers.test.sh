@@ -202,8 +202,8 @@ probe "bin/barkpark (wait_server — the boot gate barkpark up dies on)" \
 probe "bin/barkpark (server_answering PRIMARY — stop/status identity probe)" \
   "$(extract_path 'bin/barkpark server_answering' bin/barkpark 's|^  curl -sf "http://\$PHX_HOST:\$PORT\(/[^"]*\)" >/dev/null 2>&1 && return 0$|\1|p')"
 
-probe "run.sh (api_answers — the dev bring-up 'is Phoenix already up?' test)" \
-  "$(extract_path 'run.sh api_answers' run.sh 's|.*bp_curl_code -s -o /dev/null "\$API_URL\(/[^"]*\)".*|\1|p')"
+probe "scripts/dev/run.sh (api_answers — the dev bring-up 'is Phoenix already up?' test)" \
+  "$(extract_path 'scripts/dev/run.sh api_answers' scripts/dev/run.sh 's|.*bp_curl_code -s -o /dev/null "\$API_URL\(/[^"]*\)".*|\1|p')"
 
 probe "scripts/setup-windows.ps1 (Start-Server boot wait)" \
   "$(extract_path 'setup-windows Start-Server' scripts/setup-windows.ps1 's|^      \$r = Invoke-WebRequest "http://localhost:\$Port\(/[^"]*\)" -UseBasicParsing -TimeoutSec 3$|\1|p')"

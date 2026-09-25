@@ -136,9 +136,8 @@ registry() {
 .tool-versions none the asdf production toolchain pin; toolchain-skew-check reads it
 AGENTS.md none agent-facing router
 CHANGELOG.md none release notes
-CLAUDE.md none the repo router doc
+CLAUDE.md elixir the repo router doc; the Elixir suite reads it
 DESIGN.md none design notes
-HYPERQUIZ.md none quiz plugin notes
 LICENSE none the licence
 Makefile none developer entry points
 README.md none human readme
@@ -154,10 +153,8 @@ connectors none connector definitions
 deploy cloud deploy scripts the cloud suite reads
 deploy.sh none the legacy single-box deploy entry point
 design elixir design fixtures the Elixir suite reads
-dev.sh none local dev launcher
 docker-compose.yml none the compose stack
 docs none agent and human documentation; doc-gates reads it
-docs-site none the published documentation site
 go.mod go the Go module manifest
 go.sum go the Go module checksums
 internal cloud Go internals; cloud.yml dispatches on internal/**
@@ -167,14 +164,12 @@ package-lock.json none npm lockfile
 package.json none root npm manifest
 pnpm-lock.yaml none pnpm lockfile
 pnpm-workspace.yaml none the pnpm workspace definition
-run.sh none local run helper
 scaffy none scaffy templates and catalog
 scripts cloud the gate and ops scripts; cloud-path-escape-check.sh declares scripts/** (dr-w26-s4), so cloud.yml dispatches on it
 sdk none generated SDK artefacts
 templates cloud,go project templates both suites read
 tooling none standalone tooling trees
 vercel.json none vercel project config
-watch.sh none local watch helper
 web none the Next.js web demo
 REGISTRY
 }
@@ -456,12 +451,12 @@ selftest() {
 
   # ── 4. a STALE row (registered, absent from the tree) REDS ────────────────
   local d4="$tmp/d4"; mk_root "$d4"
-  rm -rf "$d4/docs-site"
+  rm -rf "$d4/changelog"
   printf 'README.md\n' > "$tmp/p4"
   local out4 rc4
   out4="$(run_subject "$d4" "$tmp/p4")"; rc4=$?
   if [ "$rc4" -ne 0 ]; then ok "4a a registry row whose entry is gone reds (rc=$rc4)"; else bad "4a a stale row passed"; fi
-  case "$out4" in *"STALE registry row 'docs-site'"*) ok "4b the stale row is named" ;; *) bad "4b the stale row is not named: $out4" ;; esac
+  case "$out4" in *"STALE registry row 'changelog'"*) ok "4b the stale row is named" ;; *) bad "4b the stale row is not named: $out4" ;; esac
 
   # ── 5. a FALSE CLAIM reds — a classification is checked, not believed ─────
   local d5="$tmp/d5"; mk_root "$d5"
@@ -538,13 +533,13 @@ selftest() {
 
   # ── 12. a registry row naming a path git does not track reds ─────────────
   local d12="$tmp/d12"; mk_root "$d12"
-  git -C "$d12" rm -r -q --cached docs-site >/dev/null 2>&1
+  git -C "$d12" rm -r -q --cached changelog >/dev/null 2>&1
   git -C "$d12" -c user.email=t@e -c user.name=t commit -qm untrack >/dev/null 2>&1
   printf 'README.md\n' > "$tmp/p12"
   local out12 rc12
   out12="$(run_subject "$d12" "$tmp/p12")"; rc12=$?
   if [ "$rc12" -ne 0 ]; then ok "12a a row naming an untracked path reds (rc=$rc12)"; else bad "12a untracked row passed: $out12"; fi
-  case "$out12" in *"UNTRACKED registry row 'docs-site'"*) ok "12b it is named" ;; *) bad "12b: $out12" ;; esac
+  case "$out12" in *"UNTRACKED registry row 'changelog'"*) ok "12b it is named" ;; *) bad "12b: $out12" ;; esac
 
   # ── 13. DELETING a top-level entry passes: the derived diff leaves out
   #        deleted paths, so removing an entry and its row is possible at all.

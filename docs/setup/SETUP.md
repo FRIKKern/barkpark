@@ -140,7 +140,7 @@ Authorization: Bearer barkpark-dev-token
 
 ## Keep-alive on macOS
 
-There is **no canonical service mechanism** for local dev — the systemd `make` targets are prod-only. To survive logout/reboot, use a LaunchAgent. The local foreground options (`make api`, tmux `make dev`, `./run.sh`) do **not** survive a session end.
+There is **no canonical service mechanism** for local dev — the systemd `make` targets are prod-only. To survive logout/reboot, use a LaunchAgent. The local foreground options (`make api`, tmux `make dev`, `./scripts/dev/run.sh`) do **not** survive a session end.
 
 Create `~/Library/LaunchAgents/dev.pelle.barkpark.plist` running `mix phx.server` with:
 

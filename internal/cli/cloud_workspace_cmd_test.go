@@ -1644,7 +1644,7 @@ func TestCloudWorkspaceListNarrowsToOneWorkspace(t *testing.T) {
 }
 
 // TestCloudWorkspaceExportWireByteAgnostic is the RE-RUNNABLE instrument behind
-// scripts/pds-w47-export-wire-bytes-2026-09-17.md. PDS-D204 moved the export
+// docs/ledgers/pds-w47-export-wire-bytes-2026-09-17.md. PDS-D204 moved the export
 // route send_resp -> send_file, which deleted the transparent gzip the CLI used
 // to receive; the live paired measurement (2026-09-17) put one profile=dev
 // export at 310,917,632 wire bytes under send_file against 83,323,612 gzipped
@@ -1712,7 +1712,7 @@ func TestCloudWorkspaceExportWireByteAgnostic(t *testing.T) {
 	// has not pinned Accept-Encoding itself.
 	if !strings.Contains(identityOffered, "gzip") {
 		t.Fatalf("the export transport must still offer gzip transparently; Accept-Encoding = %q — "+
-			"see scripts/pds-w47-export-wire-bytes-2026-09-17.md for what this costs", identityOffered)
+			"see docs/ledgers/pds-w47-export-wire-bytes-2026-09-17.md for what this costs", identityOffered)
 	}
 
 	// ARM 2 — the quiet one. Whatever the wire does, the receipt is the same tar.

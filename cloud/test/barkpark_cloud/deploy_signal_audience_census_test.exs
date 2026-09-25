@@ -153,9 +153,12 @@ defmodule BarkparkCloud.DeploySignalAudience.ExReader do
   to classify the population it draws from:
 
     * `:platform_allowlist` — the body's source is the `:platform_admin_emails`
-      config allowlist. That population is EMPTY BY CONSTRUCTION on prod: no
-      User field carries operator-ness, no route or console writes the key, and
-      `config.exs` hard-defaults it to `[]`.
+      config allowlist. No User field carries operator-ness, no route or console
+      writes the key, and `config.exs` hard-defaults it to `[]`, so for
+      seventeen waves it was EMPTY on prod. It is no longer:
+      gr-ops-platform-admin-emails set the env var on the live control plane,
+      and the census classifies it REACHABLE (dr-w19-rollout-brake-is-machine-only,
+      see `@empty_push_populations`).
     * `:team_members` — the body draws team membership rows. A team with an
       owner always has at least that one member.
     * `:unknown` — anything else. Fails CLOSED: the census refuses to answer
@@ -626,10 +629,14 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   population that resolver draws from, parsed from `notifications.ex`.
 
   THE ASSERTION: a signal every one of whose readers lands on a no-human tier —
-  `operator` or `worker` (pull), see `@empty_pull_tiers` — or on the platform
-  allowlist (push) has an EMPTY AUDIENCE BY CONSTRUCTION
+  `worker` (pull), see `@empty_pull_tiers`; no push population is empty today,
+  see `@empty_push_populations` — has an EMPTY AUDIENCE BY CONSTRUCTION
   and must be allowlisted with a reason NAMING ITS CLOSER — or it reds, naming
   the signal and the reader's `file:line`.
+
+  `operator` and the platform allowlist WERE in that set until
+  dr-w19-rollout-brake-is-machine-only: they are one population, and
+  gr-ops-platform-admin-emails provisioned it on the live control plane.
 
   Nothing here reads `PLATFORM_ADMIN_EMAILS`, or any `Application.get_env`. A
   config-reading guard is vacuous by construction: the CI value is `[]` whatever
@@ -644,6 +651,13 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   reader is a MACHINE population; since dr-w19-s5 this census calls that
   population empty for a HUMAN signal, but it still does not judge whether the
   machine's secret is provisioned anywhere.
+
+  The `operator` tier is the mirror case. It is REACHABLE here because a human
+  act outside this tree (gr-ops-platform-admin-emails) put people in it, not
+  because any source line guarantees them: the source default is still `[]`.
+  This census reads source, never config, so if the live env var were emptied
+  again it would stay green. That is the price of refusing a config read that
+  is vacuous in CI, and it is stated here rather than hidden.
 
   Nor does it judge WHO within a population may see WHICH row. A push signal
   resolving `team_members` is REACHABLE; whether it fans one team's rows into
@@ -791,8 +805,9 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
         # from the record's /build-log, but onto the SAME signal: one deployment's
         # build log. The bytes door is deliberately operator-gated because raw,
         # never-scrubbed bytes can carry secrets, so Side B derives tier `operator`
-        # (empty) for THIS reader while the record reader stays `user(s)`. That is
-        # NOT an empty-audience finding: the build-log signal REACHES a human over
+        # for THIS reader while the record reader stays `user(s)`. (It was an
+        # EMPTY tier until dr-w19-rollout-brake-is-machine-only; it is reachable
+        # now.) Either way it was NOT an empty-audience finding: the signal REACHES a human over
         # the scrubbed record door, and the raw-bytes door is a superset-privilege
         # escalation, not a signal addressed to nobody — which is exactly why the
         # empty-audience arm reds only when EVERY reader of a signal is empty.
@@ -885,7 +900,33 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   # population and this census does not judge whether its secret is provisioned
   # anywhere") is now narrowed by construction: the census does not judge the
   # PROVISIONING, but it no longer calls the tier reachable.
-  @empty_pull_tiers ["operator", "worker"]
+  #
+  # `operator` LEFT the list in dr-w19-rollout-brake-is-machine-only. It was
+  # never empty for a SOURCE reason: `Auth.require_platform_operator/2` admits
+  # whoever `Notifications.platform_admin_emails/0` returns, and that was empty
+  # only because the env var was unset on prod. gr-ops-platform-admin-emails
+  # set it. Measured 2026-09-25T08:58Z by lead-api-r22: a real bp-login session
+  # gets `platform_operator: true` from GET /v1/me, and `bp cloud rollout status`
+  # (GET /v1/operator/autoupdate) answers 200 with the brake's position. A tier a
+  # person can pass is not empty, so keeping it here would make every red on it
+  # a false one and every allowlist row over it a stale excuse.
+  #
+  # `worker` STAYS: no person holds `WORKER_TOKEN`. That is what keeps this
+  # census able to red on a pull signal, and the control test
+  # "RED-ON-DEMAND: a signal whose only reader is the worker door REDS" proves it
+  # on the real router, not on a hand-written tier string.
+  @empty_pull_tiers ["worker"]
+
+  # THE PUSH-SIDE EMPTY POPULATIONS. `:platform_allowlist` is the SAME
+  # population as the `operator` tier above — `platform_admin_emails/0` is both
+  # the recipient resolver and the gate — so it left this list in the same
+  # commit, for the same measured reason. Calling one population reachable when
+  # it gates a route and empty when it receives mail would be two answers to one
+  # question. The list is empty today; no push reader resolves to it anyway (all
+  # three derive `team_members`). `:unknown` is not here on purpose: it is a
+  # population the census could not read, and the push rows' derived output is
+  # printed above so a reader sees one appear.
+  @empty_push_populations []
 
   # ---------------------------------------------------------------------------
   # THE ALLOWLIST — today's empty audiences, each WITH ITS CLOSER.
@@ -904,70 +945,67 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   # The other row is NOT armed: dr-w18-s3 counts the digest's loss but leaves its
   # AUDIENCE the platform allowlist, so that row's closer is a later slice.
   @empty_audience_allowlist %{
-    # `fleet_deploy_census` used to sit here: its only reader sent
-    # GET /v1/operator/deploy-ledger/census, gated on the `:platform_admin_emails`
-    # allowlist that is unset on prod and unsettable through any route, console
-    # action or User field — ZERO accounts could read the epic's headline number.
-    # Its named CLOSER (dr-w18-s1) is THIS branch: the client now reads the
-    # team-scoped GET /v1/deploy-ledger/census, tier `user`, which every member of
-    # every team can reach. The "allowlist cannot rot" test reds on an excuse that
-    # stopped being true and ordered this deletion by name, so the row is gone in
-    # the same commit as the reader that closed it.
-    #
-    # `fleet_operator_digest` used to sit here too: `deliver_fleet_digest/1`
-    # resolved its recipients through `platform_admin_emails/0`, so the daily
-    # digest took its `:no_admins` arm every single day and nobody ever received
-    # one. Its named CLOSER (dr-w19-fleet-digest-audience-still-empty) is THIS
-    # branch: the digest is now partitioned by team and addressed to each team's
-    # own membership rows, so Side B reclassifies it `team_members` with no test
-    # edit at all. The rot assertion below reddened in its own words ("This is
-    # the GOOD direction: its closer landed. Delete the allowlist row.") and the
-    # row is gone in the same commit as the re-address that closed it.
-    # `site_build_log` used to sit here, and it was FOUND BY THE DERIVATION, NOT BY
-    # A HUMAN (dr-w19-audience-registry-fail-open) — it had no row in this file at
-    # all until the candidate set named it, and the census had been green over it
-    # for nine waves. Its reader sends GET /v1/sites/*/deployments/*/build-log,
-    # which the router enforced at tier `operator`: the `:platform_admin_emails`
-    # allowlist, unset on prod and unsettable through any route, console action or
-    # User field. So the ONE deploy-health read that carries a failed build's
-    # ACTUAL LOG TEXT, rather than a failure-class label, was readable by zero
-    # accounts while its sibling reads on the same resource
-    # (GET /v1/sites/*/deployments/*, tier `user(s)`) answered every member of the
-    # owning team. Its named CLOSER (dr-w19-site-build-log-is-operator-only) is
-    # THIS branch: the route now goes through `with_team_site(conn, {:ability,
-    # "read"}, …)` — the sibling's own door — so Side B derives tier `user(s)` and
-    # the rot assertion below reddened in its own words ("This is the GOOD
-    # direction: its closer landed. Delete the allowlist row."). The row is gone in
-    # the same commit as the re-point that closed it.
-    "fleet_rollout_state" =>
-      "EMPTY BY CONSTRUCTION — but the CONSTRUCTION MOVED, and so did the reason. " <>
-        "`platform_admin_emails/0` reads `[]` when the config key is unset, so the " <>
-        "gate still resolves to zero accounts by construction; what changed is WHY. " <>
-        "This row used to read " <>
-        "'`RolloutStatus` sends GET /v1/admin/autoupdate, tier `worker`' — the " <>
-        "machine population that holds `WORKER_TOKEN`, which no human account holds. " <>
-        "isu-backlog-operator-principal repointed the three rollout verbs at the " <>
-        "operator door (GET/POST /v1/operator/autoupdate*, the same trio the console " <>
-        "calls), so Side B now derives tier `operator` from source with no edit here. " <>
-        "The row's own prediction that repointing 'reds this census harder' is " <>
-        "REFUTED: dr-w19-s5 had already put `operator` in @empty_pull_tiers, so the " <>
-        "verdict is unchanged and only the REASON moved. What is left is not a " <>
-        "missing verb or a wrong door — it is that `:platform_admin_emails` is unset " <>
-        "on the live control plane, so the human-shaped door has nobody behind it. " <>
-        "Charter D30 rules that allowlist a PERMANENT HUMAN GATE. " <>
-        "CLOSER: gr-ops-platform-admin-emails — set PLATFORM_ADMIN_EMAILS on the live " <>
-        "control plane and the operator door opens for a real person; when it lands, " <>
-        "delete this row."
-  }
+                              # `fleet_deploy_census` used to sit here: its only reader sent
+                              # GET /v1/operator/deploy-ledger/census, gated on the `:platform_admin_emails`
+                              # allowlist that is unset on prod and unsettable through any route, console
+                              # action or User field — ZERO accounts could read the epic's headline number.
+                              # Its named CLOSER (dr-w18-s1) is THIS branch: the client now reads the
+                              # team-scoped GET /v1/deploy-ledger/census, tier `user`, which every member of
+                              # every team can reach. The "allowlist cannot rot" test reds on an excuse that
+                              # stopped being true and ordered this deletion by name, so the row is gone in
+                              # the same commit as the reader that closed it.
+                              #
+                              # `fleet_operator_digest` used to sit here too: `deliver_fleet_digest/1`
+                              # resolved its recipients through `platform_admin_emails/0`, so the daily
+                              # digest took its `:no_admins` arm every single day and nobody ever received
+                              # one. Its named CLOSER (dr-w19-fleet-digest-audience-still-empty) is THIS
+                              # branch: the digest is now partitioned by team and addressed to each team's
+                              # own membership rows, so Side B reclassifies it `team_members` with no test
+                              # edit at all. The rot assertion below reddened in its own words ("This is
+                              # the GOOD direction: its closer landed. Delete the allowlist row.") and the
+                              # row is gone in the same commit as the re-address that closed it.
+                              # `site_build_log` used to sit here, and it was FOUND BY THE DERIVATION, NOT BY
+                              # A HUMAN (dr-w19-audience-registry-fail-open) — it had no row in this file at
+                              # all until the candidate set named it, and the census had been green over it
+                              # for nine waves. Its reader sends GET /v1/sites/*/deployments/*/build-log,
+                              # which the router enforced at tier `operator`: the `:platform_admin_emails`
+                              # allowlist, unset on prod and unsettable through any route, console action or
+                              # User field. So the ONE deploy-health read that carries a failed build's
+                              # ACTUAL LOG TEXT, rather than a failure-class label, was readable by zero
+                              # accounts while its sibling reads on the same resource
+                              # (GET /v1/sites/*/deployments/*, tier `user(s)`) answered every member of the
+                              # owning team. Its named CLOSER (dr-w19-site-build-log-is-operator-only) is
+                              # THIS branch: the route now goes through `with_team_site(conn, {:ability,
+                              # "read"}, …)` — the sibling's own door — so Side B derives tier `user(s)` and
+                              # the rot assertion below reddened in its own words ("This is the GOOD
+                              # direction: its closer landed. Delete the allowlist row."). The row is gone in
+                              # the same commit as the re-point that closed it.
+                              #
+                              # `fleet_rollout_state` used to sit here, and it is the first row closed by a
+                              # HUMAN ACT rather than a code change. Its reader, `RolloutStatus`, first
+                              # sent GET /v1/admin/autoupdate (tier `worker`: `WORKER_TOKEN`, held by no
+                              # person); isu-backlog-operator-principal re-pointed it at
+                              # GET /v1/operator/autoupdate (tier `operator`), which was still empty
+                              # because `:platform_admin_emails` was unset on the live control plane
+                              # (Charter D30: a PERMANENT HUMAN GATE). Its named CLOSER,
+                              # gr-ops-platform-admin-emails, is DONE: the env var is set, a real bp-login
+                              # session reads the brake (lead-api-r22, 2026-09-25T08:58Z). The row said
+                              # "when it lands, delete this row", `operator` left @empty_pull_tiers
+                              # (dr-w19-rollout-brake-is-machine-only), the rot assertion reddened on it,
+                              # and it is deleted by name. The allowlist is EMPTY now; see
+                              # "RED-ON-DEMAND" below for why that is not a vacuous green.
+                            }
 
   # ---------------------------------------------------------------------------
-  # THE ZERO-VIEWER CONSOLE SURFACES (dr-w27-bl-fleet-rollout-state-has-no-human-reader)
+  # THE OPERATOR CONSOLE SURFACES (dr-w27-bl-fleet-rollout-state-has-no-human-reader)
   # ---------------------------------------------------------------------------
   # The operator console mounts a page of deploy cards behind
   # `Auth.require_platform_operator/2` on every route it reads. That principal is
-  # the `:platform_admin_emails` allowlist — the same population `fleet_rollout_state`
-  # is allowlisted for above — so every one of those cards is RENDERED CODE WITH
-  # ZERO POSSIBLE VIEWERS, and the count belongs in a census rather than in prose.
+  # the `:platform_admin_emails` allowlist, so until gr-ops-platform-admin-emails
+  # landed every one of those cards was RENDERED CODE WITH ZERO POSSIBLE VIEWERS.
+  # Since dr-w19-rollout-brake-is-machine-only the census counts them REACHABLE
+  # (operator is no longer an empty tier) and pins that every card still reads an
+  # operator-tier route — a card re-pointed at the worker door would red.
   #
   # THE FILING SAID FOUR. It is FIVE on main: `operatorPageHtml/0`'s own comment
   # still says "five cards" while the block comment above `OPERATOR_FLEET` says
@@ -1027,7 +1065,7 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
            where: "#{reader.file}:#{line}",
            sends: "recipients <- #{resolver}/*",
            resolves: Atom.to_string(population),
-           empty?: population == :platform_allowlist
+           empty?: population in @empty_push_populations
          }}
 
       {:error, why} ->
@@ -1119,34 +1157,79 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     assert length(rows) >= @reader_floor
   end
 
+  # The offender predicate, shared by the real assertion and its RED-ON-DEMAND
+  # control, so the control exercises the same code the census trusts.
+  defp offenders(derived, allowlist) do
+    for {signal, results} <- derived,
+        audiences = ok_audiences(results),
+        audiences != [],
+        Enum.all?(audiences, & &1.empty?),
+        not Map.has_key?(allowlist, signal.name) do
+      "  #{signal.name} (#{signal.kind}) — every reader lands on an empty population:\n" <>
+        Enum.map_join(audiences, "\n", fn a ->
+          "      #{a.where}  sends #{a.sends}  -> #{a.resolves}"
+        end)
+    end
+  end
+
   test "a signal whose EVERY reader is empty-by-construction REDS unless it is allowlisted" do
-    offenders =
-      for {signal, results} <- derive(),
-          audiences = ok_audiences(results),
-          audiences != [],
-          Enum.all?(audiences, & &1.empty?),
-          not Map.has_key?(@empty_audience_allowlist, signal.name) do
-        "  #{signal.name} (#{signal.kind}) — every reader lands on an empty population:\n" <>
-          Enum.map_join(audiences, "\n", fn a ->
-            "      #{a.where}  sends #{a.sends}  -> #{a.resolves}"
-          end)
-      end
+    offenders = offenders(derive(), @empty_audience_allowlist)
 
     assert offenders == [], """
     #{length(offenders)} deploy-health signal(s) have an audience that is EMPTY BY
-    CONSTRUCTION: every reader resolves to a population no person is in — the
-    platform-operator allowlist, which no account is in and none can join
-    (PLATFORM_ADMIN_EMAILS is unset on prod, no User field carries operator-ness,
-    and nothing but runtime.exs writes the key), or the `worker` machine tier,
-    whose token no human account holds. A signal reported there is a signal nobody
-    receives.
+    CONSTRUCTION: every reader resolves to a population no person is in — see
+    @empty_pull_tiers and @empty_push_populations (today: the `worker` machine
+    tier, whose token no human account holds). A signal reported there is a
+    signal nobody receives.
 
     #{Enum.join(offenders, "\n")}
 
     Fix: give the signal a reader with a reachable audience (a team-scoped route,
-    a team-resolved recipient set). If it must stay operator-only for now, add it
+    a team-resolved recipient set). If it must stay unreachable for now, add it
     to @empty_audience_allowlist WITH the task that closes it.
     """
+  end
+
+  test "RED-ON-DEMAND: a signal whose only reader is the worker door REDS" do
+    # The allowlist is EMPTY since dr-w19-rollout-brake-is-machine-only, so the
+    # real run above can no longer show the offender arm firing. This control
+    # shows it on the REAL router: the worker-tier twin of the brake read,
+    # GET /v1/admin/autoupdate, derived through the same `route_for/2` and lens
+    # as every reader, must come out empty and must red when unexcused.
+    {:ok, route} = route_for("GET", "/v1/admin/autoupdate")
+    {:ok, tier} = Lens.tier_of("GET", route)
+    assert tier == "worker"
+
+    control = %{name: "control_worker_brake", kind: :pull}
+
+    audience = %{
+      where: "control",
+      sends: "GET /v1/admin/autoupdate",
+      resolves: tier,
+      empty?: tier in @empty_pull_tiers
+    }
+
+    assert [red] = offenders([{control, [{:ok, audience}]}], @empty_audience_allowlist)
+    assert red =~ "control_worker_brake"
+    assert red =~ "-> worker"
+
+    # And the excuse door still works, so an allowlist row is still a real lever.
+    assert offenders([{control, [{:ok, audience}]}], %{"control_worker_brake" => "x"}) == []
+
+    # The mirror: the operator door is REACHABLE, so the same shape over it does
+    # not red. If `operator` crept back into @empty_pull_tiers this flips.
+    {:ok, op_route} = route_for("GET", "/v1/operator/autoupdate")
+    {:ok, op_tier} = Lens.tier_of("GET", op_route)
+
+    op = %{
+      audience
+      | sends: "GET /v1/operator/autoupdate",
+        resolves: op_tier,
+        empty?: op_tier in @empty_pull_tiers
+    }
+
+    assert op_tier == "operator"
+    assert offenders([{control, [{:ok, op}]}], @empty_audience_allowlist) == []
   end
 
   test "the allowlist cannot rot: a row whose audience is no longer empty REDS" do
@@ -1199,9 +1282,12 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
              "#{name}: the row must state the census evidence, not just an intention"
     end
 
-    # If this ever reads zero, the allowlist has stopped being able to say
-    # "this one is empty" and every row above is decoration.
-    assert map_size(@empty_audience_allowlist) > 0
+    # This used to assert `map_size(@empty_audience_allowlist) > 0`. The last
+    # row (`fleet_rollout_state`) was closed by gr-ops-platform-admin-emails, so
+    # an empty allowlist is now the TRUE state, not a broken one. What that
+    # assertion guarded — that the census can still call a signal empty — is
+    # proved by "RED-ON-DEMAND" instead, which does not need a live defect to
+    # exist in order to show the arm fires.
   end
 
   test "ANTI-VACUITY: the BROKEN walker derives a DIFFERENT (empty) Side B" do
@@ -1280,9 +1366,13 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     end
   end
 
-  test "c1 — the fleet brake's position is UNREADABLE, and the census names the fenced act" do
+  test "c1 — the fleet brake's position is READABLE: its reader resolves to tier operator, reachable" do
     name = "fleet_rollout_state"
-    reason = Map.fetch!(@empty_audience_allowlist, name)
+
+    refute Map.has_key?(@empty_audience_allowlist, name), """
+    #{name} is back on the allowlist. Its closer (gr-ops-platform-admin-emails)
+    landed and `operator` is a reachable tier; an excuse here is a stale one.
+    """
 
     audiences =
       derive()
@@ -1290,44 +1380,29 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
 
     # DERIVED, not declared: the door the Go client actually knocks on, and the
     # tier router.ex actually enforces on it.
-    assert [%{sends: sends, resolves: tier, empty?: true}] = audiences
+    assert [%{sends: sends, resolves: tier, empty?: empty?}] = audiences
 
     assert sends == "GET /v1/operator/autoupdate", """
-    the fleet brake's reader now sends #{sends}. If that is a REACHABLE door the
-    row above is stale and must be deleted; if it is another empty one, say so.
+    the fleet brake's reader now sends #{sends}. Re-derive whether that door has
+    a person behind it before editing this assertion.
     """
 
+    # The ruling this row asked for (a): a human-reachable read route for the
+    # brake, and the census asserting its tier.
     assert tier == "operator"
-    assert tier in @empty_pull_tiers
-
-    # The RECORD, by name. This is what the criterion buys when the reader path
-    # cannot be opened by any code change in this repo: the census says WHICH
-    # door, WHICH population, and WHICH act outside this tree would open it.
-    assert reason =~ "/v1/operator/autoupdate",
-           "#{name}: the row must name the door its reader knocks on"
-
-    assert reason =~ ":platform_admin_emails",
-           "#{name}: the row must name the population behind that door"
-
-    assert reason =~ "CLOSER: gr-ops-platform-admin-emails",
-           "#{name}: the row must name the act that would make the brake readable"
-
-    assert reason =~ "PERMANENT HUMAN GATE", """
-    #{name}: the row must say the closer is a FENCED, non-code act. Without that
-    sentence a reader is sent hunting for a slice to write, and there is none —
-    setting PLATFORM_ADMIN_EMAILS on the live control plane is the whole remedy.
-    """
+    refute tier in @empty_pull_tiers
+    assert empty? == false
   end
 
-  test "c2 — every operator console deploy card is a ZERO-VIEWER surface, and the count is published" do
+  test "c2 — every operator console deploy card reads an operator-tier route, and the count is published" do
     src = ConsoleReader.source(@app_js)
     cards = ConsoleReader.cards(src)
     paints = ConsoleReader.paints(src)
 
     assert length(cards) == @operator_console_card_pin, """
     the operator console mounts #{length(cards)} deploy card(s); the pin is
-    #{@operator_console_card_pin}. A card added or removed changes the honest
-    zero-viewer count — move the pin in the SAME commit, and say which card.
+    #{@operator_console_card_pin}. A card added or removed changes the published
+    count — move the pin in the SAME commit, and say which card.
     """
 
     assert Enum.sort(Enum.map(cards, &elem(&1, 0))) == Enum.sort(Map.keys(paints)), """
@@ -1344,25 +1419,34 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
         %{id: id, heading: heading, path: path, tier: tier, empty?: tier in @empty_pull_tiers}
       end
 
-    reachable = Enum.reject(rows, & &1.empty?)
+    off_tier = Enum.reject(rows, &(&1.tier == "operator"))
 
-    assert reachable == [], """
-    #{length(reachable)} operator console card(s) now read a REACHABLE route. That
-    is the GOOD direction — the surface grew a viewer — but the published
-    zero-viewer count below is now wrong. Re-state it:
+    assert off_tier == [], """
+    #{length(off_tier)} operator console card(s) read a route that is not operator-tier.
+    The console is one page behind one principal; a card on another tier is a
+    card whose audience differs from the page it sits on:
 
-    #{Enum.map_join(reachable, "\n", fn r -> "      #{r.id} (#{r.heading}) reads GET #{r.path} -> #{r.tier}" end)}
+    #{Enum.map_join(off_tier, "\n", fn r -> "      #{r.id} (#{r.heading}) reads GET #{r.path} -> #{r.tier}" end)}
+    """
+
+    dark = Enum.filter(rows, & &1.empty?)
+
+    assert dark == [], """
+    #{length(dark)} operator console card(s) read a route on an EMPTY tier — a
+    card nobody can see:
+
+    #{Enum.map_join(dark, "\n", fn r -> "      #{r.id} (#{r.heading}) reads GET #{r.path} -> #{r.tier}" end)}
     """
 
     IO.puts("""
 
-    operator console deploy cards — ZERO-VIEWER SURFACES
-      cards mounted : #{length(rows)}  (every one gated on :platform_admin_emails, which is [] on prod)
+    operator console deploy cards
+      cards mounted : #{length(rows)}  (every one gated on :platform_admin_emails, provisioned on prod by gr-ops-platform-admin-emails)
     #{Enum.map_join(rows, "\n", fn r -> "      #{String.pad_trailing(r.id, 16)} #{String.pad_trailing(r.heading, 18)} GET #{String.pad_trailing(r.path, 38)} -> #{r.tier}" end)}
 
       THE NUMBER THIS CENSUS PUBLISHES ABOUT READERSHIP
         deploy-health signals with an empty audience : #{map_size(@empty_audience_allowlist)}
-        operator console cards with zero viewers    : #{length(rows)}
+        operator console cards with zero viewers    : #{length(dark)}
     """)
   end
 

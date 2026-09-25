@@ -667,6 +667,12 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1537 — bumped 2026-09-25 from 1536 on cloud/launch-default-name
+      # (task-ef37ebad8249e82a): +1 test driving the /new blank-name submit from
+      # renderNewFlow to the progress view, with the pre-fix 422 as its control.
+      # RE-MEASURED, not added: `bash scripts/console-harness.sh` printed `ran 1537
+      # test(s)`, and `bash scripts/console-pins.sh --write` measured 1537 and
+      # rewrote the literal.
       # PIN 1536 — bumped 2026-09-24 from 1535 on console/w73-newcreaterepo
       # (cch-w73-bl-newcreaterepo-success-fields-unasserted): +1 test pinning
       # newCreateRepo's success arm to both fields POST /v1/github/repos returns.
@@ -991,7 +997,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1536-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1537-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -1007,14 +1013,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1536 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1536 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1537 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1537 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1536 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1536 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1536 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1537 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1537 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1537 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1536 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1537 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -1253,6 +1259,11 @@ jobs:
           # appears twice per step — the self-test arm and the comparison — plus
           # the step name and the two messages.
           #
+          # PIN 153 — RE-DERIVED 2026-09-25 (task-76866f421d2b91c9), which adds ONE arm:
+          #   `ONE WORLD: an origin/main PINNED before a mid-run move is the one read; unpinned, the move refuses`.
+          #   MEASURED, not added: `node --test cloud/priv/static/__preview__/seal-predicate.test.mjs` under
+          #   Node v20.20.2 -> `# tests 153 / # pass 153 / # fail 0`, rc=0. The roster was never the variable in
+          #   the mid-run reds that row fixes: `# tests` was 152 on every pre-fix run, moved or not.
           # PIN 152 — RE-DERIVED 2026-09-24 (task-88edd0348e6f703d), which adds TWO arms:
           #   `w88: a Node of the declared major found ONLY under RUNNER_TOOL_CACHE resolves; without that root it is refused`, and
           #   `w88: LOCK — seal-predicate's and console-harness.sh's Node search roots are the SAME set, and both refusals name them`.
@@ -1409,14 +1420,14 @@ jobs:
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 152 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 152 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 153 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 153 — this pin can no longer lose"; exit 1; }
           PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
-          if [ "${tally:-0}" -ne 152 ]; then
-            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 152 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 152 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 153 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 153 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 153 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "seal predicate tests: ${tally} tests, exact pin 152 — the pin re-earned"
+          echo "seal predicate tests: ${tally} tests, exact pin 153 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"

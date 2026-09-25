@@ -1450,6 +1450,15 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 		// this box change sha"), and an absent key could not distinguish it from
 		// a CLI that never asked.
 		"git_commit_first_seen_at": true,
+		// dr-w11-payload-divergence-close: the launch pins and the alert latch.
+		// ALWAYS present — empty region/server_type is the plane's own "no pin
+		// recorded", false is the truthful reading of an absent latch.
+		"region": true, "server_type": true, "unreachable_notification_sent": true,
+		// dr-bl-w9-muscle-1: the raw last beat (ALWAYS present, git_commit's
+		// rule) and its reading — the object whose duration keys are the
+		// tri-states, so the object itself is always there.
+		"last_seen_at": true,
+		"beat":         true,
 	}
 	// The two deliberate tri-states: emitted ONLY when the plane reported them,
 	// so their absence here is the contract, not a gap.
@@ -1465,6 +1474,12 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 		// jpf-w1-queue-age-alarm: emitted only when the plane reported a queued
 		// row — absent is "nothing queued / older CP", never a fabricated 0.
 		"queued_deploy_age_seconds": true,
+		// dr-w11-payload-divergence-close: each emitted only when the plane sent
+		// it — the missed-check count (absent = older plane), the in-flight
+		// rollout stamp (absent = no rollout landing), the attached domain, and
+		// the beat's p95 (absent = unmeasured, never 0 ms).
+		"unreachable_count": true, "autoupdate_triggered_at": true,
+		"custom_host": true, "p95_ms": true,
 	}
 
 	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{commitFleet()[0]})[0])

@@ -3237,6 +3237,46 @@ defmodule BarkparkCloud.Registry do
     |> Repo.one()
   end
 
+  @doc """
+  The team's IN-FLIGHT managed main that an equivalent go-live would duplicate,
+  or nil (dwb-launch-flow-double-submit-test). go_live answers a match with
+  `409 {error: "already_provisioning", barkpark}` — the envelope the /new client
+  reconciles to — instead of provisioning twice.
+
+  EQUIVALENT = same team, same slug (the unique key a second insert would
+  collide on), same template, same provider. IN FLIGHT = not live (`host`
+  nil/blank) and its latest provision job is pending/claimed, OR it has none
+  yet: a racing loser reads the winner's row in the gap between the winner's
+  insert and its job enqueue. A FAILED provision is not in flight (Retry owns
+  it), and a live box is not either — both keep go_live's plain refusal.
+  """
+  @spec inflight_launch_twin(Team.t() | binary(), term(), String.t() | nil, term()) ::
+          Barkpark.t() | nil
+  def inflight_launch_twin(team, slug, template, provider) when is_binary(slug) do
+    tid = team_id(team)
+
+    from(b in Barkpark,
+      where:
+        b.team_id == ^tid and b.slug == ^slug and b.mode == "managed" and
+          (is_nil(b.fleet_role) or b.fleet_role == "main")
+    )
+    |> Repo.one()
+    |> case do
+      %Barkpark{host: host, template: ^template, provider: ^provider} = bp
+      when host in [nil, ""] ->
+        case latest_provision_job(bp) do
+          nil -> bp
+          %ProvisionJob{status: status} when status in ["pending", "claimed"] -> bp
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  def inflight_launch_twin(_team, _slug, _template, _provider), do: nil
+
   @doc "The warm-pool default region a provision job carries when unset."
   @spec default_region() :: String.t()
   def default_region, do: @default_region

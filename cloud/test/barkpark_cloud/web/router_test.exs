@@ -1066,11 +1066,16 @@ defmodule BarkparkCloud.Web.RouterTest do
       conn1 = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
       assert conn1.status == 201
 
-      # The double-click: same name → same slug. The barkparks_team_slug_unique_idx
-      # is the launch idempotency guard — the second submit is a 422, never a
-      # second billed box, even though the plan has 2 slots to spare.
+      # The double-click: same name → same slug. The second submit reconciles to
+      # the first, still-provisioning box — 409 already_provisioning carrying its
+      # id (dwb-launch-flow-double-submit-test; it was a bare 422 slug-taken the
+      # /new client could not act on) — never a second billed box, even though
+      # the plan has 2 slots to spare. The barkparks_team_slug_unique_idx stays
+      # the backstop a racing pair collides on.
       conn2 = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
-      assert conn2.status == 422
+      assert conn2.status == 409
+      assert json_body(conn2)["error"] == "already_provisioning"
+      assert json_body(conn2)["barkpark"]["id"] == json_body(conn1)["barkpark"]["id"]
 
       # Exactly ONE barkpark and ONE provision job from the two intents.
       assert [%Barkpark{slug: "my-prod"}] = Registry.list_barkparks(team)

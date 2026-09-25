@@ -420,8 +420,8 @@ docs/cheatsheets/papers.md
 docs/setup/AGENTS-MD.md
 docs/setup/AGENT-ONRAMPS.md
 docs/decisions/success-claim-census.md
-scripts/deploy-reliability-exit-2026-08-10.md
-scripts/deploy-reliability-exit-2026-08-17.md
+docs/ledgers/deploy-reliability-exit-2026-08-10.md
+docs/ledgers/deploy-reliability-exit-2026-08-17.md
 scripts/check-doc-budgets.sh
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
