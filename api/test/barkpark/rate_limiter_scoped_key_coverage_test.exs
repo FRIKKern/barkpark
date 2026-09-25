@@ -47,6 +47,7 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
   # these is required to be compliant. It exists so the scan cannot go green by
   # finding nothing — if a site is renamed away, fix this list deliberately.
   @known_sites [
+    "lib/barkpark/plugins/forms/web/submission_controller.ex",
     "lib/barkpark/quiz/spawn_budget.ex",
     "lib/barkpark_web/channels/user_socket.ex",
     "lib/barkpark_web/controllers/app_token_controller.ex",
@@ -131,9 +132,10 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
              "call in it — the matcher has drifted: #{inspect(counts)}"
 
     # pulse_controller carries two (write bucket + read bucket); quiz
-    # spawn_budget added the ninth.
-    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 9,
-           "expected the 9 call sites the row names, found #{inspect(counts)}"
+    # spawn_budget added the ninth; the Forms submission controller the tenth
+    # (one `check` call serving its per-IP and per-endpoint buckets).
+    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 10,
+           "expected the 10 call sites the row names, found #{inspect(counts)}"
   end
 
   test "POSITIVE CONTROL: the scanner catches a call site that bypasses the helper" do

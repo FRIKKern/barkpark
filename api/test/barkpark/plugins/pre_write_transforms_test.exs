@@ -38,8 +38,12 @@ defmodule Barkpark.Plugins.PreWriteTransformsTest do
       assert Barkpark.Plugins.Tasks.pre_write_transforms() == @transform_order
     end
 
+    # The Forms plugin (task-71082f5541c13b53) declares one `:check` of its
+    # own, for its two types only; plugins resolve in name order, so it comes
+    # first and the Tasks pair keeps its relative order.
     test "the Registry resolves exactly those two, in that order, under the default load order" do
-      assert Registry.collect_pre_write_transforms() == @transform_order
+      assert Registry.collect_pre_write_transforms() ==
+               [{:check, Barkpark.Plugins.Forms.Contract, :validate} | @transform_order]
     end
 
     test "the kind check judges the TRANSFORMED attrs: a step's output is the next step's input" do
@@ -52,7 +56,7 @@ defmodule Barkpark.Plugins.PreWriteTransformsTest do
 
       assert {:ok, resynced} =
                PreWriteTransforms.run(
-                 [hd(Registry.collect_pre_write_transforms()), probe],
+                 [resync_step(Registry.collect_pre_write_transforms()), probe],
                  "task",
                  attrs
                )
@@ -171,4 +175,9 @@ defmodule Barkpark.Plugins.PreWriteTransformsTest do
     |> Enum.find(&(&1["id"] == "purpose-copy"))
     |> get_in(["content", Access.at(0), "value"])
   end
+
+  # The Registry's brief re-sync step, found by what it is rather than by
+  # position: other plugins' steps may precede it in the resolved list.
+  defp resync_step(steps),
+    do: Enum.find(steps, &match?({:transform, Barkpark.Tasks.BriefMirror, _}, &1))
 end
