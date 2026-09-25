@@ -112,6 +112,7 @@ services:
       - ECTO_IPV6
       - PHX_PORT
       - PHX_SCHEME
+      - OBAN_POOL_SIZE
       - POOL_SIZE
       - PUBLIC_READ_TOKEN_FILE
       # Crypto / preview

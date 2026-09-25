@@ -30,8 +30,18 @@ defmodule Barkpark.ObanJobPoolTest do
   end
 
   setup do
-    prev = Application.get_env(:barkpark, :oban_pool_size)
-    on_exit(fn -> Application.put_env(:barkpark, :oban_pool_size, prev) end)
+    # Restore by FETCH, not get: in :test the key is ABSENT, and put_env(k, nil)
+    # would leave it present-as-nil for every later test (it did — CI order
+    # reddened runtime_oban_pool_size_test's `== 0` with nil).
+    prev = Application.fetch_env(:barkpark, :oban_pool_size)
+
+    on_exit(fn ->
+      case prev do
+        {:ok, value} -> Application.put_env(:barkpark, :oban_pool_size, value)
+        :error -> Application.delete_env(:barkpark, :oban_pool_size)
+      end
+    end)
+
     :ok
   end
 
@@ -86,6 +96,12 @@ defmodule Barkpark.ObanJobPoolTest do
   end
 
   describe "the job pool's child spec" do
+    test "a key present with value nil reads as 0 and starts no pool" do
+      Application.put_env(:barkpark, :oban_pool_size, nil)
+      assert Repo.job_pool_size() == 0
+      assert Repo.job_pool_child_specs() == []
+    end
+
     test "size 0 (the :test default) starts no pool" do
       Application.put_env(:barkpark, :oban_pool_size, 0)
       assert Repo.job_pool_child_specs() == []

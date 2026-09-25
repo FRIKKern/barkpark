@@ -431,7 +431,9 @@ defmodule Barkpark.Repo do
   as before this pool existed.
   """
   @spec job_pool_size() :: non_neg_integer()
-  def job_pool_size, do: Application.get_env(:barkpark, :oban_pool_size, 0)
+  # `|| 0`, not a get_env default: a key PRESENT with value nil (a test restoring
+  # an unset key with put_env/3) must read as "no pool", not as nil.
+  def job_pool_size, do: Application.get_env(:barkpark, :oban_pool_size) || 0
 
   @doc """
   The child spec list for the Oban job pool: `[spec]`, or `[]` when
