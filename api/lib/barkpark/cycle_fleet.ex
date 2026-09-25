@@ -1743,7 +1743,11 @@ defmodule Barkpark.CycleFleet do
       when is_binary(assignment_id) and is_map(claim) and is_map(opts) do
     recorder = value(opts, :recorder, Recorder)
 
-    with {:ok, attempt} <- prepare_runtime_attempt(assignment_id, claim, opts),
+    # The attempt runs on a Studio Chat Recorder. With Studio Chat switched off
+    # (`Barkpark.Capability`) the Recorder tier never started, so refuse before
+    # committing an attempt row the runtime could never open.
+    with true <- Barkpark.Capability.enabled?(:studio_chat) || {:error, :studio_chat_disabled},
+         {:ok, attempt} <- prepare_runtime_attempt(assignment_id, claim, opts),
          %StudioChat.Session{} = session <- StudioChat.get_session(attempt.session_id),
          {:ok, recorder_pid} <- recorder.ensure(recorder_opts(session, opts)) do
       {:ok, %{attempt: attempt, session: session, recorder: recorder_pid}}

@@ -159,7 +159,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # CLI's memory on the next send via `--resume`.
   @impl true
   def mount(params, _session, socket) do
-    enabled_provider = Enum.find(StudioChat.Session.providers(), &Runtime.enabled?/1)
+    # With the Studio Chat capability off (`Barkpark.Capability`) the chat
+    # runtime tier never started, so no provider counts as enabled and mount
+    # takes the refusal branch below.
+    enabled_provider =
+      Barkpark.Capability.enabled?(:studio_chat) &&
+        Enum.find(StudioChat.Session.providers(), &Runtime.enabled?/1)
 
     if enabled_provider do
       {:ok,

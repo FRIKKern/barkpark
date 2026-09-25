@@ -1089,6 +1089,21 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireChatAccess)
   end
 
+  # Capability switches (task-2f59ba23bcad333e, `Barkpark.Capability`). Each is
+  # listed FIRST in its scopes' pipe_through, so a disabled subsystem answers a
+  # plain 404 before any token lookup. Default on; turned off by
+  # `config :barkpark, Barkpark.Capability, <name>: false` or
+  # `BARKPARK_CAPABILITIES_OFF`.
+  pipeline :studio_chat_capability do
+    plug(BarkparkWeb.Plugs.RequireCapability, :studio_chat)
+  end
+
+  # CycleFleet requires EpicFleet (`Barkpark.Capability` §Dependencies), so this
+  # also refuses when EpicFleet is off.
+  pipeline :cycle_fleet_capability do
+    plug(BarkparkWeb.Plugs.RequireCapability, :cycle_fleet)
+  end
+
   pipeline :require_chat_host_admin do
     plug(BarkparkWeb.Plugs.RequireToken)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
@@ -2090,7 +2105,7 @@ defmodule BarkparkWeb.Router do
   # a null (or an absent key, from an instance that predates it) to its -1
   # unmeasured sentinel, and the control plane renders that unmetered.
   scope "/v1", BarkparkWeb do
-    pipe_through(:cycle_api)
+    pipe_through([:cycle_fleet_capability, :cycle_api])
 
     get("/cycles/:epic_id/:wave_id", CycleFleetController, :show)
   end
@@ -2176,7 +2191,7 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/v1", BarkparkWeb do
-    pipe_through([:cycle_api, :require_write])
+    pipe_through([:cycle_fleet_capability, :cycle_api, :require_write])
 
     post("/cycles/:epic_id/:wave_id/open", CycleFleetController, :open)
     post("/cycles/:epic_id/:wave_id/seal", CycleFleetController, :seal)
@@ -2382,7 +2397,7 @@ defmodule BarkparkWeb.Router do
   # wrong-tenant read joins the not-found oracle. A strict Recorder/ClaudeChat
   # adapter: no adopt_sink, no launcher controls, no shed-and-close.
   scope "/v1/chat", BarkparkWeb do
-    pipe_through([:api, :require_chat_access])
+    pipe_through([:studio_chat_capability, :api, :require_chat_access])
 
     # The herd fleet stream (charter D45h): snapshot-then-live STATE frames for the
     # whole in-scope herd on ONE connection. STATIC `/events` declared BEFORE the
@@ -2430,7 +2445,7 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/w/:workspace_slug/v1/chat-hosts", BarkparkWeb do
-    pipe_through([:api, :require_chat_host_admin])
+    pipe_through([:studio_chat_capability, :api, :require_chat_host_admin])
 
     get("/", ChatHostController, :index)
     post("/enrollments", ChatHostController, :create_enrollment)
@@ -2438,12 +2453,12 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/v1/chat-host", BarkparkWeb do
-    pipe_through(:api)
+    pipe_through([:studio_chat_capability, :api])
     post("/enroll", ChatHostController, :enroll)
   end
 
   scope "/v1/chat-host", BarkparkWeb do
-    pipe_through(:registered_chat_host)
+    pipe_through([:studio_chat_capability, :registered_chat_host])
     post("/heartbeat", ChatHostController, :heartbeat)
     post("/rotate", ChatHostController, :rotate)
     get("/commands", ChatHostController, :commands)
@@ -2457,7 +2472,7 @@ defmodule BarkparkWeb.Router do
   # route rides the :registered_chat_host pipeline like the /v1/chat-host
   # dispatch surface above, even though the path lives under /v1/chat.
   scope "/v1/chat", BarkparkWeb do
-    pipe_through(:registered_chat_host)
+    pipe_through([:studio_chat_capability, :registered_chat_host])
     post("/sessions/:id/state", ChatHostController, :report_state)
   end
 
@@ -3024,7 +3039,7 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/w/:workspace_slug/p/:project_slug/v1", BarkparkWeb do
-    pipe_through([:scoped_api, :require_token])
+    pipe_through([:cycle_fleet_capability, :scoped_api, :require_token])
 
     get("/cycles/:epic_id/:wave_id", CycleFleetController, :show)
 
@@ -3042,7 +3057,7 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/w/:workspace_slug/p/:project_slug/v1", BarkparkWeb do
-    pipe_through([:scoped_api, :require_token, :require_write])
+    pipe_through([:cycle_fleet_capability, :scoped_api, :require_token, :require_write])
 
     post("/cycles/:epic_id/:wave_id/open", CycleFleetController, :open)
 

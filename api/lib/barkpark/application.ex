@@ -37,10 +37,11 @@ defmodule Barkpark.Application do
     # a malformed value wherever the plugin is enabled, and simply does not run
     # where it is absent. The task-dedup judge's endpoint check follows the
     # same shape (task-6325dacb0e233d75): it runs from the Tasks plugin's own
-    # `register_workers/1` boot child. The HOST value it validates,
-    # `:anthropic_api_url`, is still refused here at boot through the title
-    # check below, which reads the same key with the same validation.
-    _ = Barkpark.StudioChat.Titles.endpoint()
+    # `register_workers/1` boot child. The Studio Chat title endpoint check
+    # reads the same `:anthropic_api_url` key; it runs from
+    # `Barkpark.Capability.Supervisor` below, only where Studio Chat is enabled
+    # (task-2f59ba23bcad333e). A box with both Tasks and Studio Chat off has no
+    # consumer of the key, so nothing checks it.
 
     # Companion to the check above, and the other half of the same defect: the
     # From can be perfectly valid while there is no relay to hand the message
@@ -265,12 +266,12 @@ defmodule Barkpark.Application do
     * `Barkpark.Plugins.Indx.Supervisor` wraps Auth/Monitor/Recovery.
     * `Barkpark.Plugins.Sheets.Supervisor` wraps the sheets session registry/
       supervisor/replay-ring.
-    * `Barkpark.StudioChat.Supervisor` wraps the studio-chat registries/runtime/
-      notifier.
+    * `Barkpark.Capability.Supervisor` starts the capability-gated subsystems
+      (today the studio-chat tier) only when their capability is enabled.
 
   Ordering invariants held: Repo before everything that queries it; Registry
   before plugin workers; SchemaBootstrap after Repo+Registry and BEFORE Oban;
-  Indx (Auth→Recovery) before Oban; PubSub before the Sheets/StudioChat tiers
+  Indx (Auth→Recovery) before Oban; PubSub before the Sheets/Capability tiers
   and the Endpoint; Endpoint last.
   """
   @spec child_specs(list(), keyword(), list(), list()) :: [
@@ -433,10 +434,11 @@ defmodule Barkpark.Application do
       # (fresh-install invariant). Wrapped for domain isolation; positioned
       # after PubSub (delta broadcasts) + Repo (load/persist), as before.
       Barkpark.Plugins.Sheets.Supervisor,
-      # Studio Claude-chat runtime subsystem (was the two registries +
-      # RuntimeSupervisor + Notifier flat). Wrapped for domain isolation;
-      # positioned after PubSub (Recorders rebroadcast frames on it), as before.
-      Barkpark.StudioChat.Supervisor,
+      # Capability-gated subsystems (task-2f59ba23bcad333e). Starts the Studio
+      # chat runtime tier only when `Barkpark.Capability.enabled?(:studio_chat)`
+      # (default on). Same slot the chat tier held: after PubSub (Recorders
+      # rebroadcast frames on it), before the Endpoint.
+      Barkpark.Capability.Supervisor,
       BarkparkWeb.Presence,
       {Task.Supervisor, name: Barkpark.TaskSupervisor},
       # Boot-time collector for workspace-bundle temp files a SIGKILLed BEAM
