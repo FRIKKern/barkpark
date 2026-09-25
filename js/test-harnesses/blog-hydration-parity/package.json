@@ -14,15 +14,15 @@
     "@barkpark/react": "workspace:^"
   },
   "devDependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@testing-library/react": "^16.1.0",
+    "@testing-library/react": "^16.3.3",
     "vitest": "^4.1.0",
     "@vitest/browser": "^4.1.0",
     "@vitest/browser-playwright": "^4.1.0",
-    "playwright": "^1.48.0",
+    "playwright": "^1.63.0",
     "mermaid": "^11.0.0",
     "asciinema-player": "^3.8.0"
   },
