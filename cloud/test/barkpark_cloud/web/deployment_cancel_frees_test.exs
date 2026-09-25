@@ -13,13 +13,14 @@ defmodule BarkparkCloud.Web.DeploymentCancelFreesTest do
     * a redelivery of the SAME `X-GitHub-Delivery` stays deduped
       (`deployments_delivery_id_index` has no status filter, and the webhook asks
       `find_deployment_by_delivery_id/1` first), so GitHub retrying an event
-      does not undo an operator's cancel.
+      does not undo a cancel the fleet filed.
 
   There is no operator cancel ROUTE on the control plane (registry.ex says so:
   "There is no human cancel path"). The writers that land `cancelled` are the
   builder/agent fenced transition routes, the unfenced
   `Registry.transition_deployment/2` (AutoDeployWorker's refusal), and the
-  preview teardown/supersede/evict path. The tests drive the first two.
+  preview teardown/supersede/evict path — every one a machine, none a person
+  (charter D614(c)). The tests drive the first two.
   """
   use BarkparkCloud.DataCase, async: true
   import Plug.Test
@@ -103,7 +104,7 @@ defmodule BarkparkCloud.Web.DeploymentCancelFreesTest do
     do:
       transition(w, id, worker, epoch, %{
         status: "cancelled",
-        failure_reason: "cancelled by operator"
+        failure_reason: "cancelled by the build box"
       })
 
   defp json(conn), do: Jason.decode!(conn.resp_body)

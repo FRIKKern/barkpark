@@ -2930,8 +2930,8 @@ defmodule BarkparkCloud.DeployLedger do
           censored |> Enum.map(& &1.seconds) |> Enum.max(fn -> nil end)
       },
       unmetered: Enum.reduce(site_nodes, 0, &(&1.unmetered + &2)),
-      # COUNTED, NEVER DROPPED — the `unmetered` precedent, applied to rows a
-      # human stopped. See `site_delivery/3`.
+      # COUNTED, NEVER DROPPED — the `unmetered` precedent, applied to rows the
+      # fleet cancelled (charter D614(c)). See `site_delivery/3`.
       cancelled: Enum.reduce(site_nodes, 0, &(&1.cancelled + &2)),
       min_sample: @min_sample,
       sites: shown,
