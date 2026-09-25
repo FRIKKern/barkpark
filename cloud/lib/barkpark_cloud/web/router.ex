@@ -11828,6 +11828,27 @@ defmodule BarkparkCloud.Web.Router do
   defp already_provisioning(conn, %Barkpark{} = twin),
     do: json(conn, 409, %{error: "already_provisioning", barkpark: barkpark_json(twin)})
 
+  # go_live's quota refusal, BOTH of them (the cond's pre-check and the
+  # register backstop). Each re-asks for the twin before answering 403,
+  # because a full slot is exactly what the LOSER of a racing equivalent pair
+  # sees: its first twin check ran before the winner committed, and the quota
+  # count ran after (task-1f5c2cceae36e4d9 — the cond's arm used to 403
+  # directly, and CI load opened that window). The winner's row is the slot,
+  # so the answer is 409 with the winner's id, not "plan limit reached".
+  defp limit_reached_unless_twin(conn, team, launch) do
+    case launch_twin(conn, launch) do
+      nil ->
+        json(conn, 403, %{
+          error: "limit_reached",
+          limit: Billing.barkpark_limit(team),
+          upgrade_path: "/v1/billing/checkout"
+        })
+
+      twin ->
+        already_provisioning(conn, twin)
+    end
+  end
+
   defp go_live(conn) do
     # go-live is the launch action — accept a session OR a PAT, but gate each
     # principal correctly (CREDENTIAL-AWARE):
@@ -11915,12 +11936,10 @@ defmodule BarkparkCloud.Web.Router do
       # runs AFTER the 402 so an unsubscribed caller still learns "subscribe"
       # first. The Registry.register_barkpark/2 guard below is the un-bypassable
       # backstop for any path that skips this handler (the agent/internal register).
+      # A full slot may be the in-flight twin that committed after the twin
+      # check above — `limit_reached_unless_twin/3` asks once more.
       Billing.barkpark_limit_reached?(conn.assigns.current_team) ->
-        json(conn, 403, %{
-          error: "limit_reached",
-          limit: Billing.barkpark_limit(conn.assigns.current_team),
-          upgrade_path: "/v1/billing/checkout"
-        })
+        limit_reached_unless_twin(conn, conn.assigns.current_team, launch)
 
       # dwb-4: an UNKNOWN template is rejected HERE, before any row/job/box
       # exists — a 4xx at launch, never a burned box discovered mid-provision.
@@ -12035,17 +12054,7 @@ defmodule BarkparkCloud.Web.Router do
           # and the unique index both wait for it). Re-ask for the twin, so the
           # loser answers 409 with the winner's id instead of a refusal.
           {:error, :limit_reached} ->
-            case launch_twin(conn, launch) do
-              nil ->
-                json(conn, 403, %{
-                  error: "limit_reached",
-                  limit: Billing.barkpark_limit(team),
-                  upgrade_path: "/v1/billing/checkout"
-                })
-
-              twin ->
-                already_provisioning(conn, twin)
-            end
+            limit_reached_unless_twin(conn, team, launch)
 
           {:error, %Ecto.Changeset{} = changeset} ->
             case launch_twin(conn, launch) do
