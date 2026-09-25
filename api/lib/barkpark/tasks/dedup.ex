@@ -96,7 +96,7 @@ defmodule Barkpark.Tasks.Dedup do
 
   require Logger
 
-  alias Barkpark.Content.{Document, Scope, WriteScope}
+  alias Barkpark.Content.{Document, Scope, Warnings, WriteScope}
   alias Barkpark.Dedup.ScanSeam
   alias Barkpark.Repo
   alias Barkpark.Tasks.{Judge, Similarity}
@@ -303,7 +303,10 @@ defmodule Barkpark.Tasks.Dedup do
 
         case refuse do
           [] ->
-            override_toll(new_task, candidates, assessment.excluded, reasons, scan)
+            case override_toll(new_task, candidates, assessment.excluded, reasons, scan) do
+              :ok -> warn_advise(remaining_advise)
+              refused -> refused
+            end
 
           _ ->
             {:error,
@@ -316,6 +319,37 @@ defmodule Barkpark.Tasks.Dedup do
               }}}
         end
     end
+  end
+
+  # ── the advise band reaches the AUTHOR on an ALLOWED create ──────────────
+  #
+  # task-a0cd11dd35788460. Until this, an allowed create DROPPED the advise list:
+  # it was read only by `judge_escalate/3`, and with no judge configured (or a
+  # judge that answered "distinct") nothing below @refuse was ever said to
+  # anyone. spd-b37 re-filed spd-b27's serif-stack finding at 0.2833 and the
+  # create returned a clean 2xx — a gray-zone match is exactly the case the
+  # author can settle in one read, and the gate kept it to itself.
+  #
+  # The channel is the one the publish wall already uses for its advise band
+  # (`Content.DedupWall`): `Content.Warnings`, code `possible_duplicate`,
+  # severity `warning`, drained into the mutate SUCCESS envelope's `warnings`
+  # and printed by `bp task create`. It NEVER blocks — the create's result is
+  # `:ok` exactly as before; only the advisory is new. One entry per match, so
+  # every matched id and its score is named.
+  defp warn_advise(advise) do
+    Enum.each(advise, fn match ->
+      %{id: id, similarity: sim, lifecycle_status: lc} = present(match)
+      state = if lc in [nil, ""], do: "", else: ", #{lc}"
+
+      Warnings.put(
+        "possible_duplicate",
+        "this task may duplicate #{id} (similarity #{sim}#{state}) — under the " <>
+          "#{Similarity.thresholds().refuse} refuse threshold, so the create went " <>
+          "through; if it is the same finding, extend #{id} instead, or name it in " <>
+          "content.distinct_from to record that it is not",
+        "warning"
+      )
+    end)
   end
 
   # ── the refusal must name an id the caller can actually ACT on ─────────────
@@ -589,7 +623,8 @@ defmodule Barkpark.Tasks.Dedup do
   @judge_confidence 0.7
 
   # Returns {escalated, remaining_advise}. No judge configured → escalate
-  # nothing (tier-1 stands). The advise band is top-K-bounded, so this is a
+  # nothing (tier-1 stands); `remaining_advise` becomes the create's
+  # `possible_duplicate` warnings (`warn_advise/1`). The advise band is top-K-bounded, so this is a
   # handful of calls at most, only on the gray-zone matches.
   defp judge_escalate(_new_task, _candidates, []), do: {[], []}
 

@@ -314,7 +314,7 @@ defmodule Barkpark.Tasks.DedupTest do
       #   2. TOKEN-FAR, so they cannot themselves refuse. Once stopwords go, the
       #      probe scores {rate, limiting, mutate, controller} and each filler
       #      shares only {rate} out of a seven-token union — Jaccard 0.14, well
-      #      under the 0.30 advise floor.
+      #      under the 0.28 advise floor.
       #
       # Near-misspellings of the probe satisfy both: almost the same string,
       # almost none of the same words.
@@ -551,7 +551,7 @@ defmodule Barkpark.Tasks.DedupTest do
     # threshold dropped to 0.0, proving nothing about the decision. A trigram-
     # near, token-far title keeps the candidate IN the set and forces the
     # THRESHOLD to be the thing that lets it through: shared tokens are {rate}
-    # against a seven-token union, Jaccard 0.14, under the 0.30 advise floor.
+    # against a seven-token union, Jaccard 0.14, under the 0.28 advise floor.
     test "a candidate that IS scanned but scores below the threshold still PASSES", %{
       scope: scope
     } do
@@ -775,7 +775,7 @@ defmodule Barkpark.Tasks.DedupTest do
   # opening words (trgm match -> the row IS scanned) while its scored tokens stay
   # far apart: the probe tokenizes to {unrelated} once stopwords go, against
   # {unrelated, poisoned, label, set} here, for a Jaccard of 0.25 — under the
-  # 0.30 advise floor, so the create is still allowed on the merits.
+  # 0.28 advise floor, so the create is still allowed on the merits.
   @poison_probe_title "an unrelated new task"
 
   defp plant_poisoned_row!(doc_id, labels, scope) do
