@@ -69,7 +69,9 @@ defmodule Barkpark.PortableDoc.Render.CodeBlockLangParityTest do
         Enum.map(@cases, fn c -> Compose.compose_block(c["block"], style) end)
 
       strip = fn composed ->
-        Map.update(composed, "html", nil, fn html -> String.replace(html, ~r/ data-lang="[^"]*"/, "") end)
+        Map.update(composed, "html", nil, fn html ->
+          String.replace(html, ~r/ data-lang="[^"]*"/, "")
+        end)
       end
 
       first = strip.(hd(htmls))
@@ -90,7 +92,8 @@ defmodule Barkpark.PortableDoc.Render.CodeBlockLangParityTest do
         if style == :article and has_lang? do
           assert html =~ ~s( data-lang="#{lang}"), "case #{c["name"]}: data-lang expected"
         else
-          refute html =~ "data-lang", "case #{c["name"]} (#{inspect(style)}): data-lang must not appear"
+          refute html =~ "data-lang",
+                 "case #{c["name"]} (#{inspect(style)}): data-lang must not appear"
         end
       end
     end

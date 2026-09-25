@@ -136,11 +136,27 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     test "a merged table cell renders colspan/rowspan on the origin and no <td> for the covered positions (plan #24)" do
       table = %{
         "kind" => "PdTable",
-        "head" => [[%{"kind" => "PdText", "children" => ["A"]}], [%{"kind" => "PdText", "children" => ["B"]}], [%{"kind" => "PdText", "children" => ["C"]}]],
+        "head" => [
+          [%{"kind" => "PdText", "children" => ["A"]}],
+          [%{"kind" => "PdText", "children" => ["B"]}],
+          [%{"kind" => "PdText", "children" => ["C"]}]
+        ],
         "rows" => [
-          [[%{"kind" => "PdText", "children" => ["ab"]}], [], [%{"kind" => "PdText", "children" => ["c1"]}]],
-          [[%{"kind" => "PdText", "children" => ["tall"]}], [%{"kind" => "PdText", "children" => ["b2"]}], [%{"kind" => "PdText", "children" => ["c2"]}]],
-          [[], [%{"kind" => "PdText", "children" => ["b3"]}], [%{"kind" => "PdText", "children" => ["c3"]}]]
+          [
+            [%{"kind" => "PdText", "children" => ["ab"]}],
+            [],
+            [%{"kind" => "PdText", "children" => ["c1"]}]
+          ],
+          [
+            [%{"kind" => "PdText", "children" => ["tall"]}],
+            [%{"kind" => "PdText", "children" => ["b2"]}],
+            [%{"kind" => "PdText", "children" => ["c2"]}]
+          ],
+          [
+            [],
+            [%{"kind" => "PdText", "children" => ["b3"]}],
+            [%{"kind" => "PdText", "children" => ["c3"]}]
+          ]
         ],
         "spans" => [
           %{"row" => 0, "col" => 0, "colspan" => 2, "rowspan" => 1},
@@ -151,6 +167,7 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       html = Walk.render_body(table, @width, @article)
       assert html =~ ~r/<td class="bp-table__td" colspan="2">.*?ab.*?<\/td>/
       assert html =~ ~r/<td class="bp-table__td" rowspan="2">.*?tall.*?<\/td>/
+
       # first body row: two cells (the covered one is gone); third row: two cells (covered by the rowspan)
       rows = Regex.scan(~r/<tr>(.*?)<\/tr>/s, html) |> Enum.map(fn [_, inner] -> inner end)
       body = Enum.drop(rows, 1)
@@ -162,9 +179,21 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
 
     test "column widths render as a <colgroup> on the article table only (plan #25)" do
-      table = %{"kind" => "PdTable", "head" => [[%{"kind" => "PdText", "children" => ["A"]}], [%{"kind" => "PdText", "children" => ["B"]}]], "rows" => [[[], []]], "widths" => [220, nil]}
+      table = %{
+        "kind" => "PdTable",
+        "head" => [
+          [%{"kind" => "PdText", "children" => ["A"]}],
+          [%{"kind" => "PdText", "children" => ["B"]}]
+        ],
+        "rows" => [[[], []]],
+        "widths" => [220, nil]
+      }
+
       html = Walk.render_body(table, @width, @article)
-      assert html =~ ~s(<table role="presentation" class="bp-table"><colgroup><col style="width:220px"><col></colgroup><thead>)
+
+      assert html =~
+               ~s(<table role="presentation" class="bp-table"><colgroup><col style="width:220px"><col></colgroup><thead>)
+
       refute Walk.render_body(table, @width, @email) =~ "colgroup"
       refute Walk.render_body(Map.delete(table, "widths"), @width, @article) =~ "colgroup"
     end

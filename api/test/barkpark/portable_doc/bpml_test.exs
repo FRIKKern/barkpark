@@ -109,8 +109,17 @@ defmodule Barkpark.PortableDoc.BpmlTest do
     test "author alignment rides <p> and <h1..3> as align and comes back exactly (plan #21)" do
       blocks = [
         %{"id" => "h1", "type" => "heading", "level" => 2, "align" => "right", "text" => "Right"},
-        %{"id" => "p1", "type" => "paragraph", "align" => "center", "content" => [%{"type" => "text", "value" => "Centred."}]},
-        %{"id" => "p2", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "Plain."}]}
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "align" => "center",
+          "content" => [%{"type" => "text", "value" => "Centred."}]
+        },
+        %{
+          "id" => "p2",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Plain."}]
+        }
       ]
 
       {bpml, parsed} = roundtrip!(blocks)
@@ -139,7 +148,9 @@ defmodule Barkpark.PortableDoc.BpmlTest do
       assert bpml =~ ~s(<td colspan="2">ab</td><td></td>)
 
       assert {:ok, [table]} =
-               Bpml.parse_blocks("<table><tr><td rowspan=\"2\">tall</td><td>b1</td></tr><tr><td></td><td>b2</td></tr></table>")
+               Bpml.parse_blocks(
+                 "<table><tr><td rowspan=\"2\">tall</td><td>b1</td></tr><tr><td></td><td>b2</td></tr></table>"
+               )
 
       assert table["spans"] == [%{"row" => 0, "col" => 0, "colspan" => 1, "rowspan" => 2}]
       assert length(table["rows"]) == 2 and Enum.all?(table["rows"], &(length(&1) == 2))
@@ -151,7 +162,9 @@ defmodule Barkpark.PortableDoc.BpmlTest do
           "id" => "t1",
           "type" => "table",
           "cols" => [%{"width" => 220}, %{"type" => "num"}],
-          "rows" => [[[%{"type" => "text", "value" => "a"}], [%{"type" => "text", "value" => "1"}]]]
+          "rows" => [
+            [[%{"type" => "text", "value" => "a"}], [%{"type" => "text", "value" => "1"}]]
+          ]
         }
       ]
 
