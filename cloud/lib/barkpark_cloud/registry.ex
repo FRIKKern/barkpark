@@ -42,6 +42,7 @@ defmodule BarkparkCloud.Registry do
     Barkpark,
     Deployment,
     FleetSettings,
+    HostnameClaim,
     Provider,
     ProvisionJob,
     Site,
@@ -373,8 +374,9 @@ defmodule BarkparkCloud.Registry do
   # SUPPORT insert is quota-exempt (PDF-D86). Keep this private: a new caller that
   # skips the quota must be a deliberate, documented exception, not an accident.
   defp insert_barkpark(team, attrs) do
-    %Barkpark{}
-    |> Barkpark.changeset(put_team_id(attrs, team))
+    changeset = Barkpark.changeset(%Barkpark{}, put_team_id(attrs, team))
+
+    changeset
     # `mode: :savepoint` because BOTH callers now run inside a transaction
     # (`register_barkpark/2` for the quota lock, `register_support_barkpark/2` for
     # the fleet write). Without it a unique-constraint violation aborts the whole
@@ -384,6 +386,210 @@ defmodule BarkparkCloud.Registry do
     # decides to fall back to the suffixed FQDN. The savepoint keeps the
     # constraint error a VALUE the caller can read, as it was before the lock.
     |> Repo.insert(mode: :savepoint)
+    |> claim_url_host(changeset)
+  end
+
+  # The provisioning half of the hostname_claims backstop: the new row's url
+  # host is claimed in the SAME transaction as the insert (both callers of
+  # `insert_barkpark/2` run inside one). `barkparks_url_unique_idx` only sees
+  # url-vs-url; this claim also refuses a url host that another row already
+  # serves as its `custom_host` — the collision no per-column index can see.
+  #
+  # A refused claim deletes the row it just inserted (same transaction, nothing
+  # references it yet) and answers the SAME changeset error the url index
+  # gives — `{:url, "is already provisioned", constraint: :unique}` — so
+  # `insert_with_url_reservation/4` falls back to the suffixed FQDN and the
+  # worker route renders its usual 422, never a 500.
+  defp claim_url_host({:ok, %Barkpark{url: url} = bp}, changeset) do
+    case hostname_claim_key(url) do
+      nil ->
+        {:ok, bp}
+
+      host ->
+        case claim_hostname(host, bp.id, "url", []) do
+          :ok ->
+            {:ok, bp}
+
+          :taken ->
+            Repo.delete!(bp)
+
+            {:error,
+             changeset
+             |> Map.put(:action, :insert)
+             |> Ecto.Changeset.add_error(:url, "is already provisioned",
+               constraint: :unique,
+               constraint_name: "hostname_claims_host_unique_idx"
+             )}
+        end
+    end
+  end
+
+  defp claim_url_host(other, _changeset), do: other
+
+  @doc """
+  The key a hostname is claimed under in `hostname_claims`: `host` (a bare
+  hostname or an origin such as `https://h:4000/x`) run through the SAME
+  normaliser the provisioning-FQDN leg of `custom_host_taken?/2` compares with
+  (`normalize_claim_host/1`), or `nil` when nothing is left to claim (a nil or
+  junk value that normalises to `""`).
+
+  Public for one caller outside this module: the `create_hostname_claims`
+  migration's backfill, which must key existing rows exactly as live writes
+  key new ones.
+  """
+  @spec hostname_claim_key(term()) :: String.t() | nil
+  def hostname_claim_key(host) when is_binary(host) do
+    case normalize_claim_host(host) do
+      "" -> nil
+      norm -> norm
+    end
+  end
+
+  def hostname_claim_key(_), do: nil
+
+  # Claim `host` for `barkpark_id` in ONE statement. The UNIQUE index on
+  # `hostname_claims.host` is the arbiter: a concurrent claim of the same host
+  # blocks on the uncommitted key and, once the holder commits, meets the
+  # conflict. `ON CONFLICT … DO UPDATE … WHERE` turns that conflict into a
+  # VALUE instead of a raised unique_violation, so the enclosing transaction is
+  # not aborted and the caller can answer its own refusal shape.
+  #
+  # The conflict arm updates (i.e. the claim succeeds) only when the existing
+  # claim is ALREADY this barkpark's (an idempotent re-attach, or attaching the
+  # host the row already serves as its url), or when it is a `"url"` claim held
+  # by one of `takeover_ids` — rows the caller's pre-check has already judged
+  # abandoned. Anything else → 0 rows → `:taken`.
+  defp claim_hostname(host, barkpark_id, kind, takeover_ids) do
+    now = DateTime.utc_now()
+
+    on_conflict =
+      from(c in HostnameClaim,
+        where:
+          c.barkpark_id == ^barkpark_id or
+            (c.kind == "url" and c.barkpark_id in ^takeover_ids),
+        update: [set: [barkpark_id: ^barkpark_id, kind: ^kind, updated_at: ^now]]
+      )
+
+    row = %{
+      id: Ecto.UUID.generate(),
+      host: host,
+      barkpark_id: barkpark_id,
+      kind: kind,
+      inserted_at: now,
+      updated_at: now
+    }
+
+    case Repo.insert_all(HostnameClaim, [row], on_conflict: on_conflict, conflict_target: :host) do
+      {1, _} -> :ok
+      {0, _} -> :taken
+    end
+  end
+
+  # The `"url"` claims on `host` held by OTHER barkparks whose row STILL shows
+  # that url host, read BEFORE the pre-check. If the pre-check then answers
+  # "free", it walked every such row and judged it abandoned, so these holders
+  # may be taken over. Two filters, both load-bearing:
+  #
+  #   * read BEFORE the pre-check — a row provisioned in between would otherwise
+  #     land in the set without the pre-check ever judging it;
+  #   * the row's own url must key to `host` — a claim whose row the pre-check
+  #     cannot see (any state where the claim and the column disagree) is never
+  #     taken over; it refuses, which is the backstop's whole job.
+  defp url_claim_holders(host, self_id) do
+    HostnameClaim
+    |> join(:inner, [c], b in Barkpark, on: b.id == c.barkpark_id)
+    |> where([c], c.host == ^host and c.kind == "url" and c.barkpark_id != ^self_id)
+    |> select([c, b], {c.barkpark_id, b.url})
+    |> Repo.all()
+    |> Enum.filter(fn {_id, url} -> hostname_claim_key(url) == host end)
+    |> Enum.map(fn {id, _url} -> id end)
+  end
+
+  @doc """
+  Copy every existing barkpark hostname claim into `hostname_claims`. Called by
+  the `create_hostname_claims` migration; idempotent, so it is also the tool
+  that RE-LISTS pre-existing collisions later
+  (`bin/barkpark_cloud eval "BarkparkCloud.Registry.backfill_hostname_claims(BarkparkCloud.Repo)"`).
+
+  NEVER RAISES on a collision. Each claim is `INSERT … ON CONFLICT DO NOTHING`;
+  a claim whose host is already held by a DIFFERENT barkpark is skipped, left
+  exactly as it is on the barkparks row, and logged at warning level naming
+  both rows. Only new writes are refused by the index; pre-existing duplicates
+  stay. `custom_host` claims go in before `url` claims, so on a collision the
+  customer's deliberate claim holds the host and the platform-minted url is the
+  one skipped (the known case: a ghost row whose url another row now serves as
+  its custom_host).
+
+  Returns `%{claimed: n, skipped: [%{host, kind, barkpark_id, held_by, held_as}]}`.
+  """
+  @spec backfill_hostname_claims(module()) :: %{claimed: non_neg_integer(), skipped: [map()]}
+  def backfill_hostname_claims(repo) do
+    rows =
+      repo.all(
+        from(b in Barkpark,
+          order_by: [asc: b.inserted_at, asc: b.id],
+          select: {b.id, b.url, b.custom_host}
+        )
+      )
+
+    candidates =
+      for({id, _url, ch} <- rows, key = hostname_claim_key(ch), do: {key, id, "custom_host"}) ++
+        for({id, url, _ch} <- rows, key = hostname_claim_key(url), do: {key, id, "url"})
+
+    now = DateTime.utc_now()
+
+    result =
+      Enum.reduce(candidates, %{claimed: 0, skipped: []}, fn {host, id, kind}, acc ->
+        row = %{
+          id: Ecto.UUID.generate(),
+          host: host,
+          barkpark_id: id,
+          kind: kind,
+          inserted_at: now,
+          updated_at: now
+        }
+
+        case repo.insert_all(HostnameClaim, [row], on_conflict: :nothing, conflict_target: :host) do
+          {1, _} ->
+            %{acc | claimed: acc.claimed + 1}
+
+          {0, _} ->
+            case repo.one(
+                   from(c in HostnameClaim,
+                     where: c.host == ^host,
+                     select: {c.barkpark_id, c.kind}
+                   )
+                 ) do
+              # The row's own other column (its url host IS its custom_host):
+              # one claim, not a collision.
+              {^id, _} ->
+                acc
+
+              {held_by, held_as} ->
+                Logger.warning(
+                  "hostname_claims backfill: SKIPPED pre-existing collision on #{host} — " <>
+                    "barkpark #{id} (#{kind}) left unclaimed; held by barkpark #{held_by} (#{held_as})"
+                )
+
+                skip = %{
+                  host: host,
+                  kind: kind,
+                  barkpark_id: id,
+                  held_by: held_by,
+                  held_as: held_as
+                }
+
+                %{acc | skipped: acc.skipped ++ [skip]}
+            end
+        end
+      end)
+
+    Logger.info(
+      "hostname_claims backfill: #{result.claimed} claim(s) written, " <>
+        "#{length(result.skipped)} pre-existing collision(s) skipped"
+    )
+
+    result
   end
 
   # cch-w58 (DELETED): `upsert_barkpark/2` used to live here, documented by both
@@ -8056,9 +8262,11 @@ defmodule BarkparkCloud.Registry do
   provisioning FQDN (its `url` host, compared NORMALISED — a url-held FQDN and
   a custom_host are ONE namespace) — each of those would silently
   shadow or be shadowed by the attach. Taken → `{:error, :taken}`. The
-  pre-check is check-then-write; the `barkparks_custom_host_unique_idx` unique
-  constraint is the atomic backstop for a custom_host↔custom_host race
-  (translated to the same `:taken`).
+  pre-check is check-then-write; the atomic backstop is the `hostname_claims`
+  row this call writes in the same transaction (UNIQUE over the host, whichever
+  column claimed it), so a url/custom_host race lost to a concurrent
+  provisioning insert answers the same `:taken`. A site-domain race is still
+  serialised only by the advisory lock.
 
   RE-ATTACH IS REFUSED, not overwritten
   (`cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`).
@@ -8111,11 +8319,24 @@ defmodule BarkparkCloud.Registry do
         # unique_violation rescue below is honest), but it covers ONE of the four
         # legs `custom_host_taken?/2` walks — a racing SITE claim of the same
         # hostname is not an index collision at all. The lock covers all four.
+        #
+        # The lock serialises only the doors that take it; provisioning does not.
+        # So the pre-check stays (it gives the friendly refusal) and the
+        # `hostname_claims` UNIQUE index is the atomic backstop behind it: a
+        # provisioning url host committed after our pre-check read the
+        # namespace makes `claim_hostname/4` answer `:taken` — the SAME refusal.
         serialize_hostname_claim([norm], fn ->
-          if custom_host_taken?(norm, barkpark) do
-            {:error, :taken}
-          else
-            changeset |> Repo.update() |> translate_custom_host_conflict()
+          takeover_ids = url_claim_holders(norm, barkpark.id)
+
+          cond do
+            custom_host_taken?(norm, barkpark) ->
+              {:error, :taken}
+
+            claim_hostname(norm, barkpark.id, "custom_host", takeover_ids) == :taken ->
+              {:error, :taken}
+
+            true ->
+              changeset |> Repo.update() |> translate_custom_host_conflict()
           end
         end)
     end
@@ -8229,7 +8450,9 @@ defmodule BarkparkCloud.Registry do
   # url-held FQDN and a custom_host occupy ONE hostname namespace — the two
   # partial unique indexes (`barkparks_url_unique_idx`,
   # `barkparks_custom_host_unique_idx`) are DISJOINT and structurally cannot
-  # see across them, so this pre-check is the only guard there is.
+  # see across them. This pre-check gives the friendly refusal; the atomic
+  # backstop behind it is `hostname_claims` (one row per claimed host,
+  # UNIQUE (host)), written by `set_custom_host/2` and the provisioning insert.
   #
   # Self is EXCLUDED, exactly as `barkpark_custom_host_claimed?/2` does it: a row
   # attaching the host it ALREADY serves (its own provisioning FQDN — e.g.
