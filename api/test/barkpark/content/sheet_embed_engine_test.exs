@@ -74,6 +74,10 @@ defmodule Barkpark.Content.SheetEmbedEngineTest do
   test "the Sheets plugin declares its engine and the Registry publishes it" do
     assert Barkpark.Plugins.Sheets.sheet_embed_engine() == Barkpark.Plugins.Sheets.EmbedEngine
     assert SheetEmbedEngine.get() == Barkpark.Plugins.Sheets.EmbedEngine
+
+    # Control for the "not recomputed" assertion below: with the engine
+    # present the same formula content does change.
+    refute SheetEmbedEngine.recompute(sheet_content("y", "=1+1")) == sheet_content("y", "=1+1")
   end
 
   test "a plugin that declares nothing publishes no engine" do

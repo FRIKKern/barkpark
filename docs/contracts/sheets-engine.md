@@ -37,7 +37,10 @@ debounce of 2s or 25 ops, plus on terminate.
 Sheet saves run an Engine recompute, then the write-through refreshes every embedding
 paper's snapshot. Hydration mirrors it when a paper save adds a
 `{"type":"sheet","ref":…}` block. Both taps are in `content/sheets.ex` —
-`tap_sheet_writethrough` and `hydrate_sheet_embed_snapshots`.
+`tap_sheet_writethrough` and `hydrate_sheet_embed_snapshots`. They reach `Engine` and
+`Core` only through `Content.SheetEmbedEngine`, which the plugin fills via
+`sheet_embed_engine/0`. With the plugin off, a sheet saves without a recompute and
+embeds keep their last snapshot.
 
 Session deltas: `{:sheets_op, %{rev, tab, changed}}` on `doc_topic <> ":sheets:op"`.
 SSE document events fire only on the debounced persist, never per op.
