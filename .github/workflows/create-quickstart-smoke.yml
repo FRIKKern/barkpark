@@ -69,7 +69,7 @@ jobs:
       # installed below so /usr/bin/clang exists on the runner.
       CC: /usr/bin/clang
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # fetch-depth: 0 pulls full history + tags so Barkpark.BuildInfo can
         # derive the version from `git describe --tags` at compile time (same
         # rationale as elixir.yml's Test job).

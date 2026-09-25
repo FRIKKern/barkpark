@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: The staleness reader's own harness passes, and its tally is read as a NUMBER
@@ -128,7 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The reader resolves the served sha in THIS clone and counts commits
           # to origin/main. Anything shallower makes every sha unresolvable.
@@ -156,7 +156,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: File (or update) the CI failure issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -108,7 +108,7 @@ jobs:
           echo "NPM_TOKEN present ($(printf %s "${NPM_TOKEN}" | wc -c) bytes) — presence only, NOT proof of authorization."
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

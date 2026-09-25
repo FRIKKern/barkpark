@@ -104,7 +104,7 @@ jobs:
     outputs:
       hit: ${{ steps.f.outputs.hit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           # `filter: blob:none` — a BLOBLESS partial clone, and it is NOT
@@ -159,7 +159,7 @@ jobs:
     if: github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The scanner's own discrimination matrix. It must pass BEFORE its verdict
       # over the tree means anything: arm (0) runs the defect and requires 141,

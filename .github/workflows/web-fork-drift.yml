@@ -65,7 +65,7 @@ jobs:
     name: web <-> search-starter named invariants (advisory)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Prove the tripwire can fail before trusting that it passed. The selftest
       # copies BOTH real trees into a temp dir, plants five violations across

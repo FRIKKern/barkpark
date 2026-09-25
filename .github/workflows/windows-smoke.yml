@@ -58,7 +58,7 @@ jobs:
     name: install-cli.ps1 runs on windows-latest (hermetic)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Parse the installer before running it: a syntax error should name
       # itself here, not surface as a confusing mid-install failure.

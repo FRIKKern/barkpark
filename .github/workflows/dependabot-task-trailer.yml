@@ -99,7 +99,7 @@ jobs:
       startsWith(github.event.pull_request.head.ref, 'dependabot/')
     steps:
       - name: Checkout the BASE ref only (never PR code)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         # No `ref:` — on pull_request_target the default is the base branch.
         # Overriding it to the PR head is what turns this trigger into a
         # remote-code-execution primitive. Do not add one.
@@ -148,7 +148,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: shellcheck the injector and its harness
         run: shellcheck scripts/dependabot-task-trailer.sh scripts/dependabot-task-trailer.test.sh
       - name: "Hermetic fixtures: injector arms, author-clause mutation, and the gate's positive control"

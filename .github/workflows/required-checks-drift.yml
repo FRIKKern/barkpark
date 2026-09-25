@@ -218,7 +218,7 @@ jobs:
     outputs:
       touched: ${{ steps.sets.outputs.touched }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref — the same reason elixir.yml's
           # dispatcher documents: the merge ref already contains main's
@@ -343,7 +343,7 @@ jobs:
       # `git ls-files` from the repo root and §3c/§3d scan the real workflow
       # tree. Without a git index §13 produces a spurious FAIL.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -499,7 +499,7 @@ jobs:
     steps:
       - name: Checkout
         id: setup
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -661,7 +661,7 @@ jobs:
     steps:
       - name: Checkout
         id: setup
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -727,7 +727,7 @@ jobs:
       # checkout gives it neither, and a truncated history can only make it MISS.
       # `fetch-depth: 0` is the only honest depth here.
       - name: Checkout the PR head (full history — the check walks ancestors)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -804,7 +804,7 @@ jobs:
     steps:
       - name: Checkout
         id: setup
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The API stage, §10 and §11: the committed spec's `enforced` flag against
       # whether the branch is REALLY protected, and full-mode verify against live

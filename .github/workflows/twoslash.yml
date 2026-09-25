@@ -19,7 +19,7 @@ jobs:
     name: Twoslash type-check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Detect docs app
         id: detect
@@ -73,7 +73,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: File (or update) the CI failure issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -206,7 +206,7 @@ jobs:
       console: ${{ steps.sets.outputs.console }}
       verdict: ${{ steps.sets.outputs.verdict }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
           # `refs/pull/N/merge` — a commit that already contains main's advance
@@ -469,7 +469,7 @@ jobs:
         ${{ steps.selftest.outputs.verdict
         || steps.ratchet.outputs.verdict }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Harness (the ratchet must be able to fail)
         id: selftest
@@ -635,7 +635,7 @@ jobs:
         || steps.agent-event-census.outputs.verdict
         || steps.unknown-census.outputs.verdict }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -2567,7 +2567,7 @@ jobs:
     outputs:
       verdict: ${{ steps.cssom.outputs.verdict }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -2740,7 +2740,7 @@ jobs:
       # step further down: it can only publish if `tier` and `roster` exited 0.
       verdict: ${{ steps.stopwatch.outputs.verdict || steps.roster.outputs.verdict || steps.tier.outputs.verdict }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -2960,7 +2960,7 @@ jobs:
     outputs:
       verdict: ${{ steps.overflow.outputs.verdict }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -3085,7 +3085,7 @@ jobs:
     outputs:
       verdict: ${{ steps.oracle.outputs.verdict }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -3329,7 +3329,7 @@ jobs:
     outputs:
       verdict: ${{ steps.adjacency.outputs.verdict }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -3763,7 +3763,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:

@@ -141,7 +141,7 @@ jobs:
       compile: ${{ steps.sets.outputs.compile }}
       test: ${{ steps.sets.outputs.test }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
           # `refs/pull/N/merge` — a commit that already contains main's advance
@@ -383,7 +383,7 @@ jobs:
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
         with:
           # depth 2, not 0. On a pull_request the checked-out ref is the merge
@@ -1247,7 +1247,7 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # LOAD-BEARING, NOT INCIDENTAL. The diff step below derives the PR's
           # changed files from `HEAD^1`, and on actions/checkout's DEFAULT depth
@@ -1462,7 +1462,7 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         # fetch-depth: 0 pulls full history + tags. Barkpark.BuildInfo derives
         # the version from `git describe --tags --match 'v[0-9]*'` at COMPILE
         # time; a shallow (depth-1, tagless) checkout makes it degrade to
@@ -2172,7 +2172,7 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -2440,7 +2440,7 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -2978,7 +2978,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:
