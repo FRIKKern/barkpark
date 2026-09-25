@@ -477,6 +477,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     render_opts =
       Labels.paper_render_opts(dataset, style, paper_scope(existing, scope_attrs))
 
+    # A write that sends neither blocks nor body_html (a title or metadata
+    # patch) on a doc that already HAS blocks: the cache is re-rendered from
+    # those stored blocks instead of carried forward. A carried cache may come
+    # from an older renderer, and the `{:paper_updated, …}` frame for this
+    # write is built from the row it commits, so a write-capable Studio socket
+    # would paint the old bytes (task-0d3b2cd020238663). The stored blocks are
+    # already sealed, exactly what the original render saw, so this is the
+    # same render a blocks write makes. nil (no stored blocks, or an explicit
+    # `clear_blocks`) keeps the byte-for-byte carry-over of an HTML-only doc,
+    # whose cache is its only source.
+    carried_blocks = carried_blocks(blocks, attrs, existing)
+
     body_html =
       cond do
         is_list(blocks) -> Render.render_blocks(blocks, render_opts)
@@ -485,6 +497,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # a <script>/onerror= payload never persists (defensive; the reader CSP
         # is the second layer). See Barkpark.PortableDoc.HtmlSanitizer.
         is_binary(attrs["body_html"]) -> HtmlSanitizer.sanitize(attrs["body_html"])
+        is_list(carried_blocks) -> Render.render_blocks(carried_blocks, render_opts)
         true -> (existing && get_in(existing.content || %{}, ["body_html"])) || ""
       end
 
@@ -504,13 +517,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
     #     routes it into the OVERWRITE branch and discards the caller's HTML.
     #     Absent is the legacy class readers already fail closed on.
     #
-    #   carry-over — a metadata-only update rewrites the EXISTING body_html
-    #     byte-for-byte, so an existing stamp still describes exactly those
-    #     bytes and stays TRUE. Deleting here would demote a coherent paper into
-    #     the fail-closed unknown class and manufacture false 422s.
+    #   carry-over — a metadata-only update of a doc with NO stored blocks
+    #     rewrites the EXISTING body_html byte-for-byte, so an existing stamp
+    #     still describes exactly those bytes and stays TRUE. Deleting here
+    #     would demote a coherent paper into the fail-closed unknown class and
+    #     manufacture false 422s. (With stored blocks the cache is re-rendered
+    #     above, so it takes the fresh stamp like a blocks write.)
     content =
       cond do
-        is_list(blocks) ->
+        is_list(blocks) or is_list(carried_blocks) ->
           put_body_html(base_content, body_html)
 
         is_binary(attrs["body_html"]) ->
@@ -5009,6 +5024,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp maybe_put_paper(map, _key, nil), do: map
   defp maybe_put_paper(map, key, value), do: Map.put(map, key, value)
+
+  # The stored block list a body-less write re-renders its cache from (see
+  # `write_encrypted_blocks_doc/8`). nil when the write carries its own body,
+  # drops the blocks, or the doc has no non-empty stored block list — an
+  # HTML-only doc's cache is its source and must not be re-rendered to "".
+  # Reads the stored list shapes only (`Projection.read_blocks/1` minus its
+  # markdown arm); a markdown `body` string is not a block list.
+  defp carried_blocks(blocks, _attrs, _existing) when is_list(blocks), do: nil
+  defp carried_blocks(_blocks, _attrs, nil), do: nil
+
+  defp carried_blocks(_blocks, attrs, %Document{} = existing) do
+    content = existing.content || %{}
+
+    stored =
+      case content do
+        %{"blocks" => list} when is_list(list) -> list
+        %{"body" => %{"blocks" => list}} when is_list(list) -> list
+        %{"body" => list} when is_list(list) -> list
+        _ -> nil
+      end
+
+    cond do
+      is_binary(attrs["body_html"]) -> nil
+      clear_blocks?(attrs["clear_blocks"]) -> nil
+      stored in [nil, []] -> nil
+      true -> stored
+    end
+  end
 
   # Blocks on the way into `content`, with ONE new arm.
   #
