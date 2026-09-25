@@ -10793,9 +10793,30 @@ window, not for the name. State it as the structural finding it is or it is refu
 ("`usage_samples` shows no new row for b1259514") is unsatisfiable because the sweep is **host-keyed**
 (`checkable_scope/1`, `registry.ex:3813-3815` — url is never consulted) and `record_sample/1`
 (`usage.ex:424-432`) inserts unconditionally; b1259514's host survives the fix, so rows keep landing every 15
-minutes. But the draft's correction — "ZERO new rows carry `unavailable_reason`" — **also fails on a working
-fix**: `:not_live` is not a member of `@unavailable_reasons` (`usage.ex:161-162`), so the post-fix envelope
-falls through to `"unknown"` at `:257`. **RULING: the criterion is "no new row carries a DELIVERY-PROVING
+minutes. The draft's correction — "ZERO new rows carry `unavailable_reason`" — was ruled here to fail on a
+working fix, on a mechanism that does not exist.
+[**AMENDED IN PLACE 2026-09-25 (task-2d6ad0f6950ff1ea), as D505 instructs ("must be amended, not merely
+superseded"). The struck chain is quoted and refuted in D505; it is not repeated here.** What `origin/main`
+(`d474ac911`) does, read from the source: `:not_live` never reaches `unavailable_reason/1`.
+`instance_base_url/1` returns `{:error, :not_live}` and `instance_admin_token/1` returns
+`{:error, :no_admin_token | :decrypt_failed}`; they are the two HEADS of the `with` in `instance_datasets/2`,
+`instance_documents/3` and `instance_webhooks/3`, whose `else {:error, _} -> :unmetered` (`usage.ex:831`,
+`:858`, `:870`) turns a failed head into the bare atom `:unmetered`. `instance_meter/2` (`usage.ex:321-327`,
+five clauses since `59bc5d202`, 2026-08-04, #9461) maps `:unmetered` and `nil` to `meter(@unmetered, source,
+nil)` — a meter with NO `:unavailable_reason` key — and only `{:error, reason}` and a bad shape go through
+`unavailable_meter/2` to `unavailable_reason/1`, where an atom outside `@unavailable_reasons` becomes
+`"unknown"`. So a post-fix (token NULLed) tick for b1259514 carries no reason at all, never `"unknown"`: pinned
+by `usage_test.exs` "a meter that MEASURED, or one deliberately unmetered, carries no reason at all". That shape
+is RULED, not incidental: `cloud/lib/barkpark_cloud/unavailable_vocabulary.ex` (`ef1ce66db`, #15879,
+2026-09-03) classes `not_live` / `no_admin_token` / `decrypt_failed` as `:one_sided` with `usage: nil` — "a
+different axis, not a missing word" — pinned by `unavailable_vocabulary_census_test.exs`. Consequence: the
+draft's "ZERO new rows carry `unavailable_reason`" would NOT have failed on a working fix; the RULING below
+stands anyway, on the broader base D505 gives it. D505's own mechanism sentence is partly stale in turn: the
+`with/else` collapses only a failed HEAD (not live, no or undecryptable token), not "EVERY error" — a transport,
+deadline or delivered-status failure inside the `with` body returns `{:error, reason}` and DOES carry a reason.
+Read D505 ("D492's MECHANISM IS WRONG and must be amended") and `unavailable_vocabulary.ex` beside this
+decision, never instead of it.]
+**RULING: the criterion is "no new row carries a DELIVERY-PROVING
 reason (`unreachable|unauthorized|refused|instance_error`)."** D475's unblock stands unchanged: the w25
 incumbent is still `published` (rev `80239efd7c09c965d3837f2c7e1f5eef`), so the E4 dedup wall is still armed —
 **retitle it, do not unpublish it** (unpublishing loses a row the seal roster counts, and D476 already
