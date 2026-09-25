@@ -5,16 +5,72 @@ import Config
 # email in the process mailbox instead of touching a network.
 config :barkpark_cloud, BarkparkCloud.Mailer, adapter: Swoosh.Adapters.Test
 
-# Configure your database
+# ── Which test database (task-b169445c9f0031b3) ────────────────────────────
 #
-# The MIX_TEST_PARTITION environment variable can be used
-# to provide built-in test partitioning in CI environment.
-# Run `mix help test` for more information.
+# The SAME rule api/config/test.exs uses since #20107 (task-a0b11b3ae0cf45f0);
+# read either file and you have read both. The database is
+# `barkpark_cloud_test<suffix>`, and the suffix is chosen in this order:
+#
+#   1. MIX_TEST_PARTITION is SET (even to "") -> it wins, verbatim. Setting it to
+#      the empty string is the explicit opt-in to the unpartitioned, shared
+#      `barkpark_cloud_test`.
+#   2. CI is set (GitHub Actions always sets CI=true) -> "" — CI keeps
+#      `barkpark_cloud_test`, the POSTGRES_DB of its own ephemeral postgres
+#      service (.github/workflows/cloud.yml, jobs `test` and `census`, whose
+#      DATABASE_URL names the same database). CI's database is unchanged.
+#   3. Otherwise -> a per-checkout default, `_wt_<dirname>_<hash>`, derived from
+#      THIS checkout's absolute path. Two worktrees therefore never share a
+#      database unless one opts in.
+#
+# Why 3 is the default: with the variable unset every worktree on a box shared
+# ONE `barkpark_cloud_test`, and each inherited the others' migrations — a
+# console builder read DeliveryRecipientIndexTest red because #20298's index was
+# missing from the shared database another worktree had migrated to a different
+# head. The `test` alias in mix.exs runs `ecto.create` + `ecto.migrate` before
+# `test`, so a fresh per-checkout database is created and migrated on first use.
+#
+# The suffix is byte-identical to api's for the same checkout (same root, same
+# slug, same hash), so `barkpark_test_wt_X_h` and `barkpark_cloud_test_wt_X_h`
+# are visibly the same worktree's pair.
+#
+# The chosen suffix and its source are recorded under `:test_db_partition` so
+# test/support/shared_test_db.ex can say which database a red ran in and why.
+test_db_partition =
+  case System.fetch_env("MIX_TEST_PARTITION") do
+    {:ok, explicit} ->
+      %{suffix: explicit, source: :explicit}
+
+    :error ->
+      if System.get_env("CI") in [nil, "", "false", "0"] do
+        # config/ -> cloud/ -> the checkout root.
+        root = Path.expand("../..", __DIR__)
+
+        slug =
+          root
+          |> Path.basename()
+          |> String.downcase()
+          |> String.replace(~r/[^a-z0-9]+/, "_")
+          |> String.slice(0, 24)
+          |> String.trim("_")
+
+        # phash2 is stable across machines and ERTS versions, so the same path
+        # always names the same database. The slug is for humans; the hash is
+        # what keeps two checkouts with the same dirname apart.
+        hash = root |> :erlang.phash2() |> Integer.to_string(36) |> String.downcase()
+
+        %{suffix: "_wt_#{slug}_#{hash}", source: :worktree_default, root: root}
+      else
+        %{suffix: "", source: :ci}
+      end
+  end
+
+config :barkpark_cloud, :test_db_partition, test_db_partition
+
 config :barkpark_cloud, BarkparkCloud.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  database: "barkpark_cloud_test#{System.get_env("MIX_TEST_PARTITION")}",
+  database: "barkpark_cloud_test#{test_db_partition.suffix}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 

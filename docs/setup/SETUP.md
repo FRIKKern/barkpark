@@ -72,7 +72,7 @@ For database work, always run bare `mix` commands inside `api/`.
 
 ## Test database partitioning (multi-agent / multi-lane hosts)
 
-Agents sharing one Postgres need separate test databases, or they collide into cross-lane reds. `config/test.exs` gives each checkout its own by default (`barkpark_test_wt_<dir>_<hash>`, created+migrated on first `mix test`, named on the `BARKPARK-TEST-DB:` line); CI (`CI=true`) keeps `barkpark_test`. A set `MIX_TEST_PARTITION=<lane>` wins (empty = shared):
+Agents sharing one Postgres need separate test databases or they red each other. `api/` and `cloud/` give each checkout its own by default (`barkpark[_cloud]_test_wt_<dir>_<hash>`, created+migrated on first `mix test`, named on the `BARKPARK[-CLOUD]-TEST-DB:` line); CI (`CI=true`) keeps `barkpark[_cloud]_test`. A set `MIX_TEST_PARTITION=<lane>` wins (empty = shared):
 
 ```bash
 cd api && MIX_TEST_PARTITION=mylane mix test
