@@ -904,6 +904,32 @@ defmodule Barkpark.Content.Writer do
 
   defp maybe_render_paper_body_html(attrs, _type, _dataset), do: attrs
 
+  # AN UPDATE NEVER MOVES A ROW (task-60f53b3ab9cc6bb0). `put_scope_attrs/2`
+  # stamps the RESOLVED write scope, which is right for a birth and wrong for an
+  # update whenever it differs from the row being updated. A key-absent write
+  # resolves its scope independently of the row it read: no caller -> the
+  # seeded Default; a single-workspace caller -> that workspace (inferred); a
+  # `:shared_only` caller reads only shared (NULL-workspace) rows yet stamps
+  # its inferred workspace. Each moved an existing row into a tenant it did not
+  # belong to, and audited the write there (probed on main; pinned by
+  # test/barkpark/content/patch_keeps_row_workspace_test.exs).
+  #
+  # When the stamp names a different workspace than the row, drop the scope
+  # keys so the changeset leaves the row's own workspace_id / project_id /
+  # dataset_id (and the provenance that explains them) untouched. The write is
+  # then audited under the row's workspace (`tap_broadcast` reads the updated
+  # row). A stamp that AGREES with the row passes through unchanged, so every
+  # scoped write, and any same-workspace project/dataset backfill, is
+  # byte-identical to before. Nothing here widens who can write the row: the
+  # prev-doc read above already decided that, under the caller's scope.
+  @row_scope_keys ~w(workspace_id project_id dataset_id scope_source)
+
+  defp keep_row_scope(attrs, %Document{workspace_id: row_ws}) do
+    if Map.has_key?(attrs, "workspace_id") and Map.get(attrs, "workspace_id") != row_ws,
+      do: Map.drop(attrs, @row_scope_keys),
+      else: attrs
+  end
+
   defp do_upsert_document(type, attrs, dataset, doc_id, opts) do
     ctx = WriteScope.build_ctx(opts)
 
@@ -1006,7 +1032,10 @@ defmodule Barkpark.Content.Writer do
               # Field-encryption chokepoint (mirror of create_document). Fail
               # closed: a marked field that cannot be sealed rejects the write.
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
-                enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
+                enc_attrs =
+                  enc_attrs
+                  |> keep_row_scope(existing)
+                  |> maybe_render_paper_body_html(type, dataset)
 
                 # [acrc-publish-atomicity-txn-boundary] The doc write and its
                 # `mutation_events` row land or fail TOGETHER. Before this wrap
