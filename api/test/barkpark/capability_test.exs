@@ -66,6 +66,16 @@ defmodule Barkpark.CapabilityTest do
     end
   end
 
+  describe "off_message/1" do
+    test "names the switch that is off, including a required capability" do
+      put_capabilities(epic_fleet: false)
+
+      assert Capability.off_message(:cycle_fleet) =~ "the cycle_fleet capability is off"
+      assert Capability.off_message(:cycle_fleet) =~ "switched off: epic_fleet"
+      assert Capability.off_message(:epic_fleet) =~ "switched off: epic_fleet"
+    end
+  end
+
   describe "parse_off_list/1 (BARKPARK_CAPABILITIES_OFF)" do
     test "lists the named capabilities as off" do
       assert Capability.parse_off_list("studio_chat, cycle_fleet") ==
