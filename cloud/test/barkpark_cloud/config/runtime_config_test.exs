@@ -17,6 +17,7 @@ defmodule BarkparkCloud.Config.RuntimeConfigTest do
   @touched ~w(
     DATABASE_URL REGISTRY_ENCRYPTION_KEY STRIPE_SECRET_KEY OAUTH_STATE_SECRET
     STRIPE_WEBHOOK_SECRET STRIPE_PRICE_SUPPORTER PLATFORM_ADMIN_EMAILS
+    INTERNAL_ALLOWED_CIDRS
   )
 
   setup do
@@ -30,6 +31,12 @@ defmodule BarkparkCloud.Config.RuntimeConfigTest do
 
     System.put_env(%{
       "DATABASE_URL" => "ecto://user:pass@localhost/runtime_config_test",
+      # dr-w24-bl-internal-write-route-is-publicly-reachable — the prod block now
+      # REFUSES to boot without this (a /v1/internal/* perimeter that defaults
+      # open is not a perimeter). Declared here as the named opt-out so this test
+      # keeps measuring what it is about; the refusal itself is driven in
+      # `config/internal_allowed_cidrs_runtime_test.exs`.
+      "INTERNAL_ALLOWED_CIDRS" => "any",
       "REGISTRY_ENCRYPTION_KEY" => Base.encode64(:crypto.strong_rand_bytes(32)),
       "STRIPE_SECRET_KEY" => "sk_test_runtime_config_test",
       "OAUTH_STATE_SECRET" => "runtime-config-test-state-secret",
