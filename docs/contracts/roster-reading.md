@@ -2,8 +2,8 @@
 
 # Reading a task roster without being lied to
 
-Every trap below was re-measured live against `guerrilla.barkpark.cloud` on
-**2026-08-24**. None errors — each returns a plausible answer that is wrong, so the
+Every trap below was measured live against `guerrilla.barkpark.cloud` on
+**2026-08-24** (Trap 5: 2026-09-25). None errors — each returns a plausible answer that is wrong, so the
 cost is a confident false report, not a stack trace.
 
 **The one habit:** an empty list is a claim, and the one most likely to be a lie.
@@ -14,8 +14,8 @@ Before believing "0 rows", prove you would have seen rows if they existed.
 | Question | Use | Never use |
 |---|---|---|
 | Who are this epic's children? | `bp task get <epic>` → `.children` | — |
-| When did it close? Who holds it? | per-row `bp task get <id>` | `.children` (no such fields) |
-| All tasks matching a field | `GET /v1/tasks?filter[<key>]=…` | `bp task ls` (has no `--parent`) |
+| Who holds it? Its note? | `bp task ls --parent <epic> --all` | `.children` (no `claim`) |
+| All tasks matching a field | `GET /v1/tasks?filter[<key>]=…` | — |
 | Content fields / projections | `bp doc query task --filter …` | anything expecting `doc_id` |
 
 Two rules for all four: **check the HTTP status before the body**, and **compare every
@@ -27,8 +27,8 @@ with a value you know exists.
 `bp task get gh-8463` returns a row whose `doc_id` is **`drafts.gh-8463`**. You
 asked for one id and got another, with `ok: true` and HTTP 200.
 
-Measured: 403 of 403 draft rows in `bp task ls --all` carry the `drafts.` prefix, 0 of
-7264 published rows do, and the get route resolves **both** spellings to it.
+Measured: all 403 draft rows carry the `drafts.` prefix, no published row does, and
+the get route resolves **both** spellings to it.
 
 So a roster joined to per-row reads on `doc_id` silently drops every draft: the list
 says `drafts.gh-8463`, your key says `gh-8463`, the join yields nothing, no error.
@@ -59,13 +59,13 @@ answer instead of failing.
 | unknown route | 404 | `error` |
 | unknown task id | 404 | `message`, `ok`, `reason` |
 
-`if d.get("error")` misses two of the three. `if not d.get("ok")` catches all three —
-an absent `ok` is falsy — but only because success always carries `ok: true`. **The
+`if d.get("error")` misses two of the three. `if not d.get("ok")` catches all three,
+but only because success always carries `ok: true`. **The
 only signal that cannot lie is the HTTP status**; `bp` hides it, raw HTTP does not.
 
 The 400 is the honest one: `reason: invalid_filter` plus `details.supported`, naming
 every legal key — `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`,
-`phase_id`, `type`. A mistyped filter is refused loudly, never ignored.
+`phase_id`, `type`.
 
 ## Trap 4 — the same row, two field vocabularies
 
@@ -81,28 +81,30 @@ every legal key — `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`,
 So `row["status"]` on a `doc query` result is `None` even for a published row — not
 because it is unpublished, but because that verb does not project the field.
 
-> **Fix:** pick one verb per audit and stay in its vocabulary. Mixing them is what
-> produces "0 published rows" against a fully published roster.
+> **Fix:** pick one verb per audit and stay in its vocabulary. Mixing them produces
+> "0 published rows" against a fully published roster.
 
-## Trap 5 — `.children` is membership-true and timing-blind
+## Trap 5 — `.children` has no claim
 
-`.children` is authoritative for *who belongs* (`child_count` equalled
-`len(children)`, 280 = 280). Each child carries exactly six keys:
-`criteria_progress`, `doc_id`, `execution_class`, `inserted_at`, `lifecycle_status`,
-`title`.
+`.children` is authoritative for *who belongs*: on `dr-backlog-never-started`
+(2026-09-25) `child_count` 314 = `len(children)`. Seven keys: `criteria_progress`,
+`doc_id`, `execution_class`, `inserted_at`, `lifecycle_status`, `title`,
+`updated_at` — `criteria_progress` is **omitted** on a row with no criteria (1 of
+314), so read the key union, never `children[0]`.
 
-There is **no `updated_at`, no `closed_at`, no `claim`**, so any audit asking *when
-did this close* or *who holds it* must fetch each child individually. Inferring
-close time here is a vacuous green — the field was never there to disagree.
+There is **no `claim` or `assignee`**. Do not fetch per row: `bp task ls --parent
+<epic> --all -o json` returns the same 314 with both, plus `content`, in one read
+(`criteria_progress` is `null` there, not absent). The screen:
+[ledger-notes.md](ledger-notes.md#screening-an-epics-children).
 
-Drafts are excluded from **both** `.children` and `child_count`.
+Drafts are excluded from `.children`, `child_count` and the `--parent` read.
 
 ## Trap 6 — `count` is the page, `total` is the answer
 
 `count` is the rows in *this page*; `total` is the full match count and appears
 **only** with `--count`. Measured at `--limit 1`: `count=1`, `total=7252`. Reading
-`count` as the answer reports one task where there are seven thousand. `total` and a
-full page-through disagreed by one under concurrent writes — an approximation.
+`count` as the answer reports one task where there are seven thousand. `total` is
+approximate under concurrent writes (off by one against a page-through).
 
 ## Trap 7 — the claim epoch you read goes stale as you write
 
@@ -110,17 +112,15 @@ full page-through disagreed by one under concurrent writes — an approximation.
 pulses. So the obvious loop (claim, pulse while you work, close on the epoch the
 *claim* printed) cannot work; it is stale by the time you close.
 
-The refusal then misdirects:
+The refusal:
 
 ```
 bp: fenced_off
   hint: your claim epoch is stale — most often your own `bp task pulse` bumped it …
 ```
 
-The hint used to name only *lease swept or a blocker/move* — neither of which had
-happened; **your own heartbeat fenced you**, and it sent you hunting a cause that did
-not exist. The copy now names the pulse first. The trap itself is unchanged: the
-epoch you read still goes stale as you write.
+**Your own heartbeat fenced you.** The hint now names the pulse first; the trap is
+unchanged.
 
 > **Fix:** re-read `doc.claim.epoch` before stamping, or carry forward the epoch your
 > *most recent* write printed — never the claim's.
@@ -128,13 +128,12 @@ epoch you read still goes stale as you write.
 ## What is NO LONGER true
 
 `GET /v1/tasks?filter[parent_id]=…` **used to be silently ignored**, answering 200
-with an unfiltered page. That is fixed. Re-measured 2026-08-24: a real parent → 15/15
-and 100/100 belong, one distinct `parent_id`; a parent id that cannot exist → **0
-rows**; the same page unfiltered → **7** parents.
+with an unfiltered page. Fixed (2026-08-24): a real parent → 100/100 belong; a
+parent that cannot exist → **0 rows**; unfiltered → **7** parents.
 
-The route is now the correct instrument for field-scoped queries. Older notes saying
-*never source a roster from this route* are stale, and obeying them pushes you onto
-`bp task ls`, which cannot scope by parent at all.
+The route is now the correct instrument for field-scoped queries; older notes saying
+*never source a roster from this route* are stale. `bp task ls` also takes `--parent`
+now: an unknown parent → `docs: []`, not an unfiltered page.
 
 ## Re-proving this document
 
@@ -146,8 +145,9 @@ bp task get gh-8463 -o json | python3 -c 'import sys,json;print(json.load(sys.st
 # Trap 2 — the rows key, per verb
 bp task ls --limit 1 -o json        | python3 -c 'import sys,json;print(sorted(json.load(sys.stdin)))'
 bp doc query task --limit 1 -o json | python3 -c 'import sys,json;print(sorted(json.load(sys.stdin)))'
-# Trap 5 — the child key set
-bp task get cch-instruments-epic -o json | python3 -c 'import sys,json;print(sorted(json.load(sys.stdin)["children"][0]))'
+# Trap 5 — the child key union, then the one-read roster
+bp task get <epic> -o json | jq -c '[.children[]|keys[]]|unique'
+bp task ls --parent <epic> --all -o json | jq -c '{n:(.docs|length),k:(.docs[0]|keys)}'
 ```
 
 For Traps 3, 4, 6 and the filter-route check, hit the HTTP API directly with the token
