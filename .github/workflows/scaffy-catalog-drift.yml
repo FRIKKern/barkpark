@@ -14,10 +14,38 @@ name: scaffy-catalog-drift
 # when a credential is present it repairs the drift itself. Do not "fix"
 # this back to advisory without overturning D100.
 #
-# HONEST FRAMING. This is a post-merge WATCHER that reds main's own suite —
-# it fires on push-to-main, on the daily cron, and on dispatch. It can NEVER
-# gate a merge pre-merge: drift is a serve-side condition, so the PR diff
-# that introduces it is exactly what a pre-merge run cannot see.
+# HONEST FRAMING. On push-to-main, the daily cron and dispatch this is a
+# post-merge WATCHER that reds main's own suite. It ALSO runs on
+# pull_request (task dr-w31-bl-served-catalog-drift-is-red-and-unowned), and
+# there it is a PRE-MERGE NOTICE, never a merge gate: no context this file
+# publishes is in .github/required-checks.json, and it must never be — the
+# pull_request arm is paths-filtered, and a required name from a
+# paths-filtered workflow is never reported on a PR that misses the paths,
+# which deadlocks that PR (see the SKIP SHIM warning in go-tests.yml).
+#
+# WHAT THE PULL_REQUEST ARM ANSWERS. The served catalog is re-seeded from
+# main, so it lags any PR that edits a command BY CONSTRUCTION. Two questions
+# are therefore kept apart, because a signal that is red on every scaffy PR
+# while main is drifted teaches people to ignore it:
+#   * "does THIS PR put commands behind the served catalog?" — answered by
+#     `seed --impact` over the PR's own changed-file list (scaffy/seed/
+#     impact.go attributes each non-MATCH row to a touched corpus file or a
+#     touched deriver file, and counts the rest as pre-existing). A NOTICE
+#     reds this check and names the commands to re-seed after the merge.
+#   * "was main already drifted?" — the full audit still runs and prints the
+#     whole table, but on a PR pre-existing drift is a ::warning::, not a
+#     red: the PR did not cause it and cannot fix it.
+#
+# THE PULL_REQUEST ARM CANNOT WRITE. Three independent locks, any one of
+# which suffices: (1) the repair step's `if:` excludes pull_request, so on a
+# PR it never runs; (2) REPAIR_AUTHORIZED is true only on workflow_dispatch
+# with repair=true; (3) the step's BARKPARK_SEED_TOKEN expression yields the
+# secret only on workflow_dispatch, so no PR-event step env ever holds it.
+# GitHub also withholds repo secrets from fork pull_request runs, and
+# `permissions: contents: read` leaves the GITHUB_TOKEN read-only. Skipping
+# the repair step on a PR does not green a drifted run by skipping (the trap
+# the AUTHORIZATION note below forbids): on a PR the verdict belongs to the
+# PR-verdict step, which always runs there.
 #
 # FAILURE SEMANTICS — the job reds on exactly five conditions:
 #   1. SELF-TEST FAILURE (detection) — the hermetic fixture cannot prove the
@@ -76,6 +104,15 @@ on:
       - "scaffy/seed/**"
       - "internal/scaffy/**"
       - ".github/workflows/scaffy-catalog-drift.yml"
+  # PRE-MERGE NOTICE — the SAME paths as push. Never required (see header):
+  # a paths-filtered name in the required set deadlocks every PR that misses
+  # the paths. Keep this list identical to push's.
+  pull_request:
+    paths:
+      - "scaffy/commands/**"
+      - "scaffy/seed/**"
+      - "internal/scaffy/**"
+      - ".github/workflows/scaffy-catalog-drift.yml"
   schedule:
     # Daily at 06:17 UTC — catches drift introduced out-of-band (a manual
     # server edit, a reverted re-seed) with no corresponding push.
@@ -100,10 +137,14 @@ concurrency:
 
 jobs:
   drift:
-    name: served-catalog drift gate (post-merge watcher)
+    name: served-catalog drift gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # pull_request checks out the merge commit; depth 2 brings its first
+          # parent (the base tip), so HEAD^1..HEAD is exactly what merging adds.
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
 
       - uses: actions/setup-go@v5
         with:
@@ -224,6 +265,7 @@ jobs:
             summary "**DRIFT** — the served catalog is behind main; the auto-seed step decides the verdict (repair-to-green or hard red)." \
                     "" '```' "$out" '```'
             echo "status=drift" >>"$GITHUB_OUTPUT"
+            echo "drift_count=$(awk '/[[:space:]](DRIFT|MISSING|EXTRA)$/ {n++} END {print n+0}' <<<"$out")" >>"$GITHUB_OUTPUT"
             echo "drift detected — the auto-seed step repairs or reds; this exit 0 is a handoff, not a pass."
             exit 0
           fi
@@ -251,10 +293,15 @@ jobs:
       # and push arms still DETECT drift and still red on it; they simply no
       # longer mutate. This narrows who may WRITE, never what the gate SEES —
       # the detection arm is untouched, and D100's hard-red degrade stands.
+      #
+      # NEVER ON pull_request: the `if:` below excludes it and the secret
+      # expression yields '' off workflow_dispatch. A PR's drift verdict is
+      # decided by the PR-verdict step after this one, which always runs on a
+      # PR — so this skip cannot green a drifted PR.
       - name: Repair drifted commands (dispatch-only, opt-in) or red honestly
-        if: steps.audit.outputs.status == 'drift'
+        if: steps.audit.outputs.status == 'drift' && github.event_name != 'pull_request'
         env:
-          BARKPARK_SEED_TOKEN: ${{ secrets.BARKPARK_SEED_TOKEN }}
+          BARKPARK_SEED_TOKEN: ${{ github.event_name == 'workflow_dispatch' && secrets.BARKPARK_SEED_TOKEN || '' }}
           REPAIR_AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && inputs.repair }}
         run: |
           set -uo pipefail
@@ -307,3 +354,60 @@ jobs:
                   "" '```' "$out" '```'
           echo "::error::repair did not converge to green (re-check exit $code) — failing hard."
           exit 1
+
+      # ── PR verdict: drift THIS PR adds vs drift main already has ──────────
+      # pull_request only; no secret in env, nothing written anywhere but the
+      # step summary. `seed --impact` reads the PR's changed-file list and
+      # bills a non-MATCH row to the PR only when a touched corpus file backs
+      # it or a touched deriver file can explain its fields (scaffy/seed/
+      # impact.go). Exit codes are its contract: 0 QUIET, 2 CANNOT READ,
+      # 3 NOTICE. Built to a binary first because `go run` collapses every
+      # nonzero child exit to 1, which would erase 2-vs-3.
+      - name: PR verdict — drift this PR adds vs drift main already has
+        if: github.event_name == 'pull_request'
+        env:
+          AUDIT_STATUS: ${{ steps.audit.outputs.status }}
+          AUDIT_DRIFT: ${{ steps.audit.outputs.drift_count || 0 }}
+        run: |
+          set -uo pipefail
+          summary() { printf '%s\n' "$@" >>"$GITHUB_STEP_SUMMARY"; }
+          summary "" "## PR verdict (pull_request arm)"
+
+          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          if [ ! -s "$RUNNER_TEMP/changed.txt" ]; then
+            echo "::error::PR verdict CANNOT READ — empty changed-file list for HEAD^1..HEAD; refusing to call it quiet."
+            exit 1
+          fi
+          echo "changed paths:"; cat "$RUNNER_TEMP/changed.txt"
+
+          go build -o "$RUNNER_TEMP/seed" ./scaffy/seed || exit 1
+          code=0
+          out="$("$RUNNER_TEMP/seed" --impact --changed-files "$RUNNER_TEMP/changed.txt" 2>&1)" || code=$?
+          echo "$out"
+
+          # Rows the notice bills to THIS PR (0 unless NOTICE); everything else
+          # the merge-tree audit found is drift main already carried.
+          billed=0
+          if [ "$code" -eq 3 ]; then
+            billed="$(awk '$2 ~ /^(DRIFT|MISSING|EXTRA)$/ && /^  [^ ]/ {n++} END {print n+0}' <<<"$out")"
+          fi
+          pre=$(( AUDIT_DRIFT - billed ))
+          if [ "$pre" -gt 0 ]; then
+            echo "::warning::PRE-EXISTING DRIFT — ${pre} served command(s) were already behind main before this PR (the audit step's table names them). Not billed to this PR; a re-seed from main clears them (dispatch repair=true)."
+            summary "**Pre-existing drift: ${pre}** — already behind main before this PR; not billed to it."
+          fi
+
+          case "$code" in
+            0)
+              echo "PR verdict: QUIET — this PR adds 0 drifted command(s); ${pre} pre-existing on main (merge-tree audit: ${AUDIT_STATUS:-unknown}, ${AUDIT_DRIFT} non-MATCH)."
+              summary "**QUIET** — this PR adds no served-catalog drift."
+              exit 0 ;;
+            3)
+              summary "**NOTICE** — merging this PR puts commands behind the served catalog." "" '```' "$out" '```'
+              echo "::error::PR verdict: NOTICE — merging this PR puts ${billed} command(s) (named above) behind the served catalog. Not a merge gate (this check is not required); after the merge, dispatch scaffy-catalog-drift with repair=true, or main's push run reds on the same drift."
+              exit 1 ;;
+            *)
+              summary "**CANNOT READ** (exit $code) — not a clean bill of health." "" '```' "$out" '```'
+              echo "::error::PR verdict: CANNOT READ (seed --impact exit $code) — the check could not decide; this is NOT \"no drift\"."
+              exit 1 ;;
+          esac

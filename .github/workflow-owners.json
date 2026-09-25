@@ -28,6 +28,13 @@
     "named an author who had not written them. Back on the PR path, so the row is gone and",
     "the guard reds on the stale row -- which is how it came out (task-4f360efc26a428f5).",
     "",
+    "AND A THIRD, 2026-09-25: scaffy-catalog-drift.yml. Its row said the comparand IS",
+    "main, so on a PR it 'answers about the base, not the change'. False: seed --check",
+    "derives the CHECKED-OUT tree (on a PR, the merge commit) and compares it to the",
+    "served catalog, and seed --impact bills each drifted command to the PR's own changed",
+    "files. It now runs on pull_request as a pre-merge notice (never required), so the",
+    "row came out (task dr-w31-bl-served-catalog-drift-is-red-and-unowned).",
+    "",
     "THE POPULATION IS DERIVED, NEVER CURATED. A workflow belongs here iff it carries a",
     "`push:` arm and NO `pull_request:` arm -- i.e. it is off the PR path, so only the",
     "watcher can see its red. scripts/workflow-owner-check.sh recomputes that set from",
@@ -135,10 +142,6 @@
     "renew-mail-cert.yml": {
       "owner": "deploy",
       "why_off_pr": "renews the mail.barkpark.cloud LE cert via DNS-01 and reloads postfix on the CP box -- a monthly real-world side effect that must never fire from a PR head."
-    },
-    "scaffy-catalog-drift.yml": {
-      "owner": "cli",
-      "why_off_pr": "compares the scaffy catalog against the templates on main; the comparand IS main, so on a PR it answers about the base, not the change."
     },
     "scheduled-arm-health.yml": {
       "owner": "gates",
