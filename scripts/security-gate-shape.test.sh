@@ -17,16 +17,32 @@
 #   because the information is destroyed before the aggregator's shell starts.
 #
 #   So a continue-on-error job in the aggregator's `needs` launders its own red
-#   into a green required context, accidentally and unfalsifiably. Today that is
-#   `sobelow`, which is why `Security gate` does not list it.
+#   into a green context, accidentally and unfalsifiably, unless it is judged
+#   on its `outputs.verdict` instead (the channelling rule, case 2).
 #
 # …and its mirror, `blocking_not_in_needs`: a BLOCKING job present in the
 # workflow but absent from `needs` is a job the aggregator cannot judge, so it
 # greens while that job reds. Both sets are DERIVED FROM security.yml, never
-# hardcoded — that is what makes this ratchet self-correcting. When
-# `felix-w24-s7-continue-on-error-flip` makes Sobelow blocking, `coe_jobs`
-# empties and `blocking_not_in_needs` immediately demands that `sobelow` be
-# ADDED to `needs`, which is the correct answer under the new shape.
+# hardcoded — that is what makes this ratchet self-correcting.
+#
+# ── THE ZERO-COE DECISION (2026-09-25, task-7a3842d12cd5437d) ───────────────
+# `sobelow` was the last job carrying job-level continue-on-error; the flag was
+# dropped (task-f248c4889c3322fd). That left the channelling arms with an EMPTY
+# population, and `coe_in_needs_unchannelled = ""` over an empty set is the
+# vacuous green this file exists to prevent. Decided shape:
+#   1. The contract on the real file is the POPULATION ITSELF: `coe_jobs = ""`.
+#      Re-adding the flag to sobelow, or adding it to any other job, reds that
+#      arm by name. Bringing a continue-on-error job back is a deliberate edit
+#      of this pin, not a side effect.
+#   2. Over an empty population the emitter REFUSES: the three channelling
+#      facts read EMPTY-POPULATION, never "", so an arm that still asserts ""
+#      on them reds instead of greening. The real-file channelling asserts run
+#      only when the population is non-empty.
+#   3. The channelling machinery is kept and proven on PLANTED specimens in
+#      case 4: the mutator re-adds the flag to `sobelow` (the job the rule was
+#      built for) and every channelling arm must fire on that copy.
+# Rejected: re-pointing the arms at another continue-on-error job (there is
+# none), and letting them assert over whatever set exists (empty = vacuous).
 #
 # A harness with only green cases is the defect, not the proof, so every
 # assertion below has a planted mutant that makes it FIRE.
@@ -232,27 +248,48 @@ def verdict_channelled(n):
     if not any(st.get("id") == m.group(1) for st in (j.get("steps") or [])):
         return False
     return n in verdict_var_for
+# ZERO REFUSES (task-7a3842d12cd5437d). Over an EMPTY population these three
+# are not "" — "" is the passing answer, and a pass computed from nothing is the
+# vacuous green. They read EMPTY-POPULATION, which no arm accepts as clean.
+EMPTY_POP = "EMPTY-POPULATION"
+def over_coe(names):
+    return ",".join(sorted(names)) if coe_in_needs else EMPTY_POP
 emit("coe_verdict_judged",
-     ",".join(sorted(n for n in coe_in_needs if verdict_channelled(n))))
+     over_coe(n for n in coe_in_needs if verdict_channelled(n)))
 # MUST be empty: a continue-on-error job in needs with no verdict channel.
 emit("coe_in_needs_unchannelled",
-     ",".join(sorted(n for n in coe_in_needs if not verdict_channelled(n))))
+     over_coe(n for n in coe_in_needs if not verdict_channelled(n)))
 # MUST be empty: a continue-on-error job whose laundered `.result` is bound at
 # all in the aggregator.
 emit("coe_result_bound",
-     ",".join(sorted(n for n in coe_in_needs if n in var_for)))
+     over_coe(n for n in coe_in_needs if n in var_for))
 # Companion cardinality: an empty difference computed from an empty set proves
 # nothing, so a neutered `outputs.verdict` regex reds instead of going serene.
 emit("verdict_bindings_count", len(verdict_var_for))
 
-# D36, AMENDED. Every job in `needs` must actually be judged — on its `.result`
-# via decide(), OR, for a verdict-judged continue-on-error job, on its verdict.
-# Subtracting the latter is not a loophole: coe_in_needs_unchannelled and
-# coe_result_bound above hold that set to a STRICTER standard than decide().
+# D36, AMENDED TWICE. Every job in `needs` must actually be judged — on its
+# `.result` via decide(), OR on its verdict via decide_verdict(). The verdict
+# route (2026-09-25, task-7a3842d12cd5437d) is no longer limited to
+# continue-on-error jobs: `sobelow` lost the flag and is still judged on its
+# verdict, deliberately (decide_verdict is fail-closed on an EMPTY verdict).
+# It is held to the full chain — outputs.verdict declared, its Publish step
+# present, bound to a V_* var, AND that var passed as decide_verdict's 2nd
+# argument. The last link is new: before, a channelled job counted as judged
+# even if no decide_verdict call read the variable.
+verdict_consumed = set(re.findall(
+    r'^\s*decide_verdict\s+"[^"]*"\s+"\$\{?([A-Za-z_][A-Za-z0-9_]*)(?::-)?\}?"',
+    step.get("run", ""), re.M))
+def verdict_judged(n):
+    return verdict_channelled(n) and verdict_var_for.get(n) in verdict_consumed
 emit("needs_without_decide",
      ",".join(sorted(j for j in needs
                      if var_for.get(j) not in consumed
-                     and not (j in coe_in_needs and verdict_channelled(j)))))
+                     and not verdict_judged(j))))
+# Which needs entries are judged on the verdict route. Pinned in case 2, so a
+# decide_verdict regex that stopped matching reds by name, not silently.
+emit("needs_judged_on_verdict",
+     ",".join(sorted(j for j in needs
+                     if var_for.get(j) not in consumed and verdict_judged(j))))
 
 # Companion cardinalities. An empty difference is only meaningful if the sets it
 # is computed from are populated: a regex that stopped matching would report a
@@ -334,13 +371,28 @@ echo "case 2: THE LAUNDERING GUARD and its mirror"
 #     laundering hazard, unchanged;
 #   * a continue-on-error job whose `.result` is bound in the aggregator at all
 #     is one edit from being judged on the laundered channel.
-assert_fact coe_in_needs_unchannelled ""
-assert_fact coe_result_bound ""
+# THE ZERO-COE CONTRACT (see the header). The population is the subject: no
+# job in security.yml may carry job-level continue-on-error.
+assert_fact coe_jobs ""
+if [ -z "$(fact coe_jobs)" ]; then
+  # Population zero: the emitter must REFUSE, not answer "". Asserting the
+  # sentinel here is what proves the refusal is wired on the real file.
+  assert_fact coe_in_needs_unchannelled "EMPTY-POPULATION"
+  assert_fact coe_result_bound "EMPTY-POPULATION"
+  echo "  info — channelling arms: population 0; proven on planted specimens in case 4"
+else
+  # Only reachable after someone deliberately edits the pin above. The
+  # channelling rule then applies to the real file again.
+  assert_fact coe_in_needs_unchannelled ""
+  assert_fact coe_result_bound ""
+  echo "  info — continue-on-error jobs judged on outputs.verdict: '$(fact coe_verdict_judged)'"
+fi
 assert_fact_min verdict_bindings_count 3
-echo "  info — continue-on-error jobs judged on outputs.verdict: '$(fact coe_verdict_judged)'"
-# Every blocking job must be IN needs. Self-correcting by construction: the day
-# sobelow loses continue-on-error, it moves from the first set into the second
-# and this line demands it be added.
+# The verdict route is live for exactly the job judged on it today.
+assert_fact needs_judged_on_verdict "sobelow"
+# Every blocking job must be IN needs. Self-correcting by construction: a job
+# that loses continue-on-error moves into `blocking` and this line demands it
+# be in needs (sobelow already was, on its verdict channel, when it lost it).
 assert_fact blocking_not_in_needs ""
 # The reporter that carries main's post-merge red to a human is the one blocking
 # job that cannot be in `needs` (it would be a cycle). It must be present, and
@@ -403,9 +455,33 @@ agg = jobs["security-gate"]
 step = next(s for s in agg["steps"] if "run" in s)
 assert mode in ("clean", "launder", "unwired", "orphan", "paths", "pushpaths", "matrix",
                 "reporter-muted", "reporter-alwaysruns", "reporter-unwired",
+                "coe-readded", "coe-added-other", "verdict-unjudged",
                 "coe-unchannelled", "coe-result-bound", "verdict-step-deleted"), mode
 
-if mode == "launder":
+# THE PLANTED SPECIMEN (task-7a3842d12cd5437d). The real file carries no
+# continue-on-error job, so the channelling mutants first put the flag back on
+# `sobelow` — the job the rule was built for, fully verdict-wired — and then
+# break one link. Refuse, rather than mutate nothing, if it is not there.
+SPECIMEN = "sobelow"
+def plant_coe_specimen():
+    assert SPECIMEN in jobs and SPECIMEN in agg["needs"], "specimen missing"
+    jobs[SPECIMEN]["continue-on-error"] = True
+
+if mode in ("coe-unchannelled", "coe-result-bound", "verdict-step-deleted"):
+    plant_coe_specimen()
+
+if mode == "coe-readded":
+    # The regression the zero-coe pin exists for: the flag comes back.
+    plant_coe_specimen()
+elif mode == "coe-added-other":
+    # …or lands on a job that never had it.
+    jobs["mix-audit"]["continue-on-error"] = True
+elif mode == "verdict-unjudged":
+    # The verdict route's last link: V_SOBELOW still bound, but no
+    # decide_verdict call reads it. The job is then judged by nothing.
+    step["run"] = "\n".join(l for l in step["run"].split("\n")
+                            if not l.lstrip().startswith('decide_verdict "sobelow"'))
+elif mode == "launder":
     # Add a NEW continue-on-error job to needs with no verdict channel at all —
     # the exact laundering regression, in the shape it actually arrives in
     # (someone wires a muted job into the rollup and reads its result).
@@ -485,9 +561,27 @@ mutant() {
   fi
 }
 
-mutant clean    coe_in_needs_unchannelled ""            # round-trip alone is silent
-mutant clean    coe_result_bound          ""
+# ZERO REFUSES: on the shipped (zero-coe) shape the channelling facts are the
+# sentinel, never the passing "".
+mutant clean    coe_in_needs_unchannelled "EMPTY-POPULATION"
+mutant clean    coe_result_bound          "EMPTY-POPULATION"
+mutant clean    coe_verdict_judged        "EMPTY-POPULATION"
+mutant clean    coe_jobs                  ""
 mutant clean    blocking_not_in_needs ""
+mutant clean    needs_without_decide  ""
+# THE ZERO-COE PIN can lose, by name, in both shapes the flag can come back.
+mutant coe-readded     coe_jobs         "sobelow"
+mutant coe-added-other coe_jobs         "mix-audit"
+# …and a re-added flag on a job whose `.result` IS bound is the laundering
+# hazard the channelling rule names on its own.
+mutant coe-added-other coe_result_bound "mix-audit"
+# A planted, fully-wired specimen is ACCEPTED by the channelling rule — the arm
+# that would go silent if verdict_channelled() were neutered to always-False.
+mutant coe-readded     coe_verdict_judged        "sobelow"
+mutant coe-readded     coe_in_needs_unchannelled ""
+# The verdict route's consumption link (D36, amended 2026-09-25).
+mutant verdict-unjudged needs_without_decide     "sobelow"
+mutant verdict-unjudged needs_judged_on_verdict  ""
 # The laundering regression, in each of the three shapes it arrives in. Every
 # one of these was INVISIBLE to the blanket `coe_in_needs = ""` rule's
 # replacement until it was proven able to fire here.
@@ -497,9 +591,6 @@ mutant coe-unchannelled coe_in_needs_unchannelled "sobelow"   # outputs: block d
 mutant coe-unchannelled needs_without_decide      "sobelow"
 mutant verdict-step-deleted coe_in_needs_unchannelled "sobelow"  # Publish step deleted
 mutant coe-result-bound coe_result_bound          "sobelow"   # the laundered channel re-bound
-# …and the corrected rule still ACCEPTS the shipped shape, which is the arm that
-# would go silent if verdict_channelled() were neutered to always-False.
-mutant clean    coe_verdict_judged        "sobelow"
 mutant unwired  blocking_not_in_needs "mix-audit"       # an unjudged blocking job is DETECTED
 mutant orphan   needs_without_decide  "a11y-ceiling"    # reaching needs is not enough (D36)
 mutant paths    workflow_paths        "True"            # a re-added pull_request paths is DETECTED

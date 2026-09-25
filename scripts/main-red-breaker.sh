@@ -211,21 +211,18 @@
 #     crashing main is a thing to see, not to excuse), and the log-recovery
 #     parser reads exactly one wording out of main's log.
 #
-# ── WHY A FAILED SOBELOW JOB DOES NOT RED THE SECURITY GATE ─────────────────
-# Recorded, NOT changed (task-e65c78b1cd214237 criterion c3). The `Security
-# gate` aggregator in .github/workflows/security.yml lists, in its `needs`,
-# [changes, gate-shape, sobelow-inline-overlap, sobelow-baseline-fingerprint,
-# mix-audit] — and NOT `sobelow`. That omission is BY DESIGN, not a fail-open
-# hole: security.yml's header declares Sobelow ADVISORY because its fingerprints
-# are derived from compiled AST and are not stable across Elixir toolchains, so
-# a blocking gate would red the fleet on baseline drift rather than on real
-# regressions; and scripts/security-gate-shape.test.sh (the 'Security gate shape
-# ratchet' job) ENFORCES that every continue-on-error job stays OUT of the
-# aggregator's needs. So a FAILED Sobelow job sitting inside a GREEN required
-# `Security gate` context is the documented posture, and main accepted it again
-# on 2026-09-05 14:15Z. Whether that posture should change is a RULING FOR MAIN,
-# never a silent edit from a breaker PR: this script only decides WHOSE red it
-# is, never whether a red blocks.
+# ── HOW A FAILED SOBELOW JOB REACHES THE SECURITY GATE (history, corrected) ─
+# Recorded 2026-09-05 (task-e65c78b1cd214237 criterion c3), when `sobelow` was
+# continue-on-error and absent from `Security gate`'s needs. Both have changed:
+# since 2026-09-17 the aggregator judges `sobelow` on `outputs.verdict`, and
+# since 2026-09-25 (task-f248c4889c3322fd, a ruling from main) the job carries
+# no continue-on-error, so a failed Sobelow job reds its own run and the gate.
+# The reason once given here for the advisory posture — fingerprints "derived
+# from compiled AST", unstable across toolchains — was false: Sobelow 0.14.1
+# hashes phash2([type, vuln_source, filename, vuln_line_no]) and parses source,
+# it never compiles it. security.yml's header states what was measured (the
+# Config.* family only). This script still only decides WHOSE red it is, never
+# whether a red blocks.
 #
 # DECISION (in order)
 #   no step failed                          -> exit 0 (nothing to decide)
