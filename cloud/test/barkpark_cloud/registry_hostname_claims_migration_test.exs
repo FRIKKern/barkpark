@@ -17,7 +17,12 @@ defmodule BarkparkCloud.RegistryHostnameClaimsMigrationTest do
   import ExUnit.CaptureLog
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
-  alias BarkparkCloud.Registry.{Barkpark, HostnameClaim}
+  alias BarkparkCloud.Registry.Barkpark
+
+  # SCHEMALESS reads on purpose: this test rebuilds the table as THIS migration
+  # left it, and later migrations (add_site_domains_to_hostname_claims) add
+  # columns the `HostnameClaim` schema now selects.
+  @claims "hostname_claims"
 
   @version 20_260_925_152_031
   @path "priv/repo/migrations/20260925152031_create_hostname_claims.exs"
@@ -85,8 +90,13 @@ defmodule BarkparkCloud.RegistryHostnameClaimsMigrationTest do
         assert :ok = Ecto.Migrator.up(Repo, @version, mod, log: false, migration_lock: false)
       end)
 
-    assert %HostnameClaim{barkpark_id: holder, kind: "custom_host"} =
-             Repo.get_by(HostnameClaim, host: host)
+    assert {holder, "custom_host"} =
+             Repo.one(
+               from(c in @claims,
+                 where: c.host == ^host,
+                 select: {type(c.barkpark_id, :binary_id), c.kind}
+               )
+             )
 
     assert holder == live.id
 
@@ -98,8 +108,12 @@ defmodule BarkparkCloud.RegistryHostnameClaimsMigrationTest do
              "SKIPPED pre-existing collision on #{host} — barkpark #{variant.id} (url) left unclaimed"
 
     junk_ids = Enum.map(junk, & &1.id)
-    refute Repo.exists?(from(c in HostnameClaim, where: c.barkpark_id in ^junk_ids))
-    refute Repo.exists?(from(c in HostnameClaim, where: c.host in ["", "-", ".-"]))
+
+    refute Repo.exists?(
+             from(c in @claims, where: c.barkpark_id in type(^junk_ids, {:array, :binary_id}))
+           )
+
+    refute Repo.exists?(from(c in @claims, where: c.host in ["", "-", ".-"]))
 
     # rows untouched
     assert Repo.get!(Barkpark, ghost.id).url == "https://#{host}/"
