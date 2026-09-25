@@ -1523,6 +1523,10 @@ defmodule Barkpark.StudioChat.Provider.Claude do
              # the SAME tenant the spawn mint bound.
              mcp_workspace_id: Map.get(session_opts, :workspace_id),
              mcp_session_id: pinned_session_id(opts) || "anonymous",
+             # The SessionRegistry key this process holds (nil for an anonymous
+             # one-shot). `release_name/1` drops it the moment the child is
+             # gone, BEFORE the slow teardown (task-73e619c78bc9c5e0).
+             registry_key: pinned_session_id(opts),
              token_expires_at: mcp.expires_at,
              token_renewed_at: nil,
              buffer: "",
@@ -1720,6 +1724,12 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     end
 
     def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
+      # The child has exited, so this process no longer guards a writer: free
+      # the name BEFORE the sink hears about the exit. The sink's reaction
+      # (the Recorder stops; a new turn starts) can then never find this
+      # dying process under the session id (task-73e619c78bc9c5e0).
+      release_name(state)
+
       # Carry the bounded stderr tail (charter D54) so the UI can distinguish a
       # rejected-argv death (nonzero, zero frames — a resume would re-die) from
       # an ordinary end that resumes cleanly.
@@ -1779,16 +1789,35 @@ defmodule Barkpark.StudioChat.Provider.Claude do
         _ -> :ok
       end
 
+      teardown(state)
+    end
+
+    def terminate(_reason, state), do: teardown(state)
+
+    # ORDER IS THE FIX (task-73e619c78bc9c5e0). The name is the single-writer
+    # guard (charter D20), so it is held exactly as long as the child may still
+    # be writing the transcript: until the reap-wait says the child is gone.
+    # It is dropped BEFORE the stderr rm and the token revoke (a Repo round
+    # trip), because a new turn that finds this process under the session id
+    # adopts it (`Recorder.init/1`'s `{:already_started, _}` branch), gets its
+    # `:DOWN`, and stops without ever spawning: the user's turn silently never
+    # runs. Nothing below looks this process up by name.
+    defp teardown(state) do
+      await_child_exit(Map.get(state, :os_pid), 100)
+      release_name(state)
       cleanup_stderr(state)
       cleanup_mcp(state)
       :ok
     end
 
-    def terminate(_reason, state) do
-      cleanup_stderr(state)
-      cleanup_mcp(state)
-      :ok
+    # Drop this process's SessionRegistry name. Idempotent: the exit-status
+    # path releases before notifying the sink and `teardown/1` releases again;
+    # unregistering a key this process no longer holds is a no-op.
+    defp release_name(%{registry_key: key}) when is_binary(key) do
+      Registry.unregister(@registry, key)
     end
+
+    defp release_name(_), do: :ok
 
     # The stderr capture file must not outlive the session (charter D54) — remove
     # it on every teardown path (clean close, exit, crash). Best-effort.
@@ -1799,13 +1828,13 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     # that open — if rm wins, the shell re-creates the file a moment later and
     # the capture OUTLIVES the session on every close of that shape (measured
     # 6/6 leaks on passing runs). Once the pid is gone the `2>>` open has
-    # either happened or never will, so the rm below is race-free. The wait is
-    # BOUNDED: on the exit-status path the child is already dead so it costs
-    # one probe; the close-while-alive path polls `kill -0` for at most ~1s
-    # and then removes best-effort anyway.
+    # either happened or never will, so the rm below is race-free. The wait
+    # (`await_child_exit/2`) runs in `teardown/1` BEFORE this call — it also
+    # gates `release_name/1`. It is BOUNDED: on the exit-status path the child
+    # is already dead so it costs one probe; the close-while-alive path polls
+    # `kill -0` for at most ~1s and then removes best-effort anyway.
     # sobelow_skip ["Traversal.FileModule"]
-    defp cleanup_stderr(%{stderr_path: path} = state) when is_binary(path) do
-      await_child_exit(Map.get(state, :os_pid), 100)
+    defp cleanup_stderr(%{stderr_path: path}) when is_binary(path) do
       File.rm(path)
     end
 
