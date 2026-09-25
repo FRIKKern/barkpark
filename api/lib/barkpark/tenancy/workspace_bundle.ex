@@ -610,7 +610,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           # The remap stages every member it needs before writing, so it
           # needs the same membership refusal the restore path runs first.
           assert_member_tables!(manifest)
-          DatasetRemap.run(manifest, dumps, ctx.into_dataset)
+          sources = Map.new(dumps, fn {table, dump} -> {table, copy_source(dump)} end)
+          DatasetRemap.run(manifest, sources, ctx.into_dataset)
         else
           run_import(manifest, dumps, mode, ctx)
         end

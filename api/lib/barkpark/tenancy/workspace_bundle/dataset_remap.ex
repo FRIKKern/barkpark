@@ -14,6 +14,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemapError do
       option, so it has no single source dataset to remap.
     * `"unknown_member_table"` — the bundle carries rows for a table this
       database does not have, so their shape cannot be checked.
+    * `"column_mismatch"` — a rewritten table's columns in the bundle differ
+      from this database's (a bundle from another schema version).
     * `"unexpected_dataset"` — a row in a remapped table names a dataset other
       than the bundle's source dataset.
     * `"dangling_reference"` — a remapped row points at a document or revision
@@ -78,8 +80,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
       the bundle does not carry refuses (`dangling_reference`).
     * `plugin_doc_state` — `doc_id` (a `documents.id` FK) mapped; rows for
       documents outside the bundle are dropped.
-    * `mutation_events` — `id` is left to the sequence; tenancy columns as
-      above.
+    * `mutation_events` — `id` takes fresh values from its sequence; tenancy
+      columns as above.
     * `schema_definitions` — `id` fresh; tenancy columns as above.
     * `authoring_exemptions` — `dataset` takes the new slug.
 
@@ -97,28 +99,36 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
     * Actor and owner columns (`documents.owner_id`, `revisions.actor_*`). They
       name instance principals, not dataset rows.
 
-  The backstop for everything this list missed: before any insert, every
-  rewritten row is serialised with `row_to_json` and scanned for UUIDs; if one
-  is the source workspace, project or dataset id, or the old id of a bundled
-  document or revision, the import refuses with `unremapped_source_id`, naming
-  the table.
+  The backstop for everything this list missed: every rewritten row is scanned,
+  as the COPY line about to be written, for UUIDs; if one is the source
+  workspace, project or dataset id, or the old id of a bundled document or
+  revision, the import refuses with `unremapped_source_id`, naming the table,
+  and the transaction rolls back.
 
   ## Integrity
+
+  Every row is rewritten in the BEAM, on the COPY text the bundle carries, and
+  written with a literal `COPY <table> FROM STDIN` chosen by clause match on the
+  closed set of rewritten tables. No SQL statement in this module is built from
+  bundle input. The bundle's columns must equal this database's non-generated
+  columns for each rewritten table (`column_mismatch` otherwise), which is what
+  makes a column-list-free COPY land each value in its own column.
 
   Foreign keys stay enforced on the rewritten tables for the whole import, so a
   mapped id that does not exist in the target is a hard failure, not an orphan.
   The one DDL statement is `ALTER TABLE revisions DISABLE TRIGGER USER` around
-  the revisions insert: `revisions_bind_document` requires each inserted
-  revision to match its document's CURRENT state, which historical revisions do
-  not, and `revisions_immutable` is not exercised by an insert. Both are
-  re-enabled before commit. The whole import is one transaction.
+  the revisions COPY: `revisions_bind_document` requires each inserted revision
+  to match its document's CURRENT state, which historical revisions do not, and
+  `revisions_immutable` is not exercised by an insert. Both are re-enabled
+  before commit. The whole import is one transaction.
   """
 
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Repo
   alias Barkpark.Tenancy.{Dataset, Project}
-  alias Barkpark.Tenancy.WorkspaceBundle.DatasetRemapError
+  alias Barkpark.Tenancy.WorkspaceBundle.{Catalog, DatasetRemapError}
+  alias Ecto.Adapters.SQL
 
   @spine ~w(workspaces projects datasets)
 
@@ -140,12 +150,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
     "paper_access_log" => "access audit trail of the source dataset"
   }
 
-  # Lowercase canonical UUID text, which is what `row_to_json` prints for a uuid
-  # column and what every writer in this codebase stores in text/jsonb.
-  @uuid_regex "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-
-  @copy_chunk_bytes 65_536
-  @ddl_lock_timeout "2s"
+  # Any UUID in a COPY line, either case.
+  @uuid ~r/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/
 
   @typedoc "The validated `:into_dataset` option."
   @type target :: %{workspace_id: String.t(), project_id: String.t(), slug: String.t()}
@@ -207,17 +213,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
   end
 
   @doc """
-  Run the remap import. `dumps` maps each member table to its COPY text, as a
-  binary or `{:file, path}`. Returns `{:ok, stats}`; every refusal raises
-  `DatasetRemapError` after rolling back.
+  Run the remap import. `sources` maps each member table to an enumerable of
+  its COPY text chunks (re-enumerable: it is read more than once). Returns
+  `{:ok, stats}`; every refusal raises `DatasetRemapError` after rolling back.
   """
-  @spec run(map(), %{optional(String.t()) => binary() | {:file, Path.t()}}, target()) ::
-          {:ok, map()}
-  def run(manifest, dumps, target) do
-    Repo.transaction(fn -> do_run(manifest, dumps, target) end, timeout: :infinity)
+  @spec run(map(), %{optional(String.t()) => Enumerable.t()}, target()) :: {:ok, map()}
+  def run(manifest, sources, target) do
+    Repo.transaction(fn -> do_run(manifest, sources, target) end, timeout: :infinity)
   end
 
-  defp do_run(manifest, dumps, target) do
+  defp do_run(manifest, sources, target) do
     # A COPY of a large dataset is one long statement; see the same opt-out in
     # WorkspaceBundle.run_import_once/4.
     Repo.set_local_statement_timeout!(0)
@@ -229,46 +234,46 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
     project = resolve_target!(target)
 
     entries = Enum.filter(manifest["tables"] || [], &(&1["row_count"] > 0))
-    classes = Map.new(entries, fn e -> {e["name"], classify!(e["name"])} end)
 
-    staged =
-      entries
-      |> Enum.with_index()
-      |> Enum.reduce(%{}, fn {entry, i}, acc ->
-        table = entry["name"]
-        dump = Map.get(dumps, table, "")
-
-        case classes[table] do
-          {skip, _} when skip in [:workspace_scoped, :not_carried] ->
-            release_member(dump)
-            acc
-
-          _ ->
-            Map.put(acc, table, stage!(entry, dump, i))
-        end
+    members =
+      Map.new(entries, fn e ->
+        {e["name"],
+         %{
+           table: e["name"],
+           cols: e["columns"] || [],
+           rows: e["row_count"],
+           source: Map.get(sources, e["name"], [])
+         }}
       end)
 
-    source = source!(manifest, staged)
-    build_id_maps!(staged)
+    classes = Map.new(entries, fn e -> {e["name"], classify!(e["name"])} end)
 
-    dropped = check_guarded!(staged, classes, source)
+    for {table, :rewritten} <- classes, do: assert_live_columns!(members[table])
 
-    check_rewritten!(staged, source)
-    dropped = Map.merge(dropped, drop_out_of_dataset!(staged))
+    source = source!(manifest, members["datasets"])
+    maps = build_id_maps(members)
+    guarded = check_guarded!(members, classes, source, maps)
+    check_rewritten!(members, source, maps)
+    dropped = count_out_of_dataset!(members, maps)
 
     dataset = create_dataset!(project, target.slug, source)
 
-    dest = %{
-      workspace_id: project.workspace_id,
-      project_id: project.id,
-      dataset_id: dataset.id,
-      slug: dataset.slug
+    ctx = %{
+      dest: %{
+        workspace_id: project.workspace_id,
+        project_id: project.id,
+        dataset_id: dataset.id,
+        slug: dataset.slug
+      },
+      maps: maps,
+      source_ids:
+        MapSet.new(
+          [source.workspace_id, source.project_id, source.dataset_id] ++
+            Map.keys(maps.documents) ++ Map.keys(maps.revisions)
+        )
     }
 
-    rewrite!(staged, dest)
-    assert_no_source_ids!(staged, source)
-    inserted = insert!(staged)
-    drop_temp_tables!(staged)
+    inserted = write!(members, ctx, dropped)
 
     carried_rows = Map.new(entries, &{&1["name"], &1["row_count"]})
 
@@ -295,7 +300,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
           dataset_slug: source.slug
         },
         rewritten: inserted,
-        dropped_out_of_dataset: dropped,
+        dropped_out_of_dataset: Map.merge(guarded, dropped),
         skipped_workspace_scoped: skipped,
         not_carried: not_carried
       }
@@ -437,59 +442,122 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
     ).rows != []
   end
 
-  # ── Staging: every row-carrying member that needs a look lands in a temp table
+  # ── Column layout: the rewrite addresses columns by the manifest's order ─────
 
-  # Temp tables are named by position, not by table, so no identifier derived
-  # from the manifest is ever part of a temp name.
-  # sobelow_skip ["SQL.Query", "SQL.Stream"]
-  defp stage!(entry, dump, index) do
-    table = entry["name"]
-    cols = entry["columns"]
-    tmp = "_bp_remap_#{index}"
-    col_list = Enum.map_join(cols, ", ", &qi/1)
+  # Every rewritten member is written back with a column-list-free `COPY <table>
+  # FROM STDIN`, which takes the table's non-generated columns in ordinal order.
+  # That is only the manifest's order when the bundle came from this schema, so
+  # a bundle from another schema version is refused rather than mis-assigned.
+  defp assert_live_columns!(%{table: table, cols: cols}) do
+    live = Catalog.non_generated_columns(Repo, table)
 
-    Repo.query!(
-      "CREATE TEMP TABLE #{qi(tmp)} (LIKE #{qi(table)} INCLUDING DEFAULTS) ON COMMIT DROP",
-      []
-    )
-
-    stream = Ecto.Adapters.SQL.stream(Repo, "COPY #{qi(tmp)} (#{col_list}) FROM STDIN", [])
-    Enum.into(copy_source(dump), stream)
-    release_member(dump)
-
-    %{tmp: tmp, cols: cols, rows: entry["row_count"]}
+    if cols != live do
+      refuse!(
+        "column_mismatch",
+        table,
+        "the bundle's #{table} columns do not match this database's (a bundle from another " <>
+          "schema version): bundle #{inspect(cols)}, here #{inspect(live)}",
+        %{bundle: cols, live: live}
+      )
+    end
   end
 
-  # sobelow_skip ["Traversal.FileModule"]
-  defp copy_source({:file, path}), do: File.stream!(path, @copy_chunk_bytes)
-  defp copy_source(dump) when is_binary(dump), do: [dump]
+  # ── Reading COPY text ────────────────────────────────────────────────────────
 
-  # sobelow_skip ["Traversal.FileModule"]
-  defp release_member({:file, path}), do: File.rm(path)
-  defp release_member(dump) when is_binary(dump), do: :ok
+  # Rows of a member as lists of raw COPY fields. COPY text escapes tab and
+  # newline inside a value, so a bare tab separates fields and a bare newline
+  # ends a row, whatever the chunk boundaries were.
+  defp rows(nil), do: []
+
+  defp rows(%{source: source}) do
+    source
+    |> Stream.transform(
+      fn -> "" end,
+      fn chunk, buffer ->
+        parts = String.split(buffer <> IO.iodata_to_binary(chunk), "\n")
+        {complete, [rest]} = Enum.split(parts, -1)
+        {complete, rest}
+      end,
+      fn
+        "" -> {[], ""}
+        rest -> {[rest], ""}
+      end,
+      fn _ -> :ok end
+    )
+    |> Stream.reject(&(&1 == ""))
+    |> Stream.map(&String.split(&1, "\t"))
+  end
+
+  defp col!(%{table: table, cols: cols}, col) do
+    Enum.find_index(cols, &(&1 == col)) ||
+      refuse!("column_mismatch", table, "the bundle's #{table} member has no #{col} column")
+  end
+
+  # The decoded value of field `i`: `nil` for SQL NULL, otherwise the text with
+  # COPY's backslash escapes undone.
+  defp value(fields, i) do
+    case Enum.at(fields, i) do
+      "\\N" -> nil
+      nil -> nil
+      raw -> unescape(raw)
+    end
+  end
+
+  defp unescape(raw) do
+    if String.contains?(raw, "\\") do
+      Regex.replace(~r/\\(x[0-9a-fA-F]{1,2}|[0-7]{1,3}|.)/s, raw, fn _, esc ->
+        case esc do
+          "b" -> "\b"
+          "f" -> "\f"
+          "n" -> "\n"
+          "r" -> "\r"
+          "t" -> "\t"
+          "v" -> "\v"
+          "x" <> hex -> <<String.to_integer(hex, 16)>>
+          <<d, _::binary>> = oct when d in ?0..?7 -> <<String.to_integer(oct, 8)>>
+          other -> other
+        end
+      end)
+    else
+      raw
+    end
+  end
+
+  # Only ever called with UUIDs, the dataset slug (the Dataset changeset limits
+  # it to [a-z0-9_-]) or nil, none of which needs COPY escaping.
+  defp put(fields, i, nil), do: List.replace_at(fields, i, "\\N")
+  defp put(fields, i, value), do: List.replace_at(fields, i, value)
+
+  defp line(fields), do: [Enum.join(fields, "\t"), "\n"]
 
   # ── The source dataset, read from the rows the bundle carries ────────────────
 
-  # sobelow_skip ["SQL.Query"]
-  defp source!(manifest, staged) do
-    rows =
-      case staged["datasets"] do
+  defp source!(manifest, datasets) do
+    expected = manifest["dataset"]
+
+    found =
+      case datasets do
         nil ->
           []
 
-        %{tmp: tmp} ->
-          Repo.query!("SELECT id::text, project_id::text, slug, name FROM #{qi(tmp)}", []).rows
+        member ->
+          [id, project_id, slug, name] =
+            Enum.map(~w(id project_id slug name), &col!(member, &1))
+
+          member
+          |> rows()
+          |> Enum.map(fn f ->
+            {value(f, id), value(f, project_id), value(f, slug), value(f, name)}
+          end)
       end
 
-    expected_slug = manifest["dataset"]
-
-    case rows do
-      [[id, project_id, ^expected_slug, name]] ->
+    case found do
+      [{id, project_id, ^expected, name}] ->
         %{
           workspace_id: manifest["workspace_id"],
           project_id: project_id,
           dataset_id: id,
-          slug: expected_slug,
+          slug: expected,
           name: name
         }
 
@@ -498,48 +566,34 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
           "not_a_dataset_bundle",
           "datasets",
           "a dataset bundle carries exactly one datasets row, the one named in its manifest " <>
-            "(#{inspect(manifest["dataset"])}); this one carries #{length(rows)}"
+            "(#{inspect(expected)}); this one carries #{length(found)}"
         )
     end
   end
 
-  # ── Id maps ──────────────────────────────────────────────────────────────────
+  # ── Id maps: old row id -> new row id, for every id other rows point at ──────
 
-  # One map for every row id the remap re-mints and other rows point at. Built
-  # before any rewrite, from the OLD ids, so every lookup below reads old -> new.
-  # sobelow_skip ["SQL.Query"]
-  defp build_id_maps!(staged) do
-    Repo.query!(
-      "CREATE TEMP TABLE _bp_remap_ids (kind text NOT NULL, old uuid NOT NULL, " <>
-        "new uuid NOT NULL, PRIMARY KEY (kind, old)) ON COMMIT DROP",
-      []
-    )
+  defp build_id_maps(members) do
+    %{
+      documents: fresh_ids(members["documents"]),
+      revisions: fresh_ids(members["revisions"])
+    }
+  end
 
-    for table <- ~w(documents revisions), staged[table] do
-      Repo.query!(
-        "INSERT INTO _bp_remap_ids (kind, old, new) " <>
-          "SELECT $1, id, gen_random_uuid() FROM #{qi(staged[table].tmp)}",
-        [table]
-      )
-    end
+  defp fresh_ids(nil), do: %{}
 
-    :ok
+  defp fresh_ids(member) do
+    id = col!(member, "id")
+    member |> rows() |> Map.new(fn f -> {value(f, id), Ecto.UUID.generate()} end)
   end
 
   # ── Guarded tables: refuse the source dataset's rows, drop everyone else's ──
 
-  # sobelow_skip ["SQL.Query"]
-  defp check_guarded!(staged, classes, source) do
+  defp check_guarded!(members, classes, source, maps) do
     for {table, {:guarded, grain, fks}} <- classes, into: %{} do
-      %{tmp: tmp, rows: rows} = staged[table]
-      predicate = guarded_predicate(grain, fks)
-
-      [[owned]] =
-        Repo.query!(
-          "SELECT count(*) FROM #{qi(tmp)} t " <>
-            "WHERE $1::text IS NOT NULL AND $2::text IS NOT NULL AND #{predicate}",
-          [source.dataset_id, source.slug]
-        ).rows
+      member = members[table]
+      owned? = owned_predicate(member, grain, fks, source, maps)
+      owned = member |> rows() |> Enum.count(owned?)
 
       if owned > 0 do
         refuse!(
@@ -552,150 +606,127 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
         )
       end
 
-      {table, rows}
+      {table, member.rows}
     end
   end
 
-  # $1 = source dataset id, $2 = source slug.
-  defp guarded_predicate(grain, fks) do
-    grain_terms =
-      Enum.flat_map(grain, fn
+  defp owned_predicate(member, grain, fks, source, maps) do
+    has_dataset_id? = "dataset_id" in grain
+
+    grain_tests =
+      Enum.map(grain, fn
         "dataset_id" ->
-          ["t.dataset_id = $1::text::uuid"]
+          i = col!(member, "dataset_id")
+          fn f -> value(f, i) == source.dataset_id end
 
         "dataset" ->
-          if "dataset_id" in grain,
-            do: ["(t.dataset_id IS NULL AND t.dataset = $2)"],
-            else: ["t.dataset = $2"]
+          i = col!(member, "dataset")
+          j = if has_dataset_id?, do: col!(member, "dataset_id")
+
+          fn f ->
+            value(f, i) == source.slug and (j == nil or value(f, j) == nil)
+          end
 
         "scope" ->
-          ["t.scope IN ($2, 'dataset:' || $2)"]
+          i = col!(member, "scope")
+          fn f -> value(f, i) in [source.slug, "dataset:" <> source.slug] end
       end)
 
-    fk_terms =
+    fk_tests =
       Enum.map(fks, fn {col, parent} ->
-        "t.#{qi(col)} IN (SELECT old FROM _bp_remap_ids WHERE kind = '#{parent}')"
+        i = col!(member, col)
+        ids = if parent == "documents", do: maps.documents, else: maps.revisions
+        fn f -> Map.has_key?(ids, value(f, i)) end
       end)
 
-    "(" <> Enum.join(grain_terms ++ fk_terms, " OR ") <> ")"
+    tests = grain_tests ++ fk_tests
+    fn f -> Enum.any?(tests, & &1.(f)) end
   end
 
   # ── Rewritten tables: preconditions on the OLD values ────────────────────────
 
-  # sobelow_skip ["SQL.Query"]
-  defp check_rewritten!(staged, source) do
-    for table <- @tenancy_tables, staged[table] do
-      [[n]] =
-        Repo.query!(
-          "SELECT count(*) FROM #{qi(staged[table].tmp)} t " <>
-            "WHERE t.dataset_id IS DISTINCT FROM $1::text::uuid",
-          [source.dataset_id]
-        ).rows
+  defp check_rewritten!(members, source, maps) do
+    for table <- @tenancy_tables, member = members[table] do
+      i = col!(member, "dataset_id")
+      bad = member |> rows() |> Enum.count(&(value(&1, i) != source.dataset_id))
 
-      if n > 0 do
+      if bad > 0 do
         refuse!(
           "unexpected_dataset",
           table,
-          "#{n} row(s) in #{table} name a dataset other than the source dataset " <>
+          "#{bad} row(s) in #{table} name a dataset other than the source dataset " <>
             "#{inspect(source.slug)} (#{source.dataset_id})",
-          %{count: n}
+          %{count: bad}
         )
       end
     end
 
-    if staged["revisions"] do
-      assert_mapped!(staged, "revisions", "document_id", "documents")
-    end
+    assert_mapped!(members["revisions"], "document_id", maps.documents, "documents")
+    assert_mapped!(members["documents"], "current_revision_id", maps.revisions, "revisions")
+    assert_mapped!(members["documents"], "released_revision_id", maps.revisions, "revisions")
 
-    if staged["documents"] do
-      assert_mapped!(staged, "documents", "current_revision_id", "revisions")
-      assert_mapped!(staged, "documents", "released_revision_id", "revisions")
+    # An edge from a document IN the dataset to one outside it cannot be
+    # rewritten: its target does not travel.
+    for table <- ~w(content_edges task_edges), member = members[table] do
+      from = col!(member, "from_id")
+      to = col!(member, "to_id")
+
+      member
+      |> rows()
+      |> Enum.filter(
+        &(Map.has_key?(maps.documents, value(&1, from)) and
+            not Map.has_key?(maps.documents, value(&1, to)))
+      )
+      |> Enum.map(&value(&1, to))
+      |> refuse_dangling!(
+        table,
+        "lead from a document in the dataset to a document outside it"
+      )
     end
 
     :ok
   end
 
-  # sobelow_skip ["SQL.Query"]
-  defp assert_mapped!(staged, table, col, kind) do
-    %{rows: rows} =
-      Repo.query!(
-        "SELECT t.#{qi(col)}::text, count(*) OVER () FROM #{qi(staged[table].tmp)} t " <>
-          "WHERE t.#{qi(col)} IS NOT NULL AND NOT EXISTS " <>
-          "(SELECT 1 FROM _bp_remap_ids m WHERE m.kind = $1 AND m.old = t.#{qi(col)}) LIMIT 5",
-        [kind]
-      )
+  defp assert_mapped!(nil, _col, _ids, _kind), do: :ok
 
-    case rows do
-      [] ->
-        :ok
+  defp assert_mapped!(member, col, ids, kind) do
+    i = col!(member, col)
 
-      [[_, total] | _] ->
-        refuse!(
-          "dangling_reference",
-          table,
-          "#{total} row(s) in #{table}.#{col} point at a #{kind} row the bundle does not " <>
-            "carry: #{Enum.map_join(rows, ", ", &hd/1)}",
-          %{count: total, sample: Enum.map(rows, &hd/1)}
-        )
-    end
+    member
+    |> rows()
+    |> Enum.map(&value(&1, i))
+    |> Enum.reject(&(&1 == nil or Map.has_key?(ids, &1)))
+    |> refuse_dangling!(member.table, "point (#{col}) at a #{kind} row the bundle does not carry")
   end
 
-  # Edges and plugin state are exported workspace-whole even in a dataset
-  # bundle (they have no dataset column). A row whose SOURCE document is not in
-  # the bundle is another dataset's and is dropped; an edge from a bundled
-  # document to one the bundle does not carry is a real dangling reference.
-  # sobelow_skip ["SQL.Query"]
-  defp drop_out_of_dataset!(staged) do
-    owned = "IN (SELECT old FROM _bp_remap_ids WHERE kind = 'documents')"
+  defp refuse_dangling!([], _table, _what), do: :ok
 
-    edges =
-      for table <- ~w(content_edges task_edges), staged[table], into: %{} do
-        tmp = qi(staged[table].tmp)
+  defp refuse_dangling!(targets, table, what) do
+    sample = targets |> Enum.uniq() |> Enum.take(5)
 
-        %{num_rows: dropped} =
-          Repo.query!(
-            "DELETE FROM #{tmp} t WHERE t.from_id IS NULL OR NOT t.from_id #{owned}",
-            []
-          )
+    refuse!(
+      "dangling_reference",
+      table,
+      "#{length(targets)} #{table} row(s) #{what} (#{Enum.map_join(sample, ", ", &inspect/1)}); " <>
+        "the rewritten row would have nothing to point at",
+      %{count: length(targets), sample: sample}
+    )
+  end
 
-        %{rows: rows} =
-          Repo.query!(
-            "SELECT t.to_id::text, count(*) OVER () FROM #{tmp} t " <>
-              "WHERE t.to_id IS NULL OR NOT t.to_id #{owned} LIMIT 5",
-            []
-          )
-
-        case rows do
-          [] ->
-            {table, dropped}
-
-          [[_, total] | _] ->
-            refuse!(
-              "dangling_reference",
-              table,
-              "#{total} #{table} row(s) lead from a document in the dataset to a document " <>
-                "outside it (to_id #{Enum.map_join(rows, ", ", &inspect(hd(&1)))}); the " <>
-                "rewritten edge would have nothing to point at",
-              %{count: total, sample: Enum.map(rows, &hd/1)}
-            )
-        end
-      end
-
-    state =
-      if staged["plugin_doc_state"] do
-        %{num_rows: dropped} =
-          Repo.query!(
-            "DELETE FROM #{qi(staged["plugin_doc_state"].tmp)} t " <>
-              "WHERE t.doc_id IS NULL OR NOT t.doc_id #{owned}",
-            []
-          )
-
-        %{"plugin_doc_state" => dropped}
-      else
-        %{}
-      end
-
-    Map.merge(edges, state)
+  # Edges and plugin state travel workspace-whole even in a dataset bundle
+  # (they have no dataset column). A row whose SOURCE document is not in the
+  # bundle belongs to another dataset and is dropped; this counts them.
+  defp count_out_of_dataset!(members, maps) do
+    for {table, col} <- [
+          {"content_edges", "from_id"},
+          {"task_edges", "from_id"},
+          {"plugin_doc_state", "doc_id"}
+        ],
+        member = members[table],
+        into: %{} do
+      i = col!(member, col)
+      {table, member |> rows() |> Enum.count(&(not Map.has_key?(maps.documents, value(&1, i))))}
+    end
   end
 
   # ── The new dataset row ──────────────────────────────────────────────────────
@@ -733,203 +764,263 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
     end
   end
 
-  # ── Rewrites (on the staged rows, before anything touches a real table) ─────
+  # ── Writes: rewrite each row in the BEAM, COPY it into the real table ────────
 
-  @tenancy_set "workspace_id = $1::text::uuid, project_id = $2::text::uuid, " <>
-                 "dataset_id = $3::text::uuid, dataset = $4"
+  defp write!(members, ctx, dropped) do
+    %{maps: maps, dest: dest} = ctx
+    counts = %{}
 
-  defp map_expr(col, kind),
-    do: "(SELECT m.new FROM _bp_remap_ids m WHERE m.kind = '#{kind}' AND m.old = t.#{col})"
+    # documents: re-keyed, revision pointers NULL until the revisions exist.
+    counts =
+      write_member(members["documents"], counts, ctx, fn member ->
+        [id, cur, rel] =
+          Enum.map(~w(id current_revision_id released_revision_id), &col!(member, &1))
 
-  # sobelow_skip ["SQL.Query"]
-  defp rewrite!(staged, dest) do
-    params = [dest.workspace_id, dest.project_id, dest.dataset_id, dest.slug]
+        fn f ->
+          f
+          |> put(id, Map.fetch!(maps.documents, value(f, id)))
+          |> retenant(member, dest)
+          |> put(cur, nil)
+          |> put(rel, nil)
+        end
+      end)
 
-    # A statement that names no parameter must be sent none: Postgres cannot
-    # type a `$n` that the SQL never mentions.
-    run = fn table, set ->
-      if staged[table] do
-        ps = if String.contains?(set, "$1"), do: params, else: []
-        Repo.query!("UPDATE #{qi(staged[table].tmp)} t SET #{set}", ps)
-      end
-    end
+    counts =
+      with_revision_triggers_disabled(fn ->
+        write_member(members["revisions"], counts, ctx, fn member ->
+          [id, doc] = Enum.map(~w(id document_id), &col!(member, &1))
 
-    run.(
-      "documents",
-      "#{@tenancy_set}, " <>
-        "current_revision_id = #{map_expr("current_revision_id", "revisions")}, " <>
-        "released_revision_id = #{map_expr("released_revision_id", "revisions")}, " <>
-        "id = #{map_expr("id", "documents")}"
-    )
+          fn f ->
+            f
+            |> put(id, Map.fetch!(maps.revisions, value(f, id)))
+            |> put(doc, maps.documents[value(f, doc)])
+            |> retenant(member, dest)
+          end
+        end)
+      end)
 
-    run.(
-      "revisions",
-      "#{@tenancy_set}, document_id = #{map_expr("document_id", "documents")}, " <>
-        "id = #{map_expr("id", "revisions")}"
-    )
+    set_revision_pointers!(members["documents"], maps)
 
-    for table <- ~w(content_edges task_edges) do
-      run.(
-        table,
-        "id = gen_random_uuid(), from_id = #{map_expr("from_id", "documents")}, " <>
-          "to_id = #{map_expr("to_id", "documents")}"
+    counts =
+      Enum.reduce(~w(content_edges task_edges), counts, fn table, acc ->
+        write_member(members[table], acc, ctx, dropped[table], fn member ->
+          [id, from, to] = Enum.map(~w(id from_id to_id), &col!(member, &1))
+
+          fn f ->
+            case maps.documents[value(f, from)] do
+              nil ->
+                :drop
+
+              new_from ->
+                f
+                |> put(id, Ecto.UUID.generate())
+                |> put(from, new_from)
+                |> put(to, Map.fetch!(maps.documents, value(f, to)))
+            end
+          end
+        end)
+      end)
+
+    counts =
+      write_member(
+        members["plugin_doc_state"],
+        counts,
+        ctx,
+        dropped["plugin_doc_state"],
+        fn member ->
+          doc = col!(member, "doc_id")
+
+          fn f ->
+            case maps.documents[value(f, doc)] do
+              nil -> :drop
+              new_doc -> put(f, doc, new_doc)
+            end
+          end
+        end
       )
-    end
 
-    run.("plugin_doc_state", "doc_id = #{map_expr("doc_id", "documents")}")
-    run.("mutation_events", @tenancy_set)
-    run.("schema_definitions", "#{@tenancy_set}, id = gen_random_uuid()")
+    counts =
+      write_member(members["schema_definitions"], counts, ctx, fn member ->
+        id = col!(member, "id")
+        fn f -> f |> put(id, Ecto.UUID.generate()) |> retenant(member, dest) end
+      end)
 
-    if staged["authoring_exemptions"] do
+    counts = write_mutation_events!(members["mutation_events"], counts, ctx)
+    write_exemptions!(members["authoring_exemptions"], counts, ctx)
+  end
+
+  defp write_member(member, counts, ctx, dropped \\ 0, rewriter)
+
+  defp write_member(nil, counts, _ctx, _dropped, _rewriter), do: counts
+
+  defp write_member(member, counts, ctx, dropped, rewriter) do
+    rewrite = rewriter.(member)
+
+    member
+    |> rows()
+    |> Stream.map(rewrite)
+    |> Stream.reject(&(&1 == :drop))
+    |> Stream.map(&scan!(member.table, line(&1), ctx.source_ids))
+    |> Enum.into(copy_in(member.table))
+
+    Map.put(counts, member.table, member.rows - (dropped || 0))
+  end
+
+  defp retenant(fields, member, dest) do
+    fields
+    |> put(col!(member, "workspace_id"), dest.workspace_id)
+    |> put(col!(member, "project_id"), dest.project_id)
+    |> put(col!(member, "dataset_id"), dest.dataset_id)
+    |> put(col!(member, "dataset"), dest.slug)
+  end
+
+  # mutation_events.id is a sequence: the new rows take fresh values from it
+  # rather than the source's, which may already be taken here.
+  defp write_mutation_events!(nil, counts, _ctx), do: counts
+
+  defp write_mutation_events!(member, counts, ctx) do
+    id = col!(member, "id")
+    carried = member |> rows() |> Enum.count()
+
+    ids =
       Repo.query!(
-        "UPDATE #{qi(staged["authoring_exemptions"].tmp)} t SET dataset = $1",
-        [dest.slug]
+        "SELECT nextval('mutation_events_id_seq')::text FROM generate_series(1, $1)",
+        [carried]
+      ).rows
+      |> List.flatten()
+
+    member
+    |> rows()
+    |> Stream.zip(ids)
+    |> Stream.map(fn {f, new_id} -> f |> put(id, new_id) |> retenant(member, ctx.dest) end)
+    |> Stream.map(&scan!(member.table, line(&1), ctx.source_ids))
+    |> Enum.into(copy_in("mutation_events"))
+
+    Map.put(counts, "mutation_events", carried)
+  end
+
+  # authoring_exemptions is keyed by the bare (doc_id, dataset) pair, which
+  # another workspace may already hold under the same slug. First writer wins,
+  # the same rule the ordinary import applies (ON CONFLICT DO NOTHING).
+  defp write_exemptions!(nil, counts, _ctx), do: counts
+
+  defp write_exemptions!(member, counts, ctx) do
+    ds = col!(member, "dataset")
+
+    Repo.query!(
+      "CREATE TEMP TABLE _bp_remap_exemptions (LIKE authoring_exemptions INCLUDING DEFAULTS) " <>
+        "ON COMMIT DROP",
+      []
+    )
+
+    member
+    |> rows()
+    |> Stream.map(&put(&1, ds, ctx.dest.slug))
+    |> Stream.map(&scan!(member.table, line(&1), ctx.source_ids))
+    |> Enum.into(copy_in("_bp_remap_exemptions"))
+
+    %{num_rows: n} =
+      Repo.query!(
+        "INSERT INTO authoring_exemptions SELECT * FROM _bp_remap_exemptions " <>
+          "ON CONFLICT DO NOTHING",
+        []
+      )
+
+    Repo.query!("DROP TABLE _bp_remap_exemptions", [])
+    Map.put(counts, "authoring_exemptions", n)
+  end
+
+  # Every statement is a literal, one per table the remap writes; the table is
+  # chosen by clause match on the closed @rewritten set, never interpolated.
+  defp copy_in("documents"), do: SQL.stream(Repo, "COPY documents FROM STDIN", [])
+  defp copy_in("revisions"), do: SQL.stream(Repo, "COPY revisions FROM STDIN", [])
+  defp copy_in("content_edges"), do: SQL.stream(Repo, "COPY content_edges FROM STDIN", [])
+  defp copy_in("task_edges"), do: SQL.stream(Repo, "COPY task_edges FROM STDIN", [])
+  defp copy_in("plugin_doc_state"), do: SQL.stream(Repo, "COPY plugin_doc_state FROM STDIN", [])
+  defp copy_in("mutation_events"), do: SQL.stream(Repo, "COPY mutation_events FROM STDIN", [])
+
+  defp copy_in("schema_definitions"),
+    do: SQL.stream(Repo, "COPY schema_definitions FROM STDIN", [])
+
+  defp copy_in("_bp_remap_exemptions"),
+    do: SQL.stream(Repo, "COPY _bp_remap_exemptions FROM STDIN", [])
+
+  # documents <-> revisions reference each other, so the documents land with
+  # NULL revision pointers and get them here, once the revisions exist.
+  defp set_revision_pointers!(nil, _maps), do: :ok
+
+  defp set_revision_pointers!(member, maps) do
+    [id, cur, rel] = Enum.map(~w(id current_revision_id released_revision_id), &col!(member, &1))
+
+    triples =
+      member
+      |> rows()
+      |> Enum.map(fn f ->
+        {maps.documents[value(f, id)], maps.revisions[value(f, cur)],
+         maps.revisions[value(f, rel)]}
+      end)
+      |> Enum.reject(fn {_doc, c, r} -> c == nil and r == nil end)
+
+    if triples != [] do
+      {docs, curs, rels} =
+        Enum.reduce(Enum.reverse(triples), {[], [], []}, fn {d, c, r}, {ds, cs, rs} ->
+          {[d | ds], [c | cs], [r | rs]}
+        end)
+
+      Repo.query!(
+        "UPDATE documents d SET current_revision_id = v.cur, released_revision_id = v.rel " <>
+          "FROM unnest($1::text[]::uuid[], $2::text[]::uuid[], $3::text[]::uuid[]) " <>
+          "AS v(id, cur, rel) WHERE d.id = v.id",
+        [docs, curs, rels]
       )
     end
 
     :ok
+  end
+
+  # `revisions_bind_document` requires each inserted revision to match its
+  # document's CURRENT state, which a historical revision does not. Owner-level
+  # DDL inside the import transaction, bounded like WorkspaceBundle's DDL passes.
+  defp with_revision_triggers_disabled(fun) do
+    Repo.query!("SET LOCAL lock_timeout = '2s'", [])
+    Repo.query!("ALTER TABLE public.revisions DISABLE TRIGGER USER", [])
+    Repo.query!("SET LOCAL lock_timeout = '0'", [])
+    result = fun.()
+    Repo.query!("SET LOCAL lock_timeout = '2s'", [])
+    Repo.query!("ALTER TABLE public.revisions ENABLE TRIGGER USER", [])
+    Repo.query!("SET LOCAL lock_timeout = '0'", [])
+    result
   end
 
   # ── The backstop scan ────────────────────────────────────────────────────────
 
-  # sobelow_skip ["SQL.Query"]
-  defp assert_no_source_ids!(staged, source) do
-    Repo.query!(
-      "CREATE TEMP TABLE _bp_remap_source_ids (id uuid PRIMARY KEY) ON COMMIT DROP",
-      []
-    )
+  # Every rewritten row is scanned, as the COPY line about to be written, for
+  # any UUID that is a source tenancy id or the old id of a bundled document or
+  # revision. A hit means a reference shape the rewrites above do not know
+  # about, and the import stops (inside the transaction, so nothing lands).
+  defp scan!(table, line, source_ids) do
+    hits =
+      @uuid
+      |> Regex.scan(IO.iodata_to_binary(line))
+      |> List.flatten()
+      |> Enum.map(&String.downcase/1)
+      |> Enum.filter(&MapSet.member?(source_ids, &1))
 
-    Repo.query!(
-      "INSERT INTO _bp_remap_source_ids (id) " <>
-        "SELECT old FROM _bp_remap_ids UNION " <>
-        "SELECT unnest(ARRAY[$1::text::uuid, $2::text::uuid, $3::text::uuid])",
-      [source.workspace_id, source.project_id, source.dataset_id]
-    )
+    if hits != [] do
+      sample = hits |> Enum.uniq() |> Enum.take(5)
 
-    for table <- @rewritten, staged[table] do
-      %{rows: rows} =
-        Repo.query!(
-          "SELECT s.id::text, count(*) " <>
-            "FROM #{qi(staged[table].tmp)} t " <>
-            "CROSS JOIN LATERAL " <>
-            "regexp_matches(row_to_json(t)::text, '(#{@uuid_regex})', 'g') AS m(u) " <>
-            "JOIN _bp_remap_source_ids s ON s.id = m.u[1]::uuid " <>
-            "GROUP BY s.id ORDER BY s.id LIMIT 5",
-          []
-        )
-
-      case rows do
-        [] ->
-          :ok
-
-        [_ | _] ->
-          total = rows |> Enum.map(&List.last/1) |> Enum.sum()
-
-          refuse!(
-            "unremapped_source_id",
-            table,
-            "after rewriting, #{table} still contains id(s) of the source dataset's rows or " <>
-              "tenancy (#{Enum.map_join(rows, ", ", &hd/1)}). A column or embedded value " <>
-              "holds a reference the remap does not rewrite; importing it would point the " <>
-              "new dataset at the source.",
-            %{count: total, sample: Enum.map(rows, &hd/1)}
-          )
-      end
-    end
-
-    :ok
-  end
-
-  # ── Inserts, with every FK enforced ──────────────────────────────────────────
-
-  # sobelow_skip ["SQL.Query"]
-  defp insert!(staged) do
-    counts = %{}
-
-    counts =
-      insert_table!(staged, "documents", counts, fn col ->
-        if col in ["current_revision_id", "released_revision_id"],
-          do: "NULL",
-          else: "t.#{qi(col)}"
-      end)
-
-    counts =
-      if staged["revisions"] do
-        with_revision_triggers_disabled(fn -> insert_table!(staged, "revisions", counts) end)
-      else
-        counts
-      end
-
-    if staged["documents"] do
-      Repo.query!(
-        "UPDATE documents d SET current_revision_id = t.current_revision_id, " <>
-          "released_revision_id = t.released_revision_id " <>
-          "FROM #{qi(staged["documents"].tmp)} t WHERE d.id = t.id",
-        []
+      refuse!(
+        "unremapped_source_id",
+        table,
+        "after rewriting, #{table} still contains id(s) of the source dataset's rows or " <>
+          "tenancy (#{Enum.join(sample, ", ")}). A column or embedded value holds a " <>
+          "reference the remap does not rewrite; importing it would point the new dataset " <>
+          "at the source.",
+        %{count: length(hits), sample: sample}
       )
     end
 
-    counts =
-      ~w(content_edges task_edges plugin_doc_state schema_definitions)
-      |> Enum.reduce(counts, &insert_table!(staged, &1, &2))
-
-    counts =
-      insert_table!(staged, "mutation_events", counts, fn col -> "t.#{qi(col)}" end, drop: ["id"])
-
-    insert_table!(staged, "authoring_exemptions", counts, fn col -> "t.#{qi(col)}" end,
-      suffix: " ON CONFLICT DO NOTHING"
-    )
-  end
-
-  # sobelow_skip ["SQL.Query"]
-  defp insert_table!(staged, table, counts, select \\ nil, opts \\ []) do
-    case staged[table] do
-      nil ->
-        counts
-
-      %{tmp: tmp, cols: cols} ->
-        cols = cols -- Keyword.get(opts, :drop, [])
-        select = select || fn col -> "t.#{qi(col)}" end
-
-        %{num_rows: n} =
-          Repo.query!(
-            "INSERT INTO #{qi(table)} (#{Enum.map_join(cols, ", ", &qi/1)}) " <>
-              "SELECT #{Enum.map_join(cols, ", ", select)} FROM #{qi(tmp)} t" <>
-              Keyword.get(opts, :suffix, ""),
-            []
-          )
-
-        Map.put(counts, table, n)
-    end
-  end
-
-  defp with_revision_triggers_disabled(fun) do
-    alter_revision_triggers!("DISABLE")
-    result = fun.()
-    alter_revision_triggers!("ENABLE")
-    result
-  end
-
-  defp alter_revision_triggers!(action) when action in ["DISABLE", "ENABLE"] do
-    Repo.query!("SET LOCAL lock_timeout = '#{@ddl_lock_timeout}'", [])
-    Repo.query!("ALTER TABLE public.revisions #{action} TRIGGER USER", [])
-    Repo.query!("SET LOCAL lock_timeout = '0'", [])
-  end
-
-  # `ON COMMIT DROP` drops these at the outermost COMMIT. When the import runs
-  # nested in a caller's transaction (the ExUnit sandbox does exactly that),
-  # that commit is not ours, so a second import in the same outer transaction
-  # would find them still there. Drop them on the way out; a refusal needs no
-  # cleanup, because the rollback un-creates them.
-  # sobelow_skip ["SQL.Query"]
-  defp drop_temp_tables!(staged) do
-    tmps = Enum.map(staged, fn {_table, %{tmp: tmp}} -> tmp end)
-
-    for tmp <- tmps ++ ~w(_bp_remap_ids _bp_remap_source_ids) do
-      Repo.query!("DROP TABLE IF EXISTS #{qi(tmp)}", [])
-    end
-
-    :ok
+    line
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -937,8 +1028,4 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
   defp refuse!(code, table, message, details \\ %{}) do
     raise DatasetRemapError, code: code, table: table, message: message, details: details
   end
-
-  # Same quoting as WorkspaceBundle.qi/1: manifest-derived identifiers are
-  # double-quoted with embedded quotes doubled.
-  defp qi(ident), do: ~s("#{String.replace(ident, "\"", "\"\"")}")
 end
