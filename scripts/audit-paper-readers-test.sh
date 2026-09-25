@@ -24,6 +24,12 @@ if [[ " $* " == *" search query "* ]]; then
     printf '%s\n' '{"error":{"code":"internal_error","message":"server error (fixture)"},"ok":false}' >&2
     exit 8
   fi
+  if [[ "${BP_FIXTURE_INVENTORY_REFUSED:-}" == "1" ]]; then
+    # The real 2026-09-11..24 shape: -o json puts the envelope on STDOUT,
+    # stderr stays empty, exit 3.
+    printf '%s\n' '{"error":{"code":"unauthorized","message":"the configured API token was refused (fixture)"},"ok":false}'
+    exit 3
+  fi
   if [[ "${BP_FIXTURE_EMPTY:-}" == "1" ]]; then
     printf '%s\n' '{"documents":[]}'
   else
@@ -423,6 +429,21 @@ fi
 
 jq -e '.ok == false and .error == "paper inventory must be a non-empty documents array with string ids"' \
   "$tmp/empty-result.json" >/dev/null
+
+# A refused inventory read must NAME its cause. bp -o json prints the error
+# envelope on stdout with stderr empty; the witness used to carry `detail: ""`
+# for 14 straight nights while the refusal went unprinted (task-c3b8d7a5e1745a17).
+if PATH="$tmp:$PATH" BP_FIXTURE_INVENTORY_REFUSED=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/refused-result.json"; then
+  printf 'refused paper inventory unexpectedly passed\n' >&2
+  exit 1
+fi
+jq -e '.ok == false and .error == "paper inventory query failed" and
+  (.detail | test("unauthorized"))' "$tmp/refused-result.json" >/dev/null || {
+  printf 'refused inventory witness does not name the refusal: %s\n' "$(cat "$tmp/refused-result.json")" >&2
+  exit 1
+}
 
 # ── Narrow transport retry (dropped-DB-connection 500s) ───────────────────────
 # Production measurement 2026-08-23: ~27% of requests answered HTTP 500 with
