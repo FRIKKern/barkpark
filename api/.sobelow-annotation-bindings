@@ -54,7 +54,14 @@ lib/barkpark/release/secrets.ex	read_existing
 lib/barkpark/release/secrets.ex	write_env
 lib/barkpark/repo.ex	set_local_statement_timeout!
 lib/barkpark/search/golden_eval.ex	run
+lib/barkpark/self_update/runner.ex	append_log_line
 lib/barkpark/self_update/runner.ex	bounded_preflight
+lib/barkpark/self_update/runner.ex	os_pid_alive?
+lib/barkpark/self_update/runner.ex	persist_start
+lib/barkpark/self_update/runner.ex	read_deploy_status
+lib/barkpark/self_update/runner.ex	read_json
+lib/barkpark/self_update/runner.ex	read_log_tail
+lib/barkpark/self_update/runner.ex	write_json
 lib/barkpark/sites/build_log_scrub.ex	do_scrub_file
 lib/barkpark/sites/build_log_scrub.ex	fail
 lib/barkpark/sites/build_log_scrub.ex	fold_line

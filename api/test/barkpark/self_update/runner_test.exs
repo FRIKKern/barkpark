@@ -187,9 +187,6 @@ defmodule Barkpark.SelfUpdate.RunnerTest do
       before = await_done()
       assert before.exit_code == 13
 
-      assert File.exists?(Path.join(dir, "run.manifest.json"))
-      assert File.exists?(Path.join(dir, "run.terminal.json"))
-
       restart_runner()
 
       after_restart = Runner.status()
@@ -199,6 +196,9 @@ defmodule Barkpark.SelfUpdate.RunnerTest do
       assert after_restart.log == ["rebuilding", "migrate-failed"]
       assert after_restart.started_at == before.started_at
       assert after_restart.finished_at == before.finished_at
+
+      assert File.exists?(Path.join(dir, "run.manifest.json"))
+      assert File.exists?(Path.join(dir, "run.terminal.json"))
     end
 
     test "a run killed with the BEAM recovers deploy-rebuild's applied record as exit 0",

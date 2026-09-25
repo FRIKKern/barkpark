@@ -530,9 +530,9 @@ defmodule Barkpark.SelfUpdate.Runner do
     error -> record_failed(:manifest, error)
   end
 
-  # sobelow_skip ["Traversal.FileModule"]
   defp append_log_line(%{run_id: nil}, _line), do: :ok
 
+  # sobelow_skip ["Traversal.FileModule"]
   defp append_log_line(_state, line) do
     File.write(record_path(@log_file), [line, "\n"], [:append])
   rescue
@@ -693,7 +693,14 @@ defmodule Barkpark.SelfUpdate.Runner do
           "[runner] service restarted during this run; deploy-rebuild recorded " <>
             "phase=#{phase} outcome=#{outcome} sha=#{record["sha"]} at #{record["ts"]}"
 
-        %{push_log_memory(state, line) | run: {:done, code}, port: nil, finished_at: now}
+        # The flight record's `ts` is when the script reached that phase — for
+        # `restart applied`, the moment the restart was queued.
+        %{
+          push_log_memory(state, line)
+          | run: {:done, code},
+            port: nil,
+            finished_at: parse_dt(record["ts"]) || now
+        }
 
       nil ->
         line =
