@@ -241,40 +241,6 @@ case "$OP" in
         'ls /var/log/barkpark-builder/ && tail -n 200 ${FILE_PATH} 2>/dev/null || echo FILE-MISSING'
     "
     ;;
-  builder-token-fix)
-    # The /v1/builder/claim route authenticates with the CP's shared
-    # WORKER_TOKEN (require_worker), not an agent token. Extract it
-    # from the running control_plane container on the CP and install
-    # it on the box as /etc/barkpark/worker.token, repointing the
-    # builder unit. The token value never touches this runner's log.
-    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
-      || { echo "box_ip must be an IPv4"; exit 1; }
-    $SSH "root@${CP_HOST}" "
-      set -euo pipefail
-      # No pipe into head: under pipefail a truncating reader SIGPIPEs
-      # its producer and the pipeline returns 141 -- a step failure
-      # under set -e, and a silently wrong status otherwise, visible
-      # only when docker is slow enough to still be writing. head on
-      # a regular FILE cannot SIGPIPE anything.
-      docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
-      c=\$(head -1 /tmp/cp-ops-cid.txt)
-      [ -n \"\$c\" ] || { echo 'no control_plane container'; exit 1; }
-      WT=\$(docker exec \"\$c\" printenv WORKER_TOKEN)
-      [ -n \"\$WT\" ] || { echo 'WORKER_TOKEN unset in container'; exit 1; }
-      KEY=/root/.ssh/barkpark_indx
-      printf '%s' \"\$WT\" | ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
-        set -euo pipefail
-        umask 077
-        cat > /etc/barkpark/worker.token
-        sed -i \"s#--token-file /etc/barkpark/agent.token#--token-file /etc/barkpark/worker.token#\" /etc/systemd/system/barkpark-builder.service
-        systemctl daemon-reload
-        systemctl restart barkpark-builder
-        sleep 2
-        systemctl is-active barkpark-builder
-        echo builder-token-fix complete
-      '
-    "
-    ;;
   box-logs)
     # Last 100 journal lines for an ALLOWLISTED unit on a managed box.
     [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \

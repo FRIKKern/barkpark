@@ -24,7 +24,6 @@ on:
           - site-runtime-install
           - site-artifact-fetch
           - box-logs
-          - builder-token-fix
           - box-file-tail
           - caddy-repair
           - box-probe
