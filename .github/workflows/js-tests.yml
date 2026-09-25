@@ -300,7 +300,7 @@ jobs:
       # only for packages whose inputs changed since the base, plus their dependents
       # (`...[origin/<base>]`). Two packages are ALWAYS in scope because later steps
       # read their dist directly: @barkpark/codegen (drift gate) and @barkpark/core
-      # (workerd + browser proofs). A PR that touches anything outside js/packages/*
+      # (workerd + browser proofs). A PR that touches anything outside js/packages/* (or js/test-harnesses/*)
       # (this workflow, turbo.json, the lockfile, tsconfig.base, web fixtures) runs
       # the FULL graph, so a CI or infra change can never scope itself into a
       # vacuous green. main always runs the full graph.
@@ -314,8 +314,8 @@ jobs:
           base="origin/${{ github.base_ref }}"
           changed=$(git -C .. diff --name-only "$base"...HEAD)
           printf '%s\n' "$changed" | sed 's/^/  changed: /'
-          if printf '%s\n' "$changed" | grep -vqE '^js/packages/[^/]+/'; then
-            echo "filter=" >> "$GITHUB_OUTPUT"; echo "scope: FULL (a file outside js/packages/* changed)"; exit 0
+          if printf '%s\n' "$changed" | grep -vqE '^js/(packages|test-harnesses)/[^/]+/'; then
+            echo "filter=" >> "$GITHUB_OUTPUT"; echo "scope: FULL (a file outside js/packages/* and js/test-harnesses/* changed)"; exit 0
           fi
           f="--filter=...[$base] --filter=@barkpark/codegen --filter=@barkpark/core"
           echo "filter=$f" >> "$GITHUB_OUTPUT"
@@ -435,7 +435,7 @@ jobs:
 
       - name: "Prettier format (ADVISORY — parity with gofmt + mix-format gates)"
         continue-on-error: true
-        run: pnpm exec prettier --check "packages/*/src/**/*.{ts,tsx}"
+        run: pnpm exec prettier --check "packages/*/src/**/*.{ts,tsx}" "test-harnesses/*/src/**/*.{ts,tsx}"
 
       - name: Typecheck
         run: pnpm exec turbo run typecheck ${{ steps.scope.outputs.filter }}
@@ -497,7 +497,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: js-coverage
-          path: js/packages/*/coverage/coverage-final.json
+          path: |
+            js/packages/*/coverage/coverage-final.json
+            js/test-harnesses/*/coverage/coverage-final.json
           if-no-files-found: ignore
 
   changesets:
@@ -528,7 +530,7 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Exits non-zero when packages/** changed against the base branch
+      # Exits non-zero when a workspace package (packages/** or test-harnesses/**) changed against the base branch
       # without a changeset — the js/CLAUDE.md "CI blocks otherwise" rule,
       # enforced for real since 2026-06-11.
       - name: Changeset status

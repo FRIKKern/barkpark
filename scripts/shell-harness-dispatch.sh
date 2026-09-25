@@ -354,7 +354,7 @@ exit-runner-guard scripts/deploy-reliability-exit-run.sh
 exit-runner-guard scripts/deploy-reliability-exit-run.test.sh
 exit-runner-guard internal/cloudclient/client.go
 exit-runner-guard internal/cli/cloud_deploy_census_cmd.go
-exit-runner-guard scripts/deploy-reliability-exit-2026-08-10.md
+exit-runner-guard docs/ledgers/deploy-reliability-exit-2026-08-10.md
 exit-runner-guard scripts/check-doc-budgets.sh
 exit-runner-guard scripts/seal-run.sh
 cloud-static-gz scripts/cloud-static-gz-guard.sh

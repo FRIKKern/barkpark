@@ -56,7 +56,7 @@ CENSUS_SRC="internal/cli/cloud_deploy_census_cmd.go"
 # every probe.
 #
 # The envelope's shape is copied from a REAL reading taken on 2026-08-09 (the one
-# quoted in scripts/deploy-reliability-exit-2026-08-10.md), trimmed to the fields
+# quoted in docs/ledgers/deploy-reliability-exit-2026-08-10.md), trimmed to the fields
 # the runner reads. It deliberately carries `never_covered 5` and `live_rate 33.3`
 # so "the reading was withheld" is an assertion about BYTES, not about control
 # flow.
@@ -514,7 +514,7 @@ fi
 # two structural promises are checkable here rather than by eye.
 section "the verdict artefact carries what it promises"
 
-DOC="$ROOT/scripts/deploy-reliability-exit-2026-08-10.md"
+DOC="$ROOT/docs/ledgers/deploy-reliability-exit-2026-08-10.md"
 if [ ! -f "$DOC" ]; then
   bad "the verdict artefact is missing at $DOC"
 else
@@ -533,7 +533,7 @@ else
     || bad "the artefact has no UNVERIFIED section — everything in it claims to be re-derived"
   # check-doc-budgets.sh is a hardcoded heredoc plus docs/cards/*.md — it does not
   # scan scripts/ at all, so a `budget:` header here is decorative without a line.
-  grep -q 'scripts/deploy-reliability-exit-2026-08-10.md' "$ROOT/scripts/check-doc-budgets.sh" \
+  grep -q 'docs/ledgers/deploy-reliability-exit-2026-08-10.md' "$ROOT/scripts/check-doc-budgets.sh" \
     && ok "the artefact has its own line in check-doc-budgets.sh (which does not scan scripts/ by pattern)" \
     || bad "the artefact is not in check-doc-budgets.sh's CAPS heredoc — its budget header would be decorative"
 

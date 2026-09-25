@@ -120,7 +120,11 @@ function runDerivedPreconditions(pkgRoot) {
     }
   }
 }
-runDerivedPreconditions(join(process.cwd(), 'packages'))
+// Both workspace member roots: packages/* and the private parity harnesses in
+// test-harnesses/* (js/pnpm-workspace.yaml).
+for (const memberRoot of ['packages', 'test-harnesses']) {
+  runDerivedPreconditions(join(process.cwd(), memberRoot))
+}
 
 let vitest
 let exitCode = 0
