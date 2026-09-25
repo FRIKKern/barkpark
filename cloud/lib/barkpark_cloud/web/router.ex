@@ -11752,25 +11752,44 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # dwb-launch-flow-double-submit-test: the team's in-flight twin of THIS
-  # launch request (same slug, template, provider — `Registry.inflight_launch_twin/4`
-  # owns the predicate), or nil. Read from the raw body params because go_live
-  # consults it BEFORE its own validation: an unknown provider normalizes to
-  # `:error`, which no row carries, so it simply finds no twin.
-  defp launch_twin(conn) do
-    case conn.body_params["name"] do
-      name when is_binary(name) and name != "" ->
-        Registry.inflight_launch_twin(
-          conn.assigns.current_team,
-          slugify(name),
-          template_or_nil(conn.body_params["template"]),
-          launch_provider(conn.body_params["provider"])
-        )
+  # The launch request's identity, resolved ONCE per request: go_live inserts
+  # with it AND looks for an in-flight twin with it, so the two can never
+  # disagree. The name is OPTIONAL when a template is given: absent, blank or
+  # whitespace-only defaults to the template's display title (else its slug),
+  # so the /new form's "(optional)" label, the badge flow and a bare curl all
+  # launch — and a nameless double-submit resolves to the SAME slug as its
+  # first submission. With no template there is nothing to derive from: name
+  # and slug stay nil and the 422 name_required stands. `slugify/1` is called
+  # once because its fallback for an all-symbol name is random.
+  #
+  # Resolved before go_live's validation, so `provider` may be `:error` here
+  # (the cond 422s it before any insert); no row carries it, so the twin
+  # lookup simply finds nothing.
+  defp launch_identity(conn) do
+    template = template_or_nil(conn.body_params["template"])
+    name = launch_name(conn.body_params["name"], template)
 
-      _ ->
-        nil
-    end
+    %{
+      template: template,
+      name: name,
+      slug: if(is_binary(name), do: slugify(name), else: nil),
+      provider: launch_provider(conn.body_params["provider"])
+    }
   end
+
+  # dwb-launch-flow-double-submit-test: the team's in-flight twin of THIS
+  # launch (same slug, template, provider — `Registry.inflight_launch_twin/4`
+  # owns the predicate), or nil.
+  defp launch_twin(conn, %{slug: slug} = launch) when is_binary(slug) do
+    Registry.inflight_launch_twin(
+      conn.assigns.current_team,
+      slug,
+      launch.template,
+      launch.provider
+    )
+  end
+
+  defp launch_twin(_conn, _launch), do: nil
 
   # The "already provisioning" envelope the /new client reconciles to (it jumps
   # to the progress view of `barkpark.id`). The same shape the fleet-support
@@ -11817,6 +11836,8 @@ defmodule BarkparkCloud.Web.Router do
           Auth.forbidden(conn, required: "admin", scope: "team")
       end
 
+    launch = launch_identity(conn)
+
     cond do
       conn.halted ->
         conn
@@ -11854,7 +11875,7 @@ defmodule BarkparkCloud.Web.Router do
       # A RACING pair both pass this check; the database decides the loser (the
       # team-row lock / the (team_id, slug) index) and the `with/else` below
       # re-asks this question before refusing it.
-      (twin = launch_twin(conn)) != nil ->
+      (twin = launch_twin(conn, launch)) != nil ->
         already_provisioning(conn, twin)
 
       # usage-limits-quotas: the QUOTA gate — the plan's managed-instance ceiling.
@@ -11902,19 +11923,13 @@ defmodule BarkparkCloud.Web.Router do
 
       true ->
         team = conn.assigns.current_team
-        template = template_or_nil(conn.body_params["template"])
-        # The name is OPTIONAL when a template is given: absent, blank or
-        # whitespace-only defaults to the template's display title (else its
-        # slug), so the /new form's "(optional)" label, the badge flow and a bare
-        # curl all launch. With no template there is nothing to derive from and
-        # the 422 name_required below stands.
-        name = launch_name(conn.body_params["name"], template)
-        slug = if(is_binary(name), do: slugify(name), else: nil)
-        # Provider-neutral launch config (charter Decision 9). The provider was
-        # validated by the cond above (:error already 422'd), so it is a known
-        # slug or the hetzner default here; region/server_type ride through as
-        # given (nil → the claim's warm-pool fallback).
-        provider = launch_provider(conn.body_params["provider"])
+        # Name (template-defaulted), slug and template come from the ONE
+        # resolution `launch_identity/1` made — the same values the twin check
+        # above used. Provider-neutral launch config (charter Decision 9): the
+        # provider was validated by the cond above (:error already 422'd), so it
+        # is a known slug or the hetzner default here; region/server_type ride
+        # through as given (nil → the claim's warm-pool fallback).
+        %{template: template, name: name, slug: slug, provider: provider} = launch
         region = string_param_or_nil(conn.body_params["region"])
         server_type = string_param_or_nil(conn.body_params["server_type"])
 
@@ -11989,7 +12004,7 @@ defmodule BarkparkCloud.Web.Router do
           # and the unique index both wait for it). Re-ask for the twin, so the
           # loser answers 409 with the winner's id instead of a refusal.
           {:error, :limit_reached} ->
-            case launch_twin(conn) do
+            case launch_twin(conn, launch) do
               nil ->
                 json(conn, 403, %{
                   error: "limit_reached",
@@ -12002,7 +12017,7 @@ defmodule BarkparkCloud.Web.Router do
             end
 
           {:error, %Ecto.Changeset{} = changeset} ->
-            case launch_twin(conn) do
+            case launch_twin(conn, launch) do
               nil -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
               twin -> already_provisioning(conn, twin)
             end
