@@ -717,6 +717,12 @@ html[data-theme="dark"] .bp-paper-body {
   color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em;
   margin-top: 20px;
 }
+/* The highlight mark: `==text==` in the editor, <mark> in BPML. Same selector on View and Edit.
+   The fill is the warn hue at a marker-pen alpha over the page, so it reads on both themes
+   without a literal (the design-token ratchet). */
+.bp-paper-surface .bp-highlight,
+.bp-paper-surface mark { background: hsl(var(--warn-hsl) / 0.35); color: inherit; padding: 0 0.12em; border-radius: 2px; box-decoration-break: clone; }
+
 .bp-paper-surface .bp-role-pullquote {
   display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
   border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft);

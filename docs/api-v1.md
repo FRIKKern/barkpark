@@ -5,11 +5,7 @@
 
 Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
-**Reading this from a JavaScript or TypeScript app?** Use the SDK rather than raw
-`fetch`: `@barkpark/core` wraps these routes (query builder, mutations, media,
-`listen()`), and `@barkpark/nextjs` adds App Router integration. Consumption
-guide: [cards/js-sdk.md](cards/js-sdk.md). Prose docs site: `pnpm -C js install
-&& pnpm -C js --filter @barkpark/docs dev`.
+**JS/TS:** use `@barkpark/core` (queries, mutations, media, listen) and `@barkpark/nextjs` (App Router). [SDK guide](cards/js-sdk.md). Docs site: `pnpm -C js install && pnpm -C js --filter @barkpark/docs dev`.
 
 ## 1a. Workspace → Project → Dataset hierarchy
 
@@ -66,7 +62,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 Fetch one document. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin — so the bare `_publishedId` reaches an unpublished document under both, exactly as `patch`/`publish`/`discardDraft`/`delete` do.
 
-**Read-after-write is IMMEDIATE, not eventual.** A mutation is visible on the next read — 63 reads across 3 timed trials on live production, first sample t+0.45s, zero misses (`pds-bl-doc-patch-propagation-lag`). Responses carry `cache-control: max-age=0, private, must-revalidate` and the ETag is folded from the row's own `_id:_rev`, so no shared cache can serve a stale body. What looks like propagation lag is the **draft/published split**: a write that lands on `drafts.<id>` is served by `?perspective=drafts`, and by `raw` when the document has no published row — `published` and `bp task get` do an exact-id lookup and keep returning the published row until the draft is published. Diagnose a "missing" write by reading `?perspective=drafts` once, not by polling `published`.
+**Read-after-write is immediate.** Responses use `cache-control: max-age=0, private, must-revalidate`; ETags include row `_id:_rev`. Check the **draft/published split** before polling: writes to `drafts.<id>` appear under `?perspective=drafts`, or `raw` without a published row. `published` and `bp task get` read the exact ID and retain the published row until publication. Diagnose a missing write with one drafts read. Original 63-read production proof: `pds-bl-doc-patch-propagation-lag`.
 
 ### 5a. Reference Expansion
 
@@ -85,6 +81,8 @@ A batch of mutations, applied atomically (any failure rolls back the batch). Bod
 **`Idempotency-Key`** (optional, this route). A repeat with the same key replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
 
 ### Mutation kinds
+
+**`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<opaque _rev>" } }`. Requires an exact draft ID and revision; missing row →404, stale revision →412. Removes only that draft, preserves its published twin, and commits recovery history/event with the delete. Receipt names the exact removed row. Generic `delete` retains its both-variant behavior. Lost replies require reconciliation; never retry against a recreated row with a new revision.
 
 **`create`** — new draft; `conflict` if a draft already exists at that id: `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
@@ -132,7 +130,7 @@ Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the gl
 
 ## 8a. Plugin HTTP surfaces — Tickets `/v1/tickets`, Sheets `POST /v1/plugins/sheets/:slug/ops`, Bulldocs paper ops
 
-Contract: [contracts/plugin-http-api.md](contracts/plugin-http-api.md) (`bptk_` submitter keys, operator/admin routes, attachment and write limits; Sheets ops apply individually, `sort_range`, no filter wire endpoint). `POST /v1/plugins/bulldocs/papers/:slug/ops` is an EDIT door: the AuthoringWall does NOT run there — its whole contract is `ratchet_hollow/2` + `reject_new_field_loss/2`, and the five publish-time floors are re-applied at the next publish.
+Contract: [plugin HTTP](contracts/plugin-http-api.md) covers ticket keys/limits, Sheets individual ops and Paper create-only `/papers/:slug/create` (native blocks, 201; existing published/draft targets 409). Paper `/papers/:slug/ops` edits with `ratchet_hollow/2` + `reject_new_field_loss/2`, without AuthoringWall; its five publish-time floors reapply at publish. Ordinary `/papers` remains upsert.
 
 ## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
 
@@ -148,7 +146,7 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 
 Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
-`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required` 422 · `searchable_text_too_large` 422 (§6) · `storage_unavailable` 503 (media/dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (the paper’s `content["rev"]` is present but not an integer — a failed READ of the op anchor, never a rev mismatch; absent is legitimate and anchors on 0). · `auth_method_not_allowed` 403 (org `allowed_auth_methods` allow-list; NULL = all open; `social` is separate from `sso`) — checked AFTER the credential, so a wrong password still returns `invalid_credentials` 401.
+`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`paper_exists`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required` 422 · `searchable_text_too_large` 422 (§6) · `storage_unavailable` 503 (media/dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (the paper’s `content["rev"]` exists but is not an integer — an op-anchor read failure, never a rev mismatch; absent anchors on 0). · `auth_method_not_allowed` 403 (org `allowed_auth_methods` allow-list; NULL = all open; `social` is separate from `sso`) — checked AFTER the credential, so a wrong password still returns `invalid_credentials` 401.
 
 Endpoint-specific: [api/error-codes.md](api/error-codes.md); source `Errors.known_codes/0`.
 

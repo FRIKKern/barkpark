@@ -229,7 +229,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # headings were bold `<span>`s until the email-view wave (gp-w3): a mailed
     # paper deserves the same typographic skeleton the reader shows.
     _ = style
+
     %{"kind" => "PdHeading", "level" => level, "children" => children}
+    |> maybe_put("align", block_align(b))
   end
 
   def compose_block(%{"type" => "eyebrow"} = b, style) do
@@ -330,7 +332,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # both beat the bare `<span>`s email used to get, which collapsed every
     # paragraph into one unbroken run (gp-w3 email-view wave).
     _ = style
+
     %{"kind" => "PdParagraph", "children" => compose_inline_children(paragraph_inline(b))}
+    |> maybe_put("align", block_align(b))
   end
 
   # ── Authoring-drift type aliases (the choke point) ─────────────────────────
@@ -682,7 +686,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     if blank_code_source?(b) do
       %{"kind" => "_raw", "html" => ""}
     else
-      %{"kind" => "_raw", "html" => Figures.code_block_html(code_source(b), code_emphasis(b))}
+      %{
+        "kind" => "_raw",
+        "html" => Figures.code_block_html(code_source(b), code_emphasis(b), Map.get(b, "lang"))
+      }
     end
   end
 
@@ -909,7 +916,17 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       body_rows
       |> Enum.map(compose_row)
 
-    pd = %{"kind" => "PdTable", "rows" => rows} |> table_put_col_types(col_types)
+    pd =
+      %{"kind" => "PdTable", "rows" => rows}
+      |> table_put_col_types(col_types)
+      |> table_put_spans(
+        Map.get(b, "spans"),
+        length(rows),
+        rows |> List.first() |> List.wrap() |> length()
+      )
+      |> table_put_widths(Map.get(b, "cols"))
+      |> table_put_head_col(Map.get(b, "headCol"))
+      |> table_put_aligns(declared_head || legacy_head || column_head, body_rows)
 
     head =
       if is_list(declared_head) and declared_head != [],
@@ -2478,6 +2495,88 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp table_col_types(_b, _style), do: []
 
+  # Merged cells (Barkdown plan #24): `spans` is a list of %{"row", "col", "colspan", "rowspan"}
+  # over BODY rows; the grid stays rectangular (covered positions hold a placeholder cell) and
+  # the walker skips what a span covers. Anything malformed or outside the grid is dropped here,
+  # so the walker never sees an entry it cannot honour. Only the :article walker reads it.
+  defp table_put_spans(pd, spans, n_rows, n_cols) when is_list(spans) do
+    valid =
+      spans
+      |> Enum.filter(&is_map/1)
+      |> Enum.map(fn s ->
+        %{
+          "row" => table_span_int(Map.get(s, "row"), 0),
+          "col" => table_span_int(Map.get(s, "col"), 0),
+          "colspan" => table_span_int(Map.get(s, "colspan"), 1) || 1,
+          "rowspan" => table_span_int(Map.get(s, "rowspan"), 1) || 1
+        }
+      end)
+      |> Enum.filter(fn %{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} ->
+        is_integer(r) and is_integer(c) and r < n_rows and c < n_cols and (cs > 1 or rs > 1)
+      end)
+      |> Enum.map(fn %{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} = s ->
+        %{s | "colspan" => min(cs, n_cols - c), "rowspan" => min(rs, n_rows - r)}
+      end)
+      |> Enum.filter(fn %{"colspan" => cs, "rowspan" => rs} -> cs > 1 or rs > 1 end)
+
+    if valid == [], do: pd, else: Map.put(pd, "spans", valid)
+  end
+
+  defp table_put_spans(pd, _spans, _n_rows, _n_cols), do: pd
+
+  defp table_span_int(v, min) when is_integer(v) and v >= min, do: v
+
+  defp table_span_int(v, min) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, ""} when n >= min -> n
+      _ -> nil
+    end
+  end
+
+  defp table_span_int(_v, _min), do: nil
+
+  # Column widths (Barkdown plan #25): `cols[i].width`, an integer of CSS pixels, rides PdTable as
+  # `widths` (nil where a column has none) — only when at least one column has one. Only the
+  # :article walker reads it (a <colgroup>); email keeps the plain grid.
+  # Header column (Barkdown plan #26): `headCol: true` → the walker renders each body row's first
+  # cell as <th scope="row">.
+  defp table_put_head_col(pd, true), do: Map.put(pd, "headCol", true)
+  defp table_put_head_col(pd, _), do: pd
+
+  # Per-cell alignment (plan #26): a content-map cell may carry `align: "center" | "right"`;
+  # PdTable gets `aligns` — %{"head" => [...], "rows" => [[...]]} with nil where a cell has none —
+  # only when at least one cell has one.
+  defp table_put_aligns(pd, head, rows) do
+    head_aligns =
+      if is_list(head), do: Enum.map(table_row_cells_safe(head), &table_cell_align/1), else: []
+
+    row_aligns =
+      Enum.map(rows, fn row -> Enum.map(table_row_cells_safe(row), &table_cell_align/1) end)
+
+    if Enum.any?(head_aligns ++ List.flatten(row_aligns), &(&1 != nil)),
+      do: Map.put(pd, "aligns", %{"head" => head_aligns, "rows" => row_aligns}),
+      else: pd
+  end
+
+  defp table_row_cells_safe(row) when is_list(row), do: row
+  defp table_row_cells_safe(%{"cells" => cells}) when is_list(cells), do: cells
+  defp table_row_cells_safe(_row), do: []
+
+  defp table_cell_align(%{"align" => a}) when a in ["center", "right"], do: a
+  defp table_cell_align(_cell), do: nil
+
+  defp table_put_widths(pd, cols) when is_list(cols) and cols != [] do
+    widths =
+      Enum.map(cols, fn
+        %{"width" => w} -> table_span_int(w, 1)
+        _ -> nil
+      end)
+
+    if Enum.any?(widths, &is_integer/1), do: Map.put(pd, "widths", widths), else: pd
+  end
+
+  defp table_put_widths(pd, _cols), do: pd
+
   defp table_put_col_types(pd, []), do: pd
   defp table_put_col_types(pd, types), do: Map.put(pd, "cols", types)
 
@@ -3410,5 +3509,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       end
 
     open <> child_html <> cap <> "</figure>"
+  end
+
+  # The author's text alignment on a paragraph or heading: "center" | "right" ride to the
+  # walker as `align`; "left" and anything else are the default and add nothing.
+  defp block_align(b) do
+    case Map.get(b, "align") do
+      a when a in ["center", "right"] -> a
+      _ -> nil
+    end
   end
 end

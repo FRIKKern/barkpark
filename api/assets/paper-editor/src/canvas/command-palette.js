@@ -248,6 +248,14 @@ const INSERT_META = {
   diagram: { label: "Diagram", hint: "⬡" },
   action: { label: "Action", hint: "➤" },
   figure: { label: "Figure", hint: "▤" },
+  image: { label: "Image", hint: "▣" },
+  expandable: { label: "Toggle", hint: "▸" },
+  steps: { label: "Steps", hint: "①" },
+  tabs: { label: "Tabs", hint: "⌸" },
+  equation: { label: "Equation", hint: "∑" },
+  footnote: { label: "Footnotes", hint: "¹" },
+  toc: { label: "Contents", hint: "☰" },
+  video: { label: "Video", hint: "▶" },
   columns: { label: "Columns", hint: "▥" },
   section: { label: "Section", hint: "§" },
   terminal: { label: "Terminal", hint: "⌘" },
@@ -278,6 +286,14 @@ const INSERT_ORDER = [
   "diagram",
   "action",
   "figure",
+  "image",
+  "expandable",
+  "steps",
+  "tabs",
+  "equation",
+  "footnote",
+  "toc",
+  "video",
   "columns",
   "section",
   "terminal",
@@ -396,6 +412,15 @@ export function buildCommandRegistry(editor, opts) {
       group: "Format",
       hint: "U",
       run: (ed) => ed.chain().focus().toggleUnderline().run(),
+    });
+  }
+  if (editor && editorHasCommand(editor, "toggleHighlight")) {
+    cmds.push({
+      id: "format-highlight",
+      label: "Format Highlight",
+      group: "Format",
+      hint: "H",
+      run: (ed) => ed.chain().focus().toggleHighlight().run(),
     });
   }
   // Clear formatting — unset every mark on the selection.

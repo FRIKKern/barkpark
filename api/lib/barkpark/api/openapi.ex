@@ -295,6 +295,29 @@ defmodule Barkpark.Api.OpenApi do
     end
   end
 
+  # The CLI reads --file as JSON; this route never accepts a binary upload.
+  defp request_body(%{"id" => "bulldocs.create"}, _template) do
+    %{
+      "required" => true,
+      "description" =>
+        "Native Paper blocks and authoring metadata. The authoring wall validates description and weighted tags.",
+      "content" => %{
+        "application/json" => %{
+          "schema" => %{
+            "type" => "object",
+            "required" => ["blocks"],
+            "properties" => %{
+              "blocks" => %{"type" => "array", "items" => %{"type" => "object"}},
+              "title" => %{"type" => "string"},
+              "description" => %{"type" => "string"},
+              "tags" => %{"type" => "array", "items" => %{"type" => "object"}}
+            }
+          }
+        }
+      }
+    }
+  end
+
   defp request_body(cmd, template) do
     placeholders = path_placeholders(template)
     flags = Map.get(cmd, "flags", []) || []
@@ -348,6 +371,16 @@ defmodule Barkpark.Api.OpenApi do
 
   # ── Responses ──────────────────────────────────────────────────────────────
 
+  defp responses_for(%{"id" => "bulldocs.create"} = cmd, _template) do
+    %{
+      "201" => success_response(cmd),
+      "400" =>
+        err_resp("Malformed native-block payload, draft namespace or unsupported revision fence.")
+    }
+    |> maybe_ref(true, ["401", "403", "409", "422"])
+    |> Map.put("429", %{"$ref" => "#/components/responses/RateLimited"})
+  end
+
   defp responses_for(cmd, template) do
     method = cmd |> get_in(["http", "method"]) |> to_string() |> String.upcase()
     tier = Map.get(cmd, "auth_tier", "admin")
@@ -371,6 +404,18 @@ defmodule Barkpark.Api.OpenApi do
   # field the manifest never declared. Keyed by command id; add a row when a
   # verb answers a receipt shape, never widen the default.
   @receipt_schemas %{
+    "bulldocs.create" => %{
+      "type" => "object",
+      "required" => ["ok", "slug", "rev", "title", "liveview_path", "scoped_liveview_path"],
+      "properties" => %{
+        "ok" => %{"type" => "boolean", "enum" => [true]},
+        "slug" => %{"type" => "string"},
+        "rev" => %{"type" => "string"},
+        "title" => %{"type" => "string"},
+        "liveview_path" => %{"type" => "string"},
+        "scoped_liveview_path" => %{"type" => ["string", "null"]}
+      }
+    },
     "auth.reset" => %{
       "type" => "object",
       "required" => ["ok", "sessionsRevoked"],

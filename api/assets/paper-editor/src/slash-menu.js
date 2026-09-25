@@ -27,6 +27,11 @@ export const SLASH_ITEMS = [
   { group: "Text", type: "divider", label: "Divider", hint: "—", desc: "horizontal rule" },
   { group: "Text", type: "section", label: "Section", hint: "§", desc: "ruled group" },
   { group: "Text", type: "columns", label: "Columns", hint: "▥", desc: "multi-column layout" },
+  { group: "Text", type: "expandable", label: "Toggle", hint: "▸", desc: "collapsible details" },
+  { group: "Text", type: "steps", label: "Steps", hint: "①", desc: "numbered steps with bodies" },
+  { group: "Text", type: "tabs", label: "Tabs", hint: "⌸", desc: "labelled panels" },
+  { group: "Text", type: "footnote", label: "Footnotes", hint: "¹", desc: "numbered notes" },
+  { group: "Text", type: "toc", label: "Contents", hint: "☰", desc: "outline of entries" },
 
   { group: "Article chrome", type: "eyebrow", label: "Eyebrow", hint: "▔", desc: "kicker over the title" },
   { group: "Article chrome", type: "byline", label: "Byline", hint: "✎", desc: "author / credit line" },
@@ -34,6 +39,9 @@ export const SLASH_ITEMS = [
   { group: "Article chrome", type: "pullquote", label: "Pullquote", hint: "❝", desc: "highlighted quote" },
 
   { group: "Visual", type: "diagram", label: "Diagram", hint: "⬡", desc: "Mermaid diagram" },
+  { group: "Visual", type: "image", label: "Image", hint: "▣", desc: "picture from a url" },
+  { group: "Visual", type: "video", label: "Video", hint: "▶", desc: "video from a url" },
+  { group: "Visual", type: "equation", label: "Equation", hint: "∑", desc: "TeX math" },
   { group: "Visual", type: "figure", label: "Figure", hint: "▤", desc: "captioned block" },
   { group: "Visual", type: "table", label: "Table", hint: "▦", desc: "rows and columns" },
   { group: "Visual", type: "terminal", label: "Terminal", hint: "⌘", desc: "console frame" },
@@ -49,7 +57,7 @@ export const SLASH_ITEMS = [
   { group: "Basic fields", type: "field-datetime", label: "Date & time", hint: "◷", desc: "timestamp value" },
   { group: "Basic fields", type: "field-color", label: "Color", hint: "●", desc: "hex swatch value" },
 
-  { group: "Media & reference", type: "field-image", label: "Image", hint: "▣", desc: "upload or url" },
+  { group: "Media & reference", type: "field-image", label: "Image field", hint: "▣", desc: "upload or url" },
   { group: "Media & reference", type: "field-reference", label: "Reference", hint: "↗", desc: "link another document" },
 
   { group: "Structured", type: "composite", label: "Composite", hint: "{}", desc: "object of subfields" },

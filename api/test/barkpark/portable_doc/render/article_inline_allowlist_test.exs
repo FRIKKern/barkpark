@@ -71,7 +71,8 @@ defmodule Barkpark.PortableDoc.Render.ArticleInlineAllowlistTest do
     {"padding", :data},
     # PdContainer `padding:24px` + PdBox padding geometry.
     {"text-align", :data},
-    # sheet per-cell explicit `al` (sheets_parity-pinned).
+    # sheet per-cell explicit `al` (sheets_parity-pinned) + the author's paragraph /
+    # heading alignment (`align: center | right`, Barkdown plan #21).
     {"text-decoration", :data},
     # author underline/strike marks.
     {"vertical-align", :data},

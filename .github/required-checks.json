@@ -839,6 +839,10 @@
     {
       "context": "console-harness.sh reads CI's pin (it must be able to LOSE)",
       "reason": "S4 PATHS-FILTERED: shell-harnesses.yml carries a workflow-level `on: pull_request: paths:` filter, so on a PR that touches none of them this name is ABSENT — and a required absent context reports 'expected' forever (D18). shell-harnesses.yml job `changes` dispatches it; leg slug `console-harness-pin` (.github/shell-harness-legs.json). The leg proves scripts/console-harness.sh READS CI's committed pin and can LOSE when it drifts — it keeps running and keeps its own check-run and verdict; this row records only why it does not GATE. Arrived with #19567 7da416496; it first rendered on a drift-examined sha when #19951 touched console-harness.yml, which is why the gap sat latent."
+    },
+    {
+      "context": "Barkdown parity rows",
+      "reason": "S4 PATHS-FILTERED: barkdown-parity.yml runs only for Paper editor/PortableDoc paths or manual dispatch. It drives the real Barkdown Electron parity rows against this Barkpark checkout, using Barkdown main by default. Its private-repository read token is optional and absence is explicitly reported; a skipped run is not parity evidence. Keep the job running and review actual row results for Paper integration; requiring this absent context globally would block unrelated PRs."
     }
   ]
 }

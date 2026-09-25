@@ -1042,6 +1042,64 @@ defmodule Barkpark.Content.Lifecycle do
     end
   end
 
+  @doc """
+  Remove only the explicitly named draft at the caller's revision. The published
+  twin is never read or removed. Recovery history is required for this operation:
+  deleting the row, its revision snapshot and its mutation event commit together.
+  """
+  def delete_exact_draft(doc_id, type, dataset, expected_rev, opts \\ [])
+
+  def delete_exact_draft("drafts." <> suffix = doc_id, type, dataset, expected_rev, opts)
+      when suffix != "" and is_binary(expected_rev) and byte_size(expected_rev) > 0 do
+    span_write(:delete_exact_draft, opts, fn ->
+      Broadcast.write_atomically(fn ->
+        with {:ok, doc} <- Content.get_document(doc_id, type, dataset, opts),
+             :ok <- exact_delete_revision(doc, expected_rev) do
+          payload = %{
+            event: :before_delete,
+            doc: doc,
+            prev_doc: doc,
+            dataset: dataset,
+            ctx: WriteScope.build_ctx(opts)
+          }
+
+          case Barkpark.Plugins.Hooks.fire(:before_delete, payload) do
+            {:halt, reason} ->
+              {:error, {:halted, reason}}
+
+            :ok ->
+              # Keep the caller's checked snapshot all the way to the SQL fence.
+              # Rereading here would authorize removal of a newer human edit.
+              with :ok <- fenced_delete(doc) do
+                result =
+                  Broadcast.tap_broadcast(
+                    {:ok, doc},
+                    dataset,
+                    type,
+                    "delete",
+                    doc.rev,
+                    Keyword.get(opts, :source, :api),
+                    Keyword.get(opts, :user_id),
+                    require_revision: true
+                  )
+
+                WriteScope.fire_after(result, :after_delete, payload)
+              end
+          end
+        end
+      end)
+    end)
+  end
+
+  def delete_exact_draft(_, _, _, _, _), do: {:error, :malformed}
+
+  defp exact_delete_revision(%Document{status: "draft", rev: rev}, rev), do: :ok
+
+  defp exact_delete_revision(%Document{status: "draft", rev: actual}, expected),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
+
+  defp exact_delete_revision(_, _), do: {:error, :not_found}
+
   # Rev-fenced delete. Removes the row ONLY if its `rev` still matches the one
   # carried on `doc` (READ at the top of the calling operation). A bare
   # `Repo.delete` with `stale_error_field` fires only when the row is GONE, so a

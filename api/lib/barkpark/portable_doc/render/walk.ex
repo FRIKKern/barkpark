@@ -347,6 +347,25 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # is nil → byte-identical span.
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
 
+    # A highlight is author DATA like `color`. On the surface it is the semantic
+    # <mark> the stylesheet paints (no inline property — the article inline-style
+    # ratchet); off-surface (email, a bare export) it rides inline so it survives
+    # with no stylesheet. The class is the same selector the editor renders.
+    {out, inner} =
+      if Map.get(n, "highlight") do
+        case pal do
+          %{style: :article} -> {out, ~s(<mark class="bp-highlight">) <> inner <> "</mark>"}
+          _ -> {["background-color:#fff2a8" | out], inner}
+        end
+      else
+        {out, inner}
+      end
+
+    # Subscript / superscript: the semantic tags on every surface (a mail client and
+    # the paper page render <sub>/<sup> alike; no inline property, no class).
+    inner = if Map.get(n, "sub"), do: "<sub>" <> inner <> "</sub>", else: inner
+    inner = if Map.get(n, "sup"), do: "<sup>" <> inner <> "</sup>", else: inner
+
     out = Enum.reverse(out)
 
     # Trap: emit NO style= attr when the style list is empty; NO class= when no
@@ -444,6 +463,13 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         do: ["color:#{escape_attr(to_string(Map.get(n, "color")))}" | out],
         else: out
 
+    # Author alignment is DATA (like `color`): an inline text-align on every surface —
+    # the :article allowlist already carries the property.
+    out =
+      if Map.get(n, "align") in ["center", "right"],
+        do: ["text-align:#{Map.get(n, "align")}" | out],
+        else: out
+
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
     out = body_type(n, pal) ++ Enum.reverse(out)
 
@@ -512,7 +538,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # same contract as PdText.
   defp heading(n, width, %{style: :article} = pal) do
     level = heading_level(Map.get(n, "level"))
-    "<h#{level}>#{heading_inner(n, width, pal)}</h#{level}>"
+    "<h#{level}#{heading_align_attr(n)}>#{heading_inner(n, width, pal)}</h#{level}>"
   end
 
   # Non-article fallback: a PdHeading reaching the walker under a stylesheet-less
@@ -521,8 +547,25 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # (headings render as bold PdText spans), so this stays byte-frozen for email.
   defp heading(n, width, pal) do
     level = heading_level(Map.get(n, "level"))
-    style = heading_style(level, pal) |> Enum.join(";")
+    style = (heading_style(level, pal) ++ heading_align_style(n)) |> Enum.join(";")
     ~s(<h#{level} style="#{style}">#{heading_inner(n, width, pal)}</h#{level}>)
+  end
+
+  # The author's alignment on a heading is DATA (like `color` on a run): an inline
+  # text-align on every surface — the only inline property an article heading carries,
+  # and one the :article allowlist already holds.
+  defp heading_align_style(n) do
+    case Map.get(n, "align") do
+      a when a in ["center", "right"] -> ["text-align:#{a}"]
+      _ -> []
+    end
+  end
+
+  defp heading_align_attr(n) do
+    case heading_align_style(n) do
+      [] -> ""
+      styles -> ~s( style="#{escape_attr(Enum.join(styles, ";"))}")
+    end
   end
 
   defp heading_inner(n, width, pal) do
@@ -1235,6 +1278,9 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # text|num|delta|spark. ABSENT ⇒ [] ⇒ table_col_class/3 returns "" for every
     # column, so the emitted bytes are identical to the untyped render.
     cols = Map.get(n, "cols", []) |> List.wrap()
+    # Per-cell alignment and the header column (plan #26) are read once for both row groups.
+    aligns = Map.get(n, "aligns")
+    head_col? = Map.get(n, "headCol") == true
 
     thead =
       if head == [] do
@@ -1246,23 +1292,36 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           |> Enum.map(fn {cell, index} ->
             inner = render_children(cell, width, pal)
 
-            ~s(<th class="bp-table__th#{table_col_class(cols, index, "bp-table__th")}">#{inner}</th>)
+            ~s(<th class="bp-table__th#{table_col_class(cols, index, "bp-table__th")}"#{table_align_attr(aligns, :head, 0, index)}>#{inner}</th>)
           end)
           |> Enum.join("")
 
         "<thead><tr>#{cells}</tr></thead>"
       end
 
+    # Merged cells (Barkdown plan #24): a covered position renders nothing, the origin carries the
+    # span attributes. `spans` is already validated and in-grid (compose.ex table_put_spans/4).
+    spans = Map.get(n, "spans", []) |> List.wrap()
+    covered = table_covered(spans)
+
     tbody =
       body
-      |> Enum.map(fn row ->
+      |> Enum.with_index()
+      |> Enum.map(fn {row, r} ->
         cells =
           row
           |> Enum.with_index()
+          |> Enum.reject(fn {_cell, index} -> MapSet.member?(covered, {r, index}) end)
           |> Enum.map(fn {cell, index} ->
             inner = render_children(cell, width, pal)
+            attrs = table_span_attrs(spans, r, index) <> table_align_attr(aligns, :rows, r, index)
 
-            ~s(<td class="bp-table__td#{table_col_class(cols, index, "bp-table__td")}">#{inner}</td>)
+            # The header column (plan #26): the first body cell is a row header.
+            if head_col? and index == 0 do
+              ~s(<th scope="row" class="bp-table__th bp-table__th--col#{table_col_class(cols, index, "bp-table__th")}"#{attrs}>#{inner}</th>)
+            else
+              ~s(<td class="bp-table__td#{table_col_class(cols, index, "bp-table__td")}"#{attrs}>#{inner}</td>)
+            end
           end)
           |> Enum.join("")
 
@@ -1271,6 +1330,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       |> Enum.join("")
 
     ~s(<table role="presentation" class="bp-table">) <>
+      table_colgroup(
+        Map.get(n, "widths"),
+        max(length(head), body |> List.first() |> List.wrap() |> length())
+      ) <>
       thead <> "<tbody>#{tbody}</tbody></table>"
   end
 
@@ -1315,11 +1378,75 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     ~s(<table role="presentation" style="border-collapse:collapse;width:100%;margin:18px 0">#{thead}<tbody>#{rows}</tbody></table>)
   end
 
+  # Column widths (Barkdown plan #25): one <col> per column, `style="width:Npx"` where a width is
+  # set. Integers only (compose.ex table_put_widths/2), so nothing here carries author text.
+  defp table_colgroup(widths, ncols) when is_list(widths) do
+    # One <col> per grid column: the stored list is trimmed to the last column that has a width.
+    padded = widths ++ List.duplicate(nil, max(0, ncols - length(widths)))
+
+    cols =
+      Enum.map_join(padded, "", fn
+        w when is_integer(w) and w > 0 -> ~s(<col style="#{escape_attr("width:#{w}px")}">)
+        _ -> "<col>"
+      end)
+
+    "<colgroup>#{cols}</colgroup>"
+  end
+
+  defp table_colgroup(_widths, _ncols), do: ""
+
   # num and delta both RIGHT-ALIGN (digits and deltas line up on their ones
   # place), the head riding right with its column — the same colRightAlign rule
   # the Go renderer applies through lipgloss's StyleFunc. spark gets its own
   # modifier so the inline SVG can be sized by the stylesheet. Alignment is the
   # ONLY thing num changes: a num cell's body is the legacy text body.
+  # ` style="text-align:right"` on an aligned cell (plan #26); the vocabulary is closed
+  # (compose.ex table_cell_align/1), escaped all the same.
+  defp table_align_attr(%{} = aligns, area, r, c) do
+    list =
+      if area == :head,
+        do: Map.get(aligns, "head", []),
+        else: Enum.at(Map.get(aligns, "rows", []), r, [])
+
+    case Enum.at(List.wrap(list), c) do
+      a when a in ["center", "right"] -> ~s( style="#{escape_attr("text-align:" <> a)}")
+      _ -> ""
+    end
+  end
+
+  defp table_align_attr(_aligns, _area, _r, _c), do: ""
+
+  # The body positions a span covers without being its origin.
+  defp table_covered(spans) do
+    Enum.reduce(spans, MapSet.new(), fn s, acc ->
+      r0 = Map.get(s, "row", 0)
+      c0 = Map.get(s, "col", 0)
+
+      for r <- r0..(r0 + Map.get(s, "rowspan", 1) - 1),
+          c <- c0..(c0 + Map.get(s, "colspan", 1) - 1),
+          {r, c} != {r0, c0},
+          reduce: acc do
+        set -> MapSet.put(set, {r, c})
+      end
+    end)
+  end
+
+  # ` colspan="2" rowspan="3"` on the origin (each only when above 1); integers only, so nothing
+  # here can carry author text.
+  defp table_span_attrs(spans, r, c) do
+    case Enum.find(spans, fn s -> Map.get(s, "row") == r and Map.get(s, "col") == c end) do
+      nil ->
+        ""
+
+      s ->
+        cs = Map.get(s, "colspan", 1)
+        rs = Map.get(s, "rowspan", 1)
+
+        if(is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
+          if is_integer(rs) and rs > 1, do: ~s( rowspan="#{rs}"), else: ""
+    end
+  end
+
   defp table_col_class(cols, index, base) do
     case Enum.at(cols, index) do
       "num" -> " #{base}--num"

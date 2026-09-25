@@ -22,17 +22,17 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     # (task-2957c0caa1ffd1b0: both fire on eight-minute-erasure).
     "code" => ~w(id lang),
     "eyebrow" => ~w(id),
-    "p" => ~w(id),
+    "p" => ~w(id align),
     "pullquote" => ~w(id),
     "ingress" => ~w(id),
     "byline" => ~w(id),
     "ul" => ~w(id ordered),
     "stats" => ~w(id),
     "steps" => ~w(id),
-    "table" => ~w(id),
-    "h1" => ~w(id),
-    "h2" => ~w(id),
-    "h3" => ~w(id),
+    "table" => ~w(id headcol),
+    "h1" => ~w(id align),
+    "h2" => ~w(id align),
+    "h3" => ~w(id align),
     "notes" => ~w(id),
     "note" => ~w(id label lead),
     "stat" => ~w(label value denom verdict),
@@ -69,8 +69,9 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "item" => [],
     "li" => ~w(checked),
     "tr" => [],
-    "th" => [],
-    "td" => [],
+    "th" => ~w(align),
+    "td" => ~w(colspan rowspan align),
+    "col" => ~w(type width),
     "meta" => [],
     "description" => [],
     "a" => ~w(href),
@@ -111,6 +112,9 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "em" => "em",
     "code" => "code",
     "u" => "underline",
+    "mark" => "highlight",
+    "sub" => "sub",
+    "sup" => "sup",
     "s" => "strike"
   }
 
@@ -241,7 +245,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     do: text_block("eyebrow", %{"type" => "eyebrow"}, attrs, sc, cur)
 
   defp build_block(<<"h", l>>, attrs, sc, cur) when l in ?1..?3 do
-    base = %{"type" => "heading", "level" => l - ?0}
+    base = %{"type" => "heading", "level" => l - ?0} |> put_attr("align", attrs)
     text_block(<<"h", l>>, base, attrs, sc, cur, "text")
   end
 
@@ -287,7 +291,10 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     type = if tag == "p", do: "paragraph", else: tag
 
     with {:ok, nodes, cur} <- tag_inline(tag, sc, cur) do
-      {:ok, %{"type" => type, "content" => nodes} |> put_attr("id", attrs), cur}
+      block = %{"type" => type, "content" => nodes} |> put_attr("id", attrs)
+      # `align` (center | right) is a paragraph-only attribute; the printer spells it only on <p>.
+      block = if tag == "p", do: put_attr(block, "align", attrs), else: block
+      {:ok, block, cur}
     end
   end
 
@@ -796,12 +803,23 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   end
 
   defp build_block("table", attrs, sc, cur) do
-    with {:ok, {head, rows}, cur} <- table_rows(sc, cur) do
+    with {:ok, {head, rows, cols}, cur} <- table_rows(sc, cur) do
+      # Merged cells (Barkdown plan #24): a <td colspan/rowspan> is the origin of a span; the
+      # cells it covers are printed as empty <td>s, so the grid stays rectangular.
+      {rows, spans} = table_split_spans(rows)
+
       block =
         %{"type" => "table"}
         |> put_attr("id", attrs)
         |> then(&if head == [], do: &1, else: Map.put(&1, "head", head))
         |> Map.put("rows", rows)
+        |> then(&if spans == [], do: &1, else: Map.put(&1, "spans", spans))
+        |> then(&if cols == [], do: &1, else: Map.put(&1, "cols", cols))
+        |> then(
+          &if List.keyfind(attrs, "headcol", 0) == {"headcol", "true"},
+            do: Map.put(&1, "headCol", true),
+            else: &1
+        )
 
       {:ok, block, cur}
     end
@@ -1124,11 +1142,11 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp table_rows(true, cur), do: {:ok, {[], []}, cur}
+  defp table_rows(true, cur), do: {:ok, {[], [], []}, cur}
 
-  defp table_rows(false, cur), do: table_rows_loop(cur, [], [], [])
+  defp table_rows(false, cur), do: table_rows_loop(cur, [], [], [], [])
 
-  defp table_rows_loop(cur, head, rows, errors) do
+  defp table_rows_loop(cur, head, rows, errors, cols) do
     cur = skip_ws(cur)
 
     case peek(cur) do
@@ -1136,15 +1154,38 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         {errors, cur} = expect_close("table", cur, errors)
 
         if errors == [] do
-          {:ok, {Enum.reverse(head), Enum.reverse(rows)}, cur}
+          {:ok, {Enum.reverse(head), Enum.reverse(rows), Enum.reverse(cols)}, cur}
         else
           {:skip, errors, cur}
         end
 
       :tag ->
         case open_tag(cur) do
-          {:error, e} -> table_rows_loop(skip_to_next_tag(cur), head, rows, [e | errors])
-          {:ok, tag, _attrs, sc, cur2} -> table_row(cur, cur2, tag, sc, head, rows, errors)
+          {:error, e} ->
+            table_rows_loop(skip_to_next_tag(cur), head, rows, [e | errors], cols)
+
+          {:ok, "col", attrs, true, cur2} ->
+            # A column line: type (num | delta | spark) and/or a width in px (plan #25).
+            col =
+              %{}
+              |> put_attr("type", attrs)
+              |> then(fn m ->
+                case List.keyfind(attrs, "width", 0) do
+                  {"width", v} ->
+                    case Integer.parse(v) do
+                      {n, ""} when n > 0 -> Map.put(m, "width", n)
+                      _ -> m
+                    end
+
+                  nil ->
+                    m
+                end
+              end)
+
+            table_rows_loop(cur2, head, rows, errors, [col | cols])
+
+          {:ok, tag, _attrs, sc, cur2} ->
+            table_row(cur, cur2, tag, sc, head, rows, errors, cols)
         end
 
       _ ->
@@ -1154,17 +1195,17 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp table_row(cur, cur2, tag, sc, head, rows, errors) do
+  defp table_row(cur, cur2, tag, sc, head, rows, errors, cols) do
     if tag == "tr" and not sc do
       case row_cells(cur2, cur) do
         {:ok, {:head, cells}, cur3} ->
-          table_rows_loop(cur3, Enum.reverse(cells) ++ head, rows, errors)
+          table_rows_loop(cur3, Enum.reverse(cells) ++ head, rows, errors, cols)
 
         {:ok, {:body, cells}, cur3} ->
-          table_rows_loop(cur3, head, [cells | rows], errors)
+          table_rows_loop(cur3, head, [cells | rows], errors, cols)
 
         {:skip, es, cur3} ->
-          table_rows_loop(cur3, head, rows, es ++ errors)
+          table_rows_loop(cur3, head, rows, es ++ errors, cols)
       end
     else
       e =
@@ -1175,7 +1216,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
           "wrap cells in <tr>…</tr>"
         )
 
-      table_rows_loop(consume_element(tag, sc, cur2), head, rows, [e | errors])
+      table_rows_loop(consume_element(tag, sc, cur2), head, rows, [e | errors], cols)
     end
   end
 
@@ -1205,7 +1246,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       :tag ->
         case open_tag(cur) do
           {:error, e} -> {:skip, [e], consume_until_close("tr", skip_to_next_tag(cur))}
-          {:ok, tag, _attrs, sc, cur2} -> row_cell(cur, cur2, tag, sc, at, kind, cells)
+          {:ok, tag, attrs, sc, cur2} -> row_cell(cur, cur2, tag, attrs, sc, at, kind, cells)
         end
 
       _ ->
@@ -1213,7 +1254,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
   end
 
-  defp row_cell(cur, cur2, tag, sc, at, kind, cells) do
+  defp row_cell(cur, cur2, tag, attrs, sc, at, kind, cells) do
     case {tag, kind} do
       # Head cells parse as INLINE content and emit inline-node lists — the
       # write chokepoint's canonical head-cell shape, so blocks fetched from
@@ -1221,14 +1262,20 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       # printer-input shape only).
       {"th", k} when k in [nil, :head] ->
         case tag_inline("th", sc, cur2) do
-          {:ok, nodes, cur3} -> row_cells_loop(cur3, at, :head, [nodes | cells])
-          {:skip, es, cur3} -> {:skip, es, consume_until_close("tr", cur3)}
+          {:ok, nodes, cur3} ->
+            row_cells_loop(cur3, at, :head, [aligned_cell(nodes, attrs) | cells])
+
+          {:skip, es, cur3} ->
+            {:skip, es, consume_until_close("tr", cur3)}
         end
 
       {"td", k} when k in [nil, :body] ->
         case tag_inline("td", sc, cur2) do
-          {:ok, nodes, cur3} -> row_cells_loop(cur3, at, :body, [nodes | cells])
-          {:skip, es, cur3} -> {:skip, es, consume_until_close("tr", cur3)}
+          {:ok, nodes, cur3} ->
+            row_cells_loop(cur3, at, :body, [td_cell(aligned_cell(nodes, attrs), attrs) | cells])
+
+          {:skip, es, cur3} ->
+            {:skip, es, consume_until_close("tr", cur3)}
         end
 
       {t, _} when t in ["th", "td"] ->
@@ -1359,6 +1406,35 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   defp attrs_hint([]), do: "(no attributes)"
   defp attrs_hint(allowed), do: Enum.join(allowed, ", ")
+
+  # A <td colspan="2" rowspan="3"> is the origin of a merged cell (plan #24); a plain <td> is its
+  # inline nodes. An attribute that is not an integer above 1 is read as absent.
+  defp td_cell(nodes, attrs) do
+    cs = td_span_attr(attrs, "colspan")
+    rs = td_span_attr(attrs, "rowspan")
+    if cs > 1 or rs > 1, do: {:span, nodes, cs, rs}, else: nodes
+  end
+
+  # `align="center|right"` makes the cell a content-map (plan #26); anything else leaves the list.
+  defp aligned_cell(nodes, attrs) do
+    case List.keyfind(attrs, "align", 0) do
+      {"align", a} when a in ["center", "right"] -> %{"content" => nodes, "align" => a}
+      _ -> nodes
+    end
+  end
+
+  defp td_span_attr(attrs, key) do
+    case List.keyfind(attrs, key, 0) do
+      {^key, v} ->
+        case Integer.parse(v) do
+          {n, ""} when n > 1 -> n
+          _ -> 1
+        end
+
+      nil ->
+        1
+    end
+  end
 
   defp put_attr(map, key, attrs) do
     case List.keyfind(attrs, key, 0) do
@@ -1629,5 +1705,28 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   defp advance_one({<<_::utf8, rest::binary>>, ln}), do: {rest, ln}
   defp advance_one(cur), do: cur
 
+  # Body rows arrive as lists of cells, a spanning cell as {:span, nodes, colspan, rowspan}.
   defp err(code, message, line, hint), do: %{code: code, message: message, line: line, hint: hint}
+
+  defp table_split_spans(rows) do
+    {rows, spans} =
+      rows
+      |> Enum.with_index()
+      |> Enum.map_reduce([], fn {cells, r}, acc ->
+        {plain, acc} =
+          cells
+          |> Enum.with_index()
+          |> Enum.map_reduce(acc, fn
+            {{:span, nodes, cs, rs}, c}, acc ->
+              {nodes, [%{"row" => r, "col" => c, "colspan" => cs, "rowspan" => rs} | acc]}
+
+            {nodes, _c}, acc ->
+              {nodes, acc}
+          end)
+
+        {plain, acc}
+      end)
+
+    {rows, Enum.reverse(spans)}
+  end
 end

@@ -122,8 +122,8 @@
    },
    {
     "path": "api/priv/static/assets/bp-paper-editor-shell.css",
-    "count": 143,
-    "note": "The Beta paper-editor rule run extracted byte-for-byte from root.html.heex; its type literals are that file's former residue, moved not minted, and sweep on the same schedule."
+    "count": 144,
+    "note": "The Beta paper-editor rule run extracted byte-for-byte from root.html.heex; its type literals are that file's former residue, moved not minted, and sweep on the same schedule. Link preview adds one non-text viewport clamp (100vw minus 16px safe edge), not a type/reading measure; its font sizes and line heights consume the chrome ladder."
    },
    {
     "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",

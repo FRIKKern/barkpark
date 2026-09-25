@@ -23,11 +23,10 @@ Elixir/Phoenix backend: CRUD, real-time, plugins, Studio. Dev: `mix phx.server` 
 
 **Papers** is the Bulldocs plugin/producer; a **paper** is the `type:"paper"` artifact at `/papers/:slug`. Core owns the machinery; plugin wiring stays thin.
 
+- **Tables:** canvas row headers and cell alignment round-trip through BPML and article rendering; contract: `docs/contracts/portable-doc-table-authoring.md`. Editable header/row-header cells preserve newlines and wrap long text; cell widths remain source-owned. GFM paste preserves center/right column alignment in header and body cells.
 - **Core utilities:** `Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis,Bpml}`; `Content.upsert_paper/1`, `apply_paper_block_op/3`, `apply_document_block_op/5`, `get_public_paper/1`, `doc_topic/4`; `BarkparkWeb.Plugs.RequireIngestToken`.
 - **Bulldocs-owned:** `BarkparkWeb.BulldocsLive` (reader), `BulldocsIngestController` / `BulldocsIntentsController`, `Barkpark.Plugins.Bulldocs.Events`, `layouts/bulldocs.html.heex`.
-- **Reader editing:** Public/Studio share canvas + `PaperViewer`. View flushes; focus pins revisions; overlaps need review. Figure writes child `src`; empty captions are zero-flow. Null-type Card media stays contextual and exact. Card titles edit in place unless rich. Undo/Redo: authorized single-use 1h receipts, session queue; text history stays native. Clients get opaque refs, never inverses.
-- **Plugin module:** `register_schemas/1` + `register_routes/1` expose the `:public_root` reader and `:ingest` API (`/v1/plugins/bulldocs/*`) for reuse.
-- **Sessions:** 2nd blocks type (whitelist `{paper, session}`); routes `/v1/plugins/bulldocs/sessions*`; private+unwalled schema; Studio pane read-only v1 (`bp session publish` writes).
+Reader, editor settlement, clipboard, upload history and block identity: [Paper editor integration](../docs/contracts/paper-editor-integration.md).
 
 **Alias-drop gate:** `/v1/paperflow/*` aliases `/v1/plugins/bulldocs/*` for legacy producers — externally gated, do NOT drop. Ingest auth: `:ingest_token` from `BARKPARK_INGEST_TOKEN` (legacy `PAPERFLOW_INGEST_TOKEN`). See `docs/decisions/deferred.md`.
 

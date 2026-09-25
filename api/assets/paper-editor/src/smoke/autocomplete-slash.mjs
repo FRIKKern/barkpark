@@ -285,7 +285,7 @@ check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   ]) {
     assert.ok(!CANVAS_SLASH_TYPES.has(t), `${t} must NOT be insertable`);
   }
-  assert.equal(CANVAS_SLASH_TYPES.size, 25, "exactly 25 insertable types (+ note, + stage, + card, + checklist, + quote)");
+  assert.equal(CANVAS_SLASH_TYPES.size, 33, "exactly 33 insertable types (+ note, + stage, + card, + checklist, + quote, + image, + toggle, + steps, + tabs, + equation, + footnotes, + contents, + video)");
 });
 
 // (d) THE CALLOUT SHORTHAND — `> [!warn]- ` replaces the para with a bpCallout node
@@ -795,8 +795,8 @@ check("preset: every block is an EXISTING portable-doc type (no new block types)
   // loop above is comparing something real.
   assert.deepEqual(
     sectionPresetNodes("masthead").map((n) => n.type),
-    ["eyebrow", "heading", "ingress", "byline", "bpFleet", "divider", "bpOpaque"],
-    "the masthead projects to the article-chrome / fleet / divider / opaque node set",
+    ["eyebrow", "heading", "ingress", "byline", "bpFleet", "divider", "bpToc"],
+    "the masthead projects to the article-chrome / fleet / divider / contents node set (toc is a canvas atom now)",
   );
 });
 

@@ -42,6 +42,8 @@ import {
   tiptapInlineToPd,
   tiptapToBlock,
 } from "../convert.js";
+// Merged cells (plan #24): the grid <-> visible-rows model (spans on the block, covered placeholders).
+import { gridToVisible, visibleToGrid, PLACEHOLDER_CELL } from "./table-grid.js";
 
 // The doc-block kinds convert.js round-trips as prose (convert.js blockToTiptap
 // switch). These project to a native ProseMirror textblock and diff via
@@ -442,6 +444,38 @@ const CANVAS_DATAVIZ_TYPES = new Set([
 const CANVAS_FIGURE_TYPES = new Set(["figure"]);
 const CANVAS_FIGURE_NODE_NAME = "bpFigure";
 
+// editable-image: the `image` block as a self-painting atom (`bpImage`; image-node.js).
+// src + alt are the editable data (one patch-block{src, alt}); width/height/unknown keys
+// ride verbatim on bpRest; locked/role ride the doctrine template attrs. KEEP LOCKSTEP
+// with image-node.js BP_IMAGE_NODE_NAME.
+const CANVAS_IMAGE_TYPES = new Set(["image"]);
+
+// The "data + island" atoms (island-node.js): equation / footnote / toc / video. Each
+// is a bag of editable keys on typed attrs (`fields`), everything else verbatim on
+// bpRest, one patch-block of the fields on change. KEEP LOCKSTEP with ISLAND_SPECS.
+const CANVAS_ISLAND_SPECS = {
+  equation: { nodeName: "bpEquation", fields: ["tex", "display"] },
+  footnote: { nodeName: "bpFootnote", fields: ["notes"] },
+  toc: { nodeName: "bpToc", fields: ["items", "numbered"] },
+  video: { nodeName: "bpVideo", fields: ["src", "poster", "loop"] },
+};
+const CANVAS_ISLAND_BP_TYPE_BY_NODE = Object.fromEntries(
+  Object.entries(CANVAS_ISLAND_SPECS).map(([t, s]) => [s.nodeName, t]),
+);
+function isCanvasIslandType(t) {
+  return Object.hasOwn(CANVAS_ISLAND_SPECS, t);
+}
+function isCanvasIslandNode(nodeType) {
+  return Object.hasOwn(CANVAS_ISLAND_BP_TYPE_BY_NODE, nodeType);
+}
+const CANVAS_IMAGE_NODE_NAME = "bpImage";
+function isCanvasImageType(t) {
+  return CANVAS_IMAGE_TYPES.has(t);
+}
+function isCanvasImageNode(nodeType) {
+  return nodeType === CANVAS_IMAGE_NODE_NAME;
+}
+
 // True when a portable-doc BLOCK type is the figure (runToTiptap dispatch).
 function isCanvasFigureType(t) {
   return CANVAS_FIGURE_TYPES.has(t);
@@ -502,7 +536,7 @@ function isCanvasTaskListNode(nodeType) {
 // A container FOLDS INTO a run (it no longer SPLITS one). V1: FORBID container-in-
 // container. Keep aligned with columns-node.js, section-node.js, terminal-node.js and
 // paper_canvas.ex @canvas_container_types (partition-shape tests pin all four).
-const CANVAS_CONTAINER_TYPES = new Set(["columns", "section", "terminal"]);
+const CANVAS_CONTAINER_TYPES = new Set(["columns", "section", "terminal", "expandable", "steps", "tabs"]);
 
 // block.type → its TipTap NODE name (they differ): columns→bpColumns, section→bpSection,
 // terminal→bpTerminal. runToTiptap maps block.type → node.type; runToOps/classifyNode
@@ -511,7 +545,19 @@ const CANVAS_CONTAINER_NODE_NAMES = {
   columns: "bpColumns",
   section: "bpSection",
   terminal: "bpTerminal",
+  expandable: "bpExpandable",
+  steps: "bpSteps",
+  tabs: "bpTabs",
 };
+// The expandable (native toggle) container's NODE name (expandable-node.js).
+const CANVAS_EXPANDABLE_NODE_NAME = "bpExpandable";
+// steps / tabs: containers of titled rows (rows-node.js). The row node names are
+// what a container's content holds; the row's title key differs per kind.
+const CANVAS_ROWS = {
+  steps: { containerName: "bpSteps", rowName: "bpStep", rowsKey: "steps", titleKey: "title" },
+  tabs: { containerName: "bpTabs", rowName: "bpTab", rowsKey: "tabs", titleKey: "label" },
+};
+const CANVAS_ROW_NODE_NAMES = new Set(["bpStep", "bpTab"]);
 // The section container's NODE name (singular alias used by sectionBlockToNode).
 const CANVAS_CONTAINER_NODE_NAME = "bpSection";
 // Reverse: node.type → bpType. Used by classifyNode/isCanvasContainerNode to resolve
@@ -520,6 +566,9 @@ const CANVAS_CONTAINER_BP_TYPE_BY_NODE = {
   bpColumns: "columns",
   bpSection: "section",
   bpTerminal: "terminal",
+  bpExpandable: "expandable",
+  bpSteps: "steps",
+  bpTabs: "tabs",
 };
 
 // The per-column node name + the verbatim child-carrier atom node name (columns-node.js).
@@ -855,6 +904,19 @@ function blockToNode(block) {
       return fleetBlockToNode(block, bpId, bpType);
     }
 
+    if (isCanvasIslandType(bpType)) {
+      // A "data + island" atom (equation / footnote / toc / video): editable keys on
+      // typed attrs, the rest verbatim. node.type is the NODE name, not the bpType.
+      return islandBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasImageType(bpType)) {
+      // A canvas IMAGE atom (editable-image): the picture paints itself; src + alt
+      // are typed attrs, the rest of the block rides verbatim. node.type is the NODE
+      // name (bpImage), not the bpType (image).
+      return imageBlockToNode(block, bpId, bpType);
+    }
+
     if (isCanvasFigureType(bpType)) {
       // A canvas FIGURE atom (editable-figure: figure): a SERVER-PAINTED
       // read-only-child + editable-caption atom. The CHILD rides VERBATIM
@@ -876,6 +938,8 @@ function blockToNode(block) {
       //     non-first-class child rides a read-only bpColumnAtom (columns-node.js).
       // node.type is the NODE name (bpSection/bpTerminal/bpColumns), not the bpType.
       if (bpType === "section") return sectionBlockToNode(block, bpId, bpType);
+      if (bpType === "expandable") return expandableBlockToNode(block, bpId, bpType);
+      if (bpType === "steps" || bpType === "tabs") return rowsBlockToNode(block, bpId, bpType);
       if (bpType === "terminal") return terminalBlockToNode(block, bpId, bpType);
       return columnsBlockToNode(block, bpId, bpType);
     }
@@ -1029,6 +1093,170 @@ function sectionNodeToBlock(node, id, taken) {
   return block;
 }
 
+// ── expandable ⇄ canvas toggle container (bpExpandable) ───────────────────────
+//
+// { id, type:"expandable", summary?, open?, blocks|children:[child, …] } ⇄ the
+// bpExpandable CONTAINER (expandable-node.js): summary/open on attrs, the body as
+// nested content, and the persisted body KEY on attrs.bodyKey (patch.ex visible_alias:
+// a `children` body stays `children`; the default is `blocks`). Diff strategy, echo
+// key and reconstruction mirror the section (child-id sequence → coarse replace, else
+// summary patch + per-child interior patches). A container child rides bpOpaque (V1).
+function expandableBody(block) {
+  if (block && Array.isArray(block.children)) return { key: "children", children: block.children };
+  if (block && Array.isArray(block.blocks)) return { key: "blocks", children: block.blocks };
+  return { key: "blocks", children: [] };
+}
+
+function expandableBlockToNode(block, bpId, bpType) {
+  const attrs = { bpId, bpType: bpType || "expandable" };
+  if (block && block.summary != null) attrs.summary = block.summary;
+  if (block && block.open != null) attrs.open = block.open === true;
+  const { key, children } = expandableBody(block);
+  if (key !== "blocks") attrs.bodyKey = key;
+  const content = children.map((child) =>
+    child && isCanvasContainerType(child.type)
+      ? { type: "bpOpaque", attrs: { bpId: child.id, bpType: child.type, bpBlock: deepClone(child) } }
+      : blockToNode(child),
+  );
+  const node = { type: CANVAS_EXPANDABLE_NODE_NAME, attrs };
+  if (content.length) node.content = content;
+  return node;
+}
+
+function expandableNodeToBlock(node, id, taken) {
+  const seen = taken || new Set();
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: "expandable" };
+  if (attrs.summary != null) block.summary = attrs.summary;
+  if (attrs.open != null) block.open = attrs.open === true;
+  const key = attrs.bodyKey === "children" ? "children" : "blocks";
+  block[key] = ((node && node.content) || []).map((child) => {
+    const cls = classifyNode(child);
+    const childBpId = child.attrs && child.attrs.bpId;
+    const cid = childBpId != null ? childBpId : mintId(seen);
+    return nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
+  });
+  return block;
+}
+
+function expandableSummaryChanged(prevNode, nextNode) {
+  const norm = (n) => {
+    const t = n && n.attrs && n.attrs.summary;
+    return t == null || t === "" ? null : t;
+  };
+  return norm(prevNode) !== norm(nextNode);
+}
+
+function expandableSummaryPatch(nextNode) {
+  const t = nextNode && nextNode.attrs && nextNode.attrs.summary;
+  return { summary: t == null || t === "" ? null : t };
+}
+
+// Per-child interior patches when the child-id sequence is unchanged — the section's
+// helper, fed the body under whichever key the persisted block keeps it.
+function expandableChildPatchOps(prevNode, nextNode, prevBlock) {
+  const { children } = expandableBody(prevBlock);
+  return sectionChildPatchOps(prevNode, nextNode, { blocks: children });
+}
+
+function stableExpandableKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    summary: a.summary == null || a.summary === "" ? null : a.summary,
+    open: a.open == null ? null : a.open === true,
+    content: node.content || null,
+  });
+}
+
+// ── steps / tabs ⇄ canvas containers of titled rows (bpSteps / bpTabs) ────────
+//
+// { id, type:"steps", steps:[ { id?, title?, blocks|children } ] } ⇄ bpSteps > bpStep+
+// (tabs: `tabs` rows with `label`). Each row keeps its id (or is minted one), its
+// title on attrs, its body key, and its children as nested nodes (a container child
+// rides bpOpaque). The diff is COARSE like columns: any change → ONE patch-block
+// carrying the whole rebuilt rows array (row and child ids kept, new ones minted off
+// the call-shared `taken`), which patch.ex merges onto the block.
+function rowsBody(row) {
+  if (row && Array.isArray(row.children)) return { key: "children", children: row.children };
+  if (row && Array.isArray(row.blocks)) return { key: "blocks", children: row.blocks };
+  return { key: "blocks", children: [] };
+}
+
+function rowsBlockToNode(block, bpId, bpType) {
+  const spec = CANVAS_ROWS[bpType];
+  const rows = (block && Array.isArray(block[spec.rowsKey]) ? block[spec.rowsKey] : []).filter((r) => r && typeof r === "object");
+  const content = rows.map((row) => {
+    const attrs = { bpId: row.id != null ? row.id : null, bpType: spec.rowName };
+    const t = row[spec.titleKey];
+    if (t != null) attrs.title = String(t);
+    const { key, children } = rowsBody(row);
+    if (key !== "blocks") attrs.bodyKey = key;
+    const kids = children.map((child) =>
+      child && isCanvasContainerType(child.type)
+        ? { type: "bpOpaque", attrs: { bpId: child.id, bpType: child.type, bpBlock: deepClone(child) } }
+        : blockToNode(child),
+    );
+    return { type: spec.rowName, attrs, content: kids.length ? kids : [{ type: "paragraph" }] };
+  });
+  return {
+    type: spec.containerName,
+    attrs: { bpId, bpType },
+    content: content.length ? content : [{ type: spec.rowName, attrs: { bpId: null, bpType: spec.rowName }, content: [{ type: "paragraph" }] }],
+  };
+}
+
+// The rows array from a container node: row ids kept or minted, titles present-only,
+// children reconstructed with ids (an empty seed paragraph strips back to []).
+function rowsNodeToRows(node, bpType, taken) {
+  const spec = CANVAS_ROWS[bpType];
+  const seen = taken || new Set();
+  return ((node && node.content) || []).map((rowNode) => {
+    const a = (rowNode && rowNode.attrs) || {};
+    const row = { id: a.bpId != null ? a.bpId : mintId(seen) };
+    if (a.title != null && a.title !== "") row[spec.titleKey] = a.title;
+    const key = a.bodyKey === "children" ? "children" : "blocks";
+    const only = (rowNode && rowNode.content) || [];
+    const kids = only.map((child) => {
+      const cls = classifyNode(child);
+      const childBpId = child.attrs && child.attrs.bpId;
+      const cid = childBpId != null ? childBpId : mintId(seen);
+      return nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
+    });
+    // The paragraph the projection seeds into an empty row (canvas-created, no id)
+    // strips back to [] so an empty row round-trips byte-identically; a server-held
+    // empty paragraph (it has an id) is content and stays.
+    const seeded =
+      only.length === 1 &&
+      only[0].type === "paragraph" &&
+      !(only[0].attrs && only[0].attrs.bpId != null) &&
+      isEmptyParagraphBlock(kids[0]);
+    row[key] = seeded ? [] : kids;
+    return row;
+  });
+}
+
+function rowsNodeToBlock(node, id, taken) {
+  const bpType = CANVAS_CONTAINER_BP_TYPE_BY_NODE[node && node.type] || "steps";
+  const spec = CANVAS_ROWS[bpType];
+  return { id, type: bpType, [spec.rowsKey]: rowsNodeToRows(node, bpType, taken) };
+}
+
+// Canonical shape without minted ids: titles, body keys and the nested content as the
+// node carries it (child bpIds included; a canvas-new child is null on both sides only
+// when unchanged, so an unedited container compares equal).
+function stableRowsKey(node) {
+  return canonicalJSON(((node && node.content) || []).map((r) => ({
+    id: r.attrs && r.attrs.bpId != null ? r.attrs.bpId : null,
+    title: r.attrs && r.attrs.title != null && r.attrs.title !== "" ? r.attrs.title : null,
+    bodyKey: (r.attrs && r.attrs.bodyKey) || "blocks",
+    content: r.content || null,
+  })));
+}
+
+function rowsNodeChanged(prevNode, nextNode) {
+  return stableRowsKey(prevNode) !== stableRowsKey(nextNode);
+}
+
 // The child-id sequence of a section node (each child's bpId, or null for a
 // canvas-created child). Structural equality of this sequence is the coarse-path
 // pivot: ANY difference (add / remove / reorder / reparent / a null-id child) →
@@ -1146,6 +1374,12 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
     // present-or-null patch when it changed (same detector/builder as the top-level pass).
     return stageNodeChanged(prevChild, nextChild) ? stageNodeToPatch(nextChild) : null;
   }
+  if (cls.isIsland) {
+    return islandNodeChanged(prevChild, nextChild) ? islandNodeToPatch(nextChild) : null;
+  }
+  if (cls.isImage) {
+    return imageNodeChanged(prevChild, nextChild) ? imageNodeToPatch(nextChild) : null;
+  }
   if (cls.isAttrAtom) {
     if (nextChild.type === "bpDiagram") {
       return diagramNodeChanged(prevChild, nextChild)
@@ -1189,7 +1423,7 @@ function childInteriorPatch(cls, prevChild, nextChild, cid, prevBlock) {
     const patch = buildPatchBlockOp(nodeToDocEnvelope(nextChild), cid, bpType).patch;
     // A checklist turned back into a plain list must clear task (patch-block merges keys).
     if (bpType === "list" && prevBlock && prevBlock.task === true && patch.task !== true) patch.task = false;
-    return patch;
+    return withAlignDrop(patch, nextChild, prevBlock);
   }
   return null;
 }
@@ -1211,6 +1445,10 @@ function walkBlockIds(blocks, sink) {
     if (!block) continue;
     if (block.id != null) sink.add(block.id);
     if (Array.isArray(block.blocks)) walkBlockIds(block.blocks, sink);
+    if (Array.isArray(block.children)) walkBlockIds(block.children, sink);
+    // steps / tabs rows: each row is an id-bearing container of its own.
+    if (Array.isArray(block.steps)) walkBlockIds(block.steps, sink);
+    if (Array.isArray(block.tabs)) walkBlockIds(block.tabs, sink);
   }
 }
 
@@ -1221,7 +1459,7 @@ function walkNodeIds(nodes, sink) {
     if (!node) continue;
     const id = node.attrs && node.attrs.bpId;
     if (id != null) sink.add(id);
-    if (isCanvasContainerNode(node.type) && Array.isArray(node.content)) {
+    if ((isCanvasContainerNode(node.type) || CANVAS_ROW_NODE_NAMES.has(node.type)) && Array.isArray(node.content)) {
       walkNodeIds(node.content, sink);
     }
   }
@@ -1933,10 +2171,14 @@ function cellToInline(cell) {
 
 // One cell block → a bpTableHeaderCell|bpTableCell node. Omit the `content` key when
 // the inline array is empty (empty-body fidelity, callout precedent).
-function cellToNode(nodeName, cell) {
+function cellAlign(cell) {
+  const a = cell && typeof cell === "object" && !Array.isArray(cell) ? cell.align : null;
+  return a === "center" || a === "right" ? a : null;
+}
+function cellToNode(nodeName, cell, colspan = 1, rowspan = 1, head = false) {
   const node = {
     type: nodeName,
-    attrs: { bpTableCellSource: { cell: deepClone(cell) } },
+    attrs: { bpTableCellSource: { cell: deepClone(cell) }, colspan: colspan > 1 ? colspan : 1, rowspan: rowspan > 1 ? rowspan : 1, align: cellAlign(cell), head: !!head },
   };
   const inline = inlineArrayToTiptap(cellToInline(cell));
   if (inline.length) node.content = inline;
@@ -1949,32 +2191,40 @@ function cellToNode(nodeName, cell) {
 // Guards keep the node schema-valid (bpTableRow+ ; each row (cell)+) for a degenerate
 // empty table — real tables always carry rows, so the guards never fire on live data.
 function tableBlockToNode(block, bpId, bpType) {
-  const rowsSrc = Array.isArray(block && block.rows) ? block.rows : [];
+  const rowsSrc = Array.isArray(block && block.rows) ? block.rows.map((r) => (Array.isArray(r) ? r : Array.isArray(r && r.cells) ? r.cells : [])) : [];
   const headSrc = block && block.head;
   const content = [];
-
-  const mkRow = (nodeName, cells) => {
-    const list = Array.isArray(cells) ? cells : [];
-    const cellNodes = list.map((cell) => cellToNode(nodeName, cell));
+  // Merged cells (plan #24): `spans` on the block; covered positions hold placeholders and get no
+  // node, the origin carries colspan / rowspan (table-grid.js).
+  const grid = { head: Array.isArray(headSrc) && headSrc.length ? headSrc : null, rows: rowsSrc, spans: Array.isArray(block && block.spans) ? block.spans : [] };
+  const headCol = !!(block && block.headCol === true);
+  const coveredFirst = new Set();
+  for (const sp of grid.spans) if (sp && sp.col === 0) for (let r = sp.row + 1; r < sp.row + (sp.rowspan || 1); r++) coveredFirst.add(r);
+  const mkRow = (nodeName, cells, bodyIndex) => {
+    const cellNodes = cells.map((vc, i) => cellToNode(nodeName, vc.cell, vc.colspan, vc.rowspan, headCol && bodyIndex != null && i === 0 && !coveredFirst.has(bodyIndex)));
     if (!cellNodes.length) cellNodes.push({ type: nodeName });
     return { type: "bpTableRow", content: cellNodes };
   };
-
-  if (Array.isArray(headSrc) && headSrc.length) {
-    content.push(mkRow("bpTableHeaderCell", headSrc));
-  }
-  for (const row of rowsSrc) content.push(mkRow("bpTableCell", row));
+  let bodyIndex = 0;
+  for (const vrow of gridToVisible(grid)) content.push(mkRow(vrow.header ? "bpTableHeaderCell" : "bpTableCell", vrow.cells, vrow.header ? null : bodyIndex++));
 
   if (!content.length) {
     content.push({ type: "bpTableRow", content: [{ type: "bpTableCell" }] });
   }
 
+  // Column widths (plan #25): `cols[i].width` → the node's colWidths (null where unset), only when
+  // at least one column has one; the node view paints them as a <colgroup>.
+  const colsSrc = Array.isArray(block && block.cols) ? block.cols : [];
+  const widths = colsSrc.map((c) => (c && typeof c === "object" && Number.isInteger(c.width) && c.width > 0 ? c.width : null));
+  const colWidths = widths.some((w) => w != null) ? widths : null;
   return {
     type: "bpTable",
     attrs: {
       bpId,
       bpType: bpType || "table",
       bpTableSource: { block: deepClone(block) },
+      colWidths,
+      headCol,
     },
     content,
   };
@@ -2024,6 +2274,9 @@ function cellNodeMatchesSource(cell, source) {
 // Once edited, retain a supported content-map's opaque sibling metadata and replace
 // only its content. Other edited carriers become the canonical inline-array shape.
 function cellNodeToSource(cell) {
+  return withCellAlign(cellNodeToSourcePlain(cell), cell);
+}
+function cellNodeToSourcePlain(cell) {
   const source = sourceCellFromNode(cell);
   const inline = cellNodeInline(cell);
   if (source !== undefined && cellNodeMatchesSource(cell, source)) {
@@ -2037,6 +2290,27 @@ function cellNodeToSource(cell) {
   }
   return inline;
 }
+// Per-cell alignment (plan #26) on the way back: "center" | "right" make the stored cell a
+// content-map `{ content, align }` (other map keys kept); left drops `align`, and a map left with
+// nothing but `content` becomes the plain inline array again.
+function withCellAlign(stored, cell) {
+  const align = cell?.attrs?.align === "center" || cell?.attrs?.align === "right" ? cell.attrs.align : null;
+  // Unchanged alignment must preserve the source carrier and unknown metadata.
+  if (align === cellAlign(sourceCellFromNode(cell))) return stored;
+  const isMap = stored && typeof stored === "object" && !Array.isArray(stored);
+  if (align) {
+    if (isMap) return { ...stored, content: Array.isArray(stored.content) ? stored.content : cellToInline(stored), align };
+    return { content: cellToInline(stored), align };
+  }
+  if (isMap && Object.hasOwn(stored, "align")) {
+    const next = { ...stored };
+    delete next.align;
+    const keys = Object.keys(next);
+    if (keys.length === 1 && keys[0] === "content") return next.content;
+    return next;
+  }
+  return stored;
+}
 
 // tableNodeToBlock(node, id) → { id, type:"table", rows:[…], head?:[…] }. Walk the row
 // nodes: a LEADING row whose cells are ALL bpTableHeaderCell → block.head; every other
@@ -2045,16 +2319,15 @@ function cellNodeToSource(cell) {
 // path drops absent fields, like calloutNodeToBlock).
 function tableNodeToBlock(node, id) {
   const rowNodes = (node && node.content) || [];
-  let head = null;
-  const rows = [];
-  rowNodes.forEach((rowNode, i) => {
+  const visible = rowNodes.map((rowNode, i) => {
     const cells = (rowNode && rowNode.content) || [];
-    const isHeaderRow =
-      cells.length > 0 && cells.every((c) => c.type === "bpTableHeaderCell");
-    const mapped = cells.map(cellNodeToSource);
-    if (i === 0 && isHeaderRow) head = mapped;
-    else rows.push(mapped);
+    const isHeaderRow = i === 0 && cells.length > 0 && cells.every((c) => c.type === "bpTableHeaderCell");
+    return { header: isHeaderRow, cells: cells.map((c) => ({ cell: cellNodeToSource(c), colspan: isHeaderRow ? 1 : Math.max(1, c.attrs?.colspan || 1), rowspan: isHeaderRow ? 1 : Math.max(1, c.attrs?.rowspan || 1) })) };
   });
+  // Back to the rectangular grid: covered positions get the placeholder cell, spans ride `spans`.
+  const grid = visibleToGrid(visible, () => deepClone(PLACEHOLDER_CELL));
+  const head = grid.head;
+  const rows = grid.rows;
   const source = node?.attrs?.bpTableSource?.block;
   const block = source && typeof source === "object" && !Array.isArray(source)
     ? deepClone(source)
@@ -2062,6 +2335,26 @@ function tableNodeToBlock(node, id) {
   block.id = id;
   block.type = "table";
   block.rows = rows;
+  if (grid.spans.length) block.spans = grid.spans;
+  else delete block.spans;
+  if (node?.attrs?.headCol) block.headCol = true;
+  else if (block.headCol === true) block.headCol = false;
+  // Column widths back onto `cols` (kept beside the reader's column types); a column list with
+  // nothing left in it is dropped.
+  const widths = Array.isArray(node?.attrs?.colWidths) ? node.attrs.colWidths : null;
+  if (widths || (Array.isArray(block.cols) && block.cols.some((c) => c && typeof c === "object" && c.width != null))) {
+    const width = Math.max(rows.length ? rows[0].length : 0, head ? head.length : 0, widths ? widths.length : 0);
+    const cols = Array.from({ length: width }, (_, i) => {
+      const src = Array.isArray(block.cols) && block.cols[i] && typeof block.cols[i] === "object" ? { ...block.cols[i] } : {};
+      const w = widths ? widths[i] : null;
+      if (Number.isInteger(w) && w > 0) src.width = w;
+      else delete src.width;
+      return src;
+    });
+    while (cols.length && Object.keys(cols[cols.length - 1]).length === 0) cols.pop();
+    if (cols.some((c) => Object.keys(c).length)) block.cols = cols;
+    else delete block.cols;
+  }
   if (head) block.head = head;
   else if (Array.isArray(source?.head) && source.head.length) block.head = [];
   else if (!source || !Object.hasOwn(source, "head")) delete block.head;
@@ -2075,12 +2368,29 @@ function tableNodeToBlock(node, id) {
 // silently reappears on reload. compose.ex maps head:[] → no thead, so `head:[]`
 // round-trips clean. `rows` is always the full body (a whole-table replace — one cell
 // edit re-emits the entire rows/head, the v1 greenlit coarse round-trip).
-function tableNodeToPatch(node) {
+function tableNodeToPatch(node, prevBlock) {
   const block = tableNodeToBlock(node, null);
   const patch = { rows: block.rows };
   if (Object.hasOwn(block, "head")) patch.head = block.head;
   // Source-free/pasted table nodes retain the historical removal-safe fallback.
   if (!node?.attrs?.bpTableSource && !Object.hasOwn(patch, "head")) patch.head = [];
+  // Spans ride the patch; a table that lost its last span says so (a shallow merge would keep the old list).
+  // "Had spans" is read from the BASELINE the patch merges onto (the acknowledged block), not the
+  // mount-time source the node still carries: a table merged and split within one session has
+  // spans on the server and none on its source.
+  const hadSpans = (Array.isArray(prevBlock?.spans) && prevBlock.spans.length > 0) ||
+    (Array.isArray(node?.attrs?.bpTableSource?.block?.spans) && node.attrs.bpTableSource.block.spans.length > 0);
+  if (Array.isArray(block.spans) && block.spans.length) patch.spans = block.spans;
+  else if (hadSpans) patch.spans = [];
+  // Column widths ride `cols` on the patch; a table that lost its last column entry says `cols: []`.
+  const hadCols = (Array.isArray(prevBlock?.cols) && prevBlock.cols.length > 0) ||
+    (Array.isArray(node?.attrs?.bpTableSource?.block?.cols) && node.attrs.bpTableSource.block.cols.length > 0);
+  if (Array.isArray(block.cols) && block.cols.length) patch.cols = block.cols;
+  else if (hadCols) patch.cols = [];
+  // The header column rides as a boolean; false is sent only when the table had one.
+  const hadHeadCol = prevBlock?.headCol === true || node?.attrs?.bpTableSource?.block?.headCol === true;
+  if (block.headCol === true) patch.headCol = true;
+  else if (hadHeadCol) patch.headCol = false;
   return patch;
 }
 
@@ -2093,7 +2403,7 @@ function tableNodeChanged(prevNode, nextNode) {
 
 function stableTableKey(node) {
   const b = tableNodeToBlock(node, null);
-  return canonicalJSON({ head: b.head ? b.head : null, rows: b.rows });
+  return canonicalJSON({ head: b.head ? b.head : null, rows: b.rows, spans: b.spans || null, cols: b.cols || null, headCol: b.headCol === true });
 }
 
 // ── eyebrow / byline / ingress / pullquote ⇄ canvas role prose node ──────────
@@ -2972,6 +3282,138 @@ function stableFigureKey(node) {
   });
 }
 
+// ── island atoms ⇄ typed attrs + verbatim rest ────────────────────────────────
+const islandEmpty = (v) => v == null || v === "" || (Array.isArray(v) && v.length === 0);
+
+function islandBlockToNode(block, bpId, bpType) {
+  const spec = CANVAS_ISLAND_SPECS[bpType];
+  const attrs = { bpId, bpType };
+  const rest = {};
+  let hasRest = false;
+  for (const k of Object.keys(block || {})) {
+    if (k === "id" || k === "type") continue;
+    if (spec.fields.includes(k)) continue;
+    rest[k] = deepClone(block[k]);
+    hasRest = true;
+  }
+  for (const k of spec.fields) {
+    const v = block ? block[k] : undefined;
+    attrs[k] = v === undefined || v === "" ? null : deepClone(v);
+  }
+  attrs.bpRest = hasRest ? rest : null;
+  return { type: spec.nodeName, attrs };
+}
+
+function islandNodeToBlock(node, id) {
+  const bpType = CANVAS_ISLAND_BP_TYPE_BY_NODE[node && node.type];
+  const spec = CANVAS_ISLAND_SPECS[bpType];
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: bpType };
+  for (const k of spec.fields) {
+    if (attrs[k] != null && attrs[k] !== "") block[k] = deepClone(attrs[k]);
+  }
+  if (attrs.bpRest && typeof attrs.bpRest === "object") {
+    for (const k of Object.keys(attrs.bpRest)) {
+      if (k !== "id" && k !== "type" && !spec.fields.includes(k)) block[k] = deepClone(attrs.bpRest[k]);
+    }
+  }
+  return block;
+}
+
+// The patch: every editable key, present or cleared ("" for a string, [] for a list,
+// false for a flag) — patch-block merges keys, so a cleared field must ride, not vanish.
+function islandNodeToPatch(node) {
+  const bpType = CANVAS_ISLAND_BP_TYPE_BY_NODE[node && node.type];
+  const spec = CANVAS_ISLAND_SPECS[bpType];
+  const attrs = (node && node.attrs) || {};
+  const patch = {};
+  for (const k of spec.fields) {
+    const v = attrs[k];
+    patch[k] = v == null ? (k === "notes" || k === "items" ? [] : k === "display" || k === "numbered" || k === "loop" ? false : "") : deepClone(v);
+  }
+  return patch;
+}
+
+function stableIslandKey(node) {
+  const bpType = CANVAS_ISLAND_BP_TYPE_BY_NODE[node && node.type];
+  const spec = CANVAS_ISLAND_SPECS[bpType] || { fields: [] };
+  const a = (node && node.attrs) || {};
+  const data = {};
+  for (const k of spec.fields) data[k] = islandEmpty(a[k]) ? null : a[k];
+  return canonicalJSON({ data, rest: a.bpRest != null ? a.bpRest : null });
+}
+
+function islandNodeChanged(prevNode, nextNode) {
+  return stableIslandKey(prevNode) !== stableIslandKey(nextNode);
+}
+
+// ── image ⇄ canvas self-painting atom ─────────────────────────────────────────
+//
+// { id, type:"image", src?, alt?, width?, height?, locked?, role?, …rest } ⇄
+// { type:"bpImage", attrs:{ bpId, bpType, src, alt, locked, role, bpRest } }.
+// src/alt: ""/absent → null (byte-fidelity: an absent alt reconstructs absent).
+// bpRest: every other key except id/type/src/alt/locked/role, deep-cloned, or null.
+const IMAGE_OWN_KEYS = new Set(["id", "type", "src", "alt", "width", "locked", "role"]);
+
+function imageBlockToNode(block, bpId, bpType) {
+  const rest = {};
+  let hasRest = false;
+  for (const k of Object.keys(block || {})) {
+    if (IMAGE_OWN_KEYS.has(k)) continue;
+    rest[k] = deepClone(block[k]);
+    hasRest = true;
+  }
+  const attrs = stampTemplateAttrs(
+    {
+      bpId,
+      bpType,
+      src: block && block.src != null && block.src !== "" ? String(block.src) : null,
+      alt: block && block.alt != null && block.alt !== "" ? String(block.alt) : null,
+      width: block && Number.isFinite(parseInt(block.width, 10)) ? parseInt(block.width, 10) : null,
+      bpRest: hasRest ? rest : null,
+    },
+    block,
+  );
+  return { type: CANVAS_IMAGE_NODE_NAME, attrs };
+}
+
+// The inverse: src/alt only when set, then the carried rest, then locked/role.
+function imageNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: "image" };
+  if (attrs.src != null && attrs.src !== "") block.src = attrs.src;
+  if (attrs.alt != null && attrs.alt !== "") block.alt = attrs.alt;
+  if (attrs.width != null) block.width = attrs.width;
+  if (attrs.bpRest && typeof attrs.bpRest === "object") {
+    for (const k of Object.keys(attrs.bpRest)) {
+      if (!IMAGE_OWN_KEYS.has(k)) block[k] = deepClone(attrs.bpRest[k]);
+    }
+  }
+  return carryTemplateAttrs(block, attrs);
+}
+
+// The mutable-fields patch: src + alt only. patch.ex's patch-block is a shallow merge,
+// so width/height/role stay untouched; a cleared value rides as "" (the reader treats
+// an empty src as scaffolding and skips the block).
+function imageNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  return { src: attrs.src == null ? "" : attrs.src, alt: attrs.alt == null ? "" : attrs.alt, width: attrs.width == null ? null : attrs.width };
+}
+
+function stableImageKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    src: a.src == null || a.src === "" ? null : a.src,
+    alt: a.alt == null || a.alt === "" ? null : a.alt,
+    width: a.width == null ? null : a.width,
+    rest: a.bpRest != null ? a.bpRest : null,
+  });
+}
+
+function imageNodeChanged(prevNode, nextNode) {
+  return stableImageKey(prevNode) !== stableImageKey(nextNode);
+}
+
 // ── task-list ⇄ canvas editable-query + server-painted-rows atom ──────────────
 //
 // The LIVE `task-list` block { id, type:"task-list", query:{…}, title?, config? } ⇄
@@ -3472,9 +3914,12 @@ export function hasOverlappingOps(ops, baseline, remote) {
 // editor's getJSON compare EQUAL despite their differing attr/text key order.
 function stableProseKey(node) {
   const level = node.attrs && node.attrs.level;
+  const align = node.attrs && node.attrs.textAlign;
   return canonicalJSON({
     type: node.type,
     level: level == null ? null : level,
+    // Author alignment is diff-relevant (a patch must follow it); left and absent are one.
+    align: align === "center" || align === "right" ? align : null,
     content: node.content || null,
   });
 }
@@ -3509,6 +3954,10 @@ function classifyNode(node) {
   // editable-figure: a canvas figure atom (bpFigure). Its bpType resolves to "figure"
   // off node.attrs.bpType (the isFigure fallback below).
   const isFigure = isCanvasFigureNode(node.type);
+  // editable-image: the self-painting image atom (bpImage); bpType resolves to "image".
+  const isImage = isCanvasImageNode(node.type);
+  // island atoms (equation / footnote / toc / video); bpType off the node-name map.
+  const isIsland = isCanvasIslandNode(node.type);
   // live-data task-list: a canvas task-list widget (bpTaskList). Its bpType resolves
   // to "task-list" off node.attrs.bpType (the isTaskList fallback below).
   const isTaskList = isCanvasTaskListNode(node.type);
@@ -3531,6 +3980,10 @@ function classifyNode(node) {
         ? "tasks"
         : isFigure
           ? "figure"
+          : isImage
+            ? "image"
+          : isIsland
+            ? CANVAS_ISLAND_BP_TYPE_BY_NODE[node.type]
           : isTaskList
             ? "task-list"
             : isCard
@@ -3563,6 +4016,8 @@ function classifyNode(node) {
     isReadOnlyAtom,
     isFleet,
     isFigure,
+    isImage,
+    isIsland,
     isTaskList,
     isContainer,
     isRole,
@@ -3830,14 +4285,47 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
         ops.push({
           op: "patch-block",
           id: entry.id,
-          patch: tableNodeToPatch(entry.node),
+          patch: tableNodeToPatch(entry.node, prevBlock),
         });
       }
       continue;
     }
 
     if (entry.isContainer) {
-      // Canvas container node — sub-route by bpType (section | terminal | columns).
+      // Canvas container node — sub-route by bpType (section | expandable | terminal | columns).
+      if (entry.bpType === "steps" || entry.bpType === "tabs") {
+        // steps / tabs: the columns strategy — any change → ONE coarse patch-block
+        // carrying the whole rows array (ids kept, new ones minted off `taken`).
+        if (rowsNodeChanged(prevNode, entry.node)) {
+          const spec = CANVAS_ROWS[entry.bpType];
+          ops.push({
+            op: "patch-block",
+            id: entry.id,
+            patch: { [spec.rowsKey]: rowsNodeToRows(entry.node, entry.bpType, taken) },
+          });
+        }
+        continue;
+      }
+      if (entry.bpType === "expandable") {
+        // expandable: the section's strategy. A changed child-id sequence → ONE coarse
+        // replace-block of the rebuilt subtree; identical → the summary patch, then
+        // each changed child's interior patch (nested ids resolve in patch.ex).
+        if (sectionChildSeqChanged(prevNode, entry.node)) {
+          ops.push({
+            op: "replace-block",
+            id: entry.id,
+            block: expandableNodeToBlock(entry.node, entry.id, taken),
+          });
+        } else {
+          if (expandableSummaryChanged(prevNode, entry.node)) {
+            ops.push({ op: "patch-block", id: entry.id, patch: expandableSummaryPatch(entry.node) });
+          }
+          for (const childOp of expandableChildPatchOps(prevNode, entry.node, prevBlock)) {
+            ops.push(childOp);
+          }
+        }
+        continue;
+      }
       if (entry.bpType === "section") {
         // section: op strategy hinges on whether the child-id SEQUENCE changed:
         //   * DIFFERS (child add/remove/reorder/reparent, or a canvas-created null-id
@@ -3921,6 +4409,27 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
           op: "patch-block",
           id: entry.id,
           patch: taskListNodeToPatch(entry.node, prevNode),
+        });
+      }
+      continue;
+    }
+
+    if (entry.isIsland) {
+      // Island atom: one patch-block of the editable keys when any changed.
+      if (islandNodeChanged(prevNode, entry.node)) {
+        ops.push({ op: "patch-block", id: entry.id, patch: islandNodeToPatch(entry.node) });
+      }
+      continue;
+    }
+
+    if (entry.isImage) {
+      // Canvas image atom (editable-image): src + alt are the editable interior;
+      // one patch-block{src, alt} when either changed, nothing for a pure reorder.
+      if (imageNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: imageNodeToPatch(entry.node),
         });
       }
       continue;
@@ -4115,11 +4624,28 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
 
     if (proseNodeChanged(prevNode, entry.node)) {
       const bpType = entry.bpType || (prevBlock && prevBlock.type);
-      ops.push(buildPatchBlockOp(nodeToDocEnvelope(entry.node), entry.id, bpType));
+      const op = buildPatchBlockOp(nodeToDocEnvelope(entry.node), entry.id, bpType);
+      ops.push({ ...op, patch: withAlignDrop(op.patch, entry.node, prevBlock) });
     }
   }
 
   return ops;
+}
+
+// Back to left on a block the BASELINE holds centred or flushed right: the node's source
+// only carries `align` when the block mounted with one, and a block aligned earlier in this
+// session and acknowledged since has a baseline with the key but a source without it - so
+// tiptapToBlock drops the key from the patch and the server would keep the old alignment.
+// The baseline is the truth the patch merges onto; when it has an alignment the node no
+// longer shows, the patch says align:null (the shallow merge then drops it).
+function withAlignDrop(patch, node, prevBlock) {
+  if (!patch || typeof patch !== "object" || !prevBlock) return patch;
+  const prev = prevBlock.align;
+  if (prev !== "center" && prev !== "right") return patch;
+  const now = node && node.attrs && node.attrs.textAlign;
+  if (now === "center" || now === "right") return patch;
+  if (Object.hasOwn(patch, "align")) return patch;
+  return { ...patch, align: null };
 }
 
 // ── echo reconciliation: server-confirmed blocks ⇄ live doc (S4a) ────────────
@@ -4267,6 +4793,14 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasFigureNode(type)) {
     return !figureNodeChanged(serverNode, liveNode);
   }
+  // Image (editable-image: bpImage): src + alt + the carried rest.
+  if (isCanvasImageNode(type)) {
+    return !imageNodeChanged(serverNode, liveNode);
+  }
+  // Island atoms: the editable keys + the carried rest.
+  if (isCanvasIslandNode(type)) {
+    return !islandNodeChanged(serverNode, liveNode);
+  }
   // Task-list (live-data: bpTaskList): query + title + config (rows server-painted,
   // never on the node). The own-echo of a query edit — and the id-wildcard for a
   // just-minted task-list — is recognized by the SAME stable-key compare runToOps uses.
@@ -4291,6 +4825,12 @@ function nodeContentEqual(serverNode, liveNode) {
     const bp = CANVAS_CONTAINER_BP_TYPE_BY_NODE[type];
     if (bp === "section") {
       return stableSectionKey(serverNode) === stableSectionKey(liveNode);
+    }
+    if (bp === "expandable") {
+      return stableExpandableKey(serverNode) === stableExpandableKey(liveNode);
+    }
+    if (bp === "steps" || bp === "tabs") {
+      return !rowsNodeChanged(serverNode, liveNode);
     }
     if (bp === "terminal") {
       return !terminalNodeChanged(serverNode, liveNode);
@@ -4361,6 +4901,12 @@ function nextNodeToBlock(entry, taken) {
     //     with the minted id; a NEW columns carries no unknown sibling keys, lossless.
     if (entry.bpType === "section") {
       return sectionNodeToBlock(node, entry.id, taken || new Set());
+    }
+    if (entry.bpType === "expandable") {
+      return expandableNodeToBlock(node, entry.id, taken || new Set());
+    }
+    if (entry.bpType === "steps" || entry.bpType === "tabs") {
+      return rowsNodeToBlock(node, entry.id, taken || new Set());
     }
     if (entry.bpType === "terminal") {
       return terminalNodeToBlock(node, entry.id);
@@ -4436,6 +4982,13 @@ function nextNodeToBlock(entry, taken) {
     // absent (mirrors the persist default); NO snapshot (a live task-list has none —
     // the rows are server-resolved at read).
     return taskListNodeToBlock(node, entry.id);
+  }
+  if (entry.isImage) {
+    // Image insert/move (editable-image): src/alt when set, the carried rest, locked/role.
+    return imageNodeToBlock(node, entry.id);
+  }
+  if (entry.isIsland) {
+    return islandNodeToBlock(node, entry.id);
   }
   if (entry.isFigure) {
     // Figure insert/move (editable-figure): reconstruct the figure block (its

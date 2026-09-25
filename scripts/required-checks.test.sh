@@ -2771,6 +2771,8 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # RENDERED on a drift-examined sha when #19951 touched console-harness.yml,
         # so the gap sat latent until a push-to-main made the dispatcher emit it.
         --expect-unrendered "console-harness.sh reads CI's pin (it must be able to LOSE)"
+        # Paper parity postdates both frozen registration samples; acknowledge its paths-filtered exclusion.
+        --expect-unrendered "Barkdown parity rows"
         # ── 2026-09-23 (task-a0abaae6f64c0a9c): absent-context-census.yml. The
         # census job's name had no row although it renders on main commits (never
         # on a PR head — no pull_request trigger); the workflow_run leg added in

@@ -56,6 +56,7 @@ const NATURAL_BLOCK_TYPES = new Set([
   "code",
   "diagram",
   "divider",
+  "image",
 ]);
 
 // The sentinel marker. A whole-block JSON payload rides between the open/close so
@@ -86,6 +87,8 @@ function serializeBlock(block) {
   const type = block.type;
 
   if (!NATURAL_BLOCK_TYPES.has(type)) return sentinel(block);
+  // Author alignment has no markdown; the sentinel carries the block byte-identically.
+  if ((type === "paragraph" || type === "heading") && block.align != null) return sentinel(block);
 
   switch (type) {
     case "heading":
@@ -104,9 +107,23 @@ function serializeBlock(block) {
       return serializeDiagram(block);
     case "divider":
       return "---";
+    case "image":
+      return serializeImage(block);
     default:
       return sentinel(block);
   }
+}
+
+// ![alt](src) — only for a plain image (id/type/src/alt and nothing else) whose src
+// and alt cannot break the syntax; a sized, locked or otherwise decorated image
+// rides the sentinel so it comes back byte-identical.
+function serializeImage(block) {
+  const keys = Object.keys(block).filter((k) => k !== "id" && k !== "type");
+  if (keys.some((k) => k !== "src" && k !== "alt")) return sentinel(block);
+  const src = typeof block.src === "string" ? block.src : "";
+  const alt = typeof block.alt === "string" ? block.alt : "";
+  if (src === "" || /[\s()]/.test(src) || /[\]\[\n\r]/.test(alt)) return sentinel(block);
+  return "![" + alt + "](" + src + ")";
 }
 
 // The sentinel: a one-line HTML comment carrying the whole block JSON verbatim.
@@ -395,7 +412,8 @@ function inlineNodeIsLossless(node) {
   if (!node || typeof node !== "object") return false;
   switch (node.type) {
     case "text":
-      return typeof node.value === "string";
+      // A literal "==" would read back as a highlight delimiter; sentinel that leaf.
+      return typeof node.value === "string" && !node.value.includes("==");
     case "code": {
       if (typeof node.value !== "string") return false;
       // An inline-code value containing a newline can't ride a single-line span.
@@ -415,6 +433,11 @@ function inlineNodeIsLossless(node) {
       // reachable projection fixed point via strike>em>strike etc.).
       const kids = node.children || [];
       if (kids.some((k) => k && k.type === "strikethrough")) return false;
+      return inlineIsLossless(kids);
+    }
+    case "highlight": {
+      const kids = node.children || [];
+      if (kids.some((k) => k && k.type === "highlight")) return false;
       return inlineIsLossless(kids);
     }
     case "link":
@@ -444,6 +467,9 @@ function inlineNodeIsLossless(node) {
       return typeof node.name === "string" && /^[^\s#*_~`\[\]\\<|()]+$/.test(node.name);
     case "underline":
       return false; // no clean markdown for underline
+    case "sub":
+    case "sup":
+      return false; // no clean markdown for sub/superscript either — the sentinel carries them
     case "blockref":
       return false; // target/anchor not expressible inline
     default:
@@ -509,6 +535,10 @@ function inlineNodeToMarkdown(node, parentEmphChar) {
       // inside a strike is gated to a sentinel by inlineNodeIsLossless — "~~" has
       // no alternate delimiter, so "~~~~" can't be disambiguated.)
       return "~~" + inlineToMarkdown(node.children || [], null) + "~~";
+    case "highlight":
+      // "==" has no alternate delimiter either; a highlight directly inside a highlight is
+      // gated to a sentinel by inlineNodeIsLossless, like strike-in-strike.
+      return "==" + inlineToMarkdown(node.children || [], null) + "==";
     case "link":
       return "[" + inlineToMarkdown(node.children || [], null) + "](" + (node.href || "") + ")";
     case "wikilink": {
@@ -701,6 +731,17 @@ export function markdownToBlocks(md) {
         level: heading.level,
         text: heading.text,
       });
+      i += 1;
+      continue;
+    }
+
+    // 3b) IMAGE — a line that is exactly ![alt](src) becomes an image block (the
+    //     inverse of serializeImage); an image inside a sentence stays inline text.
+    const image = /^!\[([^\]\n]*)\]\(([^\s()]+)\)\s*$/.exec(line);
+    if (image) {
+      const block = { id: mintId(), type: "image", src: image[2] };
+      if (image[1] !== "") block.alt = image[1];
+      blocks.push(block);
       i += 1;
       continue;
     }
@@ -1008,18 +1049,26 @@ function isTableStart(lines, i) {
 }
 
 function scanTable(lines, i) {
-  const head = splitTableRow(lines[i]).map((c) => tokenizeInline(c));
+  const alignments = splitTableRow(lines[i + 1]).map((delimiter) =>
+    delimiter.startsWith(":") && delimiter.endsWith(":") ? "center"
+      : delimiter.endsWith(":") ? "right" : null,
+  );
+  const cell = (value, column) => {
+    const content = tokenizeInline(value);
+    return alignments[column] ? { content, align: alignments[column] } : content;
+  };
+  const head = splitTableRow(lines[i]).map(cell);
   const width = head.length;
   const rows = [];
   let j = i + 2;
   while (j < lines.length && isTableRowLine(lines[j]) && !startsNewBlock(lines[j])) {
     const cells = splitTableRow(lines[j]);
     while (cells.length < width) cells.push("");
-    rows.push(cells.slice(0, width).map((c) => tokenizeInline(c)));
+    rows.push(cells.slice(0, width).map(cell));
     j += 1;
   }
   // The server refuses a table with no body rows; a header-only paste gets one empty row.
-  if (rows.length === 0) rows.push(Array.from({ length: width }, () => []));
+  if (rows.length === 0) rows.push(Array.from({ length: width }, (_, column) => cell("", column)));
   return { block: { id: mintId(), type: "table", head, rows }, next: j };
 }
 
@@ -1147,6 +1196,20 @@ function parseInline(s, start, end) {
       if (res) {
         flush();
         out.push(res.node);
+        i = res.next;
+        continue;
+      }
+      buf += ch;
+      i += 1;
+      continue;
+    }
+
+    // Highlight ==x==.
+    if (ch === "=" && s[i + 1] === "=") {
+      const res = scanDelimited(s, i, end, "==");
+      if (res) {
+        flush();
+        out.push({ type: "highlight", children: coalesce(parseInline(s, res.innerStart, res.innerEnd)) });
         i = res.next;
         continue;
       }

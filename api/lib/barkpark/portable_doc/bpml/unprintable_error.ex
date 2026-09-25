@@ -22,7 +22,7 @@ defmodule Barkpark.PortableDoc.Bpml.UnprintableError do
       with no `type` at all;
     * `:inline`    — an inline node type the printer has no clause for, or a
       non-node where inline content belongs;
-    * `:mark`      — a text mark outside strong|em|code|underline|strike;
+    * `:mark`      — a text mark outside strong|em|code|underline|strike|highlight|sub|sup;
     * `:head_cell` — a table head cell that is neither an inline-node list nor
       a legacy `%{"text" => binary}` map.
 

@@ -1,3 +1,4 @@
+import { mock } from "node:test";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
@@ -225,6 +226,10 @@ assert.ok(
 // the whole segmented control after the 16ms ref probe, while the successful reply
 // flips the stable Beta button only a little later. That transition must settle as
 // selected instead of emitting a premature lost-press warning.
+// Exercise the actual handler's timer boundaries without racing Windows timer
+// granularity. One-millisecond steps retain the order of nested JSDOM timers.
+mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+const advance = (ms) => { for (let i = 0; i < ms; i++) mock.timers.tick(1); };
 const transitionDom = new JSDOM(`
   <main id="studio-panes">
     <div class="editor-mode-toggle" role="group" aria-label="Editor mode" data-test-id="editor-mode-toggle">
@@ -305,7 +310,7 @@ try {
         <button type="button" class="btn btn-sm btn-primary" phx-click="editor-set-mode" phx-value-mode="beta" aria-pressed="" data-test-id="editor-mode-beta">Beta</button>
       </div>`;
   }, 40);
-  await new Promise((resolve) => transitionDom.window.setTimeout(resolve, 120));
+  advance(120);
   assert.equal(
     transitionMessages.includes("That press did not reach the server — press it again."),
     false,
@@ -316,7 +321,9 @@ try {
   transitionMessages.length = 0;
   const classic = transitionDocument.querySelector('[data-test-id="editor-mode-classic"]');
   runOnPress.call(transitionHook, { target: classic });
-  await new Promise((resolve) => transitionDom.window.setTimeout(resolve, 230));
+  advance(transitionHook._PA_PROBE + transitionHook._PA_WITNESS_GRACE - 1);
+  assert.equal(transitionMessages.includes("That press did not reach the server — press it again."),false, "the warning must wait for the entire witness grace");
+  advance(1);
   assert.equal(
     transitionMessages.includes("That press did not reach the server — press it again."),
     true,
@@ -329,6 +336,7 @@ try {
   if (priorTransitionLocation === undefined) delete globalThis.location;
   else globalThis.location = priorTransitionLocation;
   transitionDom.window.close();
+  mock.timers.reset();
 }
 
 // ── THE CHROME SURFACES (spd-w19-press-answer-outside-panes) ────────────────

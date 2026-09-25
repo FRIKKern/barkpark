@@ -197,6 +197,9 @@ defmodule Barkpark.Content.Errors do
                          # /papers/:slug/source and /v1/plugins/bulldocs, so a
                          # spec-generated SDK must expect this variant on either.
                          "paper_rev_unreadable",
+                         # Create-only Paper ingest refuses an occupied published
+                         # slug or draft twin without replacing either row.
+                         "paper_exists",
                          # Session-handoff (tasks 3-4) — the session legs of the
                          # SAME controller. `missing_slug` (422, an upsert body
                          # with no slug), `invalid_kind` (422, an event kind

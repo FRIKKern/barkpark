@@ -124,6 +124,7 @@ const cellOrder = (v) => strictInt(v);
 export const BP_SECTION_CONTENT =
   "(paragraph | heading | bulletList | orderedList | divider | callout | bpCard | bpStage | " +
   "bpCode | bpDiagram | bpField | bpSheet | bpEmbed | bpFleet | " +
+  "bpImage | bpEquation | bpFootnote | bpToc | bpVideo | " +
   "eyebrow | byline | ingress | pullquote | bpOpaque)+";
 
 export const Section = Node.create({

@@ -141,10 +141,27 @@ defmodule Barkpark.Content.Broadcast do
   revision so version history doubles as a who-edited-what content trail.
   Existing 5-/6-arity callers keep working unchanged (actor defaults to nil).
   """
-  def tap_broadcast(result, dataset, type, action, prev_rev, source \\ :api, actor_user_id \\ nil) do
+  def tap_broadcast(
+        result,
+        dataset,
+        type,
+        action,
+        prev_rev,
+        source \\ :api,
+        actor_user_id \\ nil,
+        opts \\ []
+      ) do
     case result do
       {:ok, doc} ->
-        save_revision(doc, type, dataset, action, actor_user_id)
+        case save_revision(doc, type, dataset, action, actor_user_id) do
+          {:ok, _} ->
+            :ok
+
+          {:error, changeset} ->
+            if Keyword.get(opts, :require_revision, false),
+              do: raise(Ecto.InvalidChangesetError, action: :insert, changeset: changeset)
+        end
+
         ev = save_event(doc, type, dataset, action, prev_rev, source)
         emit_audit(doc, type, dataset, action, actor_user_id, source)
 
