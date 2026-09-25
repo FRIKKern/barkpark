@@ -972,12 +972,11 @@ defmodule Barkpark.Plugins.Tasks do
             summary:
               "Narrow the page to the DIRECT children of this parent task id " <>
                 "(`parent_id` is an accepted alias server-side). Each row is " <>
-                "the full card: claim, assignee and content included, and " <>
-                "criteria_progress is null on a row with no criteria. " <>
-                "`bp task get <parent>` lists the same children as seven-key " <>
-                "summaries (updated_at, the close-time field, included; no " <>
-                "claim, assignee or content) " <>
-                "and omits criteria_progress on a row with no criteria."
+                "the full card, claim, assignee and content included. " <>
+                "`bp task get <parent>` lists the same children as summaries " <>
+                "of at most seven keys (updated_at, the close-time field, " <>
+                "included; no claim, assignee or content). Both omit " <>
+                "criteria_progress on a row with no criteria."
           }
         ],
         writes: false,
