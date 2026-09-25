@@ -170,8 +170,11 @@ defmodule BarkparkWeb.Studio.AccountLive do
 
   defp live_session(_socket), do: nil
 
+  # `scoped_key/2` is the identity outside tests; a LiveView socket carries no
+  # test scope, so the key is per-user either way (the census in
+  # rate_limiter_scoped_key_coverage_test.exs requires the call shape).
   defp reauth_budget(%User{id: id}) do
-    RateLimiter.check({:studio_erase_reauth, id},
+    RateLimiter.check(RateLimiter.scoped_key(nil, {:studio_erase_reauth, id}),
       capacity: @reauth_capacity,
       refill_per_sec: @reauth_refill_per_sec
     )
