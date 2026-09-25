@@ -59,12 +59,17 @@ import (
 // Adding a tag here is a deliberate act that needs a reason. Removing one
 // happens when the producer learns to send it, or the field is deleted.
 //
-//	port           — task-4f91a03ea23aaba7 will make the CP emit it (node slot port)
-//	runtime_target — same row; today it reaches the BOX payload only, never the
-//	                 deployment JSON the CLI reads
-var dormantTags = map[string]string{
-	"runtime_target": "#3976 added the decoder; it rides the box payload, not the CLI-facing deployment JSON. Same producer row.",
-}
+// EMPTY, AND THAT IS THE GOAL STATE, not a gap. History:
+//
+//	port           — CLOSED by the producer (#15095): deployment_json/1 emits it.
+//	runtime_target — CLOSED by DELETING the field (dr-w11-payload-divergence-close).
+//	                 The plane derives it from site.kind and sends it only on the
+//	                 box's deploy/rollback payloads, never on a deployment row,
+//	                 so SiteDeployment stopped declaring it.
+//
+// The positive control below no longer leans on a live dormant field to prove
+// the guard can see one; it plants a synthetic tag instead.
+var dormantTags = map[string]string{}
 
 // repoRoot walks up from the test's working directory to the module root.
 func repoRoot(t *testing.T) string {
@@ -168,18 +173,27 @@ func declaredTags(typ reflect.Type) []string {
 	return out
 }
 
-// THE GUARD. Every tag SiteDeployment decodes must be a key the producer can
-// send — except the waived ones, which must be EXACTLY the waiver.
-func TestSiteDeploymentDecoderMatchesProducer(t *testing.T) {
-	producer := producerKeys(t)
-
-	var unsent []string
-	for _, tag := range declaredTags(reflect.TypeOf(SiteDeployment{})) {
+// unsentTags is the guard's one computation: the declared tags the producer
+// cannot emit, sorted, and never nil (so an empty result compares equal to an
+// empty waiver under reflect.DeepEqual — a nil-vs-empty mismatch would red the
+// guard on the one state it exists to reach).
+func unsentTags(producer map[string]bool, declared []string) []string {
+	unsent := []string{}
+	for _, tag := range declared {
 		if !producer[tag] {
 			unsent = append(unsent, tag)
 		}
 	}
 	sort.Strings(unsent)
+	return unsent
+}
+
+// THE GUARD. Every tag SiteDeployment decodes must be a key the producer can
+// send — except the waived ones, which must be EXACTLY the waiver.
+func TestSiteDeploymentDecoderMatchesProducer(t *testing.T) {
+	producer := producerKeys(t)
+
+	unsent := unsentTags(producer, declaredTags(reflect.TypeOf(SiteDeployment{})))
 
 	want := make([]string, 0, len(dormantTags))
 	for k := range dormantTags {
@@ -209,10 +223,17 @@ func TestSiteDeploymentDecoderMatchesProducer(t *testing.T) {
 }
 
 // POSITIVE CONTROL. A guard that finds nothing validates everything. This
-// pins that the machinery can still SEE the known defect: if the extractor
+// pins that the machinery can still SEE a dormant field: if the extractor
 // breaks open (returns every identifier, or the tag walk stops finding
 // fields), `unsent` empties and the guard above would pass over a real
-// regression. Measured on origin/main 2026-08-24: exactly port + runtime_target.
+// regression.
+//
+// It used to lean on the LIVE defect (port + runtime_target, measured on
+// origin/main 2026-08-24) and Fatal on an empty waiver. Both specimens are now
+// closed, so the control plants its own: SiteDeployment's REAL declared tags
+// plus one synthetic name no serializer emits, fed through the SAME
+// unsentTags the guard uses. It must report exactly the plant — a wide
+// extractor misses it, a blind one reports real tags beside it.
 func TestGuardStillDetectsTheKnownDormantFields(t *testing.T) {
 	producer := producerKeys(t)
 
@@ -222,9 +243,19 @@ func TestGuardStillDetectsTheKnownDormantFields(t *testing.T) {
 				"is genuinely live, remove it from dormantTags", tag)
 		}
 	}
-	if len(dormantTags) == 0 {
-		t.Fatal("dormantTags is empty — with nothing to detect, the guard cannot be " +
-			"shown to work at all")
+
+	const plant = "dr_w11_planted_dormant_tag"
+	declared := append(declaredTags(reflect.TypeOf(SiteDeployment{})), plant)
+	got := unsentTags(producer, declared)
+	want := make([]string, 0, len(dormantTags)+1)
+	for k := range dormantTags {
+		want = append(want, k)
+	}
+	want = append(want, plant)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("planted a tag no serializer emits; the guard computation reported %v, "+
+			"want exactly %v — the extractor or the tag walk has stopped discriminating", got, want)
 	}
 }
 

@@ -121,6 +121,40 @@ type Barkpark struct {
 	// IDENTITY only — the fleet table paints it through GenProviderMark, never as
 	// a status voice. Empty on a pre-migration row → the PROVIDER cell blanks.
 	Provider string `json:"provider"`
+	// Region / ServerType are the launch PLACEMENT and SIZE the control plane
+	// pinned for this box (charter Decision 9; `barkpark_json` has emitted both
+	// beside `provider` since the provider-neutral hosting slice, and the
+	// console's fleet rail renders them). IDENTITY only, never a status axis, and
+	// NOT observed truth: `server_type` is a nullable launch pin, wrong or empty
+	// on an adopted box — which is exactly why the strained fence reads
+	// `pressure.cpu_cores` off the beat instead. Empty means the plane recorded
+	// no pin (an adopted or pre-migration row, or an older plane); a renderer
+	// shows it as absent, never as a guessed default.
+	Region     string `json:"region"`
+	ServerType string `json:"server_type"`
+
+	// REACHABILITY EVIDENCE (dr-w11-payload-divergence-close). `health_status`
+	// is the VERDICT; these two are the counters it was computed from, and until
+	// this struct named them `bp` could print "degraded" and never say why.
+	//
+	//   - UnreachableCount is the StalenessWorker's consecutive-missed-check
+	//     counter (`Registry` bumps it once per sweep tick the box misses;
+	//     `record_agent_report/2` zeroes it on the next agent report). A POINTER on purpose: nil is "this control plane
+	//     predates the key", which is not the same sentence as a measured 0
+	//     ("answering every check"). The console renders it as EVIDENCE ONLY
+	//     (`missedChecksText`: silence for absent-or-zero), and so does `bp`.
+	//   - UnreachableNotificationSent is the once-per-outage alert latch: true
+	//     means the one unreachable notification for THIS outage has gone out,
+	//     and the same agent report that zeroes the counter clears it. An older
+	//     plane omits it and it decodes false — "no alert recorded", which is the
+	//     truthful reading of an absent latch.
+	UnreachableCount            *int `json:"unreachable_count"`
+	UnreachableNotificationSent bool `json:"unreachable_notification_sent"`
+
+	// CustomHost is the customer-owned FQDN attached to this instance
+	// (POST /v1/barkparks/:id/domain persists it; nil until a team attaches
+	// one). Empty is "no custom domain" — the instance answers on Host/URL only.
+	CustomHost string `json:"custom_host"`
 
 	// Additive (charter decision 15) — the triage-status axes.
 	Suspended       bool   `json:"suspended"`
@@ -207,6 +241,17 @@ type Barkpark struct {
 	AutoupdatePaused        bool    `json:"autoupdate_paused"`
 	PinnedRelease           string  `json:"pinned_release"`
 	Channel                 string  `json:"channel"`
+	// AutoupdateTriggeredAt is the IN-FLIGHT ROLLOUT MARKER (isu-w5.2): the
+	// instant the rollout worker triggered this box's self-update
+	// (`Registry.mark_autoupdate_triggered/1`), cleared by
+	// `Registry.clear_autoupdate_triggered/1` when the instance settles or the
+	// wave is reaped. While it is set, `UpdateState` above is a
+	// CACHED verdict from BEFORE the trigger — the console's "Updating"/SETTLE
+	// pill outranks it for exactly that reason, and a CLI that ignored this key
+	// printed the stale `behind` over a rollout that was actively landing.
+	// A POINTER: nil is "no rollout in flight" (and what an older plane decodes
+	// to), never a zero time.
+	AutoupdateTriggeredAt *string `json:"autoupdate_triggered_at"`
 
 	// COMMIT DISTANCE (dr-w24-s2) — the control plane's own measurement of the
 	// commit the box actually serves, which is a DIFFERENT question from
@@ -328,12 +373,14 @@ func (b *Barkpark) UnmarshalJSON(data []byte) error {
 // because a fabricated 0 reads as a perfectly idle machine. So nil here means
 // exactly one thing: WE DID NOT MEASURE. A consumer branches on the values.
 //
-// The JSON tags are router.ex's `@unmetered_pressure` keys VERBATIM. Two of them
-// — Load15 and Err5xxPerS — are landed by the sibling dr-w5-s2 slice and are
-// absent from the payload until it merges; they decode to nil, which is already
-// the correct reading (UNKNOWN), so this struct is forward-compatible with that
-// merge and needs no change when it lands. That is a WIRE relationship, not a
-// code dependency.
+// The JSON tags are the keys router.ex's `merge_pressure/2` emits, and the
+// payload census (cloud/test/barkpark_cloud/payload_key_set_census_test.exs,
+// pair "barkpark_json/6 pressure") is what holds that true — this comment used
+// to claim the tags were `@unmetered_pressure` VERBATIM, and it stayed false for
+// as long as ReqPerS and P95Ms were missing, which is the reason the claim now
+// names its instrument instead of asserting itself. A key the plane has not
+// sent (an older plane, or an agent predating the vital) decodes to nil, which
+// is already the correct reading (UNKNOWN).
 //
 // Numeric fields are float64 across the board, including the byte counts and
 // the core count: the control plane emits JSON numbers off agent-shaped jsonb,
@@ -360,6 +407,18 @@ type Pressure struct {
 	BeamPID    *string  `json:"beam_pid"`
 	BeamSlot   *string  `json:"beam_slot"`
 	Err5xxPerS *float64 `json:"err_5xx_per_s"`
+	// ReqPerS is Err5xxPerS's DENOMINATOR (charter D103): the request rate off
+	// the same 60s per-slot ring. A 5xx rate cannot be graded without it —
+	// 0.22 5xx/s is 14.4% of traffic at the median observed volume and 2.0% at
+	// the max — so a consumer that prints the error rate prints this beside it.
+	// nil is UNMEASURED; a measured 0.0 is a genuinely idle box.
+	ReqPerS *float64 `json:"req_per_s"`
+	// P95Ms is the p95 request latency off that same ring — a VITAL, colour for
+	// a reason string, and REFUSED as a fence (charter D131): the ring dies on
+	// every blue/green flip, so it is a small-sample reading, and most agents in
+	// the field still send the -1 "unwired" sentinel, which the plane relays as
+	// null. nil is UNMEASURED, never "0 ms".
+	P95Ms *float64 `json:"p95_ms"`
 	// RunawayProcs names the box's long-running ORPHANED processes — the only
 	// field in this block that answers WHO rather than HOW MUCH. Every scalar
 	// above is an aggregate: they can say a box is at load 6.3 and can never say
@@ -2345,25 +2404,34 @@ type SiteStage struct {
 // path) and SourceDigest is the sha256 of the uploaded artifact, which the box
 // re-verifies before it stages anything.
 //
-// RuntimeTarget / Port mirror the SpawnSite node-slot fields at the deployment
-// grain (charter D62): a node deployment carries the runtime_target it ran on and
-// the slot Port its process bound — omitempty and threaded explicitly for the same
-// json.Unmarshal-drops-unknown-keys reason as SpawnSite. A static deployment omits
-// both.
+// Port mirrors the SpawnSite node-slot field at the deployment grain (charter
+// D62): the slot port a node deployment's process bound — omitempty and threaded
+// explicitly for the same json.Unmarshal-drops-unknown-keys reason as SpawnSite.
+// A static deployment omits it.
+//
+// THERE IS NO RuntimeTarget HERE, deliberately (dr-w11-payload-divergence-close).
+// This struct declared a RuntimeTarget field (tag runtime_target) from #3976
+// until that task, and no deployment serializer ever emitted the key: the
+// control plane derives runtime_target from the site's kind inside
+// `Sites.Deploy` and puts it on the payloads it sends the BOX (deploy and
+// rollback) — never on a deployment row. So the field decoded to "" on every
+// real response and its one reader (the `-o json` deployment envelope) never
+// fired. (The site row does not carry it either: `site_json/2` emits no
+// runtime_target, so `SpawnSite.RuntimeTarget` is the same phantom one payload
+// over; the census has no site_json pair to see it.)
 type SiteDeployment struct {
-	ID            string      `json:"id"`
-	SiteID        string      `json:"site_id"`
-	Status        string      `json:"status"`
-	Stage         string      `json:"stage"`
-	Stages        []SiteStage `json:"stages"`
-	BuildID       string      `json:"build_id"`
-	ContentRev    string      `json:"content_rev,omitempty"`
-	Source        string      `json:"source,omitempty"`
-	SourceDigest  string      `json:"artifact_sha256,omitempty"`
-	URL           string      `json:"url"`
-	Trigger       string      `json:"trigger,omitempty"`
-	RuntimeTarget string      `json:"runtime_target,omitempty"`
-	Port          int         `json:"port,omitempty"`
+	ID           string      `json:"id"`
+	SiteID       string      `json:"site_id"`
+	Status       string      `json:"status"`
+	Stage        string      `json:"stage"`
+	Stages       []SiteStage `json:"stages"`
+	BuildID      string      `json:"build_id"`
+	ContentRev   string      `json:"content_rev,omitempty"`
+	Source       string      `json:"source,omitempty"`
+	SourceDigest string      `json:"artifact_sha256,omitempty"`
+	URL          string      `json:"url"`
+	Trigger      string      `json:"trigger,omitempty"`
+	Port         int         `json:"port,omitempty"`
 	// site-spawner (node slot truth): THE SERVED SLOT AND WHETHER THE HEALTH GATE
 	// ACTUALLY RAN. `deployment_json/1` has emitted `slot`, `port` and
 	// `health_exit_code` since #15095 (migration 20260902091000 added the three
@@ -2487,8 +2555,17 @@ type SiteDeployment struct {
 	DeferralCause *string `json:"deferral_cause"`
 	// gh-6 identity: "production" | "preview", and the branch a preview was built
 	// from. Declared for the same drops-unknown-keys reason as the pair above.
-	Environment  string `json:"environment,omitempty"`
-	Branch       string `json:"branch,omitempty"`
+	Environment string `json:"environment,omitempty"`
+	Branch      string `json:"branch,omitempty"`
+	// PreviewHost / PreviewURL name the PREVIEW SURFACE a preview deployment
+	// built (gh-6): the preview host and its https click-through. Both are null
+	// on every production row, so "" means "not a preview", never "a preview
+	// with no host". Until dr-w11-payload-divergence-close this struct decoded
+	// Environment and Branch but neither of these, so `bp` could say a
+	// deployment was a preview of branch X and never where it lives — and the
+	// deployment's own `url` is the SITE's production URL, not the preview's.
+	PreviewHost  string `json:"preview_host,omitempty"`
+	PreviewURL   string `json:"preview_url,omitempty"`
 	BuildLogURL  string `json:"build_log_url,omitempty"`
 	BecameLiveAt string `json:"became_live_at"`
 	InsertedAt   string `json:"inserted_at"`

@@ -1274,6 +1274,20 @@ func renderSiteDeployVerdict(out *writer, ref string, d cloudclient.SiteDeployme
 		return siteDeployExit(d)
 	case strings.EqualFold(d.Status, "live"):
 		prov := siteTriggerNarration(d.Trigger)
+		// A PREVIEW names its own surface (gh-6). The deployment's `url` is the
+		// SITE's production URL (`deployment_url/3` on the plane), so printing it
+		// for a preview would point the operator at the page this build did NOT
+		// replace. preview_url is null on every production row, so this arm
+		// cannot fire for one.
+		if pu := strings.TrimSpace(d.PreviewURL); pu != "" {
+			branch := ""
+			if b := strings.TrimSpace(d.Branch); b != "" {
+				branch = " of branch " + sanitizeCell(b)
+			}
+			out.outf("✓ preview live — %s%s%s", sanitizeCell(pu), branch, prov)
+			out.outf("  deployment %s reports live after SWITCH on its preview host; production is untouched. The CLI did not fetch that URL, so this is the control plane's record, not a proof the page serves — confirm with `curl -sI %s`", hzCell(d.ID), sanitizeCell(pu))
+			return exitOK
+		}
 		if u := strings.TrimSpace(d.URL); u != "" {
 			out.outf("✓ site live — %s%s", u, prov)
 			out.outf("  deployment %s reports live after SWITCH; the CLI did not fetch that URL, so this is the control plane's record, not a proof the page serves — confirm with `curl -sI %s`", hzCell(d.ID), u)
@@ -4008,12 +4022,11 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	if d.Trigger != "" {
 		m["trigger"] = d.Trigger
 	}
-	// Node-slot deployment fields (charter D62): the runtime target it ran on and
-	// the slot port its process bound — omitted for a static deployment so the JSON
-	// stays byte-identical there.
-	if d.RuntimeTarget != "" {
-		m["runtime_target"] = d.RuntimeTarget
-	}
+	// Node-slot deployment field (charter D62): the slot port its process bound —
+	// omitted for a static deployment so the JSON stays byte-identical there. No
+	// `runtime_target` is written here: the control plane never put one on a
+	// deployment row (it rides the SITE row), so the key this envelope used to
+	// copy was empty on every real response — see SiteDeployment's doc comment.
 	if d.Port != 0 {
 		m["port"] = d.Port
 	}
@@ -4138,6 +4151,16 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	}
 	if d.Branch != "" {
 		m["branch"] = d.Branch
+	}
+	// gh-6 preview identity (dr-w11-payload-divergence-close): WHERE a preview
+	// deployment lives. Null on every production row, so each key is written only
+	// when the plane sent one — an absent key is "not a preview", and the `url`
+	// above is the site's production URL, which is not where a preview serves.
+	if h := strings.TrimSpace(d.PreviewHost); h != "" {
+		m["preview_host"] = h
+	}
+	if u := strings.TrimSpace(d.PreviewURL); u != "" {
+		m["preview_url"] = u
 	}
 	// deploy-reliability W11: the two clocks the wire has carried all along and
 	// this envelope threw away — it shipped 16 keys and not one timestamp, so a
