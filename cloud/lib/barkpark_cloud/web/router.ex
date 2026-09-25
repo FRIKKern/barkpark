@@ -6944,24 +6944,37 @@ defmodule BarkparkCloud.Web.Router do
   # to `current_team = nil`, so 403 BEFORE querying rather than running the fence
   # against a nil team_id.
   #
-  # THE SELF-SCOPED READ IS NOT FREE, AND THE NUMBER IS MEASURED, NOT ARGUED.
-  # EXPLAIN (ANALYZE, BUFFERS) against a seeded table (one team, 200k rows, 50
-  # recipients) shows the planner DECLINING `notification_deliveries_team_id_
-  # inserted_at_index` for the fenced query — `lower(recipient)` is not indexed,
-  # so it bitmap-scans `notification_deliveries_team_id_index`, filters 196k rows
-  # away and top-N heapsorts what is left: 30.8 ms / 3798 shared buffers. The
-  # ADMIN read on the same team still walks the compound index backwards and
-  # stops at the LIMIT: 0.037 ms / 6 buffers. The team fence keeps it bounded and
-  # 30 ms is a fine page today, but it scales with the TEAM'S WHOLE LOG rather
-  # than the page size. The table's unboundedness is now CLOSED —
-  # `Workers.AgentRetentionWorker` prunes `notification_deliveries` past 180 days
-  # (cch-w34-bl-delivery-log-has-no-retention) — so the team's whole log is
-  # bounded by that window rather than by nothing. The remaining fix is an
-  # index on `(team_id, lower(recipient), inserted_at)` — deliberately NOT taken
-  # in this slice (it is a migration, outside this slice's file fence). It is
-  # OPEN WORK, not a solved problem: re-run the same EXPLAIN (ANALYZE, BUFFERS)
-  # after adding it and quote both plans, because a green suite proves nothing
-  # about a query plan.
+  # THE SELF-SCOPED READ WAS NOT FREE, AND THE NUMBERS ARE MEASURED, NOT ARGUED.
+  # Wave 33 (one team, 200k rows, 50 recipients) measured the planner DECLINING
+  # `notification_deliveries_team_id_inserted_at_index` for the fenced query and
+  # bitmap-scanning the team: 30.8 ms / 3798 shared buffers, against the ADMIN
+  # read's 0.037 ms / 6. The cause is that `lower(recipient)` was not indexed,
+  # so the fence was a Filter applied row by row AFTER the team fence, and the
+  # planner has no statistics for the expression (it guesses a flat 0.5%).
+  #
+  # cch-w34-bl-lower-recipient-index RE-MEASURED it (PG 17 local, seeded,
+  # EXPLAIN (ANALYZE, BUFFERS), warm, Limit-node buffers) against the index set
+  # origin/main ships — 20260629120300's `(team_id)` + `(team_id, inserted_at)`
+  # plus 20260918110000's three `(team_id, <axis>, inserted_at)` — and the
+  # read DEGRADES WITH RECIPIENT CARDINALITY and with the member's SHARE of the
+  # log, worst for a member with FEW rows, because the LIMIT never fills and
+  # the scan walks the whole team partition:
+  #
+  #     shape (heap order)              member        absent member   admin
+  #     1 team x 200k, 50 rcpt (append)  100 / 0.48ms  7060 / 33.7ms   15
+  #     1 team x 200k, 50 rcpt (random) 2513 / 2.6ms  202377 / 70ms   65
+  #     5 teams x 50k, 25 rcpt (append)  923 / 7.9ms   923 / 7.5ms     15
+  #     5 teams x 50k, 25 rcpt (random) 1398 / 1.1ms  50554 / 12.5ms  62
+  #
+  # ("absent member" = a member with no rows yet, e.g. a new joiner; `Rows
+  # Removed by Filter` equals the team's whole log.) Migration 20260925120000
+  # adds `(team_id, lower(recipient), inserted_at)`, which moves the fence into
+  # the Index Cond and walks backwards to the LIMIT. AFTER, same shapes:
+  # member 56 / 63 / 37 / 65 buffers (<= 0.13 ms), absent member 12 buffers
+  # (<= 0.04 ms) in all four, admin unchanged. A member's page now costs about
+  # one heap page per returned row — the admin's order of magnitude — instead
+  # of the team's whole log. A green suite proved none of this; the plans are
+  # quoted in full on the PR that added the index.
   #
   # `?channel=` / `?status=` / `?event=` narrow the log, and `?before=<oldest
   # inserted_at>&before_id=<that row's id>` walks the next page (the /v1/audit
