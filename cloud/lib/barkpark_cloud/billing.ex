@@ -1350,11 +1350,42 @@ defmodule BarkparkCloud.Billing do
 
       # A live-but-lapsed sub (past_due past grace, or an expired trial) is an
       # existing billing relationship — NOT eligible for a fresh free trial.
-      not is_nil(live_subscription(tid)) ->
-        {:error, :ineligible}
+      #
+      # ASK ENTITLEMENT AGAIN before refusing (task-14a9cad0f2d7fd8e). The
+      # `entitled?/1` read above and the `live_subscription/1` read here are two
+      # statements, not one snapshot. The twin of a racing double-click can
+      # commit its freshly granted trial BETWEEN them: this request then read
+      # "not entitled" before the grant and "has a live sub" after it, and
+      # answered `:ineligible` — go_live 402'd the paywall at a team whose trial
+      # had just started, before its twin reconcile could answer the 409. The
+      # sub it now sees IS that trial, so the second read says entitled. A
+      # genuinely lapsed sub (an expired trial, past_due past grace) still reads
+      # not entitled and still gets `:ineligible`.
+      between_trial_reads(tid) == :ok and not is_nil(live_subscription(tid)) ->
+        if entitled?(tid), do: {:ok, :already_entitled}, else: {:error, :ineligible}
 
       true ->
         claim_and_grant_trial(tid)
+    end
+  end
+
+  # TEST SEAM, inert in production: the one point where a racing twin's trial
+  # can land between `start_trial/1`'s two reads. A test puts a 1-arity fun under
+  # `{BarkparkCloud.Billing, :between_trial_reads}` in ITS OWN process dictionary
+  # to commit that twin deterministically; the fun is removed before it runs, so
+  # it fires at most once. Nothing in `lib/` puts that key (a test in
+  # `router_launch_flow_test.exs` greps for it), so in production this is one
+  # `Process.get/1` returning nil. Same pattern as `Cloudflare`'s process-scoped
+  # config.
+  defp between_trial_reads(tid) do
+    case Process.get({__MODULE__, :between_trial_reads}) do
+      fun when is_function(fun, 1) ->
+        Process.delete({__MODULE__, :between_trial_reads})
+        fun.(tid)
+        :ok
+
+      _ ->
+        :ok
     end
   end
 
