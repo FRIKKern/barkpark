@@ -704,8 +704,14 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 	// spends the nonce. A node tree packed from the repo root instead of
 	// .next/standalone is refused here rather than by the box's exit 11.
 	runtime := prebuiltRuntimeFor(site, siteRead, dir)
-	if _, verr := validatePrebuiltDirFor(dir, runtime); verr != nil {
+	_, metadata, verr := validatePrebuiltDirAdvising(dir, runtime)
+	if verr != nil {
 		return useError(out, "failed", verr.Error(), exitGeneric)
+	}
+	// The macOS-metadata ADVISORY (charter D121) prints here and only here: this
+	// is the last walk before the mint, and the other two discard the list.
+	for _, line := range prebuiltMetadataAdvisory(dir, metadata) {
+		out.progressf("%s", line)
 	}
 	warnPrebuiltAmbientToken(out, ref, dir, os.LookupEnv)
 	dep, code := resolvePrebuiltDeployment(out, cfg, ref, id, deploymentID, force)
