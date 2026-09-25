@@ -63,18 +63,29 @@ func (s *streamer) start(sessionID string, lastSeq int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	p, tr := s.program, s.tr
-	go func() {
-		err := tr.Events(ctx, sessionID, lastSeq, func(event string, data []byte) {
-			// Copy the frame payload before it crosses into the update loop: the
-			// adapter hands a fresh []byte per frame, but a defensive copy keeps
-			// this seam safe regardless of the underlying parser's buffer reuse.
-			cp := append([]byte(nil), data...)
-			p.Send(streamFrameMsg{name: event, data: cp})
-		})
-		if err != nil && ctx.Err() == nil {
-			p.Send(streamErrMsg{err: err})
+	go runStream(ctx, tr, sessionID, lastSeq, p.Send)
+}
+
+// runStream is the stream goroutine's body, split out so the msg it delivers
+// for each transport callback is testable without a *tea.Program. Three
+// messages leave here: a frame, a reconnect, and the terminal give-up. A
+// cancelled ctx sends nothing further — a reconnect notice from a stream the
+// shell already replaced would re-read the band on behalf of a dead stream.
+func runStream(ctx context.Context, tr Transport, sessionID string, lastSeq int, send func(tea.Msg)) {
+	err := tr.Events(ctx, sessionID, lastSeq, func(event string, data []byte) {
+		// Copy the frame payload before it crosses into the update loop: the
+		// adapter hands a fresh []byte per frame, but a defensive copy keeps
+		// this seam safe regardless of the underlying parser's buffer reuse.
+		cp := append([]byte(nil), data...)
+		send(streamFrameMsg{name: event, data: cp})
+	}, func() {
+		if ctx.Err() == nil {
+			send(streamReconnectedMsg{})
 		}
-	}()
+	})
+	if err != nil && ctx.Err() == nil {
+		send(streamErrMsg{err: err})
+	}
 }
 
 // stop cancels the running stream (on quit or session switch).
