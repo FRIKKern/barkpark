@@ -68,6 +68,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { bringUpChrome, captureStderr, BringUpRefusal } from "./bringup-retry.mjs";
+import { replaceUnique } from "./anchored-replace.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -386,7 +387,13 @@ export function createStub(fixture) {
         let html;
         try { html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8"); }
         catch { return send(500, "text/plain", "index.html missing"); }
-        if (fixture.bareSpinnerMs > 0) html = html.replace("</body>", '<script src="/__fixture/bare-spinner.js"></script></body>');
+        if (fixture.bareSpinnerMs > 0) {
+          // Exactly one </body>, or the planted spinner would land somewhere
+          // nobody chose (anchored-replace.mjs's rule for this tree).
+          try {
+            html = replaceUnique(html, "</body>", '<script src="/__fixture/bare-spinner.js"></script></body>', { what: "bare-spinner fixture" });
+          } catch (e) { return send(500, "text/plain", "fixture refused: " + e.message); }
+        }
         return send(200, MIME[".html"], html);
       }
       const abs = path.normalize(path.join(ROOT, decodeURIComponent(p)));
