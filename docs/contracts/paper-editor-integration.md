@@ -5,6 +5,8 @@ Public/Studio share canvas + `PaperViewer`. View flushes; focus pins revisions; 
 - **Plugin module:** `register_schemas/1` + `register_routes/1` expose the `:public_root` reader and `:ingest` API (`/v1/plugins/bulldocs/*`) for reuse.
 - **Sessions:** 2nd blocks type (whitelist `{paper, session}`); routes `/v1/plugins/bulldocs/sessions*`; private+unwalled schema; Studio pane read-only v1 (`bp session publish` writes).
 
+`bp bulldocs create <slug>` exposes the create-only native-block route: 201 creates a paper; 409 `paper_exists` preserves an occupied paper or draft. It does not replace `publish` or revision-checked `patch`.
+
 HTML table clipboard handling normalizes ordinary cell paragraphs/BRs to PortableDoc newlines before the schema parses them. Nested structures and merged headers keep the clipboard intact and show plain-text paste guidance. Canvas regression: `__html_table_paste.test.mjs`.
 
 Paragraph/heading inline breaks serialize as newline text, including list bodies; DOM newline normalization and Undo preserve source carriers. Other field and list-shape boundaries remain guarded. Regression: `__inline_breaks.test.mjs`.

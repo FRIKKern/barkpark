@@ -166,6 +166,7 @@
                   "missing_slug",
                   "missing_source",
                   "not_found",
+                  "paper_exists",
                   "paper_rev_unreadable",
                   "payload_too_large",
                   "precondition_failed",
@@ -1656,6 +1657,136 @@
           "ticket-key"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/plugins/bulldocs/papers/{slug}/create": {
+      "post": {
+        "operationId": "bulldocs.create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "blocks": {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "blocks"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "description": "Native Paper blocks and authoring metadata. The authoring wall validates description and weighted tags.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "liveview_path": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "rev": {
+                      "type": "string"
+                    },
+                    "scoped_liveview_path": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "slug",
+                    "rev",
+                    "title",
+                    "liveview_path",
+                    "scoped_liveview_path"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Malformed native-block payload, draft namespace or unsupported revision fence."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a paper from native blocks without replacing an existing paper or draft. Returns 201 on creation; an occupied slug refuses with 409 paper_exists. Use bulldocs patch --if-rev to edit an existing paper.",
+        "tags": [
+          "bulldocs"
+        ],
+        "x-barkpark-scope": "ingest"
       }
     },
     "/v1/plugins/sheets/{slug}/export.md": {

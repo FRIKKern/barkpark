@@ -2070,10 +2070,10 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :declared_basis},
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:164
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
-            "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "1989150", "124223564"},
-      stale_ack: %{recorded: {"1989150", "124223564"}, current: {"1989150", "63570316"},
+            "BarkparkWeb.BulldocsIngestController.ingest_blocks/5", "1989150", "124223564"},
+      stale_ack: %{recorded: {"1989150", "124223564"}, current: {"82242138", "63570316"},
         why:
-          "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 124223564 -> 63570316; head_hash 1989150 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
+          "KNOWN-STALE BASIS, NOT A WRONG HASH: the earlier expr_fp movement 124223564 -> 63570316 was recorded at 9b5dc6c35. Create-only ingest adds an optional opts argument and shares this receipt through ingest_blocks/5; the hosted census on 446f29ced derives head_hash 82242138 and unchanged expr_fp 63570316. The original recorded pair and UNJUDGED demotion remain intact; the new signature does not re-judge the receipt. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs `a valid block paper (locked title at index 0) still saves — positive control`) reads nothing back at all, so it cannot even assert that."},
@@ -6949,7 +6949,7 @@ defmodule PDS.Census do
   # the filing — which is why it is keyed on {path, def, payload key} and not on a line.
   @response_carries_read_expected [
     {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
-     "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "scoped_liveview_path"},
+     "BarkparkWeb.BulldocsIngestController.ingest_blocks/5", "scoped_liveview_path"},
     {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
      "BarkparkWeb.BulldocsIngestController.ingest_html_write/2", "scoped_liveview_path"},
     {"barkpark_web/controllers/query_controller.ex", "BarkparkWeb.QueryController.counts/2",
@@ -11629,7 +11629,11 @@ defmodule PDS.Census do
   #            remaining 185 are EXCLUDED, already quad-keyed, and not this arm's.
   # :erlang.phash2/1 is the same hash roster_def_fp/1 already fingerprints defs with, and
   # it is stable across OTP releases — which is why a CI run on another engine compares.
-  @derived_disposition_pin %{count: 83, fp: "100841140"}
+  # Re-derived 2026-09-25 with Elixir 1.18.4 / OTP27.3.4 on Windows x64:
+  # `elixir scripts/pds-elixir-receipt-census.exs` printed count 84 fp 103207718.
+  # The create-only Paper route reaches the existing UNJUDGED receipt, now /5;
+  # both prior ingest routes remain disposed through the register. No exclusion was added.
+  @derived_disposition_pin %{count: 84, fp: "103207718"}
 
   # ONE DERIVATION, READ TWICE — the printed pair and the compared pair are this function,
   # so the value a maintainer copies out of the report cannot differ from the value the arm

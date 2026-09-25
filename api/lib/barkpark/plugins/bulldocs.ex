@@ -365,8 +365,10 @@ defmodule Barkpark.Plugins.Bulldocs do
   `/v1/plugins/bulldocs/…` prefix). Every ingest route maps to `auth_tier: "ingest"`,
   the route's highway bucket.
 
-  Six verbs over five routes:
+  Six paper verbs over six routes:
 
+    * `create` — `POST /v1/plugins/bulldocs/papers/:slug/create`; native
+      blocks only, refusing an occupied published slug or draft twin.
     * `publish` — `POST /v1/plugins/bulldocs/papers` (the ingest endpoint;
       `blocks` or `body_html` payload from a file/stdin). WRITES, MINIMAL receipt.
     * `patch` — `POST /v1/plugins/bulldocs/papers/:slug/ops` (the batch ops
@@ -407,6 +409,34 @@ defmodule Barkpark.Plugins.Bulldocs do
   @impl Barkpark.Plugin
   def cli_commands do
     [
+      %{
+        id: "bulldocs.create",
+        noun: "bulldocs",
+        verb: "create",
+        summary:
+          "Create a paper from native blocks without replacing an existing paper or draft. " <>
+            "Returns 201 on creation; an occupied slug refuses with 409 paper_exists. " <>
+            "Use bulldocs patch --if-rev to edit an existing paper.",
+        http: %{method: "POST", path_template: "/v1/plugins/bulldocs/papers/:slug/create"},
+        auth_tier: "ingest",
+        args: [
+          %{name: "slug", required: true, type: "slug", summary: "New paper slug (not drafts.*)."}
+        ],
+        flags: [
+          %{
+            name: "file",
+            type: "file",
+            summary:
+              "Native blocks payload from a file or - for stdin; includes title, description and weighted tags."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
       %{
         id: "bulldocs.publish",
         noun: "bulldocs",

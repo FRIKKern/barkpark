@@ -30,7 +30,21 @@ defmodule BarkparkWeb.BulldocsCreateControllerTest do
 
   test "creates once and preserves the complete published row on a collision", %{conn: conn} do
     payload = body("insert-only-published")
-    assert json_response(create(conn, payload), 201)["slug"] == payload["slug"]
+    receipt = json_response(create(conn, payload), 201)
+    assert receipt["slug"] == payload["slug"]
+
+    operation =
+      Barkpark.Api.OpenApi.spec()["paths"]["/v1/plugins/bulldocs/papers/{slug}/create"]["post"]
+
+    assert Map.keys(operation["requestBody"]["content"]) == ["application/json"]
+    request = operation["requestBody"]["content"]["application/json"]["schema"]
+    assert "blocks" in request["required"]
+    assert request["properties"]["blocks"]["type"] == "array"
+    refute Map.has_key?(operation["responses"], "200")
+    response = operation["responses"]["201"]["content"]["application/json"]["schema"]
+    assert Enum.all?(response["required"], &Map.has_key?(receipt, &1))
+    assert response["properties"]["rev"]["type"] == "string"
+    assert is_binary(receipt["rev"])
     original = Content.get_paper(payload["slug"])
 
     collision = create(recycle(conn), Map.put(payload, "title", "Unwanted replacement"))
