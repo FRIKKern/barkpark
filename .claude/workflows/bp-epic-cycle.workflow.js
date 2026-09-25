@@ -2,7 +2,7 @@ export const meta = {
   name: 'bp-epic-cycle',
   description: 'One epic wave: strategize → survey → digest → verify → decide → build → review, with the bp task ledger + wave Paper as the live spine.',
   whenToUse:
-    'Run one wave of a Barkpark epic. INVOKE: Workflow({scriptPath: ".claude/workflows/bp-epic-cycle.workflow.js", args: {wish: "<the user\'s request, verbatim — REQUIRED, the run refuses to start without it (charter D68)>", charter_path: "<.claude/workflows/<epic>-charter.md — REQUIRED for any epic with a charter; default is the cloud charter>", charter_exists: true|false, epic_task_id: "<task-… slug, when the epic task exists>"}}). Launch from the repo root or pass an absolute scriptPath (it resolves against the session cwd); never launch by name (the name registry is a session-start snapshot). TWO SETTINGS ONLY — fable@high for thinking-focused work and for visual design/interface; opus@medium for everything else. Effort derives from the model; no xhigh, no max, anywhere. Shape: 1 Fable strategizes + OPENS the wave Paper → 5-20 Opus surveyors sweep (coverage-accounted) → 1 Fable digests + designs the verify fleet → mostly-Opus verifiers PROVE claims with run output → 1 Fable decides + files/perfects bp tasks → Opus builders (Fable on hard or visually-designed slices) claim their task, build in worktrees, stamp evidence, gate, commit → 1 Fable reviews everything, fixes in place, grades, closes the Paper as the debrief.',
+    'Run one wave of a Barkpark epic. INVOKE: Workflow({scriptPath: ".claude/workflows/bp-epic-cycle.workflow.js", args: {wish: "<the user\'s request, verbatim — REQUIRED, the run refuses to start without it (charter D68)>", charter_path: "<.claude/workflows/<epic>-charter.md — REQUIRED for any epic with a charter; default is the cloud charter>", charter_exists: true|false, epic_task_id: "<task-… slug, when the epic task exists>"}}). Launch from the repo root or pass an absolute scriptPath (it resolves against the session cwd); never launch by name (the name registry is a session-start snapshot). TWO SETTINGS ONLY — fable@high for thinking-focused work and for visual design/interface; opus@medium for everything else. Effort derives from the model; no xhigh, no max, anywhere. Shape: Fable strategizes + opens the Paper → 5-20 Opus surveyors → Fable digests → verifiers PROVE by running → Fable decides + files tasks → builders build in worktrees → Fable reviews, grades, closes the Paper. RESUME COST: resumeFromRunId replays only up to the first agent that returned null (any Fable→Opus joint fallback, any lost agent); after it ALL re-runs (~1.6M tokens per survey). Instead run `node scripts/epic-cycle-carry.mjs <runId>`, relaunch FRESH with args.carry = its stdout: carried phases dispatch 0 agents; the carry costs ~20-30k args tokens through Decide, 55-140k if it stops earlier.',
   phases: [
     { title: 'Strategize', detail: '1 Fable @ high — thinking-focused, the highest-leverage judgment in the wave: reads until reading stops changing its mind, weighs rival directions and commits to one, stress-tests it, sets 5-20 broad survey questions, OPENS the wave strategy Paper, searches prior wave Papers first (answered questions become drift-checks)', model: 'fable' },
     { title: 'Survey', detail: '5-20 Opus surveyors @ medium, read-only, ~5 min each: wide sweep — bp search first, then the repo; report COVERAGE (every file checked, what for, found/not-found)', model: 'opus' },
@@ -14,7 +14,7 @@ export const meta = {
   ],
 }
 
-// args = { wish, charter_exists, charter_path?, epic_task_id?, strategist_model?, survey_model?, review_model?, lead_notes? }
+// args = { wish, charter_exists, charter_path?, epic_task_id?, strategist_model?, survey_model?, review_model?, lead_notes?, carry? }
 // GUARD (restored 2026-07-04 after a SECOND worktree revert wiped it — this bug
 // built 2 waves against the wrong (cloud) charter): args can arrive as a JSON
 // STRING; charter_path was hardcoded to cloud so every charter_exists wave read
@@ -28,6 +28,74 @@ if (!A.wish) throw new Error('epic-cycle requires an explicit args.wish')
 const WISH = A.wish
 const CHARTER_PATH = A.charter_path || '.claude/workflows/bp-cloud-epic-charter.md'
 const EPIC_TASK_ID = A.epic_task_id || null
+
+// ── RESUME: what the Workflow tool's cache actually replays, and args.carry ──
+//
+// THE HARNESS RULE (reconstructed from the Claude Code 2.1.281 binary and
+// checked against a real recorded run of this engine: 36 of its 37 journal
+// keys re-derived exactly, the 37th being the Review prompt, which embeds
+// budget.spent() telemetry). Each agent() call's cache key is
+//
+//     key_n = "v2:" + sha256(key_{n-1} \0 prompt \0 canon(opts))
+//
+// where canon(opts) keeps only schema/model/effort/isolation/agentType/
+// disallowedTools/bashCommandClamp (label and phase are NOT in it) and key_0 is
+// "". The key is CHAINED: it hashes the previous call's key, so a call's
+// identity is its whole call history, not its own prompt. On resume a call
+// replays when its key has a result row. On the FIRST call that does not, the
+// run latches LIVE and every later call dispatches for real, even calls whose
+// results sit in the journal. One exception: a call that was STARTED but
+// neither finished nor failed (it was in flight at the kill) respawns without
+// latching.
+//
+// THE CONSEQUENCE FOR neverLose. A dispatch that returns null writes a
+// `failed` row and never a `result` row. The resumed run makes the SAME
+// sequence of calls with the SAME keys (nothing here is non-deterministic
+// before Review), reaches that failed first attempt, finds no result, sees it
+// failed, and latches. So a joint that succeeded only on a retry or on the Opus
+// fallback is a hard replay barrier: nothing at or after it ever replays. The
+// same is true of ANY null anywhere, including one lost surveyor. Recording the
+// winning model and dispatching straight to it on resume does not help: that
+// call's key chains from "" instead of from the three failed attempts, so it
+// is a key the journal never saw, and the run latches at call one.
+//
+// So the script cannot make the harness cache replay past a null. What it can
+// do is not need the cache: args.carry hands back results the lead already
+// paid for, and a carried phase makes NO agent() call. Build the carry with
+//     node scripts/epic-cycle-carry.mjs <runId | path/to/journal.jsonl>
+// and launch a FRESH run with the same args plus `carry`. It is a prefix, in
+// order: strategist → surveys → aim → verifications → architect → built. A
+// later field without every earlier one is refused (a digest carried over
+// surveys it never read is a different wave). Fleet fields are matched by
+// assignment key (surveys, verifications) or task_id (built); an assignment
+// with no carried result dispatches live, so a partial carry finishes its
+// fleet instead of silently shrinking it. Proof and counts:
+// scripts/epic-cycle-resume.test.mjs.
+const CARRY_ORDER = ['strategist', 'surveys', 'aim', 'verifications', 'architect', 'built']
+const CARRY = (() => {
+  let c = A.carry
+  if (c == null) return {}
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch (e) { throw new Error('args.carry is a non-JSON string') } }
+  if (typeof c !== 'object' || Array.isArray(c)) throw new Error('args.carry must be an object keyed by ' + CARRY_ORDER.join(', '))
+  const unknown = Object.keys(c).filter((k) => !CARRY_ORDER.includes(k))
+  if (unknown.length) throw new Error(`args.carry has unknown field(s) ${unknown.join(', ')}; the carry keys are ${CARRY_ORDER.join(', ')}`)
+  const last = CARRY_ORDER.reduce((n, k, i) => (c[k] != null ? i : n), -1)
+  for (let i = 0; i < last; i++) {
+    if (c[CARRY_ORDER[i]] == null) throw new Error(`args.carry.${CARRY_ORDER[last]} was given without args.carry.${CARRY_ORDER[i]} — a carry is a PREFIX of the wave, in order ${CARRY_ORDER.join(' → ')}`)
+  }
+  const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v)
+  if (c.strategist != null && !(isObj(c.strategist) && Array.isArray(c.strategist.survey))) throw new Error('args.carry.strategist is not a strategist report (no survey[] array)')
+  if (c.aim != null && !(isObj(c.aim) && Array.isArray(c.aim.verification))) throw new Error('args.carry.aim is not a digest report (no verification[] array)')
+  if (c.architect != null && !(isObj(c.architect) && Array.isArray(c.architect.wave))) throw new Error('args.carry.architect is not a decide report (no wave[] array)')
+  for (const k of ['surveys', 'verifications', 'built']) {
+    if (c[k] != null && !(Array.isArray(c[k]) && c[k].every(isObj))) throw new Error(`args.carry.${k} must be an array of report objects`)
+  }
+  return c
+})()
+const carriedBy = (list, field) => new Map((list || []).map((r) => [r[field], r]))
+const CARRY_SURVEY = carriedBy(CARRY.surveys, 'key')
+const CARRY_VERIFY = carriedBy(CARRY.verifications, 'key')
+const CARRY_BUILT = carriedBy(CARRY.built, 'task_id')
 // Fan-out FLOORS. The caps below (survey 20, verify 15, wave 8) are upper bounds
 // only; nothing stopped a thinking phase from returning one assignment, or zero.
 // The ratified anti-goal — a wave must never spend FEWER agents to look decisive
@@ -691,7 +759,7 @@ for (const [name, schema] of [
 
 // ── Phase 1: Strategize — one Fable mind, unhurried; the direction sets the wave's ceiling ──
 phase('Strategize')
-const strategist = await neverLose((m) => agent(
+const strategist = CARRY.strategist || await neverLose((m) => agent(
   `You are the STRATEGIST of a Barkpark epic wave — one Fable mind whose direction sets the CEILING for everything downstream. Take whatever time this needs: surveyors, verifiers, and builders can execute a great direction well, but nothing after you can rescue a mediocre one. Two exploration rounds of rigor follow, so you never need to PROVE claims — but read as much as sharpens your judgment. Bold is still the mandate; unhurried bold, not hedged.
 
 ${USER_WISH_BLOCK}
@@ -734,20 +802,21 @@ ${PAPER_BLOCK}
 ${LEAD_NOTES}`,
   { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: m, effort: EFFORT_FOR(m) }
 ), { label: 'strategist', model: M(STRAT_MODEL), other: M(JOINT_FALLBACK) })
-if (!strategist) throw new Error(`Strategize returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK}. There is no partial wave to salvage — nothing has been surveyed, decided, or written. Resume the run rather than restarting.`)
+if (!strategist) throw new Error(`Strategize returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK}. There is no partial wave to salvage — nothing has been surveyed, decided, or written. Restart it; a resume would re-dispatch this same joint live anyway (every attempt is a failed journal row).`)
 const surveyAssignments = (strategist.survey || []).slice(0, 20)
 if (surveyAssignments.length < SURVEY_FLOOR) {
   throw new Error(`Survey fan-out floor: the strategist returned ${surveyAssignments.length} survey assignment(s), below the floor of ${SURVEY_FLOOR}. Width is the cheapest part of a wave and a narrow survey is how a wave misses prior art it then rebuilds. Re-run Strategize with a wider net (5-20 assignments) rather than proceeding.`)
 }
 const WAVE_PAPER = strategist.paper_id
 SPENT.strategize = budget.spent()
+if (CARRY.strategist) log(`CARRY strategist: replayed from args.carry, 0 dispatches`)
 log(`Strategist set direction; wave paper ${WAVE_PAPER} (created=${strategist.paper_created}); ${surveyAssignments.length} survey assignments`)
 
 // ── Phase 2: Survey — wide Opus sweep at medium effort, ~5 minutes each ──
 phase('Survey')
 const surveyResults = surveyAssignments.length === 0 ? [] : (await parallel(
   surveyAssignments.map((q) => () =>
-    neverLose((m) => agent(
+    CARRY_SURVEY.get(q.key) || neverLose((m) => agent(
       `You are a SURVEYOR on a Barkpark epic wave — one of up to 20 scouts in a fast, wide sweep. READ-ONLY: no edits, no commits, and exactly ONE sanctioned bp mutation — nothing else, anywhere. THE ONE CARVE-OUT (charter D17): if your assignment below names a CANDIDATE TASK, move it out of \`considering\` and into \`researching\` the moment you start, so the board shows that someone is actually looking — \`bp task stage <candidate-task-id> researching --object research --worker survey:${q.key} --yes\`, optionally followed by \`bp task pulse\` if you run long. That is the whole permission: no create, no patch, no close, no stamp, no publish, and nothing at all if your assignment names no candidate task. Budget: ~5 minutes — breadth over depth. A fast honest answer with real file:line anchors beats a deep dive; park what you can't settle in open_questions (a targeted verify round runs after you).
 
 ${USER_WISH_BLOCK}
@@ -782,12 +851,13 @@ const surveys = surveyResults.filter(Boolean)
 const surveyLost = surveyAssignments.filter((q, i) => !surveyResults[i])
 const SURVEY_DEFICIT = deficitBlock('survey', surveyLost)
 const surveyGrip = gateFactProvenance(surveys)
+if (CARRY.surveys) log(`CARRY surveys: ${surveyAssignments.filter((q) => CARRY_SURVEY.has(q.key)).length}/${surveyAssignments.length} replayed from args.carry; the rest dispatched live`)
 log(`${surveys.length}/${surveyAssignments.length} surveyors reported${surveyLost.length ? ` — ${surveyLost.length} LOST after full recovery (${surveyLost.map((q) => q.key).join(', ')}); the wave continues and carries them as unanswered` : ''}; ${surveys.filter((s) => s.recovered_on).length} recovered cross-model; provenance gate: ${surveyGrip.demoted}/${surveyGrip.total} fact(s) DEMOTED (no rerun command)`)
 SPENT.survey = budget.spent()
 
 // ── Phase 3: Digest — one Fable mind, ~10 minutes, designs the verify fleet ──
 phase('Digest')
-const aim = await neverLose((m) => agent(
+const aim = CARRY.aim || await neverLose((m) => agent(
   `You are the DIGEST strategist of a Barkpark epic wave — the same Fable judgment that set the direction, now holding ${surveys.length} survey reports. Budget: ~10 minutes. Your output designs the LAST exploration round before the plan is cut — after it, there is no more looking.
 
 ${USER_WISH_BLOCK}
@@ -823,13 +893,14 @@ ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'digest', phase: 'Digest', schema: AIM_SCHEMA, model: m, effort: EFFORT_FOR(m) }
 ), { label: 'digest', model: M(STRAT_MODEL), other: M(JOINT_FALLBACK) })
-if (!aim) throw new Error(`Digest returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). The survey reports are intact; resume the run rather than restarting so they are not re-bought.`)
+if (!aim) throw new Error(`Digest returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). The survey reports are intact; rebuild them with \`node scripts/epic-cycle-carry.mjs <runId>\` and relaunch with args.carry, so they are not re-bought (a plain resume re-buys them whenever any earlier dispatch returned null — see the RESUME block).`)
 const verifyAssignments = (aim.verification || []).slice(0, 15)
 if (verifyAssignments.length < VERIFY_FLOOR) {
   throw new Error(`Verify fan-out floor: the digest returned ${verifyAssignments.length} verify assignment(s), below the floor of ${VERIFY_FLOOR}. Verify is the LAST round before the plan is cut — nobody checks after it. A wave that surveyed wide and then verified nothing is deciding on unproven claims. Re-run Digest with a real verify fleet (1-15 assignments, floor ${VERIFY_FLOOR}) rather than proceeding.`)
 }
 log(`Digest done; verify fleet: ${verifyAssignments.length} (${verifyAssignments.filter((v) => v.model === 'fable').length} fable@high, rest opus@medium; ${verifyAssignments.filter((v) => v.verify_commands).length} with live proofs)`)
 SPENT.digest = budget.spent()
+if (CARRY.aim) log(`CARRY digest: replayed from args.carry, 0 dispatches`)
 
 // THE CARVE-OUT, MADE RUNNABLE. The verify prompt below granted a write and
 // named no verb, so a verifier had to rediscover the write path from scratch
@@ -871,7 +942,7 @@ WRITING A LEDGER ROW (the carve-out above, made runnable — nothing materialise
 phase('Verify')
 const verifyResults = verifyAssignments.length === 0 ? [] : (await parallel(
   verifyAssignments.map((q) => () =>
-    neverLose((m) => agent(
+    CARRY_VERIFY.get(q.key) || neverLose((m) => agent(
       `You are a VERIFIER on a Barkpark epic wave — the LAST explorer before the plan is cut; nobody checks after you. No commits, never touch main, and exactly ONE sanctioned bp mutation. THE ONE CARVE-OUT (charter D17): if your assignment below names a CANDIDATE TASK, stage it to \`researching\` as you begin — \`bp task stage <candidate-task-id> researching --object research --worker verify:${q.key} --yes\`, plus \`bp task pulse\` if you run long. Nothing else on the ledger: no create, no patch, no close, no stamp, no publish, and nothing at all when your assignment names no candidate task. REPO WRITES are a SEPARATE question with a separate answer${q.needs_worktree ? ': you are in your OWN throwaway worktree — probe edits are fine, but commit nothing, and the tooling/grip/ledger REPO-WRITE carve-out described in other runs is DENIED to you (a row written here would be stranded, because your worktree is a distinct filesystem path that Decide — which commits from the shared checkout — never sees). That denial is about repo files only; the bp-ledger stage above still stands' : ' — exactly ONE repo-write carve-out: you may WRITE re-derivation recipe rows under tooling/grip/ledger/ (one new file per write, never opening an existing one), and nothing else, anywhere. You never commit them — Decide commits them one phase later, this same run. No other repo edits'}.
 
 ${USER_WISH_BLOCK}
@@ -908,6 +979,7 @@ const verifications = verifyResults.filter(Boolean)
 const verifyLost = verifyAssignments.filter((q, i) => !verifyResults[i])
 const VERIFY_DEFICIT = deficitBlock('verify — NOTHING RUNS AFTER THIS ROUND, so these stay open for the whole wave', verifyLost)
 const verifyGrip = gateFactProvenance(verifications)
+if (CARRY.verifications) log(`CARRY verifications: ${verifyAssignments.filter((q) => CARRY_VERIFY.has(q.key)).length}/${verifyAssignments.length} replayed from args.carry; the rest dispatched live`)
 log(`${verifications.length}/${verifyAssignments.length} verifiers reported${verifyLost.length ? ` — ${verifyLost.length} LOST after full recovery (${verifyLost.map((q) => q.key).join(', ')}); these unknowns stay OPEN and Decide is told so` : ''}; ${verifications.filter((v) => v.recovered_on).length} recovered cross-model; ${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs; provenance gate: ${verifyGrip.demoted}/${verifyGrip.total} fact(s) DEMOTED (no rerun command)`)
 SPENT.verify = budget.spent()
 
@@ -916,7 +988,7 @@ phase('Decide')
 const EPIC_TASK_LINE = EPIC_TASK_ID
   ? `The epic parent task is ${EPIC_TASK_ID} — verify it exists and is published; file this wave's slice tasks as its children (parent_id=${EPIC_TASK_ID}).`
   : `Ensure ONE published epic parent task exists for this epic (create it if missing — slug it from the charter name); file this wave's slice tasks as its children via parent_id.`
-const architect = await neverLose((m) => agent(
+const architect = CARRY.architect || await neverLose((m) => agent(
   `You are the STRATEGIST-ARCHITECT of a Barkpark epic — the same Fable judgment that set direction and digested exploration, now DECIDING with two rounds of ground truth in hand. Take whatever time this needs; the IMPORTANT CHOICES get made here.
 
 ${USER_WISH_BLOCK}
@@ -1010,7 +1082,8 @@ ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: m, effort: EFFORT_FOR(m) }
 ), { label: 'architect', model: M(ARCH_MODEL), other: M(JOINT_FALLBACK) })
 
-if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${ARCH_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; resume the run rather than restarting so neither round is re-bought.`)
+if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${ARCH_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; carry them forward with \`node scripts/epic-cycle-carry.mjs <runId>\` and relaunch with args.carry, so neither round is re-bought (a plain resume latches live at the first null, and these four failed dispatches are nulls — see the RESUME block).`)
+if (CARRY.architect) log(`CARRY architect: replayed from args.carry, 0 dispatches — the wave cut, charter PR and slice tasks it reports already exist`)
 const wave = (architect.wave || []).slice(0, 8)
 log(`Architect cut ${wave.length} slices (${wave.filter((w) => w.builder_model === 'fable').length} fable); charter_written=${architect.charter_written} (PR ${architect.charter_pr || 'NONE — the charter is not published'}, referent ${architect.wave_referent_task || 'NONE — that PR cannot pass the task gate'}); tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}; backlog=${architect.backlog_filed}`)
 SPENT.decide = budget.spent()
@@ -1052,7 +1125,7 @@ if (deferred.length > 0) {
 phase('Build')
 const built = (await parallel(
   buildNow.map((item, i) => () =>
-    ((m) => agent(
+    CARRY_BUILT.get(item.task_id) || ((m) => agent(
       `You are BUILDING one slice of a Barkpark epic inside your OWN isolated git worktree (safe to edit/commit; you will not collide with other builders).
 
 ${USER_WISH_BLOCK}
