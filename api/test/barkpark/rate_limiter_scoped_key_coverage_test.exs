@@ -53,6 +53,7 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
     "lib/barkpark_web/controllers/app_token_controller.ex",
     "lib/barkpark_web/controllers/bulldocs_form_controller.ex",
     "lib/barkpark_web/controllers/pulse_controller.ex",
+    "lib/barkpark_web/live/studio/account_live.ex",
     "lib/barkpark_web/plugs/auth_write_rate_limit.ex",
     "lib/barkpark_web/plugs/rate_limit.ex",
     "lib/barkpark_web/plugs/ticket_rate_limit.ex"
@@ -133,9 +134,10 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
 
     # pulse_controller carries two (write bucket + read bucket); quiz
     # spawn_budget added the ninth; the Forms submission controller the tenth
-    # (one `check` call serving its per-IP and per-endpoint buckets).
-    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 10,
-           "expected the 10 call sites the row names, found #{inspect(counts)}"
+    # (one `check` call serving its per-IP and per-endpoint buckets); the
+    # Studio "Your data" page's per-user erase-password cap the eleventh.
+    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 11,
+           "expected the 11 call sites the row names, found #{inspect(counts)}"
   end
 
   test "POSITIVE CONTROL: the scanner catches a call site that bypasses the helper" do

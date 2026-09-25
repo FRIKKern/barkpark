@@ -1883,6 +1883,7 @@ defmodule BarkparkWeb.Router do
       live("/", StudioLive)
       live("/media", MediaLive)
       live("/api-tester", ApiTesterLive)
+      live("/_account", AccountLive)
 
       live("/*path", StudioLive)
     end
