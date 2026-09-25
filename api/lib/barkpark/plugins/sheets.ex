@@ -51,18 +51,9 @@ defmodule Barkpark.Plugins.Sheets do
   the save path in `Barkpark.Content` — so existing embeds keep rendering and
   refreshing with this plugin off (fresh-install invariant).
 
-    * `register_workers/1` — the collaborative session runtime
-      (`Barkpark.Plugins.Sheets.Supervisor`: the session registry, the session
-      `DynamicSupervisor` and the replay ring). It starts under
-      `Barkpark.Plugins.Supervisor`, after `Phoenix.PubSub` and `Barkpark.Repo`
-      (task-c10be8a9ad8f0145; the host used to declare it as a static child).
-
-  The session CODE (`Barkpark.Plugins.Sheets.Session`, M1) is shared with the
-  Studio sheet grid, but its runtime is this plugin's: with the plugin off no
-  session can start. `Session` then answers as if none were live (`peek/3` →
-  `{:error, :no_session}`, `flush` → `:ok`) and refuses edits with
-  `{:error, :session_unavailable}` instead of raising. Direct mutate and embed
-  refresh do not use sessions and keep working.
+  The collaborative session itself (`Barkpark.Plugins.Sheets.Session`, M1) is CORE —
+  with this plugin off, sessions and direct mutate both keep working; only
+  the wire-op HTTP route goes away.
   """
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
@@ -151,19 +142,6 @@ defmodule Barkpark.Plugins.Sheets do
       }
     ]
   end
-
-  @doc """
-  The session runtime, as this plugin's boot child
-  (task-c10be8a9ad8f0145). Collected by
-  `Barkpark.Plugins.Registry.collect_workers/1` and started under
-  `Barkpark.Plugins.Supervisor`, which `Barkpark.Application` places after
-  `Barkpark.Repo` and `Phoenix.PubSub`: sessions load and persist through the
-  Repo and broadcast deltas on PubSub. With the plugin out of the load order
-  (or `BARKPARK_PLUGINS=""`) this callback never runs and no session
-  supervisor exists.
-  """
-  @impl Barkpark.Plugin
-  def register_workers(_ctx), do: [Supervisor.child_spec(Barkpark.Plugins.Sheets.Supervisor, [])]
 
   @impl Barkpark.Plugin
   def lifecycle_hooks do

@@ -46,11 +46,8 @@ defmodule Barkpark.ApplicationChildSpecsTest do
 
     assert Barkpark.Plugins.Supervisor in ks
     assert Barkpark.Plugins.Indx.Supervisor in ks
+    assert Barkpark.Plugins.Sheets.Supervisor in ks
     assert Barkpark.StudioChat.Supervisor in ks
-
-    # The Sheets session supervisor is a Sheets PLUGIN boot child
-    # (task-c10be8a9ad8f0145): it rides `plugin_children`, never the static list.
-    refute Barkpark.Plugins.Sheets.Supervisor in ks
 
     # The formerly-flat leaves are now NESTED (owned by the tier supervisors),
     # not direct children of Barkpark.Supervisor.
@@ -79,10 +76,8 @@ defmodule Barkpark.ApplicationChildSpecsTest do
     # Indx subsystem before Oban (its :indx queue jobs call Auth.token/0).
     assert index(specs, Barkpark.Plugins.Indx.Supervisor) < index(specs, Oban)
 
-    # PubSub before the plugin tier (the Sheets session supervisor is a plugin
-    # boot child, task-c10be8a9ad8f0145), the StudioChat tier and the Endpoint.
-    assert index(specs, Barkpark.Repo) < index(specs, Phoenix.PubSub)
-    assert index(specs, Phoenix.PubSub) < index(specs, Barkpark.Plugins.Supervisor)
+    # PubSub before the Sheets/StudioChat tiers and the Endpoint.
+    assert index(specs, Phoenix.PubSub) < index(specs, Barkpark.Plugins.Sheets.Supervisor)
     assert index(specs, Phoenix.PubSub) < index(specs, Barkpark.StudioChat.Supervisor)
     assert index(specs, Phoenix.PubSub) < index(specs, BarkparkWeb.Endpoint)
 
