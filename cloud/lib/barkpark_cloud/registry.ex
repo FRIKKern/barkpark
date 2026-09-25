@@ -430,8 +430,13 @@ defmodule BarkparkCloud.Registry do
   The key a hostname is claimed under in `hostname_claims`: `host` (a bare
   hostname or an origin such as `https://h:4000/x`) run through the SAME
   normaliser the provisioning-FQDN leg of `custom_host_taken?/2` compares with
-  (`normalize_claim_host/1`), or `nil` when nothing is left to claim (a nil or
-  junk value that normalises to `""`).
+  (`normalize_claim_host/1`), or `nil` when nothing is left to claim.
+
+  `nil` for a nil value, for anything that normalises to `""` (`"   "`,
+  `"https://"`, `"https:///"`, `"https://:443"`, `"."`), and for a residue with
+  no letter or digit in it (`"-"`, `".-"`, from `"https://-/"`): that is not a
+  hostname anyone can serve, so it claims nothing. This is what keeps the
+  table's `host <> ''` CHECK unreachable from the backfill and from live writes.
 
   Public for one caller outside this module: the `create_hostname_claims`
   migration's backfill, which must key existing rows exactly as live writes
@@ -439,10 +444,8 @@ defmodule BarkparkCloud.Registry do
   """
   @spec hostname_claim_key(term()) :: String.t() | nil
   def hostname_claim_key(host) when is_binary(host) do
-    case normalize_claim_host(host) do
-      "" -> nil
-      norm -> norm
-    end
+    norm = normalize_claim_host(host)
+    if norm =~ ~r/[a-z0-9]/, do: norm, else: nil
   end
 
   def hostname_claim_key(_), do: nil

@@ -19,6 +19,21 @@ defmodule BarkparkCloud.Repo.Migrations.CreateHostnameClaims do
   pre-existing collision the customer's deliberate claim holds the host and the
   platform-minted url is the one skipped.
 
+  ## Why no backfill INSERT can violate a constraint
+
+    * `host <> ''` — every host comes from `Registry.hostname_claim_key/1`,
+      which returns `nil` (and the candidate is dropped) for anything empty or
+      without a letter or digit.
+    * `kind IN ('url','custom_host')` — the backfill writes only those two
+      literals.
+    * the FK — every `barkpark_id` is read from `barkparks` inside this
+      migration's transaction, with `barkparks` held `IN SHARE MODE`, so no row
+      can be deleted between the read and the insert.
+    * `UNIQUE (host)` — `ON CONFLICT (host) DO NOTHING`.
+
+  `test/barkpark_cloud/registry_hostname_claims_migration_test.exs` runs this
+  module's `up/0` against the Gyldendal ghost shape and the junk spellings.
+
   ## Why this migration calls application code
 
   The repo's migrations normally copy what they need (a migration must keep
@@ -54,7 +69,13 @@ defmodule BarkparkCloud.Repo.Migrations.CreateHostnameClaims do
 
     create constraint(:hostname_claims, :hostname_claims_host_nonempty_check, check: "host <> ''")
 
-    # The table must exist before the backfill writes into it.
+    # SHARE blocks barkparks writes (never reads) until this migration's
+    # transaction commits — milliseconds for a fleet-sized table. Without it a
+    # barkpark deleted between the backfill's SELECT and its INSERT would fail
+    # the FK and RAISE, and a row inserted in that window would be missed.
+    execute "LOCK TABLE barkparks IN SHARE MODE"
+
+    # The table must exist, and the lock be held, before the backfill runs.
     flush()
 
     BarkparkCloud.Registry.backfill_hostname_claims(repo())
