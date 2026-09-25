@@ -367,3 +367,62 @@ func TestRunCloudVerifyVerdictProbeMismatch(t *testing.T) {
 		t.Fatalf("server-authored probe names must carry no escape bytes:\n%q", stdout)
 	}
 }
+
+// The four-probe envelope the executor sends today: verify.siteplane SKIPPED on
+// a box that hosts no sites (ok:true, skipped:true, status null), and a
+// REQUIRED plane that is incomplete.
+const verifySitePlaneSkippedEnvelope = `{"ok":true,"reachable":true,"verified_at":"2026-09-25T10:00:00Z","probes":[` +
+	`{"name":"verify.api","ok":true,"reachable":true,"status":200,"latency_ms":41,"evidence":"GET /v1/capabilities → 200 (API up)"},` +
+	`{"name":"verify.login","ok":true,"reachable":true,"status":401,"latency_ms":63,"evidence":"POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)"},` +
+	`{"name":"verify.studio","ok":true,"reachable":true,"status":200,"latency_ms":118,"evidence":"GET /studio → 200 (renders)"},` +
+	`{"name":"verify.siteplane","ok":true,"reachable":true,"status":null,"latency_ms":2,"skipped":true,"evidence":"skipped — this box hosts no sites (site plane not required)"}]}`
+
+const verifySitePlaneMissingEnvelope = `{"ok":false,"reachable":true,"verified_at":"2026-09-25T10:00:00Z","probes":[` +
+	`{"name":"verify.api","ok":true,"reachable":true,"status":200,"latency_ms":41,"evidence":"GET /v1/capabilities → 200 (API up)"},` +
+	`{"name":"verify.login","ok":true,"reachable":true,"status":401,"latency_ms":63,"evidence":"POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)"},` +
+	`{"name":"verify.studio","ok":true,"reachable":true,"status":200,"latency_ms":118,"evidence":"GET /studio → 200 (renders)"},` +
+	`{"name":"verify.siteplane","ok":false,"reachable":true,"status":null,"latency_ms":3,"skipped":false,"evidence":"site plane incomplete — missing: nixpacks, builder unit"}]}`
+
+// TestRunCloudVerifySitePlaneSkipped: a skipped conditional probe exits 0 (it
+// is not a failure) but its STATUS cell says "skipped", never "ok" — a probe
+// that proved nothing must not read as a proof.
+func TestRunCloudVerifySitePlaneSkipped(t *testing.T) {
+	newVerifyServer(t, 200, verifySitePlaneSkippedEnvelope)
+
+	stdout, _, code := runVerify(t, "table", false, testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0 (a skipped conditional probe is not a failure):\n%s", code, stdout)
+	}
+	var row string
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.HasPrefix(line, "Sites can build") {
+			row = line
+		}
+	}
+	if row == "" {
+		t.Fatalf("no 'Sites can build' row:\n%s", stdout)
+	}
+	if !strings.Contains(row, "skipped") || strings.Contains(row, " ok ") {
+		t.Fatalf("siteplane row must say skipped, not ok: %q", row)
+	}
+	if !strings.Contains(row, "—") {
+		t.Fatalf("siteplane has no HTTP status — the cell must be an em dash: %q", row)
+	}
+}
+
+// TestRunCloudVerifySitePlaneMissing: a REQUIRED, incomplete plane is a red
+// row and a non-zero exit — the gate means "sites can build" too.
+func TestRunCloudVerifySitePlaneMissing(t *testing.T) {
+	newVerifyServer(t, 200, verifySitePlaneMissingEnvelope)
+
+	stdout, _, code := runVerify(t, "table", false, testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	if !strings.Contains(stdout, "1 of 4 probes failed") {
+		t.Fatalf("missing fail verdict:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "missing: nixpacks, builder unit") {
+		t.Fatalf("the plane's evidence must be visible:\n%s", stdout)
+	}
+}

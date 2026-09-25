@@ -1240,6 +1240,11 @@ type VerifyProbe struct {
 	Status    *int   `json:"status"`
 	LatencyMS int    `json:"latency_ms"`
 	Evidence  string `json:"evidence"`
+	// Skipped is true when a CONDITIONAL probe did not apply to this box
+	// (verify.siteplane on a box that hosts no sites). It still passes — OK is
+	// true — but a renderer must say "skipped", never paint it as a proof.
+	// Absent on every other probe, so it decodes false.
+	Skipped bool `json:"skipped,omitempty"`
 }
 
 // VerifyResult is a COMPLETED verify run: the suite executed and every probe

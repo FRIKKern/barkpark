@@ -23,7 +23,7 @@ package cli
 // The probe vocabulary (names + labels) is the shared fixture
 // cloud/priv/static/__fixtures__/verify_probes.json, asserted from the Go
 // provisioner gate, the Elixir executor, AND this file's test — one
-// vocabulary, three speakers, zero drift.
+// vocabulary, four speakers (with the console SPA), zero drift.
 
 import (
 	"encoding/json"
@@ -36,16 +36,17 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// verifyProbeOrder is the gate order (api → login → studio) as the committed
+// verifyProbeOrder is the gate order (api → login → studio → siteplane) as the committed
 // fixture pins it; verifyProbeLabels carries each probe's human table label.
 // TestVerifyProbeVocabularyMatchesFixture holds BOTH to verify_probes.json, so
 // a probe rename reds this runtime alongside the Elixir and provisioner gates.
-var verifyProbeOrder = []string{"verify.api", "verify.login", "verify.studio"}
+var verifyProbeOrder = []string{"verify.api", "verify.login", "verify.studio", "verify.siteplane"}
 
 var verifyProbeLabels = map[string]string{
-	"verify.api":    "API answers",
-	"verify.login":  "Login responds",
-	"verify.studio": "Studio renders",
+	"verify.api":       "API answers",
+	"verify.login":     "Login responds",
+	"verify.studio":    "Studio renders",
+	"verify.siteplane": "Sites can build",
 }
 
 // runCloudVerify is `bp cloud verify <instance>`: resolve the instance (name
@@ -194,7 +195,7 @@ func renderVerifyResult(out *writer, ref string, res cloudclient.VerifyResult) {
 	}
 
 	if total == 0 {
-		// Defensive: the route always sends three probes; an empty list would be
+		// Defensive: the route always sends four probes; an empty list would be
 		// a contract break worth seeing, not an invisible blank table.
 		out.outf("(the control plane returned no probes — run with -o json to inspect the envelope)")
 		return
@@ -250,8 +251,13 @@ func verifyProbeLabel(name string) string {
 
 // verifyProbeToken maps a probe outcome onto a statusRole token so the STATUS
 // cell colours identically to a dashboard dot: pass → "ok" (green), any fail —
-// including unreachable — → "failed" (red).
+// including unreachable — → "failed" (red). A SKIPPED conditional probe
+// (verify.siteplane on a box that hosts no sites) is "skipped", unpainted: it
+// passed nothing, so it must not wear the green of a proof.
 func verifyProbeToken(p cloudclient.VerifyProbe) string {
+	if p.OK && p.Skipped {
+		return "skipped"
+	}
 	if p.OK {
 		return "ok"
 	}
@@ -279,9 +285,11 @@ WHAT IT DOES
   gate that decided "ready") against the LIVE box, using the stored admin
   token server-side — the token never reaches your terminal:
 
-    verify.api      API answers      GET /v1/capabilities is 200
-    verify.login    Login responds   bad creds cleanly rejected (never a 5xx)
-    verify.studio   Studio renders   /studio resolves through its redirect
+    verify.api        API answers      GET /v1/capabilities is 200
+    verify.login      Login responds   bad creds cleanly rejected (never a 5xx)
+    verify.studio     Studio renders   /studio resolves through its redirect
+    verify.siteplane  Sites can build  the agent's site-plane reading is complete
+                                       (skipped when the box hosts no sites)
 
   <instance> is a fleet name or id (the forms bp cloud status shows); needs
   'bp login'. An unreachable box is a FAILED VERIFICATION — the table still

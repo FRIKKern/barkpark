@@ -9328,7 +9328,7 @@ test("C8: the timeline + verify pure helpers are exported", () => {
 
 // ── the probe vocabulary is byte-pinned against the shared fixture ──────────
 // __fixtures__/verify_probes.json is asserted by the Elixir Verify suite AND
-// the Go provision gate; the SPA's chip labels must be the same three probes.
+// the Go provision gate; the SPA's chip labels must be the same four probes.
 
 test("C8: verifyProbes (name+label) equals the shared verify_probes.json fixture", () => {
   const fixture = JSON.parse(
@@ -9447,13 +9447,14 @@ test("C8: tlvEntryTitle — audit reads actor+action, status reads the transitio
        { name: "verify.api", ok: true, reachable: true, status: 200 },
        { name: "verify.login", ok: true, reachable: true, status: 401 },
        { name: "verify.studio", ok: false, reachable: true, status: 502 },
+       { name: "verify.siteplane", ok: true, reachable: true, status: null, skipped: true },
      ] })],
     [AU("a1", "token.minted", 5)],
   );
   const byKey = Object.fromEntries(m.map((e) => [e.key, hooks.tlvEntryTitle(e)]));
   assert.equal(byKey["a:a1"], "ada@acme.com minted an API token");
   assert.equal(byKey["e:1"], "Status → offline");
-  assert.equal(byKey["e:2"], "Verification failed — 1 of 3 checks");
+  assert.equal(byKey["e:2"], "Verification failed — 1 of 4 checks");
 });
 
 test("C8: a verify pass and an unreachable run title honestly", () => {
@@ -9597,6 +9598,7 @@ const PASS_ENVELOPE = {
     { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 44, evidence: "" },
     { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 120, evidence: "" },
     { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 310, evidence: "" },
+    { name: "verify.siteplane", ok: true, reachable: true, status: null, latency_ms: 3, skipped: false, evidence: "site plane complete" },
   ],
 };
 
@@ -9605,40 +9607,40 @@ test("C8: probeChipsModel — all-pass maps every fixture probe to a pass chip",
   assert.equal(m.ran, true);
   assert.equal(m.ok, true);
   assert.equal(m.reachable, true);
-  assert.deepEqual([...m.chips.map((c) => c.role)], ["pass", "pass", "pass"]);
-  assert.deepEqual([...m.chips.map((c) => c.label)], ["API answers", "Login responds", "Studio renders"]);
+  assert.deepEqual([...m.chips.map((c) => c.role)], ["pass", "pass", "pass", "pass"]);
+  assert.deepEqual([...m.chips.map((c) => c.label)], ["API answers", "Login responds", "Studio renders", "Sites can build"]);
   assert.equal(m.chips[0].status, 200);
   assert.equal(m.chips[0].latencyMs, 44);
 });
 
-test("C8: probeChipsModel — one-fail and unreachable are normal results, chips stay three", () => {
+test("C8: probeChipsModel — one-fail and unreachable are normal results, chips stay four", () => {
   const oneFail = JSON.parse(JSON.stringify(PASS_ENVELOPE));
   oneFail.ok = false;
   oneFail.probes[2] = { name: "verify.studio", ok: false, reachable: true, status: 502, latency_ms: 90, evidence: "502" };
   const m = hooks.probeChipsModel(oneFail);
-  assert.deepEqual([...m.chips.map((c) => c.role)], ["pass", "pass", "fail"]);
+  assert.deepEqual([...m.chips.map((c) => c.role)], ["pass", "pass", "fail", "pass"]);
 
   const unreach = {
     ok: false, reachable: false, verified_at: PASS_ENVELOPE.verified_at,
-    probes: ["verify.api", "verify.login", "verify.studio"].map((n) => (
+    probes: ["verify.api", "verify.login", "verify.studio", "verify.siteplane"].map((n) => (
       { name: n, ok: false, reachable: false, status: null, latency_ms: 5000, evidence: "connect timeout" }
     )),
   };
   const mu = hooks.probeChipsModel(unreach);
   assert.equal(mu.reachable, false);
-  assert.equal(mu.chips.length, 3);
+  assert.equal(mu.chips.length, 4);
   for (const c of mu.chips) {
     assert.equal(c.role, "fail");
     assert.equal(c.unreachable, true);
   }
 });
 
-test("C8: probeChipsModel(null) is the never-run state — three unknown chips", () => {
+test("C8: probeChipsModel(null) is the never-run state — four unknown chips", () => {
   const m = hooks.probeChipsModel(null);
   assert.equal(m.ran, false);
   assert.equal(m.ok, null);
   assert.equal(m.verifiedAt, null);
-  assert.deepEqual([...m.chips.map((c) => c.role)], ["unknown", "unknown", "unknown"]);
+  assert.deepEqual([...m.chips.map((c) => c.role)], ["unknown", "unknown", "unknown", "unknown"]);
 });
 
 test("C8: verifySummaryText — pass / fail-count / unreachable / never-run", () => {
@@ -9646,7 +9648,7 @@ test("C8: verifySummaryText — pass / fail-count / unreachable / never-run", ()
   const oneFail = JSON.parse(JSON.stringify(PASS_ENVELOPE));
   oneFail.ok = false;
   oneFail.probes[1].ok = false;
-  assert.match(hooks.verifySummaryText(hooks.probeChipsModel(oneFail)), /^1 of 3 checks failing/);
+  assert.match(hooks.verifySummaryText(hooks.probeChipsModel(oneFail)), /^1 of 4 checks failing/);
   const unreach = { ok: false, reachable: false, probes: [] };
   assert.match(hooks.verifySummaryText(hooks.probeChipsModel(unreach)), /^Unreachable — the box didn't answer/);
   assert.match(hooks.verifySummaryText(hooks.probeChipsModel(null)), /Never checked/);
@@ -9663,9 +9665,9 @@ test("C8: the never-run card invites the FIRST check (primary button)", () => {
   assert.match(html, /Never checked/);
 });
 
-test("C8: an all-pass card shows three pass chips + a quiet Check now", () => {
+test("C8: an all-pass card shows four pass chips + a quiet Check now", () => {
   const html = hooks.verifyCardHtml(hooks.probeChipsModel(PASS_ENVELOPE));
-  assert.equal((html.match(/vf-chip vf-chip--pass/g) || []).length, 3);
+  assert.equal((html.match(/vf-chip vf-chip--pass/g) || []).length, 4);
   assert.match(html, />Check now</);
   assert.doesNotMatch(html, /btn-primary/); // routine re-check is not the loudest thing on the page
   assert.match(html, /All checks passed/);
@@ -9675,12 +9677,12 @@ test("C8: an all-pass card shows three pass chips + a quiet Check now", () => {
 test("C8: an unreachable result renders honestly — fail chips + 'unreachable', no error scaffolding", () => {
   const unreach = {
     ok: false, reachable: false, verified_at: PASS_ENVELOPE.verified_at,
-    probes: ["verify.api", "verify.login", "verify.studio"].map((n) => (
+    probes: ["verify.api", "verify.login", "verify.studio", "verify.siteplane"].map((n) => (
       { name: n, ok: false, reachable: false, status: null, latency_ms: 5000, evidence: "t/o" }
     )),
   };
   const html = hooks.verifyCardHtml(hooks.probeChipsModel(unreach));
-  assert.equal((html.match(/vf-chip vf-chip--fail/g) || []).length, 3);
+  assert.equal((html.match(/vf-chip vf-chip--fail/g) || []).length, 4);
   assert.match(html, /unreachable/);
   assert.doesNotMatch(html, /notice-error/);
   assert.match(html, /data-vf-run/); // re-check stays one click away
@@ -9693,6 +9695,28 @@ test("C8: chips carry a label-in-name aria-label (pass/fail/not-checked in words
   assert.match(fail, /aria-label="Studio renders — failed"/);
   const never = hooks.verifyChipHtml({ name: "verify.login", label: "Login responds", role: "unknown", status: null, latencyMs: null });
   assert.match(never, /aria-label="Login responds — not checked"/);
+  // verify.siteplane is CONDITIONAL (jpf-bl-siteplane-verify-probe). Folded into
+  // this test rather than added beside it: the console-harness step pins the
+  // EXACT test count, and this arm is the same question — what a chip SAYS.
+  // A SKIPPED probe is a skip chip: never a pass check mark, never "unreachable".
+  const skipped = JSON.parse(JSON.stringify(PASS_ENVELOPE));
+  skipped.probes[3] = {
+    name: "verify.siteplane", ok: true, reachable: true, status: null, latency_ms: 2, skipped: true,
+    evidence: "skipped — this box hosts no sites (site plane not required)",
+  };
+  const sm = hooks.probeChipsModel(skipped);
+  assert.deepEqual([...sm.chips.map((c) => c.role)], ["pass", "pass", "pass", "skip"]);
+  const shtml = hooks.verifyCardHtml(sm);
+  assert.equal((shtml.match(/vf-chip vf-chip--pass/g) || []).length, 3);
+  assert.match(shtml, /vf-chip vf-chip--skip/);
+  assert.match(shtml, /aria-label="Sites can build — skipped, not required"/);
+  assert.match(shtml, /<span class="vf-chip-code">skipped<\/span>/);
+  assert.doesNotMatch(shtml, /unreachable/);
+  // A REQUIRED plane that passed has no HTTP status and must not read as
+  // "unreachable" — it reached the box's stored beat, not an HTTP response.
+  const planeOk = hooks.verifyChipHtml(hooks.probeChipsModel(PASS_ENVELOPE).chips[3]);
+  assert.match(planeOk, /aria-label="Sites can build — passed"/);
+  assert.doesNotMatch(planeOk, /vf-chip-code/);
 });
 
 // ── verifyNoteHtml: human copy + EXACTLY ONE recovery action (D25) ──────────

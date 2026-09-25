@@ -2721,7 +2721,7 @@ const EXPECTATIONS = {
   "verify-fail": {
     what: "verify chips — the failing Studio probe rendered honestly",
     container: "instance-verify",
-    includes: ["vf-chip vf-chip--fail", "502", "1 of 3 checks failing"],
+    includes: ["vf-chip vf-chip--fail", "502", "1 of 4 checks failing"],
     excludes: ["All checks passed"],
   },
   "verify-never": {
