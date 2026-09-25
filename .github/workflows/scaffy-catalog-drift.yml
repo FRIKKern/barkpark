@@ -17,7 +17,7 @@ name: scaffy-catalog-drift
 # HONEST FRAMING. On push-to-main, the daily cron and dispatch this is a
 # post-merge WATCHER that reds main's own suite. It ALSO runs on
 # pull_request (task dr-w31-bl-served-catalog-drift-is-red-and-unowned), and
-# there it is a PRE-MERGE NOTICE, never a merge gate: no context this file
+# there it is a PRE-MERGE NOTICE, never a gate on the merge: no context this file
 # publishes is in .github/required-checks.json, and it must never be — the
 # pull_request arm is paths-filtered, and a required name from a
 # paths-filtered workflow is never reported on a PR that misses the paths,

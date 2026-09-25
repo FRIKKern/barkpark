@@ -967,20 +967,23 @@ c="$(git log --format=%H | head -1)"
 SH
 
   # ── THE LIVE TREE, not only a copy of it (the fixture proves the matcher; the
-  # real file proves the fixture is the same shape as the tree).  cp-ops.yml
-  # must report ZERO at high — and the PRECONDITION is asserted first, because a
-  # zero over a file that no longer contains the shape measures nothing.
-  cpops="$sroot/.github/workflows/cp-ops.yml"
+  # real file proves the fixture is the same shape as the tree).  The cp-ops
+  # arms — cp-ops.yml's run: body until task-2ea65cb8f1c71a2a moved it, verbatim,
+  # into scripts/cp-ops.sh — must report ZERO at high: the remote ssh bodies sit
+  # under the script's own `set -euo pipefail` exactly as they sat under the
+  # run: body's.  The PRECONDITION is asserted first, because a zero over a file
+  # that no longer contains the shape measures nothing.
+  cpops="$sroot/scripts/cp-ops.sh"
   if [ ! -r "$cpops" ]; then
-    sno "live cp-ops.yml: NOT FOUND under $sroot — this arm measured nothing"
+    sno "live scripts/cp-ops.sh: NOT FOUND under $sroot — this arm measured nothing"
   elif ! grep -q 'docker ps -a --format' "$cpops"; then
-    sno "live cp-ops.yml: the remote box-probe body is gone — this arm's subject no longer exists"
+    sno "live scripts/cp-ops.sh: the remote box-probe body is gone — this arm's subject no longer exists"
   else
     cpn="$(bash "${BASH_SOURCE[0]}" --min-confidence high --count-only "$cpops" 2>/dev/null | sed -E 's/.*: ([0-9]+) finding.*/\1/')"
     if [ "$cpn" = "0" ]; then
-      sok "live cp-ops.yml: 0 high finding(s) — the four remote-ssh sites are no longer attributed to the outer run:"
+      sok "live scripts/cp-ops.sh: 0 high finding(s) — the four remote-ssh sites are no longer attributed to the outer set -e:"
     else
-      sno "live cp-ops.yml: reported $cpn high finding(s); the remote-command attribution is back"
+      sno "live scripts/cp-ops.sh: reported $cpn high finding(s); the remote-command attribution is back"
     fi
   fi
 

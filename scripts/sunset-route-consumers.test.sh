@@ -286,7 +286,13 @@ ADJUDICATED='bin/barkpark'
 # the lane that owns the file. Shrink-only.
 #   scripts/pds-pull-proof.sh:3109  reboot_target()'s post-reboot health wait,
 #                 inside the pds loan fence (scripts/pds-*).
-API_LEDGER='scripts/pds-pull-proof.sh'
+#   scripts/cp-ops.sh  the box-migrate arm's post-migrate health curl, inside
+#                 the remote ssh body. It was the same probe in cp-ops.yml's
+#                 run: block, which this census does not scan; task-2ea65cb8f1c71a2a
+#                 moved the arms into scripts/ byte-for-byte, so it surfaced
+#                 here unchanged. It prints HEALTH-FAIL, it does not gate an exit.
+API_LEDGER='scripts/pds-pull-proof.sh
+scripts/cp-ops.sh'
 API_LEFT="$(printf '%s\n' "$CENSUS" | grep -vE '^internal/(cli|provisioner)/' | cut -d: -f1 | sort -u | grep -v '^$' || true)"
 ADJ_ALL="$(printf '%s\n%s\n' "$ADJUDICATED" "$API_LEDGER" | grep -v '^$' | sort -u)"
 UNLEDGERED="$(comm -23 <(printf '%s\n' "$API_LEFT") <(printf '%s\n' "$ADJ_ALL"))"

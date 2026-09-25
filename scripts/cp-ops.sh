@@ -1,0 +1,468 @@
+#!/usr/bin/env bash
+# cp-ops.sh — the operation arms of .github/workflows/cp-ops.yml, as a FILE.
+#
+# Usage: bash scripts/cp-ops.sh <operation>      (cwd-independent; cds to the repo root)
+#
+# WHY A FILE (task-2ea65cb8f1c71a2a). These arms were the body of cp-ops.yml's
+# one `run:` step: 22,389 bytes, past GitHub's 21,000-character expression cap.
+# It worked only because the scalar carried no `${{ }}` — one interpolation
+# would have made GitHub refuse the whole workflow at startup, every arm dark
+# at once (scripts/workflow-run-block-length-check.sh). And inside YAML no gate
+# saw the arms: actionlint passed, the SIGPIPE scanner skipped them, and
+# deleting an arm reddened nothing.
+#
+# THE CONTRACT WITH THE WORKFLOW. The workflow keeps the workflow_dispatch
+# choice list and the secrets/inputs plumbing; it passes everything as step
+# env, unchanged names: DEPLOY_SSH_KEY CP_HOST GUERRILLA_HOST TEAM NEEDLE
+# BOX_IP ARTIFACT_REPO ARTIFACT_REF UNIT FILE_PATH, and the operation as $1.
+# Every arm below is the workflow's text moved VERBATIM (the YAML scalar after
+# folding, byte for byte): same validation, same ssh argv, same quoting, same
+# runner-side vs remote-side expansion sites.
+#
+# CP_OPS_DRY_RUN=1 skips writing /tmp/deploy_key — the one runner-side side
+# effect outside ssh. The arms still run; scripts/cp-ops.test.sh puts a stub
+# `ssh` first on PATH, so each arm's argv and stdin are CAPTURED instead of
+# sent, and compared against scripts/fixtures/cp-ops/golden.txt, which was
+# captured from the ORIGINAL workflow block (origin/main 6d6804020) before
+# the move; the one later delta is a `lineref-ok` hatch on a comment line in
+# box-migrate's remote body. An arm edit is a golden edit, in the same diff.
+#
+# ADDING AN ARM: a choice option in cp-ops.yml AND a case arm here AND a golden
+# row (scripts/cp-ops.test.sh --regen). The test reds on either half alone.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+OP="${1:?usage: scripts/cp-ops.sh <operation>}"
+if [ "${CP_OPS_DRY_RUN:-}" != 1 ]; then
+  printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+  chmod 600 /tmp/deploy_key
+fi
+SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
+case "$OP" in
+  box-probe)
+    # Fixed read-only diagnostics: disk, memory, docker state, units.
+    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+      || { echo "box_ip must be an IPv4"; exit 1; }
+    $SSH "root@${CP_HOST}" "
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+        echo == df ==; df -h / /var 2>/dev/null | tail -3
+        echo == mem ==; free -m | head -2
+        echo == docker ps ==; docker ps -a --format \"{{.Names}} {{.Status}} {{.Image}}\" | head -10
+        echo == docker disk ==; docker system df 2>/dev/null | head -6
+        echo == units ==; systemctl is-active barkpark-agent barkpark-builder barkpark-runtime caddy
+        echo == last docker events ==; journalctl -u docker -n 12 --no-pager | tail -12
+      '
+    "
+    ;;
+  box-prune)
+    # Reclaim disk on a site box: every deploy builds a fresh image
+    # and (until jpf-runtime-image-pruning lands in the runtime)
+    # nothing removes the superseded ones — the jarl box hit 100%
+    # of 38G this way and took the instance down. Removes exited
+    # site containers, then dangling/unreferenced images and build
+    # cache. The RUNNING deployment and its image are never touched
+    # (prune only removes what nothing references). df before/after.
+    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+      || { echo "box_ip must be an IPv4"; exit 1; }
+    $SSH "root@${CP_HOST}" "
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+        set -euo pipefail
+        echo == df before ==; df -h / | tail -1
+        echo == removing exited site containers ==
+        docker ps -a --filter status=exited --filter \"name=site-\" -q | xargs -r docker rm
+        echo == pruning images ==
+        docker image prune -af 2>/dev/null | tail -1
+        echo == pruning build cache ==
+        docker builder prune -af 2>/dev/null | tail -1
+        echo == vacuuming journal ==
+        journalctl --vacuum-size=200M 2>&1 | tail -1
+        echo == df after ==; df -h / | tail -1
+      '
+    "
+    ;;
+  box-unit-repair)
+    # The disk-full incident left the jarl instance dead AFTER the
+    # space came back: nothing on the operator belt could even LOOK
+    # at the instance units on a box, let alone restart one. With no
+    # unit given: list the barkpark/postgres/caddy units, who owns
+    # port 4000, and the recent slot journal. With a unit: journal
+    # tail, restart, verify. The allowlist is the security boundary.
+    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+      || { echo "box_ip must be an IPv4"; exit 1; }
+    if [ -n "$UNIT" ]; then
+      [[ "$UNIT" =~ ^(barkpark-slot@[a-z]|barkpark-agent|barkpark-runtime|barkpark-builder|barkpark|postgresql(@[0-9a-z-]+)?|caddy)$ ]] \
+        || { echo "unit not in allowlist"; exit 1; }
+    fi
+    $SSH "root@${CP_HOST}" "
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+        set -uo pipefail
+        if [ -z \"${UNIT}\" ]; then
+          echo == units ==
+          systemctl list-units --all --no-pager --plain \"barkpark*\" \"postgresql*\" caddy.service 2>/dev/null | head -14
+          echo == port 4000 ==
+          ss -ltnp 2>/dev/null | grep :4000 || echo nothing-listens-on-4000
+          echo == recent slot journal ==
+          journalctl -u \"barkpark*\" -n 40 --no-pager 2>/dev/null | tail -40
+        else
+          echo == journal before ==
+          journalctl -u \"${UNIT}\" -n 30 --no-pager 2>/dev/null | tail -30
+          echo == restarting ${UNIT} ==
+          systemctl restart \"${UNIT}\" && sleep 4
+          systemctl is-active \"${UNIT}\"
+          echo == journal after ==
+          journalctl -u \"${UNIT}\" -n 10 --no-pager 2>/dev/null | tail -10
+        fi
+      '
+    "
+    ;;
+  box-migrate)
+    # The dooodo incident (task-8c4105022de20560): the legacy
+    # single-box self-update engine (scripts/deploy-rebuild.sh)
+    # rebuilds and restarts but never runs ecto.migrate, so a relay
+    # update that ships a migration leaves a legacy mix box
+    # crashlooping on missing columns — and nothing on the operator
+    # belt could apply migrations remotely. This arm stops the
+    # (crashlooping) barkpark.service, applies pending Ecto
+    # migrations via the box's own api/start.sh env wrapper (ASDF +
+    # .env + MIX_ENV=prod — the same `bash start.sh mix ecto.migrate`
+    # the Makefile db-migrate target runs), restarts the service, and
+    # reports the post-migrate boot state: is-active, the Golden-Rule
+    # health curl, a journal tail, and a kernel-log OOM check.
+    # Security boundary: box_ip is regex-validated below and the
+    # remote script is this FIXED text — no other input reaches the
+    # box, no free-form shell. Legacy mix-run boxes only; a slot box
+    # (.slots marker) is refused untouched — deploy/instance-deploy.sh
+    # owns migrations there (its exit-13 revert path).
+    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+      || { echo "box_ip must be an IPv4"; exit 1; }
+    $SSH "root@${CP_HOST}" "
+      KEY=/root/.ssh/barkpark_indx
+      [ -f \"\$KEY\" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+      ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+        set -uo pipefail
+        cd /opt/barkpark/api || { echo no-checkout-at-/opt/barkpark; exit 1; }
+        [ -d ../.slots ] && { echo slot-box-refused — use deploy/instance-deploy.sh; exit 1; }
+        echo == stopping barkpark ==
+        systemctl stop barkpark 2>/dev/null || true
+        echo == migrating ==
+        MIG=0
+        timeout 600 bash start.sh mix ecto.migrate || MIG=\$?
+        echo == starting barkpark ==
+        systemctl start barkpark 2>/dev/null || true
+        sleep 20
+        echo == unit state ==
+        systemctl is-active barkpark || true
+        echo == health ==
+        curl -fsS -m 10 -o /dev/null http://localhost:4000/api/schemas && echo HEALTH-OK || echo HEALTH-FAIL
+        echo == journal tail ==
+        # UNIT SET, DERIVED (not copied) from deploy/instance-deploy.sh
+        # by grepping every systemd unit it installs / enables / starts:
+        #   barkpark-slot@.service       install :1171, enable :580,:1480
+        #                                -> barkpark-slot@blue|green (:478,:1157)
+        #   barkpark-site@.service       install :1178, start  :1173
+        #                                -> barkpark-site@<slug>__<slot>
+        #   barkpark-agent.service       install :1503, enable :1509
+        #   barkpark-mcp.service         install :1554, enable :1558
+        #   barkpark-connectors.service  install :1689, enable :1691
+        #   barkpark.service             NOT created here -- instance-deploy.sh
+        #                                DISABLES it (:1482); it is written by
+        #                                repo-root deploy.sh:312 / enabled :330, (lineref-ok: moved verbatim)
+        #                                i.e. the legacy mix box this op targets.
+        #   (no .timer is installed by instance-deploy.sh: 0 matches for 'timer')
+        # Every name is barkpark-prefixed and the SET GROWS (site@, mcp and
+        # connectors were all added after slot@), so the derived query is the
+        # PREDICATE barkpark* -- a hand-kept list goes stale on the next unit.
+        # WHY NOT -u barkpark ALONE, even though :152 refuses a .slots box:
+        # that guard is a [ -d ../.slots ] test, which reads FALSE on a slot box
+        # whose marker is missing (provisioning died before instance-deploy.sh
+        # :1179 mkdir, or the dir was removed) -- exactly the broken box whose
+        # tail must not come back silent. barkpark* costs nothing on a legacy
+        # box, where barkpark is the only match.
+        # WHY :405 DIFFERS AND STAYS -u 'barkpark-slot@*': guerrilla-logs-grep
+        # greps a KNOWN slot host for a request id, so slot-only is deliberate
+        # noise control there, not an oversight. :153 in this same file already
+        # uses the barkpark* form this line now matches.
+        journalctl -u \"barkpark*\" -n 25 --no-pager 2>/dev/null | tail -25
+        echo == kernel oom check ==
+        journalctl -k -n 200 --no-pager 2>/dev/null | grep -iE \"out of memory|oom-kill\" | tail -5 || echo no-oom-in-recent-kernel-log
+        [ \"\$MIG\" -eq 0 ] || { echo \"MIGRATE-FAILED exit \$MIG\"; exit 1; }
+        echo box-migrate complete
+      '
+    "
+    ;;
+  caddy-repair)
+    # Restore the instance vhosts the site runtime's Caddyfile switch
+    # clobbered (gap: the runtime rebuilds the file from its own state
+    # and drops blocks it does not own). Appends the two known-shape
+    # blocks when missing, validates, reloads. Prints the file head.
+    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+      || { echo "box_ip must be an IPv4"; exit 1; }
+    $SSH "root@${CP_HOST}" "
+      set -euo pipefail
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+        set -euo pipefail
+        CF=/etc/caddy/Caddyfile
+        cp -a \"\$CF\" \"\$CF.pre-repair.\$(date +%s)\"
+        add() {
+          local host=\"\$1\" ondemand=\"\$2\"
+          grep -q \"^\$host {\" \"\$CF\" && { echo \"vhost \$host present\"; return; }
+          {
+            echo \"\"
+            echo \"# Restored by cp-ops caddy-repair — instance vhost \$host.\"
+            echo \"\$host {\"
+            [ \"\$ondemand\" = yes ] && printf \"\\ttls {\\n\\t\\ton_demand\\n\\t}\\n\"
+            printf \"\\treverse_proxy 127.0.0.1:4000\\n\"
+            echo \"}\"
+          } >> \"\$CF\"
+          echo \"vhost \$host appended\"
+        }
+        add jarl.barkpark.cloud no
+        add barkpark.jarl.no yes
+        caddy validate --config \"\$CF\" >/dev/null
+        systemctl reload caddy
+        echo == caddy repaired ==
+        head -40 \"\$CF\"
+      '
+    "
+    ;;
+  box-file-tail)
+    # Tail a file on a managed box, restricted to the builder log dir.
+    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+      || { echo "box_ip must be an IPv4"; exit 1; }
+    [[ "$FILE_PATH" =~ ^/var/log/barkpark-builder/[A-Za-z0-9._-]+$ ]] \
+      || { echo "file_path must be a plain file under /var/log/barkpark-builder/"; exit 1; }
+    $SSH "root@${CP_HOST}" "
+      set -euo pipefail
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} \
+        'ls /var/log/barkpark-builder/ && tail -n 200 ${FILE_PATH} 2>/dev/null || echo FILE-MISSING'
+    "
+    ;;
+  builder-token-fix)
+    # The /v1/builder/claim route authenticates with the CP's shared
+    # WORKER_TOKEN (require_worker), not an agent token. Extract it
+    # from the running control_plane container on the CP and install
+    # it on the box as /etc/barkpark/worker.token, repointing the
+    # builder unit. The token value never touches this runner's log.
+    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+      || { echo "box_ip must be an IPv4"; exit 1; }
+    $SSH "root@${CP_HOST}" "
+      set -euo pipefail
+      # No pipe into head: under pipefail a truncating reader SIGPIPEs
+      # its producer and the pipeline returns 141 -- a step failure
+      # under set -e, and a silently wrong status otherwise, visible
+      # only when docker is slow enough to still be writing. head on
+      # a regular FILE cannot SIGPIPE anything.
+      docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
+      c=\$(head -1 /tmp/cp-ops-cid.txt)
+      [ -n \"\$c\" ] || { echo 'no control_plane container'; exit 1; }
+      WT=\$(docker exec \"\$c\" printenv WORKER_TOKEN)
+      [ -n \"\$WT\" ] || { echo 'WORKER_TOKEN unset in container'; exit 1; }
+      KEY=/root/.ssh/barkpark_indx
+      printf '%s' \"\$WT\" | ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+        set -euo pipefail
+        umask 077
+        cat > /etc/barkpark/worker.token
+        sed -i \"s#--token-file /etc/barkpark/agent.token#--token-file /etc/barkpark/worker.token#\" /etc/systemd/system/barkpark-builder.service
+        systemctl daemon-reload
+        systemctl restart barkpark-builder
+        sleep 2
+        systemctl is-active barkpark-builder
+        echo builder-token-fix complete
+      '
+    "
+    ;;
+  box-logs)
+    # Last 100 journal lines for an ALLOWLISTED unit on a managed box.
+    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+      || { echo "box_ip must be an IPv4"; exit 1; }
+    case "$UNIT" in
+      barkpark-builder|barkpark-runtime|barkpark-agent) ;;
+      *) echo "unit not in allowlist"; exit 1 ;;
+    esac
+    $SSH "root@${CP_HOST}" "
+      set -euo pipefail
+      KEY=/root/.ssh/barkpark_indx
+      [ -f \"\$KEY\" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+      ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} \
+        'journalctl -u ${UNIT} -n 100 --no-pager'
+    "
+    ;;
+  site-artifact-fetch)
+    # Stage a GitHub tarball as a file:// artifact directory on a
+    # managed box — the builder's resolveArtifact is file://-only
+    # (https blob storage is a future addition), so this is how a
+    # public repo's ref becomes buildable on the box. Prints the
+    # exact file:// URL to pass to `bp deploy --artifact-url`.
+    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+      || { echo "box_ip must be an IPv4"; exit 1; }
+    [[ "$ARTIFACT_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] \
+      || { echo "artifact_repo must be owner/repo"; exit 1; }
+    [[ "$ARTIFACT_REF" =~ ^[A-Za-z0-9_./-]{1,120}$ ]] \
+      || { echo "artifact_ref must be a plain ref"; exit 1; }
+    $SSH "root@${CP_HOST}" "
+      set -euo pipefail
+      KEY=/root/.ssh/barkpark_indx
+      [ -f \"\$KEY\" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+      ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+        set -euo pipefail
+        DEST=/var/lib/barkpark-builder/uploads/${ARTIFACT_REPO##*/}
+        rm -rf \"\$DEST\" \"\$DEST.tmp\" && mkdir -p \"\$DEST.tmp\"
+        curl -fsSL https://github.com/${ARTIFACT_REPO}/archive/${ARTIFACT_REF}.tar.gz \
+          | tar -xz -C \"\$DEST.tmp\" --strip-components=1
+        mv \"\$DEST.tmp\" \"\$DEST\"
+        echo \"artifact staged: file://\$DEST\"
+      '
+    "
+    ;;
+  site-runtime-install)
+    # Install the site-hosting stack (docker, nixpacks, barkpark-builder,
+    # barkpark-runtime) on a managed box that `bp launch` provisioned
+    # WITHOUT it — the gap that leaves site deployments queued forever.
+    # Hops: runner → CP (DEPLOY_SSH_KEY) → box (the CP's warm-pool key
+    # ~/.ssh/barkpark_indx — the same key the provisioner's attach-domain
+    # worker uses). Idempotent: every step checks before it installs.
+    [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+      || { echo "box_ip must be an IPv4"; exit 1; }
+    # Stream the repo's installer to the CP, which relays it to the box
+    # with the warm-pool key and runs it there.
+    $SSH "root@${CP_HOST}" "
+      set -euo pipefail
+      cat > /tmp/site-runtime-install.sh
+      KEY=/root/.ssh/barkpark_indx
+      [ -f \"\$KEY\" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+      scp -i \"\$KEY\" -o StrictHostKeyChecking=accept-new /tmp/site-runtime-install.sh root@${BOX_IP}:/tmp/
+      ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} 'bash /tmp/site-runtime-install.sh'
+    " < deploy/site-runtime-install.sh
+    ;;
+  cp-app-logs)
+    # The control plane's own app logs — the one surface a fleet-list
+    # 500 can actually be diagnosed from (operator SSH is deliberately
+    # narrow, so this rides the same CI-held key as every other arm).
+    # An OPTIONAL needle (same request-id charset as guerrilla's grep)
+    # narrows to one request's stacktrace; omitted, a bounded tail.
+    if [ -n "$NEEDLE" ]; then
+      [[ "$NEEDLE" =~ ^[A-Za-z0-9_-]{4,64}$ ]] \
+        || { echo "needle must be 4-64 chars of [A-Za-z0-9_-]"; exit 1; }
+    fi
+    $SSH "root@${CP_HOST}" "
+      set -uo pipefail
+      # No pipe into head: under pipefail a truncating reader SIGPIPEs
+      # its producer and the pipeline returns 141 -- a step failure
+      # under set -e, and a silently wrong status otherwise, visible
+      # only when docker is slow enough to still be writing. head on
+      # a regular FILE cannot SIGPIPE anything.
+      docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
+      c=\$(head -1 /tmp/cp-ops-cid.txt)
+      [ -n \"\$c\" ] || { echo 'no running control_plane container'; exit 1; }
+      if [ -n '$NEEDLE' ]; then
+        # The 141 trap, and why the old one-liner LIED. Under pipefail
+        # head -300 closes the pipe on its 301st line, grep dies of
+        # SIGPIPE, the pipeline reports 141 and the || arm printed
+        # 'no log match' over 300 lines of matches it had just printed
+        # -- the verdict inverted by the size of the match, which is
+        # exactly the case an operator is grepping for. grep now drains
+        # into a file and owns the verdict; head reads that file.
+        docker logs --since 3h \"\$c\" >/tmp/cp-ops-logs.txt 2>&1
+        if grep -F '$NEEDLE' -B 2 -A 60 /tmp/cp-ops-logs.txt >/tmp/cp-ops-hits.txt; then
+          head -300 /tmp/cp-ops-hits.txt
+        else
+          echo 'no log match for $NEEDLE in the last 3 hours'
+        fi
+      else
+        docker logs --since 90m \"\$c\" 2>&1 | tail -300
+      fi
+    "
+    ;;
+  guerrilla-logs-grep)
+    # Request ids / tokens only — the needle is interpolated into a
+    # remote grep, so the charset is the whole security boundary.
+    [[ "$NEEDLE" =~ ^[A-Za-z0-9_-]{4,64}$ ]] \
+      || { echo "needle must be 4-64 chars of [A-Za-z0-9_-]"; exit 1; }
+    $SSH "root@${GUERRILLA_HOST}" "
+      journalctl -u 'barkpark-slot@*' --since '-3 hours' --no-pager 2>/dev/null \
+        | grep -F '$NEEDLE' -A 30 | head -200 \
+        || echo 'no journal match for $NEEDLE in the last 3 hours'
+    "
+    ;;
+  guerrilla-db-probe)
+    # Pool-sizing evidence (task jpf-bl-guerrilla-db-probe-arm; gates
+    # jpf-bl-oban-pool-partition): guerrilla's POOL_SIZE, Postgres
+    # max_connections, and backends by state. READ-ONLY and takes NO
+    # input — the remote script is a SINGLE-QUOTED literal, so not
+    # even a runner-side variable expands into it (stricter than the
+    # guerrilla-logs-grep arm above, which must interpolate NEEDLE).
+    #
+    # WHY max_connections HEADROOM IS THE NUMBER: a blue/green flip
+    # (deploy/instance-deploy.sh) boots the TARGET slot while the
+    # ACTIVE one still serves, so at flip time guerrilla holds
+    # 2 x (pool_size + 1) backends, not pool_size + 1. A POOL_SIZE
+    # raise must fit twice under max_connections (minus superuser
+    # and other-client reservations) or the flip itself fails to
+    # connect — measure before any raise.
+    #
+    # .env HOLDS SECRETS: only lines whose key is exactly POOL_SIZE
+    # are printed, never the file. api/start.sh sources .env with
+    # set -a, so the LAST POOL_SIZE= line wins; absent, runtime.exs
+    # defaults to 10. The running slot's own environ is read too —
+    # .env may have changed since boot — again filtered to POOL_SIZE.
+    #
+    # SIGPIPE: no pipe here ends in a truncating reader (no head, no
+    # grep -q); grep reads its whole input, so no producer can die
+    # of 141 under pipefail.
+    # shellcheck disable=SC2016 # the single quotes ARE the boundary: nothing expands runner-side
+    $SSH "root@${GUERRILLA_HOST}" '
+      set -uo pipefail
+      rc=0
+      echo "== POOL_SIZE in /opt/barkpark/.env (last line wins; none = runtime.exs default 10) =="
+      grep -nE "^[[:space:]]*(export[[:space:]]+)?POOL_SIZE=" /opt/barkpark/.env \
+        || echo "no POOL_SIZE line in /opt/barkpark/.env"
+      echo "== POOL_SIZE in each running slot environ =="
+      for s in blue green; do
+        st=$(systemctl is-active "barkpark-slot@$s" 2>/dev/null)
+        pid=$(systemctl show -p MainPID --value "barkpark-slot@$s" 2>/dev/null)
+        if [ "$st" = active ] && [ -r "/proc/$pid/environ" ]; then
+          v=$(tr "\0" "\n" < "/proc/$pid/environ" | grep -E "^POOL_SIZE=") || v="POOL_SIZE unset (runtime.exs default 10)"
+          echo "slot $s active pid $pid: $v"
+        else
+          echo "slot $s: ${st:-unknown}"
+        fi
+      done
+      cd /tmp
+      echo "== show max_connections =="
+      sudo -u postgres psql -X -v ON_ERROR_STOP=1 -Atc "show max_connections" || rc=1
+      echo "== pg_stat_activity by state (empty state = background process) =="
+      sudo -u postgres psql -X -v ON_ERROR_STOP=1 -Atc \
+        "select state, count(*) from pg_stat_activity group by state order by state" || rc=1
+      [ "$rc" -eq 0 ] || { echo "PSQL-FAILED"; exit 1; }
+      echo guerrilla-db-probe complete
+    '
+    ;;
+  grant-forever)
+    # UUID only — the rpc string below is built from validated parts.
+    [[ "$TEAM" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+      || { echo "team must be a UUID"; exit 1; }
+    # rpc into the LIVE release node (mix tasks don't exist in a prod
+    # release). grant_forever is idempotent; the caveat about a
+    # surviving Stripe-side subscription is the operator's to handle.
+    $SSH "root@${CP_HOST}" "
+      set -euo pipefail
+      # No pipe into head: under pipefail a truncating reader SIGPIPEs
+      # its producer and the pipeline returns 141 -- a step failure
+      # under set -e, and a silently wrong status otherwise, visible
+      # only when docker is slow enough to still be writing. head on
+      # a regular FILE cannot SIGPIPE anything.
+      docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
+      c=\$(head -1 /tmp/cp-ops-cid.txt)
+      [ -n \"\$c\" ] || { echo 'no running control_plane container'; exit 1; }
+      docker exec \"\$c\" bin/barkpark_cloud rpc \
+        'BarkparkCloud.Billing.grant_forever(\"$TEAM\") |> IO.inspect(label: \"grant_forever\")'
+    "
+    ;;
+  *)
+    echo "unknown operation: $OP"; exit 1
+    ;;
+esac

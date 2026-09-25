@@ -690,6 +690,11 @@
         "env": {}
       },
       {
+        "name": "cp-ops: choice list == scripts/cp-ops.sh arms (both ways) and every arm's ssh argv matches its golden",
+        "run": "bash -n scripts/cp-ops.sh\nbash scripts/cp-ops.test.sh\n",
+        "env": {}
+      },
+      {
         "name": "paper-reader audit fixture",
         "run": "bash scripts/audit-paper-readers-test.sh",
         "env": {}
