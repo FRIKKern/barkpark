@@ -29,6 +29,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleCatalogDevTest do
   end
 
   describe "dev partition coverage (PDS-D4: deny-by-default)" do
+    # compares the static dev map to the full live schema, so it needs the plugin/fleet tables present
+    # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+    @tag :owned_tables
     test "sentinel passes on the clean schema and the partition covers EXACTLY the bundle-reachable set" do
       assert :ok = Catalog.assert_dev_partition!(Repo)
 

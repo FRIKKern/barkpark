@@ -536,18 +536,12 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     Keyword.fetch!(list_opts, :page_size) * Keyword.fetch!(list_opts, :max_pages)
   end
 
-  # `task_edges` is the Tasks plugin's table: with the plugin off it may not
-  # exist, so docs pass through unhydrated (task-d3ecc509d4ea227d).
   defp hydrate_task_edges(docs) when is_list(docs) do
-    if Barkpark.OwnedTables.enabled?("task_edges"),
-      do: Barkpark.Plugins.Tasks.hydrate_edges_batch(docs),
-      else: docs
+    Barkpark.Plugins.Tasks.hydrate_edges_batch(docs)
   end
 
   defp hydrate_task_edges(doc) when is_map(doc) do
-    if Barkpark.OwnedTables.enabled?("task_edges"),
-      do: Barkpark.Plugins.Tasks.hydrate_edges(doc),
-      else: doc
+    Barkpark.Plugins.Tasks.hydrate_edges(doc)
   end
 
   defp hydrate_task_edges(doc), do: doc

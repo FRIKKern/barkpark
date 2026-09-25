@@ -29,7 +29,11 @@ defmodule Barkpark.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test]
+      preferred_envs: [
+        precommit: :test,
+        "test.core_without_owned_tables": :test,
+        "barkpark.core_without_owned_tables": :test
+      ]
     ]
   end
 
@@ -171,7 +175,11 @@ defmodule Barkpark.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: [&strict_test_paths/1, "ecto.create --quiet", "ecto.migrate --quiet", "test"],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"],
+      # Barkspark criterion 0 (task-d3ecc509d4ea227d): a test green with every
+      # plugin off and the plugin/fleet tables PRESENT must stay green with them
+      # ABSENT. See Mix.Tasks.Barkpark.CoreWithoutOwnedTables.
+      "test.core_without_owned_tables": ["barkpark.core_without_owned_tables"]
     ]
   end
 
