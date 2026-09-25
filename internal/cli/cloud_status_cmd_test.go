@@ -1450,6 +1450,11 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 		// this box change sha"), and an absent key could not distinguish it from
 		// a CLI that never asked.
 		"git_commit_first_seen_at": true,
+		// dr-bl-w9-muscle-1: the raw last beat (ALWAYS present, git_commit's
+		// rule) and its reading — the object whose duration keys are the
+		// tri-states, so the object itself is always there.
+		"last_seen_at": true,
+		"beat":         true,
 	}
 	// The two deliberate tri-states: emitted ONLY when the plane reported them,
 	// so their absence here is the contract, not a gap.
