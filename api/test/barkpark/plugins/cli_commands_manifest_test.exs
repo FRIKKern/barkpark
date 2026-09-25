@@ -738,10 +738,12 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
 
       assert parent.type == "string"
 
-      # The help text has to say WHY this route rather than the rail: it is the
-      # one that answers a close-time question. A summary that merely said
-      # "filter by parent" would leave the audit ergonomics exactly where the
-      # trap found them.
+      # The help text has to name the close-time field, so a reader auditing
+      # "which children closed in this window?" knows the answer is on the
+      # row. Both this listing and `bp task get`'s child rail carry updated_at
+      # (pinned below); the help states the real difference between them
+      # (claim/assignee/content on these rows) rather than implying the rail
+      # lacks it — task-40e138710f10229b.
       assert parent.summary =~ "updated_at"
       assert parent.summary =~ "close-time"
     end
