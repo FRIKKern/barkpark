@@ -233,7 +233,7 @@ not red-capable in normal operation — `CORPUS-INTACT` tests `files >= 600` and
 ### The unrouted sites, and THE WRITE-RECEIPT BUCKETS (wave 33 follow-on)
 
 Re-derived by run at `d8bd23c1d`; every integer here MOVED off the figures this section
-carried, and the per-site table is `scripts/pds-w33-write-receipt-buckets.md`.
+carried, and the per-site table is `docs/ledgers/pds-w33-write-receipt-buckets.md`.
 
 **Unrouted is 14 at depth 6, not 12 and not 10.** **11** of the 14 route at depth 10 —
 all `github_webhook_controller.ex` (`:99 :100 :124 :128 :133 :165 :170 :174 :186 :202
@@ -287,5 +287,5 @@ a string an author may decline: rerun
 - `internal/cli/cloud_autoupdate_cmd.go` — the A3 site converted with it (`autoupdateReceipt`, `autoupdateApplied`)
 - `templates/place-directory/install.sh` — the two unguarded shell claims (lines 29, 33)
 - `api/lib/barkpark_web/router.ex` — the owner of the 260-member ROUTED-WRITE denominator
-- `scripts/pds-w33-write-receipt-buckets.md` — the per-site bucket table, the ruling's evidence
+- `docs/ledgers/pds-w33-write-receipt-buckets.md` — the per-site bucket table, the ruling's evidence
 - `scripts/pds-elixir-receipt-census.exs` — the census: routed population, disposition, lens, blind shapes, register, and the integrity arms that can go red

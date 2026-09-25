@@ -9,7 +9,7 @@
     "../../js/packages/groq",
     "../../js/packages/nextjs-query"
   ],
-  "out": "../../docs-site/reference",
+  "out": "../../docs/site/reference",
   "name": "Barkpark JavaScript Reference",
   "readme": "none",
   "includeVersion": true,

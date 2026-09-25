@@ -1207,8 +1207,8 @@ docs/setup/AGENT-ONRAMPS.md 11000
 
 docs/decisions/success-claim-census.md 19307
 
-scripts/deploy-reliability-exit-2026-08-10.md 11200
-scripts/deploy-reliability-exit-2026-08-17.md 9800
+docs/ledgers/deploy-reliability-exit-2026-08-10.md 11200
+docs/ledgers/deploy-reliability-exit-2026-08-17.md 9800
 CAPS
   if [ "$CAPS_ROWS_WALKED" -ne "$CAPS_ROWS_EXPECTED" ]; then
     echo "FAIL: the fixed-caps table walked $CAPS_ROWS_WALKED row(s), expected $CAPS_ROWS_EXPECTED." \

@@ -249,7 +249,7 @@ func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
 	// the send_resp ancestor — 3.731x, +217.05 MiB — while the bytes THIS function
 	// writes to disk are identical either way. Full record, including the
 	// deliberate absence of `vary: accept-encoding`:
-	// scripts/pds-w47-export-wire-bytes-2026-09-17.md.
+	// docs/ledgers/pds-w47-export-wire-bytes-2026-09-17.md.
 	declared := resp.ContentLength
 	verified := declared >= 0 && n == declared
 	if declared >= 0 && n != declared {
