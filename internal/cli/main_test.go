@@ -25,7 +25,11 @@ func TestMain(m *testing.M) {
 	os.Exit(runWithSandboxedConfigHome(m))
 }
 
+// realHomeAtStart is the caller's HOME, captured before the sandbox replaces it.
+var realHomeAtStart string
+
 func runWithSandboxedConfigHome(m *testing.M) int {
+	realHomeAtStart, _ = os.UserHomeDir()
 	// Resolve the REAL config dir with the caller's environment, before the
 	// sandbox replaces it, and fingerprint what is there.
 	realDir, _ := configDir()
@@ -39,6 +43,10 @@ func runWithSandboxedConfigHome(m *testing.M) int {
 	defer os.RemoveAll(dir)
 	if err := os.Setenv("XDG_CONFIG_HOME", dir); err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: cannot set XDG_CONFIG_HOME: %v\n", err)
+		return 2
+	}
+	if err := sandboxHome(); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: cannot sandbox HOME: %v\n", err)
 		return 2
 	}
 	sandboxConfigHome = dir
@@ -98,10 +106,42 @@ func TestConfigHomeIsSandboxedForThePackage(t *testing.T) {
 	if !strings.HasPrefix(path, sandboxConfigHome+string(filepath.Separator)) {
 		t.Fatalf("ConfigPath() = %q is outside the sandbox %q", path, sandboxConfigHome)
 	}
-	if home, err := os.UserHomeDir(); err == nil {
+	if got, _ := os.UserHomeDir(); got != sandboxHomeDir {
+		t.Fatalf("HOME resolves to %q, want the package sandbox %q", got, sandboxHomeDir)
+	}
+	if home := realHomeAtStart; home != "" {
 		real := filepath.Join(home, ".config", "barkpark")
 		if strings.HasPrefix(path, real) {
 			t.Fatalf("ConfigPath() = %q resolves under the real config dir %q", path, real)
 		}
 	}
 }
+
+// sandboxHome points HOME at a fresh temp dir too, so a path a test builds from
+// os.UserHomeDir (~/.config, ~/.claude, ~/.ssh) cannot reach the real home.
+// The Go toolchain derives its caches from HOME, and some tests shell out to
+// `go`, so GOPATH and GOCACHE are pinned to their REAL values first (only when
+// the caller has not set them); otherwise a subprocess would re-download every
+// module into an empty cache.
+func sandboxHome() error {
+	realHome, herr := os.UserHomeDir()
+	if herr == nil {
+		if os.Getenv("GOPATH") == "" {
+			os.Setenv("GOPATH", filepath.Join(realHome, "go"))
+		}
+	}
+	if os.Getenv("GOCACHE") == "" {
+		if c, err := os.UserCacheDir(); err == nil {
+			os.Setenv("GOCACHE", filepath.Join(c, "go-build"))
+		}
+	}
+	home, err := os.MkdirTemp("", "bp-cli-test-home-")
+	if err != nil {
+		return err
+	}
+	sandboxHomeDir = home
+	return os.Setenv("HOME", home)
+}
+
+// sandboxHomeDir is the throwaway HOME, removed by the OS temp reaper.
+var sandboxHomeDir string
