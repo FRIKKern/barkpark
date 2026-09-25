@@ -231,7 +231,25 @@ defmodule Barkpark.Content.DedupWall do
   @spec lock_publish_scope!(String.t(), String.t(), keyword()) :: :ok
   def lock_publish_scope!(type, dataset, opts \\ []) do
     if scope_lock_enabled?() do
-      key = publish_scope_lock_key(type, dataset, Keyword.get(opts, :workspace_id))
+      workspace_id = Keyword.get(opts, :workspace_id)
+
+      # LOCK ORDER: the workspace's audit-chain lock BEFORE the scope lock
+      # (task-0c397ec87de1f924). A publish takes this scope lock and then
+      # `Audit.emit/1` (via `Broadcast.tap_broadcast`) takes the audit-chain
+      # lock in the SAME transaction. A mutate batch that audited an earlier
+      # mutation (`Mutations.apply_mutations/3` is one transaction) already
+      # holds the audit-chain lock when its publish reaches here. Those are
+      # opposite orders over the same two keys, and Postgres answered 40P01:
+      #
+      #     Process A waits for advisory lock [_,0,1329934127,1]  (this key)
+      #     Process B waits for advisory lock [_,0,2614849228,1]  (audit chain)
+      #
+      # Taking the audit-chain lock first makes every holder of this key a
+      # holder of that one, so the cycle cannot form. It is re-entrant, so the
+      # emit later in the transaction does not wait on itself.
+      :ok = Barkpark.Audit.lock_chain!(workspace_id)
+
+      key = publish_scope_lock_key(type, dataset, workspace_id)
       _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [key])
     end
 

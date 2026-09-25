@@ -164,6 +164,20 @@ defmodule Barkpark.Audit do
 
   # ── internals ──────────────────────────────────────────────────────────
 
+  @doc """
+  Take the workspace's audit-chain advisory lock (`emit/1` takes it too).
+
+  MUST be called inside an open transaction; it is held to commit/rollback and
+  is re-entrant within that transaction. Exposed so a caller that takes another
+  advisory lock AND may emit in the same transaction can take this one FIRST,
+  keeping one global lock order (`DedupWall.lock_publish_scope!/3` does).
+  """
+  @spec lock_chain!(String.t() | nil) :: :ok
+  def lock_chain!(workspace_id) do
+    lock_chain(workspace_id)
+    :ok
+  end
+
   # Transaction-scoped advisory lock keyed on the workspace, so concurrent
   # emits for the SAME workspace serialize on the chain tail (and the empty
   # first-row case is safe) while different workspaces never contend.
