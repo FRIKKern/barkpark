@@ -11,7 +11,7 @@ Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
 A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Documents** (§3). Canonical paths start `/w/:workspace_slug/p/:project_slug/v1/data/...`.
 
-**Flat alias.** Unprefixed `/v1/*` routes resolve to `Default`/`Default`.
+**Flat alias.** Unprefixed `/v1/*` routes resolve to `Default`/`Default`. One with a scoped twin answers `Deprecation: true` and a `rel="successor-version"` `Link` to it; no `Sunset` yet.
 
 ## 2. Base URL & Authentication
 
@@ -62,7 +62,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 Fetch one document. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin — so the bare `_publishedId` reaches an unpublished document under both, exactly as `patch`/`publish`/`discardDraft`/`delete` do.
 
-**Read-after-write is immediate.** Responses use `cache-control: max-age=0, private, must-revalidate`; ETags include row `_id:_rev`. Check the **draft/published split** before polling: writes to `drafts.<id>` appear under `?perspective=drafts`, or `raw` without a published row. `published` and `bp task get` read the exact ID and retain the published row until publication. Diagnose a missing write with one drafts read. Original 63-read production proof: `pds-bl-doc-patch-propagation-lag`.
+**Read-after-write is immediate.** Responses use `cache-control: max-age=0, private, must-revalidate`; ETags include row `_id:_rev`. Check the **draft/published split** before polling: writes to `drafts.<id>` appear under `?perspective=drafts`, or `raw` without a published row. `published` and `bp task get` read the exact ID and retain the published row until publication. Diagnose a missing write with one drafts read.
 
 ### 5a. Reference Expansion
 
@@ -121,7 +121,7 @@ SSE stream of document mutations, scoped to the resolved workspace + project.
 
 ## 8. Schema endpoints [admin]
 
-Flat `/v1/schemas/*` forms remain the `Default`/`Default` alias, gated on the global `admin` permission; scoped `P` forms gate on workspace role (`owner`/`admin`). Below, `P` = `/w/:workspace_slug/p/:project_slug`; a schema object is `{name,title,icon,visibility,fields:[...]}`.
+Flat `/v1/schemas/*` forms gate on the global `admin` permission; scoped `P` forms gate on workspace role (`owner`/`admin`). Below, `P` = `/w/:workspace_slug/p/:project_slug`; a schema object is `{name,title,icon,visibility,fields:[...]}`.
 
 - `GET P/v1/schemas/:dataset` → `{"_schemaVersion": 1, "schemas": [ <schema>, ... ]}`
 - `GET P/v1/schemas/:dataset/:name` → `{"_schemaVersion": 1, "schema": <schema>}`

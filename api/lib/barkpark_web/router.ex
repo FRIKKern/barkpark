@@ -28,6 +28,9 @@ defmodule BarkparkWeb.Router do
   end
 
   pipeline :api do
+    # Flat /v1 routes with a /w/:ws/p/:proj mirror answer Deprecation: true + a
+    # successor Link (no Sunset yet). First, so a halt below still carries it.
+    plug(BarkparkWeb.Plugs.FlatTreeDeprecation)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
     # Baseline JSON security headers (nosniff + referrer-policy). The browser
@@ -74,6 +77,9 @@ defmodule BarkparkWeb.Router do
   # fallback so a local `bp cycle` invocation cannot silently operate on a
   # different cloud/default workspace.
   pipeline :cycle_api do
+    # Flat /v1 routes with a /w/:ws/p/:proj mirror answer Deprecation: true + a
+    # successor Link (no Sunset yet). First, so a halt below still carries it.
+    plug(BarkparkWeb.Plugs.FlatTreeDeprecation)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
@@ -665,6 +671,9 @@ defmodule BarkparkWeb.Router do
   end
 
   pipeline :api_preview do
+    # Flat /v1 routes with a /w/:ws/p/:proj mirror answer Deprecation: true + a
+    # successor Link (no Sunset yet). First, so a halt below still carries it.
+    plug(BarkparkWeb.Plugs.FlatTreeDeprecation)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
     # Parity with :api — baseline JSON security headers on the flat preview reads.
@@ -928,6 +937,9 @@ defmodule BarkparkWeb.Router do
   # token-auth. protect_from_forgery cannot apply (no Phoenix CSRF token on API /
   # Web-Component uploads).
   pipeline :media_mutate do
+    # Flat /v1 routes with a /w/:ws/p/:proj mirror answer Deprecation: true + a
+    # successor Link (no Sunset yet). First, so a halt below still carries it.
+    plug(BarkparkWeb.Plugs.FlatTreeDeprecation)
     plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
@@ -1067,6 +1079,9 @@ defmodule BarkparkWeb.Router do
   # search settings, schemas, structure and webhooks alike — do NOT clone it
   # per controller. Adding a flat admin surface? Mount it HERE.
   pipeline :flat_admin_api do
+    # Flat /v1 routes with a /w/:ws/p/:proj mirror answer Deprecation: true + a
+    # successor Link (no Sunset yet). First, so a halt below still carries it.
+    plug(BarkparkWeb.Plugs.FlatTreeDeprecation)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
