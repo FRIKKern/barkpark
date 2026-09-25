@@ -63,6 +63,19 @@ defmodule Barkpark.Capability do
   end
 
   @doc """
+  The operator-facing sentence for a refusal because `name` is off. Names the
+  switch that turned it off, including a required capability that is off.
+  """
+  @spec off_message(name()) :: String.t()
+  def off_message(name) when name in @names do
+    off = Enum.reject([name | Map.get(@requires, name, [])], &switched_on?/1)
+
+    "the #{name} capability is off on this instance (switched off: " <>
+      Enum.map_join(off, ", ", &Atom.to_string/1) <>
+      "; set by config :barkpark, Barkpark.Capability or BARKPARK_CAPABILITIES_OFF)"
+  end
+
+  @doc """
   Parses the `BARKPARK_CAPABILITIES_OFF` value into config for this module.
 
   Unknown names raise instead of being ignored: a typo in an OFF list would

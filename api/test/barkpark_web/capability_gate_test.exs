@@ -68,7 +68,9 @@ defmodule BarkparkWeb.CapabilityGateTest do
       {:post, "/v1/chat-host/enroll"},
       {:post, "/v1/chat-host/heartbeat"},
       {:get, "/v1/chat-host/commands"},
-      {:post, "/v1/chat/sessions/00000000-0000-0000-0000-000000000000/state"}
+      {:post, "/v1/chat/sessions/00000000-0000-0000-0000-000000000000/state"},
+      # The workspace-bound chat token mint (task-71ea7ca2c8fabce2).
+      {:post, "/w/#{ws}/p/default/v1/chat/tokens"}
     ]
   end
 

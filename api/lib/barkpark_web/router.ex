@@ -3268,7 +3268,7 @@ defmodule BarkparkWeb.Router do
   # sessions. Same :scoped_admin gate (owner/admin role in the resolved
   # workspace), so this can never be a privilege-mint.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through([:scoped_api, :scoped_admin])
+    pipe_through([:studio_chat_capability, :scoped_api, :scoped_admin])
 
     post("/v1/chat/tokens", ChatTokenController, :create)
   end
