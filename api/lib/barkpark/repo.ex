@@ -54,7 +54,9 @@ defmodule Barkpark.Repo do
   `Ecto.Migrator.with_repo/3` starts the repo with the SAME config, so a
   migration connection inherits the 30 s wall too. Two consequences:
 
-    * `Barkpark.Release.migrate/0` overrides it to `"0"` for the release path.
+    * `Barkpark.Release.migrate/0` overrides it to `"0"` for the release path,
+      by merging the parameter into the repo's app env around `with_repo/3`
+      (ecto_sql 3.13.5's `with_repo/3` ignores a `parameters:` option).
     * `make deploy` migrates through `mix ecto.migrate` (see the Makefile), NOT
       through `Barkpark.Release`, so that override does not cover the live
       deploy. A migration that runs one long statement MUST disable the wall
