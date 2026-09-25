@@ -140,6 +140,7 @@ defmodule Barkpark.Content.Mutations do
             Enum.map_reduce(mutations, %{}, fn m, cache ->
               case apply_one(m, dataset, opts) do
                 {:ok, doc, op} ->
+                  :ok = between_mutations_barrier()
                   {schema, cache} = echo_schema(doc.type, dataset, opts, cache)
 
                   {%{
@@ -211,6 +212,31 @@ defmodule Barkpark.Content.Mutations do
   # codebase's slot for "well-formed, but I cannot act on it as sent"
   # (`workspace_scope_required`, `batch_too_large`, `create_wall`).
   @tsvector_limit_bytes 1_048_575
+
+  # TEST-ONLY BARRIER SEAM (task-59136713cece112c). A lock-order race between
+  # two batches needs each one parked INSIDE its transaction after its first
+  # mutation, holding what that mutation locked, before its second one runs.
+  # Nothing in a serial test produces that interleaving. A harness puts a
+  # `fun/0` under this key in the BATCH process's dictionary; it runs once,
+  # after the first successful mutation, and is removed before it runs, so it
+  # fires at most once per `Process.put`. Process-scoped, so a concurrently
+  # running async test can never trip it; unset (every production path), it
+  # costs one `Process.get`. Nothing under api/lib may set the key:
+  # test/barkpark/content/mutations_between_barrier_census_test.exs enforces
+  # it. Same shape and rationale as `DedupWall.post_check_barrier/3`.
+  @between_mutations_barrier :barkpark_mutations_between_barrier
+
+  defp between_mutations_barrier do
+    case Process.get(@between_mutations_barrier) do
+      fun when is_function(fun, 0) ->
+        Process.delete(@between_mutations_barrier)
+        fun.()
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
 
   defp classify_search_vector_overflow(
          %Postgrex.Error{postgres: %{code: :program_limit_exceeded, message: message}},
