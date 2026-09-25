@@ -22,8 +22,6 @@ defmodule Barkpark.Tasks.AmbiguousTwinError do
 
   defexception [:doc_id, :datasets, :message]
 
-  @behaviour Barkpark.Content.ErrorEnvelope
-
   @type t :: %__MODULE__{doc_id: String.t(), datasets: [String.t()], message: String.t()}
 
   @doc """
@@ -40,22 +38,6 @@ defmodule Barkpark.Tasks.AmbiguousTwinError do
       message:
         "task #{doc_id} exists in more than one dataset in this workspace/project " <>
           "(#{Enum.join(named, ", ")}); name one with ?dataset= — this door will not pick for you"
-    }
-  end
-
-  @doc """
-  The 409 `ambiguous_dataset` envelope, rendered by
-  `Barkpark.Content.Errors.to_envelope/2` through `Barkpark.Content.ErrorEnvelope`.
-  `details.datasets` is the caller's remedy: every dataset that holds the id,
-  which is what `?dataset=` needs.
-  """
-  @impl Barkpark.Content.ErrorEnvelope
-  def error_envelope(%__MODULE__{} = e) do
-    %{
-      code: "ambiguous_dataset",
-      message: e.message,
-      status: 409,
-      details: %{doc_id: e.doc_id, datasets: e.datasets}
     }
   end
 end

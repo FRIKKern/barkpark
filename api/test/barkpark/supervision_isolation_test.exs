@@ -263,16 +263,9 @@ defmodule Barkpark.SupervisionIsolationTest do
   # SNAPSHOT — it goes stale the day a fifth tier is added, and it goes stale
   # silently, which is exactly how `Barkpark.Plugins.Sheets.Supervisor` kept the
   # OTP default while three named siblings were asserted green.
-  #
-  # The plugin tier's own children are part of the population too: since
-  # task-c10be8a9ad8f0145 the Sheets session supervisor is a Sheets plugin boot
-  # child, so reading only the static list would drop it from this check.
   defp intermediate_supervisors do
-    plugin_children = Barkpark.Plugins.Registry.collect_workers(%{phase: :boot})
-
     []
     |> Barkpark.Application.child_specs([repo: Barkpark.Repo], [], [])
-    |> Kernel.++(plugin_children)
     |> Enum.map(&Supervisor.child_spec(&1, []))
     |> Enum.filter(fn %{start: {mod, _, _}} = spec ->
       Map.get(spec, :type) == :supervisor and barkpark_module?(mod) and
@@ -304,7 +297,7 @@ defmodule Barkpark.SupervisionIsolationTest do
   end
 
   describe "EVERY intermediate tier in the real boot list widens its budget" do
-    test "the derived population is the four wrapping tiers, one from the plugin tier (control)" do
+    test "the derived population is the four wrapping tiers (control)" do
       mods = intermediate_supervisors()
 
       # Printed as an assertion, not assumed: an empty or shrunken population

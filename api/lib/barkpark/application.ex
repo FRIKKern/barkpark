@@ -262,16 +262,16 @@ defmodule Barkpark.Application do
   the flat children used to occupy, so global boot ORDER is preserved verbatim:
 
     * `Barkpark.Plugins.Supervisor` wraps `plugin_children` (was folded in flat).
-      The Sheets plugin's session supervisor is one of those children now: it
-      starts only when the Sheets plugin is loaded (task-c10be8a9ad8f0145).
     * `Barkpark.Plugins.Indx.Supervisor` wraps Auth/Monitor/Recovery.
-    * The studio-chat supervisor wraps the studio-chat registries/runtime/
+    * `Barkpark.Plugins.Sheets.Supervisor` wraps the sheets session registry/
+      supervisor/replay-ring.
+    * `Barkpark.StudioChat.Supervisor` wraps the studio-chat registries/runtime/
       notifier.
 
   Ordering invariants held: Repo before everything that queries it; Registry
-  before plugin workers; PubSub before the plugin tier, the studio-chat tier
-  and the Endpoint; SchemaBootstrap after Repo+Registry and BEFORE Oban;
-  Indx (Auth→Recovery) before Oban; Endpoint last.
+  before plugin workers; SchemaBootstrap after Repo+Registry and BEFORE Oban;
+  Indx (Auth→Recovery) before Oban; PubSub before the Sheets/StudioChat tiers
+  and the Endpoint; Endpoint last.
   """
   @spec child_specs(list(), keyword(), list(), list()) :: [
           Supervisor.child_spec() | {module(), term()} | module()
@@ -406,13 +406,6 @@ defmodule Barkpark.Application do
       # before the endpoint can serve mutate/export traffic.
       Barkpark.Validation.Registry,
       Barkpark.Content.Validation.Rules,
-      {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
-      # PubSub starts BEFORE the plugin tier (task-c10be8a9ad8f0145). The Sheets
-      # plugin's session supervisor is a plugin boot child now, and its sessions
-      # broadcast deltas on PubSub; with PubSub here, every plugin boot child
-      # starts after it, which is the order the static Sheets tier had. Nothing
-      # above needs PubSub to be absent, and nothing started later loses it.
-      {Phoenix.PubSub, name: Barkpark.PubSub},
       # VOLATILE plugin tier (was folded in FLAT here via plugin_children).
       # Now isolated under its own supervisor + restart budget: a crash-looping
       # third-party/plugin worker can no longer breach Barkpark.Supervisor's
@@ -433,6 +426,13 @@ defmodule Barkpark.Application do
       # jobs call Auth.token/0); internal order Auth→Monitor→Recovery preserved.
       Barkpark.Plugins.Indx.Supervisor,
       {Oban, oban_config},
+      {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
+      {Phoenix.PubSub, name: Barkpark.PubSub},
+      # Sheets M1 collaborative-session subsystem (was SessionRegistry +
+      # SessionSupervisor + ReplayRing flat). CORE, plugin-independent
+      # (fresh-install invariant). Wrapped for domain isolation; positioned
+      # after PubSub (delta broadcasts) + Repo (load/persist), as before.
+      Barkpark.Plugins.Sheets.Supervisor,
       # Studio Claude-chat runtime subsystem (was the two registries +
       # RuntimeSupervisor + Notifier flat). Wrapped for domain isolation;
       # positioned after PubSub (Recorders rebroadcast frames on it), as before.

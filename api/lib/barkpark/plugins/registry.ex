@@ -549,7 +549,6 @@ defmodule Barkpark.Plugins.Registry do
     publish_pre_publish_fences(plugins)
     publish_pre_write_transforms(plugins)
     publish_paper_task_resolvers(plugins)
-    publish_resolve_doc_guards(plugins)
     publish_mutate_door_fences(plugins)
 
     state
@@ -687,36 +686,6 @@ defmodule Barkpark.Plugins.Registry do
     end
   end
 
-  # Every registered plugin's `resolve_doc_guards/0` declaration, into the
-  # content-owned holder the canonical slug resolver runs
-  # (task-c10be8a9ad8f0145). Same rules as the fence publishers: not routed
-  # through `reduce_resolvers/3`, a raising declaration or a malformed entry
-  # raises.
-  defp publish_resolve_doc_guards(plugins) do
-    plugins
-    |> Enum.flat_map(&declared_resolve_doc_guards/1)
-    |> Barkpark.Content.ResolveDocGuards.publish()
-  end
-
-  defp declared_resolve_doc_guards(%{module: mod, name: name}) do
-    if Code.ensure_loaded?(mod) and function_exported?(mod, :resolve_doc_guards, 0) do
-      guards = Enum.map(mod.resolve_doc_guards(), &validate_resolve_doc_guard!(&1, name))
-      [%{name: name, module: mod, guards: guards}]
-    else
-      [%{name: name, module: mod, guards: []}]
-    end
-  end
-
-  defp validate_resolve_doc_guard!({mod, fun} = guard, _name)
-       when is_atom(mod) and is_atom(fun),
-       do: guard
-
-  defp validate_resolve_doc_guard!(other, name) do
-    raise ArgumentError,
-          "plugin #{inspect(name)} declared a malformed resolve-doc guard " <>
-            "#{inspect(other)}; expected {module, function}"
-  end
-
   # The mutate-door twin of `publish_pre_publish_fences/1`
   # (task-b04cbe7823d084a6): every registered plugin's `mutate_door_fences/0`
   # declaration, into the content-owned holder `Content.Mutations` reads. Same
@@ -766,7 +735,6 @@ defmodule Barkpark.Plugins.Registry do
     publish_pre_publish_fences([])
     publish_pre_write_transforms([])
     publish_paper_task_resolvers([])
-    publish_resolve_doc_guards([])
     publish_mutate_door_fences([])
     {:ok, %{plugins: %{}, baseline_plugins: nil}}
   end
