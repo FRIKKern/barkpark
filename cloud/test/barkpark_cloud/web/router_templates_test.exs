@@ -41,6 +41,21 @@ defmodule BarkparkCloud.Web.RouterTemplatesTest do
     assert "BARKPARK_WEBHOOK_SECRET" in blog["env_keys"]
   end
 
+  test "every served row carries app_dir and no_app_dir_reason for the Vercel clone handoff" do
+    conn = Router.call(conn(:get, "/v1/templates"), @opts)
+    %{"templates" => templates} = json_body(conn)
+
+    served = Map.new(templates, &{&1["slug"], {&1["app_dir"], &1["no_app_dir_reason"]}})
+
+    for t <- templates do
+      assert Map.has_key?(t, "app_dir") and Map.has_key?(t, "no_app_dir_reason"), t["slug"]
+    end
+
+    assert served["search-starter"] == {"templates/search-starter", nil}
+    assert {nil, reason} = served["place-directory"]
+    assert is_binary(reason)
+  end
+
   test "no secret or value ever appears in the catalog payload" do
     conn = Router.call(conn(:get, "/v1/templates"), @opts)
     body = conn.resp_body

@@ -26195,17 +26195,49 @@
     });
   }
 
-  // github.com/<owner>/<repo> URL host clone override wins over the template's
-  // default (monorepo) repo, so the Vercel handoff clones the user's NEW repo.
+  // Why a clone of the template's default repo is NOT offered, or "" when it is.
+  // The default repo is the Barkpark monorepo, whose ROOT is not the template's
+  // app (its vercel.json and echo-only build belong to the Barkpark demo), so a
+  // clone of it must name the folder Vercel builds: `tpl.app_dir`, served by
+  // GET /v1/templates from BarkparkCloud.Templates' catalog, the one place that
+  // decides it. A template with no such folder gets the catalog's reason instead
+  // of a link that cannot build. A repo override is the user's OWN new repo
+  // (the GitHub "Create repo" flow), which is the app itself, so it is always
+  // offered.
+  function vercelCloneWithheldReason(tpl, repoOverride) {
+    if (repoOverride) return "";
+    if (tpl && tpl.repo && tpl.app_dir) return "";
+    return (tpl && tpl.no_app_dir_reason) ||
+      "This template has no folder in its repository that Vercel can build as-is, so there is no Deploy to Vercel link for it.";
+  }
+
+  // The vercel.com/new/clone handoff, or "" when vercelCloneWithheldReason
+  // withholds it. A github.com/<owner>/<repo> override wins over the template's
+  // default (monorepo) repo, so the handoff clones the user's NEW repo from its
+  // root. Without an override the URL carries Vercel's `root-directory`
+  // parameter (https://vercel.com/docs/deploy-button/build-settings#root-directory)
+  // set to the template's app folder inside the monorepo.
   function vercelCloneUrl(tpl, boot, repoOverride) {
-    var repo = repoOverride || (tpl && tpl.repo) || "";
+    if (vercelCloneWithheldReason(tpl, repoOverride)) return "";
+    var repo = repoOverride || tpl.repo;
     var keys = (tpl && tpl.env_keys && tpl.env_keys.length) ? tpl.env_keys : (boot && boot.env ? Object.keys(boot.env) : []);
-    var params = [];
-    if (repo) params.push("repository-url=" + encodeURIComponent(repo));
+    var params = ["repository-url=" + encodeURIComponent(repo)];
+    if (!repoOverride) params.push("root-directory=" + encodeURIComponent(tpl.app_dir));
     if (keys.length) params.push("env=" + encodeURIComponent(keys.join(",")));
     params.push("envDescription=" + encodeURIComponent("Paste the values from the copy block on the launch screen."));
     if (tpl && tpl.docs) params.push("envLink=" + encodeURIComponent(tpl.docs));
     return "https://vercel.com/new/clone?" + params.join("&");
+  }
+
+  // The Deploy-to-Vercel anchor. When the clone is withheld it is still rendered,
+  // but hidden and without an href, next to the reason: the GitHub "Create repo"
+  // flow later points it at the user's new repo and reveals it (newCreateRepo).
+  function vercelDeployLinkHtml(clone, label, reason) {
+    if (clone) {
+      return '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">' + esc(label) + "</a>";
+    }
+    return '<a class="btn btn-block btn-vercel" id="new-vercel" target="_blank" rel="noopener" hidden>' + esc(label) + "</a>" +
+      '<p class="new-fineprint dim" id="new-vercel-withheld">' + esc(reason) + "</p>";
   }
 
   // A .env block (KEY=value per line) in the template's key order, only keys the
@@ -26251,7 +26283,7 @@
       '<p class="new-fineprint dim">Vercel will ask for ' + n + " environment variable" + (n === 1 ? "" : "s") +
         ". Copy each value here and paste it into the matching field on Vercel — or “Copy all as .env” and paste the whole block. Treat them as secret.</p>" +
       (rowsHtml ? '<ol class="new-env-rows">' + rowsHtml + "</ol>" : "") +
-      '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy to Vercel</a>' +
+      vercelDeployLinkHtml(clone, "Deploy to Vercel", vercelCloneWithheldReason(tpl)) +
     "</div>";
   }
 
@@ -26452,7 +26484,7 @@
       extra = ghBlock;
       vercelBlock = dotenv
         ? vercelFallbackHtml(tpl, boot, clone, dotenv)
-        : '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy your site to Vercel</a>';
+        : vercelDeployLinkHtml(clone, "Deploy your site to Vercel", vercelCloneWithheldReason(tpl));
     }
 
     var tail = vercelBlock +
@@ -26537,7 +26569,12 @@
     api("POST", "/v1/github/repos", { template: tpl.slug, name: name, private: false }).then(function (r) {
       if (r.ok && r.data) {
         var v = $("#new-vercel");
-        if (v) v.setAttribute("href", vercelCloneUrl(tpl, boot, r.data.html_url));
+        if (v) {
+          v.setAttribute("href", vercelCloneUrl(tpl, boot, r.data.html_url));
+          v.hidden = false;
+        }
+        var withheld = $("#new-vercel-withheld");
+        if (withheld) withheld.remove();
         btn.textContent = "Repo created";
         var res = $("#new-gh-result");
         if (res) {
@@ -30688,7 +30725,8 @@
       vercelClaimHtml: vercelClaimHtml, vercelClaimLinkHtml: vercelClaimLinkHtml,
       vercelClaimedHtml: vercelClaimedHtml, vercelClaimUnknownHtml: vercelClaimUnknownHtml,
       vercelClaimInnerHtml: vercelClaimInnerHtml,
-      vercelCloneUrl: vercelCloneUrl,
+      vercelCloneUrl: vercelCloneUrl, vercelCloneWithheldReason: vercelCloneWithheldReason,
+      vercelDeployLinkHtml: vercelDeployLinkHtml,
       // Guided fallback (no platform token): per-field copy + Deploy.
       vercelFallbackHtml: vercelFallbackHtml, vercelEnvRows: vercelEnvRows,
       deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim,

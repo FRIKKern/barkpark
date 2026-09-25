@@ -7404,6 +7404,131 @@ test("vercelFallbackHtml: values FIRST (per-field copy), then the Deploy button"
   assert.match(html, /href="https:\/\/vercel\.com\/new\/clone[^"]*" target="_blank" rel="noopener"/);
 });
 
+// ── The monorepo clone names the template's folder (task-32e385b29e75c102) ──
+// Without a user repo, the clone target is the template catalog's default repo,
+// the Barkpark monorepo, whose ROOT cannot build a template. The catalog
+// (BarkparkCloud.Templates, served by GET /v1/templates) carries each template's
+// `app_dir`, and __fixtures__/template_app_dirs.json mirrors it; the Elixir
+// TemplatesAppDirTest reds if the two drift or a directory stops being a
+// buildable app for its template. Vercel's parameter is `root-directory`
+// (https://vercel.com/docs/deploy-button/build-settings#root-directory).
+
+const templateAppDirs = JSON.parse(
+  fs.readFileSync(new URL("./__fixtures__/template_app_dirs.json", import.meta.url), "utf8"),
+);
+
+// A LITERAL expectation per slug, not derived from the fixture: moving a
+// template's folder (even with the catalog and fixture updated together) or
+// dropping the parameter reds here. `null` = the clone is withheld.
+const EXPECTED_ROOT_DIRECTORY = {
+  "astro-search-starter": "templates/astro-search-starter",
+  "blog-starter": null,
+  "place-directory": null,
+  "search-starter": "templates/search-starter",
+  "website-starter": null,
+};
+
+const CLONE_ENVDESC = "&envDescription=Paste%20the%20values%20from%20the%20copy%20block%20on%20the%20launch%20screen.";
+
+function catalogTemplate(row) {
+  return {
+    slug: row.slug,
+    repo: templateAppDirs.repo,
+    app_dir: row.app_dir,
+    no_app_dir_reason: row.no_app_dir_reason,
+    env_keys: ["BARKPARK_API_URL", "BARKPARK_TOKEN"],
+  };
+}
+
+// Every mismatch between what `h` (a hooks object, shipped or mutant) produces
+// from `rows` (the fixture, or a mutated copy) and the literal expectation.
+// [] = all correct.
+function cloneUrlMismatches(h, rows = templateAppDirs.templates) {
+  const out = [];
+  for (const row of rows) {
+    const tpl = catalogTemplate(row);
+    const want = EXPECTED_ROOT_DIRECTORY[row.slug];
+    const got = h.vercelCloneUrl(tpl, null);
+    if (want === null) {
+      if (got !== "") out.push(row.slug + ": expected the clone to be withheld, got " + got);
+      if (h.vercelCloneWithheldReason(tpl) !== row.no_app_dir_reason) {
+        out.push(row.slug + ": the withheld reason is not the catalog's no_app_dir_reason");
+      }
+    } else {
+      const exact = "https://vercel.com/new/clone?repository-url=" + encodeURIComponent(templateAppDirs.repo) +
+        "&root-directory=" + encodeURIComponent(want) +
+        "&env=" + encodeURIComponent("BARKPARK_API_URL,BARKPARK_TOKEN") + CLONE_ENVDESC;
+      if (got !== exact) out.push(row.slug + ": expected " + exact + ", got " + got);
+    }
+  }
+  return out;
+}
+
+test("vercelCloneUrl: every catalog template clones its own folder, or the clone is withheld", () => {
+  assert.deepEqual(templateAppDirs.templates.map((r) => r.slug), Object.keys(EXPECTED_ROOT_DIRECTORY),
+    "the fixture's templates must be exactly the expected set; a new template needs a decision here");
+  // Floors: both arms must actually be exercised.
+  assert.ok(templateAppDirs.templates.filter((r) => r.app_dir).length >= 2, "need at least two cloneable templates");
+  assert.ok(templateAppDirs.templates.filter((r) => !r.app_dir).length >= 1, "need at least one withheld template");
+  assert.deepEqual(cloneUrlMismatches(hooks), []);
+});
+
+test("vercelCloneUrl: a user's own repo is cloned from its root, never with the monorepo folder", () => {
+  const mine = "https://github.com/acme/my-site";
+  for (const row of templateAppDirs.templates) {
+    const url = hooks.vercelCloneUrl(catalogTemplate(row), null, mine);
+    assert.ok(url.startsWith("https://vercel.com/new/clone?repository-url=" + encodeURIComponent(mine) + "&"),
+      row.slug + ": the override must be the clone target: " + url);
+    assert.doesNotMatch(url, /root-directory/, row.slug + ": the user's repo IS the app");
+    assert.equal(hooks.vercelCloneWithheldReason(catalogTemplate(row), mine), "", row.slug);
+  }
+});
+
+test("vercelCloneUrl: a template missing repo or app_dir is withheld with a reason, never a bare link", () => {
+  assert.equal(hooks.vercelCloneUrl(null, null), "");
+  assert.equal(hooks.vercelCloneUrl({ slug: "x", repo: "https://github.com/FRIKKern/barkpark" }, null), "");
+  assert.equal(hooks.vercelCloneUrl({ slug: "x", app_dir: "templates/x" }, null), "");
+  assert.match(hooks.vercelCloneWithheldReason({ slug: "x" }), /no folder in its repository that Vercel can build/);
+});
+
+test("vercelDeployLinkHtml / vercelFallbackHtml: a withheld clone renders the reason and a hidden, href-less anchor", () => {
+  const row = templateAppDirs.templates.find((r) => r.slug === "place-directory");
+  const tpl = catalogTemplate(row);
+  const reason = hooks.vercelCloneWithheldReason(tpl);
+  const bare = hooks.vercelDeployLinkHtml("", "Deploy your site to Vercel", reason);
+  assert.match(bare, /<a class="btn btn-block btn-vercel" id="new-vercel" target="_blank" rel="noopener" hidden>/);
+  assert.doesNotMatch(bare, /href=/);
+  assert.match(bare, /id="new-vercel-withheld">This template runs on the Barkpark web demo/);
+
+  const boot = { env: { BARKPARK_API_URL: "https://acme.barkpark.cloud", BARKPARK_TOKEN: "bp_read_secret" } };
+  const html = hooks.vercelFallbackHtml(tpl, boot, hooks.vercelCloneUrl(tpl, boot), "BARKPARK_TOKEN=bp_read_secret");
+  assert.doesNotMatch(html, /href="https:\/\/vercel\.com/);
+  assert.match(html, /id="new-vercel-withheld"/);
+  assert.match(html, /data-copy="bp_read_secret"/, "the values stay copyable for a later deploy");
+
+  const live = hooks.vercelDeployLinkHtml("https://vercel.com/new/clone?x=1", "Deploy to Vercel", "");
+  assert.match(live, /id="new-vercel" href="https:\/\/vercel\.com\/new\/clone\?x=1" target="_blank"/);
+  assert.doesNotMatch(live, /new-vercel-withheld|hidden/);
+});
+
+test("CONTROL: the clone pin reds when root-directory is dropped or a folder moves", () => {
+  // Mutant 1: the shipped app.js without the root-directory parameter.
+  const dropped = replaceUnique(APP_SRC,
+    'if (!repoOverride) params.push("root-directory=" + encodeURIComponent(tpl.app_dir));', "",
+    { what: "drop the root-directory parameter" });
+  const droppedMismatches = cloneUrlMismatches(evalApp(dropped).hooks);
+  assert.deepEqual(droppedMismatches.map((m) => m.split(":")[0]).sort(), ["astro-search-starter", "search-starter"],
+    "dropping root-directory must red every cloneable template");
+
+  // Mutant 2: the catalog (mirrored by the fixture) moves search-starter's
+  // folder. The catalog, not app.js, owns the folder, so the mutation is a copy
+  // of the fixture fed to the shipped code.
+  const movedRows = templateAppDirs.templates.map((r) =>
+    r.slug === "search-starter" ? { ...r, app_dir: "apps/search-starter" } : r);
+  assert.deepEqual(cloneUrlMismatches(hooks, movedRows).map((m) => m.split(":")[0]), ["search-starter"],
+    "a moved folder must red exactly the template that moved");
+});
+
 test("vercelFallbackHtml: singular copy for one variable", () => {
   const tpl = { env_keys: ["BARKPARK_TOKEN"] };
   const html = hooks.vercelFallbackHtml(tpl, { env: { BARKPARK_TOKEN: "x" } }, "https://vercel.com/new/clone", "BARKPARK_TOKEN=x");

@@ -1,0 +1,30 @@
+{
+  "repo": "https://github.com/FRIKKern/barkpark",
+  "templates": [
+    {
+      "slug": "astro-search-starter",
+      "app_dir": "templates/astro-search-starter",
+      "no_app_dir_reason": null
+    },
+    {
+      "slug": "blog-starter",
+      "app_dir": null,
+      "no_app_dir_reason": "This starter is assembled by create-barkpark-app, so the Barkpark repository has no folder Vercel can build as-is. Create a GitHub repo for it on this screen (GitHub must be connected), or run npx create-barkpark-app and import the result into Vercel."
+    },
+    {
+      "slug": "place-directory",
+      "app_dir": null,
+      "no_app_dir_reason": "This template runs on the Barkpark web demo, which needs its local packages built before Next.js can build it. Vercel's default build cannot do that, so there is no Deploy to Vercel link for it yet."
+    },
+    {
+      "slug": "search-starter",
+      "app_dir": "templates/search-starter",
+      "no_app_dir_reason": null
+    },
+    {
+      "slug": "website-starter",
+      "app_dir": null,
+      "no_app_dir_reason": "This starter is assembled by create-barkpark-app, so the Barkpark repository has no folder Vercel can build as-is. Create a GitHub repo for it on this screen (GitHub must be connected), or run npx create-barkpark-app and import the result into Vercel."
+    }
+  ]
+}
