@@ -115,11 +115,16 @@ defmodule Barkpark.Content.ExactDraftDeleteTest do
 
   test "a separately committed human edit between read and delete survives", ctx do
     :ok = Barkpark.PluginEnv.with_plugins([InterleaveHook], ctx)
+    id = "interleaved-#{System.unique_integer([:positive])}"
+    # Registered BEFORE the unboxed writes so a crash or timeout mid-test still
+    # removes them. See purge_committed!/2.
+    before = unboxed(&committed_counts/0)
+    marks = unboxed(&committed_marks/0)
+    on_exit(fn -> purge_committed!(id, marks, before) end)
+
     # Independent database connections: a rollback cannot make this pass by
     # rolling back the simulated human write along with the failed deletion.
     Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
-      id = "interleaved-#{System.unique_integer([:positive])}"
-
       {:ok, d} =
         Content.create_document("note", %{"_id" => id, "title" => "Original"}, "production")
 
@@ -157,9 +162,84 @@ defmodule Barkpark.Content.ExactDraftDeleteTest do
         Process.delete(:exact_delete_writer)
         Process.delete(:exact_delete_human_rev)
         Task.shutdown(writer, :brutal_kill)
-        # The independently committed row and append-only history stay in the
-        # disposable test database as evidence. No global fixture is reused.
       end
+    end)
+  end
+
+  # ── unboxed teardown: every row the interleaved test COMMITTED ──────────────
+  #
+  # `unboxed_run/2` commits, so nothing rolls this test's writes back. Measured
+  # on a fresh partition (2026-09-25): one run left 1 `documents` row
+  # (drafts.interleaved-<n>, "Human won", dataset production), 1 `revisions`,
+  # 1 `mutation_events`, 1 `audit_events` and 1 scheduled ProjectorWorker
+  # `oban_jobs` row. Every later test in the same database then saw one extra
+  # production note: studio_live_plus_press_retry_test counts notes == 1.
+  #
+  # The delete is exact: the documents, revisions and events are keyed by this
+  # test's unique id; the id-sequenced tables are also bounded below by the
+  # watermark read before the test, and the Oban row by worker + scope + type.
+  # `revisions` and `audit_events` are append-only by trigger, so the purge runs
+  # with `session_replication_role = replica` (same instrument as
+  # cycle_fleet_test) inside one transaction, children before the document.
+  # It then asserts the committed counts are back to the pre-test values.
+  defp unboxed(fun), do: Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fun)
+
+  @committed_tables ~w(documents revisions mutation_events audit_events oban_jobs)
+
+  defp committed_counts do
+    Map.new(@committed_tables, fn t ->
+      %{rows: [[n]]} = Repo.query!("SELECT count(*) FROM #{t}")
+      {t, n}
+    end)
+  end
+
+  defp committed_marks do
+    Map.new(~w(mutation_events audit_events oban_jobs), fn t ->
+      %{rows: [[n]]} = Repo.query!("SELECT coalesce(max(id), 0) FROM #{t}")
+      {t, n}
+    end)
+  end
+
+  defp purge_committed!(id, marks, before) do
+    doc_ids = [id, "drafts." <> id]
+
+    unboxed(fn ->
+      Repo.transaction(fn ->
+        Repo.query!("SET LOCAL session_replication_role = replica")
+
+        Repo.query!(
+          "DELETE FROM revisions WHERE doc_id = ANY($1) AND type = 'note' AND dataset = 'production'",
+          [doc_ids]
+        )
+
+        Repo.query!(
+          "DELETE FROM mutation_events WHERE id > $1 AND doc_id = ANY($2) AND dataset = 'production'",
+          [marks["mutation_events"], doc_ids]
+        )
+
+        Repo.query!("DELETE FROM audit_events WHERE id > $1 AND subject = ANY($2)", [
+          marks["audit_events"],
+          doc_ids
+        ])
+
+        Repo.query!(
+          """
+          DELETE FROM oban_jobs WHERE id > $1
+            AND worker = 'Barkpark.EdgeProjector.ProjectorWorker'
+            AND args ->> 'scope' = 'production' AND args -> 'types' ? 'note'
+          """,
+          [marks["oban_jobs"]]
+        )
+
+        Repo.query!(
+          "DELETE FROM documents WHERE doc_id = ANY($1) AND type = 'note' AND dataset = 'production'",
+          [doc_ids]
+        )
+      end)
+
+      now = committed_counts()
+      leaked = for {t, n} <- now, n != before[t], into: %{}, do: {t, n - before[t]}
+      assert leaked == %{}, "the interleaved test left committed rows: #{inspect(leaked)}"
     end)
   end
 

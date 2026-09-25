@@ -3539,8 +3539,14 @@ type DeployDeliveryCensored struct {
 // A site can appear here with Sample 0 and Cancelled > 0 — every row it filed in
 // the window was stopped by hand. That is a real, reportable state, and it is
 // NOT still waiting.
+//
+// Name and Slug are the SAME identity pair DeployCoverageSite carries, resolved
+// server-side by the same helper; both are null when the site row is gone, and
+// the renderer then prints the id marked "(no site row)", never a blank.
 type DeployDeliverySite struct {
 	SiteID               string   `json:"site_id"`
+	Name                 string   `json:"name"`
+	Slug                 string   `json:"slug"`
 	Sample               int      `json:"sample"`
 	Delivered            int      `json:"delivered"`
 	Censored             int      `json:"censored"`

@@ -3,6 +3,8 @@
 
 [![Deploy with Barkpark](https://barkpark.cloud/button.svg)](https://barkpark.cloud/new?template=blog-starter)
 
+What the button does, and how to add it to your own template: [Deploy with Barkpark](docs/setup/DEPLOY-WITH-BARKPARK.md).
+
 Barkpark is an open-source CMS you can run on your computer or a server.
 Define your own fields, edit content visually, and publish it through an API.
 Build a website or just keep a recipe collection. Use only what you need.

@@ -15,7 +15,8 @@ defmodule BarkparkCloud.DeployLedgerDeliveryScopeTest do
   which answers `403 {"error":"forbidden","scope":"platform","required":
   "platform_operator"}` to a real account token. The route `bp` actually reads is
   the TEAM one, `GET /v1/deploy-ledger/census`, and it `Map.put` only `:scope`.
-  So the reader landed on a route nobody can reach, and the ONLY arm production
+  So the reader landed on a route nobody could reach (the operator allowlist was
+  unset on prod until gr-ops-platform-admin-emails, 2026-09-25), and the ONLY arm production
   ever executed was the `d == nil` arm its Go test forbids — a vacuous green
   asserted against a fixture that test builds itself.
 
@@ -336,6 +337,60 @@ defmodule BarkparkCloud.DeployLedgerDeliveryScopeTest do
     end
   end
 
+  ## ── 2b. Site NAMES are a tenancy surface too ──────────────────────────────
+  #
+  # dr-w33-bl-delivery-sites-node-is-anonymous. Each `sites` entry now carries
+  # `name` and `slug` beside `site_id` — the shape `coverage_site_row/1`
+  # settled on — so the name lookup is a second read that could, done wrong,
+  # name a site the caller does not own. Asserted over the wire, in BOTH
+  # directions, and against the NAME and SLUG bytes, not only the id: a leak
+  # through the name join would never show up in an id-keyed check.
+
+  describe "the delivery sites node NAMES its sites, and only the caller's" do
+    test "team A's delivery site carries A's name and slug, and B's appear nowhere" do
+      f = two_teams()
+
+      b = body(call("/v1/deploy-ledger/census?#{@window}", session_token(f.user_a)))
+
+      # The tenancy refusal FIRST, so a leak reds on the sentence that names it
+      # rather than on the shape assertion below it.
+      for foreign <- [f.site_b.name, f.site_b.slug] do
+        refute conn_body_names?(b, foreign),
+               "team #{f.team_a.slug}'s census body names team #{f.team_b.slug}'s site " <>
+                 "#{inspect(foreign)} — the delivery name lookup crossed the tenancy line"
+      end
+
+      assert [site] = b["delivery"]["sites"]
+      assert site["site_id"] == f.site_a.id
+      assert site["name"] == f.site_a.name
+      assert site["slug"] == f.site_a.slug
+    end
+
+    test "the OTHER direction — team B's body never names team A's site" do
+      f = two_teams()
+
+      b = body(call("/v1/deploy-ledger/census?#{@window}", session_token(f.user_b)))
+
+      refute conn_body_names?(b, f.site_a.name),
+             "team B's census body names team A's site #{inspect(f.site_a.name)}"
+
+      refute conn_body_names?(b, f.site_a.slug)
+
+      assert [site] = b["delivery"]["sites"]
+      assert {site["name"], site["slug"]} == {f.site_b.name, f.site_b.slug}
+    end
+
+    test "the fleet read (nil scope) names every site — the names are resolved, not dropped" do
+      f = two_teams()
+
+      d = DeployLedger.delivery(@from, @to, as_of: @to)
+      by_id = Map.new(d.sites, &{&1.site_id, {&1.name, &1.slug}})
+
+      assert by_id[f.site_a.id] == {f.site_a.name, f.site_a.slug}
+      assert by_id[f.site_b.id] == {f.site_b.name, f.site_b.slug}
+    end
+  end
+
   ## ── 3. The refusal arms survive scoping ───────────────────────────────────
 
   describe "a thin SCOPED population still refuses, with its evidence" do
@@ -390,4 +445,10 @@ defmodule BarkparkCloud.DeployLedgerDeliveryScopeTest do
   # appear ANYWHERE in the bytes team A receives", and a keyed check would miss
   # a leak into a node this test did not think to name.
   defp conn_body_mentions?(body, id), do: body |> Jason.encode!() |> String.contains?(id)
+
+  # A NAME is matched as a whole JSON string value, quotes included. Fixture
+  # names are `S <n>` / `s-<n>` and `n` is monotonic, so a bare substring check
+  # would flake whenever A's number is a prefix of B's (`s-12` inside `s-123`).
+  defp conn_body_names?(body, value),
+    do: body |> Jason.encode!() |> String.contains?(Jason.encode!(value))
 end

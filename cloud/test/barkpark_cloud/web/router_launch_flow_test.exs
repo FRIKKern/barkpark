@@ -253,6 +253,69 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
     end
   end
 
+  # The NAMELESS double submit. go_live defaults an absent/blank/whitespace
+  # name from the template title, so two nameless submissions of one template
+  # are the same launch and must reconcile exactly like two named ones. The
+  # twin check uses go_live's own resolved name/slug (`launch_identity/1`);
+  # feeding it the raw `name` param instead reds every test in this block.
+  describe "double submit with no name (the template-defaulted name)" do
+    for {label, extra} <- [
+          {"absent", %{}},
+          {"blank", %{name: ""}},
+          {"spaces-only", %{name: "   "}}
+        ] do
+      @nameless_body Map.merge(%{template: "blog-starter"}, extra)
+
+      test "#{label} name, sequential → 201 then 409 already_provisioning, same id; one row, one job" do
+        body = @nameless_body
+        {team, token} = dup_team(:supporter)
+
+        first = call(:post, "/v1/launch", body, token)
+        assert first.status == 201
+        id = json_body(first)["barkpark"]["id"]
+        assert json_body(first)["barkpark"]["name"] == "Blog Starter"
+
+        second = call(:post, "/v1/launch", body, token)
+
+        assert second.status == 409,
+               "want 409 already_provisioning, got #{second.status} #{second.resp_body}"
+
+        assert json_body(second)["error"] == "already_provisioning"
+        assert json_body(second)["barkpark"]["id"] == id
+
+        ledger = dup_ledger(team)
+        assert ledger.rows == [id]
+        assert ledger.provision_jobs == 1
+      end
+
+      test "#{label} name, racing pair → one 201 + one 409, same id; one row, one job" do
+        body = @nameless_body
+        {team, token} = dup_team(:supporter)
+        parent = self()
+
+        responses =
+          for _ <- 1..2 do
+            Task.async(fn ->
+              Ecto.Adapters.SQL.Sandbox.allow(Repo, parent, self())
+              conn = call(:post, "/v1/launch", body, token)
+              {conn.status, json_body(conn)}
+            end)
+          end
+          |> Enum.map(&Task.await(&1, 30_000))
+
+        assert responses |> Enum.map(&elem(&1, 0)) |> Enum.sort() == [201, 409],
+               "want exactly one 201 and one 409, got #{inspect(responses)}"
+
+        assert [id] = responses |> Enum.map(fn {_, b} -> b["barkpark"]["id"] end) |> Enum.uniq()
+        assert {409, %{"error" => "already_provisioning"}} = List.keyfind(responses, 409, 0)
+
+        ledger = dup_ledger(team)
+        assert ledger.rows == [id]
+        assert ledger.provision_jobs == 1
+      end
+    end
+  end
+
   test "unentitled + trial spent → 402 {no_active_subscription, checkout_path}" do
     {user, team} = user_with_team()
     exhaust_trial(team)

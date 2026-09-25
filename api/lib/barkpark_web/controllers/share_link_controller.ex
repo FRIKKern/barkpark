@@ -186,9 +186,7 @@ defmodule BarkparkWeb.ShareLinkController do
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Errors
-  alias Barkpark.Content.Labels
   alias Barkpark.Media.Storage.MediaFile
-  alias Barkpark.PortableDoc.Render
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Links, ShareLink}
   alias BarkparkWeb.ErrorResponse
@@ -650,32 +648,19 @@ defmodule BarkparkWeb.ShareLinkController do
   # (which would distinguish "redacted content exists here" from "this paper is
   # empty") is never disclosed to the token holder.
   #
-  # This deliberately does NOT copy Studio's raw read: an editor is an
+  # This deliberately does NOT copy Studio's editor read: an editor is an
   # authenticated author looking at their own document, so it may see the
-  # unredacted, unsanitized source. This surface may not.
+  # unredacted source. This surface may not.
+  #
+  # `Content.Papers.reader_html/3` renders a blocks paper from its blocks on
+  # every read and never serves the stored `body_html` cache for it; only a
+  # legacy paper with no blocks is served its sanitized `body_html`.
   #
   # Reference resolution stays bound to the LINK scope (not request/global
   # scope) — `reader_schema_scope/2` only fills in the paper's own ids where
   # the caller passed none, so the ids from `scope/1` win.
-  defp paper_body_html(%Content.Document{} = paper, %ShareLink{} = link) do
-    case Content.Papers.reader_source(paper, link.dataset, scope(link)) do
-      {:blocks, blocks} ->
-        render_opts =
-          Labels.paper_render_opts(
-            link.dataset,
-            Map.get(paper.content || %{}, "style"),
-            scope(link)
-          )
-
-        {:ok, Render.render_blocks(blocks, render_opts)}
-
-      {:html, sanitized_html} ->
-        {:ok, sanitized_html}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  defp paper_body_html(%Content.Document{} = paper, %ShareLink{} = link),
+    do: Content.Papers.reader_html(paper, link.dataset, scope(link))
 
   defp paper_body_html(_paper, _link), do: {:error, :not_found}
 

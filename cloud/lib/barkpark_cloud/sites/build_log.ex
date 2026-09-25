@@ -4,9 +4,10 @@ defmodule BarkparkCloud.Sites.BuildLog do
   for the black box recorder, addressed by DEPLOYMENT ID.
 
   It shipped operator-gated and `dr-w19-site-build-log-is-operator-only` re-pointed
-  it: `:platform_admin_emails` is unset on prod and unsettable through any route,
-  so the one deploy-health read carrying a failed build's own words was readable by
-  zero accounts. The router now takes it through `with_team_site(conn, {:ability,
+  it: `:platform_admin_emails` was unset on prod then (gr-ops-platform-admin-emails
+  provisioned it 2026-09-25) and is unsettable through any route, so the one
+  deploy-health read carrying a failed build's own words was readable by zero
+  accounts. The router now takes it through `with_team_site(conn, {:ability,
   "read"}, …)` — the SAME door `GET /v1/sites/:id/deployments/:dep_id` uses — and
   hands this module the already-team-scoped `site.id`. Nothing about WHAT crosses
   the boundary changed (see the raw-bytes and field-allowlist sections below);

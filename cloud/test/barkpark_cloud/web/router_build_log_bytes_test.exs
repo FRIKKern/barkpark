@@ -10,9 +10,9 @@ defmodule BarkparkCloud.Web.RouterBuildLogBytesTest do
   router to its catch-all.
 
   WHAT IS DELIBERATELY NOT ASSERTED. No test here asserts a live 200 from the
-  operator gate IN PRODUCTION. `PLATFORM_ADMIN_EMAILS` is unset in prod
-  (`gr-ops-platform-admin-emails`), so this route is 403-dark there for every
-  real account. These tests set the allowlist in Application config for the test
+  operator gate IN PRODUCTION. `PLATFORM_ADMIN_EMAILS` was provisioned in prod
+  2026-09-25 (`gr-ops-platform-admin-emails`), and which accounts it names is a
+  prod fact this file cannot see. These tests set the allowlist in Application config for the test
   process, which proves the GATE and the ROUTE and claims nothing about prod.
 
   `async: false` — the operator allowlist is process-global Application config.

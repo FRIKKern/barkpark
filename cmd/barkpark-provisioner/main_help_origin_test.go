@@ -8,7 +8,7 @@ import (
 )
 
 // dwb-doc-lag-microfixes: the --control-url examples in this file once named
-// cloud.barkpark.dev, a domain Barkpark Cloud never served (the live apex is
+// a retired .dev control-plane host that Barkpark Cloud never served (the live apex is
 // barkpark.cloud). A wrong example in operator help is copied into unit files,
 // so this pins every --control-url example to the canonical origin and refuses
 // the retired domain anywhere in the source.

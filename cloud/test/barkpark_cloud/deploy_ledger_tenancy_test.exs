@@ -2,14 +2,15 @@ defmodule BarkparkCloud.DeployLedgerTenancyTest do
   @moduledoc """
   THE TEAM-SCOPED CENSUS — `GET /v1/deploy-ledger/census` (dr-w16-s6).
 
-  Sixteen waves of this epic built a deploy census that is correct to the row and
-  that NOBODY CAN READ: the only route over it is
+  Sixteen waves of this epic built a deploy census that was correct to the row and
+  that NOBODY COULD READ: the only route over it was
   `GET /v1/operator/deploy-ledger/census`, gated by
-  `Auth.require_platform_operator`, and `PLATFORM_ADMIN_EMAILS` is unset in
-  production — measured live this wave, that route answers
+  `Auth.require_platform_operator`, and `PLATFORM_ADMIN_EMAILS` was unset in
+  production — measured live that wave, that route answered
   `403 {"error":"forbidden","scope":"platform","required":"platform_operator"}`
-  to a real token in the same minute `GET /v1/sites` answers it 200. The operator
-  population is zero BY CONSTRUCTION. This file covers the read that reaches a
+  to a real token in the same minute `GET /v1/sites` answered it 200. The operator
+  population was zero BY CONSTRUCTION (gr-ops-platform-admin-emails provisioned it
+  2026-09-25; non-operator members still read only this route). This file covers the read that reaches a
   real, non-admin caller.
 
   FOUR PROPERTIES, and the census is worse than useless without any of them:

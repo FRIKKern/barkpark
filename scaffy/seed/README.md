@@ -164,6 +164,17 @@ commands they did not touch dies the same death as one that fires on every PR:
 
 ### WHERE THIS RENDERS, AND WHO IS FORCED TO LOOK — the honest answer
 
+**UPDATE 2026-09-25 — the renderer is now wired.** `scaffy-catalog-drift.yml`
+gained a `pull_request` arm on the same paths as its push arm (task
+`dr-w31-bl-served-catalog-drift-is-red-and-unowned`). On a PR its last step
+runs `--impact` over `git diff --name-only HEAD^1 HEAD` of the merge commit:
+QUIET greens, NOTICE and CANNOT READ red that check, and drift the notice does
+not bill to the PR is a `::warning::`, never a red. That check is still **not
+required** and must never be (a paths-filtered name deadlocks PRs that miss
+the paths), so "nothing forces a look" below remains true of the merge button;
+what changed is that the author now sees a red check instead of nothing. The
+rest of this section is the record of why it shipped unwired.
+
 **Nothing forces a look. This is advisory, and it is advisory for a structural
 reason, not an oversight.**
 

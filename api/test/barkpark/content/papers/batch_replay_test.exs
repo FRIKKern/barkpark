@@ -402,6 +402,8 @@ defmodule Barkpark.Content.Papers.BatchReplayTest do
   end
 
   test "concurrent callers sharing one request identity produce one write and one replay" do
+    Barkpark.DeletedWorkspaceResidue.purge_on_exit()
+
     Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
       ws = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(ws)

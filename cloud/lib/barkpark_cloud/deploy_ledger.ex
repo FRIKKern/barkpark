@@ -2889,6 +2889,30 @@ defmodule BarkparkCloud.DeployLedger do
       |> Enum.map(&Map.delete(&1, :observations))
       |> Enum.sort_by(&{&1.sample, &1.site_id}, :desc)
 
+    # WHICH SITE, NOT WHICH UUID (dr-w33-bl-delivery-sites-node-is-anonymous).
+    # The still-waiting line used to print a bare `site_id`, and an operator had
+    # to hand-join the sites table to learn it was `live-auto`. The SAME shape
+    # the never-covered list settled on (`coverage_site_row/1`): `name` and
+    # `slug` beside `site_id`, both NULLABLE, resolved by the SAME helper
+    # (`site_names/1`), over the SHOWN rows only.
+    #
+    # TENANCY: every id handed to `site_names/1` was harvested from `rows`,
+    # which came out of `scoped` — already narrowed by `scope_to_sites/2`. A site
+    # that can be named here is a site that was already in the caller's scope;
+    # the id list is never built from request params.
+    #
+    # TWO READS, NO DROPPED ROW. The names are read after the rows, so a site
+    # deleted in between resolves to no name. `Map.get/3` with a nil default is
+    # a LEFT join: the row survives with `name: nil`, it is never silently
+    # dropped the way an inner join over a moving set would drop it.
+    shown = Enum.take(ranked, site_limit)
+    names = site_names(shown |> Enum.map(& &1.site_id) |> Enum.uniq())
+
+    shown =
+      Enum.map(shown, fn site ->
+        Map.merge(site, Map.get(names, site.site_id, %{name: nil, slug: nil}))
+      end)
+
     %{
       window: %{from: from, to: to, width_seconds: width},
       as_of: as_of,
@@ -2910,7 +2934,7 @@ defmodule BarkparkCloud.DeployLedger do
       # human stopped. See `site_delivery/3`.
       cancelled: Enum.reduce(site_nodes, 0, &(&1.cancelled + &2)),
       min_sample: @min_sample,
-      sites: Enum.take(ranked, site_limit),
+      sites: shown,
       # THE SAME TRUNCATION MARKER the census node carries. `site_limit` has
       # defaulted to 50 here too and cut just as silently; the Go side's own
       # marker is over its OWN 10-row clamp and is structurally blind to this

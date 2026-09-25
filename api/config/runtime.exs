@@ -182,6 +182,20 @@ if System.get_env("BARKPARK_CLAUDE_CHAT") in ["0", "false", "no", "off"] do
   config :barkpark, :claude_chat, enabled: false
 end
 
+# Capability switches for the non-plugin subsystems (task-2f59ba23bcad333e,
+# `Barkpark.Capability`): studio_chat, cycle_fleet, epic_fleet. All ON unless
+# listed here, e.g. BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet. An OFF
+# subsystem starts no processes and its routes answer 404. This is the whole
+# Studio Chat subsystem; BARKPARK_CLAUDE_CHAT above only turns off the Claude
+# provider inside it. An unknown name refuses the boot.
+case System.get_env("BARKPARK_CAPABILITIES_OFF") do
+  off when is_binary(off) and off != "" ->
+    config :barkpark, Barkpark.Capability, Barkpark.Capability.parse_off_list(off)
+
+  _ ->
+    :ok
+end
+
 # "Log in with Barkpark Cloud" (instance-login handoff): on a cloud-managed
 # instance, the control plane's public origin here puts the cloud sign-in
 # button on /login. The button deep-links to the cloud SPA, which mints a

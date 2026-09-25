@@ -140,7 +140,7 @@ CLAUDE.md elixir the repo router doc; the Elixir suite reads it
 DESIGN.md none design notes
 LICENSE none the licence
 Makefile none developer entry points
-README.md none human readme
+README.md cloud,elixir human readme; deploy_button_docs_test.exs reads its badge (dwb-9)
 VERSION elixir the checked-in release marker Barkpark.BuildInfo reads at compile time (tier 3, declared in ELIXIR_COMPILE_PATHS); a docker or tarball build has no .git and takes its release from it
 api elixir the Phoenix app; the Elixir suite compiles and tests it
 apps none secondary app trees

@@ -447,8 +447,8 @@ defmodule BarkparkCloud.NotificationsTest do
   ## The daily fleet digest — dr-w19-s5, THE ADDRESS
   ##
   ## `deliver_fleet_digest/1` used to resolve `platform_admin_emails/0`, whose
-  ## only source is a config allowlist that is unset on prod and hard-defaults to
-  ## `[]`: the one push channel for fleet health succeeded at sending nothing,
+  ## only source is a config allowlist that was then unset on prod (provisioned
+  ## 2026-09-25 by gr-ops-platform-admin-emails) and hard-defaults to `[]`: the one push channel for fleet health succeeded at sending nothing,
   ## every day, for its whole recorded life. It now partitions the fleet by team
   ## and mails each team's own members. These tests pin the two things a SOURCE
   ## census structurally cannot: that the population is REAL (a registered

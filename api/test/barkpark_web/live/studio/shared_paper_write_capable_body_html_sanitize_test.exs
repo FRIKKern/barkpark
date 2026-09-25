@@ -211,4 +211,50 @@ defmodule BarkparkWeb.Studio.SharedPaperWriteCapableBodyHtmlSanitizeTest do
       assert view.pid == pid_before
     end
   end
+
+  # pt-backlog-kill-the-body-html-cache — a blocks paper's body renders from its
+  # blocks, so the write-capable arm must not read the stored `body_html` cache
+  # for it at all. Before that change the socket carried the cache in
+  # `:paper_html` (unused by the block arm, but read and sanitized on every
+  # open); the marker below is what this test would have found there.
+  describe "a write-capable Studio socket on a blocks paper" do
+    test "does not read the stored body_html cache into :paper_html", %{
+      ws: ws,
+      proj: proj,
+      conn: conn
+    } do
+      slug = "wcap-blocks-#{System.unique_integer([:positive])}"
+      marker = "CACHE-ONLY-MARKER-#{System.unique_integer([:positive])}"
+
+      {:ok, paper} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => slug,
+            "title" => "Blocks paper",
+            "dataset" => @dataset,
+            "blocks" => [
+              %{
+                "id" => "p1",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Prose from the blocks"}]
+              }
+            ],
+            "workspace_id" => ws.id,
+            "project_id" => proj.id
+          })
+        )
+
+      paper = plant_body_html!(paper, "<p>#{marker}</p>")
+      assert is_list(paper.content["blocks"])
+
+      {view, html} = open_paper!(conn, paper.doc_id)
+      assert_write_capable!(view)
+
+      socket = :sys.get_state(view.pid).socket
+      assert socket.assigns.paper_block_mode == true
+      assert socket.assigns.paper_html == ""
+      refute html =~ marker
+      refute render(view) =~ marker
+    end
+  end
 end

@@ -5122,7 +5122,8 @@ defmodule BarkparkCloud.Web.Router do
   #
   #   1. `Auth.require_platform_operator` — 401 with no session, 403 for a
   #      non-operator session, and 403 `allowlist: "unconfigured"` when
-  #      PLATFORM_ADMIN_EMAILS is unset (which it is, in production). It FAILS
+  #      PLATFORM_ADMIN_EMAILS is unset (it is set in production since
+  #      2026-09-25, gr-ops-platform-admin-emails). It FAILS
   #      CLOSED: an unconfigured allowlist admits nobody rather than everybody.
   #      An operator-only send route reachable by anyone is a spam cannon.
   #   2. `digest_send:<user_id>` — 2/60s (DeviceAuth.RateLimiter). The smallest
@@ -5396,10 +5397,11 @@ defmodule BarkparkCloud.Web.Router do
   # GET /v1/deploy-ledger/census?from=&to=[&site_ids=a,b] → 200 <census + scope>
   # — THE SAME census, over the CALLER'S OWN sites (dr-w16-s6). The operator
   # route above is gated by `require_platform_operator`, and PLATFORM_ADMIN_EMAILS
-  # is unset in production: measured live this wave, that route answers
-  # `403 {"error":"forbidden","scope":"platform","required":"platform_operator"}`
-  # to every real account, in the same minute GET /v1/sites answers 200 to the
-  # same token. Sixteen waves built a correct number nobody could read. This is
+  # was unset in production when this landed: measured live that wave, that route
+  # answered `403 {"error":"forbidden","scope":"platform","required":"platform_operator"}`
+  # to every real account, in the same minute GET /v1/sites answered 200 to the
+  # same token. (gr-ops-platform-admin-emails provisioned the allowlist
+  # 2026-09-25; this route remains the read for every non-operator member.) Sixteen waves built a correct number nobody could read. This is
   # the read.
   #
   # ONE census computation, never two: `DeployLedger.census/3` is called here
@@ -5461,7 +5463,9 @@ defmodule BarkparkCloud.Web.Router do
               |> Map.put(:scope, census_scope(team, scoped))
               # THE DELIVERY NODE, SCOPED (dr-w21-s6). It was added ONLY by
               # `deploy_census_json/2` on the OPERATOR route, so wave 15's
-              # reader shipped onto a route nobody can reach: measured live,
+              # reader shipped onto a route nobody could reach (the operator
+              # allowlist was unset on prod until gr-ops-platform-admin-emails,
+              # 2026-09-25): measured live,
               # `bp cloud deployments -o table` rendered "NOT MEASURED — this
               # control plane sends no delivery census" to every real operator,
               # because the only route a real token can reach is this one and it
@@ -6957,24 +6961,37 @@ defmodule BarkparkCloud.Web.Router do
   # to `current_team = nil`, so 403 BEFORE querying rather than running the fence
   # against a nil team_id.
   #
-  # THE SELF-SCOPED READ IS NOT FREE, AND THE NUMBER IS MEASURED, NOT ARGUED.
-  # EXPLAIN (ANALYZE, BUFFERS) against a seeded table (one team, 200k rows, 50
-  # recipients) shows the planner DECLINING `notification_deliveries_team_id_
-  # inserted_at_index` for the fenced query — `lower(recipient)` is not indexed,
-  # so it bitmap-scans `notification_deliveries_team_id_index`, filters 196k rows
-  # away and top-N heapsorts what is left: 30.8 ms / 3798 shared buffers. The
-  # ADMIN read on the same team still walks the compound index backwards and
-  # stops at the LIMIT: 0.037 ms / 6 buffers. The team fence keeps it bounded and
-  # 30 ms is a fine page today, but it scales with the TEAM'S WHOLE LOG rather
-  # than the page size. The table's unboundedness is now CLOSED —
-  # `Workers.AgentRetentionWorker` prunes `notification_deliveries` past 180 days
-  # (cch-w34-bl-delivery-log-has-no-retention) — so the team's whole log is
-  # bounded by that window rather than by nothing. The remaining fix is an
-  # index on `(team_id, lower(recipient), inserted_at)` — deliberately NOT taken
-  # in this slice (it is a migration, outside this slice's file fence). It is
-  # OPEN WORK, not a solved problem: re-run the same EXPLAIN (ANALYZE, BUFFERS)
-  # after adding it and quote both plans, because a green suite proves nothing
-  # about a query plan.
+  # THE SELF-SCOPED READ WAS NOT FREE, AND THE NUMBERS ARE MEASURED, NOT ARGUED.
+  # Wave 33 (one team, 200k rows, 50 recipients) measured the planner DECLINING
+  # `notification_deliveries_team_id_inserted_at_index` for the fenced query and
+  # bitmap-scanning the team: 30.8 ms / 3798 shared buffers, against the ADMIN
+  # read's 0.037 ms / 6. The cause is that `lower(recipient)` was not indexed,
+  # so the fence was a Filter applied row by row AFTER the team fence, and the
+  # planner has no statistics for the expression (it guesses a flat 0.5%).
+  #
+  # cch-w34-bl-lower-recipient-index RE-MEASURED it (PG 17 local, seeded,
+  # EXPLAIN (ANALYZE, BUFFERS), warm, Limit-node buffers) against the index set
+  # origin/main ships — 20260629120300's `(team_id)` + `(team_id, inserted_at)`
+  # plus 20260918110000's three `(team_id, <axis>, inserted_at)` — and the
+  # read DEGRADES WITH RECIPIENT CARDINALITY and with the member's SHARE of the
+  # log, worst for a member with FEW rows, because the LIMIT never fills and
+  # the scan walks the whole team partition:
+  #
+  #     shape (heap order)              member        absent member   admin
+  #     1 team x 200k, 50 rcpt (append)  100 / 0.48ms  7060 / 33.7ms   15
+  #     1 team x 200k, 50 rcpt (random) 2513 / 2.6ms  202377 / 70ms   65
+  #     5 teams x 50k, 25 rcpt (append)  923 / 7.9ms   923 / 7.5ms     15
+  #     5 teams x 50k, 25 rcpt (random) 1398 / 1.1ms  50554 / 12.5ms  62
+  #
+  # ("absent member" = a member with no rows yet, e.g. a new joiner; `Rows
+  # Removed by Filter` equals the team's whole log.) Migration 20260925120000
+  # adds `(team_id, lower(recipient), inserted_at)`, which moves the fence into
+  # the Index Cond and walks backwards to the LIMIT. AFTER, same shapes:
+  # member 56 / 63 / 37 / 65 buffers (<= 0.13 ms), absent member 12 buffers
+  # (<= 0.04 ms) in all four, admin unchanged. A member's page now costs about
+  # one heap page per returned row — the admin's order of magnitude — instead
+  # of the team's whole log. A green suite proved none of this; the plans are
+  # quoted in full on the PR that added the index.
   #
   # `?channel=` / `?status=` / `?event=` narrow the log, and `?before=<oldest
   # inserted_at>&before_id=<that row's id>` walks the next page (the /v1/audit
@@ -9820,8 +9837,9 @@ defmodule BarkparkCloud.Web.Router do
   #
   # TEAM-SCOPED, the SAME door its siblings already use
   # (dr-w19-site-build-log-is-operator-only). It shipped `operator`-gated, which is
-  # the `:platform_admin_emails` allowlist — unset on prod and unsettable through
-  # any route, console action or User field (`gr-ops-platform-admin-emails`) — so
+  # the `:platform_admin_emails` allowlist — then unset on prod (provisioned
+  # 2026-09-25 by `gr-ops-platform-admin-emails`) and unsettable through any
+  # route, console action or User field — so
   # the ONE deploy-health read carrying a failed build's own words was readable by
   # ZERO accounts while `GET /v1/sites/:id/deployments/:dep_id` next door answered
   # every member of the owning team. Fail-closed to the point of uselessness is not
@@ -9869,9 +9887,9 @@ defmodule BarkparkCloud.Web.Router do
   # the exact condition it widened under: "the widening moved WHO may ask, never
   # WHAT is served … Not raw log bytes, and never has." THIS route serves the
   # bytes, so that argument does not reach it and the audience does not move with
-  # it. `Auth.require_platform_operator/2` is 403-dark in production today
-  # (`gr-ops-platform-admin-emails`), which this route INHERITS from the row this
-  # task was filed under — no criterion here asserts a live 200 from it, and
+  # it. `Auth.require_platform_operator/2` admits only the platform-admin
+  # allowlist (provisioned on the live control plane 2026-09-25,
+  # `gr-ops-platform-admin-emails`) — no criterion here asserts a live 200 from it, and
   # widening it is a separate decision with a separate secret-boundary review.
   # All policy lives in `Sites.BuildLogBytes`.
   get "/v1/sites/:id/deployments/:dep_id/build-log/bytes" do
@@ -11765,25 +11783,44 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # dwb-launch-flow-double-submit-test: the team's in-flight twin of THIS
-  # launch request (same slug, template, provider — `Registry.inflight_launch_twin/4`
-  # owns the predicate), or nil. Read from the raw body params because go_live
-  # consults it BEFORE its own validation: an unknown provider normalizes to
-  # `:error`, which no row carries, so it simply finds no twin.
-  defp launch_twin(conn) do
-    case conn.body_params["name"] do
-      name when is_binary(name) and name != "" ->
-        Registry.inflight_launch_twin(
-          conn.assigns.current_team,
-          slugify(name),
-          template_or_nil(conn.body_params["template"]),
-          launch_provider(conn.body_params["provider"])
-        )
+  # The launch request's identity, resolved ONCE per request: go_live inserts
+  # with it AND looks for an in-flight twin with it, so the two can never
+  # disagree. The name is OPTIONAL when a template is given: absent, blank or
+  # whitespace-only defaults to the template's display title (else its slug),
+  # so the /new form's "(optional)" label, the badge flow and a bare curl all
+  # launch — and a nameless double-submit resolves to the SAME slug as its
+  # first submission. With no template there is nothing to derive from: name
+  # and slug stay nil and the 422 name_required stands. `slugify/1` is called
+  # once because its fallback for an all-symbol name is random.
+  #
+  # Resolved before go_live's validation, so `provider` may be `:error` here
+  # (the cond 422s it before any insert); no row carries it, so the twin
+  # lookup simply finds nothing.
+  defp launch_identity(conn) do
+    template = template_or_nil(conn.body_params["template"])
+    name = launch_name(conn.body_params["name"], template)
 
-      _ ->
-        nil
-    end
+    %{
+      template: template,
+      name: name,
+      slug: if(is_binary(name), do: slugify(name), else: nil),
+      provider: launch_provider(conn.body_params["provider"])
+    }
   end
+
+  # dwb-launch-flow-double-submit-test: the team's in-flight twin of THIS
+  # launch (same slug, template, provider — `Registry.inflight_launch_twin/4`
+  # owns the predicate), or nil.
+  defp launch_twin(conn, %{slug: slug} = launch) when is_binary(slug) do
+    Registry.inflight_launch_twin(
+      conn.assigns.current_team,
+      slug,
+      launch.template,
+      launch.provider
+    )
+  end
+
+  defp launch_twin(_conn, _launch), do: nil
 
   # The "already provisioning" envelope the /new client reconciles to (it jumps
   # to the progress view of `barkpark.id`). The same shape the fleet-support
@@ -11830,6 +11867,8 @@ defmodule BarkparkCloud.Web.Router do
           Auth.forbidden(conn, required: "admin", scope: "team")
       end
 
+    launch = launch_identity(conn)
+
     cond do
       conn.halted ->
         conn
@@ -11867,7 +11906,7 @@ defmodule BarkparkCloud.Web.Router do
       # A RACING pair both pass this check; the database decides the loser (the
       # team-row lock / the (team_id, slug) index) and the `with/else` below
       # re-asks this question before refusing it.
-      (twin = launch_twin(conn)) != nil ->
+      (twin = launch_twin(conn, launch)) != nil ->
         already_provisioning(conn, twin)
 
       # usage-limits-quotas: the QUOTA gate — the plan's managed-instance ceiling.
@@ -11915,19 +11954,13 @@ defmodule BarkparkCloud.Web.Router do
 
       true ->
         team = conn.assigns.current_team
-        template = template_or_nil(conn.body_params["template"])
-        # The name is OPTIONAL when a template is given: absent, blank or
-        # whitespace-only defaults to the template's display title (else its
-        # slug), so the /new form's "(optional)" label, the badge flow and a bare
-        # curl all launch. With no template there is nothing to derive from and
-        # the 422 name_required below stands.
-        name = launch_name(conn.body_params["name"], template)
-        slug = if(is_binary(name), do: slugify(name), else: nil)
-        # Provider-neutral launch config (charter Decision 9). The provider was
-        # validated by the cond above (:error already 422'd), so it is a known
-        # slug or the hetzner default here; region/server_type ride through as
-        # given (nil → the claim's warm-pool fallback).
-        provider = launch_provider(conn.body_params["provider"])
+        # Name (template-defaulted), slug and template come from the ONE
+        # resolution `launch_identity/1` made — the same values the twin check
+        # above used. Provider-neutral launch config (charter Decision 9): the
+        # provider was validated by the cond above (:error already 422'd), so it
+        # is a known slug or the hetzner default here; region/server_type ride
+        # through as given (nil → the claim's warm-pool fallback).
+        %{template: template, name: name, slug: slug, provider: provider} = launch
         region = string_param_or_nil(conn.body_params["region"])
         server_type = string_param_or_nil(conn.body_params["server_type"])
 
@@ -12002,7 +12035,7 @@ defmodule BarkparkCloud.Web.Router do
           # and the unique index both wait for it). Re-ask for the twin, so the
           # loser answers 409 with the winner's id instead of a refusal.
           {:error, :limit_reached} ->
-            case launch_twin(conn) do
+            case launch_twin(conn, launch) do
               nil ->
                 json(conn, 403, %{
                   error: "limit_reached",
@@ -12015,7 +12048,7 @@ defmodule BarkparkCloud.Web.Router do
             end
 
           {:error, %Ecto.Changeset{} = changeset} ->
-            case launch_twin(conn) do
+            case launch_twin(conn, launch) do
               nil -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
               twin -> already_provisioning(conn, twin)
             end

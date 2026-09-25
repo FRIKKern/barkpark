@@ -65,7 +65,8 @@ defmodule BarkparkCloud.Sites.BuildLogBytes do
   ## Not SSE-broadcast, and operator-gated
 
   Pull-only, one deployment per request, behind `Auth.require_platform_operator/2`
-  — which is 403-dark in production today (`gr-ops-platform-admin-emails`). The
+  — which admits only the platform-admin allowlist, provisioned on the live control
+  plane 2026-09-25 (`gr-ops-platform-admin-emails`). The
   audience of a fan-out channel is everyone subscribed to it, which is never the
   audience a build log is gated to.
   """
