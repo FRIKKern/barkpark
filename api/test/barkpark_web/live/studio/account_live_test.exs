@@ -146,7 +146,15 @@ defmodule BarkparkWeb.Studio.AccountLiveTest do
       assert consequences =~ "anonymous placeholder"
       assert consequences =~ "Every sign-in session is revoked"
       assert consequences =~ "pseudonymised, not deleted"
-      assert consequences =~ "Personal access tokens you created are not revoked"
+
+      assert consequences =~
+               "Personal access tokens you own are revoked, and your passkeys and social sign-in links"
+
+      assert consequences =~
+               "Machine tokens you created as a workspace admin stay with that workspace."
+
+      # The pre-#20324 sentence, false since erasure revokes owned tokens.
+      refute consequences =~ "not revoked"
       assert has_element?(view, "#erase-form input[type=password][name=password]")
       assert has_element?(view, "#erase-form input[type=checkbox][name=acknowledge]")
     end
@@ -213,6 +221,28 @@ defmodule BarkparkWeb.Studio.AccountLiveTest do
       # Every session, not just this one.
       assert Accounts.verify_user_session(ctx.raw) == nil
       assert Accounts.verify_user_session(other_raw) == nil
+    end
+
+    test "a personal access token the user owns answers 401 once erased through the page",
+         ctx do
+      {:ok, {pat, _token}} =
+        Auth.create_personal_access_token("gdpr-ui-pat", ["read"],
+          owner_user_id: ctx.user.id,
+          created_by: ctx.email
+        )
+
+      mine = fn ->
+        ctx.conn |> put_req_header("authorization", "Bearer #{pat}") |> get("/v1/access/mine")
+      end
+
+      # Control: before erasure the token authenticates as the user.
+      assert mine.().status == 200
+
+      {view, _} = mount!(ctx)
+      submit(view, %{"acknowledge" => "true", "password" => @password})
+      assert_redirect(view, "/login")
+
+      assert mine.().status == 401
     end
 
     test "the old cookie is dead afterwards: no page controls, export 401s", ctx do
