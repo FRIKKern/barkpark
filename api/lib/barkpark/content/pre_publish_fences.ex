@@ -40,7 +40,7 @@ defmodule Barkpark.Content.PrePublishFences do
   re-check (changing which refusal a publish that trips two of them receives,
   and letting a hook run for a publish the gate refuses); putting the
   in-transaction re-check at the door would lose the lock it exists to read
-  under (see `Barkpark.Tasks.PublishGuards`).
+  under (see the Tasks plugin's `tasks/publish_guards.ex`).
   """
 
   @key {__MODULE__, :declared}

@@ -1634,7 +1634,7 @@ defmodule Barkpark.Content.Query do
   # Fail LOUD on an unsupported order term, mirroring InvalidFilterError's
   # precedent for an unsupported FILTER (an unsupported SORT is the same
   # defect class) and the identical-shaped fail-loud catch-all already at
-  # `Barkpark.Tasks.Queue.apply_order/2`. This catch-all used to silently
+  # `apply_order/2` in the Tasks plugin's queue (tasks/queue.ex). This catch-all used to silently
   # default to `updated_at desc` for ANY unrecognised term — unreachable from
   # the HTTP door (QueryController normalises `?order=` and 422s a bad spec
   # before the query is ever built), but latent for any other caller that

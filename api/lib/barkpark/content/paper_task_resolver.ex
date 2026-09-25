@@ -5,7 +5,7 @@ defmodule Barkpark.Content.PaperTaskResolver do
   segment and the rows / aggregates of a query-carrying task block.
 
   THE DEPENDENCY POINTS INTO CONTENT, NEVER OUT OF IT. `Barkpark.Content.Papers`
-  must not name `Barkpark.Tasks` (a plugin's substrate) or
+  must not name the Tasks plugin's modules (a plugin's substrate) or
   `Barkpark.Plugins.Registry` (kernel→feature). So a plugin declares a resolver
   module through `Barkpark.Plugin.paper_task_resolver/0`, the Registry
   PUBLISHES every registered plugin's declaration here (`publish/1`, on every

@@ -10,10 +10,10 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
   immediately, so a doc embedding an existing sheet never waits for the
   sheet's next save to render values.
 
-  Also locks plain sheet CRUD through Content with NO plugin wiring in scope:
-  the grid machinery is core, so a sheet document round-trips and its embeds
-  refresh even when `Barkpark.Plugins.Sheets` is not loaded (fresh-install
-  invariant).
+  Also locks plain sheet CRUD through Content. The refresh runs through the
+  `Barkpark.Content.SheetEmbedEngine` seam the Sheets plugin fills; with the
+  plugin out of the load order a sheet still round-trips and embeds keep their
+  cached snapshot (`content/sheet_embed_engine_test.exs`).
   """
   use Barkpark.DataCase, async: true
 

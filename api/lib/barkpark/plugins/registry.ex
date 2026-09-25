@@ -550,6 +550,7 @@ defmodule Barkpark.Plugins.Registry do
     publish_pre_write_transforms(plugins)
     publish_paper_task_resolvers(plugins)
     publish_resolve_doc_guards(plugins)
+    publish_sheet_embed_engines(plugins)
     publish_mutate_door_fences(plugins)
 
     state
@@ -572,8 +573,8 @@ defmodule Barkpark.Plugins.Registry do
   # plugin warn "names no plugin this reader knows" / "not a registered
   # plugin" — false. An empty entry adds no step, so the fences, steps and
   # resolver a holder yields are unchanged; a module that never registered is
-  # still unknown to the holder and still warned about by name. All five
-  # publishers below follow this one rule.
+  # still unknown to the holder and still warned about by name. Every
+  # publisher below follows this one rule.
   defp publish_pre_write_fences(plugins) do
     plugins
     |> Enum.flat_map(&declared_pre_write_fences/1)
@@ -717,6 +718,32 @@ defmodule Barkpark.Plugins.Registry do
             "#{inspect(other)}; expected {module, function}"
   end
 
+  # Every registered plugin's `sheet_embed_engine/0` declaration, into the
+  # content-owned holder the sheet save path and embed pipeline call
+  # (task-0b7e83682d7a7140). Same rules as `publish_paper_task_resolvers/1`: a
+  # raising declaration or a malformed entry raises.
+  defp publish_sheet_embed_engines(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_sheet_embed_engine/1)
+    |> Barkpark.Content.SheetEmbedEngine.publish()
+  end
+
+  defp declared_sheet_embed_engine(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :sheet_embed_engine, 0) do
+      case mod.sheet_embed_engine() do
+        engine when is_atom(engine) ->
+          [%{name: name, module: mod, engine: engine}]
+
+        other ->
+          raise ArgumentError,
+                "plugin #{inspect(name)} declared a malformed sheet embed engine " <>
+                  "#{inspect(other)}; expected a module or nil"
+      end
+    else
+      [%{name: name, module: mod, engine: nil}]
+    end
+  end
+
   # The mutate-door twin of `publish_pre_publish_fences/1`
   # (task-b04cbe7823d084a6): every registered plugin's `mutate_door_fences/0`
   # declaration, into the content-owned holder `Content.Mutations` reads. Same
@@ -767,6 +794,7 @@ defmodule Barkpark.Plugins.Registry do
     publish_pre_write_transforms([])
     publish_paper_task_resolvers([])
     publish_resolve_doc_guards([])
+    publish_sheet_embed_engines([])
     publish_mutate_door_fences([])
     {:ok, %{plugins: %{}, baseline_plugins: nil}}
   end

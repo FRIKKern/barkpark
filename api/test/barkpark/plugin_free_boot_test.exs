@@ -167,7 +167,9 @@ defmodule Barkpark.PluginFreeBootTest do
     {"Barkpark.Plugins.Media", "lib/barkpark/media/processing.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/checkout.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/relations.ex"},
-    {"Barkpark.Plugins.Sheets", "lib/barkpark/content/sheets.ex"},
+    # `content/sheets.ex` LEFT this list (task-0b7e83682d7a7140): the sheet
+    # save path and embed pipeline reach the engine through the content-owned
+    # `SheetEmbedEngine` seam the Sheets plugin fills.
     {"Barkpark.Plugins.Bulldocs", "lib/barkpark/content/papers/block_ops.ex"},
     {"Barkpark.Plugins.Tasks", "lib/barkpark/edge_projector/backfill.ex"},
     {"Barkpark.Plugins.Tasks", "lib/barkpark/edge_projector/projector_worker.ex"},
@@ -524,6 +526,16 @@ defmodule Barkpark.PluginFreeBootTest do
       # `resolve_doc_guards/0`; with nothing registered `Graph.resolve_doc/3`
       # runs no guard.
       assert Barkpark.Content.ResolveDocGuards.list() == []
+    end
+
+    test "no sheet embed engine resolves: sheet saves skip recompute and embeds keep their snapshot" do
+      # task-0b7e83682d7a7140 — the sheet engine moved behind
+      # `sheet_embed_engine/0`; with nothing registered the seam answers nil
+      # and both calls degrade instead of raising.
+      assert Barkpark.Content.SheetEmbedEngine.get() == nil
+      content = %{"tabs" => [%{"cells" => %{"A1" => %{"f" => "=1+1"}}}]}
+      assert Barkpark.Content.SheetEmbedEngine.recompute(content) == content
+      assert Barkpark.Content.SheetEmbedEngine.snapshot_for(content, 0) == nil
     end
 
     test "the Sheets session supervisor is absent, and Session answers instead of raising" do

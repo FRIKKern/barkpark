@@ -91,8 +91,8 @@ defmodule Barkpark.Content.Lifecycle do
         # THE INCUMBENT, READ ONCE (task-c1f155da34d3338f). The published row
         # this publish is about to replace — `nil` when there is none, which is
         # the definition of a FIRST publish (a birth). It was already being read
-        # here, inside the task publish-door gate (now
-        # `Barkpark.Tasks.PublishGuards.door_gate/4`), purely to decide the same
+        # here, inside the task publish-door gate (now the Tasks plugin's
+        # `door_gate/4` in tasks/publish_guards.ex), purely to decide the same
         # question ("First publish — a birth" — see its `_ ->` clause);
         # hoisting the read makes that fact available to the `:before_publish`
         # payload as well, and costs no extra query.
@@ -543,8 +543,7 @@ defmodule Barkpark.Content.Lifecycle do
   # a claimed row.
   #
   # Same ruling as the SUCCESS arm (the Tasks publish door's field fence in
-  # `Barkpark.Tasks.PublishGuards`,
-  # task-9b5e1a6a688d27fc): the DOCUMENT door is the one that must yield. A
+  # tasks/publish_guards.ex, task-9b5e1a6a688d27fc): the DOCUMENT door is the one that must yield. A
   # publish that names no task-door field carries no authorial intent about
   # the claim, so it may neither silently rewrite it (success arm) nor destroy
   # it (here). The pair therefore holds ONE contract: a publish never destroys
@@ -585,7 +584,7 @@ defmodule Barkpark.Content.Lifecycle do
   # The lock is not paper-specific machinery; it is what makes the in-transaction
   # re-read of the published row AUTHORITATIVE. Every type whose published row is
   # ALSO written by a second, non-publish door needs it, and "task" is exactly
-  # that: `Barkpark.Tasks.{Claim,Pulse,Stamp,...}` write the published row in
+  # that: the Tasks plugin's claim, pulse, stamp and sibling writers write the published row in
   # place through `Internal.fenced_content_write/4` while `publish_after_gate/7`
   # copies the draft's content over it wholesale. The published-row read at the
   # top of `do_publish_document/4` — the one the `:door` pre-publish fences
@@ -595,7 +594,7 @@ defmodule Barkpark.Content.Lifecycle do
   # overwritten by this update.
   # `FOR UPDATE` here plus the `:in_transaction` pre-publish fences run right
   # after it (`run_in_transaction_fences/5`; the Tasks criteria re-check,
-  # `Barkpark.Tasks.PublishGuards.no_criteria_regression/4`) moves the verdict
+  # `no_criteria_regression/4` in tasks/publish_guards.ex) moves the verdict
   # onto a row nothing can move until this transaction ends. THIS LOCK STAYS IN
   # CORE: it is also the paper arm's revision fence, so it is not task-only.
   #

@@ -843,8 +843,9 @@ defmodule Barkpark.Content.Broadcast do
   that serves ONE resolvable tenant (the seeded Default workspace — the public
   reader's tenant, `Quiz.Bridge`'s bindable set) passes that workspace's id.
 
-  The `%{doc: doc} when is_map(doc)` guard `Tasks.Web.BoardLive`,
-  `StudioChat.Recorder` and `ChatLive` carry was written for the #17207 era in
+  The `%{doc: doc} when is_map(doc)` guard that the Tasks board LiveView, the
+  Studio chat recorder (`studio_chat/recorder.ex`) and `ChatLive` carry was
+  written for the #17207 era in
   which a workspace-owned document ALSO arrived as a payload-free twin on the
   global topic; that twin no longer exists, and the guard is now merely
   defensive.

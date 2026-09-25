@@ -873,7 +873,7 @@ defmodule Barkpark.Content.Mutations do
   # WHAT IT DOES **NOT** COVER (D40 boundary — state it, do not imply it):
   #   * direct `Repo`/`Ecto` writes and `Content.Writer` calls that bypass
   #     `apply_mutations` entirely — this is a door guard, not a row invariant;
-  #   * the sanctioned `Barkpark.Tasks.*` modules, which are deliberately
+  #   * the Tasks plugin's own sanctioned writers, which are deliberately
   #     upstream of it and keep full authority over a claim's lifetime;
   #   * the FRESH-CREATE exemption above — a forged birth has no claim to
   #     drop, so this guard cannot see it (what that exemption does and no
@@ -884,7 +884,7 @@ defmodule Barkpark.Content.Mutations do
   # MEASURED that boundary and it was a live hole, not a comment: patch
   # `set:{"claim":{"worker":"attacker","epoch":99}}` on a task claimed by
   # honest-worker(epoch=1) returned HTTP 200, the stored claim became the
-  # attacker's, and `Barkpark.Tasks.close(honest-worker, epoch: 1)` then returned
+  # attacker's, and the Tasks close (`close(honest-worker, epoch: 1)`) then returned
   # `{:error, :fenced_off}` — the honest owner locked out of its own row, the
   # exact D22 failure shape with one extra step. The fence therefore refuses ANY
   # api-door write that CHANGES a live claim (erasure OR substitution): the

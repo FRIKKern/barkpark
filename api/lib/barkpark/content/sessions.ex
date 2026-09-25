@@ -4,7 +4,8 @@ defmodule Barkpark.Content.Sessions do
 
   A session's `content["events"]` list is a server-stamped, append-only log —
   no update/delete op ever touches it. `append_event/5` rides the SAME
-  advisory-lock + CAS-on-rev core as `Barkpark.Tasks.Mutations.update_paper_refs_by_id/4`
+  advisory-lock + CAS-on-rev core as the Tasks plugin's `update_paper_refs_by_id/4`
+  (tasks/mutations.ex)
   (`Repo.get`-then-`Repo.update_all` guarded on the observed `rev`, under
   `pg_advisory_xact_lock`), mirrored exactly: no draft/published dual-row
   handling, because — like a task — the row this writes IS the row
@@ -17,7 +18,7 @@ defmodule Barkpark.Content.Sessions do
 
   Under the per-slug advisory lock, a losing writer serializes behind the
   winner rather than racing it — the same "extremely rare" CAS-loss posture
-  `Barkpark.Tasks` docs for its own mutations — so there is no retry loop
+  the Tasks plugin docs for its own mutations — so there is no retry loop
   here, matching `update_paper_refs_by_id/4`'s own (retry-free) shape.
 
   No test here exercises the advisory lock's actual cross-process
@@ -28,7 +29,7 @@ defmodule Barkpark.Content.Sessions do
   connections/processes outside the sandbox's ownership model — impractical
   in this suite. Correctness here rests on `pg_advisory_xact_lock/1` being a
   real Postgres primitive (proven by its existing use in
-  `Barkpark.Tasks.Mutations`), not on a test racing it.
+  tasks/mutations.ex), not on a test racing it.
   """
 
   import Ecto.Query, only: [from: 2]

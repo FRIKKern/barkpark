@@ -333,7 +333,7 @@ defmodule Barkpark.Content.WriteScope do
   #
   # PUBLIC, deliberately (task-893cf2751bac7428). A READ that must scan exactly
   # the rows a WRITE through these same opts will land among cannot resolve the
-  # tenant by a second, independent rule: `Barkpark.Tasks.Dedup`'s candidate scan
+  # tenant by a second, independent rule: the Tasks dedup gate's candidate scan
   # read `opts[:workspace_id]` RAW, so on a path that threads no tenant (the
   # GitHub webhook pipeline carries no scope plug) it handed `nil` to
   # `Content.Scope.scope_to_workspace/3` — whose nil arm fails CLOSED — and

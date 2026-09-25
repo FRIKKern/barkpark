@@ -45,11 +45,17 @@ defmodule Barkpark.Plugins.Sheets do
       core stays conversion-free (the Bulldocs split: core keeps the
       reusable machinery, the plugin is the wiring).
 
-  The grid machinery itself is CORE, not plugin: A1 helpers and snapshot
-  synthesis live in `Barkpark.Plugins.Sheets.Core`, the `"sheet"` portable-doc embed block
-  composes in `Barkpark.PortableDoc.Render`, and snapshot write-through rides
-  the save path in `Barkpark.Content` — so existing embeds keep rendering and
-  refreshing with this plugin off (fresh-install invariant).
+  The `"sheet"` portable-doc embed block composes in core
+  (`Barkpark.PortableDoc.Render`) from the snapshot the block caches, so
+  existing embeds keep rendering with this plugin off (fresh-install
+  invariant).
+
+    * `sheet_embed_engine/0` — `Barkpark.Plugins.Sheets.EmbedEngine`, the
+      formula recompute (`Engine`) and snapshot synthesis (`Core`) the save
+      path in `Barkpark.Content.Sheets` calls through
+      `Barkpark.Content.SheetEmbedEngine` (task-0b7e83682d7a7140). With this
+      plugin off a sheet saves without a recompute and embeds keep their last
+      snapshot instead of refreshing; nothing raises.
 
     * `register_workers/1` — the collaborative session runtime
       (`Barkpark.Plugins.Sheets.Supervisor`: the session registry, the session
@@ -61,8 +67,8 @@ defmodule Barkpark.Plugins.Sheets do
   Studio sheet grid, but its runtime is this plugin's: with the plugin off no
   session can start. `Session` then answers as if none were live (`peek/3` →
   `{:error, :no_session}`, `flush` → `:ok`) and refuses edits with
-  `{:error, :session_unavailable}` instead of raising. Direct mutate and embed
-  refresh do not use sessions and keep working.
+  `{:error, :session_unavailable}` instead of raising. Direct mutate does not
+  use sessions and keeps working.
   """
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
@@ -164,6 +170,13 @@ defmodule Barkpark.Plugins.Sheets do
   """
   @impl Barkpark.Plugin
   def register_workers(_ctx), do: [Supervisor.child_spec(Barkpark.Plugins.Sheets.Supervisor, [])]
+
+  @doc """
+  The engine the sheet save path and the embed pipeline reach through
+  `Barkpark.Content.SheetEmbedEngine` (task-0b7e83682d7a7140).
+  """
+  @impl Barkpark.Plugin
+  def sheet_embed_engine, do: Barkpark.Plugins.Sheets.EmbedEngine
 
   @impl Barkpark.Plugin
   def lifecycle_hooks do

@@ -50,7 +50,8 @@ defmodule Barkpark.Content.Papers.MixedWriteGuard do
   body carries `slug` + `body_html`. The other five all send `blocks`:
   `sync_create_persist/6` (POST …/papers/:slug/sync), the blocks leg of
   `ingest/2` (which also absorbs the BPML spelling), `Barkpark.Seeds.Clean`,
-  `Barkpark.StudioChat.PlanPapers`, and `PlaygroundController`. The sibling
+  the Studio chat plan-paper writer (`studio_chat/plan_papers.ex`), and
+  `PlaygroundController`. The sibling
   block-op route (POST …/papers/:slug/ops) whitelists ops and explicitly
   reserves the derived keys, `body_html` among them, so it cannot reach this
   shape. `internal/` (the `bp` CLI) sends `body_html` only in the READ

@@ -3,7 +3,7 @@ defmodule Barkpark.Content.Edge do
   A single typed, materialised edge in the content graph between two
   `documents` rows.
 
-  Mirrors `Barkpark.Tasks.Edge` structurally (binary-id PK, two `documents`
+  Mirrors the Tasks plugin's edge schema (`lib/barkpark/tasks/edge.ex`) structurally (binary-id PK, two `documents`
   FKs, a `:string` `kind`, the same `(from_id, to_id, kind)` uniqueness) but
   with one deliberate divergence:
 

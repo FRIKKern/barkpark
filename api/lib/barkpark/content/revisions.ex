@@ -68,7 +68,7 @@ defmodule Barkpark.Content.Revisions do
       a plain string with no FK to `documents`, so the history of a deleted
       document stays listable and `restore_revision/4` can bring it back. The
       `action: "delete"` entry is itself a revision.
-    * The compaction snapshot written by `Barkpark.Tasks.Compactor` (action
+    * The compaction snapshot written by the Tasks plugin's compactor (action
       `"compaction_snapshot"`) is an ordinary revision row and inherits exactly
       this retention. Nothing prunes it. That module's note about "the existing
       revision-pruning sweep" described a sweep that has never existed; it has

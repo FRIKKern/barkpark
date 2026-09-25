@@ -9,7 +9,7 @@ defmodule Barkpark.Content.DedupWall do
 
   ## Reuses the Tasks.Similarity SHAPE, not its scoring
 
-  The thresholds are copied verbatim from `Barkpark.Tasks.Similarity`
+  The thresholds are copied verbatim from the Tasks plugin's similarity scorer
   (tasks/similarity.ex:33-34, :41) so the two dedup surfaces speak one calibrated
   vocabulary:
 
@@ -34,7 +34,7 @@ defmodule Barkpark.Content.DedupWall do
   ## When the gate cannot run: it SAYS SO (it does not silently pass)
 
   This used to fail OPEN and silently — the publish-side twin of the bug
-  `Barkpark.Tasks.Dedup` closed: any candidate-fetch error yielded an empty
+  the Tasks plugin's dedup gate (tasks/dedup.ex) closed: any candidate-fetch error yielded an empty
   candidate set, so publish answered `200 OK` having never checked for a
   duplicate. Same lie, same ledger: a verb reporting success on a claim ("this
   document is not a near-duplicate") it never computed.
@@ -190,7 +190,7 @@ defmodule Barkpark.Content.DedupWall do
   #     hashtext("dedup:" <> type <> ":" <> (workspace_id || "global") <> ":" <> dataset)
   #
   # Every other advisory-lock family in this codebase is built by
-  # `Barkpark.Tasks.LockKey` and every one of its strings starts with `task:`,
+  # the Tasks plugin's lock-key module and every one of its strings starts with `task:`,
   # `task-resources` or `listener:` (`lib/barkpark/tasks/lock_key.ex`), and
   # `BlockOps.upsert_blocks_doc/3`'s non-paper leg takes `"<type>:<slug>"`
   # (today `session:…`). A `dedup:`-prefixed string is in NONE of those sets, so
@@ -214,7 +214,8 @@ defmodule Barkpark.Content.DedupWall do
   The advisory-lock key string for a publish scope. Exposed so tests and the
   two call sites share ONE derivation — two writers that build the key
   differently do not exclude each other and NOTHING raises (see
-  `Barkpark.Tasks.LockKey`'s moduledoc for the same failure in the task family).
+  the moduledoc of `lib/barkpark/tasks/lock_key.ex` for the same failure in the task
+  family).
   """
   @spec publish_scope_lock_key(String.t(), String.t(), String.t() | nil) :: String.t()
   def publish_scope_lock_key(type, dataset, workspace_id) do

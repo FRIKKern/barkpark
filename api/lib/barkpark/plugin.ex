@@ -969,6 +969,32 @@ defmodule Barkpark.Plugin do
   """
   @callback resolve_doc_guards() :: [Barkpark.Content.ResolveDocGuards.guard()]
 
+  # ── Sheet embed engine (Barkspark phase 1, task-0b7e83682d7a7140) ─────
+
+  @doc """
+  Declare the module the sheet save path and the sheet embed pipeline
+  (`Barkpark.Content.Sheets`) reach the spreadsheet engine through. The module
+  implements `Barkpark.Content.SheetEmbedEngine` (`recompute/1`,
+  `snapshot_for/2`).
+
+  Published by `Barkpark.Plugins.Registry` to
+  `Barkpark.Content.SheetEmbedEngine` and read there in plugin load order; the
+  first declared engine wins. When none is declared (the Sheets plugin is out
+  of the load order, or the `BARKPARK_PLUGINS=""` kill switch), a sheet saves
+  without a formula recompute and embed blocks keep their cached snapshot
+  instead of refreshing. Nothing raises.
+
+  Why a new callback and not an existing one: `lifecycle_hooks/0` gates or
+  halts one save of the plugin's own type, and the `resolve_*` chains
+  accumulate values. Neither hands content a pure function to call on the save
+  path of every document that embeds a sheet.
+
+  NOT filtered by per-workspace enablement, like `resolve_doc_guards/0`.
+
+  Default (supplied by `use Barkpark.Plugin`) returns `nil`.
+  """
+  @callback sheet_embed_engine() :: module() | nil
+
   # ── Mutate-door fences (Barkspark phase 1, task-b04cbe7823d084a6) ─────
 
   @typedoc """
@@ -1217,6 +1243,7 @@ defmodule Barkpark.Plugin do
                       pre_write_transforms: 0,
                       paper_task_resolver: 0,
                       resolve_doc_guards: 0,
+                      sheet_embed_engine: 0,
                       mutate_door_fences: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
@@ -1434,6 +1461,9 @@ defmodule Barkpark.Plugin do
       def resolve_doc_guards, do: []
 
       @impl Barkpark.Plugin
+      def sheet_embed_engine, do: nil
+
+      @impl Barkpark.Plugin
       def mutate_door_fences, do: []
 
       @impl Barkpark.Plugin
@@ -1507,6 +1537,7 @@ defmodule Barkpark.Plugin do
                      pre_write_transforms: 0,
                      paper_task_resolver: 0,
                      resolve_doc_guards: 0,
+                     sheet_embed_engine: 0,
                      mutate_door_fences: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,

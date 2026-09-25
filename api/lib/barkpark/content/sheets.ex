@@ -9,7 +9,8 @@ defmodule Barkpark.Content.Sheets do
   #
   # A `{"type":"sheet","ref":<sheet doc id>}` block in any document's
   # `content["blocks"]` carries a cached `"snapshot"` — the dense value grid
-  # `Barkpark.Plugins.Sheets.Core.snapshot_for/2` synthesizes from the sheet's sparse cells.
+  # the sheet engine synthesizes from the sheet's sparse cells
+  # (`SheetEmbedEngine.snapshot_for/2`, the seam the Sheets plugin fills).
   # The snapshot is what keeps the block rendering with the Sheets plugin off
   # (fresh-install invariant), so it must never go stale: every successful save
   # of a `"sheet"` document rewrites the snapshot in all same-scope documents
@@ -27,7 +28,7 @@ defmodule Barkpark.Content.Sheets do
 
   import Ecto.Query
   alias Barkpark.Repo
-  alias Barkpark.Content.{Broadcast, Document, Labels}
+  alias Barkpark.Content.{Broadcast, Document, Labels, SheetEmbedEngine}
   alias Barkpark.PortableDoc.{Projection, Render}
 
   import Barkpark.Content.DraftId, only: [draft_id: 1, published_id: 1, draft?: 1]
@@ -36,11 +37,12 @@ defmodule Barkpark.Content.Sheets do
   # and `upsert_document/4` so stored content carries computed values; the
   # write-through below projects them into embed snapshots with zero renderer
   # changes. The engine is pure and total: non-sheet types and writes without a
-  # "tabs" list pass through untouched.
+  # "tabs" list pass through untouched. It is reached through
+  # `SheetEmbedEngine`; with no engine registered the content is stored as sent.
   def maybe_recompute_sheet_formulas(attrs, "sheet") do
     case Map.get(attrs, "content") do
       %{"tabs" => _} = content ->
-        Map.put(attrs, "content", Barkpark.Plugins.Sheets.Engine.recompute(content))
+        Map.put(attrs, "content", SheetEmbedEngine.recompute(content))
 
       _ ->
         attrs
@@ -56,7 +58,15 @@ defmodule Barkpark.Content.Sheets do
 
   def tap_sheet_writethrough(result), do: result
 
+  # With no engine registered there is no snapshot to write, so the refresh
+  # is skipped before the embed query: every embed keeps its cached snapshot.
   def refresh_sheet_embeds(%Document{} = sheet) do
+    if SheetEmbedEngine.get(),
+      do: do_refresh_sheet_embeds(sheet),
+      else: %{rewritten: 0, noop: 0}
+  end
+
+  defp do_refresh_sheet_embeds(sheet) do
     # Match both id forms: papers canonically embed the published id, but the
     # mutated row is (almost always) the draft — and a block authored against
     # the draft id must refresh too.
@@ -116,11 +126,11 @@ defmodule Barkpark.Content.Sheets do
 
     {blocks, changed?} =
       Enum.map_reduce(blocks, false, fn block, changed ->
-        if is_map(block) and Map.get(block, "type") == "sheet" and
-             Map.get(block, "ref") in refs do
-          snapshot =
-            Barkpark.Plugins.Sheets.Core.snapshot_for(sheet_content, embed_tab_index(block))
-
+        with true <-
+               is_map(block) and Map.get(block, "type") == "sheet" and
+                 Map.get(block, "ref") in refs,
+             %{} = snapshot <-
+               SheetEmbedEngine.snapshot_for(sheet_content, embed_tab_index(block)) do
           # Equality is the write gate: a snapshot that already matches the
           # freshly synthesized one leaves the block — and thus the doc's rev —
           # untouched, so a re-save that changed nothing is a true no-op and a
@@ -128,7 +138,8 @@ defmodule Barkpark.Content.Sheets do
           new_block = Map.put(block, "snapshot", snapshot)
           {new_block, changed or new_block != block}
         else
-          {block, changed}
+          # Not an embed of this sheet, or no engine registered (`nil`).
+          _ -> {block, changed}
         end
       end)
 
@@ -183,7 +194,7 @@ defmodule Barkpark.Content.Sheets do
   # this is its mirror for the EMBEDDING side. A document save whose blocks
   # introduce or change `{"type":"sheet","ref":…}` blocks hydrates each
   # block's `"snapshot"` from the referenced sheet IMMEDIATELY — same
-  # `Barkpark.Plugins.Sheets.Core.snapshot_for/2` projection, same per-block `"tab"`,
+  # `SheetEmbedEngine.snapshot_for/2` projection, same per-block `"tab"`,
   # same scope ladder — so a paper embedding an EXISTING sheet renders its
   # values on the first read instead of an empty grid until the sheet's next
   # save. ONE batched query fetches every referenced sheet (both id forms,
@@ -193,7 +204,8 @@ defmodule Barkpark.Content.Sheets do
   # self-reference is skipped — the mirror of the write-through's
   # `doc_id not in refs` exclusion, so a sheet embedding itself terminates.
   # Runs pre-write in the attrs pipeline (zero extra writes); a save without
-  # sheet blocks costs zero extra queries.
+  # sheet blocks costs zero extra queries. With no engine registered the
+  # blocks are stored as sent and no sheet is fetched.
 
   def hydrate_sheet_embed_snapshots(attrs) do
     content = Map.get(attrs, "content")
@@ -217,18 +229,17 @@ defmodule Barkpark.Content.Sheets do
           uniq: true,
           do: published_id(ref)
 
-    case refs do
-      [] ->
+    case refs != [] and SheetEmbedEngine.get() do
+      engine when engine in [false, nil] ->
         blocks
 
-      refs ->
+      engine ->
         sheets = fetch_embedded_sheets(refs, scope)
 
         Enum.map(blocks, fn block ->
           with %{"type" => "sheet", "ref" => ref} when is_binary(ref) <- block,
                %{} = sheet_content <- Map.get(sheets, published_id(ref)) do
-            snapshot =
-              Barkpark.Plugins.Sheets.Core.snapshot_for(sheet_content, embed_tab_index(block))
+            snapshot = engine.snapshot_for(sheet_content, embed_tab_index(block))
 
             Map.put(block, "snapshot", snapshot)
           else
