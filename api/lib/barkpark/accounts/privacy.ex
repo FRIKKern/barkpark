@@ -15,6 +15,7 @@ defmodule Barkpark.Accounts.Privacy do
   """
   import Ecto.Query, warn: false
 
+  alias Barkpark.Access.Grant
   alias Barkpark.Audit
   alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken
@@ -89,6 +90,35 @@ defmodule Barkpark.Accounts.Privacy do
             revoked_at: t.revoked_at
           }
         end),
+      # Passkeys: the label and dates only. `credential_id`, `cose_key` and
+      # `sign_count` are authenticator material, not the subject's data, and
+      # are left out for the same reason a token hash is.
+      passkeys:
+        Repo.all(
+          from c in WebauthnCredential,
+            where: c.user_id == ^user.id,
+            order_by: [asc: c.inserted_at]
+        )
+        |> Enum.map(fn c ->
+          %{
+            id: c.id,
+            nickname: c.nickname,
+            created_at: c.inserted_at,
+            last_used_at: c.last_used_at
+          }
+        end),
+      # Social-login links. `external_id` is the provider's id for the subject:
+      # personal data we hold, and not a secret, since logging in with it still
+      # takes authenticating at the provider. No provider tokens are stored.
+      social_identities:
+        Repo.all(
+          from i in SocialIdentity,
+            where: i.user_id == ^user.id,
+            order_by: [asc: i.inserted_at]
+        )
+        |> Enum.map(fn i ->
+          %{id: i.id, provider: i.provider, external_id: i.external_id, created_at: i.inserted_at}
+        end),
       memberships:
         Repo.all(
           from m in Membership,
@@ -116,7 +146,7 @@ defmodule Barkpark.Accounts.Privacy do
   Erase the subject: revoke all access, scrub PII (pseudonymise), and emit an
   audit event, in ONE transaction. Returns `{:ok, %{sessions_deleted,
   email_tokens_deleted, api_tokens_revoked, passkeys_deleted,
-  social_identities_deleted, memberships_deleted}}`.
+  social_identities_deleted, grants_pseudonymised, memberships_deleted}}`.
 
   Access that outlives a password and a session, and so must go here too:
 
@@ -175,6 +205,8 @@ defmodule Barkpark.Accounts.Privacy do
       set: [created_by: erased_email]
     )
 
+    grants_pseudonymised = pseudonymise_grants(user, erased_email)
+
     {memberships, _} =
       Repo.delete_all(
         from m in Membership,
@@ -208,6 +240,7 @@ defmodule Barkpark.Accounts.Privacy do
         "api_tokens_revoked" => length(revoked_token_ids),
         "passkeys_deleted" => passkeys,
         "social_identities_deleted" => social_identities,
+        "grants_pseudonymised" => grants_pseudonymised,
         "memberships_deleted" => memberships
       }
     })
@@ -218,9 +251,40 @@ defmodule Barkpark.Accounts.Privacy do
       api_tokens_revoked: length(revoked_token_ids),
       passkeys_deleted: passkeys,
       social_identities_deleted: social_identities,
+      grants_pseudonymised: grants_pseudonymised,
       memberships_deleted: memberships,
       revoked_token_ids: revoked_token_ids
     }
+  end
+
+  # Access grants addressed to the subject: `grantee_email` is rewritten to the
+  # pseudonym, and the row is kept.
+  #
+  # Kept, not deleted: the grant is the GRANTOR's record of what they shared,
+  # and the `grant.*` audit events name it by id. Pseudonymising is also what
+  # closes a PENDING grant. Claiming requires the claimant's email to equal
+  # `grantee_email` and a confirmed account (`Access.ClaimFlow`). Left alone,
+  # the invitation would stay open to whoever registers that address next, and
+  # access the grantor gave the erased subject would pass to that new account.
+  # After the rewrite the only matching account is the erased row, which has no
+  # credential and no `confirmed_at`, so the grant can never be claimed. The
+  # grantor sees it addressed to an erased account and can revoke it.
+  #
+  # Matched on the email case-insensitively (it is not normalised at mint, and
+  # `ClaimFlow.grantee?/2` compares downcased) and on `grantee_user_id`, which
+  # covers a claimed grant whose address differs from the current email.
+  defp pseudonymise_grants(%User{id: user_id, email: email}, erased_email) do
+    email = String.downcase(email)
+
+    {n, _} =
+      Repo.update_all(
+        from(g in Grant,
+          where: fragment("lower(?)", g.grantee_email) == ^email or g.grantee_user_id == ^user_id
+        ),
+        set: [grantee_email: erased_email]
+      )
+
+    n
   end
 
   # Every not-yet-revoked token the subject owns, any kind, through the one
