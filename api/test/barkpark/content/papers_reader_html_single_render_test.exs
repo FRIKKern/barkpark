@@ -73,6 +73,9 @@ defmodule Barkpark.Content.PapersReaderHtmlSingleRenderTest do
     session = :trace.session_create(:render_count, self(), [])
 
     try do
+      # A trace pattern only matches a LOADED module: with Render not yet
+      # loaded it matches 0 functions and every count reads 0.
+      Code.ensure_loaded!(Render)
       1 = :trace.function(session, {Render, :render_blocks, 2}, true, [])
       parent = self()
 
