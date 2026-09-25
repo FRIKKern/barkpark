@@ -337,6 +337,10 @@ tooling-harnesses .github/workflows/compose-smoke.yml
 tooling-harnesses .github/workflows/go-format.yml
 tooling-harnesses scripts/console-slice-gate.mjs
 tooling-harnesses scripts/console-slice-gate.test.mjs
+tooling-harnesses scripts/usage-envelope-diff.mjs
+tooling-harnesses scripts/usage-envelope-diff.test.mjs
+tooling-harnesses scripts/fixtures/usage-envelope-diff/*.json
+tooling-harnesses cloud/lib/barkpark_cloud/usage.ex
 launcher-boot-selftest bin/barkpark
 launcher-boot-selftest scripts/barkpark-boot-selftest.sh
 workflow-portability scripts/workflow-portability-check.sh

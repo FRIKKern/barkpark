@@ -724,6 +724,15 @@ on:
       # `tooling-harnesses`, so the glob alone leaves this step dark.
       - "scripts/console-slice-gate.mjs"
       - "scripts/console-slice-gate.test.mjs"
+      # USAGE ENVELOPE CROSS-TICK DIFF (task-ce383752422a5715). `tooling-harnesses`
+      # runs the detector's suite. The fixtures and cloud/.../usage.ex are INPUTS:
+      # the suite's precondition re-reads usage.ex's meter block and
+      # @unavailable_reasons, so a compose/1 edit can red it without touching
+      # the detector.
+      - "scripts/usage-envelope-diff.mjs"
+      - "scripts/usage-envelope-diff.test.mjs"
+      - "scripts/fixtures/usage-envelope-diff/*.json"
+      - "cloud/lib/barkpark_cloud/usage.ex"
       # ── SUNSET-ROUTE CONSUMERS (task-a6613aa3eddb3c80) ─────────────────────
       # scripts/sunset-route-consumers.test.sh landed in #17772 wired to
       # NOTHING: `selftest-wiring-census` printed
@@ -1425,6 +1434,15 @@ on:
       # `tooling-harnesses`, so the glob alone leaves this step dark.
       - "scripts/console-slice-gate.mjs"
       - "scripts/console-slice-gate.test.mjs"
+      # USAGE ENVELOPE CROSS-TICK DIFF (task-ce383752422a5715). `tooling-harnesses`
+      # runs the detector's suite. The fixtures and cloud/.../usage.ex are INPUTS:
+      # the suite's precondition re-reads usage.ex's meter block and
+      # @unavailable_reasons, so a compose/1 edit can red it without touching
+      # the detector.
+      - "scripts/usage-envelope-diff.mjs"
+      - "scripts/usage-envelope-diff.test.mjs"
+      - "scripts/fixtures/usage-envelope-diff/*.json"
+      - "cloud/lib/barkpark_cloud/usage.ex"
       # ── SUNSET-ROUTE CONSUMERS (task-a6613aa3eddb3c80) ─────────────────────
       # scripts/sunset-route-consumers.test.sh landed in #17772 wired to
       # NOTHING: `selftest-wiring-census` printed

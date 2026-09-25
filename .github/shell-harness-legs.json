@@ -685,6 +685,11 @@
         "env": {}
       },
       {
+        "name": "usage-envelope-diff: a reason-bearing -> reasonless meter across adjacent ticks is NAMED, not silent",
+        "run": "node --check scripts/usage-envelope-diff.mjs\nnode scripts/node-test-floor.mjs --floor 1 scripts/usage-envelope-diff.test.mjs\n",
+        "env": {}
+      },
+      {
         "name": "paper-reader audit fixture",
         "run": "bash scripts/audit-paper-readers-test.sh",
         "env": {}
