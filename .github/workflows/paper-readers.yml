@@ -113,8 +113,30 @@ jobs:
           # BUDGET fires first and produces a reportable red, instead of the
           # cap firing and producing an unexplained cancellation.
           BP_AUDIT_ELAPSED_BUDGET_SECONDS: "5563"
+          # THE INVENTORY READ NEEDS A CREDENTIAL GUERRILLA ACCEPTS (task-c3b8d7a5e1745a17).
+          # Red 14 of 14 nights 2026-09-11..24, every one `paper inventory query
+          # failed` with an empty detail. Cause: bp has NO anonymous mode — with
+          # no token configured it falls to its baked dev floor
+          # `barkpark-dev-token` (TestNoCLIInvocationResolvesAnEmptyToken pins
+          # that, deliberately), guerrilla resolves that to auth_tier "none", and
+          # since #17681 (merged 2026-09-11 06:09Z, three hours before the first
+          # red) bp refuses a present-but-refused credential instead of reading
+          # anonymously: exit 3, envelope on stdout. Reproduced 2026-09-25 with
+          # a clean HOME and a bp built from this tree: `bp search query` is
+          # refused, while the per-Paper `bp paper view <public url>` leg still
+          # renders at rc 0 with no token. With an accepted token the same
+          # binary inventoried 1056 Papers. The curl legs (GUI / email /
+          # source) send no Authorization header and still prove the ANONYMOUS
+          # reader contract; this token reaches only `bp`.
+          # BARKPARK_TASK_TOKEN is the least-privilege app token task-lease-renew
+          # and reland-check already present to this same server every 20 min.
+          BARKPARK_API_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
         run: |
           set -o pipefail
+          if [ -z "${BARKPARK_API_TOKEN:-}" ]; then
+            echo "::error title=paper-readers has no CLI credential::BARKPARK_TASK_TOKEN is empty. bp has no anonymous mode: with no token it presents its baked dev token, guerrilla refuses it, and the Paper inventory read (bp search query) fails before anything is audited. Set the repository secret."
+            exit 2
+          fi
           rc=0
           timeout --signal=TERM --kill-after=30s \
             "${BP_AUDIT_ELAPSED_BUDGET_SECONDS}s" \

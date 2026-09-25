@@ -276,6 +276,71 @@ runs_json 6 6 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/only-arm/runs/subjec
 jobs_json "nightly:success" > "$TMP/only-arm/runs/jobs.705.json"
 run_case cron-is-only-arm-is-ok only-arm 0 "cannot be redundant"
 
+# ── 15. THE READER DOES NOT READ ITSELF (task-c3b8d7a5e1745a17) ──────────────
+# The tree carries a healthy subject AND the reader's own workflow, whose
+# scheduled history is all red — the latch measured on run 36001198282. By
+# default the self row is skipped and PRINTED; the pair-mate names a different
+# file as self, so the same red history is read and the run reds on it. Only
+# SAH_SELF differs between the two.
+lay_tree self-latch subject.yml cron
+lay_tree self-latch scheduled-arm-health.yml cron
+runs_json 50 50 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/self-latch/runs/subject.yml.schedule.json"
+runs_json 50 50 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/self-latch/runs/subject.yml.all.json"
+jobs_json "nightly:success" > "$TMP/self-latch/runs/jobs.749.json"
+runs_json 8 0 8 "" > "$TMP/self-latch/runs/scheduled-arm-health.yml.schedule.json"
+runs_json 8 0 8 "" > "$TMP/self-latch/runs/scheduled-arm-health.yml.all.json"
+run_case self-row-is-not-read self-latch 0 "scheduled-arm-health.yml — NOT READ"
+export SAH_SELF=not-this-tree.yml
+run_case self-row-read-would-latch self-latch 1 "NEVER SUCCEEDED scheduled-arm-health.yml"
+unset SAH_SELF
+
+# ── 16. A SKIP THE CRON NEVER DECLARED IS NOT A LAUNDER ──────────────────────
+# The real watcher shape (main-gate-watch, cron-overdue-probe, crown-reconcile,
+# twoslash): the cron re-runs the watcher and skips a pull_request-only harness
+# and a failure() reporter. Both arms execute the same job. That is a rerun.
+# The pair-mate differs ONLY in the harness's `if:` — gated to
+# workflow_dispatch, which a scheduled arm could have run — and stays VACUOUS,
+# which is the studio-journey-smoke shape the verdict exists for.
+lay_gated() {
+  local label="$1" harness_if="$2"
+  mkdir -p "$TMP/$label/tree/.github/workflows" "$TMP/$label/runs"
+  cat > "$TMP/$label/tree/.github/workflows/subject.yml" <<YML
+name: subject
+on:
+  schedule:
+    - cron: "40 6 * * *"
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  watch:
+    name: watch
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps: [{run: "true"}]
+  harness:
+    name: harness
+    if: $harness_if
+    runs-on: ubuntu-latest
+    steps: [{run: "true"}]
+  report:
+    name: report to a human
+    needs: [watch]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps: [{run: "true"}]
+YML
+  runs_json 6 6 0 "2026-09-14T00:00:00Z" schedule 700 > "$TMP/$label/runs/subject.yml.schedule.json"
+  runs_json 6 6 0 "2026-09-14T00:00:00Z" push 800     > "$TMP/$label/runs/subject.yml.all.json"
+  jobs_json "watch:success" "harness:skipped" "report to a human:skipped" > "$TMP/$label/runs/jobs.705.json"
+  jobs_json "watch:success" "harness:skipped" "report to a human:skipped" > "$TMP/$label/runs/jobs.805.json"
+}
+lay_gated excused-skip "github.event_name == 'pull_request'"
+run_case pr-only-and-reporter-skips-are-rerun excused-skip 0 "excused skips (reporter or pull_request-only, never the cron's job): harness|report to a human"
+lay_gated counted-skip "github.event_name == 'workflow_dispatch'"
+run_case dispatch-gated-skip-still-vacuous counted-skip 1 "SKIPPED on the cron: harness"
+lay_gated or-skip "github.event_name == 'pull_request' || github.event_name == 'schedule'"
+run_case or-gated-skip-is-not-excused or-skip 1 "SKIPPED on the cron: harness"
 
 echo
 echo "scheduled-arm-health.test.sh — $CASES cases · $PASS passed · $FAIL failed"
