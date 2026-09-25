@@ -1454,6 +1454,11 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 		// ALWAYS present — empty region/server_type is the plane's own "no pin
 		// recorded", false is the truthful reading of an absent latch.
 		"region": true, "server_type": true, "unreachable_notification_sent": true,
+		// dr-bl-w9-muscle-1: the raw last beat (ALWAYS present, git_commit's
+		// rule) and its reading — the object whose duration keys are the
+		// tri-states, so the object itself is always there.
+		"last_seen_at": true,
+		"beat":         true,
 	}
 	// The two deliberate tri-states: emitted ONLY when the plane reported them,
 	// so their absence here is the contract, not a gap.
