@@ -167,6 +167,34 @@ defmodule Barkpark.Content.Papers do
 
   def reader_source(_, _dataset, _scope_opts), do: {:error, :not_found}
 
+  @doc """
+  The reader HTML for `paper`, rendered from its blocks on this read.
+
+  A paper with blocks is rendered through `Render.render_blocks/2`; the stored
+  `content["body_html"]` cache is never served for it. A legacy paper with no
+  blocks has nothing to render from, so its sanitized `body_html` is the
+  source. Every refusal from `reader_source/3` (`:redacted_source`,
+  `:semantic_empty`, `:ambiguous_source`, `:invalid_blocks`, `:not_found`)
+  passes through unchanged, so a caller cannot fall back to the cache.
+
+  Reference and codelist labels resolve in `scope_opts` — the caller's scope,
+  not the paper's — so a share link keeps resolving inside the link scope.
+  """
+  @spec reader_html(term(), String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
+  def reader_html(paper, dataset, scope_opts \\ []) do
+    case reader_source(paper, dataset, scope_opts) do
+      {:blocks, blocks} ->
+        style = Map.get(paper.content || %{}, "style")
+        {:ok, Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope_opts))}
+
+      {:html, sanitized} ->
+        {:ok, sanitized}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp classify_reader_blocks(paper, blocks, envelope, dataset) do
     cond do
       not valid_reader_blocks?(blocks) ->
