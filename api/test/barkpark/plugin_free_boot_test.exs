@@ -105,12 +105,12 @@ defmodule Barkpark.PluginFreeBootTest do
     {"Barkpark.Plugins.Bulldocs", "lib/barkpark_web/live/bulldocs_live.ex"}
   ]
 
-  # core-static, always present: application.ex declares the Sheets session
-  # supervisor as a static child. Per api/CLAUDE.md the Sheets session runtime
-  # is CORE, plugin-independent — it does NOT vanish under :plugins [].
-  @coupling_core_static [
-    {"Barkpark.Plugins.Sheets", "lib/barkpark/application.ex"}
-  ]
+  # core-static, always present. EMPTY since task-c10be8a9ad8f0145: the one
+  # entry was application.ex declaring the Sheets session supervisor as a
+  # static child, and the Sheets plugin now starts it from its own
+  # `register_workers/1`, so it DOES vanish under :plugins [] (asserted in
+  # "fresh-install invariant" below).
+  @coupling_core_static []
 
   # plugin HTTP wiring: host controllers/plugs that back a plugin's
   # `register_routes/1` surface. They execute ONLY when that plugin mounted its
@@ -517,6 +517,31 @@ defmodule Barkpark.PluginFreeBootTest do
                  [%{"type" => "task-list", "query" => %{"parent_id" => "x"}}],
                  []
                )
+    end
+
+    test "no resolve-doc guard resolves: the slug resolver runs no plugin guard under :plugins []" do
+      # task-c10be8a9ad8f0145 — the Tasks twin rule moved behind
+      # `resolve_doc_guards/0`; with nothing registered `Graph.resolve_doc/3`
+      # runs no guard.
+      assert Barkpark.Content.ResolveDocGuards.list() == []
+    end
+
+    test "the Sheets session supervisor is absent, and Session answers instead of raising" do
+      # task-c10be8a9ad8f0145 — the supervisor is the Sheets plugin's boot
+      # child now, so the kill-switch boot never starts it.
+      assert Process.whereis(Barkpark.Plugins.Sheets.Supervisor) == nil
+      refute Barkpark.Plugins.Sheets.Session.runtime_started?()
+
+      ws = Ecto.UUID.generate()
+      alias Barkpark.Plugins.Sheets.Session
+
+      assert Session.peek("any-sheet", "production", ws) == {:error, :no_session}
+      assert Session.flush("any-sheet", "production", ws) == :ok
+      assert Session.flush("any-sheet", "production") == :ok
+      assert Session.stop("any-sheet", "production", ws) == :ok
+
+      assert Session.apply_ops("any-sheet", "production", [], nil, ws) ==
+               {:error, :session_unavailable}
     end
 
     test "no mutate-door fence resolves: the raw mutate door runs no plugin guard under :plugins []" do
