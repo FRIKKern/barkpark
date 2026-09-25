@@ -13,9 +13,10 @@ defmodule Barkpark.Content.DedupAuditLockOrderTest do
   A is a mutate batch that audited an earlier mutation and then publishes; B is
   a plain publish (scope lock, then the audit emit in `tap_broadcast`). With the
   scope lock taken before the audit lock, B gets the scope lock and the four
-  steps deadlock (Postgres 40P01). With the audit lock taken first inside
-  `AuthoringWall.recheck_dedup_under_scope_lock/5`, B blocks on audit(ws) before
-  it can hold the scope lock, A finishes, then B finishes.
+  steps deadlock (Postgres 40P01). With the audit lock taken first (inside
+  `DedupWall.lock_publish_scope!/3`, keyed on the workspace
+  `AuthoringWall.recheck_dedup_under_scope_lock/5` passes), B blocks on
+  audit(ws) before it can hold the scope lock, A finishes, then B finishes.
 
   The caller opts carry NO workspace, only the document does, as on a publish
   whose request scope is unset: the audit emit keys on the document's
