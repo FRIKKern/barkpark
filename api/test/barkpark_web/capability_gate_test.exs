@@ -47,7 +47,7 @@ defmodule BarkparkWeb.CapabilityGateTest do
   defp put_capabilities(kw), do: Application.put_env(:barkpark, Capability, kw)
 
   defp json_conn do
-    build_conn()
+    scoped_conn()
     |> put_req_header("accept", "application/json")
     |> put_req_header("content-type", "application/json")
   end
@@ -154,7 +154,7 @@ defmodule BarkparkWeb.CapabilityGateTest do
       assert {:ok, _view, _html} = live(as(conn, raw), path)
 
       put_capabilities(studio_chat: false)
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(as(build_conn(), raw), path)
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(as(scoped_conn(), raw), path)
     end
 
     test "chat page redirects OFF even with a chat provider enabled", %{
@@ -169,7 +169,7 @@ defmodule BarkparkWeb.CapabilityGateTest do
       assert {:ok, _view, _html} = live(as(conn, raw), path)
 
       put_capabilities(studio_chat: false)
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(as(build_conn(), raw), path)
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(as(scoped_conn(), raw), path)
     end
   end
 
