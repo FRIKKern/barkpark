@@ -11752,6 +11752,32 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # dwb-launch-flow-double-submit-test: the team's in-flight twin of THIS
+  # launch request (same slug, template, provider — `Registry.inflight_launch_twin/4`
+  # owns the predicate), or nil. Read from the raw body params because go_live
+  # consults it BEFORE its own validation: an unknown provider normalizes to
+  # `:error`, which no row carries, so it simply finds no twin.
+  defp launch_twin(conn) do
+    case conn.body_params["name"] do
+      name when is_binary(name) and name != "" ->
+        Registry.inflight_launch_twin(
+          conn.assigns.current_team,
+          slugify(name),
+          template_or_nil(conn.body_params["template"]),
+          launch_provider(conn.body_params["provider"])
+        )
+
+      _ ->
+        nil
+    end
+  end
+
+  # The "already provisioning" envelope the /new client reconciles to (it jumps
+  # to the progress view of `barkpark.id`). The same shape the fleet-support
+  # enqueue emits for its own in-flight row.
+  defp already_provisioning(conn, %Barkpark{} = twin),
+    do: json(conn, 409, %{error: "already_provisioning", barkpark: barkpark_json(twin)})
+
   defp go_live(conn) do
     # go-live is the launch action — accept a session OR a PAT, but gate each
     # principal correctly (CREDENTIAL-AWARE):
@@ -11817,6 +11843,19 @@ defmodule BarkparkCloud.Web.Router do
           error: "no_active_subscription",
           checkout_path: "/v1/billing/checkout"
         })
+
+      # dwb-launch-flow-double-submit-test — IDEMPOTENT LAUNCH. An equivalent
+      # launch whose first submission is still provisioning (a double-click, a
+      # client retry, a second tab) reconciles to THAT instance: 409
+      # already_provisioning + the existing row, and nothing is inserted,
+      # enqueued, audited or billed. It precedes the quota gate because the
+      # first submission already fills the slot it would count: a trial team
+      # (ceiling 1) used to be told "plan limit reached" by its own double-click.
+      # A RACING pair both pass this check; the database decides the loser (the
+      # team-row lock / the (team_id, slug) index) and the `with/else` below
+      # re-asks this question before refusing it.
+      (twin = launch_twin(conn)) != nil ->
+        already_provisioning(conn, twin)
 
       # usage-limits-quotas: the QUOTA gate — the plan's managed-instance ceiling.
       # 403 (authenticated AND entitled, but the plan forbids one more) with the
@@ -11938,15 +11977,30 @@ defmodule BarkparkCloud.Web.Router do
           # (a concurrent create that filled the last slot between the check and
           # the insert) still returns 403, never a 500. The context guard is the
           # backstop; this maps it to the same friendly response.
+          #
+          # dwb-launch-flow-double-submit-test: both refusals below are also how
+          # the LOSER of a racing equivalent pair arrives — the slot or the slug
+          # it collided on is the winner's, committed by now (the team-row lock
+          # and the unique index both wait for it). Re-ask for the twin, so the
+          # loser answers 409 with the winner's id instead of a refusal.
           {:error, :limit_reached} ->
-            json(conn, 403, %{
-              error: "limit_reached",
-              limit: Billing.barkpark_limit(team),
-              upgrade_path: "/v1/billing/checkout"
-            })
+            case launch_twin(conn) do
+              nil ->
+                json(conn, 403, %{
+                  error: "limit_reached",
+                  limit: Billing.barkpark_limit(team),
+                  upgrade_path: "/v1/billing/checkout"
+                })
+
+              twin ->
+                already_provisioning(conn, twin)
+            end
 
           {:error, %Ecto.Changeset{} = changeset} ->
-            json(conn, 422, %{error: "invalid", details: errors(changeset)})
+            case launch_twin(conn) do
+              nil -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+              twin -> already_provisioning(conn, twin)
+            end
         end
     end
   end
