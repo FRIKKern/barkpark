@@ -205,6 +205,7 @@ func TestDuplicateRegistryRowsDetected(t *testing.T) {
 // Both renderings, end to end through runCloudStatus: the table prints the
 // dark duration and the duplicate section; -o json carries beat + duplicates.
 func TestCloudStatusRendersDarkAndDuplicates(t *testing.T) {
+	withTempConfigHome(t) // seedCloudLogin below WRITES config.json; without this it overwrote the real ~/.config/barkpark/config.json
 	withDarkNow(t, mustTime(t, "2026-09-25T09:05:00Z"))
 	body := `{"barkparks":[
 		{"id":"8974b239-6dcf-45f1-b1ff-479bc023291b","name":"muscle-1","host":"46.224.19.120","url":"https://muscle-1.barkpark.cloud","health_status":"unknown","agent_status":"offline","deprovision_status":"failed","deprovision_error":"refusing to delete","inserted_at":"2026-07-26T13:47:46.176707Z","queued_deploy_age_seconds":null},
