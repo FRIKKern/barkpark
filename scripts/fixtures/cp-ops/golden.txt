@@ -614,7 +614,7 @@ root@cp.example.invalid
         #   barkpark-connectors.service  install :1689, enable :1691
         #   barkpark.service             NOT created here -- instance-deploy.sh
         #                                DISABLES it (:1482); it is written by
-        #                                repo-root deploy.sh:312 / enabled :330,
+        #                                repo-root deploy.sh:312 / enabled :330, (lineref-ok: moved verbatim)
         #                                i.e. the legacy mix box this op targets.
         #   (no .timer is installed by instance-deploy.sh: 0 matches for 'timer')
         # Every name is barkpark-prefixed and the SET GROWS (site@, mcp and

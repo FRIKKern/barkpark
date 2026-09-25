@@ -21,11 +21,27 @@
 #      equal scripts/fixtures/cp-ops/golden.txt, which was captured from the
 #      ORIGINAL workflow `run:` block (origin/main 6d6804020) before the arms
 #      moved. That is the byte-for-byte proof: same validation verdicts, same
-#      ssh argv, same quoting, same runner-side vs remote-side expansion.
+#      ssh argv, same quoting, same runner-side vs remote-side expansion. One
+#      deliberate delta since: a `lineref-ok` hatch appended to one COMMENT line
+#      inside box-migrate's remote body (scripts/new-lineref-check.sh reads it
+#      as a new comment citation) — a remote `#` comment, no behaviour.
 #      Every choice option must also be exercised by at least one case.
 #
 # Hermetic: no network, no ssh, no secrets; mktemp only. Exit 0 = all green.
 # shellcheck disable=SC2016 # literal $(…) inputs and a literal "$OP" pattern are the point
+# Interpreter guard (scripts/posix-vacuous-green-census.sh pins it above the
+# first process substitution): under `sh` the `<(…)` below cannot parse, and
+# everything above it would already have run.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "cp-ops.test.sh: needs bash (this script uses process substitution); run: bash scripts/cp-ops.test.sh" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "cp-ops.test.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/cp-ops.test.sh" >&2
+    exit 2
+    ;;
+esac
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

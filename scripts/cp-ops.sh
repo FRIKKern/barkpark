@@ -24,7 +24,8 @@
 # `ssh` first on PATH, so each arm's argv and stdin are CAPTURED instead of
 # sent, and compared against scripts/fixtures/cp-ops/golden.txt, which was
 # captured from the ORIGINAL workflow block (origin/main 6d6804020) before
-# the move. An arm edit is a golden edit, in the same reviewed diff.
+# the move; the one later delta is a `lineref-ok` hatch on a comment line in
+# box-migrate's remote body. An arm edit is a golden edit, in the same diff.
 #
 # ADDING AN ARM: a choice option in cp-ops.yml AND a case arm here AND a golden
 # row (scripts/cp-ops.test.sh --regen). The test reds on either half alone.
@@ -167,7 +168,7 @@ case "$OP" in
         #   barkpark-connectors.service  install :1689, enable :1691
         #   barkpark.service             NOT created here -- instance-deploy.sh
         #                                DISABLES it (:1482); it is written by
-        #                                repo-root deploy.sh:312 / enabled :330,
+        #                                repo-root deploy.sh:312 / enabled :330, (lineref-ok: moved verbatim)
         #                                i.e. the legacy mix box this op targets.
         #   (no .timer is installed by instance-deploy.sh: 0 matches for 'timer')
         # Every name is barkpark-prefixed and the SET GROWS (site@, mcp and
