@@ -972,6 +972,20 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       nested: "pressure",
       go: "Pressure"
     },
+    # dr-w15-s5. `merge_capability/2` emits a NESTED node exactly as
+    # `merge_pressure/2` does, so the top-level `site_deploy` key alone would
+    # leave the node's interior (`configured`, `runner_alive`, `reported_at`)
+    # crossing the language boundary with nothing checking it — and
+    # `reported_at` is ALREADY a tag name in the package (Pressure), so the
+    # file-global union would launder it. This pair makes the PHANTOM/UNREAD
+    # arms bite `SiteDeployCapability` itself.
+    %{
+      name: "barkpark_json/6 site_deploy",
+      file: @router,
+      entry: {:barkpark_json, 6},
+      nested: "site_deploy",
+      go: "SiteDeployCapability"
+    },
     %{
       name: "site_deployment_json/3",
       file: @router,
@@ -1696,7 +1710,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `live_rate` KEY on `site_row/2` but not the seven keys inside the
   # `rate_basis/3` node it calls, exactly as it already cannot see
   # `sites[].failure_rate.*`.
-  @emitted_pinned 176
+  # 176 -> 180 (dr-w15-s5, the site-deploy capability): `merge_capability/2`
+  # puts ONE top-level key, `site_deploy`, on `barkpark_json/6` (+1), and the
+  # new nested pair "barkpark_json/6 site_deploy" makes the node's THREE inner
+  # keys — `configured`, `runner_alive`, `reported_at` — part of the walked
+  # population (+3), exactly as the pressure pair does for its vitals. MEASURED
+  # by the PIN CO-EDIT arm on this branch off origin/main 70e354593
+  # ("@emitted_pinned 176 -> 180"), never summed.
+  @emitted_pinned 180
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -2057,7 +2078,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `SiteDeployment.RuntimeTarget` (the :phantom row), which does NOT move this
   # NAME pin — runtime_target is still declared on three other structs — and
   # moves the SITE register's runtime_target row 4 -> 3 instead.
-  @go_tag_pinned 395
+  # 395 -> 398 (dr-w15-s5, the site-deploy capability): THREE new NAMES —
+  # `site_deploy` on `Barkpark`, and `configured` and `runner_alive` on the new
+  # `SiteDeployCapability`. Its third tag, `reported_at`, is NOT a new name (it
+  # rides free on the union beside `Pressure.ReportedAt`), so it moves the SITE
+  # register's reported_at row 2 -> 3 instead of this pin — the exact class the
+  # register exists for. MEASURED by the PIN CO-EDIT arm on this branch off
+  # origin/main 70e354593 ("@go_tag_pinned 395 -> 398"), never by arithmetic.
+  @go_tag_pinned 398
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2390,7 +2418,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "refused" => 4,
     # W6 S4: MetricsSpace.ReportedAt — the space report stamps its own cadence,
     # which is why it is not the health beat's `as_of`.
-    "reported_at" => 2,
+    # dr-w15-s5: SiteDeployCapability.ReportedAt, the beat the capability was
+    # read off — 2 -> 3, riding free on the NAME union.
+    "reported_at" => 3,
     "required" => 2,
     # 2026-09-10 #17479: ADD => 2, retry.go added. NEWLY DUPLICATED and the only
     # NEW NAME on this branch (the sole reason `@go_tag_pinned` moved at all):
@@ -2580,8 +2610,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `merge_deploy_rate/2` clause AND is a plain map key, so BOTH walkers see it
   # and the pair moves together — the invariant `seeing - blind == 14` is
   # unmoved, which is exactly what a key of this shape must do.
-  @barkpark_family_keys 69
-  @barkpark_family_keys_blind 50
+  # 69/50 -> 70/51 (dr-w15-s5): `site_deploy` is the same shape as
+  # `deploy_rate` — the guarded `merge_capability/2` clause emits it AND its
+  # unguarded twin puts `@unmeasured_site_deploy` under the same key — so BOTH
+  # walkers see it and the pair moves TOGETHER; `seeing - blind == 14` is
+  # unmoved. The node's interior lives in its own pair and is not in this
+  # family. MEASURED by the PIN CO-EDIT arm ("69 -> 70", "50 -> 51").
+  @barkpark_family_keys 70
+  @barkpark_family_keys_blind 51
 
   # ---------------------------------------------------------------------------
 
@@ -2671,10 +2707,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # 49 -> 50 (dr-w10-s1): `deploy_rate` is the EIGHTH pipeline key —
     # `merge_deploy_rate/2`, the guarded twin of `merge_pressure/2`. It is
     # re-listed by name below for the same reason `pressure` is.
-    assert MapSet.size(p.top) == 50
+    #
+    # 50 -> 51 (dr-w15-s5): `site_deploy` is the NINTH pipeline key —
+    # `merge_capability/2`, reading the same beat `merge_pressure/2` reads.
+    assert MapSet.size(p.top) == 51
 
     for key <- ~w(provision_status provision_error deprovision_status deprovision_error
-                  provision_steps provision_console pressure deploy_rate) do
+                  provision_steps provision_console pressure deploy_rate site_deploy) do
       assert key in p.top, "#{key} is added by the merge_* pipeline and was not collected"
     end
   end
@@ -2977,6 +3016,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # consumer that destructures the block crashes on exactly the boxes that have
     # not reported — the population this payload exists to describe honestly.
     assert Extract.attribute_map_keys(@router, :unmetered_pressure) == emitted(pressure()).keys
+  end
+
+  test "@unmeasured_site_deploy and merge_capability/2's measured arm are the SAME shape" do
+    # dr-w15-s5, the same reason as the pressure arm above: the never-beaten /
+    # never-probed arm is the one most boxes take today, and a consumer that
+    # destructures the block must not crash on exactly those boxes.
+    assert Extract.attribute_map_keys(@router, :unmeasured_site_deploy) ==
+             emitted(site_deploy()).keys
+
+    assert MapSet.size(emitted(site_deploy()).keys) == 3
   end
 
   # ---------------------------------------------------------------------------
@@ -3959,6 +4008,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
 
   defp barkpark, do: Enum.find(@pairs, &(&1.name == "barkpark_json/6"))
   defp pressure, do: Enum.find(@pairs, &(&1.name == "barkpark_json/6 pressure"))
+  defp site_deploy, do: Enum.find(@pairs, &(&1.name == "barkpark_json/6 site_deploy"))
 
   defp platform_delivery, do: Enum.find(@pairs, &(&1.name == "PlatformDelivery.to_json/1"))
 

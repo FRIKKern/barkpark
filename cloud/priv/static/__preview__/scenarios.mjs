@@ -294,6 +294,16 @@ export function bpBase(over) {
         slot_units_truncated: null,
         reported_at: null,
       },
+      // dr-w15-s5 — "can this box deploy sites". Always present on the wire:
+      // router.ex merge_capability/2's fallback puts @unmeasured_site_deploy —
+      // THIS all-nil map, key for key. nil is UNMEASURED and never false:
+      // `configured: false` is the box's own refusal, and a box nobody measured
+      // must never read as refusing.
+      site_deploy: {
+        configured: null,
+        runner_alive: null,
+        reported_at: null,
+      },
       // dr-w10-s1 — the per-box deploy vital. Always present on the wire: when
       // a box owns no sites (six of eight prod boxes), router.ex's
       // merge_deploy_rate/2 fallback puts `no_deploy_surface/0` — THIS all-nil

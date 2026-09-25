@@ -315,6 +315,14 @@ type Barkpark struct {
 	// read as "measured, and it is fine".
 	Pressure *Pressure `json:"pressure"`
 
+	// SiteDeploy is "can this box deploy sites" (dr-w15-s5), read by the control
+	// plane's merge_capability/2 off the same latest health beat Pressure comes
+	// from. A POINTER for Pressure's reason: nil means the control plane never
+	// sent the key (it predates dr-w15-s5), which is a different fact from a
+	// plane that sent the block with both booleans null (the box's agent, or its
+	// instance, predates the capability probe). Neither is ever "false".
+	SiteDeploy *SiteDeployCapability `json:"site_deploy"`
+
 	// QueuedDeployAgeSeconds is the age of the OLDEST `queued` container-site
 	// deployment on this box (jpf-w1-queue-age-alarm, charter D6) — the raw
 	// number `barkpark_json` serves so the CLIENT can own the stalled
@@ -364,6 +372,23 @@ func (b *Barkpark) UnmarshalJSON(data []byte) error {
 	_, clockPresent := fields["update_checked_at"]
 	b.UpdateCheckedAtMissing = !clockPresent
 	return nil
+}
+
+// SiteDeployCapability is the `site_deploy` block a fleet row carries
+// (router.ex merge_capability/2). BOTH verdict fields are POINTERS and the
+// three states stay three states: nil is UNMEASURED (an agent or instance that
+// predates the probe, a failed probe, a box that never beat); a real false is
+// the box's OWN refusal — Configured false is exactly the expression its deploy
+// trigger branches on to answer feature_not_configured, RunnerAlive false is a
+// CRASHED DeployRunner (it is supervised unconditionally, so false never means
+// "feature off"). Nothing may read nil as false.
+//
+// The census pair "barkpark_json/6 site_deploy" holds these tags to the keys
+// merge_capability/2 emits.
+type SiteDeployCapability struct {
+	Configured  *bool   `json:"configured"`
+	RunnerAlive *bool   `json:"runner_alive"`
+	ReportedAt  *string `json:"reported_at"`
 }
 
 // Pressure is the host-pressure block a fleet row carries (`pressure` in

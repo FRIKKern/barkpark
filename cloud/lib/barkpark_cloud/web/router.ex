@@ -545,6 +545,19 @@ defmodule BarkparkCloud.Web.Router do
     reported_at: nil
   }
 
+  # dr-w15-s5: the all-UNMEASURED site-deploy capability block, for a box that has
+  # never beaten and for a beat whose agent predates the `site_deploy` field (or
+  # whose probe could not read the instance route — the agent's `omitempty` keeps
+  # the key OFF the wire then). Both booleans are nil, NEVER false: `false` is the
+  # box's own verdict "I refuse deploys", and an un-upgraded or unread box must
+  # never be reported as refusing. Key-identical to merge_capability/2's measured
+  # arm so a consumer can always destructure.
+  @unmeasured_site_deploy %{
+    configured: nil,
+    runner_alive: nil,
+    reported_at: nil
+  }
+
   # Rewrite conn.remote_ip to the real client IP from X-Forwarded-For, but ONLY
   # when the immediate peer is a trusted front (loopback, or the docker bridge
   # gateway — see trusted_peer?/1). A request whose actual peer is NOT trusted is
@@ -12628,6 +12641,7 @@ defmodule BarkparkCloud.Web.Router do
     |> merge_provision_steps(provision)
     |> merge_provision_console(provision)
     |> merge_pressure(pressure)
+    |> merge_capability(pressure)
     |> merge_deploy_rate(deploy_rate)
   end
 
@@ -12777,6 +12791,50 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp merge_pressure(map, _), do: Map.put(map, :pressure, @unmetered_pressure)
+
+  # dr-w15-s5: "can this box deploy sites" on the fleet row — the one per-box
+  # quantity that is true or false at n=1 (charter D235/D236).
+  #
+  # Read off the SAME latest-health-beat RAW jsonb `merge_pressure/2` reads (the
+  # `pressure` prefetch is that beat): the agent's `site_deploy` record
+  # (internal/agent/report.go SiteDeployCapability, probed from the instance's
+  # GET /v1/instance/site-deploy) lands whole in the beat's payload via
+  # POST /v1/agent/report, so this needs NO migration and NO widening of
+  # `Barkpark.health_changeset/2` — nothing here is a column.
+  #
+  # HONESTY LAW, the measured_or_nil law restated for a BOOLEAN: only a real
+  # JSON `true`/`false` survives. An absent `site_deploy` key (an agent
+  # predating dr-w15-s5, or a probe that 404ed on an instance predating
+  # dr-w15-s1 — the agent sends NOTHING then, by `omitempty`), an absent inner
+  # key, a JSON null, and any non-boolean garbage ALL render nil — UNMEASURED.
+  # Never `false` and never 0: `configured: false` is the box's OWN refusal
+  # ("feature_not_configured"), and fabricating it for a box nobody measured is
+  # the exact lie this slice exists to prevent.
+  #
+  # The key is always present (all-nil when the box has never beaten), so a
+  # consumer branches on the VALUES, not on the key's existence — the same
+  # contract `pressure` keeps.
+  defp merge_capability(map, %{payload: payload, reported_at: at}) when is_map(payload) do
+    record = site_deploy_record(Map.get(payload, "site_deploy"))
+
+    Map.put(map, :site_deploy, %{
+      configured: bool_or_nil(Map.get(record, "configured")),
+      runner_alive: bool_or_nil(Map.get(record, "runner_alive")),
+      reported_at: at
+    })
+  end
+
+  defp merge_capability(map, _), do: Map.put(map, :site_deploy, @unmeasured_site_deploy)
+
+  # A `site_deploy` value that is not an object (absent, null, garbage) carries
+  # no record, and reads as an EMPTY one — so both booleans fall to nil below.
+  defp site_deploy_record(record) when is_map(record), do: record
+  defp site_deploy_record(_), do: %{}
+
+  # The boolean counterpart of measured_or_nil: a real boolean is a measurement,
+  # anything else — nil, a string "false", 0 — is UNMEASURED.
+  defp bool_or_nil(b) when is_boolean(b), do: b
+  defp bool_or_nil(_), do: nil
 
   # A vital counts as MEASURED only when it is a non-negative number. Anything
   # else — absent, non-numeric, or the agent's `-1` unwired sentinel — is nil.
