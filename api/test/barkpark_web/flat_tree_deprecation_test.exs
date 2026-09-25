@@ -79,7 +79,7 @@ defmodule BarkparkWeb.FlatTreeDeprecationTest do
   describe "the successor URL" do
     test "names the resolved default scope and substitutes the path params" do
       {ws, project} = TenancyFixtures.ensure_default_scope!()
-      conn = get(build_conn(), "/v1/data/query/production/post")
+      conn = get(scoped_conn(), "/v1/data/query/production/post")
 
       assert get_resp_header(conn, "deprecation") == ["true"]
       assert get_resp_header(conn, "sunset") == []
@@ -89,21 +89,21 @@ defmodule BarkparkWeb.FlatTreeDeprecationTest do
     end
 
     test "never copies the query string" do
-      conn = get(build_conn(), "/v1/data/query/production/post?token=secret&limit=1")
+      conn = get(scoped_conn(), "/v1/data/query/production/post?token=secret&limit=1")
       [link] = get_resp_header(conn, "link")
       refute link =~ "secret"
       assert link =~ "/v1/data/query/production/post>"
     end
 
     test "percent-encodes a path param that needs it" do
-      conn = get(build_conn(), "/v1/data/doc/production/post/a%20b")
+      conn = get(scoped_conn(), "/v1/data/doc/production/post/a%20b")
       [link] = get_resp_header(conn, "link")
       assert link =~ "/v1/data/doc/production/post/a%20b>"
     end
 
     test "a halted request keeps the unresolved slugs as placeholders" do
       # :flat_admin_api halts at RequireToken, before any scope is assigned.
-      conn = get(build_conn(), "/v1/webhooks/production")
+      conn = get(scoped_conn(), "/v1/webhooks/production")
       assert conn.status == 401
       assert get_resp_header(conn, "deprecation") == ["true"]
       assert get_resp_header(conn, "link") == [wrap("#{@scoped_prefix}/v1/webhooks/production")]
@@ -115,7 +115,7 @@ defmodule BarkparkWeb.FlatTreeDeprecationTest do
       {:ok, _} = Auth.create_token(token, "flat-deprecation-b", "production", ["read"], ws_b.id)
 
       conn =
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer " <> token)
         |> get("/v1/data/query/production/post")
 
@@ -127,7 +127,7 @@ defmodule BarkparkWeb.FlatTreeDeprecationTest do
   describe "unchanged surfaces" do
     test "a scoped route carries no Deprecation, Sunset or Link" do
       {ws, project} = TenancyFixtures.ensure_default_scope!()
-      conn = get(build_conn(), "/w/#{ws.slug}/p/#{project.slug}/v1/data/query/production/post")
+      conn = get(scoped_conn(), "/w/#{ws.slug}/p/#{project.slug}/v1/data/query/production/post")
 
       assert get_resp_header(conn, "deprecation") == []
       assert get_resp_header(conn, "sunset") == []
@@ -135,7 +135,7 @@ defmodule BarkparkWeb.FlatTreeDeprecationTest do
     end
 
     test "legacy /api/schemas keeps its own Sunset and successor Link" do
-      conn = get(build_conn(), "/api/schemas")
+      conn = get(scoped_conn(), "/api/schemas")
 
       assert get_resp_header(conn, "deprecation") == ["true"]
       assert get_resp_header(conn, "sunset") == ["Wed, 31 Dec 2026 23:59:59 GMT"]
@@ -177,7 +177,7 @@ defmodule BarkparkWeb.FlatTreeDeprecationTest do
   end
 
   defp request(verb, path) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("content-type", "application/json")
     |> dispatch(@endpoint, verb, probe_path(path), "{}")
   end
