@@ -783,6 +783,16 @@
         "env": {}
       },
       {
+        "name": "epic-cycle-carry.mjs syntax check",
+        "run": "node --check scripts/epic-cycle-carry.mjs",
+        "env": {}
+      },
+      {
+        "name": "bp-epic-cycle resume replays what it claims (runs the real engine with a stub agent; counts dispatches)",
+        "run": "node --test scripts/epic-cycle-resume.test.mjs",
+        "env": {}
+      },
+      {
         "name": "workflow-run-shell-check.sh syntax check",
         "run": "bash -n scripts/workflow-run-shell-check.sh",
         "env": {}
