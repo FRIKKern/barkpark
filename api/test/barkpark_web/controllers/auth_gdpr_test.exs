@@ -58,6 +58,23 @@ defmodule BarkparkWeb.AuthGdprTest do
              |> json_response(401)
     end
 
+    test "a personal access token minted before erasure answers 401 after it", %{conn: _conn} do
+      token = session_token("erase-pat@example.com")
+
+      %{"token" => pat} =
+        authed(token) |> post_json("/v1/auth/tokens", %{name: "cli"}) |> json_response(201)
+
+      # the PAT authenticates AS the user before erasure (owner-resolving route)
+      assert %{} = authed(pat) |> get("/v1/access/mine") |> json_response(200)
+
+      body =
+        authed(token) |> post_json("/v1/auth/erase", %{password: @password}) |> json_response(200)
+
+      assert authed(pat) |> get("/v1/access/mine") |> json_response(401)
+      assert {:error, :unauthorized} = Barkpark.Auth.verify_token(pat)
+      assert body["erased"]["api_tokens_revoked"] == 1
+    end
+
     test "403 with a wrong password (no erasure)", %{conn: _conn} do
       token = session_token("keep@example.com")
 

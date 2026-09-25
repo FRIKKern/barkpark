@@ -9,6 +9,10 @@ defmodule Barkpark.Accounts.PrivacyTest do
   alias Barkpark.Accounts.{Privacy, User, UserSession, UserEmailToken}
   alias Barkpark.Audit
   alias Barkpark.Audit.Event
+  alias Barkpark.Auth
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Accounts.WebauthnCredential
+  alias Barkpark.Sso.SocialIdentity
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Membership
   alias Barkpark.Repo
@@ -21,7 +25,51 @@ defmodule Barkpark.Accounts.PrivacyTest do
     user
   end
 
+  # A token row inserted directly, so expiry and ownership can be set freely.
+  defp token_row!(attrs) do
+    raw = "priv-" <> Ecto.UUID.generate()
+
+    {:ok, token} =
+      %ApiToken{}
+      |> ApiToken.changeset(
+        Map.merge(
+          %{token_hash: ApiToken.hash_token(raw), label: "t", permissions: ["read"]},
+          attrs
+        )
+      )
+      |> Repo.insert()
+
+    {raw, token}
+  end
+
   describe "export_subject/1" do
+    test "lists the subject's own API tokens by id and name only — no hash or secret" do
+      user = subject("export-tokens@example.com")
+
+      {:ok, {raw, pat}} =
+        Auth.create_personal_access_token("laptop", ["read"],
+          owner_user_id: user.id,
+          created_by: user.email
+        )
+
+      # someone else's token is not in this subject's export
+      other = subject("export-other@example.com")
+
+      {:ok, {_, _}} =
+        Auth.create_personal_access_token("theirs", ["read"], owner_user_id: other.id)
+
+      export = Privacy.export_subject(user)
+
+      assert [row] = export.api_tokens
+      assert row.id == pat.id
+      assert row.name == "laptop"
+      assert Map.keys(row) |> Enum.sort() == [:created_at, :expires_at, :id, :name, :revoked_at]
+
+      encoded = Jason.encode!(export)
+      refute encoded =~ raw
+      refute encoded =~ pat.token_hash
+    end
+
     test "returns the account + related data, without secret material" do
       user = subject()
       {:ok, _token} = Accounts.create_user_session_token(user)
@@ -86,6 +134,85 @@ defmodule Barkpark.Accounts.PrivacyTest do
       assert ev.category == "auth"
       assert ev.metadata["pseudonymised"] == true
       assert :ok == Audit.verify_chain(nil)
+    end
+
+    test "revokes every API token the subject owns, in the audited revoke path" do
+      user = subject("erase-tokens@example.com")
+
+      {:ok, {raw_pat, pat}} =
+        Auth.create_personal_access_token("cli", ["read"],
+          owner_user_id: user.id,
+          created_by: user.email
+        )
+
+      # an owned token already past its expiry: revoked too, so the record is final
+      past = DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:second)
+      {_raw_old, old} = token_row!(%{owner_user_id: user.id, expires_at: past})
+
+      # a machine token the subject minted for a workspace: not theirs to lose,
+      # but it must stop naming them
+      {raw_machine, machine} = token_row!(%{created_by: user.email})
+
+      # another user's token is untouched
+      other = subject("erase-bystander@example.com")
+
+      {:ok, {raw_other, _}} =
+        Auth.create_personal_access_token("x", ["read"], owner_user_id: other.id)
+
+      assert {:ok, %ApiToken{}} = Auth.verify_token(raw_pat)
+
+      assert {:ok, summary} = Privacy.erase_subject(user)
+      assert summary.api_tokens_revoked == 2
+      refute Map.has_key?(summary, :revoked_token_ids)
+
+      assert {:error, :unauthorized} = Auth.verify_token(raw_pat)
+      assert %DateTime{} = Repo.get!(ApiToken, pat.id).revoked_at
+      assert %DateTime{} = Repo.get!(ApiToken, old.id).revoked_at
+
+      assert {:ok, _} = Auth.verify_token(raw_machine)
+      assert Repo.get!(ApiToken, machine.id).created_by == "erased-#{user.id}@erased.invalid"
+      assert Repo.get!(ApiToken, pat.id).created_by == "erased-#{user.id}@erased.invalid"
+      assert {:ok, _} = Auth.verify_token(raw_other)
+
+      # one token_revoked audit row per revoked token, from the shared primitive
+      revoked_subjects =
+        Repo.all(from e in Event, where: e.action == "token_revoked", select: e.subject)
+
+      assert pat.id in revoked_subjects
+      assert old.id in revoked_subjects
+
+      # the erasure event counts them and carries no token material
+      ev =
+        Repo.one(from e in Event, where: e.action == "subject_erased" and e.actor_id == ^user.id)
+
+      assert ev.metadata["api_tokens_revoked"] == 2
+      metadata = Jason.encode!(ev.metadata)
+      refute metadata =~ raw_pat
+      refute metadata =~ pat.token_hash
+      refute metadata =~ pat.id
+      assert :ok == Audit.verify_chain(nil)
+    end
+
+    test "deletes passkeys and social-login links, which log in without a password" do
+      user = subject("erase-creds@example.com")
+
+      Repo.insert!(%WebauthnCredential{
+        user_id: user.id,
+        credential_id: :crypto.strong_rand_bytes(16),
+        cose_key: :erlang.term_to_binary(%{}),
+        nickname: "yubikey"
+      })
+
+      Repo.insert!(%SocialIdentity{user_id: user.id, provider: "google", external_id: "g-erase"})
+
+      assert {:ok, summary} = Privacy.erase_subject(user)
+      assert summary.passkeys_deleted == 1
+      assert summary.social_identities_deleted == 1
+
+      assert Repo.aggregate(from(c in WebauthnCredential, where: c.user_id == ^user.id), :count) ==
+               0
+
+      assert Repo.aggregate(from(i in SocialIdentity, where: i.user_id == ^user.id), :count) == 0
     end
   end
 end
