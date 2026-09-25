@@ -209,8 +209,10 @@ defmodule Barkpark.Status do
   never a `0` that would read as "nothing pending". `latest_applied` is also
   `nil` on a database with no applied migration at all.
 
-  `directories` defaults to the repo's own migrations path; a caller (a test)
-  may point it at another directory to stage a pending migration.
+  `directories` defaults to `Barkpark.MigrationPaths.enabled/1`, the set the
+  migrator applies (the core directory plus each enabled plugin or capability
+  folder); a caller (a test) may point it at another directory to stage a
+  pending migration.
   """
   @spec migration_state([String.t()] | nil) :: %{
           latest_applied: non_neg_integer() | nil,
@@ -223,7 +225,7 @@ defmodule Barkpark.Status do
     end
   end
 
-  defp read_migrations(nil), do: Ecto.Migrator.migrations(Repo)
+  defp read_migrations(nil), do: Ecto.Migrator.migrations(Repo, Barkpark.MigrationPaths.enabled())
   defp read_migrations(dirs), do: Ecto.Migrator.migrations(Repo, dirs)
 
   defp summarize_migrations(list) do
