@@ -2051,7 +2051,23 @@ EOF
 # continue-on-error — the reason is false) and UNRESOLVED (the named job is not
 # in the tree, or the context resolves to zero or several jobs — the claim
 # cannot be checked, which is never a silent skip).
+#
+# IT STANDS DOWN ON A REDIRECTED TREE — partial_accounting_check's rule, for the
+# same reason. `--workflows` is a TEST-ONLY override that points the prose
+# clauses at a fixture; the spec's S2 rows name jobs of the COMMITTED tree, so
+# resolving them against somebody else's fixture would report every one
+# UNRESOLVED. MEASURED: without this, required-checks.test.sh went 381/6 — all
+# six were §26/§27 probes about blocking_authority_check, reddened here.
+# `--s2-workflows` names a tree for THIS clause; every real run passes neither.
+S2_WF_DIR_OVERRIDE=""
+
 s2_premise_check() {
+  if [ -z "$S2_WF_DIR_OVERRIDE" ] && [ "${WORKFLOWS_DIR_EXPLICIT:-0}" -eq 1 ]; then
+    say "  note   S2-premise stands down: --workflows redirected the scan to $WORKFLOWS_DIR, which is not the tree the spec's S2 rows name. Pass --s2-workflows to point this clause at a tree."
+    return 0
+  fi
+  # Dynamic scope: wf_job_index and wf_expand_name_legs read $WORKFLOWS_DIR.
+  local WORKFLOWS_DIR="${S2_WF_DIR_OVERRIDE:-$WORKFLOWS_DIR}"
   [ -d "$WORKFLOWS_DIR" ] \
     || blocked "cannot read $WORKFLOWS_DIR — the S2-premise clause has nothing to resolve against (a HOLD, never a skip)"
   local rows
@@ -2853,18 +2869,18 @@ YML
   s2_spec "$tmp/s2-false.json" "S2 ADVISORY: security.yml job 'sobelow' carries continue-on-error:true"
   probe_says "39/42 the #20410 MUTATION: the false S2 reason put back on the sobelow row, over a job whose continue-on-error lines are all STEP-level, REDS as a MISMATCH" 1 \
     "S2 MISMATCH" "S2 UNRESOLVED" \
-    --spec "$tmp/s2-false.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-s2-flagless" || rc=1
+    --spec "$tmp/s2-false.json" --readback "$good_rb" --runs "$good_runs" --sha probe --s2-workflows "$tmp/wf-s2-flagless" || rc=1
   probe_says "40/42 …and the IDENTICAL row over the job WITH a job-level continue-on-error is GREEN — one YAML line apart, opposite verdicts" 0 \
     "1 checked" "" \
-    --spec "$tmp/s2-false.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-s2-flagged" || rc=1
+    --spec "$tmp/s2-false.json" --readback "$good_rb" --runs "$good_runs" --sha probe --s2-workflows "$tmp/wf-s2-flagged" || rc=1
   s2_spec "$tmp/s2-unresolved.json" "S2 ADVISORY: security.yml job 'sobelow-gone' carries continue-on-error:true"
   probe_says "41/42 an S2 row naming a job the tree does not have REDS as UNRESOLVED — distinct from a mismatch, never a silent skip" 1 \
     "S2 UNRESOLVED" "S2 MISMATCH" \
-    --spec "$tmp/s2-unresolved.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-s2-flagged" || rc=1
+    --spec "$tmp/s2-unresolved.json" --readback "$good_rb" --runs "$good_runs" --sha probe --s2-workflows "$tmp/wf-s2-flagged" || rc=1
   s2_spec "$tmp/s2-intent.json" "S2 ADVISORY BY INTENT: security.yml job 'sobelow' is advisory for a stated reason and claims no flag"
   probe_says "42/42 an \`S2 ADVISORY BY INTENT:\` row claims NO flag, so over the flagless job it stays GREEN — the clause checks the claim the reason makes" 0 \
     "1 BY INTENT" "" \
-    --spec "$tmp/s2-intent.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-s2-flagless" || rc=1
+    --spec "$tmp/s2-intent.json" --readback "$good_rb" --runs "$good_runs" --sha probe --s2-workflows "$tmp/wf-s2-flagless" || rc=1
 
   rm -rf "$tmp"
   echo
@@ -2892,6 +2908,7 @@ main() {
       # Same contract as --workflows and --prose: an override exists ONLY so the
       # suite can point the partial-accounting clause at a fixture tree.
       --partial-workflows) PARTIAL_WF_DIR_OVERRIDE="$2"; shift 2 ;;
+      --s2-workflows) S2_WF_DIR_OVERRIDE="$2"; shift 2 ;;
       # Turn the merge-truth clause's zero-candidate green into a refusal. For
       # a caller about to STAND on this clause; see REQUIRE_PROSE_CANDIDATES.
       --require-prose-candidates) REQUIRE_PROSE_CANDIDATES=1; shift ;;
