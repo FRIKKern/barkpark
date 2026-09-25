@@ -501,7 +501,8 @@ defmodule Barkpark.Content.Writer do
                     "update",
                     existing.rev,
                     Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id)
+                    Keyword.get(opts, :user_id),
+                    caller_context: Keyword.get(opts, :caller_context)
                   )
                 end)
               end
@@ -542,7 +543,8 @@ defmodule Barkpark.Content.Writer do
                     "create",
                     nil,
                     Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id)
+                    Keyword.get(opts, :user_id),
+                    caller_context: Keyword.get(opts, :caller_context)
                   )
                 end)
               end
@@ -1023,7 +1025,8 @@ defmodule Barkpark.Content.Writer do
                     "update",
                     existing.rev,
                     Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id)
+                    Keyword.get(opts, :user_id),
+                    caller_context: Keyword.get(opts, :caller_context)
                   )
                 end)
               end
@@ -1045,7 +1048,8 @@ defmodule Barkpark.Content.Writer do
                     "create",
                     nil,
                     Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id)
+                    Keyword.get(opts, :user_id),
+                    caller_context: Keyword.get(opts, :caller_context)
                   )
                 end)
               end

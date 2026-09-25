@@ -58,7 +58,7 @@ defmodule Barkpark.Content.Broadcast do
   alias Barkpark.Audit
   alias Barkpark.Repo
 
-  alias Barkpark.Content.{Document, DraftId, Envelope, MutationEvent, Revision}
+  alias Barkpark.Content.{CallerContext, Document, DraftId, Envelope, MutationEvent, Revision}
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -140,6 +140,14 @@ defmodule Barkpark.Content.Broadcast do
   mutation's `opts[:user_id]` (`ctx.user_id`) — is stamped onto the saved
   revision so version history doubles as a who-edited-what content trail.
   Existing 5-/6-arity callers keep working unchanged (actor defaults to nil).
+
+  `opts[:caller_context]` — the SERVER-derived principal the write door
+  authenticated (`CallerContext.from_conn/1` via `scope_opts/1`) — stamps the
+  revision's `actor_kind` / `actor_id` / `actor_label` through
+  `CallerContext.actor_stamp/1`, the one source Papers already use. Only a
+  `%CallerContext{}` stamps; an absent one (system writes, jobs, legacy
+  callers) leaves all three columns NULL — UNMEASURED, never `""`. Nothing a
+  request BODY carries reaches this: the context is built from `conn.assigns`.
   """
   def tap_broadcast(
         result,
@@ -153,7 +161,7 @@ defmodule Barkpark.Content.Broadcast do
       ) do
     case result do
       {:ok, doc} ->
-        case save_revision(doc, type, dataset, action, actor_user_id) do
+        case save_revision(doc, type, dataset, action, actor_user_id, revision_actor_stamp(opts)) do
           {:ok, _} ->
             :ok
 
@@ -611,6 +619,18 @@ defmodule Barkpark.Content.Broadcast do
       inserted_at: DateTime.utc_now()
     })
     |> Repo.insert!()
+  end
+
+  # The revision attribution triple for `tap_broadcast/8`. A `%CallerContext{}`
+  # is the only input: it is minted by the auth plugs from the token/session the
+  # request ARRIVED on, never from a field the client typed. Anything else —
+  # nil, or no key at all — yields `%{}`, which `save_revision/6` writes as
+  # three NULL columns: the pre-existing row shape, read as UNMEASURED.
+  defp revision_actor_stamp(opts) do
+    case Keyword.get(opts, :caller_context) do
+      %CallerContext{} = ctx -> CallerContext.actor_stamp(ctx)
+      _ -> %{}
+    end
   end
 
   @doc """

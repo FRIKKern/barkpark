@@ -431,7 +431,8 @@ defmodule Barkpark.Content.Lifecycle do
                     "publish",
                     prev_pub_rev,
                     Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id)
+                    Keyword.get(opts, :user_id),
+                    caller_context: Keyword.get(opts, :caller_context)
                   )
 
                 {:error, reason} ->
@@ -684,7 +685,8 @@ defmodule Barkpark.Content.Lifecycle do
           "discardDraft",
           draft.rev,
           Keyword.get(opts, :source, :api),
-          Keyword.get(opts, :user_id)
+          Keyword.get(opts, :user_id),
+          caller_context: Keyword.get(opts, :caller_context)
         )
 
         {:error, {:duplicate_of, payload}}
@@ -775,7 +777,8 @@ defmodule Barkpark.Content.Lifecycle do
                 "update",
                 prev_rev,
                 Keyword.get(opts, :source, :api),
-                Keyword.get(opts, :user_id)
+                Keyword.get(opts, :user_id),
+                caller_context: Keyword.get(opts, :caller_context)
               )
 
               :ok
@@ -904,7 +907,8 @@ defmodule Barkpark.Content.Lifecycle do
                   "unpublish",
                   prev_draft_rev,
                   Keyword.get(opts, :source, :api),
-                  Keyword.get(opts, :user_id)
+                  Keyword.get(opts, :user_id),
+                  caller_context: Keyword.get(opts, :caller_context)
                 )
 
               {:error, reason} ->
@@ -946,7 +950,8 @@ defmodule Barkpark.Content.Lifecycle do
               "discardDraft",
               prev_rev,
               Keyword.get(opts, :source, :api),
-              Keyword.get(opts, :user_id)
+              Keyword.get(opts, :user_id),
+              caller_context: Keyword.get(opts, :caller_context)
             )
         end
 
@@ -1030,7 +1035,8 @@ defmodule Barkpark.Content.Lifecycle do
                     "delete",
                     prev_rev,
                     Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id)
+                    Keyword.get(opts, :user_id),
+                    caller_context: Keyword.get(opts, :caller_context)
                   )
 
                 {:error, reason} ->
@@ -1080,7 +1086,8 @@ defmodule Barkpark.Content.Lifecycle do
                     doc.rev,
                     Keyword.get(opts, :source, :api),
                     Keyword.get(opts, :user_id),
-                    require_revision: true
+                    require_revision: true,
+                    caller_context: Keyword.get(opts, :caller_context)
                   )
 
                 WriteScope.fire_after(result, :after_delete, payload)
