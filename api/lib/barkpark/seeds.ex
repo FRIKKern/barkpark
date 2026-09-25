@@ -4,10 +4,13 @@ defmodule Barkpark.Seeds do
   (now a one-liner calling `run/0`) so the seed bodies are testable and
   `Barkpark.Release.seed/0` keeps working unchanged.
 
-  Profile selection: `BARKPARK_SEED_PROFILE=demo|clean`. The default is
-  `demo`, so every pre-existing caller (deploy.sh, entrypoint.sh,
-  `make seed`, `mix ecto.reset`) behaves byte-identically to the
-  pre-extraction script. Unknown values raise rather than silently seeding
+  Profile selection: `BARKPARK_SEED_PROFILE=demo|clean`. With the variable
+  unset, `profile/0` reads `config :barkpark, :default_seed_profile`, which is
+  `"clean"` everywhere except `config/dev.exs`. A release, a `deploy.sh` box
+  or `Barkpark.Release.seed/0` therefore never seeds the demo world, and never
+  its shared `barkpark-dev-token`, unless someone asks for `demo` by name.
+  Dev keeps `demo` because `:dev_browser_token` in `config/dev.exs` expects
+  the seeded dev token. Unknown values raise rather than silently seeding
   the wrong world.
 
   Both profiles end with `Plugins.Bootstrap.register_all_schemas/0` +
@@ -17,12 +20,24 @@ defmodule Barkpark.Seeds do
 
   alias Barkpark.Seeds.{Clean, Demo, Shared}
 
-  @doc "Read `BARKPARK_SEED_PROFILE` (default: demo) and dispatch to `run/1`."
+  @doc "Resolve the profile (see `profile/0`) and dispatch to `run/1`."
   def run do
-    case System.get_env("BARKPARK_SEED_PROFILE", "demo") do
+    case profile() do
       "demo" -> run(:demo)
       "clean" -> run(:clean)
       other -> raise "BARKPARK_SEED_PROFILE must be clean or demo, got: #{inspect(other)}"
+    end
+  end
+
+  @doc """
+  The seed profile to run: `BARKPARK_SEED_PROFILE` when set, else
+  `config :barkpark, :default_seed_profile`, else `"clean"`.
+  """
+  @spec profile() :: String.t()
+  def profile do
+    case System.get_env("BARKPARK_SEED_PROFILE") do
+      value when is_binary(value) and value != "" -> value
+      _ -> Application.get_env(:barkpark, :default_seed_profile, "clean")
     end
   end
 

@@ -277,10 +277,11 @@ fi
 
 set -a; source "$APP_DIR/.env"; set +a
 
-# Admin token: on the `clean` profile, mint one now so the seed installs it and
-# we can print the exact `bp` login command at the end. The `demo` profile
-# (default) seeds the shared dev token instead. Never overrides a caller-set one.
-SEED_PROFILE="${BARKPARK_SEED_PROFILE:-demo}"
+# Admin token: on the `clean` profile (the default), mint one now so the seed
+# installs it and we can print the exact `bp` login command at the end. The
+# `demo` profile, only when asked for by name, seeds the shared dev token
+# instead. Never overrides a caller-set one.
+SEED_PROFILE="${BARKPARK_SEED_PROFILE:-clean}"
 ADMIN_TOKEN=""
 if [ "$SEED_PROFILE" = "clean" ] && [ -z "${BARKPARK_SEED_ADMIN_TOKEN:-}" ]; then
   ADMIN_TOKEN="bp_admin_$(openssl rand 24 | base64 | tr '+/' '-_' | tr -d '=')"

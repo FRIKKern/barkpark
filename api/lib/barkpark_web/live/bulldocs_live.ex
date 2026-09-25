@@ -1331,6 +1331,14 @@ defmodule BarkparkWeb.BulldocsLive do
       not socket.assigns.block_mode ->
         {:noreply, refetch(socket)}
 
+      # A canvas batch (`paper-ops`) broadcasts ONE frame with op_kind: :batch
+      # and NO fragment_html: there is nothing to paint per block. Streaming
+      # that nil fragment over the last touched block blanked it in every
+      # View-mode reader while an editor typed. Re-read the document instead,
+      # exactly as the rev-gap path does.
+      is_nil(Map.get(frame, :fragment_html)) ->
+        {:noreply, refetch(socket)}
+
       # Missed a frame — refetch the whole doc and re-stream from scratch.
       gap?(socket.assigns.rev, frame.rev) ->
         {:noreply, refetch(socket)}
