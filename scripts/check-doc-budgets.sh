@@ -1381,8 +1381,8 @@ DISCOVERY_HEADER_RE='^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-
 #       3920B vs 900tok=3600B header, over by 320B (+9%)
 #   docs/decisions/0005-pr-body-criteria.md
 #       3113B vs 700tok=2800B header, over by 313B (+11%)
-#   docs/contracts/roster-reading.md
-#       7384B vs 1800tok=7200B header, over by 184B (+3%)
+#   docs/contracts/roster-reading.md -- PAID 2026-09-25 (task-57eff013016a4eb6),
+#       carried under its header; freeze row deleted, ceiling lowered to 37
 #   docs/contracts/dispatch-areas.md
 #       5782B vs 1400tok=5600B header, over by 182B (+3%)
 #   docs/ops/backup-dr.md
@@ -1456,8 +1456,8 @@ DISCOVERY_HEADER_RE='^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-
 # point -- the ceiling buys a REVIEWED LINE IN THE DIFF, not an impossibility.
 # What it removes is the silent path, where a freeze row is appended and the
 # only visible change is one digit that looks like bookkeeping.
-FREEZE_ROWS_CEILING=38
-FREEZE_ROWS_EXPECTED=38
+FREEZE_ROWS_CEILING=37
+FREEZE_ROWS_EXPECTED=37
 
 # APPEND-ONLY RECORDS. A byte ceiling on a file that grows by design is a gate
 # in front of the thing it is supposed to protect: docs/ops/break-glass-log.md
@@ -1490,7 +1490,6 @@ docs/cli/HANDBOOK.md 13979
 docs/cli/m0-decisions.md 5334
 docs/contracts/cycle-fleet.md 7497
 docs/contracts/dispatch-areas.md 5782
-docs/contracts/roster-reading.md 7384
 docs/contracts/tui-render-doctrine.md 3920
 docs/decisions/0001-sdk-envelope.md 2179
 docs/decisions/0002-npm-dist-tag.md 5221
