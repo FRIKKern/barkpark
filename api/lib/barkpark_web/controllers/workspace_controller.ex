@@ -66,6 +66,7 @@ defmodule BarkparkWeb.WorkspaceController do
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.Archive
+  alias Barkpark.Tenancy.WorkspaceBundle.DatasetRemapError
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
   alias Barkpark.Tenancy.WorkspaceBundle.SingleFlight
@@ -753,9 +754,41 @@ defmodule BarkparkWeb.WorkspaceController do
   `import_constraint_violation` naming the violated constraint + table — never
   the opaque `internal_error` 500 the live support chain died blind on
   (task-63a199c0a0ce2a06). Non-constraint Postgres raises still 500 loudly.
+
+  ## Import as a NEW dataset (`into_dataset`, task-9a458d67319697b3)
+
+  `?into_dataset=<new slug>&into_project=<project slug>` imports a
+  DATASET-scoped bundle as a new dataset under that project of the workspace
+  in the URL, with fresh ids and every pointer to the source rewritten
+  (`WorkspaceBundle`'s `:into_dataset` option; the rewrite table lives in
+  `Barkpark.Tenancy.WorkspaceBundle.DatasetRemap`). Here, unlike a restore, the
+  URL's `workspace_slug` IS the target, so it is bound like `export/2` binds
+  its workspace: on top of this route's admin + operator pipeline, the caller
+  must pass `TenancyAuth.authorize(token, workspace_id, :write)` on the TARGET
+  workspace (member, with write or admin). Unknown workspace or project is 404,
+  a caller without write on the target is 403, both before the body is read.
+
+  Refusals keep existing codes, with the engine's reason named in `reason`:
+  409 `conflict` for `dataset_slug_conflict` (the project already has that
+  slug), 422 `validation_failed` for every other `DatasetRemapError`
+  (`dangling_reference`, `unhandled_dataset_rows`, `not_a_dataset_bundle`, …)
+  and for a malformed request (`into_project` missing, or `mode=merge`).
   """
-  def import(conn, %{"workspace_slug" => _slug} = params) do
-    case params["mode"] || "clean" do
+  def import(conn, %{"workspace_slug" => slug} = params) do
+    case {params["mode"] || "clean", Map.has_key?(params, "into_dataset")} do
+      {"clean", true} ->
+        remap_import(conn, slug, params)
+
+      {"merge", true} ->
+        remap_request_invalid(conn, "into_dataset imports only in mode=clean")
+
+      {mode, false} ->
+        plain_import(conn, mode)
+    end
+  end
+
+  defp plain_import(conn, mode) do
+    case mode do
       "clean" ->
         with_spilled_body(conn, &clean_import/3)
 
@@ -782,6 +815,104 @@ defmodule BarkparkWeb.WorkspaceController do
           message: "unknown import mode #{inspect(other)} (expected clean or merge)"
         })
     end
+  end
+
+  # ── into_dataset: import a dataset bundle as a new dataset ──────────────────
+
+  defp remap_import(conn, ws_slug, params) do
+    token = conn.assigns[:api_token]
+
+    with {:ok, new_slug, project_slug} <- remap_params(params),
+         %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws_slug),
+         :ok <- TenancyAuth.authorize(token, workspace.id, :write),
+         %Tenancy.Project{} = project <- Tenancy.get_project(workspace.slug, project_slug) do
+      target = [workspace_id: workspace.id, project_id: project.id, slug: new_slug]
+
+      with_spilled_body(conn, fn conn, path, receipt ->
+        remap_into(conn, path, receipt, target)
+      end)
+    else
+      {:invalid, message} -> remap_request_invalid(conn, message)
+      nil -> {:error, :not_found}
+      {:error, :forbidden} -> {:error, :forbidden}
+    end
+  end
+
+  defp remap_params(params) do
+    case {params["into_dataset"], params["into_project"]} do
+      {slug, project}
+      when is_binary(slug) and slug != "" and is_binary(project) and project != "" ->
+        {:ok, slug, project}
+
+      {slug, _} when not is_binary(slug) or slug == "" ->
+        {:invalid, "into_dataset must be the new dataset's slug"}
+
+      _ ->
+        {:invalid, "into_dataset needs into_project, the slug of the target project"}
+    end
+  end
+
+  defp remap_request_invalid(conn, message) do
+    ErrorResponse.emit_fields(conn, :unprocessable_entity, %{
+      code: "validation_failed",
+      message: message
+    })
+  end
+
+  defp remap_into(conn, path, receipt, target) do
+    case WorkspaceBundle.import_bundle_file(path, into_dataset: target) do
+      {:ok, stats} ->
+        remap = stats.remap
+
+        json(
+          conn,
+          Map.merge(receipt, %{
+            tables: stats.tables,
+            total_rows: stats.total_rows,
+            dataset: %{
+              id: remap.dataset_id,
+              slug: remap.dataset_slug,
+              workspace_id: remap.workspace_id,
+              project_id: remap.project_id
+            },
+            source: remap.source,
+            dropped_out_of_dataset: remap.dropped_out_of_dataset,
+            skipped_workspace_scoped: remap.skipped_workspace_scoped,
+            not_carried: remap.not_carried
+          })
+        )
+
+      {:error, other} ->
+        import_failed(conn, :clean, other)
+    end
+  rescue
+    e in DatasetRemapError -> remap_refused(conn, e)
+    e in InvalidBundleError -> invalid_bundle(conn, e)
+    e in Postgrex.Error -> constraint_conflict_or_reraise(conn, e, __STACKTRACE__)
+    e -> log_import_crash_and_reraise(:clean, e, __STACKTRACE__)
+  end
+
+  # Existing codes only: the engine's refusal reason rides in `reason`, and
+  # `details` carries only JSON-safe keys (an `invalid_target` refusal holds
+  # changeset error tuples, which are summarised in the message instead).
+  defp remap_refused(conn, %DatasetRemapError{} = e) do
+    {status, code} =
+      case e.code do
+        "dataset_slug_conflict" -> {:conflict, "conflict"}
+        _ -> {:unprocessable_entity, "validation_failed"}
+      end
+
+    details =
+      e.details
+      |> Map.take([:count, :sample, :existing_dataset_id, :project_id, :slug])
+      |> Map.put(:table, e.table)
+
+    ErrorResponse.emit_fields(conn, status, %{
+      code: code,
+      reason: e.code,
+      message: e.message,
+      details: details
+    })
   end
 
   defp clean_import(conn, path, receipt) do
