@@ -316,6 +316,73 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
     end
   end
 
+  # task-1f5c2cceae36e4d9 — the racing pair above flaked in CI as [201, 403]:
+  # the loser's twin check ran BEFORE the winner committed and its quota check
+  # ran AFTER, and the cond's quota arm 403'd without asking again. The race
+  # tests cannot force that window, so this one does: a telemetry handler on the
+  # repo's query event, scoped to THIS process, commits the winner's row (and
+  # its provision job) the moment the loser's first twin lookup returns empty.
+  # The loser then counts a full slot. Removing the re-check in the quota arm
+  # reds this test with 403 limit_reached.
+  describe "the winner commits between the loser's twin check and its quota check" do
+    test "the quota arm re-asks for the twin → 409 with the winner's id, not 403" do
+      {user, team} = user_with_team()
+      # free = ceiling 1, so the winner's one row fills the only slot.
+      {:ok, _} = Billing.subscribe(team, "free")
+      {:ok, token} = Accounts.create_user_session_token(user)
+      slug = "dup-blog"
+
+      me = self()
+      handler = {__MODULE__, make_ref()}
+
+      :telemetry.attach(
+        handler,
+        [:barkpark_cloud, :repo, :query],
+        fn _event, _measure, meta, _cfg ->
+          # The loser's FIRST in-flight-twin lookup (the only barkparks query
+          # keyed on this slug and fleet_role) — fire once, in this process only.
+          if self() == me and not Process.get(:winner_committed, false) and
+               meta.query =~ ~s(FROM "barkparks") and meta.query =~ "fleet_role" and
+               slug in meta.params do
+            Process.put(:winner_committed, true)
+
+            {:ok, winner} =
+              Registry.register_managed_barkpark(team, "Dup Blog", slug,
+                template: "blog-starter",
+                provider: "hetzner"
+              )
+
+            {:ok, _job} = Registry.enqueue_provision_job(winner)
+            send(me, {:winner, winner.id})
+          end
+        end,
+        nil
+      )
+
+      conn =
+        try do
+          call(:post, "/v1/launch", @dup_body, token)
+        after
+          :telemetry.detach(handler)
+        end
+
+      # PRECONDITION: the interleaving really happened — the winner landed
+      # mid-request, after the loser's twin lookup and before its quota check.
+      assert_received {:winner, winner_id},
+                      "the seam never fired: no twin lookup ran, so nothing was measured"
+
+      assert conn.status == 409,
+             "want 409 already_provisioning, got #{conn.status} #{conn.resp_body}"
+
+      assert json_body(conn)["error"] == "already_provisioning"
+      assert json_body(conn)["barkpark"]["id"] == winner_id
+
+      ledger = dup_ledger(team)
+      assert ledger.rows == [winner_id]
+      assert ledger.provision_jobs == 1
+    end
+  end
+
   test "unentitled + trial spent → 402 {no_active_subscription, checkout_path}" do
     {user, team} = user_with_team()
     exhaust_trial(team)
