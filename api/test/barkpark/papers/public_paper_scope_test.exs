@@ -38,6 +38,27 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
 
   @slug "2026-05-25-leak-probe"
 
+  @doc """
+  Simulate "no seeded Default tenant" without an FK-entangled teardown.
+
+  This used to be a RENAME, back when `Tenancy.get_default_workspace/0`
+  looked up `slug == "default"`. Since task-566dc5be4871353b the seat is
+  the uncast `workspaces.is_default` column, so a rename vacates nothing —
+  which is precisely the property that change bought. The rename is kept
+  only so the row is also unreachable by name; the seat is cleared by the
+  shared fixture.
+
+  Public so `Barkpark.Papers.PublicPaperScopeLockOrderTest` (below) runs the
+  same statements on unboxed connections.
+  """
+  def retire_default_workspace! do
+    Tenancy.get_default_workspace()
+    |> Ecto.Changeset.change(slug: "not-default-#{System.unique_integer([:positive])}")
+    |> Repo.update!()
+
+    vacate_default_seat!()
+  end
+
   describe "get_public_paper/2 cross-workspace isolation" do
     setup do
       # The seeded Default workspace/project IS the public tenant.
@@ -141,18 +162,7 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
           })
         )
 
-      # Simulate "no seeded Default tenant" without an FK-entangled teardown.
-      # This used to be a RENAME, back when `Tenancy.get_default_workspace/0`
-      # looked up `slug == "default"`. Since task-566dc5be4871353b the seat is
-      # the uncast `workspaces.is_default` column, so a rename vacates nothing —
-      # which is precisely the property that change bought. The rename is kept
-      # only so the row is also unreachable by name; the seat is cleared by the
-      # shared fixture.
-      Tenancy.get_default_workspace()
-      |> Ecto.Changeset.change(slug: "not-default-#{System.unique_integer([:positive])}")
-      |> Repo.update!()
-
-      vacate_default_seat!()
+      retire_default_workspace!()
 
       assert Tenancy.get_default_workspace() == nil
 
@@ -165,5 +175,151 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
 
       _ = ctx
     end
+  end
+end
+
+defmodule Barkpark.Papers.PublicPaperScopeLockOrderTest do
+  @moduledoc """
+  task-8051eddcd3c9f30f — retiring the shared Default workspace in a test must
+  not deadlock with a concurrent writer to that workspace.
+
+  Two transactions on the Default workspace `ws`, each on its own unboxed
+  connection, in the order the async suite interleaves them:
+
+      P: Audit.emit(ws)              ── holds audit(ws)       (the fail-closed
+                                                                setup's upsert_paper)
+                                        T: INSERT … workspace_id = ws
+                                           ── FK check: FOR KEY SHARE on
+                                              workspaces(ws)  (a task birth)
+      P: retire_default_workspace!() ── wants a lock on workspaces(ws)
+                                        T: Audit.emit(ws)   ── wants audit(ws)
+
+  Every writer takes the workspace-row lock (KEY SHARE, from its FK check)
+  BEFORE audit(ws). A slug RENAME of the row is a key-modifying UPDATE, so it
+  wants FOR UPDATE, which conflicts with KEY SHARE: P waits on T, T waits on
+  P, Postgres raises 40P01. Vacating the seat alone updates only the
+  `is_default` column (covered by a partial unique index, so not a key
+  column): FOR NO KEY UPDATE, which KEY SHARE does not block.
+
+  Deterministic: T does not request audit(ws) until P is either blocked on a
+  lock (pg_stat_activity) or has finished retiring. Both transactions roll
+  back, so nothing is committed.
+  """
+  use ExUnit.Case, async: false
+
+  import Barkpark.TenancyFixtures
+
+  alias Barkpark.Audit
+  alias Barkpark.Papers.PublicPaperScopeTest
+  alias Barkpark.Repo
+  alias Barkpark.Tenancy
+  alias Ecto.Adapters.SQL.Sandbox
+
+  defp emit!(ws_id, subject) do
+    {:ok, _} =
+      Audit.emit(%{
+        category: "content_mutation",
+        action: "document.lock_order_probe",
+        subject: subject,
+        workspace_id: ws_id
+      })
+
+    :ok
+  end
+
+  # A deadlock victim's Postgrex error is returned, not raised, so the test
+  # can assert on it.
+  defp in_rolled_back_txn(fun) do
+    Repo.transaction(fn ->
+      fun.()
+      Repo.rollback(:done)
+    end)
+  rescue
+    e in Postgrex.Error -> {:postgres_error, e.postgres[:code]}
+  end
+
+  defp waiting_on_lock?(pid) do
+    %{rows: [[type]]} =
+      Repo.query!("SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1", [pid])
+
+    type == "Lock"
+  end
+
+  # Poll until P is blocked on a lock (true) or reports it finished (false).
+  defp await_p_blocked_or_done(p_pid, deadline_ms) do
+    receive do
+      :p_retired -> false
+    after
+      20 ->
+        cond do
+          waiting_on_lock?(p_pid) -> true
+          deadline_ms <= 0 -> flunk("P neither blocked nor finished retiring")
+          true -> await_p_blocked_or_done(p_pid, deadline_ms - 20)
+        end
+    end
+  end
+
+  test "retiring the Default does not deadlock with a writer that holds its key share" do
+    :ok = Sandbox.checkout(Repo, sandbox: false)
+    {ws, _proj} = ensure_default_scope!()
+    parent = self()
+
+    p =
+      Task.async(fn ->
+        :ok = Sandbox.checkout(Repo, sandbox: false)
+
+        in_rolled_back_txn(fn ->
+          %{rows: [[pid]]} = Repo.query!("SELECT pg_backend_pid()")
+          emit!(ws.id, "fail-closed-setup")
+          send(parent, {:p_holds_audit, pid})
+
+          receive do
+            :go_p -> :ok
+          end
+
+          PublicPaperScopeTest.retire_default_workspace!()
+          send(parent, :p_retired)
+        end)
+      end)
+
+    assert_receive {:p_holds_audit, p_pid}, 5_000
+
+    t =
+      Task.async(fn ->
+        :ok = Sandbox.checkout(Repo, sandbox: false)
+
+        in_rolled_back_txn(fn ->
+          {:ok, _} =
+            Tenancy.create_project(ws, %{
+              slug: "lock-order-#{System.unique_integer([:positive])}",
+              name: "lock order probe"
+            })
+
+          send(parent, :t_holds_key_share)
+
+          receive do
+            :go_t -> :ok
+          end
+
+          emit!(ws.id, "task-birth")
+        end)
+      end)
+
+    assert_receive :t_holds_key_share, 5_000
+    send(p.pid, :go_p)
+
+    p_blocked? = await_p_blocked_or_done(p_pid, 5_000)
+    send(t.pid, :go_t)
+
+    results = [Task.await(p, 15_000), Task.await(t, 15_000)]
+
+    refute Enum.any?(results, &match?({:postgres_error, :deadlock_detected}, &1)),
+           "the two transactions deadlocked (40P01): #{inspect(results)}"
+
+    assert results == [{:error, :done}, {:error, :done}]
+
+    refute p_blocked?,
+           "retire_default_workspace!/0 waited on a writer's KEY SHARE of the Default " <>
+             "row while holding audit(ws) — it takes a key-modifying row lock"
   end
 end
