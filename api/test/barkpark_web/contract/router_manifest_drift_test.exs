@@ -104,6 +104,7 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     # An OPTIONS probe a browser sends before the real request. There is no
     # operator intent behind it and nothing to render.
     {"OPTIONS", "/v1/plugins/bulldocs/papers/:*/form-responses"} => "CORS preflight",
+    {"OPTIONS", "/v1/plugins/forms/w/:*/p/:*/d/:*/sites/:*/submissions"} => "CORS preflight",
     {"OPTIONS", "/v1/plugins/pulse/:*/events"} => "CORS preflight",
     {"OPTIONS", "/v1/plugins/pulse/:*/recent"} => "CORS preflight",
     {"OPTIONS", "/v1/plugins/pulse/:*/stats"} => "CORS preflight",
@@ -145,6 +146,8 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
       "the media processing worker calls this back; not an operator verb",
     {"POST", "/v1/plugins/bulldocs/papers/:*/form-responses"} =>
       "a reader submits a rendered paper's form from the browser",
+    {"POST", "/v1/plugins/forms/w/:*/p/:*/d/:*/sites/:*/submissions"} =>
+      "a visitor submits a hosted site's form from the browser",
 
     # ── Scrape + self-describing endpoints ─────────────────────────────────
     # `bp` fetches the manifest and spec directly as part of BEING a client;
