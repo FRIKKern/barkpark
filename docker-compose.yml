@@ -233,6 +233,11 @@ services:
       # refuses the node at boot rather than silently using ours.
       - ANTHROPIC_API_URL
       - ONIX_DATASET_HOST
+      # Barkspark slice J (task-2f59ba23bcad333e): comma list of non-plugin
+      # subsystems to turn OFF (studio_chat, cycle_fleet, epic_fleet).
+      # Passthrough-only: unset or empty keeps all of them ON; an unknown
+      # name refuses the boot.
+      - BARKPARK_CAPABILITIES_OFF
       - BARKPARK_CLAUDE_CHAT
       - BARKPARK_TMUX_CONSOLE
     volumes:
