@@ -503,8 +503,9 @@ defmodule BarkparkCloud.Notifications do
   ## dr-w19-s5 — THE ADDRESS, not just the count
 
   This used to resolve `platform_admin_emails/0`, whose only source is the
-  `:platform_admin_emails` config allowlist. `PLATFORM_ADMIN_EMAILS` is unset on
-  prod, `config.exs` hard-defaults the key to `[]`, no User field carries
+  `:platform_admin_emails` config allowlist. `PLATFORM_ADMIN_EMAILS` was unset on
+  prod then (gr-ops-platform-admin-emails provisioned it on the live control plane
+  2026-09-25), `config.exs` hard-defaults the key to `[]`, no User field carries
   operator-ness and no route, console action or mix task writes it — so the
   population was EMPTY BY CONSTRUCTION and the only push channel for fleet
   health had been succeeding at sending nothing for its whole recorded life.

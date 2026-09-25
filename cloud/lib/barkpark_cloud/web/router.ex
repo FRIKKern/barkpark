@@ -5109,7 +5109,8 @@ defmodule BarkparkCloud.Web.Router do
   #
   #   1. `Auth.require_platform_operator` — 401 with no session, 403 for a
   #      non-operator session, and 403 `allowlist: "unconfigured"` when
-  #      PLATFORM_ADMIN_EMAILS is unset (which it is, in production). It FAILS
+  #      PLATFORM_ADMIN_EMAILS is unset (it is set in production since
+  #      2026-09-25, gr-ops-platform-admin-emails). It FAILS
   #      CLOSED: an unconfigured allowlist admits nobody rather than everybody.
   #      An operator-only send route reachable by anyone is a spam cannon.
   #   2. `digest_send:<user_id>` — 2/60s (DeviceAuth.RateLimiter). The smallest
@@ -5383,10 +5384,11 @@ defmodule BarkparkCloud.Web.Router do
   # GET /v1/deploy-ledger/census?from=&to=[&site_ids=a,b] → 200 <census + scope>
   # — THE SAME census, over the CALLER'S OWN sites (dr-w16-s6). The operator
   # route above is gated by `require_platform_operator`, and PLATFORM_ADMIN_EMAILS
-  # is unset in production: measured live this wave, that route answers
-  # `403 {"error":"forbidden","scope":"platform","required":"platform_operator"}`
-  # to every real account, in the same minute GET /v1/sites answers 200 to the
-  # same token. Sixteen waves built a correct number nobody could read. This is
+  # was unset in production when this landed: measured live that wave, that route
+  # answered `403 {"error":"forbidden","scope":"platform","required":"platform_operator"}`
+  # to every real account, in the same minute GET /v1/sites answered 200 to the
+  # same token. (gr-ops-platform-admin-emails provisioned the allowlist
+  # 2026-09-25; this route remains the read for every non-operator member.) Sixteen waves built a correct number nobody could read. This is
   # the read.
   #
   # ONE census computation, never two: `DeployLedger.census/3` is called here
@@ -5448,7 +5450,9 @@ defmodule BarkparkCloud.Web.Router do
               |> Map.put(:scope, census_scope(team, scoped))
               # THE DELIVERY NODE, SCOPED (dr-w21-s6). It was added ONLY by
               # `deploy_census_json/2` on the OPERATOR route, so wave 15's
-              # reader shipped onto a route nobody can reach: measured live,
+              # reader shipped onto a route nobody could reach (the operator
+              # allowlist was unset on prod until gr-ops-platform-admin-emails,
+              # 2026-09-25): measured live,
               # `bp cloud deployments -o table` rendered "NOT MEASURED — this
               # control plane sends no delivery census" to every real operator,
               # because the only route a real token can reach is this one and it
@@ -9807,8 +9811,9 @@ defmodule BarkparkCloud.Web.Router do
   #
   # TEAM-SCOPED, the SAME door its siblings already use
   # (dr-w19-site-build-log-is-operator-only). It shipped `operator`-gated, which is
-  # the `:platform_admin_emails` allowlist — unset on prod and unsettable through
-  # any route, console action or User field (`gr-ops-platform-admin-emails`) — so
+  # the `:platform_admin_emails` allowlist — then unset on prod (provisioned
+  # 2026-09-25 by `gr-ops-platform-admin-emails`) and unsettable through any
+  # route, console action or User field — so
   # the ONE deploy-health read carrying a failed build's own words was readable by
   # ZERO accounts while `GET /v1/sites/:id/deployments/:dep_id` next door answered
   # every member of the owning team. Fail-closed to the point of uselessness is not
@@ -9856,9 +9861,9 @@ defmodule BarkparkCloud.Web.Router do
   # the exact condition it widened under: "the widening moved WHO may ask, never
   # WHAT is served … Not raw log bytes, and never has." THIS route serves the
   # bytes, so that argument does not reach it and the audience does not move with
-  # it. `Auth.require_platform_operator/2` is 403-dark in production today
-  # (`gr-ops-platform-admin-emails`), which this route INHERITS from the row this
-  # task was filed under — no criterion here asserts a live 200 from it, and
+  # it. `Auth.require_platform_operator/2` admits only the platform-admin
+  # allowlist (provisioned on the live control plane 2026-09-25,
+  # `gr-ops-platform-admin-emails`) — no criterion here asserts a live 200 from it, and
   # widening it is a separate decision with a separate secret-boundary review.
   # All policy lives in `Sites.BuildLogBytes`.
   get "/v1/sites/:id/deployments/:dep_id/build-log/bytes" do

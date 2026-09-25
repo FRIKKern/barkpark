@@ -607,8 +607,9 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   ## The defect
 
   For seventeen waves this epic built deploy-health instruments and addressed
-  every one of them to the platform-operator population — which nobody is in and
-  nobody can join. `PLATFORM_ADMIN_EMAILS` is unset on prod; the `User` schema
+  every one of them to the platform-operator population — which nobody was in and
+  nobody could join. `PLATFORM_ADMIN_EMAILS` was unset on prod (until
+  gr-ops-platform-admin-emails, 2026-09-25); the `User` schema
   has no platform field, so operator-ness is not storable; `mix
   barkpark_cloud.create_admin` touches the allowlist zero times; no route,
   LiveView or console action writes `:platform_admin_emails`; the only
@@ -947,7 +948,7 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   @empty_audience_allowlist %{
                               # `fleet_deploy_census` used to sit here: its only reader sent
                               # GET /v1/operator/deploy-ledger/census, gated on the `:platform_admin_emails`
-                              # allowlist that is unset on prod and unsettable through any route, console
+                              # allowlist that was then unset on prod and unsettable through any route, console
                               # action or User field — ZERO accounts could read the epic's headline number.
                               # Its named CLOSER (dr-w18-s1) is THIS branch: the client now reads the
                               # team-scoped GET /v1/deploy-ledger/census, tier `user`, which every member of
@@ -969,7 +970,7 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
                               # all until the candidate set named it, and the census had been green over it
                               # for nine waves. Its reader sends GET /v1/sites/*/deployments/*/build-log,
                               # which the router enforced at tier `operator`: the `:platform_admin_emails`
-                              # allowlist, unset on prod and unsettable through any route, console action or
+                              # allowlist, then unset on prod and unsettable through any route, console action or
                               # User field. So the ONE deploy-health read that carries a failed build's
                               # ACTUAL LOG TEXT, rather than a failure-class label, was readable by zero
                               # accounts while its sibling reads on the same resource
