@@ -94,7 +94,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatTurnHandoffTest do
     assert_receive {:held_in_terminate, dying}, 10_000
     dying_ref = Process.monitor(dying)
     assert Process.alive?(dying), "precondition: turn 1's Session is still in terminate/2"
-    assert Recorder.whereis(sid) == nil
+    # The Recorder's registry entry is removed by the Registry's OWN monitor,
+    # which can run after this test's :DOWN arrives, so a bare assert here
+    # races (CI run 36169053988: left: #PID<…>). Wait, bounded, for the entry
+    # to clear; the precondition is the same, only its timing is honest.
+    assert await_unregistered(sid), "precondition: turn 1's Recorder left the registry"
 
     # ── TURN 2, inside the window ───────────────────────────────────────────
     {:ok, rec2} = Recorder.ensure(turn_opts(sid, ws, minter))
@@ -186,6 +190,24 @@ defmodule BarkparkWeb.Studio.ClaudeChatTurnHandoffTest do
       {:ok, body} -> String.split(body, "\n", trim: true)
       _ -> []
     end
+  end
+
+  defp await_unregistered(sid, deadline_ms \\ 5_000) do
+    deadline = System.monotonic_time(:millisecond) + deadline_ms
+
+    Stream.repeatedly(fn -> Recorder.whereis(sid) end)
+    |> Enum.reduce_while(false, fn
+      nil, _ ->
+        {:halt, true}
+
+      _pid, _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          {:halt, false}
+        else
+          Process.sleep(10)
+          {:cont, false}
+        end
+    end)
   end
 
   defp await_down(pid) do
