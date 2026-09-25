@@ -74,7 +74,7 @@ jobs:
         with:
           version-file: barkpark/.tool-versions
           version-type: strict
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         if: steps.token.outputs.present == 'true'
         with:
           go-version-file: barkpark/go.mod
