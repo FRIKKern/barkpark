@@ -81,7 +81,7 @@ jobs:
           node-version: ${{ matrix.entry.node }}
 
       - name: Cache node_modules
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ matrix.entry.dir }}/node_modules
           key: ${{ runner.os }}-plugin-${{ matrix.entry.plugin }}-${{ hashFiles(format('{0}/package-lock.json', matrix.entry.dir)) }}

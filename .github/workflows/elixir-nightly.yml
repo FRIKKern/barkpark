@@ -156,7 +156,7 @@ jobs:
         with:
           node-version: "20"
       - name: Cache deps
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             api/deps
@@ -313,7 +313,7 @@ jobs:
       # compiles our own application into _build/test, and a post-job auto-save
       # would put it into the gate's namespace. The gate owns those entries.
       - name: Restore deps (dependency SOURCES)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: api/deps
           key: ${{ runner.os }}-mix-test-deps-v2-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
@@ -321,7 +321,7 @@ jobs:
             ${{ runner.os }}-mix-test-deps-v2-27.0-1.18.4-
 
       - name: Restore compiled dependency artifacts (test)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: api/_build/test/lib
           key: ${{ runner.os }}-mix-test-depbuild-v1-27.0-1.18.4-${{ hashFiles('api/mix.lock') }}
@@ -380,7 +380,7 @@ jobs:
       # chrome-headless-shell, with BP_CHROME pinned from the path `install`
       # prints rather than from the harness guessing a cache layout.
       - name: Cache chrome-headless-shell
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/puppeteer
           key: ${{ runner.os }}-puppeteer-chrome-headless-shell-stable
