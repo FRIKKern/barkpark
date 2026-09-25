@@ -6,16 +6,21 @@ defmodule Barkpark.Content.DedupAuditLockOrderTest do
   Two transactions in the same workspace, each on its own unboxed connection:
 
       A: Audit.emit(ws)            ── holds audit(ws)
-                                       B: lock_publish_scope!(ws) ── holds dedup(ws)?
-      A: lock_publish_scope!(ws)   ── wants dedup(ws)
-                                       B: Audit.emit(ws)          ── wants audit(ws)
+                                       B: recheck_dedup(doc in ws) ── holds dedup?
+      A: recheck_dedup(doc in ws)  ── wants dedup
+                                       B: Audit.emit(ws)           ── wants audit(ws)
 
   A is a mutate batch that audited an earlier mutation and then publishes; B is
   a plain publish (scope lock, then the audit emit in `tap_broadcast`). With the
-  scope lock taken before the audit lock, B gets dedup(ws) and the four steps
-  deadlock (Postgres 40P01). With the audit lock taken first inside
-  `lock_publish_scope!/3`, B blocks on audit(ws) before it can hold dedup(ws),
-  A finishes, then B finishes.
+  scope lock taken before the audit lock, B gets the scope lock and the four
+  steps deadlock (Postgres 40P01). With the audit lock taken first inside
+  `AuthoringWall.recheck_dedup_under_scope_lock/5`, B blocks on audit(ws) before
+  it can hold the scope lock, A finishes, then B finishes.
+
+  The caller opts carry NO workspace, only the document does, as on a publish
+  whose request scope is unset: the audit emit keys on the document's
+  workspace, so the pre-lock must too. Keying it on the opts instead turned the
+  cycle into audit(ws) against audit(global) in the papers suite.
 
   Deterministic: A does not request the scope lock until B has reported holding
   it, or 500 ms have passed with B blocked (the fixed ordering). Both
@@ -24,11 +29,24 @@ defmodule Barkpark.Content.DedupAuditLockOrderTest do
   use ExUnit.Case, async: false
 
   alias Barkpark.Audit
-  alias Barkpark.Content.DedupWall
+  alias Barkpark.Content.{AuthoringWall, Document}
   alias Barkpark.Repo
   alias Ecto.Adapters.SQL.Sandbox
 
   @dataset "production"
+
+  defp publish_recheck!(ws, title) do
+    ref = %Document{
+      doc_id: "lock-order-#{System.unique_integer([:positive])}",
+      type: "paper",
+      dataset: @dataset,
+      title: title,
+      content: %{},
+      workspace_id: ws
+    }
+
+    :ok = AuthoringWall.recheck_dedup_under_scope_lock(ref, "paper", ref.doc_id, @dataset, [])
+  end
 
   defp emit!(ws, subject) do
     {:ok, _} =
@@ -70,7 +88,7 @@ defmodule Barkpark.Content.DedupAuditLockOrderTest do
             :go_a -> :ok
           end
 
-          DedupWall.lock_publish_scope!("paper", @dataset, workspace_id: ws)
+          publish_recheck!(ws, "Batch publish #{ws}")
         end)
       end)
 
@@ -81,7 +99,7 @@ defmodule Barkpark.Content.DedupAuditLockOrderTest do
         :ok = Sandbox.checkout(Repo, sandbox: false)
 
         in_rolled_back_txn(fn ->
-          DedupWall.lock_publish_scope!("paper", @dataset, workspace_id: ws)
+          publish_recheck!(ws, "Plain publish #{ws}")
           send(parent, :b_holds_scope)
           emit!(ws, "plain-publish")
         end)

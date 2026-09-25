@@ -210,6 +210,24 @@ defmodule Barkpark.Content.AuthoringWall do
     if exempt? do
       :ok
     else
+      # LOCK ORDER (task-0c397ec87de1f924): the audit-chain lock of the
+      # workspace this document is audited under, BEFORE the publish-scope
+      # lock. The publish then emits through `Broadcast.tap_broadcast` ->
+      # `Audit.emit/1`, which takes that audit-chain lock in the SAME
+      # transaction; a mutate batch (`Mutations.apply_mutations/3`, one
+      # transaction) that audited an earlier mutation already holds it when its
+      # publish reaches here. Opposite orders over the same two keys, and
+      # Postgres answered 40P01:
+      #
+      #     A waits for advisory lock [_,0,1329934127,1]  dedup:paper:<ws>:production
+      #     B waits for advisory lock [_,0,2614849228,1]  audit chain of <ws>
+      #
+      # Taking it here makes every holder of the scope lock a holder of the
+      # audit-chain lock first, so the cycle cannot form; it is re-entrant, so
+      # the later emit does not wait on itself. The DOCUMENT's workspace, not
+      # the caller's scope: the emit keys on `doc.workspace_id`, and a publish
+      # whose opts carry no workspace still audits under the draft's.
+      :ok = Barkpark.Audit.lock_chain!(audit_workspace(ref, opts))
       :ok = DedupWall.lock_publish_scope!(type, dataset, opts)
 
       case DedupWall.guard(ref, type, dataset, Keyword.put(opts, :dedup_in_transaction, true)) do
@@ -224,6 +242,9 @@ defmodule Barkpark.Content.AuthoringWall do
   end
 
   def recheck_dedup_under_scope_lock(_ref, _type, _pid, _dataset, _opts), do: :ok
+
+  defp audit_workspace(%{workspace_id: ws}, _opts) when is_binary(ws) and ws != "", do: ws
+  defp audit_workspace(_ref, opts), do: Keyword.get(opts, :workspace_id)
 
   @doc """
   Dry-run the whole wall and return EVERY failing gate at once (BPML
