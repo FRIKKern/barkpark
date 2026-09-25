@@ -331,10 +331,16 @@ func (b *Builder) transition(ctx context.Context, deploymentID string, body map[
 // systemd unit's job (CPUQuota=...).
 func (b *Builder) build(ctx context.Context, d *claimedDeployment, con *buildConsole) (imageTag string, logPath string, err error) {
 	con.caption("Fetching your source…")
-	source, err := b.resolveSource(ctx, d, con)
+	source, release, err := b.resolveSource(ctx, d, con)
 	if err != nil {
 		return "", "", err
 	}
+	// The source dir is read by nixpacks and nothing after build() returns, so
+	// this is its owner: a clone workdir is removed here on EVERY exit path —
+	// success, nixpacks/docker failure, site-env failure. Without it a
+	// long-lived builder host kept one full checkout per claimed git
+	// deployment under $TMPDIR/bp-builder-git-*, forever.
+	defer release()
 	con.logf("source: ready at %s", source)
 
 	// site-<site_id_short>-<deployment_id_short> is unique per build and
@@ -473,19 +479,27 @@ func (b *Builder) resolveArtifact(url string) (string, error) {
 }
 
 // resolveSource walks the source ladder for a claimed deployment and returns
-// the local directory to hand nixpacks:
+// the local directory to hand nixpacks, plus a release func the caller MUST
+// call once it is done reading that directory:
 //  1. artifact_url non-empty → resolveArtifact, exactly as before the ladder;
+//     release is a no-op — the builder did not create that dir and does not
+//     own it (a promote/redeploy re-queues the SAME artifact_url, so deleting
+//     it after one build would break the next);
 //  2. else a `source` of kind "git" → sha-first shallow clone (cloneGitSource);
+//     release removes the temp clone workdir the builder created;
 //  3. else → the honest empty-artifact error (nothing minted a source at all).
-func (b *Builder) resolveSource(ctx context.Context, d *claimedDeployment, con *buildConsole) (string, error) {
+//
+// On error release is a non-nil no-op, and nothing is left behind.
+func (b *Builder) resolveSource(ctx context.Context, d *claimedDeployment, con *buildConsole) (string, func(), error) {
+	noop := func() {}
 	switch {
 	case d.ArtifactURL != "":
 		con.logf("source: resolving artifact %s", d.ArtifactURL)
 		dir, err := b.resolveArtifact(d.ArtifactURL)
 		if err != nil {
-			return "", fmt.Errorf("artifact: %w", err)
+			return "", noop, fmt.Errorf("artifact: %w", err)
 		}
-		return dir, nil
+		return dir, noop, nil
 
 	case d.Source != nil && d.Source.Kind == "git":
 		// Register the clone credential as a console secret BEFORE the first
@@ -496,13 +510,17 @@ func (b *Builder) resolveSource(ctx context.Context, d *claimedDeployment, con *
 			d.Source.URL, refOrNone(d.Source.Ref), authModeOf(d.Source))
 		dir, err := b.cloneGitSource(ctx, d.Source)
 		if err != nil {
-			return "", fmt.Errorf("git source: %w", err)
+			return "", noop, fmt.Errorf("git source: %w", err)
 		}
-		return dir, nil
+		return dir, func() {
+			if err := os.RemoveAll(dir); err != nil {
+				con.logf("source: could not remove clone workdir %s: %v", dir, err)
+			}
+		}, nil
 
 	default:
 		_, err := b.resolveArtifact("")
-		return "", fmt.Errorf("artifact: %w", err)
+		return "", noop, fmt.Errorf("artifact: %w", err)
 	}
 }
 
@@ -516,6 +534,9 @@ func (b *Builder) resolveSource(ctx context.Context, d *claimedDeployment, con *
 // a depth-1 BRANCH fetch does not carry non-tip shas (`reference is not a
 // tree`), so fetch-by-ref-then-checkout-sha is not a lane. The ref is passed
 // verbatim; the checkout dir feeds nixpacks unchanged.
+//
+// On success the CALLER owns the returned dir and must remove it; on failure
+// the partial workdir is removed here, so a failed clone leaves nothing.
 func (b *Builder) cloneGitSource(ctx context.Context, src *BuildSource) (string, error) {
 	if src.URL == "" || src.Ref == "" {
 		return "", fmt.Errorf("source envelope incomplete (url=%q ref=%q) — the control plane must mint both", src.URL, src.Ref)
@@ -570,6 +591,7 @@ func (b *Builder) cloneGitSource(ctx context.Context, src *BuildSource) (string,
 		cmd.Stdout = &out
 		cmd.Stderr = &out
 		if err := cmd.Run(); err != nil {
+			_ = os.RemoveAll(dir)
 			return "", classifyGitFailure(src, args, out.String(), err)
 		}
 	}
