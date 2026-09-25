@@ -220,10 +220,28 @@ defmodule Barkpark.LabelFixtures do
     %{rows: [[xid]]} = Barkpark.Repo.query!("SELECT pg_current_xact_id_if_assigned()")
 
     if xid == nil and not Barkpark.Repo.in_transaction?() do
-      ExUnit.Callbacks.on_exit(fn -> purge_committed_tags!(ids) end)
+      register_on_test_exit!(fn -> purge_committed_tags!(ids) end)
     end
 
     :ok
+  end
+
+  # `ExUnit.Callbacks.on_exit/2` accepts only the test process, but committing
+  # callers also run in a `Task` the test spawned (dedup_publish_toctou,
+  # broadcast_savepoint_idle). Register on the nearest process in the `$callers`
+  # chain that ExUnit knows as a test. `OnExitHandler.add/3` is what `on_exit/2`
+  # calls; it answers `:error` for a process that is not a test.
+  defp register_on_test_exit!(fun) do
+    ref = {__MODULE__, make_ref()}
+
+    registered? =
+      Enum.any?([self() | Process.get(:"$callers", [])], fn pid ->
+        ExUnit.OnExitHandler.add(pid, ref, fun) == :ok
+      end)
+
+    registered? ||
+      raise "LabelFixtures committed tag documents outside any test process; " <>
+              "nothing would delete them"
   end
 
   defp purge_committed_tags!(ids) do
