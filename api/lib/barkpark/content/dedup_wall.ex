@@ -231,7 +231,28 @@ defmodule Barkpark.Content.DedupWall do
   @spec lock_publish_scope!(String.t(), String.t(), keyword()) :: :ok
   def lock_publish_scope!(type, dataset, opts \\ []) do
     if scope_lock_enabled?() do
-      key = publish_scope_lock_key(type, dataset, Keyword.get(opts, :workspace_id))
+      workspace_id = Keyword.get(opts, :workspace_id)
+
+      # LOCK ORDER (task-0c397ec87de1f924): the audit-chain lock BEFORE the
+      # scope lock. A publish takes the scope lock and then, through
+      # `Broadcast.tap_broadcast` -> `Audit.emit/1`, the audit-chain lock in
+      # the SAME transaction. A mutate batch (`Mutations.apply_mutations/3` is
+      # one transaction) that audited an earlier mutation already holds the
+      # audit-chain lock when its publish reaches here: opposite orders over
+      # the same two keys, and Postgres answered 40P01:
+      #
+      #     A waits for advisory lock [_,0,1329934127,1]  dedup:paper:<ws>:production
+      #     B waits for advisory lock [_,0,2614849228,1]  audit chain of <ws>
+      #
+      # Taken first, every holder of the scope lock already holds the
+      # audit-chain lock, so the cycle cannot form; it is re-entrant, so the
+      # later emit does not wait on itself. `:audit_workspace_id` is the
+      # workspace the document is AUDITED under (AuthoringWall passes the
+      # document's); the opts scope is only the fallback. Inside this `if`, so
+      # the race harness's scope-lock-off red arm still serializes nothing.
+      :ok = Barkpark.Audit.lock_chain!(Keyword.get(opts, :audit_workspace_id, workspace_id))
+
+      key = publish_scope_lock_key(type, dataset, workspace_id)
       _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [key])
     end
 
