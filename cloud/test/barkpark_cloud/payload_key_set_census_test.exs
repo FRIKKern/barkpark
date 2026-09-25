@@ -2085,7 +2085,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # register's reported_at row 2 -> 3 instead of this pin — the exact class the
   # register exists for. MEASURED by the PIN CO-EDIT arm on this branch off
   # origin/main 70e354593 ("@go_tag_pinned 395 -> 398"), never by arithmetic.
-  @go_tag_pinned 398
+  # 398 -> 399 (jpf-bl-siteplane-verify-probe): ONE new NAME, `skipped` on
+  # `VerifyProbe` — verify.siteplane's conditional-probe flag (omitempty). One
+  # site, a name the package did not have, so the SITE register does not move.
+  # `VerifyProbe` is in no `@pairs` entry, so no paired decoder/emit arm reads
+  # it. MEASURED by the PIN CO-EDIT arm on this branch off origin/main
+  # bd0fdf27b ("@go_tag_pinned 398 -> 399"), never by arithmetic.
+  @go_tag_pinned 399
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
