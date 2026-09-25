@@ -2781,7 +2781,12 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # fixture pair predates the workflow. DERIVED by
         # scripts/required-checks-ack-derive.sh, which named exactly these two.
         --expect-unrendered "Absent required-context census"
-        --expect-unrendered "Census cadence (hold, re-arm)")
+        --expect-unrendered "Census cadence (hold, re-arm)"
+        # ── 2026-09-25 (task-19428fc715804f49): core-without-owned-tables.yml.
+        # Schedule + workflow_dispatch only, so its job name renders on main
+        # commits and never on a PR head; its row lands with the workflow and the
+        # frozen fixture pair predates it.
+        --expect-unrendered "Core without owned tables (differential, two suite runs)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
