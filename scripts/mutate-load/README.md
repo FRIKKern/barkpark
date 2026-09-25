@@ -1,5 +1,5 @@
 <!-- doc-tier: human | canonical-for: mutate-load-harness | budget: 900tok -->
-# barkpark-mutate-load
+# mutate-load
 
 Drives N concurrent task create+publish rounds over
 `POST /w/<ws>/p/<proj>/v1/data/mutate/<dataset>` — the two requests
@@ -22,7 +22,7 @@ alone own. Never point it at a shared or production instance.
 ## Run
 
 ```bash
-go build -o /tmp/mload ./cmd/barkpark-mutate-load
+go build -o /tmp/mload ./scripts/mutate-load
 # local API: cd api && BARKPARK_DEV_DATABASE=<your_db> mix ecto.setup && \
 #            BARKPARK_DEV_DATABASE=<your_db> PORT=4817 mix phx.server
 /tmp/mload --server http://localhost:4817 --token barkpark-dev-token \
@@ -37,8 +37,8 @@ go build -o /tmp/mload ./cmd/barkpark-mutate-load
 - `--json` prints the report as JSON; `--label` tags it with the commit.
 
 Before you measure a dev server: dev's defaults distort the result. The write
-rate limit is 60/min per token (`config/config.exs`; the env override in
-`runtime.exs` applies under `:prod` only), and `code_reloader: true` puts
+rate limit is 60/min per token (`api/config/config.exs`; the env override in
+`api/config/runtime.exs` applies under `:prod` only), and `code_reloader: true` puts
 `Phoenix.CodeReloader` and `CheckRepoStatus` in front of every request. For a
 measurement, override locally (never commit) in `api/config/dev.exs`:
 
@@ -52,5 +52,5 @@ and wait for the Oban backlog to drain after seeding (`oban_jobs` rows in
 `available`/`executing`) so that queued background jobs do not skew the first
 measurement.
 
-Tests: `go test ./cmd/barkpark-mutate-load/` (fake server returning 500/409/
+Tests: `go test ./scripts/mutate-load/` (fake server returning 500/409/
 HTML 500/no-id/hang-ups; refusal of non-loopback targets with zero requests).

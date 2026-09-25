@@ -1,4 +1,4 @@
-// Command barkpark-mutate-load drives N concurrent task create+publish rounds
+// Command mutate-load drives N concurrent task create+publish rounds
 // over POST /v1/data/mutate/<dataset> and reports per-leg latency percentiles
 // and error classes (HTTP status + error.code, or the transport failure).
 //
@@ -103,11 +103,11 @@ func main() {
 func run(args []string, stdout, stderr io.Writer, rt http.RoundTripper) int {
 	cfg, err := parseFlags(args, stderr)
 	if err != nil {
-		fmt.Fprintln(stderr, "barkpark-mutate-load:", err)
+		fmt.Fprintln(stderr, "mutate-load:", err)
 		return 2
 	}
 	if err := checkTarget(cfg.Server, cfg.OwnTarget); err != nil {
-		fmt.Fprintln(stderr, "barkpark-mutate-load: REFUSED:", err)
+		fmt.Fprintln(stderr, "mutate-load: REFUSED:", err)
 		return 2
 	}
 	client := &http.Client{Transport: rt, Timeout: cfg.Timeout}
@@ -130,7 +130,7 @@ func run(args []string, stdout, stderr io.Writer, rt http.RoundTripper) int {
 
 func parseFlags(args []string, stderr io.Writer) (config, error) {
 	var c config
-	fs := flag.NewFlagSet("barkpark-mutate-load", flag.ContinueOnError)
+	fs := flag.NewFlagSet("mutate-load", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&c.Server, "server", "http://localhost:4000", "target base URL (loopback only unless --i-own-this-target)")
 	fs.StringVar(&c.Token, "token", os.Getenv("BARKPARK_LOAD_TOKEN"), "bearer token (default $BARKPARK_LOAD_TOKEN)")
