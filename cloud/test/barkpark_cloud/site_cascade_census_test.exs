@@ -91,7 +91,11 @@ defmodule BarkparkCloud.SiteCascadeCensusTest do
         "every site that ever uploaded one, bound to a deployment or not",
     {"content_publishes", "site_id"} =>
       "one row per HMAC-verified content-publish delivery (deploy-reliability W11 / D162); " <>
-        "created 2026-08-07 and unasserted from birth until W67"
+        "created 2026-08-07 and unasserted from birth until W67",
+    {"hostname_claims", "site_id"} =>
+      "the site's claims on its domains (task-274fad4f639e6890); deleting the site must " <>
+        "RELEASE them or the names stay unclaimable forever. Asserted behaviourally at " <>
+        "router_sites_test.exs \"a site's hostname claims cascade on delete, freeing its domains\""
   }
 
   @cascade "c"

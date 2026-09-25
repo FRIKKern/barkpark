@@ -24,22 +24,29 @@ defmodule BarkparkCloud.Registry.HostnameClaim do
   barkparks write. Released by `on_delete: :delete_all` when the barkpark row
   goes, which is the same statement as the delete.
 
-  SCOPE: barkparks only. Site `domains` are NOT in this table yet; the
-  site ↔ custom_host pair is still serialised only by the advisory lock in
-  `Registry.hostname_claimed?/2`.
+  SITE DOMAINS (task-274fad4f639e6890) are claims too: kind `"site_domain"`,
+  owner `site_id` (and `barkpark_id` NULL), written by `create_site/2` and
+  `add_site_domain/2`, released by `remove_site_domain/2` and by
+  `on_delete: :delete_all` from `sites`. The `hostname_claims_owner_check`
+  CHECK pins exactly one owner column per kind.
+
+  NOT a claim: a foreign-team PARENT domain (`foreign_custom_host_suffix?/2`).
+  That is a suffix relation, which no unique key can express; it stays a
+  pre-check.
   """
   use Ecto.Schema
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @kinds ~w(url custom_host)
+  @kinds ~w(url custom_host site_domain)
 
   schema "hostname_claims" do
     field :host, :string
     field :kind, :string
 
     belongs_to :barkpark, BarkparkCloud.Registry.Barkpark
+    belongs_to :site, BarkparkCloud.Registry.Site
 
     timestamps(type: :utc_datetime_usec)
   end
