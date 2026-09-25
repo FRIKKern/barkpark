@@ -28692,6 +28692,109 @@ test("cch-w48-s1: ONE clause, two callers — the pre-hoc card and the evidenced
     /owner role on this team/);
 });
 
+// ── task-ef37ebad8249e82a · THE OPTIONAL NAME IS OPTIONAL END TO END ───────
+// newLaunchFormHtml labels the name "(optional)" and newLaunch sends `name`
+// only when the trimmed field is non-empty. go_live used to answer that exact
+// body 422 {error:"name_required"}, surfaced as a generic "Couldn't launch"
+// toast. The server now defaults the name from the template (pinned in
+// cloud/test/barkpark_cloud/web/router_launch_flow_test.exs); this drive pins
+// the CLIENT half: a blank submit sends {template} with no name and a 201 lands
+// on the progress view, never the failure toast. The 422 arm is the control —
+// the same drive against the pre-fix server answer must reach the toast, or
+// this test could not tell the two apart.
+async function driveNewBlankNameSubmit(launchStatus, launchPayload) {
+  const { hooks: h, sandbox: sb } = evalApp();
+  const posts = [];
+  const toasts = [];
+  const slot = {
+    _html: "",
+    controls: {},
+    get innerHTML() { return this._html; },
+    set innerHTML(v) {
+      this._html = String(v);
+      this.controls = {};
+      if (this._html.indexOf('id="new-launch-form"') !== -1) {
+        this.controls["#new-launch-form"] = { _h: [], addEventListener(_t, fn) { this._h.push(fn); } };
+      }
+    },
+    querySelector(sel) { return this.controls[String(sel)] || null; },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+  };
+  const btn = { disabled: false, textContent: "Launch" };
+  const nameEl = { value: "   " }; // whitespace-only: trimmed to "" exactly like an untouched field
+  const stack = { appendChild(el) { if (/toast-error/.test(el.className)) toasts.push(el); } };
+  sb.document = {
+    readyState: "loading",
+    querySelector(sel) {
+      const s = String(sel);
+      if (s === "#new-body") return slot;
+      if (s === "#new-launch-btn") return slot.controls["#new-launch-form"] ? btn : null;
+      if (s === "#new-name") return slot.controls["#new-launch-form"] ? nameEl : null;
+      if (s === "#toast-stack") return stack;
+      return slot.controls[s] || null;
+    },
+    querySelectorAll() { return []; },
+    getElementById() { return null; },
+    // toast() wires its close/action buttons through the element's own
+    // querySelector, so the element must answer with a bindable node.
+    createElement: () => ({ ...inertEl, setAttribute: noop, querySelector: () => ({ addEventListener: noop }) }),
+    addEventListener: noop, removeEventListener: noop,
+    body: { ...inertEl, appendChild: noop },
+    documentElement: { ...inertEl, getAttribute: () => null },
+  };
+  sb.location = { hash: "", pathname: "/new", search: "?template=blog-starter", origin: "http://localhost" };
+  sb.history = recordingHistory();
+  const session = JSON.stringify({ token: "tok" });
+  sb.localStorage = { getItem: (k) => (k === "bp.active-team" ? null : session), setItem: noop, removeItem: noop };
+  const reply = (status, payload) => Promise.resolve({
+    ok: status >= 200 && status < 300, status,
+    headers: { get: () => "application/json" },
+    json: () => Promise.resolve(payload),
+  });
+  sb.fetch = (path, opts) => {
+    const p = String(path);
+    const method = (opts && opts.method) || "GET";
+    if (p === "/v1/templates") {
+      return reply(200, { templates: [{ slug: "blog-starter", title: "Blog Starter", description: "A blog", what_you_get: [] }] });
+    }
+    if (p === "/v1/me") return reply(200, W47_OWNER);
+    if (method === "POST" && p === "/v1/launch") {
+      posts.push(JSON.parse(opts.body));
+      return reply(launchStatus, launchPayload);
+    }
+    return reply(200, {});
+  };
+  const settle = async () => { for (let i = 0; i < 24; i++) await Promise.resolve(); };
+
+  h.renderNewFlow();
+  await settle();
+  const form = slot.controls["#new-launch-form"];
+  assert.ok(form && form._h.length === 1, "the owner must reach the launch form, or there is nothing to submit");
+  form._h[0]({ preventDefault: noop });
+  await settle();
+  return { posts, toasts, html: slot.innerHTML, btn };
+}
+
+test("task-ef37ebad8249e82a: a blank-name /new launch sends no name and lands on the progress view, not the failure toast", async () => {
+  const ok = await driveNewBlankNameSubmit(201, { barkpark: { id: "bp-1", name: "Blog Starter" } });
+  assert.equal(ok.posts.length, 1, "exactly one launch request");
+  assert.deepEqual(Object.keys(ok.posts[0]), ["template"],
+    "a blank field sends {template} alone — the body go_live now defaults the name for");
+  assert.equal(ok.posts[0].template, "blog-starter");
+  assert.match(ok.html, /class="new-progress"/, "the 201 hands off to the progress view");
+  assert.equal(ok.toasts.length, 0, "and no error toast fires on the success path");
+
+  // CONTROL — the pre-fix server answer to the SAME request. The drive must be
+  // able to see the failure, or its green above means nothing.
+  const refused = await driveNewBlankNameSubmit(422, { error: "name_required" });
+  assert.equal(refused.posts.length, 1);
+  assert.doesNotMatch(refused.html, /class="new-progress"/, "a 422 never reaches progress");
+  assert.equal(refused.toasts.length, 1, "the 422 surfaces as the failure toast");
+  assert.match(refused.toasts[0].innerHTML, /Couldn&#39;t launch|Couldn't launch/);
+  assert.equal(refused.btn.disabled, false, "and the button is handed back for a retry");
+});
+
 test("cch-w48-s1: the /new launch step reuses renderNewPricing's seam — no loadMe, no second policy read", () => {
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const region = appRegion(src, "// ---- Step: launch (logged in)", "// ---- Step: pricing");

@@ -17,6 +17,7 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
 
   alias BarkparkCloud.{Accounts, Billing, Registry}
   alias BarkparkCloud.Accounts.Team
+  alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -102,5 +103,85 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
     assert body["error"] == "limit_reached"
     assert body["upgrade_path"] == "/v1/billing/checkout"
     assert length(Registry.list_barkparks(team)) == 1
+  end
+
+  # task-ef37ebad8249e82a — the /new form labels the name "(optional)" and sends
+  # no `name` when the field is left blank. The server used to 422 name_required
+  # on exactly that request; it now defaults the name from the template's catalog
+  # title. Removing the default in go_live reds every test in this block.
+  describe "a nameless launch with a template defaults the name from the template" do
+    for {label, extra} <- [
+          {"absent", %{}},
+          {"empty", %{name: ""}},
+          {"whitespace-only", %{name: "   \t "}}
+        ] do
+      test "#{label} name → 201, named from the template title, clean FQDN" do
+        {user, team} = user_with_team()
+        {:ok, _} = Billing.subscribe(team, "supporter")
+        {:ok, token} = Accounts.create_user_session_token(user)
+
+        conn =
+          call(
+            :post,
+            "/v1/launch",
+            Map.put(unquote(Macro.escape(extra)), :template, "blog-starter"),
+            token
+          )
+
+        assert conn.status == 201, conn.resp_body
+        assert json_body(conn)["barkpark"]["name"] == "Blog Starter"
+
+        [row] = Registry.list_barkparks(team)
+        assert row.name == "Blog Starter"
+        assert row.slug == "blog-starter"
+        assert row.template == "blog-starter"
+        assert row.url == Barkpark.clean_url("blog-starter")
+      end
+    end
+
+    test "two teams launching the same template nameless both succeed with distinct FQDNs" do
+      {user_a, team_a} = user_with_team()
+      {user_b, team_b} = user_with_team()
+      {:ok, _} = Billing.subscribe(team_a, "supporter")
+      {:ok, _} = Billing.subscribe(team_b, "supporter")
+      {:ok, token_a} = Accounts.create_user_session_token(user_a)
+      {:ok, token_b} = Accounts.create_user_session_token(user_b)
+
+      assert call(:post, "/v1/launch", %{template: "blog-starter"}, token_a).status == 201
+      assert call(:post, "/v1/launch", %{template: "blog-starter"}, token_b).status == 201
+
+      [a] = Registry.list_barkparks(team_a)
+      [b] = Registry.list_barkparks(team_b)
+      # Clean-first: the first claimant gets the clean label; the second falls
+      # back to the globally-unique `<slug>-<team_short_id>` form.
+      assert a.url == Barkpark.clean_url("blog-starter")
+      assert b.url == Barkpark.provisioning_url({"blog-starter", team_b.id})
+      assert a.url != b.url
+    end
+
+    test "a given name still wins over the template default" do
+      {user, team} = user_with_team()
+      {:ok, _} = Billing.subscribe(team, "supporter")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      assert call(:post, "/v1/launch", %{name: "Mine", template: "blog-starter"}, token).status ==
+               201
+
+      assert [%{name: "Mine", slug: "mine"}] = Registry.list_barkparks(team)
+    end
+
+    test "no template and no name → 422 name_required (nothing to derive from)" do
+      {user, team} = user_with_team()
+      {:ok, _} = Billing.subscribe(team, "supporter")
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      for body <- [%{}, %{name: ""}, %{name: "   "}] do
+        conn = call(:post, "/v1/launch", body, token)
+        assert conn.status == 422
+        assert json_body(conn)["error"] == "name_required"
+      end
+
+      assert Registry.list_barkparks(team) == []
+    end
   end
 end

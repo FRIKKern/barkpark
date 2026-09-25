@@ -31275,6 +31275,10 @@
       // show. launchRoleClause rides along so the ONE clause behind both the
       // pre-hoc card and the post-hoc toast is asserted, not assumed.
       newLaunchOffer: newLaunchOffer, renderNewLaunch: renderNewLaunch,
+      // task-ef37ebad8249e82a — the /new flow's real entry, so a node test can
+      // drive template read → launch step → the blank-name submit → the
+      // progress hand-off end to end, instead of asserting the form in pieces.
+      renderNewFlow: renderNewFlow,
       launchRoleClause: launchRoleClause,
       launchOwnerOnlyCopy: LAUNCH_OWNER_ONLY_COPY,
       // cch-w31-s4 follow-up: api() ITSELF, so the response envelope is drivable
