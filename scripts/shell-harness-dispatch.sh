@@ -341,6 +341,10 @@ tooling-harnesses scripts/usage-envelope-diff.mjs
 tooling-harnesses scripts/usage-envelope-diff.test.mjs
 tooling-harnesses scripts/fixtures/usage-envelope-diff/*.json
 tooling-harnesses cloud/lib/barkpark_cloud/usage.ex
+tooling-harnesses scripts/cp-ops.sh
+tooling-harnesses scripts/cp-ops.test.sh
+tooling-harnesses scripts/fixtures/cp-ops/golden.txt
+tooling-harnesses .github/workflows/cp-ops.yml
 launcher-boot-selftest bin/barkpark
 launcher-boot-selftest scripts/barkpark-boot-selftest.sh
 workflow-portability scripts/workflow-portability-check.sh

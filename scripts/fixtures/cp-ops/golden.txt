@@ -1,0 +1,644 @@
+=== case grant-forever/ok: op=grant-forever [TEAM=0123abcd-4567-89ab-cdef-0123456789ab]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      set -euo pipefail
+      # No pipe into head: under pipefail a truncating reader SIGPIPEs
+      # its producer and the pipeline returns 141 -- a step failure
+      # under set -e, and a silently wrong status otherwise, visible
+      # only when docker is slow enough to still be writing. head on
+      # a regular FILE cannot SIGPIPE anything.
+      docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
+      c=$(head -1 /tmp/cp-ops-cid.txt)
+      [ -n "$c" ] || { echo 'no running control_plane container'; exit 1; }
+      docker exec "$c" bin/barkpark_cloud rpc         'BarkparkCloud.Billing.grant_forever("0123abcd-4567-89ab-cdef-0123456789ab") |> IO.inspect(label: "grant_forever")'
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case grant-forever/not-uuid: op=grant-forever [TEAM=x"); System.halt()]
+team must be a UUID
+=== exit 1
+=== case cp-app-logs/tail: op=cp-app-logs
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      set -uo pipefail
+      # No pipe into head: under pipefail a truncating reader SIGPIPEs
+      # its producer and the pipeline returns 141 -- a step failure
+      # under set -e, and a silently wrong status otherwise, visible
+      # only when docker is slow enough to still be writing. head on
+      # a regular FILE cannot SIGPIPE anything.
+      docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
+      c=$(head -1 /tmp/cp-ops-cid.txt)
+      [ -n "$c" ] || { echo 'no running control_plane container'; exit 1; }
+      if [ -n '' ]; then
+        # The 141 trap, and why the old one-liner LIED. Under pipefail
+        # head -300 closes the pipe on its 301st line, grep dies of
+        # SIGPIPE, the pipeline reports 141 and the || arm printed
+        # 'no log match' over 300 lines of matches it had just printed
+        # -- the verdict inverted by the size of the match, which is
+        # exactly the case an operator is grepping for. grep now drains
+        # into a file and owns the verdict; head reads that file.
+        docker logs --since 3h "$c" >/tmp/cp-ops-logs.txt 2>&1
+        if grep -F '' -B 2 -A 60 /tmp/cp-ops-logs.txt >/tmp/cp-ops-hits.txt; then
+          head -300 /tmp/cp-ops-hits.txt
+        else
+          echo 'no log match for  in the last 3 hours'
+        fi
+      else
+        docker logs --since 90m "$c" 2>&1 | tail -300
+      fi
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case cp-app-logs/needle: op=cp-app-logs [NEEDLE=req_ABC-123]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      set -uo pipefail
+      # No pipe into head: under pipefail a truncating reader SIGPIPEs
+      # its producer and the pipeline returns 141 -- a step failure
+      # under set -e, and a silently wrong status otherwise, visible
+      # only when docker is slow enough to still be writing. head on
+      # a regular FILE cannot SIGPIPE anything.
+      docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
+      c=$(head -1 /tmp/cp-ops-cid.txt)
+      [ -n "$c" ] || { echo 'no running control_plane container'; exit 1; }
+      if [ -n 'req_ABC-123' ]; then
+        # The 141 trap, and why the old one-liner LIED. Under pipefail
+        # head -300 closes the pipe on its 301st line, grep dies of
+        # SIGPIPE, the pipeline reports 141 and the || arm printed
+        # 'no log match' over 300 lines of matches it had just printed
+        # -- the verdict inverted by the size of the match, which is
+        # exactly the case an operator is grepping for. grep now drains
+        # into a file and owns the verdict; head reads that file.
+        docker logs --since 3h "$c" >/tmp/cp-ops-logs.txt 2>&1
+        if grep -F 'req_ABC-123' -B 2 -A 60 /tmp/cp-ops-logs.txt >/tmp/cp-ops-hits.txt; then
+          head -300 /tmp/cp-ops-hits.txt
+        else
+          echo 'no log match for req_ABC-123 in the last 3 hours'
+        fi
+      else
+        docker logs --since 90m "$c" 2>&1 | tail -300
+      fi
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case cp-app-logs/bad-needle: op=cp-app-logs [NEEDLE=a'b;c]
+needle must be 4-64 chars of [A-Za-z0-9_-]
+=== exit 1
+=== case guerrilla-logs-grep/ok: op=guerrilla-logs-grep [NEEDLE=F1a2b3c4]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@guerrilla.example.invalid
+--- argv[7]
+
+      journalctl -u 'barkpark-slot@*' --since '-3 hours' --no-pager 2>/dev/null         | grep -F 'F1a2b3c4' -A 30 | head -200         || echo 'no journal match for F1a2b3c4 in the last 3 hours'
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case guerrilla-logs-grep/empty: op=guerrilla-logs-grep
+needle must be 4-64 chars of [A-Za-z0-9_-]
+=== exit 1
+=== case guerrilla-db-probe/ok: op=guerrilla-db-probe [NEEDLE=$(ignored)]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@guerrilla.example.invalid
+--- argv[7]
+
+      set -uo pipefail
+      rc=0
+      echo "== POOL_SIZE in /opt/barkpark/.env (last line wins; none = runtime.exs default 10) =="
+      grep -nE "^[[:space:]]*(export[[:space:]]+)?POOL_SIZE=" /opt/barkpark/.env \
+        || echo "no POOL_SIZE line in /opt/barkpark/.env"
+      echo "== POOL_SIZE in each running slot environ =="
+      for s in blue green; do
+        st=$(systemctl is-active "barkpark-slot@$s" 2>/dev/null)
+        pid=$(systemctl show -p MainPID --value "barkpark-slot@$s" 2>/dev/null)
+        if [ "$st" = active ] && [ -r "/proc/$pid/environ" ]; then
+          v=$(tr "\0" "\n" < "/proc/$pid/environ" | grep -E "^POOL_SIZE=") || v="POOL_SIZE unset (runtime.exs default 10)"
+          echo "slot $s active pid $pid: $v"
+        else
+          echo "slot $s: ${st:-unknown}"
+        fi
+      done
+      cd /tmp
+      echo "== show max_connections =="
+      sudo -u postgres psql -X -v ON_ERROR_STOP=1 -Atc "show max_connections" || rc=1
+      echo "== pg_stat_activity by state (empty state = background process) =="
+      sudo -u postgres psql -X -v ON_ERROR_STOP=1 -Atc \
+        "select state, count(*) from pg_stat_activity group by state order by state" || rc=1
+      [ "$rc" -eq 0 ] || { echo "PSQL-FAILED"; exit 1; }
+      echo guerrilla-db-probe complete
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case site-runtime-install/ok: op=site-runtime-install [BOX_IP=10.0.0.7]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      set -euo pipefail
+      cat > /tmp/site-runtime-install.sh
+      KEY=/root/.ssh/barkpark_indx
+      [ -f "$KEY" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+      scp -i "$KEY" -o StrictHostKeyChecking=accept-new /tmp/site-runtime-install.sh root@10.0.0.7:/tmp/
+      ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7 'bash /tmp/site-runtime-install.sh'
+    
+--- stdin: deploy/site-runtime-install.sh (byte-identical)
+=== exit 0
+=== case site-runtime-install/bad-ip: op=site-runtime-install [BOX_IP=10.0.0.7;id]
+box_ip must be an IPv4
+=== exit 1
+=== case site-artifact-fetch/ok: op=site-artifact-fetch [BOX_IP=10.0.0.7] [ARTIFACT_REPO=acme/site.web] [ARTIFACT_REF=feature/x-1]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      set -euo pipefail
+      KEY=/root/.ssh/barkpark_indx
+      [ -f "$KEY" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+      ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7 '
+        set -euo pipefail
+        DEST=/var/lib/barkpark-builder/uploads/site.web
+        rm -rf "$DEST" "$DEST.tmp" && mkdir -p "$DEST.tmp"
+        curl -fsSL https://github.com/acme/site.web/archive/feature/x-1.tar.gz           | tar -xz -C "$DEST.tmp" --strip-components=1
+        mv "$DEST.tmp" "$DEST"
+        echo "artifact staged: file://$DEST"
+      '
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case site-artifact-fetch/bad-repo: op=site-artifact-fetch [BOX_IP=10.0.0.7] [ARTIFACT_REPO=acme/site;id] [ARTIFACT_REF=main]
+artifact_repo must be owner/repo
+=== exit 1
+=== case site-artifact-fetch/bad-ref: op=site-artifact-fetch [BOX_IP=10.0.0.7] [ARTIFACT_REPO=acme/site] [ARTIFACT_REF=main$(id)]
+artifact_ref must be a plain ref
+=== exit 1
+=== case box-logs/ok: op=box-logs [BOX_IP=10.0.0.7] [UNIT=barkpark-runtime]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      set -euo pipefail
+      KEY=/root/.ssh/barkpark_indx
+      [ -f "$KEY" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+      ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7         'journalctl -u barkpark-runtime -n 100 --no-pager'
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case box-logs/bad-unit: op=box-logs [BOX_IP=10.0.0.7] [UNIT=sshd]
+unit not in allowlist
+=== exit 1
+=== case builder-token-fix/ok: op=builder-token-fix [BOX_IP=10.0.0.7]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      set -euo pipefail
+      # No pipe into head: under pipefail a truncating reader SIGPIPEs
+      # its producer and the pipeline returns 141 -- a step failure
+      # under set -e, and a silently wrong status otherwise, visible
+      # only when docker is slow enough to still be writing. head on
+      # a regular FILE cannot SIGPIPE anything.
+      docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
+      c=$(head -1 /tmp/cp-ops-cid.txt)
+      [ -n "$c" ] || { echo 'no control_plane container'; exit 1; }
+      WT=$(docker exec "$c" printenv WORKER_TOKEN)
+      [ -n "$WT" ] || { echo 'WORKER_TOKEN unset in container'; exit 1; }
+      KEY=/root/.ssh/barkpark_indx
+      printf '%s' "$WT" | ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7 '
+        set -euo pipefail
+        umask 077
+        cat > /etc/barkpark/worker.token
+        sed -i "s#--token-file /etc/barkpark/agent.token#--token-file /etc/barkpark/worker.token#" /etc/systemd/system/barkpark-builder.service
+        systemctl daemon-reload
+        systemctl restart barkpark-builder
+        sleep 2
+        systemctl is-active barkpark-builder
+        echo builder-token-fix complete
+      '
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case box-file-tail/ok: op=box-file-tail [BOX_IP=10.0.0.7] [FILE_PATH=/var/log/barkpark-builder/build-1.log]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      set -euo pipefail
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7         'ls /var/log/barkpark-builder/ && tail -n 200 /var/log/barkpark-builder/build-1.log 2>/dev/null || echo FILE-MISSING'
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case box-file-tail/escape: op=box-file-tail [BOX_IP=10.0.0.7] [FILE_PATH=/var/log/barkpark-builder/../../etc/shadow]
+file_path must be a plain file under /var/log/barkpark-builder/
+=== exit 1
+=== case caddy-repair/ok: op=caddy-repair [BOX_IP=10.0.0.7]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      set -euo pipefail
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7 '
+        set -euo pipefail
+        CF=/etc/caddy/Caddyfile
+        cp -a "$CF" "$CF.pre-repair.$(date +%s)"
+        add() {
+          local host="$1" ondemand="$2"
+          grep -q "^$host {" "$CF" && { echo "vhost $host present"; return; }
+          {
+            echo ""
+            echo "# Restored by cp-ops caddy-repair — instance vhost $host."
+            echo "$host {"
+            [ "$ondemand" = yes ] && printf "\ttls {\n\t\ton_demand\n\t}\n"
+            printf "\treverse_proxy 127.0.0.1:4000\n"
+            echo "}"
+          } >> "$CF"
+          echo "vhost $host appended"
+        }
+        add jarl.barkpark.cloud no
+        add barkpark.jarl.no yes
+        caddy validate --config "$CF" >/dev/null
+        systemctl reload caddy
+        echo == caddy repaired ==
+        head -40 "$CF"
+      '
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case box-probe/ok: op=box-probe [BOX_IP=10.0.0.7]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7 '
+        echo == df ==; df -h / /var 2>/dev/null | tail -3
+        echo == mem ==; free -m | head -2
+        echo == docker ps ==; docker ps -a --format "{{.Names}} {{.Status}} {{.Image}}" | head -10
+        echo == docker disk ==; docker system df 2>/dev/null | head -6
+        echo == units ==; systemctl is-active barkpark-agent barkpark-builder barkpark-runtime caddy
+        echo == last docker events ==; journalctl -u docker -n 12 --no-pager | tail -12
+      '
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case box-probe/bad-ip: op=box-probe [BOX_IP=box.example]
+box_ip must be an IPv4
+=== exit 1
+=== case box-prune/ok: op=box-prune [BOX_IP=10.0.0.7]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7 '
+        set -euo pipefail
+        echo == df before ==; df -h / | tail -1
+        echo == removing exited site containers ==
+        docker ps -a --filter status=exited --filter "name=site-" -q | xargs -r docker rm
+        echo == pruning images ==
+        docker image prune -af 2>/dev/null | tail -1
+        echo == pruning build cache ==
+        docker builder prune -af 2>/dev/null | tail -1
+        echo == vacuuming journal ==
+        journalctl --vacuum-size=200M 2>&1 | tail -1
+        echo == df after ==; df -h / | tail -1
+      '
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case box-unit-repair/list: op=box-unit-repair [BOX_IP=10.0.0.7]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7 '
+        set -uo pipefail
+        if [ -z "" ]; then
+          echo == units ==
+          systemctl list-units --all --no-pager --plain "barkpark*" "postgresql*" caddy.service 2>/dev/null | head -14
+          echo == port 4000 ==
+          ss -ltnp 2>/dev/null | grep :4000 || echo nothing-listens-on-4000
+          echo == recent slot journal ==
+          journalctl -u "barkpark*" -n 40 --no-pager 2>/dev/null | tail -40
+        else
+          echo == journal before ==
+          journalctl -u "" -n 30 --no-pager 2>/dev/null | tail -30
+          echo == restarting  ==
+          systemctl restart "" && sleep 4
+          systemctl is-active ""
+          echo == journal after ==
+          journalctl -u "" -n 10 --no-pager 2>/dev/null | tail -10
+        fi
+      '
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case box-unit-repair/unit: op=box-unit-repair [BOX_IP=10.0.0.7] [UNIT=barkpark-slot@b]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      KEY=/root/.ssh/barkpark_indx
+      ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7 '
+        set -uo pipefail
+        if [ -z "barkpark-slot@b" ]; then
+          echo == units ==
+          systemctl list-units --all --no-pager --plain "barkpark*" "postgresql*" caddy.service 2>/dev/null | head -14
+          echo == port 4000 ==
+          ss -ltnp 2>/dev/null | grep :4000 || echo nothing-listens-on-4000
+          echo == recent slot journal ==
+          journalctl -u "barkpark*" -n 40 --no-pager 2>/dev/null | tail -40
+        else
+          echo == journal before ==
+          journalctl -u "barkpark-slot@b" -n 30 --no-pager 2>/dev/null | tail -30
+          echo == restarting barkpark-slot@b ==
+          systemctl restart "barkpark-slot@b" && sleep 4
+          systemctl is-active "barkpark-slot@b"
+          echo == journal after ==
+          journalctl -u "barkpark-slot@b" -n 10 --no-pager 2>/dev/null | tail -10
+        fi
+      '
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case box-unit-repair/bad-unit: op=box-unit-repair [BOX_IP=10.0.0.7] [UNIT=caddy;id]
+unit not in allowlist
+=== exit 1
+=== case box-migrate/ok: op=box-migrate [BOX_IP=10.0.0.7]
+>>> ssh argc=8
+--- argv[0]
+-i
+--- argv[1]
+/tmp/deploy_key
+--- argv[2]
+-o
+--- argv[3]
+StrictHostKeyChecking=accept-new
+--- argv[4]
+-o
+--- argv[5]
+UserKnownHostsFile=/tmp/known
+--- argv[6]
+root@cp.example.invalid
+--- argv[7]
+
+      KEY=/root/.ssh/barkpark_indx
+      [ -f "$KEY" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+      ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7 '
+        set -uo pipefail
+        cd /opt/barkpark/api || { echo no-checkout-at-/opt/barkpark; exit 1; }
+        [ -d ../.slots ] && { echo slot-box-refused — use deploy/instance-deploy.sh; exit 1; }
+        echo == stopping barkpark ==
+        systemctl stop barkpark 2>/dev/null || true
+        echo == migrating ==
+        MIG=0
+        timeout 600 bash start.sh mix ecto.migrate || MIG=$?
+        echo == starting barkpark ==
+        systemctl start barkpark 2>/dev/null || true
+        sleep 20
+        echo == unit state ==
+        systemctl is-active barkpark || true
+        echo == health ==
+        curl -fsS -m 10 -o /dev/null http://localhost:4000/api/schemas && echo HEALTH-OK || echo HEALTH-FAIL
+        echo == journal tail ==
+        # UNIT SET, DERIVED (not copied) from deploy/instance-deploy.sh
+        # by grepping every systemd unit it installs / enables / starts:
+        #   barkpark-slot@.service       install :1171, enable :580,:1480
+        #                                -> barkpark-slot@blue|green (:478,:1157)
+        #   barkpark-site@.service       install :1178, start  :1173
+        #                                -> barkpark-site@<slug>__<slot>
+        #   barkpark-agent.service       install :1503, enable :1509
+        #   barkpark-mcp.service         install :1554, enable :1558
+        #   barkpark-connectors.service  install :1689, enable :1691
+        #   barkpark.service             NOT created here -- instance-deploy.sh
+        #                                DISABLES it (:1482); it is written by
+        #                                repo-root deploy.sh:312 / enabled :330,
+        #                                i.e. the legacy mix box this op targets.
+        #   (no .timer is installed by instance-deploy.sh: 0 matches for 'timer')
+        # Every name is barkpark-prefixed and the SET GROWS (site@, mcp and
+        # connectors were all added after slot@), so the derived query is the
+        # PREDICATE barkpark* -- a hand-kept list goes stale on the next unit.
+        # WHY NOT -u barkpark ALONE, even though :152 refuses a .slots box:
+        # that guard is a [ -d ../.slots ] test, which reads FALSE on a slot box
+        # whose marker is missing (provisioning died before instance-deploy.sh
+        # :1179 mkdir, or the dir was removed) -- exactly the broken box whose
+        # tail must not come back silent. barkpark* costs nothing on a legacy
+        # box, where barkpark is the only match.
+        # WHY :405 DIFFERS AND STAYS -u 'barkpark-slot@*': guerrilla-logs-grep
+        # greps a KNOWN slot host for a request id, so slot-only is deliberate
+        # noise control there, not an oversight. :153 in this same file already
+        # uses the barkpark* form this line now matches.
+        journalctl -u "barkpark*" -n 25 --no-pager 2>/dev/null | tail -25
+        echo == kernel oom check ==
+        journalctl -k -n 200 --no-pager 2>/dev/null | grep -iE "out of memory|oom-kill" | tail -5 || echo no-oom-in-recent-kernel-log
+        [ "$MIG" -eq 0 ] || { echo "MIGRATE-FAILED exit $MIG"; exit 1; }
+        echo box-migrate complete
+      '
+    
+--- stdin: 0 bytes
+=== exit 0
+=== case unknown-op: op=nope
+unknown operation: nope
+=== exit 1

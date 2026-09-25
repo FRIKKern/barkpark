@@ -733,6 +733,14 @@ on:
       - "scripts/usage-envelope-diff.test.mjs"
       - "scripts/fixtures/usage-envelope-diff/*.json"
       - "cloud/lib/barkpark_cloud/usage.ex"
+      # CP-OPS ARMS (task-2ea65cb8f1c71a2a). `tooling-harnesses` runs
+      # scripts/cp-ops.test.sh: cp-ops.yml's choice list vs the script's arms,
+      # and every arm's ssh argv vs the golden. cp-ops.yml is workflow_dispatch
+      # only, so without these rows an arm edit is checked by nothing.
+      - "scripts/cp-ops.sh"
+      - "scripts/cp-ops.test.sh"
+      - "scripts/fixtures/cp-ops/golden.txt"
+      - ".github/workflows/cp-ops.yml"
       # ── SUNSET-ROUTE CONSUMERS (task-a6613aa3eddb3c80) ─────────────────────
       # scripts/sunset-route-consumers.test.sh landed in #17772 wired to
       # NOTHING: `selftest-wiring-census` printed
@@ -1443,6 +1451,14 @@ on:
       - "scripts/usage-envelope-diff.test.mjs"
       - "scripts/fixtures/usage-envelope-diff/*.json"
       - "cloud/lib/barkpark_cloud/usage.ex"
+      # CP-OPS ARMS (task-2ea65cb8f1c71a2a). `tooling-harnesses` runs
+      # scripts/cp-ops.test.sh: cp-ops.yml's choice list vs the script's arms,
+      # and every arm's ssh argv vs the golden. cp-ops.yml is workflow_dispatch
+      # only, so without these rows an arm edit is checked by nothing.
+      - "scripts/cp-ops.sh"
+      - "scripts/cp-ops.test.sh"
+      - "scripts/fixtures/cp-ops/golden.txt"
+      - ".github/workflows/cp-ops.yml"
       # ── SUNSET-ROUTE CONSUMERS (task-a6613aa3eddb3c80) ─────────────────────
       # scripts/sunset-route-consumers.test.sh landed in #17772 wired to
       # NOTHING: `selftest-wiring-census` printed
