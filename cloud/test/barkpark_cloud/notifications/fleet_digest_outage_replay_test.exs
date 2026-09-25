@@ -53,10 +53,11 @@ defmodule BarkparkCloud.Notifications.FleetDigestOutageReplayTest do
 
   AND WHAT "PLATFORM-ADDRESSED" MEANS HERE. Charter D362 rules this digest
   PER-TEAM: the body names instances and sites by name, so a fleet-wide blast is a
-  cross-team disclosure. A literal platform recipient does not exist —
-  `PLATFORM_ADMIN_EMAILS` is unset on prod and settable by no route, console
-  action or User field (`dr-bl-w5-census-is-dark-to-every-human`) — and this file
-  invents none. The signal it proves is the one D362 permits: the team that owns
+  cross-team disclosure. The digest has no platform recipient —
+  `PLATFORM_ADMIN_EMAILS` is settable by no route, console action or User field
+  (`dr-bl-w5-census-is-dark-to-every-human`; the env var itself was provisioned
+  on prod 2026-09-25 by gr-ops-platform-admin-emails, and the digest does not
+  read it) — and this file invents none. The signal it proves is the one D362 permits: the team that owns
   the five failing sites receives an email that NAMES the failures, where before
   dr-w28-s5 the digest said nothing whatsoever about deploys and before dr-w19-s5
   it was addressed to nobody at all.

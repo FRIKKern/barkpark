@@ -138,9 +138,10 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # agent_or_worker and public are unchanged: no existing route changed class.
   # 2026-08-07: 66 / 47 / 7 / 12. deploy-reliability dr-w16-s6 added ONE
   # session-or-PAT GET, `/v1/deploy-ledger/census` — the team-scoped twin of the
-  # operator route above, added because that operator route 403s for every real
-  # account (PLATFORM_ADMIN_EMAILS is unset in production), so the correct number
-  # this epic spent sixteen waves building was unreadable by anyone. It counts as
+  # operator route above, added because that operator route 403'd for every real
+  # account (PLATFORM_ADMIN_EMAILS was unset in production until
+  # gr-ops-platform-admin-emails, 2026-09-25), so the correct number this epic
+  # spent sixteen waves building was unreadable by anyone. It counts as
   # SESSION because `Auth.require_user_or_pat` is a session wrapper here; the
   # `Auth.require_ability("read")` beside it narrows a PAT, it does not reclassify
   # the route. RULED NOT SIDE-EFFECTING by reading the whole path:

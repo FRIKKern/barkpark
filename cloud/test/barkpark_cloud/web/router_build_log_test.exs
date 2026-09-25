@@ -12,8 +12,9 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
 
   THE SECOND HOLE, and the one `dr-w19-site-build-log-is-operator-only` closed.
   The route shipped `Auth.require_platform_operator`-gated, which is the
-  `:platform_admin_emails` allowlist — unset on prod, unsettable through any
-  route, console action or User field (`gr-ops-platform-admin-emails`). This file
+  `:platform_admin_emails` allowlist — then unset on prod (provisioned 2026-09-25
+  by `gr-ops-platform-admin-emails`), unsettable through any route, console
+  action or User field. This file
   used to say so and then set the allowlist in Application config so its own
   tests could pass, which proved the gate and the route while claiming nothing
   about production — where the answer for EVERY real account was 403. A team
@@ -335,8 +336,9 @@ defmodule BarkparkCloud.Web.RouterBuildLogTest do
     # THE CLOSER'S OWN ARM. Put `Auth.require_platform_operator(conn, [])` back in
     # front of this route and this test reds with 403 where it expects 200: the
     # user is a real owner of the team that owns the site, and the operator
-    # allowlist is EMPTY in this test — which is exactly prod's shape
-    # (`gr-ops-platform-admin-emails`). The audience census's rot assertion is the
+    # allowlist is EMPTY in this test — prod's shape when the route shipped
+    # (provisioned 2026-09-25, `gr-ops-platform-admin-emails`), and still the
+    # shape for any account not on it. The audience census's rot assertion is the
     # other half of the same proof, from source rather than from a request.
     test "a member of the owning team reads the log, with NO operator allowlist set" do
       Application.put_env(:barkpark_cloud, :platform_admin_emails, [])

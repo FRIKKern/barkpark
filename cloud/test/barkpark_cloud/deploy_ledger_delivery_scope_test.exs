@@ -15,7 +15,8 @@ defmodule BarkparkCloud.DeployLedgerDeliveryScopeTest do
   which answers `403 {"error":"forbidden","scope":"platform","required":
   "platform_operator"}` to a real account token. The route `bp` actually reads is
   the TEAM one, `GET /v1/deploy-ledger/census`, and it `Map.put` only `:scope`.
-  So the reader landed on a route nobody can reach, and the ONLY arm production
+  So the reader landed on a route nobody could reach (the operator allowlist was
+  unset on prod until gr-ops-platform-admin-emails, 2026-09-25), and the ONLY arm production
   ever executed was the `d == nil` arm its Go test forbids — a vacuous green
   asserted against a fixture that test builds itself.
 

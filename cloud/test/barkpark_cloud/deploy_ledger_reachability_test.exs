@@ -712,7 +712,8 @@ defmodule BarkparkCloud.DeployLedgerReachabilityTest do
 
     # THREE external call sites, and the multiset is PINNED — dr-w16-s6 widened
     # this from the single-element `[%{arity: 2}]` it was, because the operator
-    # route (`census(from, to)`, arity 2) 403s for every real account and the
+    # route (`census(from, to)`, arity 2) 403'd for every real account then (the
+    # allowlist was unset on prod until gr-ops-platform-admin-emails, 2026-09-25) and the
     # team-scoped route (`census(from, to, site_ids: …)`, arity 3) is the read a
     # non-operator can actually reach. dr-w28-s5 widened it again, ON PURPOSE,
     # for the THIRD site: `Notifications.DigestEmail.window_health/3` in
