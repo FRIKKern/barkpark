@@ -1,40 +1,47 @@
 defmodule Barkpark.OwnedTables do
   @moduledoc """
-  Which database tables belong to a plugin or a capability, and whether that
-  owner is switched on for this instance (Barkspark phase 2, slice 2,
-  task-d3ecc509d4ea227d).
+  Which database tables belong to a plugin or a capability rather than to core,
+  and whether that owner is switched on for this instance (Barkspark phase 2,
+  slice 2, task-d3ecc509d4ea227d).
 
-  Core must run with every plugin and fleet table ABSENT. Where core code
-  touches one of these tables, it asks `enabled?/1` first and skips the work
-  when the owner is off.
+  ## The rule (main's ruling, 2026-09-25 16:35Z)
+
+  A table is CORE when a core route, a core fence or a core module reads it
+  with no `Barkpark.Capability.enabled?/1` gate. Only the tables that fail that
+  test are listed here. Applying it moved four tables the phase-2 survey called
+  plugin-owned into core, and they are deliberately absent from `@owners`:
+
+    * `task_edges` — `/v1/tasks` is mounted by the core router, and the core
+      mutate door's claim fence (`Barkpark.Tasks.Claim`) reads it.
+    * `paper_access_log` — the core route `GET /v1/papers/:slug/access` and the
+      core `PaperAccessSweeper` cron read it.
+    * `paper_events` — the core-mounted `/v1/paperflow/intents` reads it and
+      the core `Content.Papers.BlockOps` writes it.
+    * `pulse_counters`, `pulse_events`, `pulse_meters` — `Barkpark.Pulse` is a
+      core module by its own moduledoc, and the core endpoint mounts
+      `PulseSocket`, whose channel join reads `pulse_counters`.
+
+  A table listed here is dropped by the differential check
+  (`mix test.core_without_owned_tables`), which proves core runs without it.
 
   ## The two instance-level switches
 
-  An owner is either a plugin or a capability, and each has one existing
-  switch. This module reads those switches; it adds no switch of its own.
-
     * `{:plugin, name}`: on when the plugin is registered in
-      `Barkpark.Plugins.Registry` (`BARKPARK_PLUGINS`: unset registers every
-      bundled plugin, `""` registers none, `"a,b"` registers those).
-      Registration runs synchronously in `Barkpark.SchemaBootstrap.init/1`,
-      before Oban and the endpoint start, so no request or job sees a
-      half-filled registry.
+      `Barkpark.Plugins.Registry` (`BARKPARK_PLUGINS`). Registration runs
+      synchronously in `Barkpark.SchemaBootstrap.init/1`, before Oban and the
+      endpoint start.
     * `{:capability, name}`: `Barkpark.Capability.enabled?/1`
       (`BARKPARK_CAPABILITIES_OFF`).
 
-  This is not per-workspace enablement (`Barkpark.Plugins.Enablement`). The
-  tables are instance-wide, so only the instance-level switch decides whether
-  they can be relied on.
+  Not per-workspace enablement (`Barkpark.Plugins.Enablement`): the tables are
+  instance-wide.
 
   ## Off does not mean absent
 
-  Turning an owner off does not drop its tables: an instance that ran every
-  migration and later set `BARKPARK_CAPABILITIES_OFF=cycle_fleet` still has
-  the cycle tables and their rows. So a caller that must clean up rows (for
-  example workspace teardown) cannot simply skip an off owner's table. It uses
-  `present?/1` to decide, which answers `true` for an enabled owner without
-  touching the database and checks the live catalog only when the owner is
-  off.
+  Turning an owner off does not drop its tables. A caller that must still clean
+  up rows (workspace teardown) uses `present?/1`, which answers `true` for an
+  enabled owner without a database round trip and checks the live catalog only
+  when the owner is off.
   """
 
   alias Barkpark.Capability
@@ -73,20 +80,62 @@ defmodule Barkpark.OwnedTables do
     "epic_assignments" => {:capability, :epic_fleet},
     "epic_benchmark_attempts" => {:capability, :epic_fleet},
     "epic_benchmark_experiments" => {:capability, :epic_fleet},
-    # plugins
-    "paper_access_log" => {:plugin, "bulldocs"},
-    "paper_events" => {:plugin, "bulldocs"},
+    # plugins. `paper_events_dataset_rescope_backup` is a Bulldocs migration's
+    # side-table that nothing in api/lib reads.
     "paper_events_dataset_rescope_backup" => {:plugin, "bulldocs"},
-    "pulse_counters" => {:plugin, "pulse"},
-    "pulse_events" => {:plugin, "pulse"},
-    "pulse_meters" => {:plugin, "pulse"},
-    "github_sync_conflicts" => {:plugin, "github"},
-    "task_edges" => {:plugin, "tasks"}
+    "github_sync_conflicts" => {:plugin, "github"}
   }
+
+  # The two BEFORE DELETE triggers on CORE tables that call a cycle_fleet
+  # function (migration 20260715000500), as {table, trigger}.
+  @core_triggers [
+    {"workspaces", "workspaces_teardown_cycle_ledger"},
+    {"projects", "projects_teardown_cycle_ledger"}
+  ]
+
+  # SQL functions the fleet migrations install, as `to_regprocedure` signatures.
+  # Every one is used only by an owned table's trigger or check, or by the
+  # teardown path `Barkpark.Tenancy.delete_workspace/1` guards.
+  @functions [
+    "barkpark_prepare_workspace_cycle_teardown(uuid)",
+    "barkpark_teardown_cycle_ledger()",
+    "barkpark_cycle_correction_immutable()",
+    "barkpark_epic_costs_valid(jsonb)",
+    "barkpark_epic_ledger_immutable()",
+    "barkpark_epic_replacement_ordinal_valid()",
+    "barkpark_b1_document(uuid)",
+    "barkpark_paper_has_cycle_authority(jsonb,uuid,uuid,text,text,uuid,text,text,text,text,jsonb)",
+    "barkpark_reject_padded_cycle_assignment_unit_ids()",
+    "barkpark_reject_padded_cycle_result_unit_ids()",
+    "barkpark_reject_sealed_cycle_append()",
+    "barkpark_release_gate_challenge_transition()",
+    "barkpark_release_gate_immutable()",
+    "barkpark_release_public_smoke_transition()",
+    "barkpark_runtime_usage_receipts_immutable()",
+    "barkpark_seal_cycle_correction_parent()",
+    "barkpark_seed_cycle_retrieval_attribution()",
+    "barkpark_unavailable_smoke_retry_allowed(uuid,uuid)",
+    "barkpark_validate_cycle_assignment()",
+    "barkpark_validate_cycle_build_result()",
+    "barkpark_validate_cycle_correction()",
+    "barkpark_validate_cycle_wave_inventory()",
+    "barkpark_validate_cycle_wave_inventory_00600()",
+    "barkpark_validate_release_gate()",
+    "barkpark_canonical_jsonb(jsonb)",
+    "barkpark_jsonb_canonical_digest(jsonb)"
+  ]
 
   @doc "Every table a plugin or capability owns, sorted."
   @spec tables() :: [String.t()]
   def tables, do: @owners |> Map.keys() |> Enum.sort()
+
+  @doc "The core-table triggers that call a fleet function, as `{table, trigger}`."
+  @spec core_triggers() :: [{String.t(), String.t()}]
+  def core_triggers, do: @core_triggers
+
+  @doc "The fleet-installed SQL functions, as `to_regprocedure` signatures."
+  @spec functions() :: [String.t()]
+  def functions, do: @functions
 
   @doc "The owner of `table`, or `:core` for a table no plugin or capability owns."
   @spec owner(String.t()) :: owner() | :core

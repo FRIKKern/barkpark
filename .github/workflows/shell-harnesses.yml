@@ -427,6 +427,8 @@ on:
       - "scripts/workflow-portability-check.test.sh"
       - "scripts/workflow-module-exec-smoke.sh"
       - "scripts/workflow-module-exec-smoke.test.sh"
+      - "scripts/epic-cycle-carry.mjs"
+      - "scripts/epic-cycle-resume.test.mjs"
       - ".claude/workflows/*.workflow.js"
       # RUN-BODY SHELL CHECK. The glob is the same argument as the one above:
       # `.github/workflows/*.yml` IS the corpus this gate enumerates, so pinning
@@ -1186,6 +1188,8 @@ on:
       - "scripts/workflow-portability-check.test.sh"
       - "scripts/workflow-module-exec-smoke.sh"
       - "scripts/workflow-module-exec-smoke.test.sh"
+      - "scripts/epic-cycle-carry.mjs"
+      - "scripts/epic-cycle-resume.test.mjs"
       - ".claude/workflows/*.workflow.js"
       # RUN-BODY SHELL CHECK — mirrors the pull_request list above, glob
       # included. A lane wired on PRs only goes dark the moment a merge lands.

@@ -221,7 +221,7 @@ defmodule BarkparkWeb.SessionIssuer do
   # session as born strong-factor-fresh. Best-effort + fully isolated: an audit
   # hiccup must never fail the login that already succeeded.
   defp audit_session_mint(user, opts) do
-    Barkpark.Audit.emit(%{
+    Barkpark.Audit.emit_best_effort(%{
       category: "auth",
       action: "session_minted",
       subject: user.id,
@@ -229,12 +229,6 @@ defmodule BarkparkWeb.SessionIssuer do
       actor_id: user.id,
       metadata: %{"mfa_verified" => Keyword.get(opts, :mfa_verified, false)}
     })
-
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
   end
 
   @doc """

@@ -20,6 +20,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
   describe "Catalog live enumerations (charter D4)" do
+    # pins the full-schema E1 count, so it needs the plugin/fleet tables present
+    # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+    @tag :owned_tables
     test "E1 = the 43 workspace_id tables including correction and release authority" do
       e1 = Catalog.live_e1(Repo)
       assert length(e1) == 43
@@ -73,6 +76,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       end
     end
 
+    # pins the full-schema E2 list, so it needs the plugin/fleet tables present
+    # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+    @tag :owned_tables
     test "E2 = the 16 FK-transitive children without a workspace_id column" do
       # The six 20260715 cycle-fleet children joined the original six; each reaches
       # the tenant grain through a single many-to-one FK to a workspace_id parent.
@@ -512,6 +518,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # stayed green while a row the bundle carried survived the teardown.
 
   describe "export and teardown derive every string-keyed predicate from ONE source" do
+    # seeds github_sync_conflicts, so it needs the plugin/fleet tables present
+    # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+    @tag :owned_tables
     test "STRUCTURAL: each class's teardown DELETE carries the exporter's own WHERE verbatim" do
       f = seed_lockstep_fixture!()
 
@@ -558,6 +567,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       end
     end
 
+    # seeds github_sync_conflicts, so it needs the plugin/fleet tables present
+    # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+    @tag :owned_tables
     test "BEHAVIOURAL: the teardown sweeps exactly the rows A's bundle carries, sparing co-owned" do
       f = seed_lockstep_fixture!()
       scope_a = tenant_scope_for(f.ws_a)

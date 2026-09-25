@@ -7094,20 +7094,20 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    toolbar. Tokens only. */
 .site-forms { margin-top: 22px; }
 .forms-status {
-  margin: 0 0 12px; font-size: 13px; color: var(--muted-text);
+  margin: 0 0 12px; font-size: var(--text-sm); color: var(--muted-text);
   overflow-wrap: anywhere;
 }
-.forms-status .mono { font-family: var(--mono); font-size: 12px; }
+.forms-status .mono { font-family: var(--mono); font-size: var(--text-xs); }
 .forms-toolbar {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   margin: 0 0 10px;
 }
-.forms-selected { font-size: 12px; color: var(--muted-text); }
+.forms-selected { font-size: var(--text-xs); color: var(--muted-text); }
 .form-sub-check { flex: none; margin: 0; accent-color: var(--primary); }
 .form-sub-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .form-sub-fields {
   display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
-  gap: 4px 12px; margin: 10px 0 0; font-size: 13px;
+  gap: 4px 12px; margin: 10px 0 0; font-size: var(--text-sm);
 }
 .form-sub-fields dt { color: var(--muted-text); font-weight: 500; }
 /* A visitor's message is PROSE (break-word); the endpoint URL above is a

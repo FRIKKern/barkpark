@@ -895,10 +895,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp maybe_append_paper_event(attrs, slug, %Document{} = doc) do
     event_type = attrs["event_type"]
 
-    # `paper_events` is a Bulldocs table: with the plugin off it may not exist
-    # (task-d3ecc509d4ea227d), and an insert into a missing table raises.
-    if is_binary(event_type) and event_type != "" and
-         Barkpark.OwnedTables.enabled?("paper_events") do
+    if is_binary(event_type) and event_type != "" do
       event_attrs = %{
         "goal_id" => attrs["goal_id"],
         "paper_slug" => slug,

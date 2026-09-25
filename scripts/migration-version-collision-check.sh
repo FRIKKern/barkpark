@@ -48,6 +48,15 @@
 #      the one most often unavailable (a `fetch-depth: 1` checkout has no base),
 #      which is why its absence is DISCLOSED rather than silently passed over.
 #
+# ONE KEYSPACE, SEVERAL FOLDERS. A plugin or capability keeps its migrations in
+# <app>/priv/plugins/<name>/migrations or <app>/priv/capabilities/<name>/migrations
+# (Barkpark.MigrationPaths). The migrator runs those folders against the SAME
+# schema_migrations table as <app>/priv/repo/migrations, so every detector below
+# treats them as one keyspace: a version in core and in a plugin folder is a
+# collision (A), a row a plugin file claims is not an orphan (B), and a plugin
+# file this branch adds is checked against the rows (C). The folder is counted
+# whether or not the plugin is switched on here, because it is on elsewhere.
+#
 # A DETECTOR THAT DID NOT RUN IS NOT A DETECTOR THAT PASSED. Every half that is
 # skipped prints its own `NOT RUN:` line and that line is repeated in the closing
 # summary. A green with no `NOT RUN:` lines is a green over all three detectors;
@@ -157,14 +166,24 @@ dir_count=$(printf '%s\n' "$files" | sed -E 's|/[^/]*$||' | sort -u | wc -l | tr
 printf 'corpus: %s migration files in %s directories (source: %s, root: %s)\n' \
   "$file_count" "$dir_count" "$corpus_source" "$ROOT"
 
-# ── Detector A: two files, one version, one directory ────────────────────────
+# keyspace_of DIR — the directory whose schema_migrations table DIR's files land
+# in: a plugin or capability migrations folder maps to its app's core folder,
+# every other directory to itself.
+keyspace_of() {
+  printf '%s\n' "$1" | sed -E 's#^(.*/)?priv/(plugins|capabilities)/[^/]+/migrations$#\1priv/repo/migrations#'
+}
+
+# ── Detector A: two files, one version, one keyspace ─────────────────────────
 # Keyed on (directory, version) — NOT on version alone. api/ and cloud/ are
 # different repositories with different schema_migrations tables, and the test
 # fixture tree under api/test is a third; a version shared ACROSS them collides
 # with nothing and flagging it would be a false red that trains people to ignore
 # this script.
+# The plugin and capability folders fold into their app's core directory (see
+# ONE KEYSPACE above), so `d` below is the keyspace, not the literal folder.
 dup_keys=$(printf '%s\n' "$files" \
   | awk '{ d=$0; sub(/\/[^\/]*$/, "", d); f=$0; sub(/.*\//, "", f); v=f; sub(/_.*/, "", v); print d "\t" v }' \
+  | sed -E 's#^((.*/)?)priv/(plugins|capabilities)/[^/	]+/migrations	#\1priv/repo/migrations	#' \
   | sort | uniq -d || true)
 
 if [ -n "$dup_keys" ]; then
@@ -172,7 +191,15 @@ if [ -n "$dup_keys" ]; then
     [ -n "$d" ] || continue
     violations=$((violations + 1))
     printf 'VIOLATION (A duplicate version): %s in %s is claimed by more than one file:\n' "$v" "$d"
-    printf '%s\n' "$files" | grep -E "^${d}/${v}_[^/]*\.exs$" | sed 's/^/    /'
+    while read -r f; do
+      [ -n "$f" ] || continue
+      [ "$(keyspace_of "${f%/*}")" = "$d" ] || continue
+      case "${f##*/}" in
+        "${v}"_*) printf '    %s\n' "$f" ;;
+      esac
+    done <<FILES
+$files
+FILES
     printf '    `mix ecto.migrate` keys on the version integer alone: it will run ONE of these and silently skip the rest. Renumber the newer file.\n'
   done <<EOF
 $dup_keys
@@ -227,8 +254,20 @@ if [ -n "$db_reason" ]; then
   fi
   note_not_run "detectors B and C (schema_migrations vs files) — $db_reason"
 else
-  dir_versions=$(printf '%s\n' "$files" \
-    | grep -E "^${DIR}/[0-9]{8,}_[^/]*\.exs$" \
+  # Every file in DIR's keyspace: DIR itself plus, for a core directory, its
+  # app's plugin and capability folders (ONE KEYSPACE above).
+  keyspace_files=""
+  while read -r f; do
+    [ -n "$f" ] || continue
+    if [ "$(keyspace_of "${f%/*}")" = "$DIR" ]; then
+      keyspace_files="${keyspace_files}${f}
+"
+    fi
+  done <<FILES
+$files
+FILES
+  keyspace_dirs=$(printf '%s' "$keyspace_files" | sed -E 's|/[^/]*$||' | sort -u || true)
+  dir_versions=$(printf '%s' "$keyspace_files" \
     | sed -E 's|.*/([0-9]+)_.*|\1|' | sort -u || true)
   recorded=$(printf '%s\n' "$db_versions" | grep -E '^[0-9]+$' | sort -u || true)
   recorded_count=0
@@ -259,16 +298,14 @@ EOF
   else
     added=""
     added_rc=0
-    added=$(git -C "$ROOT" diff --name-only --diff-filter=A "$BASE_REF"...HEAD -- "$DIR" 2>/dev/null) || added_rc=$?
+    # shellcheck disable=SC2086 # keyspace_dirs is one path per line, no spaces
+    added=$(git -C "$ROOT" diff --name-only --diff-filter=A "$BASE_REF"...HEAD -- "$DIR" $keyspace_dirs 2>/dev/null) || added_rc=$?
     if [ "$added_rc" -ne 0 ]; then
       note_not_run "detector C (recorded-before-added) — git diff against '$BASE_REF' failed (exit $added_rc)"
     else
       while read -r f; do
         [ -n "$f" ] || continue
-        case "$f" in
-          "$DIR"/*) : ;;
-          *) continue ;;
-        esac
+        [ "$(keyspace_of "${f%/*}")" = "$DIR" ] || continue
         base=${f##*/}
         v=${base%%_*}
         grep -qE '^[0-9]{8,}$' <<<"$v" || continue   # here-string: no SIGPIPE'd producer

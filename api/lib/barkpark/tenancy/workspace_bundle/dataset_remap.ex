@@ -65,6 +65,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.DatasetRemap do
   | not carried | `api_tokens`, `access_grants`, `share_links`, `preview_token_jti`, `paper_access_log` | Not imported and counted. They name the dataset but are the source's credentials, grants and access trail; carrying them into another tenant would give the source's holders access to the new dataset. |
   | workspace-scoped | every remaining member table (tokens, memberships, roles, audit, secrets, chat, cycle and epic ledgers, …) | Not imported and counted: they describe the source workspace, not the dataset, and carry no dataset grain. |
 
+  ## Why each guarded table is refused rather than carried
+
+  A guarded table with rows for the source dataset refuses the whole import.
+  Each one needs more than a pointer rewrite, and carrying it without that work
+  would be worse than refusing:
+
+  | Table | What carrying it would take |
+  |---|---|
+  | `media_files` | The row points at a blob by `path` / `object_key`. Carrying the row without copying the blob to a key the new dataset owns leaves a media row that serves nothing, or serves the source's bytes. Needs a blob copy through `Media.Storage`, which the import transaction cannot roll back. |
+  | `data_keys` | The wrapped DEK is keyed by `scope = "dataset:<slug>"` and decrypts the source's encrypted content. Carrying it means re-scoping a key, which is a key-management decision (re-wrap or share), not a row copy. Without it, encrypted content in the new dataset cannot be read, so the import refuses instead. |
+  | `webhooks` | Each row carries a signing `secret` and a delivery `url` owned by the source tenant. Copying it would make the new dataset fire the source's endpoints with the source's secret. |
+  | `search_intel_events`, `search_intel_crystals`, `search_intel_merge_patterns` | Analytics about the source's traffic (`actor_key`, `session_key`, query history). They describe who searched the source, not the dataset's content, and their `parent_event_id` / `query_event_id` chains would also need an id map. |
+  | `search_synonyms`, `search_surface_config` | Configuration, keyed by `scope` (the dataset slug) and, for synonyms, `dataset_id`. Carrying them is a rewrite of `id`, tenancy and `scope`; it is the cheapest next step, left out so this remap stays content-only. |
+  | `paper_events` | An event ledger with `parent_event_id` / `request_event_id` chains and actor columns naming source principals. Needs its own id map. |
+  | `shares` | A public-sharing grant keyed by the source `workspace_slug` / `project_slug`. Re-pointing it would publish the new dataset under a grant nobody issued for it. |
+  | `sync_cursors`, `sync_dead_letters`, `sync_push_conflicts`, `sync_push_cursors`, `sync_push_doc_revs` | Position state for an external sync connected to the source. Copied, a cursor would claim the new dataset is already in sync with a remote it has never talked to. |
+  | `github_sync_conflicts` | Open conflicts between the source's documents and a GitHub repo the source is connected to. The new dataset has no such connection. |
+  | FK children of documents or revisions (`chat_runtime_usage_receipts`, `cycle_correction_admissions`, `cycle_release_paper_candidates`, `epic_assignment_tasks`, `epic_assignment_runtime_attempts`) | Ledger rows of the source workspace's cycle, epic and chat runs that point at the dataset's documents. Their parents are workspace-scoped and do not travel, so the child cannot be rewritten into a whole row. |
+
   The rewrites, column by column:
 
     * `documents` — `id` gets a fresh UUID (recorded in an id map);

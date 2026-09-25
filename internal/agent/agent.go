@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/tokensource"
 )
 
 // DefaultInterval is the report+poll cadence when Agent.Interval is zero.
@@ -52,6 +54,13 @@ type Agent struct {
 	// Token is the agent bearer token (cloud-9 mint_agent_token plaintext). Sent
 	// as `Authorization: Bearer <token>` on every request.
 	Token string
+	// TokenSource, when set, owns the agent bearer: authorize reads its cached
+	// token and httpClient wraps the transport so a 401 re-reads --token-file
+	// and replays once if the file now holds a different token. Provisioning
+	// supersede-mints agent.token on claim / stale-reclaim; without this the
+	// agent 401-loops until restarted. Supersedes Token. See
+	// internal/tokensource.
+	TokenSource *tokensource.Source
 	// Interval is the report+poll cadence for Run. Zero means DefaultInterval.
 	Interval time.Duration
 	// HTTPClient is the injected client. Zero value uses http.DefaultClient.
@@ -77,10 +86,14 @@ type Agent struct {
 // so a hung control-plane connection can't freeze the report+poll loop with
 // no crash and no log — http.DefaultClient has Timeout 0 (no deadline).
 func (a *Agent) httpClient() *http.Client {
-	if a.HTTPClient != nil {
-		return a.HTTPClient
+	c := a.HTTPClient
+	if c == nil {
+		c = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	if a.TokenSource != nil {
+		return a.TokenSource.Client(c)
+	}
+	return c
 }
 
 // runner returns the injected runner or the real ExecRunner.
@@ -240,8 +253,12 @@ func (a *Agent) getJSON(ctx context.Context, path string, out any) error {
 
 // authorize attaches the agent bearer token (when set).
 func (a *Agent) authorize(req *http.Request) {
-	if a.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+a.Token)
+	tok := a.Token
+	if a.TokenSource != nil {
+		tok = a.TokenSource.Token()
+	}
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 }
 

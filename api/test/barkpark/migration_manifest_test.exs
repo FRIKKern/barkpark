@@ -16,14 +16,24 @@ defmodule Barkpark.MigrationManifestTest do
 
   ## What this test does
 
-  It hashes every file in `priv/repo/migrations` and compares against the
-  committed `MANIFEST.sha256`. Editing a shipped migration's bytes now reds
-  HERE, at the edit, naming the file — instead of silently forking the fleet's
-  schema for months.
+  It hashes every file in each migrations directory and compares against that
+  directory's committed `MANIFEST.sha256`. Editing a shipped migration's bytes
+  now reds HERE, at the edit, naming the file — instead of silently forking the
+  fleet's schema for months.
+
+  The directories are `Barkpark.MigrationPaths.all/1`: `priv/repo/migrations`
+  plus every `priv/plugins/<name>/migrations` and
+  `priv/capabilities/<name>/migrations` folder on disk. That is every directory
+  the migrator can apply. A plugin switched off on one instance is switched on
+  on another, so its shipped files need the same protection; each folder carries
+  its own `MANIFEST.sha256`.
 
   ## Regenerate (from the repo root) after ADDING a migration
 
       ( cd api/priv/repo/migrations && shasum -a 256 *.exs ) > api/priv/repo/migrations/MANIFEST.sha256
+
+  For a plugin folder, substitute its directory, e.g.
+  `api/priv/plugins/<name>/migrations`.
 
   (`sha256sum` emits the identical `<hash>  <name>` format, if that is what you
   have.) Regenerating is the right response to a NEW file. It is NOT the right
@@ -32,58 +42,68 @@ defmodule Barkpark.MigrationManifestTest do
 
   use ExUnit.Case, async: true
 
-  @migrations_dir Path.expand("../../priv/repo/migrations", __DIR__)
-  @manifest Path.join(@migrations_dir, "MANIFEST.sha256")
+  @priv_root Path.expand("../../priv", __DIR__)
+  @api_root Path.expand("../..", __DIR__)
 
-  @regen "Regenerate (repo root): ( cd api/priv/repo/migrations && shasum -a 256 *.exs ) > api/priv/repo/migrations/MANIFEST.sha256"
-
-  test "no shipped migration has been edited in place" do
-    recorded = read_manifest()
-    actual = hash_migrations()
-
-    changed =
-      for {name, hash} <- recorded, Map.has_key?(actual, name), actual[name] != hash, do: name
-
-    assert changed == [],
-           """
-           a shipped migration was edited in place — add a forward migration instead
-
-           Changed: #{Enum.join(changed, ", ")}
-
-           A migration already applied on some database will NEVER re-run there.
-           Editing its bytes changes only what FUTURE databases get, and leaves
-           every existing one holding the old object with `mix ecto.migrations`
-           still reporting clean. Ship the change as a NEW migration that
-           CREATE OR REPLACEs / ALTERs the object forward — see
-           priv/repo/migrations/20260901140000_replace_bind_document_revision_trigger_function.exs
-           for the shape.
-
-           If you are deliberately rewriting history on a migration that has
-           provably never left your machine, say so in the PR and then:
-           #{@regen}
-           """
+  test "the directory set starts with priv/repo/migrations" do
+    assert hd(Barkpark.MigrationPaths.all(priv_root: @priv_root)) ==
+             Path.join(@priv_root, "repo/migrations")
   end
 
-  test "MANIFEST.sha256 lists exactly the migration files on disk" do
-    recorded = read_manifest() |> Map.keys() |> Enum.sort()
-    actual = hash_migrations() |> Map.keys() |> Enum.sort()
+  for migrations_dir <- Barkpark.MigrationPaths.all(priv_root: @priv_root) do
+    @migrations_dir migrations_dir
+    @manifest Path.join(migrations_dir, "MANIFEST.sha256")
+    @rel "api/" <> Path.relative_to(migrations_dir, @api_root)
+    @regen "Regenerate (repo root): ( cd #{@rel} && shasum -a 256 *.exs ) > #{@rel}/MANIFEST.sha256"
 
-    assert recorded == actual,
-           """
-           MANIFEST.sha256 is out of date with priv/repo/migrations.
+    test "#{@rel}: no shipped migration has been edited in place" do
+      recorded = read_manifest(@manifest)
+      actual = hash_migrations(@migrations_dir)
 
-           Added, not yet recorded: #{inspect(actual -- recorded)}
-           Recorded, now missing:   #{inspect(recorded -- actual)}
+      changed =
+        for {name, hash} <- recorded, Map.has_key?(actual, name), actual[name] != hash, do: name
 
-           Adding a migration is normal — record it: #{@regen}
-           A file going MISSING is not: a deleted migration is the same
-           permanent-divergence hazard as an amended one, because the databases
-           that already ran it keep its effects.
-           """
+      assert changed == [],
+             """
+             a shipped migration was edited in place — add a forward migration instead
+
+             Changed: #{Enum.join(changed, ", ")}
+
+             A migration already applied on some database will NEVER re-run there.
+             Editing its bytes changes only what FUTURE databases get, and leaves
+             every existing one holding the old object with `mix ecto.migrations`
+             still reporting clean. Ship the change as a NEW migration that
+             CREATE OR REPLACEs / ALTERs the object forward — see
+             priv/repo/migrations/20260901140000_replace_bind_document_revision_trigger_function.exs
+             for the shape.
+
+             If you are deliberately rewriting history on a migration that has
+             provably never left your machine, say so in the PR and then:
+             #{@regen}
+             """
+    end
+
+    test "#{@rel}: MANIFEST.sha256 lists exactly the migration files on disk" do
+      recorded = read_manifest(@manifest) |> Map.keys() |> Enum.sort()
+      actual = hash_migrations(@migrations_dir) |> Map.keys() |> Enum.sort()
+
+      assert recorded == actual,
+             """
+               MANIFEST.sha256 is out of date with #{@rel}.
+
+             Added, not yet recorded: #{inspect(actual -- recorded)}
+             Recorded, now missing:   #{inspect(recorded -- actual)}
+
+             Adding a migration is normal — record it: #{@regen}
+             A file going MISSING is not: a deleted migration is the same
+             permanent-divergence hazard as an amended one, because the databases
+             that already ran it keep its effects.
+             """
+    end
   end
 
-  defp read_manifest do
-    @manifest
+  defp read_manifest(manifest) do
+    manifest
     |> File.read!()
     |> String.split("\n", trim: true)
     |> Map.new(fn line ->
@@ -92,8 +112,8 @@ defmodule Barkpark.MigrationManifestTest do
     end)
   end
 
-  defp hash_migrations do
-    @migrations_dir
+  defp hash_migrations(migrations_dir) do
+    migrations_dir
     |> Path.join("*.exs")
     |> Path.wildcard()
     |> Map.new(fn path ->

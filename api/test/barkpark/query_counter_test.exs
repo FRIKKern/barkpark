@@ -27,6 +27,9 @@ defmodule Barkpark.QueryCounterTest do
   alias Barkpark.QueryCounter
 
   describe "the foreign-process leak trap (permanent)" do
+    # its witness statement reads chat_messages, so it needs the plugin/fleet tables present
+    # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+    @tag :owned_tables
     test "a statement from a process outside the measurement never enters the census" do
       {_, {clean, clean_sources}} = QueryCounter.census(fn -> owned_documents_statement!() end)
 

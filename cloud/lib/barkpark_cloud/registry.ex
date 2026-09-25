@@ -42,6 +42,7 @@ defmodule BarkparkCloud.Registry do
     Barkpark,
     Deployment,
     FleetSettings,
+    HostnameClaim,
     Provider,
     ProvisionJob,
     Site,
@@ -373,8 +374,9 @@ defmodule BarkparkCloud.Registry do
   # SUPPORT insert is quota-exempt (PDF-D86). Keep this private: a new caller that
   # skips the quota must be a deliberate, documented exception, not an accident.
   defp insert_barkpark(team, attrs) do
-    %Barkpark{}
-    |> Barkpark.changeset(put_team_id(attrs, team))
+    changeset = Barkpark.changeset(%Barkpark{}, put_team_id(attrs, team))
+
+    changeset
     # `mode: :savepoint` because BOTH callers now run inside a transaction
     # (`register_barkpark/2` for the quota lock, `register_support_barkpark/2` for
     # the fleet write). Without it a unique-constraint violation aborts the whole
@@ -384,6 +386,352 @@ defmodule BarkparkCloud.Registry do
     # decides to fall back to the suffixed FQDN. The savepoint keeps the
     # constraint error a VALUE the caller can read, as it was before the lock.
     |> Repo.insert(mode: :savepoint)
+    |> claim_url_host(changeset)
+  end
+
+  # The provisioning half of the hostname_claims backstop: the new row's url
+  # host is claimed in the SAME transaction as the insert (both callers of
+  # `insert_barkpark/2` run inside one). `barkparks_url_unique_idx` only sees
+  # url-vs-url; this claim also refuses a url host that another row already
+  # serves as its `custom_host` — the collision no per-column index can see.
+  #
+  # A refused claim deletes the row it just inserted (same transaction, nothing
+  # references it yet) and answers the SAME changeset error the url index
+  # gives — `{:url, "is already provisioned", constraint: :unique}` — so
+  # `insert_with_url_reservation/4` falls back to the suffixed FQDN and the
+  # worker route renders its usual 422, never a 500.
+  defp claim_url_host({:ok, %Barkpark{url: url} = bp}, changeset) do
+    case hostname_claim_key(url) do
+      nil ->
+        {:ok, bp}
+
+      host ->
+        case claim_hostname(host, {:barkpark, bp.id}, "url", []) do
+          :ok ->
+            {:ok, bp}
+
+          :taken ->
+            Repo.delete!(bp)
+
+            {:error,
+             changeset
+             |> Map.put(:action, :insert)
+             |> Ecto.Changeset.add_error(:url, "is already provisioned",
+               constraint: :unique,
+               constraint_name: "hostname_claims_host_unique_idx"
+             )}
+        end
+    end
+  end
+
+  defp claim_url_host(other, _changeset), do: other
+
+  @doc """
+  The key a hostname is claimed under in `hostname_claims`: `host` (a bare
+  hostname or an origin such as `https://h:4000/x`) run through the SAME
+  normaliser the provisioning-FQDN leg of `custom_host_taken?/2` compares with
+  (`normalize_claim_host/1`), or `nil` when nothing is left to claim.
+
+  `nil` for a nil value, for anything that normalises to `""` (`"   "`,
+  `"https://"`, `"https:///"`, `"https://:443"`, `"."`), and for a residue with
+  no letter or digit in it (`"-"`, `".-"`, from `"https://-/"`): that is not a
+  hostname anyone can serve, so it claims nothing. This is what keeps the
+  table's `host <> ''` CHECK unreachable from the backfill and from live writes.
+
+  Public for one caller outside this module: the `create_hostname_claims`
+  migration's backfill, which must key existing rows exactly as live writes
+  key new ones.
+  """
+  @spec hostname_claim_key(term()) :: String.t() | nil
+  def hostname_claim_key(host) when is_binary(host) do
+    norm = normalize_claim_host(host)
+    if norm =~ ~r/[a-z0-9]/, do: norm, else: nil
+  end
+
+  def hostname_claim_key(_), do: nil
+
+  # Claim `host` for `barkpark_id` in ONE statement. The UNIQUE index on
+  # `hostname_claims.host` is the arbiter: a concurrent claim of the same host
+  # blocks on the uncommitted key and, once the holder commits, meets the
+  # conflict. `ON CONFLICT … DO UPDATE … WHERE` turns that conflict into a
+  # VALUE instead of a raised unique_violation, so the enclosing transaction is
+  # not aborted and the caller can answer its own refusal shape.
+  #
+  # The conflict arm updates (i.e. the claim succeeds) only when the existing
+  # claim is ALREADY this barkpark's (an idempotent re-attach, or attaching the
+  # host the row already serves as its url), or when it is a `"url"` claim held
+  # by one of `takeover_ids` — rows the caller's pre-check has already judged
+  # abandoned. Anything else → 0 rows → `:taken`.
+  #
+  # `owner` is `{:barkpark, id}` (kinds `"url"` / `"custom_host"`) or
+  # `{:site, id}` (kind `"site_domain"`); the table's owner CHECK pins which
+  # column each kind fills. A takeover moves the claim to the new owner and
+  # clears the other owner column.
+  defp claim_hostname(host, owner, kind, takeover_ids) do
+    now = DateTime.utc_now()
+    {barkpark_id, site_id} = claim_owner_columns(owner)
+
+    may_update =
+      dynamic(
+        [c],
+        ^own_claim_filter(owner) or (c.kind == "url" and c.barkpark_id in ^takeover_ids)
+      )
+
+    on_conflict =
+      from(c in HostnameClaim,
+        where: ^may_update,
+        update: [
+          set: [barkpark_id: ^barkpark_id, site_id: ^site_id, kind: ^kind, updated_at: ^now]
+        ]
+      )
+
+    row = %{
+      id: Ecto.UUID.generate(),
+      host: host,
+      barkpark_id: barkpark_id,
+      site_id: site_id,
+      kind: kind,
+      inserted_at: now,
+      updated_at: now
+    }
+
+    case Repo.insert_all(HostnameClaim, [row], on_conflict: on_conflict, conflict_target: :host) do
+      {1, _} -> :ok
+      {0, _} -> :taken
+    end
+  end
+
+  defp claim_owner_columns({:barkpark, id}), do: {id, nil}
+  defp claim_owner_columns({:site, id}), do: {nil, id}
+
+  defp own_claim_filter({:barkpark, id}), do: dynamic([c], c.barkpark_id == ^id)
+  defp own_claim_filter({:site, id}), do: dynamic([c], c.site_id == ^id)
+
+  # Claim every host in `hosts` for `site`, stopping at the first refusal.
+  # `:ok` or `:taken`. Each host takes over the abandoned-url holders the pre-check
+  # already judged (read before it, by the caller).
+  defp claim_site_hosts(%Site{id: site_id}, hosts, takeovers) do
+    Enum.reduce_while(hosts, :ok, fn host, :ok ->
+      case claim_hostname(host, {:site, site_id}, "site_domain", Map.get(takeovers, host, [])) do
+        :ok -> {:cont, :ok}
+        :taken -> {:halt, :taken}
+      end
+    end)
+  end
+
+  # Release this site's claim on `domain` (keyed like every claim), and only
+  # this site's — a claim some other owner holds is never touched.
+  defp release_site_host(%Site{id: site_id}, domain) do
+    case hostname_claim_key(domain) do
+      nil ->
+        :ok
+
+      host ->
+        Repo.delete_all(
+          from(c in HostnameClaim, where: c.host == ^host and c.site_id == ^site_id)
+        )
+
+        :ok
+    end
+  end
+
+  @doc """
+  Copy every existing SITE domain into `hostname_claims` as a `"site_domain"`
+  claim. Called by the `add_site_domains_to_hostname_claims` migration;
+  idempotent, so it also re-lists pre-existing collisions later
+  (`bin/barkpark_cloud eval "BarkparkCloud.Registry.backfill_site_domain_claims(BarkparkCloud.Repo)"`).
+
+  NEVER RAISES on a collision: each claim is `INSERT … ON CONFLICT DO NOTHING`.
+  A domain whose host is already claimed by another owner is skipped, left on
+  the site row as it is, and logged at warning level naming both sides.
+
+  PRECEDENCE on a pre-existing collision: the claim already in the table holds.
+  Barkpark claims (url host, custom_host) were backfilled by the
+  `create_hostname_claims` migration and have been written live ever since, so
+  a site domain that collides with one is the one skipped. A custom_host is a
+  deliberate attach that the V2 DNS-ownership proof guards, and the barkpark it
+  names is the box the name already routes to — moving that claim to a site in
+  a migration would silently change who owns a live hostname. Between two sites
+  (only possible for rows older than the cross-site trigger), the older site
+  (by `inserted_at`) holds.
+
+  Returns `%{claimed: n, skipped: [%{host, site_id, held_by, held_as}]}`.
+  """
+  @spec backfill_site_domain_claims(module()) :: %{claimed: non_neg_integer(), skipped: [map()]}
+  def backfill_site_domain_claims(repo) do
+    rows =
+      repo.all(
+        from(s in Site, order_by: [asc: s.inserted_at, asc: s.id], select: {s.id, s.domains})
+      )
+
+    candidates =
+      for {id, domains} <- rows,
+          host <- (domains || []) |> Enum.map(&hostname_claim_key/1) |> Enum.uniq(),
+          host != nil,
+          do: {host, id}
+
+    now = DateTime.utc_now()
+
+    result =
+      Enum.reduce(candidates, %{claimed: 0, skipped: []}, fn {host, id}, acc ->
+        row = %{
+          id: Ecto.UUID.generate(),
+          host: host,
+          site_id: id,
+          kind: "site_domain",
+          inserted_at: now,
+          updated_at: now
+        }
+
+        case repo.insert_all(HostnameClaim, [row], on_conflict: :nothing, conflict_target: :host) do
+          {1, _} ->
+            %{acc | claimed: acc.claimed + 1}
+
+          {0, _} ->
+            case repo.one(
+                   from(c in HostnameClaim,
+                     where: c.host == ^host,
+                     select: {c.site_id, c.barkpark_id, c.kind}
+                   )
+                 ) do
+              {^id, _, _} ->
+                acc
+
+              {held_site, held_bp, held_as} ->
+                held_by = held_site || held_bp
+                owner = if held_site, do: "site", else: "barkpark"
+
+                Logger.warning(
+                  "hostname_claims site backfill: SKIPPED pre-existing collision on #{host} — " <>
+                    "site #{id} (site_domain) left unclaimed; held by #{owner} #{held_by} (#{held_as})"
+                )
+
+                skip = %{host: host, site_id: id, held_by: held_by, held_as: held_as}
+                %{acc | skipped: acc.skipped ++ [skip]}
+            end
+        end
+      end)
+
+    Logger.info(
+      "hostname_claims site backfill: #{result.claimed} claim(s) written, " <>
+        "#{length(result.skipped)} pre-existing collision(s) skipped"
+    )
+
+    result
+  end
+
+  # The `"url"` claims on `host` held by OTHER barkparks whose row STILL shows
+  # that url host, read BEFORE the pre-check. If the pre-check then answers
+  # "free", it walked every such row and judged it abandoned, so these holders
+  # may be taken over. Two filters, both load-bearing:
+  #
+  #   * read BEFORE the pre-check — a row provisioned in between would otherwise
+  #     land in the set without the pre-check ever judging it;
+  #   * the row's own url must key to `host` — a claim whose row the pre-check
+  #     cannot see (any state where the claim and the column disagree) is never
+  #     taken over; it refuses, which is the backstop's whole job.
+  #
+  # `self_id` nil (a SITE door: a site is never a barkpark) excludes nobody —
+  # conditionally, never `!= ^nil`, which SQL answers NULL for every row.
+  defp url_claim_holders(host, self_id) do
+    HostnameClaim
+    |> join(:inner, [c], b in Barkpark, on: b.id == c.barkpark_id)
+    |> where([c], c.host == ^host and c.kind == "url")
+    |> exclude_claim_holder(self_id)
+    |> select([c, b], {c.barkpark_id, b.url})
+    |> Repo.all()
+    |> Enum.filter(fn {_id, url} -> hostname_claim_key(url) == host end)
+    |> Enum.map(fn {id, _url} -> id end)
+  end
+
+  defp exclude_claim_holder(query, nil), do: query
+  defp exclude_claim_holder(query, id), do: where(query, [c], c.barkpark_id != ^id)
+
+  @doc """
+  Copy every existing barkpark hostname claim into `hostname_claims`. Called by
+  the `create_hostname_claims` migration; idempotent, so it is also the tool
+  that RE-LISTS pre-existing collisions later
+  (`bin/barkpark_cloud eval "BarkparkCloud.Registry.backfill_hostname_claims(BarkparkCloud.Repo)"`).
+
+  NEVER RAISES on a collision. Each claim is `INSERT … ON CONFLICT DO NOTHING`;
+  a claim whose host is already held by a DIFFERENT barkpark is skipped, left
+  exactly as it is on the barkparks row, and logged at warning level naming
+  both rows. Only new writes are refused by the index; pre-existing duplicates
+  stay. `custom_host` claims go in before `url` claims, so on a collision the
+  customer's deliberate claim holds the host and the platform-minted url is the
+  one skipped (the known case: a ghost row whose url another row now serves as
+  its custom_host).
+
+  Returns `%{claimed: n, skipped: [%{host, kind, barkpark_id, held_by, held_as}]}`.
+  """
+  @spec backfill_hostname_claims(module()) :: %{claimed: non_neg_integer(), skipped: [map()]}
+  def backfill_hostname_claims(repo) do
+    rows =
+      repo.all(
+        from(b in Barkpark,
+          order_by: [asc: b.inserted_at, asc: b.id],
+          select: {b.id, b.url, b.custom_host}
+        )
+      )
+
+    candidates =
+      for({id, _url, ch} <- rows, key = hostname_claim_key(ch), do: {key, id, "custom_host"}) ++
+        for({id, url, _ch} <- rows, key = hostname_claim_key(url), do: {key, id, "url"})
+
+    now = DateTime.utc_now()
+
+    result =
+      Enum.reduce(candidates, %{claimed: 0, skipped: []}, fn {host, id, kind}, acc ->
+        row = %{
+          id: Ecto.UUID.generate(),
+          host: host,
+          barkpark_id: id,
+          kind: kind,
+          inserted_at: now,
+          updated_at: now
+        }
+
+        case repo.insert_all(HostnameClaim, [row], on_conflict: :nothing, conflict_target: :host) do
+          {1, _} ->
+            %{acc | claimed: acc.claimed + 1}
+
+          {0, _} ->
+            case repo.one(
+                   from(c in HostnameClaim,
+                     where: c.host == ^host,
+                     select: {c.barkpark_id, c.kind}
+                   )
+                 ) do
+              # The row's own other column (its url host IS its custom_host):
+              # one claim, not a collision.
+              {^id, _} ->
+                acc
+
+              {held_by, held_as} ->
+                Logger.warning(
+                  "hostname_claims backfill: SKIPPED pre-existing collision on #{host} — " <>
+                    "barkpark #{id} (#{kind}) left unclaimed; held by barkpark #{held_by} (#{held_as})"
+                )
+
+                skip = %{
+                  host: host,
+                  kind: kind,
+                  barkpark_id: id,
+                  held_by: held_by,
+                  held_as: held_as
+                }
+
+                %{acc | skipped: acc.skipped ++ [skip]}
+            end
+        end
+      end)
+
+    Logger.info(
+      "hostname_claims backfill: #{result.claimed} claim(s) written, " <>
+        "#{length(result.skipped)} pre-existing collision(s) skipped"
+    )
+
+    result
   end
 
   # cch-w58 (DELETED): `upsert_barkpark/2` used to live here, documented by both
@@ -6005,9 +6353,18 @@ defmodule BarkparkCloud.Registry do
     # creates of the same hostname both read a free namespace and both insert.
     result =
       serialize_hostname_claim(normalized_attr_domains(prepared), fn ->
+        hosts = prepared |> normalized_attr_domains() |> Enum.uniq()
+        takeovers = Map.new(hosts, &{&1, url_claim_holders(&1, nil)})
+
         case first_claimed_domain(prepared, barkpark) do
-          nil -> %Site{} |> Site.changeset(prepared) |> Repo.insert()
-          _taken -> {:error, :domain_taken}
+          nil ->
+            %Site{}
+            |> Site.changeset(prepared)
+            |> Repo.insert()
+            |> claim_created_site_hosts(takeovers)
+
+          _taken ->
+            {:error, :domain_taken}
         end
       end)
 
@@ -6026,6 +6383,29 @@ defmodule BarkparkCloud.Registry do
         other
     end
   end
+
+  # The site half of the hostname_claims backstop at CREATE: every domain the
+  # new row carries is claimed in the same transaction as the insert. The keys
+  # are the row's STORED domains (normalised by `Site.changeset/2`) run through
+  # `hostname_claim_key/1` — the one normaliser every claim uses; on a domain
+  # that passed `Site.domain_format/0` it is the identity. A refused claim
+  # deletes the row it just inserted (nothing references it yet; claims already
+  # written for it cascade) and answers the pre-check's own `{:error,
+  # :domain_taken}`.
+  defp claim_created_site_hosts({:ok, %Site{domains: domains} = site}, takeovers) do
+    hosts = domains |> Enum.map(&hostname_claim_key/1) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+
+    case claim_site_hosts(site, hosts, takeovers) do
+      :ok ->
+        {:ok, site}
+
+      :taken ->
+        Repo.delete!(site)
+        {:error, :domain_taken}
+    end
+  end
+
+  defp claim_created_site_hosts(other, _takeovers), do: other
 
   # The first domain in a create's attrs already claimed elsewhere in the
   # hostname namespace, or nil. NO self-exclusions are passed: the site does not
@@ -7794,46 +8174,65 @@ defmodule BarkparkCloud.Registry do
       # lock `hostname_claimed?/2` takes is still held when the row lands. See
       # `serialize_hostname_claim/2`.
       serialize_hostname_claim([norm], fn ->
+        # Read BEFORE the pre-check, exactly as `set_custom_host/2` does: the
+        # abandoned-url holders the pre-check is about to judge.
+        takeover_ids = url_claim_holders(norm, nil)
+
         # Claimed anywhere else in the ONE hostname namespace — another site
         # (any team), a barkpark's `custom_host`, a foreign team's parent domain,
         # or a live provisioning FQDN. Reject before the ask-gate can answer 200
         # for two owners. Until this called `hostname_claimed?/2` it tested SITES
         # ONLY, so a site could take a hostname another team already served as its
         # `custom_host` — and no route existed to take it back.
-        if hostname_claimed?(norm, except_site_id: site.id, team_id: site.team_id) do
-          {:error, :domain_taken}
-        else
-          new_domains = Enum.uniq(existing ++ [norm])
+        cond do
+          hostname_claimed?(norm, except_site_id: site.id, team_id: site.team_id) ->
+            {:error, :domain_taken}
 
-          # WHAT THE DB-LEVEL UNIQUENESS TRIGGER (add_domain_cross_site_uniqueness
-          # migration) ACTUALLY DOES — it is NOT the race backstop, and this
-          # comment said it was. Its body is a plpgsql
-          # `IF EXISTS (SELECT 1 FROM sites s WHERE s.id <> NEW.id AND d = ANY(s.domains))`
-          # inside a BEFORE ROW trigger. That EXISTS runs under the SAME READ
-          # COMMITTED snapshot rules as any other statement, so it CANNOT see a
-          # concurrent uncommitted `sites` row. Because its snapshot is taken later
-          # than the application check above, it NARROWS the window from
-          # milliseconds to microseconds — it does not close it. Only a UNIQUE
-          # INDEX, an EXCLUDE constraint, explicit locking, or SERIALIZABLE gives
-          # mutual exclusion; what serialises this door is the per-hostname
-          # `pg_advisory_xact_lock` taken in `hostname_claimed?/2` and held by the
-          # transaction `serialize_hostname_claim/2` opened around this whole body.
+          # THE DATABASE BACKSTOP. The advisory lock serialises only the doors
+          # that take it; provisioning does not, so a url host committed after
+          # the pre-check read the namespace is invisible to it. The
+          # hostname_claims UNIQUE (host) index refuses it here, with the same
+          # `{:error, :domain_taken}`.
           #
-          # The trigger is still worth rescuing: it fires for writers that bypass
-          # this door, raising a unique_violation we translate to the same friendly
-          # {:error, :domain_taken} rather than a 500.
-          try do
-            site
-            |> Site.changeset(%{domains: new_domains})
-            |> Repo.update()
-          rescue
-            e in Postgrex.Error ->
-              if e.postgres[:code] == :unique_violation do
-                {:error, :domain_taken}
-              else
-                reraise e, __STACKTRACE__
-              end
-          end
+          # Only a well-formed domain is claimed: a malformed one is refused by
+          # `Site.changeset/2` below, and keying it first would claim whatever
+          # prefix the normaliser cut it down to.
+          Regex.match?(Site.domain_format(), norm) and
+              claim_site_hosts(site, [norm], %{norm => takeover_ids}) == :taken ->
+            {:error, :domain_taken}
+
+          true ->
+            new_domains = Enum.uniq(existing ++ [norm])
+
+            # WHAT THE DB-LEVEL UNIQUENESS TRIGGER (add_domain_cross_site_uniqueness
+            # migration) ACTUALLY DOES — it is NOT the race backstop, and this
+            # comment said it was. Its body is a plpgsql
+            # `IF EXISTS (SELECT 1 FROM sites s WHERE s.id <> NEW.id AND d = ANY(s.domains))`
+            # inside a BEFORE ROW trigger. That EXISTS runs under the SAME READ
+            # COMMITTED snapshot rules as any other statement, so it CANNOT see a
+            # concurrent uncommitted `sites` row. Because its snapshot is taken later
+            # than the application check above, it NARROWS the window from
+            # milliseconds to microseconds — it does not close it. Only a UNIQUE
+            # INDEX, an EXCLUDE constraint, explicit locking, or SERIALIZABLE gives
+            # mutual exclusion; what serialises this door is the per-hostname
+            # `pg_advisory_xact_lock` taken in `hostname_claimed?/2` and held by the
+            # transaction `serialize_hostname_claim/2` opened around this whole body.
+            #
+            # The trigger is still worth rescuing: it fires for writers that bypass
+            # this door, raising a unique_violation we translate to the same friendly
+            # {:error, :domain_taken} rather than a 500.
+            try do
+              site
+              |> Site.changeset(%{domains: new_domains})
+              |> Repo.update()
+            rescue
+              e in Postgrex.Error ->
+                if e.postgres[:code] == :unique_violation do
+                  {:error, :domain_taken}
+                else
+                  reraise e, __STACKTRACE__
+                end
+            end
         end
       end)
     end
@@ -7846,9 +8245,14 @@ defmodule BarkparkCloud.Registry do
     norm = normalize_domain(domain)
     new_domains = Enum.reject(existing, &(&1 == norm))
 
-    site
-    |> Site.changeset(%{domains: new_domains})
-    |> Repo.update()
+    # The array write and the claim release are ONE transaction: a released
+    # claim with the domain still on the row (or the reverse) is never visible.
+    serialize_hostname_claim([norm], fn ->
+      with {:ok, updated} <- site |> Site.changeset(%{domains: new_domains}) |> Repo.update() do
+        if norm in existing, do: release_site_host(site, norm)
+        {:ok, updated}
+      end
+    end)
   end
 
   # Case-folded, trimmed, trailing-dot-stripped — the ONE normalization used for
@@ -8056,9 +8460,11 @@ defmodule BarkparkCloud.Registry do
   provisioning FQDN (its `url` host, compared NORMALISED — a url-held FQDN and
   a custom_host are ONE namespace) — each of those would silently
   shadow or be shadowed by the attach. Taken → `{:error, :taken}`. The
-  pre-check is check-then-write; the `barkparks_custom_host_unique_idx` unique
-  constraint is the atomic backstop for a custom_host↔custom_host race
-  (translated to the same `:taken`).
+  pre-check is check-then-write; the atomic backstop is the `hostname_claims`
+  row this call writes in the same transaction (UNIQUE over the host, whichever
+  column claimed it), so a url/custom_host race lost to a concurrent
+  provisioning insert answers the same `:taken`. A site-domain race is still
+  serialised only by the advisory lock.
 
   RE-ATTACH IS REFUSED, not overwritten
   (`cch-w54-bl-re-attaching-a-domain-orphans-the-previous-record-on-a-live-box`).
@@ -8111,11 +8517,25 @@ defmodule BarkparkCloud.Registry do
         # unique_violation rescue below is honest), but it covers ONE of the four
         # legs `custom_host_taken?/2` walks — a racing SITE claim of the same
         # hostname is not an index collision at all. The lock covers all four.
+        #
+        # The lock serialises only the doors that take it; provisioning does not.
+        # So the pre-check stays (it gives the friendly refusal) and the
+        # `hostname_claims` UNIQUE index is the atomic backstop behind it: a
+        # provisioning url host committed after our pre-check read the
+        # namespace makes `claim_hostname/4` answer `:taken` — the SAME refusal.
         serialize_hostname_claim([norm], fn ->
-          if custom_host_taken?(norm, barkpark) do
-            {:error, :taken}
-          else
-            changeset |> Repo.update() |> translate_custom_host_conflict()
+          takeover_ids = url_claim_holders(norm, barkpark.id)
+
+          cond do
+            custom_host_taken?(norm, barkpark) ->
+              {:error, :taken}
+
+            claim_hostname(norm, {:barkpark, barkpark.id}, "custom_host", takeover_ids) ==
+                :taken ->
+              {:error, :taken}
+
+            true ->
+              changeset |> Repo.update() |> translate_custom_host_conflict()
           end
         end)
     end
@@ -8229,7 +8649,9 @@ defmodule BarkparkCloud.Registry do
   # url-held FQDN and a custom_host occupy ONE hostname namespace — the two
   # partial unique indexes (`barkparks_url_unique_idx`,
   # `barkparks_custom_host_unique_idx`) are DISJOINT and structurally cannot
-  # see across them, so this pre-check is the only guard there is.
+  # see across them. This pre-check gives the friendly refusal; the atomic
+  # backstop behind it is `hostname_claims` (one row per claimed host,
+  # UNIQUE (host)), written by `set_custom_host/2` and the provisioning insert.
   #
   # Self is EXCLUDED, exactly as `barkpark_custom_host_claimed?/2` does it: a row
   # attaching the host it ALREADY serves (its own provisioning FQDN — e.g.

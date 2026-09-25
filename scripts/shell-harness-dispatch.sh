@@ -351,6 +351,8 @@ workflow-portability scripts/workflow-portability-check.sh
 workflow-portability scripts/workflow-portability-check.test.sh
 workflow-portability scripts/workflow-module-exec-smoke.sh
 workflow-portability scripts/workflow-module-exec-smoke.test.sh
+workflow-portability scripts/epic-cycle-carry.mjs
+workflow-portability scripts/epic-cycle-resume.test.mjs
 workflow-portability .claude/workflows/*.workflow.js
 workflow-portability scripts/workflow-run-shell-check.sh
 workflow-portability .github/workflows/*.yml
