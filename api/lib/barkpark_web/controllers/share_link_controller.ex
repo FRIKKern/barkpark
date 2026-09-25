@@ -299,6 +299,14 @@ defmodule BarkparkWeb.ShareLinkController do
     end
   end
 
+  # The ONE cache policy for a media share link's bytes, on every arm: the
+  # local `send_file`, the 302, and the presigned URL's signed
+  # `response-cache-control` (so a bucket-served byte carries it too). Not
+  # `Delivery.file_cache_control/1`: see the `{:file, full}` comment below for
+  # why a share link has no `bp_visibility` to key on and must never be the
+  # 24h shared-cache store.
+  @media_cache_control "private, max-age=0, must-revalidate"
+
   # @sobelow_skip — both findings on this clause are accepted false-positives:
   #   * Traversal.SendFile (send_file/3): `file` is resolved by
   #     `Media.get_file/2` scoped to the LINK's own workspace/project; `.path` is
@@ -327,7 +335,8 @@ defmodule BarkparkWeb.ShareLinkController do
         # the same flat path. Same seal as MediaController.serve/2.
         case Barkpark.Media.Blobstore.serve_strategy(file,
                response_content_type: MediaFile.serve_content_type(mime),
-               response_content_disposition: disposition
+               response_content_disposition: disposition,
+               response_cache_control: @media_cache_control
              ) do
           {:file, full} ->
             # ONE POLICY FOR BOTH BRANCHES (het-bl-sharelink-local-cache-policy).
@@ -352,12 +361,12 @@ defmodule BarkparkWeb.ShareLinkController do
             |> put_resp_content_type(MediaFile.serve_content_type(mime))
             |> put_resp_header("x-content-type-options", "nosniff")
             |> put_resp_header("content-disposition", disposition)
-            |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
+            |> put_resp_header("cache-control", @media_cache_control)
             |> send_file(200, full)
 
           {:redirect, url} ->
             conn
-            |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
+            |> put_resp_header("cache-control", @media_cache_control)
             |> redirect(external: url)
 
           {:error, :not_found} ->
