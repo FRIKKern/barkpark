@@ -123,6 +123,7 @@ defmodule Barkpark.Content.Mutations do
     try do
       result =
         Repo.transaction(fn ->
+          :ok = serialize_unscoped_batch(opts)
           tx_id = Writer.generate_rev()
 
           # SECURITY: echo each mutated document through the REAL caller + the
@@ -212,6 +213,30 @@ defmodule Barkpark.Content.Mutations do
   # codebase's slot for "well-formed, but I cannot act on it as sent"
   # (`workspace_scope_required`, `batch_too_large`, `create_wall`).
   @tsvector_limit_bytes 1_048_575
+
+  # THE UNSCOPED-BATCH SERIALIZER (task-59136713cece112c, ruling option b).
+  #
+  # `Audit.emit/1` takes the audit-chain lock of each DOCUMENT's workspace and
+  # holds it to the end of this transaction. A batch whose opts name a workspace
+  # reads fail-closed to it and stamps it on creates, so it audits under ONE
+  # chain; the /mutate door always sends one (it refuses a key-absent write with
+  # `workspace_scope_required`). A batch with NO workspace in its opts (internal
+  # callers only) reads unscoped, so a `delete`/`publish` of rows in W1 and W2
+  # takes chain(W1) and chain(W2) in mutation order, and two such batches in
+  # opposite order deadlock (40P01) — pinned by
+  # test/barkpark/content/unscoped_batch_audit_lock_order_test.exs.
+  #
+  # The chains it will need are known only after `apply_one/3` reads each row,
+  # so a sorted up-front set is not computable. Instead every unscoped batch
+  # takes the GLOBAL chain lock (the nil key) FIRST: two unscoped batches then
+  # never interleave. A scoped transaction holds one chain and only ever takes
+  # locks ordered after it (the #20369 publish-scope lock, rows), so it cannot
+  # close a cycle with one either. `lock_chain!/1` is re-entrant, so a nil-
+  # workspace document's own emit later in the batch does not wait on itself.
+  # Scoped batches are untouched.
+  defp serialize_unscoped_batch(opts) do
+    if is_nil(Keyword.get(opts, :workspace_id)), do: Barkpark.Audit.lock_chain!(nil), else: :ok
+  end
 
   # TEST-ONLY BARRIER SEAM (task-59136713cece112c). A lock-order race between
   # two batches needs each one parked INSIDE its transaction after its first
