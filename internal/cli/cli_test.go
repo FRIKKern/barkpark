@@ -527,6 +527,7 @@ func TestClassifyError(t *testing.T) {
 		{"canonical forbidden", `{"error":{"code":"forbidden","message":"token lacks required permission"}}`, exitAuth, "forbidden"},
 		{"canonical validation", `{"error":{"code":"validation_failed","message":"bad"}}`, exitValidation, "validation_failed"},
 		{"canonical rev_mismatch", `{"error":{"code":"rev_mismatch"}}`, exitConflict, "rev_mismatch"},
+		{"canonical paper_exists", `{"error":{"code":"paper_exists","message":"Paper already exists"}}`, exitConflict, "paper_exists"},
 		// Canonical envelopes for the codes added when the server moved these off
 		// bare-string / fail-open shapes — each must resolve via error.code.
 		{"canonical halted", `{"error":{"code":"halted","message":"lifecycle veto"}}`, exitConflict, "halted"},

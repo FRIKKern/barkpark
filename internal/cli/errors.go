@@ -117,6 +117,7 @@ var codeExit = map[string]int{
 	"invalid_path":        exitValidation,
 	"empty_body":          exitValidation,
 	"rev_mismatch":        exitConflict,
+	"paper_exists":        exitConflict,
 	"precondition_failed": exitConflict,
 	"conflict":            exitConflict,
 	// A plugin lifecycle veto. The bare-string {"error":"halted"} shape is still
