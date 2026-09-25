@@ -5229,14 +5229,19 @@ test("D32: the SPA ladder is attention_order.json's ORDER, derived on both sides
   // ── RULING A's SHAPE, as ordering claims over the ladder (fixture-independent,
   // so they hold on a main that has not taken the fixture change yet).
   const at = (st) => ladderOrder.indexOf(st);
-  assert.ok(at("degraded") + 1 === at("deploys_failing"),
-    "ruling A: deploys_failing sits IMMEDIATELY after degraded");
+  // dr-w15-s5: cannot_deploy sits IMMEDIATELY after degraded, and
+  // deploys_failing immediately behind it — the box's own refusal of the NEXT
+  // deploy outranks a past-window failure rate.
+  assert.ok(at("degraded") + 1 === at("cannot_deploy"),
+    "dr-w15-s5: cannot_deploy sits IMMEDIATELY after degraded");
+  assert.ok(at("cannot_deploy") + 1 === at("deploys_failing"),
+    "ruling A + dr-w15-s5: deploys_failing sits immediately behind cannot_deploy");
   assert.ok(at("deploys_failing") + 1 === at("diverged"),
     "ruling A: diverged sits immediately behind deploys_failing");
   assert.ok(at("unreported") < at("deploy_stalled") && at("deploy_stalled") < at("behind"),
     "deploy_stalled must sit after unreported and before behind");
   assert.equal(ladderOrder[ladderOrder.length - 1], "ok", "ok is the last rung");
-  assert.equal(ladderOrder.length, 14, "ruling A's ladder is fourteen rungs");
+  assert.equal(ladderOrder.length, 15, "ruling A's ladder plus dr-w15-s5's cannot_deploy is fifteen rungs");
 
   // The crossing rungs carry the fixture's own metadata the day it arrives —
   // asserted only WHEN it arrives, so this never claims a fact about a file
@@ -5810,6 +5815,11 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
     // dr-w10-s1: the recorded guerrilla row — 46.28% of 1,290 terminal deploys,
     // which printed `ok` with an empty detail before the arm landed.
     deploys_failing: { ...LIVE, deploy_rate: DEPLOY_NODE(46.28, 1290) },
+    // dr-w15-s5: the box's OWN refusal on a box with sites. The deploy_rate is
+    // the SAME failing node as the deploys_failing witness, so this also
+    // proves the refusal wins the evaluation, not only the sort.
+    cannot_deploy: { ...LIVE, deploy_rate: DEPLOY_NODE(46.28, 1290),
+      site_deploy: { configured: false, runner_alive: true, reported_at: SEEN } },
     // dr-w24-followup: rendered by the BEHIND column since dr-w24-s2, ranked by
     // nothing until the arm landed.
     diverged: { ...LIVE, commit_ancestry: "diverged", commit_distance: 12 },
@@ -5828,6 +5838,14 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
   };
   assert.deepEqual(Object.keys(WITNESS).slice().sort(), expected.slice().sort(),
     "a fixture state gained or lost a witness — the predicate and attention_order.json have drifted");
+
+  // dr-w15-s5: the cannot_deploy witness's two NEGATIVE arms, the Go twin's
+  // TestCannotDeployRungIsMeasuredOnly rows. A null capability is UNMEASURED,
+  // never a refusal; a refusal on a box with NO deploy surface fires nothing.
+  assert.equal(hooks.classifyBp({ ...LIVE, deploy_rate: DEPLOY_NODE(0, 55),
+    site_deploy: { configured: null, runner_alive: null, reported_at: SEEN } }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, deploy_rate: DEPLOY_NODE(0, 0, { sites: 0, sites_deploying: 0 }),
+    site_deploy: { configured: false, runner_alive: true, reported_at: SEEN } }), "ok");
 
   for (const state of expected) {
     assert.equal(hooks.classifyBp(WITNESS[state]), state, state + " must be reachable from classifyBp");
@@ -6099,7 +6117,7 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
   // charter D33: a MAP[state] || "…" tail announces the CALMEST word over the
   // most severe state. The enum is pinned, and every member has an explicit arm.
   const KINDS = ["removal_failed", "failed", "suspended", "degraded",
-    "deploys_failing", "diverged", "strained", "filling", "unreported",
+    "cannot_deploy", "deploys_failing", "diverged", "strained", "filling", "unreported",
     "deploy_stalled", "behind", "removing", "provisioning", "ok"];
   assert.deepEqual([...hooks.attentionKinds].sort(), KINDS.slice().sort(),
     "a new fleet state was added without a statusOf arm (or one was removed)");
@@ -6108,6 +6126,7 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
     failed: { provision_status: "failed" },
     suspended: { host: "h", suspended: true },
     degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    cannot_deploy: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", deploy_rate: DEPLOY_NODE(0, 55), site_deploy: { configured: true, runner_alive: false } },
     deploys_failing: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", deploy_rate: DEPLOY_NODE(46.28, 1290) },
     diverged: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", commit_ancestry: "diverged", commit_distance: 12 },
     unreported: { host: "h", last_seen_at: null },

@@ -53,8 +53,10 @@ func TestDeploysFailingDirectionOne(t *testing.T) {
 	if got := attentionBucket(attentionStatus(b)); got != "attention" {
 		t.Fatalf("bucket = %q, want attention", got)
 	}
-	if got := attentionRank("deploys_failing"); got != 5 {
-		t.Fatalf("rank = %d, want 5 (directly under degraded)", got)
+	// 5 -> 6 (dr-w15-s5): `cannot_deploy` now sits between degraded and this
+	// rung — the box's own refusal of the NEXT deploy outranks the past rate.
+	if got := attentionRank("deploys_failing"); got != 6 {
+		t.Fatalf("rank = %d, want 6 (directly under cannot_deploy)", got)
 	}
 	// The sentence never quotes a percentage without its denominator.
 	detail := attentionDetail(b, attentionStatus(b))
