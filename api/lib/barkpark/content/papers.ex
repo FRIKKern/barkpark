@@ -123,9 +123,17 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc "Return one visibility-safe canonical source for any historical Paper shape."
-  def reader_source(paper, dataset, scope_opts \\ [])
+  def reader_source(paper, dataset, scope_opts \\ []) do
+    case classify_reader_source(paper, dataset, scope_opts) do
+      {:blocks, blocks, _provenance_render} -> {:blocks, blocks}
+      other -> other
+    end
+  end
 
-  def reader_source(%Document{} = paper, dataset, scope_opts) do
+  # `reader_source/3`'s body. A `:blocks` verdict also carries the render
+  # `cache_provenance/4` already paid for (or nil when it rendered nothing),
+  # so `reader_html/3` can serve it instead of rendering the same blocks twice.
+  defp classify_reader_source(%Document{} = paper, dataset, scope_opts) do
     scope_opts = reader_schema_scope(paper, scope_opts || [])
     had_structured_source? = is_list(Projection.read_blocks(paper.content || %{}))
 
@@ -165,7 +173,7 @@ defmodule Barkpark.Content.Papers do
     end
   end
 
-  def reader_source(_, _dataset, _scope_opts), do: {:error, :not_found}
+  defp classify_reader_source(_, _dataset, _scope_opts), do: {:error, :not_found}
 
   @doc """
   The reader HTML for `paper`, rendered from its blocks on this read.
@@ -182,10 +190,9 @@ defmodule Barkpark.Content.Papers do
   """
   @spec reader_html(term(), String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
   def reader_html(paper, dataset, scope_opts \\ []) do
-    case reader_source(paper, dataset, scope_opts) do
-      {:blocks, blocks} ->
-        style = Map.get(paper.content || %{}, "style")
-        {:ok, Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope_opts))}
+    case classify_reader_source(paper, dataset, scope_opts) do
+      {:blocks, blocks, provenance_render} ->
+        {:ok, reader_render(paper, blocks, dataset, scope_opts, provenance_render)}
 
       {:html, sanitized} ->
         {:ok, sanitized}
@@ -194,6 +201,36 @@ defmodule Barkpark.Content.Papers do
         {:error, reason}
     end
   end
+
+  # Serve the render `cache_provenance/4` already made when it is the render
+  # this read would make. Both use `Labels.paper_render_opts/3` with the same
+  # dataset and style; they differ only in the scope the ref resolver runs in —
+  # provenance binds the PAPER's scope, the reader the CALLER's (a share link
+  # resolves inside the link scope). That scope reaches the bytes only through
+  # a resolver-dependent block, so the earlier render is reused when no block
+  # resolves an external referent, or when the two scopes are the same list.
+  defp reader_render(paper, blocks, dataset, scope_opts, provenance_render) do
+    reusable? =
+      is_binary(provenance_render) and
+        (not resolver_dependent?(blocks) or
+           resolver_scope(scope_opts) == resolver_scope(provenance_scope(paper)))
+
+    if reusable? do
+      provenance_render
+    else
+      style = Map.get(paper.content || %{}, "style")
+      Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope_opts))
+    end
+  end
+
+  # The scope `Labels.render_opts/2` hands the ref resolver, order-normalised.
+  defp resolver_scope(scope) when is_list(scope),
+    do: scope |> Keyword.put_new(:published_only, true) |> Enum.sort()
+
+  defp resolver_scope(_scope), do: nil
+
+  defp provenance_scope(paper),
+    do: [workspace_id: paper.workspace_id, project_id: paper.project_id]
 
   defp classify_reader_blocks(paper, blocks, envelope, dataset) do
     cond do
@@ -205,12 +242,12 @@ defmodule Barkpark.Content.Papers do
 
       true ->
         case cache_provenance(paper, blocks, envelope["body_html"], dataset) do
-          :coherent ->
-            {:blocks, blocks}
+          {:coherent, rendered} ->
+            {:blocks, blocks, rendered}
 
           {:stale, rendered} ->
             refresh_html_cache(paper, blocks, rendered)
-            {:blocks, blocks}
+            {:blocks, blocks, rendered}
 
           :divergent ->
             {:error, :ambiguous_source}
@@ -230,7 +267,8 @@ defmodule Barkpark.Content.Papers do
   # conflates two populations with OPPOSITE correct handling, and answering
   # "ambiguous" to both is what made honest drift a hard 422.
   #
-  #   :coherent        — no cache, or the cache IS this render. Serve blocks.
+  #   {:coherent, nil} — no cache; nothing was rendered. Serve blocks.
+  #   {:coherent, html} — the cache IS this render. Serve blocks.
   #   {:stale, html}   — the cache was rendered from THESE blocks by a renderer
   #                      that is no longer ours (or its resolved externals have
   #                      since moved). Blocks are canonical, so serve them and
@@ -249,17 +287,17 @@ defmodule Barkpark.Content.Papers do
   # the honest pre-digest integer, or nothing — is a LAGGING stamp, i.e. stale.
   defp cache_provenance(_paper, _blocks, html, _dataset)
        when not is_binary(html) or html == "",
-       do: :coherent
+       do: {:coherent, nil}
 
   defp cache_provenance(paper, blocks, html, dataset) do
     content = paper.content || %{}
     style = get_in(content, ["style"])
-    scope = [workspace_id: paper.workspace_id, project_id: paper.project_id]
+    scope = provenance_scope(paper)
     rendered = Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope))
 
     cond do
       rendered == html ->
-        :coherent
+        {:coherent, rendered}
 
       # EXTERNAL REFERENT DRIFT — a third class the drift/divergence split does
       # not name, and the rule above is UNSOUND without it. `paper_render_opts`
