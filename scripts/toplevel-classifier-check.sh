@@ -136,7 +136,7 @@ registry() {
 .tool-versions none the asdf production toolchain pin; toolchain-skew-check reads it
 AGENTS.md none agent-facing router
 CHANGELOG.md none release notes
-CLAUDE.md none the repo router doc
+CLAUDE.md elixir the repo router doc; the Elixir suite reads it
 DESIGN.md none design notes
 HYPERQUIZ.md none quiz plugin notes
 LICENSE none the licence

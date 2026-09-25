@@ -5,7 +5,7 @@ Read [Writing standard](docs/contracts/writing.md) for every task, alongside its
 
 ## Identity
 
-Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root + `internal/cli/` — one binary, manifest-driven from `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour — 12 today (Bulldocs, Frt, Github, Grip, Media, OnixEdit, Pulse, Quiz, Scaffy, Sheets, Tasks, Tickets); with all plugins off, Barkpark still works. That roster is DERIVED, not curated — one `use Barkpark.Plugin` per file in `api/lib/barkpark/plugins/*.ex`, diffed against this line by `scripts/roster-drift-check.sh`. Prod runs on Hetzner ARM64.
+Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root + `internal/cli/` — one binary, manifest-driven from `GET /v1/capabilities`), **Phoenix API + LiveView Studio** (`api/`), **JS SDK monorepo** (`js/`), **Next.js web demo** (`web/`). Plugins ride the `Barkpark.Plugin` behaviour — 12 today (Bulldocs, Frt, Github, Grip, Media, OnixEdit, Pulse, Quiz, Scaffy, Sheets, Tasks, Tickets); with all plugins off, Barkpark still works. That roster is DERIVED, not curated — one `use Barkpark.Plugin` per file in `api/lib/barkpark/plugins/*.ex`, diffed against this line by `scripts/roster-drift-check.sh`. Prod runs on Hetzner ARM64. Core is Barkpark's lake; Studio and every surface attach to it, in three shapes: Cloud (`cloud/`), Solo, App.
 
 ## Golden Rules
 
@@ -46,6 +46,7 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 | CLI/TUI | Go TUI / pdrender | `docs/cards/tui.md` |
 | Studio | LiveView Studio UI | `docs/cards/studio.md` |
 | Search | search / media / analytics | `docs/cards/search-media.md` |
+| Meta | core vs plugin / shapes / product era / process freeze | `docs/contracts/product-era.md` |
 | Meta | "is X deferred?" / anything else | `docs/decisions/deferred.md` / `docs/INDEX.md` |
 
 ## Prod micro-block
@@ -96,6 +97,6 @@ NEVER stop before pushing — it strands work locally. NEVER say "ready to push 
 
 ## Doc contract
 
-Three tiers: `agent` (router/cards/contracts — loaded via the routing table), `human` (READMEs), `cold` (retired docs — never load; commands need a dated `HISTORICAL RECORD` banner). First line of every active doc: `<!-- doc-tier: agent|human|cold | canonical-for: <topic> | budget: <N>tok -->`; `canonical-for` is unique repo-wide — one owner per topic. A new durable fact goes into its owner; **creating a new card requires retiring or merging one** (hard cap: 7 cards). Touched a file a card anchors? Update the card or `scripts/docs-anchors-check.sh` reds. It and the byte budgets (`scripts/check-doc-budgets.sh`) run in CI as one job, `Doc budgets + anchors`, which is ADVISORY: it reds its own check run on every PR touching matching paths, and CANNOT block a merge — that context is an explicit S4 exclusion in `.github/required-checks.json`, whose required set is only `Cloud gate`/`Console gate`/`Elixir gate`/`PR references an active task`. On overflow, split or retire content; never raise the cap — policy held by review, not by the merge button (`docs/ops/merge-gates.md`). Golden Rules and Past Mistakes above are verbatim-exempt: any edit requires explicit owner sign-off.
+Three tiers: `agent` (router/cards/contracts — loaded via the routing table), `human` (READMEs), `cold` (retired docs — never load; commands need a dated `HISTORICAL RECORD` banner). First line of every active doc: `<!-- doc-tier: agent|human|cold | canonical-for: <topic> | budget: <N>tok -->`; `canonical-for` is unique repo-wide — one owner per topic. A new durable fact goes into its owner; **creating a new card requires retiring or merging one** (hard cap: 7 cards). Touched a file a card anchors? Update the card or `scripts/docs-anchors-check.sh` reds. It and the byte budgets (`scripts/check-doc-budgets.sh`) run in CI as `Doc budgets + anchors`, which is ADVISORY and cannot block a merge. On overflow, split or retire content; never raise the cap — policy held by review, not by the merge button (`docs/ops/merge-gates.md`). Golden Rules and Past Mistakes above are verbatim-exempt: any edit requires explicit owner sign-off.
 
 **Canonical-impl markers (code-side `canonical-for`).** `@canonical capability:<slug> [aka:…] [doc:…]` above a capability's public entry point; `grep -rn '@canonical capability:'` IS the index. Demand-driven, not universal. Full contract — syntax, when to stamp, what §8/§8b enforce: `docs/contracts/canonical-impl-markers.md`.
