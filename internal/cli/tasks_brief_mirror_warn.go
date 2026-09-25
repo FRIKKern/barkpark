@@ -106,6 +106,27 @@ type briefMirrorDivergence struct {
 // the residue is frozen and the remedy is "read the field", not "write the row".
 var briefMirrorTerminalStatuses = map[string]bool{"done": true, "cancelled": true}
 
+// briefPurposeDroppedSequences is the complete list of character sequences
+// the purpose-copy rendering deletes from `description`. Nothing else is
+// changed except surrounding whitespace (TrimSpace). The server mirror's
+// @stripped (api/lib/barkpark/tasks/brief_mirror.ex) is the same list.
+var briefPurposeDroppedSequences = []string{"**", "__", "`"}
+
+// THE PURPOSE BLOCK IS A LOSSY RENDERING OF `description`, BY DESIGN. It drops
+// every "**", every "__" and every "`" and trims the ends; nothing else. So a
+// code span loses its backticks (`bp task ready` renders as bp task ready), and
+// an identifier that contains "__" loses those underscores too (__init__
+// renders as init). `description` is the canonical text and is stored
+// byte-verbatim (PR #18404); the brief is a display copy for readers such as
+// the task TUI and must never be used to reconstruct, compare against, or
+// quote the description. Preserving code spans was considered and declined
+// (task-d0c4a5061e04fdcc): it would change the composer, the server mirror and
+// the 1,313-row shared corpus together, and would turn every stored brief whose
+// description holds a backtick into a divergence under the read-time warning
+// below — including terminal rows, which are never rewritten.
+// TestBriefPurposeLossyRenderingIsDocumented reds if this paragraph stops
+// naming exactly briefPurposeDroppedSequences.
+//
 // briefPurposeStripOnePass is THE canonical purpose-copy normaliser, and this
 // is the one site that owns it: ensureTaskPortableBrief composes with it and
 // this warning compares against it, so the writer and the reader cannot drift.
@@ -113,7 +134,11 @@ var briefMirrorTerminalStatuses = map[string]bool{"done": true, "cancelled": tru
 // all three patterns at once — see this file's header for why that is the
 // correct side, and tasks_brief_strip_parity_test.go for the proof.
 func briefPurposeStripOnePass(s string) string {
-	return strings.TrimSpace(strings.NewReplacer("**", "", "__", "", "`", "").Replace(s))
+	pairs := make([]string, 0, 2*len(briefPurposeDroppedSequences))
+	for _, seq := range briefPurposeDroppedSequences {
+		pairs = append(pairs, seq, "")
+	}
+	return strings.TrimSpace(strings.NewReplacer(pairs...).Replace(s))
 }
 
 // briefMirrorCriterionTexts is resync_criteria/2's rule, exactly: the criterion
