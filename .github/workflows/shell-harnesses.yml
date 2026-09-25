@@ -1830,7 +1830,7 @@ jobs:
           # fixture repos and diff against a real merge-base) and the rest do
           # not. Carried as data in .github/shell-harness-legs.json.
           fetch-depth: ${{ matrix.leg.fetch_depth }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         id: node
         if: ${{ matrix.leg.node != '' }}
         with:

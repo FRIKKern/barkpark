@@ -54,7 +54,7 @@ jobs:
           fetch-depth: 0   # fit.mjs labels defects + temporally cross-validates over FULL history
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
 
@@ -126,7 +126,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
 
