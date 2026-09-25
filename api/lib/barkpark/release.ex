@@ -19,25 +19,49 @@ defmodule Barkpark.Release do
 
     for repo <- repos() do
       {:ok, _, _} =
-        with_repo.(
-          repo,
-          &run_migrations(&1, run_opts),
-          # `with_repo/3` starts the repo with the SAME config, so a migration
-          # connection would otherwise inherit prod's 30 s `statement_timeout`
-          # (config/runtime.exs) — and a backfill or a `CREATE INDEX
-          # CONCURRENTLY` that Postgres CANCELS at 30 s leaves an INVALID index
-          # behind. A migration is an operator-supervised, offline-shaped step:
-          # its bound is the deploy window, not a request budget. These opts are
-          # passed through to `repo.start_link/1`, where they REPLACE the
-          # `:parameters` from config (nothing else sets that key).
-          #
-          # NOTE, and it is the load-bearing half: `make deploy` migrates via
-          # `mix ecto.migrate` (Makefile), not through this function, so this
-          # override does not cover the live path. A long migration must still
-          # disable the wall itself — see `Barkpark.Repo`'s @moduledoc for the
-          # `repo().checkout` + `SET statement_timeout = 0` shape.
-          parameters: [statement_timeout: "0"]
-        )
+        with_statement_timeout_lifted(repo, fn ->
+          with_repo.(repo, &run_migrations(&1, run_opts), [])
+        end)
+    end
+  end
+
+  # Migration connections run with `statement_timeout = 0`. Prod's repo config
+  # (config/runtime.exs) sends `parameters: [statement_timeout: "30s"]` as a
+  # Postgrex startup parameter, and `with_repo/3` starts the repo from that
+  # same config — so without this a backfill or a `CREATE INDEX CONCURRENTLY`
+  # that Postgres CANCELS at 30 s leaves an INVALID index behind. A migration
+  # is an operator-supervised, offline-shaped step: its bound is the deploy
+  # window, not a request budget.
+  #
+  # WHY THE APP ENV, not a `with_repo/3` option: ecto_sql 3.13.5's
+  # `with_repo/3` reads only `:mode` and `:pool_size` from its third argument
+  # and starts the repo as `repo.start_link(pool_size: pool_size)`
+  # (deps/ecto_sql/lib/ecto/migrator.ex, `ensure_repo_started/2`). A
+  # `parameters:` passed there was silently dropped, and migrations ran under
+  # the 30 s wall (measured: "30s", test/barkpark/release/
+  # migrate_statement_timeout_test.exs). `repo.start_link/1` DOES read the
+  # repo's app env, so the override is merged into it for the duration of the
+  # call — `statement_timeout` only; any other startup parameter is kept — and
+  # the previous env is restored afterwards.
+  #
+  # NOTE, and it is the load-bearing half: `make deploy` / deploy-rebuild.sh
+  # migrate via `mix ecto.migrate`, not through this function, so this
+  # override does not cover that path — it runs `with_repo/3` straight from the
+  # config, 30 s wall included. A long migration must still disable the wall
+  # itself — see `Barkpark.Repo`'s @moduledoc for the `repo().checkout` +
+  # `SET statement_timeout = 0` shape.
+  defp with_statement_timeout_lifted(repo, fun) do
+    previous = Application.get_env(@app, repo)
+    config = previous || []
+    parameters = Keyword.put(config[:parameters] || [], :statement_timeout, "0")
+    Application.put_env(@app, repo, Keyword.put(config, :parameters, parameters))
+
+    try do
+      fun.()
+    after
+      if previous == nil,
+        do: Application.delete_env(@app, repo),
+        else: Application.put_env(@app, repo, previous)
     end
   end
 

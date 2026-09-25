@@ -85,7 +85,20 @@ defmodule Barkpark.MigrationPaths do
           capability_enabled?.(name),
           do: dir
 
-    [core_dir(priv_root) | plugin_dirs ++ capability_dirs]
+    [core_dir_for(opts, priv_root) | plugin_dirs ++ capability_dirs]
+  end
+
+  # With no explicit `:priv_root`, the core directory is the one Ecto itself
+  # reads, `Ecto.Migrator.migrations_path(Barkpark.Repo)`, which honours the
+  # repo's `:priv` config. Rebuilding it from `Application.app_dir(:barkpark,
+  # "priv")` matched only while `:priv` was unset: a repo configured with its
+  # own `:priv` (the release statement_timeout probe does exactly that) had its
+  # migrations silently skipped. Plugin and capability folders stay under the
+  # app's priv root.
+  defp core_dir_for(opts, priv_root) do
+    if Keyword.has_key?(opts, :priv_root),
+      do: core_dir(priv_root),
+      else: Ecto.Migrator.migrations_path(Barkpark.Repo)
   end
 
   @doc """
