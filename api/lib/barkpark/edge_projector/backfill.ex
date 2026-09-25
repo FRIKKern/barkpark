@@ -219,7 +219,13 @@ defmodule Barkpark.EdgeProjector.Backfill do
   # Same purity seam the worker uses: hydrate a task doc's authoritative
   # `task_edges` rows BEFORE the pure projection (no-op for non-task docs), so
   # a `--types task,paper` sweep projects dependency edges identically.
-  defp hydrate_task_edges(doc) when is_map(doc), do: Barkpark.Plugins.Tasks.hydrate_edges(doc)
+  # With the Tasks plugin off `task_edges` may not exist (task-d3ecc509d4ea227d).
+  defp hydrate_task_edges(doc) when is_map(doc) do
+    if Barkpark.OwnedTables.enabled?("task_edges"),
+      do: Barkpark.Plugins.Tasks.hydrate_edges(doc),
+      else: doc
+  end
+
   defp hydrate_task_edges(doc), do: doc
 
   defp scope_result(dataset, ws, status, extra \\ []) do
