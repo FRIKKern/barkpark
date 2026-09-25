@@ -57,11 +57,15 @@ defmodule Barkpark.Repo do
     * `Barkpark.Release.migrate/0` overrides it to `"0"` for the release path,
       by merging the parameter into the repo's app env around `with_repo/3`
       (ecto_sql 3.13.5's `with_repo/3` ignores a `parameters:` option).
-    * `make deploy` migrates through `mix ecto.migrate` (see the Makefile), NOT
-      through `Barkpark.Release`, so that override does not cover the live
-      deploy. A migration that runs one long statement MUST disable the wall
-      itself, or Postgres cancels it — and a cancelled `CREATE INDEX
-      CONCURRENTLY` leaves an INVALID index behind:
+    * `make deploy` migrates through `mix ecto.migrate`, which is aliased to
+      `mix barkpark.migrate`; that task runs the SAME lift
+      (`Barkpark.Release.with_statement_timeout_lifted/2`) around
+      `ecto.migrate`, so the live deploy's migrations also run at `"0"`
+      (task-7ae53b2bb9a81083). A migration run any OTHER way (a repo started
+      by hand, a data script, a remote shell) still inherits the wall, and a
+      migration that must be safe there disables it itself, or Postgres
+      cancels it — and a cancelled `CREATE INDEX CONCURRENTLY` leaves an
+      INVALID index behind:
 
           @disable_ddl_transaction true
           @disable_migration_lock true
