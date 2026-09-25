@@ -57,19 +57,17 @@ defmodule Barkpark.MigrationPathsTest do
     end
 
     test "enabled/0 reads the :plugins switch that runtime.exs sets", %{fx: fx} do
-      previous = Application.fetch_env(:barkpark, :plugins)
+      # Every load-order SETTER goes through Barkpark.PluginEnv (the
+      # plugin_order_setter_guard_test census); capture/restore puts absence
+      # back as absence, never as [].
+      prior = Barkpark.PluginEnv.capture()
+      on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
 
-      on_exit(fn ->
-        case previous do
-          {:ok, value} -> Application.put_env(:barkpark, :plugins, value)
-          :error -> Application.delete_env(:barkpark, :plugins)
-        end
-      end)
-
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
       refute fx.plugin_dir in MigrationPaths.enabled(priv_root: fx.priv_root)
 
-      Application.delete_env(:barkpark, :plugins)
+      # Unset (the discover-everything default) is the :unset snapshot.
+      Barkpark.PluginEnv.restore(:unset)
       assert fx.plugin_dir in MigrationPaths.enabled(priv_root: fx.priv_root)
     end
   end
