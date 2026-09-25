@@ -15158,3 +15158,60 @@ the same fallback and reported `deploy.yml push` as a watcher of this charter; t
 why the table above says four arms and not five. **The bug is in the gates fence and is filed, not fixed here** —
 but the lesson is this lane's: *a matcher copied for its shape carries the cell you did not test.* This guard's case
 G exists to hold that cell down for good.
+
+### D621 — 2026-09-25 — A `cancelled` DEPLOYMENT ROW IS ITS OWN COUNTED BUCKET IN THE TIME-TO-WEB CENSUS, NEVER A WAIT; AND THE WAITING ALERT CANNOT FIRE ON ONE, BECAUSE IT READS THAT CENSUS AND NO OTHER.
+
+Row: `dr-w11-bl-cancelled-rows-count-as-waiting`, c0. The behaviour shipped in **#16528** (`b9e5b6114`); this entry
+writes down the rule the code already carries, ratified by main on 2026-09-06 as option 1. The number was reserved
+through `deploy/d-number-arbiter.sh --allocate-d 1` (D616), not read off this file. Verified against `origin/main`
+at `e9f137469`; every citation below is a function or a test name (D613 rule 1).
+
+**THE NOUN.** `deployments.status == "cancelled"` — a publish the FLEET refused (the three machine producers in
+D614(c)). No person can cancel a deploy. This is **not** the `cancelled` of D338, which is a GitHub Actions
+workflow-run conclusion (queue eviction under `deploy-production` concurrency); the two share a word and nothing
+else, and neither ruling bears on the other.
+
+**(a) CENSUS LEVEL — what a cancelled row counts as for time-to-web.** In `DeployLedger.delivery/3`,
+`site_delivery/3` splits `status == "cancelled"` out of the metered rows with `Enum.split_with` BEFORE `observe/3`
+runs — the same shape as the `unmetered` split one clause above it. So a cancelled row is:
+
+- **not an observation**: it is in neither the `delivered` nor the `censored` bucket, adds nothing to `sample`,
+  and cannot set `still_waiting` or `oldest_waiting_seconds`; it feeds no percentile;
+- **counted, never dropped**: `cancelled: length(cancelled)` on every site node, summed fleet-wide into the
+  envelope's `cancelled` — present at `0` when there is none;
+- **still on the roster**: a site whose only in-window row is cancelled APPEARS in `sites[]`, carrying
+  `sample: 0`, `delivered: 0`, `censored: 0`, `still_waiting: false`, `cancelled: N`;
+- **not delivered by a later live mark** (the rider): that mark belongs to a different publish, which files its own
+  row and earns its own observation. Crediting the cancelled row would count one delivery twice and put a duration
+  on content that stopped trying to ship.
+
+Pinned in `cloud/test/barkpark_cloud/deploy_ledger_test.exs` by *"a site whose ONLY non-live row is CANCELLED
+appears, and is NOT still waiting"* (sites[] membership, `still_waiting` false, fleet `sample` 0,
+`censored.count` 0, `cancelled` 1) and *"a cancelled row is NOT delivered by a later live mark on the same site"*
+(`sample` 1 not 2, `delivered` 1, `cancelled` 1). The census reads rosier than the fleet only if the bucket
+vanishes, which is why it is a named key and never a `WHERE` clause.
+
+**(b) ALERT LEVEL — a waiting alert never fires with a cancelled row as its sole cause.** The alert
+(`Notifications.SitePublishWaitingAlert`, dr-w11-s5 — built since #16528, whose tests still say "not built") writes
+no query of its own: `read/2` calls `DeployLedger.delivery/3`, and `verdict/1` / `waiting_sites/1` count a site
+only when the private `over_threshold?/1` sees `still_waiting: true` AND a numeric `oldest_waiting_seconds` at or
+past `threshold_seconds/0`. Neither field can be moved by a cancelled row (part (a)), so the alert needs **no
+filter of its own and must not grow one** — a second filter would be two definitions of one cohort, the drift
+`SitePublishWaitingAlert`'s moduledoc refuses. A site with a genuine waiter AND cancelled rows still alerts, on the
+waiter's duration. Pinned by *"the still-waiting cohort delivery/3 PUBLISHES cannot contain a cancelled-caused
+row"*: one in-flight waiter plus a site of two older cancelled rows; the cohort is exactly `[waiting_site.id]`,
+`censored.count` 1 with the waiter's bound (85,400s), not the cancelled rows' larger one, and `cancelled` 2 stays on
+the envelope.
+
+**THE LIMIT OF (b), STATED.** That proof is over the cohort, not through the alert. No committed test drives a
+cancelled row into `SitePublishWaitingAlert` end to end — its test file stalls with `failed` on purpose, noting
+that a `cancelled` fixture "would assert nothing". The hole the #16528 test named (S5 computing its own cohort)
+did not open: `read/2` is a thin call to `delivery/3`. If that ever changes, (b) is no longer proved.
+
+**RELATION TO D290 AND D614 — consistent; D290 needs no further note.** D290 ("`cancelled` HAS NEVER EXISTED")
+already carries two dated amendments from D614: the zero is a reading at a date, not a property, and there are
+three producers. This rule does not contradict it: the only cancelled rows this entry has seen are test fixtures,
+and the prod population is unmeasured from this lane (D614(b)). D614(d) forbids scoping an alarm *against* the
+cancelled population; this rule does the complement — it keeps the population *out of* the alarm while counting
+it in the census, and it is correct at zero and at any non-zero value, so it does not rot when a preview site or
+a prebuilt-release site makes the population real.
