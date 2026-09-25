@@ -18,6 +18,14 @@ defmodule Mix.Tasks.Barkpark.Migrate do
       choice this task does not override.
 
   Otherwise it appends one `--migrations-path` per directory, core first.
+
+  The run happens inside `Barkpark.Release.with_statement_timeout_lifted/2`, so
+  every migration connection starts with `statement_timeout = 0` instead of
+  prod's 30 s wall — the same lift `Barkpark.Release.migrate/0` applies. It
+  wraps the ecto.migrate call only: the config is loaded first (so the lift
+  lands on the runtime config), and the repo's app env is restored when the
+  run returns, before anything after it in an alias (`mix test`) starts the
+  repo.
   """
 
   use Mix.Task
@@ -30,13 +38,18 @@ defmodule Mix.Tasks.Barkpark.Migrate do
   @doc """
   Loads the configuration exactly as `ecto.migrate` does (`app.config` with the
   same arguments; Mix runs it once), then hands `ecto_migrate` the resolved
-  argument list. `ecto_migrate` and `opts` (the `migrate_args/2` options) exist
-  for tests.
+  argument list with `statement_timeout` lifted on the repos `ecto.migrate`
+  will start (`Mix.Ecto.parse_repo/1`, the same reader it uses). `ecto_migrate`
+  and `opts` (the `migrate_args/2` options) exist for tests.
   """
   @spec run([String.t()], ([String.t()] -> term()), keyword()) :: term()
   def run(args, ecto_migrate, opts \\ []) when is_function(ecto_migrate, 1) do
     Mix.Task.run("app.config", args)
-    args |> migrate_args(opts) |> ecto_migrate.()
+    migrate_args = migrate_args(args, opts)
+
+    Barkpark.Release.with_statement_timeout_lifted(Mix.Ecto.parse_repo(args), fn ->
+      ecto_migrate.(migrate_args)
+    end)
   end
 
   @doc """
