@@ -493,4 +493,60 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
       assert Registry.list_barkparks(team) == []
     end
   end
+
+  ## task-14a9cad0f2d7fd8e — the twin's trial lands BETWEEN start_trial's reads
+  #
+  # `Billing.start_trial/1` reads `entitled?/1`, then `live_subscription/1`. The
+  # racing pair above only hits the gap between them under CI timing (301/301
+  # local runs green; it red once in CI with [201, 402]). These tests put the
+  # twin's whole launch INTO that gap, on one connection, through the billing
+  # seam `{Billing, :between_trial_reads}`, so the interleave is exact every run.
+  describe "trial twin commits between start_trial's two reads" do
+    test "the loser answers the double-submit 409 naming the twin's id, not a 402" do
+      {team, token} = dup_team(:trial)
+      me = self()
+
+      Process.put({Billing, :between_trial_reads}, fn _tid ->
+        twin = call(:post, "/v1/launch", @dup_body, token)
+        send(me, {:twin, twin.status, json_body(twin)})
+      end)
+
+      conn = call(:post, "/v1/launch", @dup_body, token)
+
+      assert_received {:twin, 201, %{"barkpark" => %{"id" => twin_id}}}
+      refute Process.get({Billing, :between_trial_reads}), "the seam must fire exactly once"
+
+      # Pre-fix this was 402 no_active_subscription: the first read saw no
+      # entitlement, the second saw the twin's trial and called it lapsed.
+      assert_already_provisioning(conn, twin_id)
+      assert_one_of_everything(dup_ledger(team), twin_id, :trial)
+    end
+
+    test "a genuinely LAPSED subscription still 402s (the re-ask does not open the paywall)" do
+      {team, token} = dup_team(:trial)
+      {:ok, sub} = Billing.start_trial(team)
+      past = DateTime.utc_now() |> DateTime.add(-1, :day) |> DateTime.truncate(:microsecond)
+      sub |> Ecto.Changeset.change(current_period_end: past) |> Repo.update!()
+      refute Billing.entitled?(team)
+      assert Billing.live_subscription(team)
+
+      conn = call(:post, "/v1/launch", @dup_body, token)
+      assert conn.status == 402
+      assert json_body(conn)["error"] == "no_active_subscription"
+      assert {:error, :ineligible} = Billing.start_trial(team)
+      assert Registry.list_barkparks(team) == []
+    end
+
+    test "the seam is inert in production: nothing under lib/ sets it" do
+      writers =
+        Path.wildcard(Path.expand("../../../lib/**/*.ex", __DIR__))
+        |> Enum.filter(&(File.read!(&1) =~ ":between_trial_reads"))
+        |> Enum.map(&Path.relative_to(&1, Path.expand("../../..", __DIR__)))
+
+      assert writers == ["lib/barkpark_cloud/billing.ex"]
+      src = File.read!(Path.expand("../../../lib/barkpark_cloud/billing.ex", __DIR__))
+      refute src =~ ~r/Process\.put\(\{__MODULE__, :between_trial_reads\}/
+      assert Process.get({Billing, :between_trial_reads}) == nil
+    end
+  end
 end
