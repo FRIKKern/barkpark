@@ -265,6 +265,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     Archive,
     BundleIoError,
     Catalog,
+    DatasetRemap,
     ExportScopeError,
     ImportLockError,
     InvalidBundleError
@@ -403,6 +404,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       derive this itself. Defaults to `nil` (no expectation, every arm
       unchanged) — which is every non-HTTP caller: mix tasks and round-trip
       tests have no operator to have named a target.
+    * `:into_dataset` — `[workspace_id: uuid, project_id: uuid, slug: string]`.
+      Import a DATASET-scoped bundle (exported with `:dataset`) as a NEW dataset
+      under that project, with a fresh dataset id, the given slug, and fresh row
+      ids, rewriting every stored pointer to the source dataset. Refuses with
+      `DatasetRemapError` (`dataset_slug_conflict` when the slug is taken in that
+      project; the other codes are listed on the exception). Only `:clean` mode;
+      `:grant_admin_to` does not apply, because the target workspace already
+      exists. See `Barkpark.Tenancy.WorkspaceBundle.DatasetRemap` for the table
+      of what is rewritten and what is not. Defaults to `nil` (the byte-for-byte
+      restore above, unchanged).
 
   In `:merge` mode a same-slug/different-id root collision returns
   `{:error, {:workspace_slug_conflict, %{slug, existing_id, bundle_id}}}`
@@ -520,7 +531,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # keeps its arity (it is named as `run_import/4` in `Barkpark.Repo`'s
   # statement-timeout docs).
   defp import_ctx!(opts) do
-    %{grant: grant_admin_to!(opts), expected_root_slug: expected_root_slug!(opts)}
+    ctx = %{
+      grant: grant_admin_to!(opts),
+      expected_root_slug: expected_root_slug!(opts),
+      into_dataset: DatasetRemap.target!(Keyword.get(opts, :into_dataset))
+    }
+
+    if ctx.into_dataset do
+      # A remap creates a new dataset inside a workspace that already exists:
+      # there is nothing to merge into and no workspace to grant.
+      if Keyword.get(opts, :mode, :clean) != :clean do
+        raise ArgumentError, ":into_dataset imports only in :clean mode"
+      end
+
+      if ctx.grant do
+        raise ArgumentError, ":grant_admin_to does not apply to an :into_dataset import"
+      end
+    end
+
+    ctx
   end
 
   # THE CALLER'S STATED TARGET (task-b8218812cee2e4cc). The engine cannot derive
@@ -573,8 +602,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     # import_failed — task-96d8ab2b582818a4) is provable over the wire without
     # mocking the engine. `nil` in every non-test env.
     case Application.get_env(:barkpark, :import_fault) do
-      {:error, _term} = fault -> fault
-      nil -> run_import(manifest, dumps, mode, ctx)
+      {:error, _term} = fault ->
+        fault
+
+      nil ->
+        if ctx.into_dataset do
+          # The remap stages every member it needs before writing, so it
+          # needs the same membership refusal the restore path runs first.
+          assert_member_tables!(manifest)
+          DatasetRemap.run(manifest, dumps, ctx.into_dataset)
+        else
+          run_import(manifest, dumps, mode, ctx)
+        end
     end
   end
 
