@@ -84,6 +84,14 @@ type verifyConfig struct {
 	// chain's own record of step 7c (cloud.LiveServer.SitePlaneInstalled).
 	// Ignored when sitePlaneRequired is false.
 	sitePlaneComplete *bool
+	// sitePlaneMissing / sitePlaneUnmeasured / sitePlaneLogTail explain a false
+	// sitePlaneComplete (cloud.LiveServer's diagnosis of the failed step 7c):
+	// the components measured absent / not readable after the failed install,
+	// and the last lines of the installer's own output. They ride into the
+	// failure evidence so an upstream apt / nixpacks outage reads as one.
+	sitePlaneMissing    []string
+	sitePlaneUnmeasured []string
+	sitePlaneLogTail    string
 }
 
 // probeOutcome is one probe's verdict plus the evidence + elapsed time narrated
@@ -233,10 +241,32 @@ func verifySitePlane(_ context.Context, cfg verifyConfig, _ *http.Client) probeO
 	case cfg.sitePlaneComplete == nil:
 		return probeOutcome{name, false, "site plane required but UNMEASURED — nothing recorded whether it was installed", 0}
 	case !*cfg.sitePlaneComplete:
-		return probeOutcome{name, false, "site plane NOT installed — the site-runtime installer failed; sites on this box would stay queued", 0}
+		return probeOutcome{name, false, sitePlaneFailureEvidence(cfg), 0}
 	default:
 		return probeOutcome{name, true, "site plane installed (site-runtime installer exited 0)", 0}
 	}
+}
+
+// sitePlaneFailureEvidence names what is missing and quotes the installer's
+// last lines. Every clause is present only when it has content, but the
+// "components" clause always says SOMETHING: when nothing was measured it says
+// so, rather than implying a clean box.
+func sitePlaneFailureEvidence(cfg verifyConfig) string {
+	var b strings.Builder
+	b.WriteString("site plane NOT installed — the site-runtime installer (go-live step 7c) failed; sites on this box would stay queued")
+	if len(cfg.sitePlaneMissing) > 0 {
+		b.WriteString("; missing: " + strings.Join(cfg.sitePlaneMissing, ", "))
+	}
+	if len(cfg.sitePlaneUnmeasured) > 0 {
+		b.WriteString("; unmeasured: " + strings.Join(cfg.sitePlaneUnmeasured, ", "))
+	}
+	if len(cfg.sitePlaneMissing) == 0 && len(cfg.sitePlaneUnmeasured) == 0 {
+		b.WriteString("; components: none recorded")
+	}
+	if cfg.sitePlaneLogTail != "" {
+		b.WriteString("; step 7c log tail: " + cfg.sitePlaneLogTail)
+	}
+	return b.String()
 }
 
 // verifyBodySnippet reads at most verifyMaxBodyBytes of a failing response body

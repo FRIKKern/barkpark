@@ -79,6 +79,12 @@ func TestProvisionVerifyFailsWhenSitePlaneInstallFailed(t *testing.T) {
 	seams, prov, _, runner := fakeSeams(t)
 	seams.ControlURL = "https://cloud.example.test"
 	runner.failOn = "site-hosting plane"
+	// An UPSTREAM outage, as the installer prints it: the log tail must carry it
+	// verbatim so the failure reads as an outage, not a box fault.
+	runner.failOut = "==> docker: already installed\n==> git: already installed\n==> nixpacks: installing\n" +
+		"curl: (22) The requested URL returned error: 503\nE: nixpacks install failed (upstream unavailable)"
+	// The post-failure probe: nixpacks + the builder unit absent, the rest present.
+	runner.sitePlaneOut = "docker=1\nbuildx=1\nnixpacks=0\ngo=1\ngit=1\nbuilder_unit=0\nruntime_unit=1\n"
 	rec := &verifyRec{}
 	seams.StepReporter = rec.Report
 
@@ -93,8 +99,26 @@ func TestProvisionVerifyFailsWhenSitePlaneInstallFailed(t *testing.T) {
 	if teardown != nil {
 		t.Error("non-nil teardown after a failed verify, want nil (the box was already cleaned up)")
 	}
-	if failed := rec.detail("verify", "failed"); !strings.Contains(failed, "verify.siteplane") {
+	failed := rec.detail("verify", "failed")
+	if !strings.Contains(failed, "verify.siteplane") {
 		t.Errorf("verify/failed detail = %q, want it to name verify.siteplane", failed)
+	}
+	// It NAMES the missing components, in the agent beat's words…
+	if !strings.Contains(failed, "missing: nixpacks, builder unit") {
+		t.Errorf("verify/failed detail = %q, want it to name the missing components (nixpacks, builder unit)", failed)
+	}
+	if strings.Contains(failed, "missing: docker") || strings.Contains(failed, "unmeasured") {
+		t.Errorf("verify/failed detail = %q, names a component the probe measured PRESENT", failed)
+	}
+	// …and carries the installer's log tail, so an upstream outage reads as one.
+	for _, line := range []string{"step 7c log tail:", "curl: (22) The requested URL returned error: 503", "E: nixpacks install failed (upstream unavailable)"} {
+		if !strings.Contains(failed, line) {
+			t.Errorf("verify/failed detail = %q, want the log-tail line %q", failed, line)
+		}
+	}
+	// The returned error (what /fail records) carries the same.
+	if !strings.Contains(err.Error(), "missing: nixpacks, builder unit") || !strings.Contains(err.Error(), "upstream unavailable") {
+		t.Errorf("err = %v, want the components and the log tail", err)
 	}
 	// The three HTTP probes passed first — the failure is the plane, nothing else.
 	if got := len(rec.details("verify", "progress")); got != 3 {
@@ -133,5 +157,33 @@ func TestRestoreVerifySkipsSitePlane(t *testing.T) {
 	}, func(string, string, string) {})
 	if err == nil || !strings.Contains(err.Error(), "verify.siteplane") {
 		t.Fatalf("control: a required, unmeasured plane = %v, want a verify.siteplane failure", err)
+	}
+}
+
+// TestProvisionVerifySitePlaneProbeUnreadable: when the post-failure component
+// probe cannot run, every component is named UNMEASURED — never "missing"
+// (nobody looked) — and the log tail still rides along.
+func TestProvisionVerifySitePlaneProbeUnreadable(t *testing.T) {
+	seams, _, _, runner := fakeSeams(t)
+	seams.ControlURL = "https://cloud.example.test"
+	runner.failOn = "site-hosting plane"
+	runner.failOut = "E: Unable to locate package docker-buildx-plugin"
+	runner.sitePlaneErr = errString("ssh: connection reset")
+	rec := &verifyRec{}
+	seams.StepReporter = rec.Report
+
+	job := JobSpec{JobID: "job-noprobe", Name: "Noprobe", Slug: "noprobe", Region: "nbg1", ServerType: "cax11", AgentToken: "agent-tok"}
+	if _, _, _, _, err := ProvisionWith(context.Background(), seams, job); err == nil {
+		t.Fatal("want the failed plane install to fail verify")
+	}
+	failed := rec.detail("verify", "failed")
+	if !strings.Contains(failed, "unmeasured: docker, buildx, nixpacks, go toolchain, git, builder unit, runtime unit") {
+		t.Errorf("verify/failed detail = %q, want all seven components named UNMEASURED", failed)
+	}
+	if strings.Contains(failed, "missing:") {
+		t.Errorf("verify/failed detail = %q, calls an unread component missing", failed)
+	}
+	if !strings.Contains(failed, "E: Unable to locate package docker-buildx-plugin") {
+		t.Errorf("verify/failed detail = %q, want the installer's log-tail line", failed)
 	}
 }

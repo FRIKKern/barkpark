@@ -506,6 +506,10 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		// other red probe. See verifySitePlane.
 		sitePlaneRequired: live.SitePlaneInstalled != nil,
 		sitePlaneComplete: live.SitePlaneInstalled,
+		// Why it failed, when it did: missing components + the installer's tail.
+		sitePlaneMissing:    live.SitePlaneMissing,
+		sitePlaneUnmeasured: live.SitePlaneUnmeasured,
+		sitePlaneLogTail:    live.SitePlaneLogTail,
 	}, report); verr != nil {
 		// Same teardown path as a content failure: nil teardown, no orphan bills.
 		if cerr := wp.CleanupHost(live.Server, spec); cerr != nil {

@@ -178,6 +178,17 @@ type LiveServer struct {
 	// is the live reading; these two agreeing is the healthy case and these two
 	// DISAGREEING is the interesting one.
 	SitePlaneInstalled *bool
+
+	// SitePlaneMissing / SitePlaneUnmeasured / SitePlaneLogTail explain a
+	// SitePlaneInstalled == false verdict (all empty otherwise). Missing and
+	// Unmeasured are the components a read-only probe run right after the failed
+	// install found absent / could not read (diagnoseSitePlane); LogTail is the
+	// last lines of the installer's own output (sitePlaneLogTail). The verify
+	// gate folds all three into its failure so an upstream apt or nixpacks outage
+	// reads as an outage, not a mystery.
+	SitePlaneMissing    []string
+	SitePlaneUnmeasured []string
+	SitePlaneLogTail    string
 }
 
 // ─── injected seams ─────────────────────────────────────────────────────────
@@ -1583,12 +1594,18 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	// and is set to a measured true/false the moment the step is actually run.
 	// See LiveServer.SitePlaneInstalled for the three-state law it keeps.
 	var sitePlaneInstalled *bool
+	var planeMissing, planeUnmeasured []string
+	var planeLogTail string
 	if spec.ControlURL != "" && spec.AgentToken != "" {
 		wp.progress("configure", "progress", "Installing the site-hosting plane…")
 		err := runner.Run(ctx, siteRuntimeInstallStep())
 		ok := err == nil
 		sitePlaneInstalled = &ok
 		if err != nil {
+			// Say WHY, for the verify gate that will fail this box on it: which
+			// components are missing, and the installer's own last lines.
+			planeMissing, planeUnmeasured = diagnoseSitePlane(ctx, runner)
+			planeLogTail = sitePlaneLogTail(err.Error())
 			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: site-plane install on %s degraded (box serves, but its site deployments stay queued until the plane is installed): %v\n", host.IP, err)
 			// Narrate the degrade on the SAME hook the operator is already
 			// watching. The stderr line above lands in the worker journal, which
@@ -1623,7 +1640,10 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		Secrets: secrets,
 		// Carried out of the chain verbatim — including nil, which is the honest
 		// answer for a box whose plane was never attempted.
-		SitePlaneInstalled: sitePlaneInstalled,
+		SitePlaneInstalled:  sitePlaneInstalled,
+		SitePlaneMissing:    planeMissing,
+		SitePlaneUnmeasured: planeUnmeasured,
+		SitePlaneLogTail:    planeLogTail,
 	}
 	if err := wp.Registry.Register(ctx, live); err != nil {
 		return LiveServer{}, fmt.Errorf("register: %w", err)
