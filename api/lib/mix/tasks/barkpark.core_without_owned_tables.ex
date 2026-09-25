@@ -198,7 +198,10 @@ defmodule Mix.Tasks.Barkpark.CoreWithoutOwnedTables do
     [
       {"MIX_ENV", "test"},
       {"MIX_TEST_PARTITION", suffix},
-      {"BARKPARK_PLUGINS", ""},
+      # NOT "": an empty value UNSETS the variable in a port env (`System.cmd`),
+      # and unset means "discover every plugin". "," parses to the same `[]`
+      # kill switch (`Barkpark.Plugins.EnvConfig.parse/1`).
+      {"BARKPARK_PLUGINS", ","},
       {"BARKPARK_CAPABILITIES_OFF", Enum.map_join(Capability.names(), ",", &Atom.to_string/1)}
     ]
   end
