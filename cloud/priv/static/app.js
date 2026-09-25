@@ -16195,6 +16195,8 @@
     { name: "verify.api", label: "API answers" },
     { name: "verify.login", label: "Login responds" },
     { name: "verify.studio", label: "Studio renders" },
+    // CONDITIONAL: skipped (ok + skipped:true) on a box that hosts no sites.
+    { name: "verify.siteplane", label: "Sites can build" },
   ];
 
   // Pure: the newest `verify` event in a newest-first events payload, or null.
@@ -16210,7 +16212,9 @@
   // verified_at, probes}) — the POST response and the persisted event payload
   // share this shape — or null for the never-run state. Every probe in the
   // vocabulary gets a chip even if the envelope omits it (role "unknown"):
-  // three chips always, so the row never shifts.
+  // one chip per probe always, so the row never shifts. A probe the executor
+  // SKIPPED (verify.siteplane on a box that hosts no sites) gets role "skip" —
+  // it passed nothing, so it must not wear a pass chip's check mark.
   function probeChipsModel(result) {
     var ran = !!(result && typeof result === "object" && Array.isArray(result.probes));
     var byName = {};
@@ -16228,7 +16232,7 @@
         return {
           name: v.name,
           label: v.label,
-          role: p.ok ? "pass" : "fail",
+          role: p.ok ? (p.skipped === true ? "skip" : "pass") : "fail",
           status: p.status != null ? p.status : null,
           latencyMs: p.latency_ms != null ? p.latency_ms : null,
           unreachable: p.reachable === false,
@@ -16248,13 +16252,19 @@
   }
 
   // Pure: one probe chip. pass/fail carry the semantic role; a chip that never
-  // ran (or an unreachable probe) says so in words, not just colour.
+  // ran (or an unreachable probe) says so in words, not just colour. A probe
+  // with no HTTP status that DID reach the box (verify.siteplane reads the
+  // agent's stored beat, not an HTTP response) shows no code rather than a
+  // false "unreachable".
   function verifyChipHtml(chip) {
     var glyph = chip.role === "pass" ? "&#10003;" : chip.role === "fail" ? "&#10007;" : "&middot;";
     var code = chip.role === "unknown" ? ""
-      : chip.unreachable || chip.status == null ? "unreachable"
+      : chip.role === "skip" ? "skipped"
+      : chip.unreachable ? "unreachable"
+      : chip.status == null ? ""
       : String(chip.status) + (chip.latencyMs != null ? " · " + chip.latencyMs + "ms" : "");
-    var state = chip.role === "pass" ? "passed" : chip.role === "fail" ? "failed" : "not checked";
+    var state = chip.role === "pass" ? "passed" : chip.role === "fail" ? "failed"
+      : chip.role === "skip" ? "skipped, not required" : "not checked";
     return '<span class="vf-chip vf-chip--' + esc(chip.role) + '" role="listitem" aria-label="' +
       esc(chip.label + " — " + state) + '">' +
       '<span class="vf-chip-glyph" aria-hidden="true">' + glyph + "</span>" +

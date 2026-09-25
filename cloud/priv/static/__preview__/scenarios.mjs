@@ -1690,6 +1690,7 @@ function verifyEnvelope(over) {
       { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 44, evidence: "GET /v1/capabilities → 200 (API up)" },
       { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 121, evidence: "POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)" },
       { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 316, evidence: "GET /studio → 200 (renders)" },
+      { name: "verify.siteplane", ok: true, reachable: true, status: null, latency_ms: 3, skipped: false, evidence: "site plane complete (docker, buildx, nixpacks, go, git; builder + runtime units active) · beat 41s ago" },
     ],
   };
   return Object.assign(base, over);
@@ -1701,6 +1702,7 @@ const verifyOneFail = verifyEnvelope({
     verifyPass.probes[0],
     verifyPass.probes[1],
     { name: "verify.studio", ok: false, reachable: true, status: 502, latency_ms: 5031, evidence: "502 — <html>upstream not ready</html>" },
+    verifyPass.probes[3],
   ],
 });
 
@@ -7595,6 +7597,7 @@ export function route(name, method, path, state, body) {
           { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 38, evidence: "GET /v1/capabilities → 200 (API up)" },
           { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 102, evidence: "POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)" },
           { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 288, evidence: "GET /studio → 200 (renders)" },
+          { name: "verify.siteplane", ok: true, reachable: true, status: null, latency_ms: 2, skipped: true, evidence: "skipped — this box hosts no sites (site plane not required)" },
         ],
       },
     };

@@ -22,11 +22,19 @@ import (
 // VERIFY closes the loop by additionally proving the AUTH stack answers.
 //
 // The gate runs AFTER content bootstrap and BEFORE the provisioner declares the
-// box ready, over HTTPS against the live instance origin. Three probes, in order:
+// box ready, over HTTPS against the live instance origin. Four probes, in order:
 //
-//	verify.api    GET  /v1/capabilities        → 200                 (the API is up)
-//	verify.login  POST /v1/auth/login (sentinel wrong creds) → <500  (auth answers)
-//	verify.studio GET  /studio (≤3 scoped hops) → final <500         (Studio renders)
+//	verify.api       GET  /v1/capabilities        → 200                 (the API is up)
+//	verify.login     POST /v1/auth/login (sentinel wrong creds) → <500  (auth answers)
+//	verify.studio    GET  /studio (≤3 scoped hops) → final <500         (Studio renders)
+//	verify.siteplane the site-hosting plane, WHEN REQUIRED               (sites can build)
+//
+// verify.siteplane is the one probe that is not an HTTP request: nothing the
+// instance origin serves can see docker / nixpacks / the builder units. It reads
+// a SITE-PLANE FACT handed to the gate by its caller (verifyConfig.sitePlane*)
+// and is CONDITIONAL: a caller that does not require a plane gets a SKIPPED
+// probe (it passes, and its evidence says it was skipped — never a fake
+// "installed"). See verifySitePlane for who requires it and why.
 //
 // verify.login sends DELIBERATELY-WRONG sentinel credentials: a clean 401/422
 // proves the whole request→session→auth pipeline ran and rejected them; ANY 5xx
@@ -63,6 +71,19 @@ type verifyConfig struct {
 	// when zero (production); tests set tiny values for fast fail paths.
 	probeTimeout time.Duration
 	totalBudget  time.Duration
+
+	// sitePlaneRequired says whether THIS box must carry the site-hosting plane
+	// for the gate to pass. False (the zero value) makes verify.siteplane a
+	// SKIPPED probe — the restore path's setting, because a restored box is a
+	// CMS resurrection whose plane nobody installed in this run, and a box that
+	// legitimately has no plane must still restore green.
+	sitePlaneRequired bool
+	// sitePlaneComplete is the site-plane FACT the probe reads, three-state
+	// under internal/agent/site_plane.go's law: nil UNMEASURED, false a measured
+	// verdict that the plane is missing, true present. At birth it is the go-live
+	// chain's own record of step 7c (cloud.LiveServer.SitePlaneInstalled).
+	// Ignored when sitePlaneRequired is false.
+	sitePlaneComplete *bool
 }
 
 // probeOutcome is one probe's verdict plus the evidence + elapsed time narrated
@@ -107,9 +128,7 @@ func runVerifyGate(ctx context.Context, cfg verifyConfig, report func(step, stat
 	}
 
 	report("verify", "started", "")
-	for _, probe := range []func(context.Context, verifyConfig, *http.Client) probeOutcome{
-		verifyAPI, verifyLogin, verifyStudio,
-	} {
+	for _, probe := range verifyProbes {
 		out := probe(ctx, cfg, client)
 		if !out.pass {
 			report("verify", "failed", fmt.Sprintf("%s: %s", out.name, out.evidence))
@@ -119,6 +138,14 @@ func runVerifyGate(ctx context.Context, cfg verifyConfig, report func(step, stat
 	}
 	report("verify", "done", "")
 	return nil
+}
+
+// verifyProbes is the gate's dispatch order — the ONE list runVerifyGate walks
+// and TestProvisionerProbeVocabularyMatchesFixture holds to verify_probes.json.
+// verify.siteplane rides LAST: it is the only probe that is not an HTTP read,
+// and a box whose CMS is dead should be reported as that, not as a plane fault.
+var verifyProbes = []func(context.Context, verifyConfig, *http.Client) probeOutcome{
+	verifyAPI, verifyLogin, verifyStudio, verifySitePlane,
 }
 
 // verifyAPI (1): GET /v1/capabilities must return 200 — the API is up. Mirrors
@@ -179,6 +206,37 @@ func verifyStudio(_ context.Context, cfg verifyConfig, _ *http.Client) probeOutc
 	}
 	res := hg.CheckStudio()
 	return probeOutcome{name, res.Pass, res.Detail, time.Since(start)}
+}
+
+// verifySitePlane (4): the site-hosting plane, CONDITIONALLY.
+//
+// Not required (sitePlaneRequired false) → PASS with evidence that says
+// "skipped". That is the restore path and any caller with no expectation: a box
+// that legitimately has no plane must not fail a gate over it.
+//
+// Required → PASS iff the fact is a measured true. A measured false FAILS (the
+// box would go live with every site pointed at it sitting `queued`), and so does
+// a nil: a required fact nobody measured is not a pass — a green with no
+// subject is exactly the vacuous verdict the three-state law exists to refuse.
+//
+// ProvisionWith requires it iff the go-live chain actually ATTEMPTED step 7c
+// (LiveServer.SitePlaneInstalled != nil — the control plane sent the agent
+// token + control URL the plane installer rides on). An old control plane that
+// never asked leaves it nil, and the probe is skipped: byte-for-byte the
+// pre-probe verdict for those boxes.
+func verifySitePlane(_ context.Context, cfg verifyConfig, _ *http.Client) probeOutcome {
+	const name = "verify.siteplane"
+	if !cfg.sitePlaneRequired {
+		return probeOutcome{name, true, "skipped — no site plane required for this box", 0}
+	}
+	switch {
+	case cfg.sitePlaneComplete == nil:
+		return probeOutcome{name, false, "site plane required but UNMEASURED — nothing recorded whether it was installed", 0}
+	case !*cfg.sitePlaneComplete:
+		return probeOutcome{name, false, "site plane NOT installed — the site-runtime installer failed; sites on this box would stay queued", 0}
+	default:
+		return probeOutcome{name, true, "site plane installed (site-runtime installer exited 0)", 0}
+	}
 }
 
 // verifyBodySnippet reads at most verifyMaxBodyBytes of a failing response body

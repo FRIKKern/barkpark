@@ -284,6 +284,12 @@ func (d *CloudRestoreDriver) Verify(ctx context.Context, fqdn string) error {
 		baseURL:      base,
 		probeTimeout: d.VerifyProbeTimeout,
 		totalBudget:  d.VerifyTotalBudget,
+		// verify.siteplane is CONDITIONAL and deliberately NOT required here: a
+		// restore resurrects the CMS, and nothing in this run installs or measures
+		// a site plane, so a box that legitimately has none must still restore
+		// green. Requiring it would fail every restore on an unmeasured fact.
+		// Pinned by TestRestoreVerifySkipsSitePlane.
+		sitePlaneRequired: false,
 	}, func(step, status, detail string) {})
 }
 
