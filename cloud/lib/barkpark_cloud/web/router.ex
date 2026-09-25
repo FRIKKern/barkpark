@@ -11863,9 +11863,14 @@ defmodule BarkparkCloud.Web.Router do
 
       true ->
         team = conn.assigns.current_team
-        name = conn.body_params["name"]
-        slug = if(is_binary(name), do: slugify(name), else: nil)
         template = template_or_nil(conn.body_params["template"])
+        # The name is OPTIONAL when a template is given: absent, blank or
+        # whitespace-only defaults to the template's display title (else its
+        # slug), so the /new form's "(optional)" label, the badge flow and a bare
+        # curl all launch. With no template there is nothing to derive from and
+        # the 422 name_required below stands.
+        name = launch_name(conn.body_params["name"], template)
+        slug = if(is_binary(name), do: slugify(name), else: nil)
         # Provider-neutral launch config (charter Decision 9). The provider was
         # validated by the cond above (:error already 422'd), so it is a known
         # slug or the hetzner default here; region/server_type ride through as
@@ -12340,6 +12345,28 @@ defmodule BarkparkCloud.Web.Router do
 
   defp template_or_nil(t) when is_binary(t) and t != "", do: t
   defp template_or_nil(_), do: nil
+
+  # go_live's name default (task-ef37ebad8249e82a). A given non-blank name is
+  # kept exactly as sent. nil, "" or whitespace-only → the template's catalog
+  # title (the same string the /new form shows as its placeholder), else the
+  # template slug; with no template → nil, which go_live answers with 422
+  # name_required. A non-binary name is returned unchanged so it still 422s —
+  # a malformed value is not an absent one.
+  defp launch_name(name, template) when is_binary(name) do
+    if String.trim(name) == "", do: default_launch_name(template), else: name
+  end
+
+  defp launch_name(nil, template), do: default_launch_name(template)
+  defp launch_name(name, _template), do: name
+
+  defp default_launch_name(nil), do: nil
+
+  defp default_launch_name(template) do
+    case BarkparkCloud.Templates.get(template) do
+      %{title: title} when is_binary(title) and title != "" -> title
+      _ -> template
+    end
+  end
 
   # Normalize the launch `provider` param (charter Decision 9). Absent/blank → the
   # hetzner default (a provider-less launch is Hetzner, as before). A known slug →
