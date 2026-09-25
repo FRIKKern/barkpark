@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/caddyfile"
+	"github.com/FRIKKern/barkpark/internal/tokensource"
 )
 
 // DefaultInterval is the claim-poll cadence when Executor.Interval is zero.
@@ -73,6 +74,13 @@ type Executor struct {
 	Runner        CommandRunner
 	FS            FS
 	Ports         PortAllocator
+
+	// TokenSource, when set, owns the control-plane bearer: its transport sets
+	// Authorization on every request and, on a 401, re-reads --token-file and
+	// replays once if the token changed (provisioning supersede-mints
+	// agent.token on claim / stale-reclaim). It supersedes AgentToken. See
+	// internal/tokensource.
+	TokenSource *tokensource.Source
 
 	// RetainImages bounds how many container generations — and therefore how
 	// many loaded Docker images — this box keeps PER SITE after a PROVEN
@@ -792,10 +800,14 @@ func (e *Executor) Run(ctx context.Context, buildState func(context.Context) (St
 // hung control-plane connection can't freeze the claim/transition loop with
 // no crash and no log — http.DefaultClient has Timeout 0 (no deadline).
 func (e *Executor) http() *http.Client {
-	if e.HTTPClient != nil {
-		return e.HTTPClient
+	c := e.HTTPClient
+	if c == nil {
+		c = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	if e.TokenSource != nil {
+		return e.TokenSource.Client(c)
+	}
+	return c
 }
 
 func (e *Executor) runner() CommandRunner {
@@ -834,8 +846,12 @@ func (e *Executor) healthTimeout() time.Duration {
 }
 
 func (e *Executor) attachAuth(req *http.Request) {
-	if e.AgentToken != "" {
-		req.Header.Set("Authorization", "Bearer "+e.AgentToken)
+	tok := e.AgentToken
+	if e.TokenSource != nil {
+		tok = e.TokenSource.Token()
+	}
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 }
 

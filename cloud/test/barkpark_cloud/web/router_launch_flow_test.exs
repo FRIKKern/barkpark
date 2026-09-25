@@ -316,6 +316,73 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
     end
   end
 
+  # task-1f5c2cceae36e4d9 — the racing pair above flaked in CI as [201, 403]:
+  # the loser's twin check ran BEFORE the winner committed and its quota check
+  # ran AFTER, and the cond's quota arm 403'd without asking again. The race
+  # tests cannot force that window, so this one does: a telemetry handler on the
+  # repo's query event, scoped to THIS process, commits the winner's row (and
+  # its provision job) the moment the loser's first twin lookup returns empty.
+  # The loser then counts a full slot. Removing the re-check in the quota arm
+  # reds this test with 403 limit_reached.
+  describe "the winner commits between the loser's twin check and its quota check" do
+    test "the quota arm re-asks for the twin → 409 with the winner's id, not 403" do
+      {user, team} = user_with_team()
+      # free = ceiling 1, so the winner's one row fills the only slot.
+      {:ok, _} = Billing.subscribe(team, "free")
+      {:ok, token} = Accounts.create_user_session_token(user)
+      slug = "dup-blog"
+
+      me = self()
+      handler = {__MODULE__, make_ref()}
+
+      :telemetry.attach(
+        handler,
+        [:barkpark_cloud, :repo, :query],
+        fn _event, _measure, meta, _cfg ->
+          # The loser's FIRST in-flight-twin lookup (the only barkparks query
+          # keyed on this slug and fleet_role) — fire once, in this process only.
+          if self() == me and not Process.get(:winner_committed, false) and
+               meta.query =~ ~s(FROM "barkparks") and meta.query =~ "fleet_role" and
+               slug in meta.params do
+            Process.put(:winner_committed, true)
+
+            {:ok, winner} =
+              Registry.register_managed_barkpark(team, "Dup Blog", slug,
+                template: "blog-starter",
+                provider: "hetzner"
+              )
+
+            {:ok, _job} = Registry.enqueue_provision_job(winner)
+            send(me, {:winner, winner.id})
+          end
+        end,
+        nil
+      )
+
+      conn =
+        try do
+          call(:post, "/v1/launch", @dup_body, token)
+        after
+          :telemetry.detach(handler)
+        end
+
+      # PRECONDITION: the interleaving really happened — the winner landed
+      # mid-request, after the loser's twin lookup and before its quota check.
+      assert_received {:winner, winner_id},
+                      "the seam never fired: no twin lookup ran, so nothing was measured"
+
+      assert conn.status == 409,
+             "want 409 already_provisioning, got #{conn.status} #{conn.resp_body}"
+
+      assert json_body(conn)["error"] == "already_provisioning"
+      assert json_body(conn)["barkpark"]["id"] == winner_id
+
+      ledger = dup_ledger(team)
+      assert ledger.rows == [winner_id]
+      assert ledger.provision_jobs == 1
+    end
+  end
+
   test "unentitled + trial spent → 402 {no_active_subscription, checkout_path}" do
     {user, team} = user_with_team()
     exhaust_trial(team)
@@ -424,6 +491,62 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
       end
 
       assert Registry.list_barkparks(team) == []
+    end
+  end
+
+  ## task-14a9cad0f2d7fd8e — the twin's trial lands BETWEEN start_trial's reads
+  #
+  # `Billing.start_trial/1` reads `entitled?/1`, then `live_subscription/1`. The
+  # racing pair above only hits the gap between them under CI timing (301/301
+  # local runs green; it red once in CI with [201, 402]). These tests put the
+  # twin's whole launch INTO that gap, on one connection, through the billing
+  # seam `{Billing, :between_trial_reads}`, so the interleave is exact every run.
+  describe "trial twin commits between start_trial's two reads" do
+    test "the loser answers the double-submit 409 naming the twin's id, not a 402" do
+      {team, token} = dup_team(:trial)
+      me = self()
+
+      Process.put({Billing, :between_trial_reads}, fn _tid ->
+        twin = call(:post, "/v1/launch", @dup_body, token)
+        send(me, {:twin, twin.status, json_body(twin)})
+      end)
+
+      conn = call(:post, "/v1/launch", @dup_body, token)
+
+      assert_received {:twin, 201, %{"barkpark" => %{"id" => twin_id}}}
+      refute Process.get({Billing, :between_trial_reads}), "the seam must fire exactly once"
+
+      # Pre-fix this was 402 no_active_subscription: the first read saw no
+      # entitlement, the second saw the twin's trial and called it lapsed.
+      assert_already_provisioning(conn, twin_id)
+      assert_one_of_everything(dup_ledger(team), twin_id, :trial)
+    end
+
+    test "a genuinely LAPSED subscription still 402s (the re-ask does not open the paywall)" do
+      {team, token} = dup_team(:trial)
+      {:ok, sub} = Billing.start_trial(team)
+      past = DateTime.utc_now() |> DateTime.add(-1, :day) |> DateTime.truncate(:microsecond)
+      sub |> Ecto.Changeset.change(current_period_end: past) |> Repo.update!()
+      refute Billing.entitled?(team)
+      assert Billing.live_subscription(team)
+
+      conn = call(:post, "/v1/launch", @dup_body, token)
+      assert conn.status == 402
+      assert json_body(conn)["error"] == "no_active_subscription"
+      assert {:error, :ineligible} = Billing.start_trial(team)
+      assert Registry.list_barkparks(team) == []
+    end
+
+    test "the seam is inert in production: nothing under lib/ sets it" do
+      writers =
+        Path.wildcard(Path.expand("../../../lib/**/*.ex", __DIR__))
+        |> Enum.filter(&(File.read!(&1) =~ ":between_trial_reads"))
+        |> Enum.map(&Path.relative_to(&1, Path.expand("../../..", __DIR__)))
+
+      assert writers == ["lib/barkpark_cloud/billing.ex"]
+      src = File.read!(Path.expand("../../../lib/barkpark_cloud/billing.ex", __DIR__))
+      refute src =~ ~r/Process\.put\(\{__MODULE__, :between_trial_reads\}/
+      assert Process.get({Billing, :between_trial_reads}) == nil
     end
   end
 end

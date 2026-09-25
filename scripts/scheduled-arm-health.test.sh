@@ -82,16 +82,18 @@ run_case() {
   fi
 }
 
-# lay_tree <label> <workflow-basename> <cron|nocron>
+# lay_tree <label> <workflow-basename> <cron|nocron> [cron-exprs, '|'-separated]
 lay_tree() {
-  local label="$1" base="$2" cron="$3"
+  local label="$1" base="$2" cron="$3" exprs="${4:-40 6 * * *}" e
   mkdir -p "$TMP/$label/tree/.github/workflows" "$TMP/$label/runs"
   {
     echo "name: ${base%.yml}"
     echo "on:"
     if [ "$cron" = cron ]; then
       echo "  schedule:"
-      echo "    - cron: \"40 6 * * *\""
+      while IFS= read -r e; do echo "    - cron: \"$e\""; done <<EOF
+$(printf '%s' "$exprs" | tr '|' '\n')
+EOF
     else
       echo "  push:"
       echo "    branches: [main]"
@@ -99,6 +101,12 @@ lay_tree() {
     echo "jobs: {}"
   } > "$TMP/$label/tree/.github/workflows/$base"
 }
+
+# THE OTHER ARM IS `push` IN EVERY ALL-EVENTS FIXTURE THAT MEANS "ANOTHER ARM".
+# Since task-1662605eac0c70ee the subject UNIONS the scheduled rows of the
+# unfiltered listing into the filtered one (the filtered index can lag), so an
+# all-events fixture whose rows are tagged `schedule` would now be read as more
+# scheduled history — which is what a real payload with those rows would mean.
 
 echo "scheduled-arm-health.test.sh — every case is a pair; --now pinned to $NOW"
 echo
@@ -110,7 +118,7 @@ echo
 # belongs to a different job on a different event.
 lay_tree never-succeeded subject.yml cron
 runs_json 47 0 47 ""                      > "$TMP/never-succeeded/runs/subject.yml.schedule.json"
-runs_json 100 51 7 "2026-09-14T00:00:00Z" > "$TMP/never-succeeded/runs/subject.yml.all.json"
+runs_json 100 51 7 "2026-09-14T00:00:00Z" push 800 > "$TMP/never-succeeded/runs/subject.yml.all.json"
 run_case never-succeeded never-succeeded 1 "NEVER SUCCEEDED"
 
 # THE LAUNDERING LINE ITSELF, not just the red. This is the sentence that says
@@ -140,7 +148,7 @@ run_case healthy healthy 0 "ok              subject.yml"
 # differ ONLY in the .schedule.json payload.
 lay_tree event-scoped subject.yml cron
 runs_json 40 0 40 ""                      > "$TMP/event-scoped/runs/subject.yml.schedule.json"
-runs_json 100 99 1 "2026-09-14T00:00:00Z" > "$TMP/event-scoped/runs/subject.yml.all.json"
+runs_json 100 99 1 "2026-09-14T00:00:00Z" push 800 > "$TMP/event-scoped/runs/subject.yml.all.json"
 run_case event-scoped event-scoped 1 "NOT ONE of the 40 completed scheduled runs"
 
 # ── 4. STALE, AND ITS FRESH TWIN ─────────────────────────────────────────────
@@ -148,7 +156,7 @@ run_case event-scoped event-scoped 1 "NOT ONE of the 40 completed scheduled runs
 # question is age. Both cases carry successes; only the timestamp moves.
 lay_tree stale subject.yml cron
 runs_json 30 5 25 "2026-07-01T00:00:00Z"  > "$TMP/stale/runs/subject.yml.schedule.json"
-runs_json 60 30 30 "2026-09-14T00:00:00Z" > "$TMP/stale/runs/subject.yml.all.json"
+runs_json 60 30 30 "2026-09-14T00:00:00Z" push 800 > "$TMP/stale/runs/subject.yml.all.json"
 run_case stale stale 1 "STALE"
 
 lay_tree fresh subject.yml cron
@@ -165,7 +173,7 @@ run_case fresh fresh 0 "ok "
 # at two thresholds.
 lay_tree young subject.yml cron
 runs_json 4 0 4 ""                        > "$TMP/young/runs/subject.yml.schedule.json"
-runs_json 20 18 2 "2026-09-14T00:00:00Z"  > "$TMP/young/runs/subject.yml.all.json"
+runs_json 20 18 2 "2026-09-14T00:00:00Z" push 800 > "$TMP/young/runs/subject.yml.all.json"
 run_case young-under-floor young 0 "no verdict yet"
 run_case young-over-floor  young 1 "NEVER SUCCEEDED" --min-runs 3
 
@@ -176,7 +184,7 @@ run_case young-over-floor  young 1 "NEVER SUCCEEDED" --min-runs 3
 # existence is why the default silence is a policy rather than a blind spot.
 lay_tree never-ran subject.yml cron
 runs_json 0 0 0 ""                        > "$TMP/never-ran/runs/subject.yml.schedule.json"
-runs_json 100 94 1 "2026-09-14T00:00:00Z" > "$TMP/never-ran/runs/subject.yml.all.json"
+runs_json 100 94 1 "2026-09-14T00:00:00Z" push 800 > "$TMP/never-ran/runs/subject.yml.all.json"
 run_case never-ran-reported never-ran 0 "NEVER RAN"
 run_case never-ran-strict never-ran 1 "NEVER RAN" --strict-never-ran
 
@@ -187,7 +195,7 @@ run_case never-ran-strict never-ran 1 "NEVER RAN" --strict-never-ran
 # shape this whole file exists to distrust.
 lay_tree no-cron subject.yml nocron
 runs_json 47 0 47 ""                      > "$TMP/no-cron/runs/subject.yml.schedule.json"
-runs_json 100 51 7 "2026-09-14T00:00:00Z" > "$TMP/no-cron/runs/subject.yml.all.json"
+runs_json 100 51 7 "2026-09-14T00:00:00Z" push 800 > "$TMP/no-cron/runs/subject.yml.all.json"
 run_case roster-is-cron-only no-cron 2 "REFUSING"
 
 # ── 8. AN UNREADABLE ROW IS NEVER GREEN ──────────────────────────────────────
@@ -205,7 +213,7 @@ run_case unreadable-is-not-green unreadable 2 "CANNOT MEASURE"
 # reason. So an unknown argument is an exit 2 refusal.
 lay_tree bad-arg subject.yml cron
 runs_json 50 50 0 "2026-09-14T00:00:00Z"  > "$TMP/bad-arg/runs/subject.yml.schedule.json"
-runs_json 100 94 1 "2026-09-14T00:00:00Z" > "$TMP/bad-arg/runs/subject.yml.all.json"
+runs_json 100 94 1 "2026-09-14T00:00:00Z" push 800 > "$TMP/bad-arg/runs/subject.yml.all.json"
 run_case unknown-argument-refused bad-arg 2 "REFUSING" --not-a-real-flag
 
 # ── 10. A RUN-LEVEL SUCCESS IS NOT COVERAGE ──────────────────────────────────
@@ -341,6 +349,61 @@ lay_gated counted-skip "github.event_name == 'workflow_dispatch'"
 run_case dispatch-gated-skip-still-vacuous counted-skip 1 "SKIPPED on the cron: harness"
 lay_gated or-skip "github.event_name == 'pull_request' || github.event_name == 'schedule'"
 run_case or-gated-skip-is-not-excused or-skip 1 "SKIPPED on the cron: harness"
+
+# ── 17. THE FILTERED LISTING LAGS; A PUSH-HEAVY FIRST PAGE HIDES THE CRON ───
+# (task-1662605eac0c70ee) breakglass-watch.yml, 2026-09-24: `event=schedule`
+# answered total_count=207, newest success 2026-08-23 — weeks behind the runs.
+# The workflow also runs on push, so the newest 100 runs of the UNFILTERED
+# listing are all push events and hold no scheduled run either. The scheduled
+# success is on page 2. The base script reads only the filtered listing and
+# reds STALE; this one walks the unfiltered listing and finds it.
+#   green: page 2 carries a fresh scheduled success          -> ok, rescue counted
+#   red:   page 2 carries only push runs, listing ends there  -> STALE, walk named
+#   exit2: page 2 is needed (total_count says so) and absent  -> CANNOT MEASURE
+lay_lagging() {
+  local label="$1" page2="$2" total="$3"
+  lay_tree "$label" subject.yml cron "*/30 * * * *"
+  runs_json 207 96 0 "2026-08-23T14:29:57Z" schedule 700  > "$TMP/$label/runs/subject.yml.schedule.json"
+  runs_json "$total" 100 0 "2026-09-14T20:00:00Z" push 800 > "$TMP/$label/runs/subject.yml.all.json"
+  case "$page2" in
+    fresh-schedule) runs_json "$total" 1 0 "2026-09-14T10:06:34Z" schedule 950 > "$TMP/$label/runs/subject.yml.all.page2.json" ;;
+    push-only)      runs_json "$total" 100 0 "2026-09-13T00:00:00Z" push 1000 > "$TMP/$label/runs/subject.yml.all.page2.json" ;;
+    absent)         : ;;
+  esac
+  jobs_json "watch:success" "harness:skipped" > "$TMP/$label/runs/jobs.950.json"
+  jobs_json "harness:success" > "$TMP/$label/runs/jobs.899.json"
+}
+lay_lagging lagging-rescued fresh-schedule 300
+run_case push-and-schedule-lagging-listing-is-ok lagging-rescued 0 "ok              subject.yml"
+run_case lagging-listing-rescue-is-counted lagging-rescued 0 "+1 scheduled row(s) the filtered listing did NOT return, found in 2 page(s)"
+lay_lagging lagging-confirmed push-only 200
+run_case push-and-schedule-truly-stale-is-red lagging-confirmed 1 "confirmed against 2 page(s) of the unfiltered listing"
+lay_lagging lagging-unreadable absent 300
+run_case lagging-walk-unreadable-is-not-green lagging-unreadable 2 "CANNOT MEASURE  subject.yml — page 2"
+
+# ── 18. THE ALLOWED SILENCE IS THE CRON'S, NOT A FLAT 21 DAYS ────────────────
+# renew-mail-cert.yml, 2026-09-25: cron "17 4 1 * *", last scheduled success
+# 2026-09-01T09:22:59Z, next fire 10-01. 24 days of silence is its SCHEDULE. The
+# base script reds it STALE (> 21). Allowed = longest gap 31d + 48h slack = 33d.
+#   green: monthly, 24d old                                -> ok
+#   red:   monthly, 33d14h old (it missed 10-01)           -> STALE
+#   red:   DAILY cron, same 24d-old success                -> STALE (21d floor)
+#   red:   monthly AND weekly crons, same 24d-old success  -> STALE: the union is
+#          the tightest schedule, gap 7d, so the floor rules
+lay_monthly() {
+  local label="$1" crons="$2"
+  lay_tree "$label" subject.yml cron "$crons"
+  runs_json 2 2 0 "2026-09-01T09:22:59Z" schedule 700 > "$TMP/$label/runs/subject.yml.schedule.json"
+  runs_json 2 2 0 "2026-09-01T09:22:59Z" schedule 700 > "$TMP/$label/runs/subject.yml.all.json"
+  jobs_json "renew:success" > "$TMP/$label/runs/jobs.701.json"
+}
+lay_monthly monthly "17 4 1 * *"
+run_case monthly-cron-24d-silence-is-ok monthly 0 "allowed 33d: cron \"17 4 1 * *\" max gap 31d + 48h slack" --now 2026-09-25T13:00:00Z
+run_case monthly-cron-missed-fire-is-stale monthly 1 "STALE           subject.yml" --now 2026-10-05T00:00:00Z
+lay_monthly daily-twin "17 4 * * *"
+run_case daily-cron-24d-silence-is-stale daily-twin 1 "raised to the --stale-days floor 21d" --now 2026-09-25T13:00:00Z
+lay_monthly monthly-and-weekly "17 4 1 * *|0 6 * * 1"
+run_case two-crons-take-the-tightest-gap monthly-and-weekly 1 "max gap 7d + 48h slack, raised to the --stale-days floor 21d" --now 2026-09-25T13:00:00Z
 
 echo
 echo "scheduled-arm-health.test.sh — $CASES cases · $PASS passed · $FAIL failed"

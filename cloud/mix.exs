@@ -118,7 +118,13 @@ defmodule BarkparkCloud.MixProject do
     [
       setup: ["deps.get", "ecto.setup"],
       "ecto.setup": ["ecto.create", "ecto.migrate"],
-      "ecto.reset": ["ecto.drop", "ecto.setup"]
+      "ecto.reset": ["ecto.drop", "ecto.setup"],
+      # task-b169445c9f0031b3: config/test.exs gives each checkout its own test
+      # database by default, so the first `mix test` in a fresh worktree must
+      # create and migrate it — the same alias api/mix.exs carries. Both are
+      # no-ops on a database that is already current (CI's `DB setup` step has
+      # already run them by the time `mix test` starts).
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
     ]
   end
 end

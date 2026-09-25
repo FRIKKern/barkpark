@@ -334,10 +334,54 @@ defmodule BarkparkCloud.Notifications.SitePublishWaitingAlert do
   defp site_lines(sites) do
     sites
     |> Enum.map(fn site ->
-      "  - site #{site.site_id}: waiting at least #{format_duration(site.oldest_waiting_seconds)}" <>
+      "  - site #{site_label(site)}: waiting at least #{format_duration(site.oldest_waiting_seconds)}" <>
         " (#{Map.get(site, :censored, 0)} of #{Map.get(site, :sample, 0)} attempts in this window not yet delivered)"
     end)
     |> Enum.join("\n")
+  end
+
+  @doc """
+  WHICH SITE, NOT WHICH UUID. The label one waiting site is printed under:
+  its `slug`, else its `name`, else its `site_id` marked `(no site row)`.
+
+  The rows come from `DeployLedger.delivery/3`, whose `sites` nodes carry
+  NULLABLE `name` and `slug` beside `site_id` (resolved by its `site_names/1`
+  over the caller's already-scoped rows — never from request params). A nil or
+  blank value is skipped, never printed: an empty label reads as a site with no
+  identity, while the id with `(no site row)` says exactly what is known — the
+  ledger holds attempts for a site whose row it could not read (deleted between
+  the two reads, or never there).
+
+  This is the SAME precedence and the SAME fallback wording as the Go
+  census's `deploySiteLabel` (`internal/cli/cloud_deploy_census_cmd.go`), so
+  the email and `bp cloud deploy-census` name a site identically. Control
+  characters are folded the way its `sanitizeCell` folds them, because a site
+  name is team-authored text and a newline in it must not start a new line of
+  this notice.
+  """
+  @spec site_label(map()) :: String.t()
+  def site_label(site) when is_map(site) do
+    cond do
+      (slug = present(Map.get(site, :slug))) != nil -> slug
+      (name = present(Map.get(site, :name))) != nil -> name
+      (id = present(Map.get(site, :site_id))) != nil -> id <> " (no site row)"
+      true -> "(unidentified)"
+    end
+  end
+
+  defp present(value) when is_binary(value) do
+    case value |> fold_controls() |> String.trim() do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp present(_value), do: nil
+
+  defp fold_controls(value) do
+    value
+    |> String.replace(~r/[\n\r\t]/, " ")
+    |> String.replace(~r/[\x00-\x1f\x7f]/, "")
   end
 
   defp count_sites(1), do: "1 site"

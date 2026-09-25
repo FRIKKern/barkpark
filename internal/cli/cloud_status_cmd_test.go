@@ -110,7 +110,9 @@ func TestAttentionBucket(t *testing.T) {
 	cases := map[string]string{
 		"removal_failed": "attention", "failed": "attention", "suspended": "attention",
 		"degraded": "attention",
-		// dr-w10-s1 / dr-w24-followup — ranks 5 and 6, both attention
+		// dr-w15-s5 — rank 5, attention
+		"cannot_deploy": "attention",
+		// dr-w10-s1 / dr-w24-followup — ranks 6 and 7, both attention
 		"deploys_failing": "attention", "diverged": "attention",
 		// the D69 additions
 		"strained": "attention", "filling": "attention", "unreported": "attention",
@@ -136,12 +138,15 @@ func TestAttentionBucket(t *testing.T) {
 	}
 }
 
-// TestAttentionLadderIsFourteenRungs pins the ladder itself — order and length —
+// TestAttentionLadderIsFifteenRungs pins the ladder itself — order and length —
 // so a rung inserted at the wrong height (which silently re-buckets its
 // neighbours) fails here rather than in an operator's terminal.
-func TestAttentionLadderIsFourteenRungs(t *testing.T) {
+func TestAttentionLadderIsFifteenRungs(t *testing.T) {
 	want := []string{
 		"removal_failed", "failed", "suspended", "degraded",
+		// dr-w15-s5, inserted at 5: the box's own measured refusal of the NEXT
+		// deploy outranks a past-window failure RATE, directly under degraded.
+		"cannot_deploy",
 		// dr-w10-s1 / dr-w24-followup, inserted at 5 and 6 by the orchestrator's
 		// 2026-09-06 ruling: a CONFIRMED failure outranks every "may be heading
 		// somewhere bad" rung below it.
@@ -164,13 +169,14 @@ func TestAttentionLadderIsFourteenRungs(t *testing.T) {
 		bucket string
 	}{
 		{"removal_failed", 1, "attention"},
-		{"deploys_failing", 5, "attention"}, // dr-w10-s1: directly under degraded
-		{"diverged", 6, "attention"},        // dr-w24-followup: immediately behind it
-		{"deploy_stalled", 10, "attention"}, // jpf-w1 D7: after unreported, before behind
-		{"behind", 11, "attention"},         // the LAST attention rung
-		{"removing", 12, "in-flight"},
-		{"provisioning", 13, "in-flight"},
-		{"ok", 14, "healthy"}, // the ONLY healthy rung
+		{"cannot_deploy", 5, "attention"},   // dr-w15-s5: directly under degraded
+		{"deploys_failing", 6, "attention"}, // dr-w10-s1: directly under cannot_deploy
+		{"diverged", 7, "attention"},        // dr-w24-followup: immediately behind it
+		{"deploy_stalled", 11, "attention"}, // jpf-w1 D7: after unreported, before behind
+		{"behind", 12, "attention"},         // the LAST attention rung
+		{"removing", 13, "in-flight"},
+		{"provisioning", 14, "in-flight"},
+		{"ok", 15, "healthy"}, // the ONLY healthy rung
 	} {
 		if got := attentionRank(c.state); got != c.rank {
 			t.Errorf("attentionRank(%q) = %d, want %d", c.state, got, c.rank)
@@ -599,13 +605,15 @@ func TestRankBarkparksFixture(t *testing.T) {
 	f := loadAttentionFixture(t)
 	wantFixtureOrder := []string{
 		"rf-1", "fail-1", "susp-1", "deg-1", "deg-2",
+		// dr-w15-s5: the capability rung, directly under degraded.
+		"cd-1",
 		// dr-w10-s1 / dr-w24-followup: the two new rungs, between degraded and
 		// strained. df-1 carries the RECORDED guerrilla shape (46.28% of 1,290
 		// terminal rows); div-1 an ancestry the plane graded `diverged`.
 		"df-1", "div-1",
 		"strain-1",
 		"fill-1", "unrep-1", "stall-1", "beh-1", "rem-1", "rem-2",
-		"prov-1", "alpha", "ok-1", "Zeta",
+		"prov-1", "alpha", "nosite-1", "ok-1", "unm-1", "Zeta",
 	}
 	if !slices.Equal(f.ExpectedOrder, wantFixtureOrder) {
 		t.Fatalf("fixture no longer exercises the full named ranking:\n got: %v\nwant: %v", f.ExpectedOrder, wantFixtureOrder)
@@ -616,6 +624,19 @@ func TestRankBarkparksFixture(t *testing.T) {
 			t.Fatalf("producer-backed fixture row %q omits queued_deploy_age_seconds", b.Name)
 		}
 		byName[b.Name] = b
+	}
+	// cd-1 carries BOTH a measured configured=false AND a 100%-failing rate, so
+	// this is the switch-order proof: the refusal must win the EVALUATION too,
+	// not only the sort (both rungs name the same box; only one may).
+	if got := attentionStatus(byName["cd-1"]); got != "cannot_deploy" {
+		t.Fatalf("fixture's refusing row status = %q, want cannot_deploy", got)
+	}
+	// The rung's two negative arms, inside the order case: no deploy surface
+	// never fires, and an UNMEASURED capability is never a refusal.
+	for _, n := range []string{"nosite-1", "unm-1"} {
+		if got := attentionStatus(byName[n]); got != "ok" {
+			t.Fatalf("fixture's %s row status = %q, want ok", n, got)
+		}
 	}
 	if got := attentionStatus(byName["df-1"]); got != "deploys_failing" {
 		t.Fatalf("fixture's 46.28%%-of-1290 row status = %q, want deploys_failing", got)
@@ -749,13 +770,14 @@ func TestRunCloudStatusJSON(t *testing.T) {
 		t.Fatalf("buckets = %+v", resp.Buckets)
 	}
 	// Ranked most-urgent-first, ranks 1-based per the decision-32 fixture:
-	// failed (2) < degraded (4) < strained (7) < filling (8) < ok (14).
-	// The ORDER is unchanged by dr-w10-s1's two insertions at 5 and 6 — that is
-	// the point of an insertion: every pre-existing state keeps its relative
-	// position and its bucket, and only the integers moved.
+	// failed (2) < degraded (4) < strained (8) < filling (9) < ok (15).
+	// The ORDER is unchanged by dr-w10-s1's two insertions at 5 and 6, nor by
+	// dr-w15-s5's cannot_deploy at 5 — that is the point of an insertion: every
+	// pre-existing state keeps its relative position and its bucket, and only
+	// the integers moved.
 	wantOrder := []string{"dead-box", "slow-box", "hot-box", "full-box", "ok-box"}
 	wantStatus := []string{"failed", "degraded", "strained", "filling", "ok"}
-	wantRank := []int{2, 4, 7, 8, 14}
+	wantRank := []int{2, 4, 8, 9, 15}
 	for i := range wantOrder {
 		if resp.Barkparks[i].Name != wantOrder[i] || resp.Barkparks[i].Status != wantStatus[i] || resp.Barkparks[i].Rank != wantRank[i] {
 			t.Fatalf("row %d = %s/%s/rank %d, want %s/%s/rank %d", i,
@@ -1062,9 +1084,11 @@ func TestStatusDeployIsAGaugeNotAFence(t *testing.T) {
 	// the assertions below) ships as a gauge with no rung — and it still does,
 	// byte for byte. The two rungs added here are a DIFFERENT instrument: the
 	// per-box `deploy_rate` node this PR puts on the wire, ratified at rank 5 by
-	// charter D202 and by the orchestrator's 2026-09-06 ruling.
-	if len(attentionRankOrder) != 14 {
-		t.Fatalf("the ladder is no longer the charter's fourteen: %v", attentionRankOrder)
+	// charter D202 and by the orchestrator's 2026-09-06 ruling. 14 -> 15 is
+	// dr-w15-s5's `cannot_deploy`, a third per-box instrument (the box's own
+	// site_deploy capability), equally outside D330's census gauge.
+	if len(attentionRankOrder) != 15 {
+		t.Fatalf("the ladder is no longer the charter's fifteen: %v", attentionRankOrder)
 	}
 	// The floor is read, never carried: a census that sends min_sample 999 moves
 	// the refusal, which a hardcoded fence could not do.
@@ -2025,9 +2049,10 @@ func TestStatusDeployMarkerRidesTheOkRowWithItsWindow(t *testing.T) {
 		t.Fatalf("the marker must move no bucket:\n%s", stdout)
 	}
 	// The CENSUS MARKER adds no rung — that is D330 and it still holds. The
-	// ladder's fourteen is dr-w10-s1's per-box `deploy_rate` rung plus
-	// dr-w24-followup's `diverged`, neither of which this marker can reach.
-	if len(attentionRankOrder) != 14 {
+	// ladder's fifteen is dr-w10-s1's per-box `deploy_rate` rung plus
+	// dr-w24-followup's `diverged` plus dr-w15-s5's `cannot_deploy`, none of
+	// which this marker can reach.
+	if len(attentionRankOrder) != 15 {
 		t.Fatalf("the marker must add no rung: %v", attentionRankOrder)
 	}
 
@@ -2076,5 +2101,58 @@ func TestStatusDeployMarkerIsSilentOnEveryRefusal(t *testing.T) {
 	live.To = time.Date(2026, 9, 2, 16, 0, 0, 0, time.UTC)
 	if got := deployMarker(live, "bp-1"); !strings.Contains(got, "deploys live 109/435") {
 		t.Fatalf("the measured arm must speak, got %q", got)
+	}
+}
+
+// TestCannotDeployRungIsMeasuredOnly is the dr-w15-s5 honesty table: the
+// capability rung fires ONLY on a real false from a box that owns sites. nil
+// at either level (an older control plane, an agent or instance predating the
+// probe) is UNMEASURED and must never read as a refusal; a box with no deploy
+// surface has not been refused anything. The two positive rows are the
+// CONTROL: they prove the negatives are not a predicate that never fires.
+func TestCannotDeployRungIsMeasuredOnly(t *testing.T) {
+	tru, fls := true, false
+	sites := func(n int) *cloudclient.BoxDeployRate { return &cloudclient.BoxDeployRate{Sites: n, SitesDeploying: n} }
+	live := func(sd *cloudclient.SiteDeployCapability, dr *cloudclient.BoxDeployRate) cloudclient.Barkpark {
+		return cloudclient.Barkpark{
+			Name: "b", Host: "h", LastSeenAt: "2026-08-06T12:00:00Z",
+			HealthStatus: "up", AgentStatus: "online", UpdateState: "current",
+			SiteDeploy: sd, DeployRate: dr,
+		}
+	}
+	cases := []struct {
+		name string
+		bp   cloudclient.Barkpark
+		want string
+	}{
+		{"CONTROL: measured configured=false, 3 sites", live(&cloudclient.SiteDeployCapability{Configured: &fls, RunnerAlive: &tru}, sites(3)), "cannot_deploy"},
+		{"CONTROL: measured runner crashed, 3 sites", live(&cloudclient.SiteDeployCapability{Configured: &tru, RunnerAlive: &fls}, sites(3)), "cannot_deploy"},
+		{"older control plane: no site_deploy key", live(nil, sites(3)), "ok"},
+		{"agent/instance predates the probe: both null", live(&cloudclient.SiteDeployCapability{}, sites(3)), "ok"},
+		{"half record: configured null, runner alive", live(&cloudclient.SiteDeployCapability{RunnerAlive: &tru}, sites(3)), "ok"},
+		{"measured capable", live(&cloudclient.SiteDeployCapability{Configured: &tru, RunnerAlive: &tru}, sites(3)), "ok"},
+		{"refusal with NO deploy surface (sites 0)", live(&cloudclient.SiteDeployCapability{Configured: &fls, RunnerAlive: &tru}, sites(0)), "ok"},
+		{"refusal on an older CP with no deploy_rate node", live(&cloudclient.SiteDeployCapability{Configured: &fls, RunnerAlive: &tru}, nil), "ok"},
+	}
+	for _, c := range cases {
+		if got := attentionStatus(c.bp); got != c.want {
+			t.Errorf("%s: attentionStatus = %q, want %q", c.name, got, c.want)
+		}
+	}
+	// The reason names WHICH refusal and the sites waiting on it.
+	bp := live(&cloudclient.SiteDeployCapability{Configured: &fls, RunnerAlive: &fls}, sites(3))
+	d := attentionDetail(bp, attentionStatus(bp))
+	for _, want := range []string{"not configured", "runner not running", "3 site(s)"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("cannot_deploy detail %q lacks %q", d, want)
+		}
+	}
+	// -o json keeps the three states: null is unmeasured, never false.
+	row := siteDeployRow(live(&cloudclient.SiteDeployCapability{RunnerAlive: &fls}, sites(3)))
+	if v, ok := row["configured"]; !ok || v != nil {
+		t.Errorf("unmeasured configured projected as %#v (present=%v), want explicit null", v, ok)
+	}
+	if v := row["runner_alive"]; v != false {
+		t.Errorf("measured runner_alive projected as %#v, want false", v)
 	}
 }

@@ -7777,7 +7777,15 @@
     // MEASURED rate at or over the fence fires it: a node that is absent or that
     // the ledger refused to grade is a SILENCE and stays a detail line, never a
     // rung (charter D69).
-    if (live && deploysFailing(bp)) return "deploys_failing";      // 5
+    // dr-w15-s5: THE CAPABILITY RUNG, the Go twin's arm verbatim
+    // (cloud_status_cmd.go attentionStatus `case live && cannotDeploy(b)`),
+    // evaluated and ranked directly above deploys_failing: the rate says past
+    // attempts failed, this says the box itself refuses the NEXT one, and where
+    // both hold it names the cause. Fires only on a REAL false from a box that
+    // owns sites — a null (unmeasured) never fires, and a box with no deploy
+    // surface (the feature is off by default) has been refused nothing.
+    if (live && cannotDeploy(bp)) return "cannot_deploy";          // 5
+    if (live && deploysFailing(bp)) return "deploys_failing";      // 6
     // dr-w24-followup: the box serves a sha on neither side of main's history.
     // Immediately behind deploys_failing by the same ruling — a fact about the
     // box's CODE, not its capacity, and not itself a failed deploy. Until this
@@ -7853,6 +7861,7 @@
     { state: "failed",          bucket: "attention" },
     { state: "suspended",       bucket: "attention" },
     { state: "degraded",        bucket: "attention" },
+    { state: "cannot_deploy",   bucket: "attention" },
     { state: "deploys_failing", bucket: "attention" },
     { state: "diverged",        bucket: "attention" },
     { state: "strained",        bucket: "attention" },
@@ -8038,6 +8047,15 @@
     // with no population is a number nobody can argue with. box_caused rides
     // along: the price of a RAW rate (charter D148) is that it accuses the box
     // for a customer's broken build, and this pays that price out loud.
+    // dr-w15-s5: warn (directly under degraded), and the detail names WHICH
+    // refusal the box gave and how many sites wait on it — the Go twin's
+    // cannotDeployReason.
+    if (kind === "cannot_deploy") {
+      var sd = bp.site_deploy, refusals = [];
+      if (sd.configured === false) refusals.push("Site deploys not configured on the box");
+      if (sd.runner_alive === false) refusals.push("Deploy runner not running");
+      return { role: "warn", label: "Cannot deploy", detail: refusals.join(" · ") + " (" + bp.deploy_rate.sites + " site(s))" };
+    }
     if (kind === "deploys_failing") return { role: "warn", label: "Deploys failing", detail: deploysFailingReason(bp) };
     // dr-w24-followup: warn, and the detail says the thing the BEHIND column
     // cannot — WHY a diverged box is worth looking at. Never a distance.
@@ -8366,6 +8384,15 @@
   function deploysFailing(bp) {
     var v = deployVerdict(bp);
     return v.kind === DEPLOY_MEASURED && v.pct >= DEPLOYS_FAILING_PCT;
+  }
+  // dr-w15-s5: the capability rung's predicate, the Go twin's cannotDeploy.
+  // `=== false` and never falsiness: site_deploy's null is UNMEASURED, and only
+  // the box's own false (configured off, or its DeployRunner crashed) is a
+  // refusal. A box with no deploy surface never fires.
+  function cannotDeploy(bp) {
+    var c = bp && bp.site_deploy;
+    if (!c || deployVerdict(bp).kind === DEPLOY_NO_SURFACE) return false;
+    return c.configured === false || c.runner_alive === false;
   }
   function deployPct1(n) {
     return String(Math.round(n * 10) / 10);

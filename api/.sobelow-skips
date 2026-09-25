@@ -1,10 +1,10 @@
 
-Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:421,5A4B56B
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:427,500FEDC
 XSS.Raw: XSS,lib/barkpark_web/layouts/quiz.html.heex:21,47A091E
-Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:215,474B23A
-Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:480,76E1390
-Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:930,49EB1CC
-Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:861,5D94F51
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:221,15858DD
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:486,52551D8
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:939,387A619
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:870,32CDEB2
 Config.HTTPS: HTTPS Not Enabled,config/prod.exs:0,2B5C077
 XSS.Raw: XSS,lib/barkpark_web/layouts/bulldocs.html.heex:95,ADA708
-Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:793,2DCF187
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:802,7440DE5

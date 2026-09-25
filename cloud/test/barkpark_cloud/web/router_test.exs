@@ -532,7 +532,10 @@ defmodule BarkparkCloud.Web.RouterTest do
       # `div-1` (commit_ancestry "diverged" → diverged, rank 6). This count is a
       # FRESHNESS pin on the producer-backed fixture, so it moves WITH the
       # fixture, in the same commit, and never by widening it to `>=`.
-      assert length(fixture_rows) == 18
+      # 18 -> 21 (dr-w15-s5): `cd-1` (a measured site_deploy.configured=false on
+      # a box with sites → cannot_deploy, rank 5) and the rung's two negative
+      # arms, `nosite-1` (no deploy surface) and `unm-1` (capability null).
+      assert length(fixture_rows) == 21
 
       assert Enum.all?(fixture_rows, &Map.has_key?(&1, "queued_deploy_age_seconds")),
              "every Go ranking row must preserve the field the producer always emits"
