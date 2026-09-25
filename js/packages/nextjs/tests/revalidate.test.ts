@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { revalidateTag, revalidatePath } from 'next/cache'
 import { revalidateBarkpark } from '../src/revalidate/index'
+import type { WebhookPayload } from '../src/webhook/index'
 
 vi.mock('next/cache', () => ({
   revalidateTag: vi.fn(),
@@ -367,5 +368,45 @@ describe('revalidateBarkpark', () => {
     // 'p1' must not be char-iterated into bp:ds:production:doc:p / :doc:1.
     expect(calls).not.toContain('bp:ds:production:doc:p')
     expect(calls).not.toContain('bp:ds:production:doc:1')
+  })
+
+  // The documented webhook route — `onMutation: (payload) => revalidateBarkpark(payload)`,
+  // in createWebhookHandler's own JSDoc and in both create-barkpark-app starters —
+  // forwards core's WebhookEvent, whose `document` is `Record<string, unknown> | null`
+  // and whose `workspace`/`project` are `string | null`. Before the payload type was
+  // widened, that call did not typecheck, so `next build` of a fresh scaffold failed
+  // at "Linting and checking validity of types". The assignment below is the
+  // compile-time half (`pnpm typecheck` includes tests/**); the call is the runtime half.
+  it('accepts a verified webhook payload verbatim (null document, null scope)', () => {
+    const payload: WebhookPayload = {
+      event: 'delete',
+      type: 'post',
+      doc_id: 'p1',
+      document: null,
+      dataset: 'production',
+      workspace: null,
+      project: null,
+      workspace_id: null,
+      project_id: null,
+      sync_tags: [],
+      timestamp: '2026-09-25T00:00:00Z',
+    }
+    const forward: (p: WebhookPayload) => void = (p) => revalidateBarkpark(p)
+    forward(payload)
+
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:_all')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
+    expect(mockedRevalidateTag).toHaveBeenCalledTimes(3)
+  })
+
+  it('reads _id/_type off an untyped webhook document only when they are non-empty strings', () => {
+    revalidateBarkpark({
+      dataset: 'production',
+      document: { _id: 'd1', _type: 42, title: 'x' } as Record<string, unknown>,
+    })
+    expect(mockedRevalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:d1')
+    expect(mockedRevalidateTag).not.toHaveBeenCalledWith('bp:ds:production:type:42')
+    expect(mockedRevalidateTag).toHaveBeenCalledTimes(2)
   })
 })
