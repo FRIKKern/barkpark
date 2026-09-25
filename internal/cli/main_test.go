@@ -56,7 +56,7 @@ func runWithSandboxedConfigHome(m *testing.M) int {
 	// XDG_CONFIG_HOME at the real home, or by writing a path it built itself)
 	// changes the real dir; this fails the whole binary and names it.
 	if after := snapshotConfigDir(realDir); !bytes.Equal(before, after) {
-		fmt.Fprintf(os.Stderr, "FAIL: a test in this package WROTE the real bp config dir %s (its contents changed during the run). Use withTempConfigHome(t).\n", realDir)
+		fmt.Fprintf(os.Stderr, "FAIL: a test in this package WROTE a credential file (config.json, env or session.key) in the real bp config dir %s during the run. Use withTempConfigHome(t).\n", realDir)
 		if code == 0 {
 			code = 1
 		}
@@ -64,25 +64,33 @@ func runWithSandboxedConfigHome(m *testing.M) int {
 	return code
 }
 
-// snapshotConfigDir fingerprints every regular file directly in dir as
-// name + size + mtime + bytes. A missing dir fingerprints as empty, so a test
-// that CREATES the real dir is caught too.
+// guardedConfigFiles are the files in the real bp config dir that carry
+// credentials or identity: the ones a clobber destroys. The dir also holds
+// caches that a LIVE bp or taskboard rewrites on its own schedule
+// (taskboard-cache-*.json, cli-release-cache.json, update-check.json); the
+// first version of this guard fingerprinted the whole dir and failed the
+// binary whenever a taskboard running beside the tests refreshed its cache,
+// with zero failing tests (dr-w33 builder, 2026-09-25). A guard that reds
+// under ordinary use gets ignored, so it watches only what must never change.
+var guardedConfigFiles = []string{"config.json", "env", "session.key"}
+
+// snapshotConfigDir fingerprints each guarded file in dir as name + size +
+// mtime + bytes, or name + "absent", so a test that CREATES one is caught too.
 func snapshotConfigDir(dir string) []byte {
 	var b bytes.Buffer
 	if dir == "" {
 		return nil
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil || !info.Mode().IsRegular() {
+	for _, name := range guardedConfigFiles {
+		path := filepath.Join(dir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			fmt.Fprintf(&b, "%s|absent", name)
+			b.WriteByte(0)
 			continue
 		}
-		data, _ := os.ReadFile(filepath.Join(dir, e.Name()))
-		fmt.Fprintf(&b, "%s|%d|%d|", e.Name(), info.Size(), info.ModTime().UnixNano())
+		data, _ := os.ReadFile(path)
+		fmt.Fprintf(&b, "%s|%d|%d|", name, info.Size(), info.ModTime().UnixNano())
 		b.Write(data)
 		b.WriteByte(0)
 	}
