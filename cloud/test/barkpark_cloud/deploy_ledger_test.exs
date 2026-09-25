@@ -4703,9 +4703,11 @@ defmodule BarkparkCloud.DeployLedgerTest do
                :cancelled,
                :censored,
                :delivered,
+               :name,
                :oldest_waiting_seconds,
                :sample,
                :site_id,
+               :slug,
                :still_waiting,
                :unmetered
              ]

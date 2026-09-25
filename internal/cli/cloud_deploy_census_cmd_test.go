@@ -1503,12 +1503,18 @@ const censusDeliveryEnvelope = `{
     "cancelled": 5,
     "min_sample": 200,
     "sites": [
-      {"site_id": "site-alpha", "sample": 1000, "delivered": 600, "censored": 400, "unmetered": 7,
+      {"site_id": "0cf76788-db52-4f04-a00d-675433796b53", "name": "Site Alpha", "slug": "site-alpha",
+       "sample": 1000, "delivered": 600, "censored": 400, "unmetered": 7,
        "cancelled": 3, "still_waiting": true, "oldest_waiting_seconds": 76399.0, "as_of": "2026-08-02T00:00:00Z"},
-      {"site_id": "jarl-website", "sample": 23, "delivered": 23, "censored": 0, "unmetered": 0,
+      {"site_id": "5b1e2f4a-8c3d-4e6f-9a0b-1c2d3e4f5a6b", "name": "Jarl Website", "slug": "jarl-website",
+       "sample": 23, "delivered": 23, "censored": 0, "unmetered": 0,
        "cancelled": 0, "still_waiting": false, "oldest_waiting_seconds": null, "as_of": "2026-08-02T00:00:00Z"},
-      {"site_id": "stopped-by-hand", "sample": 0, "delivered": 0, "censored": 0, "unmetered": 0,
-       "cancelled": 2, "still_waiting": false, "oldest_waiting_seconds": null, "as_of": "2026-08-02T00:00:00Z"}
+      {"site_id": "9d8c7b6a-5f4e-4d3c-8b2a-190817263544", "name": "Stopped By Hand", "slug": "stopped-by-hand",
+       "sample": 0, "delivered": 0, "censored": 0, "unmetered": 0,
+       "cancelled": 2, "still_waiting": false, "oldest_waiting_seconds": null, "as_of": "2026-08-02T00:00:00Z"},
+      {"site_id": "e7a1c0de-0000-4000-8000-00000000dead", "name": null, "slug": null,
+       "sample": 1, "delivered": 0, "censored": 1, "unmetered": 0,
+       "cancelled": 0, "still_waiting": true, "oldest_waiting_seconds": 120.0, "as_of": "2026-08-02T00:00:00Z"}
     ]
   }
 }`
@@ -1567,27 +1573,36 @@ func TestCloudDeploymentsDeliveryEveryEmittedKeyIsRead(t *testing.T) {
 		d.Censored.StillWaitingAtLeastSeconds == nil || *d.Censored.StillWaitingAtLeastSeconds != 76399.0 {
 		t.Fatalf("censored cohort decoded wrong: %+v", d.Censored)
 	}
-	if len(d.Sites) != 3 {
+	if len(d.Sites) != 4 {
 		t.Fatalf("sites decoded wrong: %+v", d.Sites)
 	}
-	alpha, jarl, stopped := d.Sites[0], d.Sites[1], d.Sites[2]
+	alpha, jarl, stopped, gone := d.Sites[0], d.Sites[1], d.Sites[2], d.Sites[3]
+	// dr-w33-bl-delivery-sites-node-is-anonymous: the identity pair decodes, and
+	// a null pair (the site row is gone) decodes to "", which the renderer turns
+	// into "<id> (no site row)" — never a blank cell.
+	if alpha.Name != "Site Alpha" || alpha.Slug != "site-alpha" {
+		t.Fatalf("the delivery site identity decoded wrong: name=%q slug=%q", alpha.Name, alpha.Slug)
+	}
+	if gone.Name != "" || gone.Slug != "" || gone.SiteID != "e7a1c0de-0000-4000-8000-00000000dead" {
+		t.Fatalf("a nameless site decoded wrong: %+v", gone)
+	}
 	// A site whose every row in the window was stopped by hand: measured
 	// nothing, waiting on nothing, and STILL PRESENT with its count.
-	if stopped.SiteID != "stopped-by-hand" || stopped.Sample != 0 || stopped.Censored != 0 ||
+	if stopped.Slug != "stopped-by-hand" || stopped.Sample != 0 || stopped.Censored != 0 ||
 		stopped.Cancelled != 2 || stopped.StillWaiting {
 		t.Fatalf("a cancelled-only site must decode as cancelled, never as waiting: %+v", stopped)
 	}
 	if alpha.Cancelled != 3 {
 		t.Fatalf("a site's cancelled count decoded wrong: %+v", alpha)
 	}
-	if alpha.SiteID != "site-alpha" || alpha.Sample != 1000 || alpha.Delivered != 600 || alpha.Censored != 400 ||
+	if alpha.SiteID != "0cf76788-db52-4f04-a00d-675433796b53" || alpha.Sample != 1000 || alpha.Delivered != 600 || alpha.Censored != 400 ||
 		alpha.Unmetered != 7 || !alpha.StillWaiting || alpha.OldestWaitingSeconds == nil ||
 		*alpha.OldestWaitingSeconds != 76399.0 || alpha.AsOf != "2026-08-02T00:00:00Z" {
 		t.Fatalf("site row decoded wrong: %+v", alpha)
 	}
 	// The jarl-website shape: live deliveries, nothing waiting — and its
 	// oldest-waiting bound is ABSENT, not zero.
-	if jarl.SiteID != "jarl-website" || jarl.StillWaiting || jarl.OldestWaitingSeconds != nil {
+	if jarl.Slug != "jarl-website" || jarl.StillWaiting || jarl.OldestWaitingSeconds != nil {
 		t.Fatalf("a site with nothing waiting must carry a nil bound, never 0: %+v", jarl)
 	}
 }
@@ -1688,6 +1703,22 @@ func TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "site-alpha") || !strings.Contains(stdout, "sites still waiting") {
 		t.Fatalf("the still-waiting sites must be NAMED:\n%s", stdout)
+	}
+	// dr-w33-bl-delivery-sites-node-is-anonymous. The row is NAMED by its slug,
+	// not by its primary key: the old render printed the bare UUID, and an
+	// operator had to hand-join the sites table to learn which site was waiting.
+	alphaRow := censusLineContaining(t, stdout, "site-alpha")
+	if !strings.Contains(alphaRow, "STILL WAITING >= 21h13m19s") {
+		t.Fatalf("the named row is not the still-waiting row: %q", alphaRow)
+	}
+	if strings.Contains(stdout, "0cf76788-db52-4f04-a00d-675433796b53") {
+		t.Fatalf("a site with a name was rendered by its UUID:\n%s", stdout)
+	}
+	// A site whose row is gone has NO name, and says so beside the only true
+	// identifier left — never a blank cell that reads as a site called "".
+	goneRow := censusLineContaining(t, stdout, "e7a1c0de-0000-4000-8000-00000000dead (no site row)")
+	if !strings.Contains(goneRow, "STILL WAITING >= 2m0s") {
+		t.Fatalf("the nameless still-waiting row rendered wrong: %q", goneRow)
 	}
 	// jarl-website has nothing waiting, so it must not appear in the
 	// still-waiting list at all — and it must certainly not appear with a 0.

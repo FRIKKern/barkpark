@@ -2348,7 +2348,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
     # /v1/tokens PAT surface). `PAT.Name` and
     # `MintPATRequest.Name` — two new sites, 13 -> 15.
-    "name" => 15,
+    # dr-w33-bl-delivery-sites-node-is-anonymous, MEASURED 2026-09-25 by the
+    # SITE arm on this branch off origin/main c999ad5c7 ("name: 15 site(s) ->
+    # 16"): `DeployDeliverySite.Name`, the same identity pair
+    # `DeployCoverageSite` carries. `@go_tag_pinned` HOLDS at 395 — the name
+    # already existed package-wide, so it rides free on the union.
+    "name" => 16,
     "never_covered" => 3,
     "next_cursor" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.OK` — the 202 relay envelope's own flag.
@@ -2431,7 +2436,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 7 -> 8. `SiteBuildLogRecord.Slug` — the site slug the box
     # recorded the build under, echoed from the record.
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 9 -> 10. `SiteBuildLogBytes.Slug`.
-    "slug" => 10,
+    # dr-w33-bl-delivery-sites-node-is-anonymous, MEASURED by the SITE arm on the
+    # same tree ("slug: 10 site(s) -> 11"): `DeployDeliverySite.Slug`.
+    "slug" => 11,
     "source" => 3,
     "stage" => 3,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 2 -> 3. `SiteBuildLogRecord.Stages` — the recorded stage

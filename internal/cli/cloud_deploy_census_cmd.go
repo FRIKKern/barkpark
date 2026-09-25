@@ -1593,7 +1593,7 @@ func renderDeployDelivery(out *writer, d *cloudclient.DeployDelivery, siteLimit 
 		out.outf("  sites still waiting (who is waiting, and since when)")
 		for _, s := range shown {
 			out.outf("    %-38s %s  · %d measured · %d still waiting · %d delivered",
-				sanitizeCell(s.SiteID), deployDeliverySiteWaiting(s), s.Sample, s.Censored, s.Delivered)
+				deploySiteLabel(s.SiteID, s.Name, s.Slug), deployDeliverySiteWaiting(s), s.Sample, s.Censored, s.Delivered)
 		}
 		if n := len(waiting) - len(shown); n > 0 {
 			out.outf("    … and %d more site(s) still waiting (raise the display clamp with --sites 0)", n)
@@ -1908,13 +1908,21 @@ func renderDeployCoverageSites(out *writer, c *cloudclient.DeployCoverageCohorts
 // then the only true thing there is to print — never a blank cell, which reads
 // as a site with no name rather than as a site that is gone.
 func deployCoverageSiteName(s cloudclient.DeployCoverageSite) string {
-	if slug := strings.TrimSpace(s.Slug); slug != "" {
+	return deploySiteLabel(s.SiteID, s.Name, s.Slug)
+}
+
+// deploySiteLabel is the ONE rendering of a census site identity, shared by the
+// never-covered list and the delivery still-waiting list so the two nodes that
+// carry {site_id, name, slug} can never print one site two ways: slug, then
+// name, then the id marked "(no site row)".
+func deploySiteLabel(siteID, name, slug string) string {
+	if slug := strings.TrimSpace(slug); slug != "" {
 		return sanitizeCell(slug)
 	}
-	if name := strings.TrimSpace(s.Name); name != "" {
+	if name := strings.TrimSpace(name); name != "" {
 		return sanitizeCell(name)
 	}
-	if id := strings.TrimSpace(s.SiteID); id != "" {
+	if id := strings.TrimSpace(siteID); id != "" {
 		return sanitizeCell(id) + " (no site row)"
 	}
 	return "(unidentified)"
