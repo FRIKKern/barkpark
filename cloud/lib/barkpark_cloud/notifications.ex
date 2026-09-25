@@ -1916,9 +1916,13 @@ defmodule BarkparkCloud.Notifications do
   # that looks exactly like "you were never emailed". Comparing on
   # `lower(recipient)` is the only version of this filter that cannot lie.
   #
-  # It is a filter, not a scan risk: the `(team_id, inserted_at)` index still
-  # bounds the read to one team and carries the ORDER BY; `lower(?)` is applied
-  # to the rows that survive the team fence, never to the whole table.
+  # The comparison is on the EXPRESSION `lower(recipient)` so that it can be an
+  # Index Cond on `(team_id, lower(recipient), inserted_at)` (migration
+  # 20260925120000). Without that index this was a Filter over the team's rows
+  # and a member with few deliveries read the team's WHOLE log to fill (or fail
+  # to fill) the LIMIT — measured in the route comment above
+  # `GET /v1/notifications/deliveries`. Change this fragment and the index stops
+  # matching it.
   defp maybe_delivery_recipient(query, email) when is_binary(email) and email != "" do
     needle = String.downcase(email)
     where(query, [d], fragment("lower(?)", d.recipient) == ^needle)
