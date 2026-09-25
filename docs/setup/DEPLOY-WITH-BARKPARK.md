@@ -42,12 +42,13 @@ an instance and Studio, and you build the site yourself.
    (`POST /v1/auth/login`, `POST /v1/auth/register`, or an enabled OAuth
    provider). After OAuth the browser returns to the same template.
 3. **Launch.** The Launch button sends `POST /v1/launch` with the template slug
-   and a project name. You must be an owner or admin of the team. A team that
+   and the project name, when one was typed. You must be an owner or admin of the team. A team that
    has not used its free trial gets it started here; a team without an active
    plan sees the plan picker (HTTP 402). An unknown template is refused (HTTP
    422) before any server is created.
-   The form labels the name as optional, but the server currently refuses a
-   launch without one (`name_required`). Type a name.
+   The name is optional: leave it blank and the instance is named after the
+   template (for example `Blog Starter` at `blog-starter.barkpark.cloud`, or
+   `blog-starter-<team>` if that address is taken).
 4. **Progress.** The page adds `&bp=<id>` to its address, so a refresh resumes
    the same launch rather than starting a new one. The steps come from the
    provisioning worker, with real timestamps and a live log:
