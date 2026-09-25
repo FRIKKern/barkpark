@@ -3,6 +3,8 @@ defmodule Barkpark.Content.Errors do
 
   require Logger
 
+  alias Barkpark.Content.ErrorEnvelope
+
   # Human-grade, fix-suggesting hints keyed off the STABLE `code` string. Purely
   # additive: merged in `to_envelope/2` only when a hint is registered for the
   # code, so existing `code`/`message`/`status`/`details` stay byte-for-byte
@@ -90,11 +92,11 @@ defmodule Barkpark.Content.Errors do
     "workspace_scope_required" =>
       "This write named no workspace and your credential could mean more than one (or none), so it was refused rather than attributed to a tenant nobody chose. Say where it goes: send the write to /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset, or use a token bound to a single workspace. details.workspaces lists the slugs this credential can write to.",
     # THE ONE RULE's refusal (task-49eef068420df918 + task-baf9b74a0ffc83f4) —
-    # `Barkpark.Tasks.TwinResolver`: a task doc_id living in more than one
+    # the Tasks plugin's twin resolver: a task doc_id living in more than one
     # dataset of one workspace/project, asked for by a caller who named none.
     "ambiguous_dataset" =>
       "This task id exists in more than one dataset in this workspace/project, so the door refused rather than pick one for you. Name the dataset you mean (?dataset=<name> on the task route), or collapse the twin — details.datasets lists every dataset that holds the id.",
-    # The PRODUCER half of the same rule — `Barkpark.Tasks.DatasetTwinFence`.
+    # The PRODUCER half of the same rule — the Tasks plugin's dataset-twin fence.
     "dataset_twin" =>
       "A task with this _id already exists in another dataset of this workspace/project, and a second copy would make the id ambiguous for every by-id reader. Write to the dataset that already holds it (details.datasets), use a different _id, or — if a genuinely separate copy is intended — resend with content.dataset_twin_intended: true.",
     # Postgres' per-tsvector 1 048 575-byte cap, hit by the generated
@@ -967,24 +969,25 @@ defmodule Barkpark.Content.Errors do
       details: Map.take(payload, [:similar, :advise])
     }
 
-  # THE ONE RULE, READ SIDE (task-49eef068420df918 + task-baf9b74a0ffc83f4).
-  # `Barkpark.Tasks.TwinResolver` RAISES this rather than picking a row when a
-  # task doc_id lives in more than one dataset and the caller named none. 409 —
-  # the `conflict` family: a resource-STATE collision, never a server fault, so
-  # it must not collapse to `internal_error` on the RenderErrors path (the
-  # pass-through clause in `BarkparkWeb.ErrorJSON` is what keeps this body).
-  # `details.datasets` is the caller's remedy: it names every dataset that holds
-  # the id, which is exactly what `?dataset=` needs.
-  defp build({:error, %Barkpark.Tasks.AmbiguousTwinError{} = e}),
-    do: %{
-      code: "ambiguous_dataset",
-      message: e.message,
-      status: 409,
-      details: %{doc_id: e.doc_id, datasets: e.datasets}
-    }
+  # An exception that renders as its OWN envelope (`Barkpark.Content.ErrorEnvelope`,
+  # task-c10be8a9ad8f0145). This is how THE ONE RULE's read-side refusal
+  # renders (task-49eef068420df918 + task-baf9b74a0ffc83f4): the Tasks plugin's
+  # twin resolver RAISES rather than picking a row when a task doc_id lives in
+  # more than one dataset and the caller named none, and its exception builds
+  # the 409 `ambiguous_dataset` body with `details.datasets`, the caller's
+  # remedy for `?dataset=`. Content names no plugin exception here; the
+  # exception module declares the behaviour. An exception that does not
+  # implement it renders exactly as before, through the catch-all below.
+  defp build({:error, e} = reason) when is_exception(e) do
+    if ErrorEnvelope.implemented_by?(e) do
+      e.__struct__.error_envelope(e)
+    else
+      build_unmatched(reason)
+    end
+  end
 
   # THE ONE RULE, PRODUCER SIDE (task-49eef068420df918 C2).
-  # `Barkpark.Tasks.DatasetTwinFence` refuses a task birth that would put an
+  # The Tasks plugin's dataset-twin fence refuses a task birth that would put an
   # existing (doc_id, type) into a SECOND dataset of the same workspace+project
   # — the 2026-08-07 sequence that made the eleven live twins. 409, same family
   # as `duplicate_task`: the row is not invalid, the LEDGER state collides.
@@ -1215,7 +1218,9 @@ defmodule Barkpark.Content.Errors do
   # The `code` stays byte-identical "internal_error":
   # `BarkparkCloud.Sites.Deploy.transient_refusal?/1` grants its retry grace by
   # matching the CODE, and moving it turns that grace terminal (error_json.ex).
-  defp build(other) do
+  defp build(other), do: build_unmatched(other)
+
+  defp build_unmatched(other) do
     descriptor = reason_descriptor(other)
 
     Logger.error(

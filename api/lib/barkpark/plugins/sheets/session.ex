@@ -424,6 +424,10 @@ defmodule Barkpark.Plugins.Sheets.Session do
   """
   @spec flush(String.t(), String.t()) :: :ok | {:error, term()}
   def flush(slug, dataset) do
+    if runtime_started?(), do: flush_live(slug, dataset), else: :ok
+  end
+
+  defp flush_live(slug, dataset) do
     pubid = Content.published_id(slug)
 
     @registry
@@ -464,11 +468,22 @@ defmodule Barkpark.Plugins.Sheets.Session do
   @doc "The live session pid for `{dataset, workspace_id, slug}`, or `nil`."
   @spec whereis(String.t(), String.t(), String.t() | nil) :: pid() | nil
   def whereis(slug, dataset, workspace_id \\ nil) do
-    case Registry.lookup(@registry, key(slug, dataset, workspace_id)) do
-      [{pid, _}] -> pid
-      [] -> nil
+    if runtime_started?() do
+      case Registry.lookup(@registry, key(slug, dataset, workspace_id)) do
+        [{pid, _}] -> pid
+        [] -> nil
+      end
     end
   end
+
+  @doc """
+  Whether the session runtime is running. It is the Sheets plugin's boot child
+  (`Barkpark.Plugins.Sheets.register_workers/1`), so with the plugin off this
+  is `false`: no session is live, none can start, and the functions above
+  answer that way instead of raising on a missing registry.
+  """
+  @spec runtime_started?() :: boolean()
+  def runtime_started?, do: is_pid(Process.whereis(@registry))
 
   @doc """
   The delta-broadcast topic for a sheet: `Content.doc_topic/4` suffixed with
@@ -563,7 +578,10 @@ defmodule Barkpark.Plugins.Sheets.Session do
   defp ensure_session(slug, dataset, workspace_id) do
     session_key = key(slug, dataset, workspace_id)
 
-    case Registry.lookup(@registry, session_key) do
+    case runtime_started?() and Registry.lookup(@registry, session_key) do
+      false ->
+        {:error, :session_unavailable}
+
       [{pid, _}] ->
         {:ok, pid}
 

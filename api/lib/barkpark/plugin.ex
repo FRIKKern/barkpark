@@ -65,9 +65,10 @@ defmodule Barkpark.Plugin do
   literal reading is false by construction: the host owns ALL Studio UI (a
   plugin ships none), so `Studio.SheetGrid` necessarily names
   `Barkpark.Plugins.Sheets.*` and the Bulldocs reader names
-  `Barkpark.Plugins.Bulldocs.Events`; `application.ex` declares
-  `Sheets.Supervisor` as an always-present core-static child; and host
-  controllers/plugs back plugin `register_routes/1` surfaces. The ENFORCED
+  `Barkpark.Plugins.Bulldocs.Events`; and host controllers/plugs back plugin
+  `register_routes/1` surfaces. (`application.ex` no longer names
+  `Sheets.Supervisor`: the Sheets plugin starts it from `register_workers/1`,
+  task-c10be8a9ad8f0145.) The ENFORCED
   rule is:
 
   > Host code under `lib/barkpark` + `lib/barkpark_web` (excluding
@@ -941,6 +942,33 @@ defmodule Barkpark.Plugin do
   """
   @callback paper_task_resolver() :: module() | nil
 
+  # ── Slug-resolver guards (Barkspark phase 1, task-c10be8a9ad8f0145) ───
+
+  @doc """
+  Declare guards that run on every resolution by the canonical slug resolver,
+  `Barkpark.Content.Graph.resolve_doc/3`. Each entry is `{module, function}`,
+  called as `apply(module, function, [rows, doc_id, dataset])` with every row
+  the resolver's scoped query returned; it returns `:ok` or RAISES, and the
+  raise is the refusal (render it by implementing
+  `Barkpark.Content.ErrorEnvelope` on the exception).
+
+  Published by `Barkpark.Plugins.Registry` to
+  `Barkpark.Content.ResolveDocGuards` and run there in plugin load order. The
+  Tasks plugin declares its twin rule here, so a task id held in two datasets
+  is refused rather than resolved to whichever row sorts first.
+
+  Why a new callback and not an existing one: the fence callbacks run on
+  WRITES, and the `resolve_*` chains accumulate values and rescue a raising
+  plugin back to the accumulator. A read-side refusal needs to see the rows
+  and to raise through.
+
+  NOT filtered by per-workspace enablement, and a raising declaration is NOT
+  swallowed — the same integrity-gate rules as `pre_write_fences/0`.
+
+  Default (supplied by `use Barkpark.Plugin`) returns `[]`.
+  """
+  @callback resolve_doc_guards() :: [Barkpark.Content.ResolveDocGuards.guard()]
+
   # ── Mutate-door fences (Barkspark phase 1, task-b04cbe7823d084a6) ─────
 
   @typedoc """
@@ -1188,6 +1216,7 @@ defmodule Barkpark.Plugin do
                       pre_publish_fences: 0,
                       pre_write_transforms: 0,
                       paper_task_resolver: 0,
+                      resolve_doc_guards: 0,
                       mutate_door_fences: 0,
                       api_tests: 0,
                       resolve_api_tests: 2,
@@ -1402,6 +1431,9 @@ defmodule Barkpark.Plugin do
       def paper_task_resolver, do: nil
 
       @impl Barkpark.Plugin
+      def resolve_doc_guards, do: []
+
+      @impl Barkpark.Plugin
       def mutate_door_fences, do: []
 
       @impl Barkpark.Plugin
@@ -1474,6 +1506,7 @@ defmodule Barkpark.Plugin do
                      pre_publish_fences: 0,
                      pre_write_transforms: 0,
                      paper_task_resolver: 0,
+                     resolve_doc_guards: 0,
                      mutate_door_fences: 0,
                      api_tests: 0,
                      resolve_api_tests: 2,

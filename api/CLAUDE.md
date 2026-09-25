@@ -32,7 +32,7 @@ Reader, editor settlement, clipboard, upload history and block identity: [Paper 
 
 ## Sheets
 
-`type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot — Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant). Core is `Barkpark.Plugins.Sheets.{Core,Engine,Session,Structure}` + `SheetsReaderLive` / `Studio.SheetGrid`; the plugin (`plugins/sheets.ex`) declares the `sheet` schema, a before_save gate, the `:ingest` import/export/ops API and the `/sheets/:slug` reader; embeds refresh via `content/sheets.ex`.
+`type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot — Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant). Core is `Barkpark.Plugins.Sheets.{Core,Engine,Session,Structure}` + `SheetsReaderLive` / `Studio.SheetGrid`; the plugin (`plugins/sheets.ex`) declares the `sheet` schema, starts the session runtime (`Sheets.Supervisor`, a `register_workers/1` child), a before_save gate, the `:ingest` import/export/ops API and the `/sheets/:slug` reader; embeds refresh via `content/sheets.ex`.
 
 Owner (caps, formula subset, error envelopes, embed pipeline, session deltas): `docs/contracts/sheets-engine.md`.
 

@@ -202,7 +202,7 @@ defmodule Barkpark.Content.Graph do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, DraftId, Edge, Scope}
+  alias Barkpark.Content.{Document, DraftId, Edge, ResolveDocGuards, Scope}
 
   # The INVERTED plugin edge-extractor seam. The kernel (`content`) must hold no
   # compile-time reference to a feature concept, and `Barkpark.Plugins.Registry`
@@ -232,7 +232,7 @@ defmodule Barkpark.Content.Graph do
 
   @doc """
   The traversal node budget (#{@node_budget}). Exposed so graph-DERIVED list
-  surfaces (e.g. `Barkpark.Tasks.Expectations.driven_tasks/2`) bound
+  surfaces (e.g. the Tasks plugin's `Expectations.driven_tasks/2`) bound
   themselves with the engine's OWN ceiling instead of inventing a second
   constant that could drift.
   """
@@ -1595,10 +1595,12 @@ defmodule Barkpark.Content.Graph do
   raw UUID and scopes datasets via `WriteScope` for edge-endpoint resolution — a
   deliberately richer variant, not a duplicate of this one.
 
-  RAISES `Barkpark.Tasks.AmbiguousTwinError` (409 `ambiguous_dataset`) when the
-  id is a `type: "task"` whose winning-tier rows span more than one dataset in
-  scope and no `dataset` was named — `Barkpark.Tasks.TwinResolver` rule 3, the
-  same refusal `GET /v1/tasks/:doc_id` gives. Non-task types never raise.
+  Runs every plugin guard published to `Barkpark.Content.ResolveDocGuards` on
+  the rows it read. With the Tasks plugin loaded, that RAISES a 409
+  `ambiguous_dataset` refusal when the id is a `type: "task"` whose winning-tier
+  rows span more than one dataset in scope and no `dataset` was named (the
+  twin resolver's rule 3, the same refusal `GET /v1/tasks/:doc_id` gives).
+  Non-task types never raise.
   """
   @spec resolve_doc(String.t() | nil, String.t() | nil, keyword()) :: Document.t() | nil
   # @canonical capability:slug-resolve aka:resolve_doc,resolve_pk,slug_to_pk,resolve_doc_pk
@@ -1635,13 +1637,16 @@ defmodule Barkpark.Content.Graph do
 
     rows = Repo.all(query)
 
-    # THE ONE RULE (`Barkpark.Tasks.TwinResolver` — read that moduledoc; this
-    # resolver writes no second rule). This is the canonical slug resolver for
-    # EVERY type, so the refusal is TASK-SCOPED: a `type == "task"` id whose
-    # winning-tier rows span more than one dataset of the caller's
-    # workspace/project, with no `dataset` named, RAISES
-    # `Barkpark.Tasks.AmbiguousTwinError` (409 `ambiguous_dataset`, naming both)
-    # instead of letting `List.first` pick a dataset the caller never named.
+    # THE ONE RULE (the Tasks plugin's twin resolver — read its moduledoc; this
+    # resolver writes no second rule), reached through the content-owned
+    # `ResolveDocGuards` seam (task-c10be8a9ad8f0145) so content names no
+    # plugin. This is the canonical slug resolver for EVERY type, so the
+    # refusal is TASK-SCOPED: a `type == "task"` id whose winning-tier rows span
+    # more than one dataset of the caller's workspace/project, with no `dataset`
+    # named, RAISES a 409 `ambiguous_dataset` refusal naming both, instead of
+    # letting `List.first` pick a dataset the caller never named. With no guard
+    # published (Tasks out of the load order, or the kill switch) the first row
+    # wins, as it does for every other type.
     # Every other type is untouched — a second copy of a non-task document in
     # another dataset is content replication working as designed.
     #
@@ -1655,7 +1660,7 @@ defmodule Barkpark.Content.Graph do
     # reason `choose/3` takes rows: the rule cannot decide from a row the query
     # already dropped. The `where` is an exact doc_id match on two spellings, so
     # the read stays bounded by (types x datasets) for one id.
-    Barkpark.Tasks.TwinResolver.refuse_ambiguous_task!(rows, pub_id, dataset)
+    :ok = ResolveDocGuards.run!(rows, pub_id, dataset)
 
     List.first(rows)
   end

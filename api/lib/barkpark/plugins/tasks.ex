@@ -216,6 +216,17 @@ defmodule Barkpark.Plugins.Tasks do
   def paper_task_resolver, do: Barkpark.Tasks.PaperResolver
 
   @doc """
+  THE ONE RULE on the canonical slug resolver
+  (`Barkpark.Content.Graph.resolve_doc/3`, task-c10be8a9ad8f0145): a task id
+  whose winning rows span more than one dataset in scope, asked for with no
+  dataset named, raises `Barkpark.Tasks.AmbiguousTwinError` (409
+  `ambiguous_dataset`) instead of resolving to whichever row sorts first. See
+  `Barkpark.Tasks.TwinResolver.refuse_ambiguous_task!/3`.
+  """
+  @impl Barkpark.Plugin
+  def resolve_doc_guards, do: [{Barkpark.Tasks.TwinResolver, :refuse_ambiguous_task!}]
+
+  @doc """
   The task guards of the RAW mutate door (`/v1/data/mutate`), formerly
   private to `Barkpark.Content.Mutations` (task-b04cbe7823d084a6), each at the
   position it held there — see `Barkpark.Tasks.MutateGuards`:

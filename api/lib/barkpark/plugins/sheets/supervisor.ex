@@ -19,10 +19,10 @@ defmodule Barkpark.Plugins.Sheets.Supervisor do
   one "unexpected message" error report and carries on, and that report is a
   true record of a ring crash, not a fault of its own.
 
-  CORE and plugin-independent (fresh-install invariant): these processes always
-  start; only the HTTP ops route is plugin wiring. Needs `Repo` and
-  `Phoenix.PubSub` up first — both are started before this supervisor in
-  `Barkpark.Application`.
+  Started by the Sheets plugin (`Barkpark.Plugins.Sheets.register_workers/1`,
+  task-c10be8a9ad8f0145), under `Barkpark.Plugins.Supervisor`; with the plugin
+  off it does not exist. Needs `Repo` and `Phoenix.PubSub` up first —
+  `Barkpark.Application` starts both before the plugin tier.
   """
   use Supervisor
 
