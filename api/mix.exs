@@ -163,11 +163,25 @@ defmodule Barkpark.MixProject do
   defp aliases do
     [
       setup: ["deps.get", "ecto.setup"],
+      # Every `mix ecto.migrate` (Makefile, deploy scripts, CI, the aliases in
+      # this list) runs over Barkpark.MigrationPaths.enabled/1, the directory
+      # set Barkpark.Release.migrate/0 runs. With no plugin migration folder on
+      # disk the arguments reach ecto.migrate unchanged.
+      "ecto.migrate": &migrate_enabled_dirs/1,
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: [&strict_test_paths/1, "ecto.create --quiet", "ecto.migrate --quiet", "test"],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
     ]
+  end
+
+  # `ecto.migrate` runs `app.config` with its own arguments as its first step.
+  # Running it here first, with the same arguments, compiles the project so the
+  # `barkpark.migrate` task exists on a fresh checkout; Mix then skips the
+  # second `app.config` call.
+  defp migrate_enabled_dirs(args) do
+    Mix.Task.run("app.config", args)
+    Mix.Task.run("barkpark.migrate", args)
   end
 
   # `mix test <path>` where <path> does not exist exits 0 and silently runs only

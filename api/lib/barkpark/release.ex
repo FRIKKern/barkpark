@@ -3,14 +3,25 @@ defmodule Barkpark.Release do
 
   @app :barkpark
 
-  def migrate do
+  @doc """
+  Run every pending migration in the enabled directory set
+  (`run_migrations/2`) against each repo, started repo-only by
+  `Ecto.Migrator.with_repo/3`.
+
+  `bin/barkpark eval "Barkpark.Release.migrate()"` calls it with no options.
+  The options exist for the fixture-plugin test: `:with_repo` replaces
+  `Ecto.Migrator.with_repo/3` (a running test repo must not be restarted), and
+  the rest goes to `run_migrations/2`.
+  """
+  def migrate(opts \\ []) do
     load_app()
+    {with_repo, run_opts} = Keyword.pop(opts, :with_repo, &Ecto.Migrator.with_repo/3)
 
     for repo <- repos() do
       {:ok, _, _} =
-        Ecto.Migrator.with_repo(
+        with_repo.(
           repo,
-          &Ecto.Migrator.run(&1, :up, all: true),
+          &run_migrations(&1, run_opts),
           # `with_repo/3` starts the repo with the SAME config, so a migration
           # connection would otherwise inherit prod's 30 s `statement_timeout`
           # (config/runtime.exs) — and a backfill or a `CREATE INDEX
@@ -31,9 +42,37 @@ defmodule Barkpark.Release do
   end
 
   @doc """
+  Apply every pending migration in `Barkpark.MigrationPaths.enabled/1` to
+  `repo`: the core directory plus the migrations folder of each plugin and
+  capability switched on by `BARKPARK_PLUGINS` and `BARKPARK_CAPABILITIES_OFF`.
+
+  `migrate/1` runs this inside `Ecto.Migrator.with_repo/3`. With no plugin or
+  capability folder holding migrations the list is the core directory alone,
+  `Ecto.Migrator.migrations_path(repo)`, which is exactly what
+  `Ecto.Migrator.run(repo, :up, all: true)` reads.
+
+  `opts` takes the `Barkpark.MigrationPaths` options (`:priv_root`, `:plugins`,
+  `:capability_enabled?`); anything else goes to `Ecto.Migrator.run/4`. Tests
+  use both; `bin/barkpark eval "Barkpark.Release.migrate()"` passes none.
+  """
+  @spec run_migrations(Ecto.Repo.t(), keyword()) :: [integer()]
+  def run_migrations(repo, opts \\ []) do
+    {path_opts, migrator_opts} = Keyword.split(opts, [:priv_root, :plugins, :capability_enabled?])
+
+    Ecto.Migrator.run(
+      repo,
+      Barkpark.MigrationPaths.enabled(path_opts),
+      :up,
+      Keyword.put(migrator_opts, :all, true)
+    )
+  end
+
+  @doc """
   Assert the migrate step actually applied the tree: every migration version in
-  the release's `priv/repo/migrations` is present in `schema_migrations`, and no
-  two files claim the same version. Raises, naming the version, otherwise.
+  the directories `Barkpark.MigrationPaths.enabled/1` returns (the release's
+  `priv/repo/migrations` plus any enabled plugin or capability folder) is
+  present in `schema_migrations`, and no two files claim the same version.
+  Raises, naming the version, otherwise.
 
   The same `Barkpark.MigrationIntegrity.check/1` the test suite runs — a release
   has no `mix test` alias to migrate for it, so an operator runs this after

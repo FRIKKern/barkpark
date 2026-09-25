@@ -57,16 +57,19 @@ defmodule Barkpark.MigrationIntegrity do
   Options (all defaulted; overridden only by the guard's own tests, which point
   them at fixture directories and fixture version sets):
 
-    * `:dir` — the migrations directory (default: the app's `priv/repo/migrations`)
+    * `:dirs` — the migrations directories (default: `default_dirs/0`, the set
+      the migrator runs). They share one `schema_migrations` table, so a version
+      claimed in two of them is a collision like two files in one directory.
+    * `:dir` — a single directory, the same as `dirs: [dir]`
     * `:repo` — the repo whose `schema_migrations` is read (default: `Barkpark.Repo`)
     * `:applied` — a zero-arity fun returning the applied versions, bypassing `:repo`
   """
   @spec check(keyword()) :: success() | failure()
   def check(opts \\ []) do
-    dir = Keyword.get_lazy(opts, :dir, &default_dir/0)
+    dirs = dirs(opts)
 
-    with {:ok, files} <- read_files(dir),
-         {:ok, by_version} <- index_by_version(files, dir),
+    with {:ok, files} <- read_files(dirs),
+         {:ok, by_version} <- index_by_version(files, dirs),
          {:ok, applied} <- read_applied(opts) do
       missing =
         by_version
@@ -100,22 +103,41 @@ defmodule Barkpark.MigrationIntegrity do
     MapSet.new(rows, fn [version] -> version end)
   end
 
-  @doc "The migrations directory this guard reads by default."
+  @doc "The core migrations directory, the first entry of `default_dirs/0`."
   @spec default_dir() :: String.t()
   def default_dir do
     Application.app_dir(:barkpark, "priv/repo/migrations")
   end
 
+  @doc """
+  The directories this guard reads by default: `Barkpark.MigrationPaths.enabled/1`,
+  the same set `Barkpark.Release.migrate/0` and `mix ecto.migrate` apply. A
+  plugin switched off on this instance has no rows to find, so its folder is
+  not checked here.
+  """
+  @spec default_dirs() :: [String.t()]
+  def default_dirs, do: Barkpark.MigrationPaths.enabled()
+
+  defp dirs(opts) do
+    case Keyword.fetch(opts, :dirs) do
+      {:ok, dirs} when is_list(dirs) -> dirs
+      :error -> opts |> Keyword.fetch(:dir) |> single_dir()
+    end
+  end
+
+  defp single_dir({:ok, dir}), do: [dir]
+  defp single_dir(:error), do: default_dirs()
+
   # -- reads, each of which refuses an empty result ---------------------------
 
-  defp read_files(dir) do
-    case dir |> Path.join("*.exs") |> Path.wildcard() |> Enum.sort() do
+  defp read_files(dirs) do
+    case dirs |> Enum.flat_map(&(&1 |> Path.join("*.exs") |> Path.wildcard())) |> Enum.sort() do
       [] ->
         {:error,
          """
          migration integrity guard read ZERO migration files.
 
-         Directory: #{dir}
+         #{directory_line(dirs)}
 
          An empty read is a broken instrument, not a clean tree: this guard
          cannot pass by having found nothing to check. Either the path is wrong
@@ -128,7 +150,7 @@ defmodule Barkpark.MigrationIntegrity do
     end
   end
 
-  defp index_by_version(files, dir) do
+  defp index_by_version(files, dirs) do
     {parsed, unparsable} =
       Enum.split_with(files, fn path -> Regex.run(@version_re, Path.basename(path)) end)
 
@@ -138,9 +160,9 @@ defmodule Barkpark.MigrationIntegrity do
        migration filenames without a leading integer version — the migrator
        cannot key them and this guard cannot check them:
 
-       #{Enum.map_join(unparsable, "\n", &"  #{Path.basename(&1)}")}
+       #{Enum.map_join(unparsable, "\n", &"  #{display_name(&1, dirs)}")}
 
-       Directory: #{dir}
+       #{directory_line(dirs)}
        """}
     else
       by_version =
@@ -150,7 +172,7 @@ defmodule Barkpark.MigrationIntegrity do
             [_, version] = Regex.run(@version_re, Path.basename(path))
             String.to_integer(version)
           end,
-          &Path.basename/1
+          &display_name(&1, dirs)
         )
 
       case Enum.filter(by_version, fn {_version, names} -> length(names) > 1 end) do
@@ -192,6 +214,15 @@ defmodule Barkpark.MigrationIntegrity do
   end
 
   # -- messages ---------------------------------------------------------------
+
+  # One directory keeps the messages exactly as they were. With several, a file
+  # is named with its directory so two same-named files in different folders
+  # read as the two files they are.
+  defp display_name(path, [_single]), do: Path.basename(path)
+  defp display_name(path, _dirs), do: Path.relative_to_cwd(path)
+
+  defp directory_line([dir]), do: "Directory: #{dir}"
+  defp directory_line(dirs), do: "Directories: #{Enum.join(dirs, ", ")}"
 
   defp collision_message(collisions) do
     """
