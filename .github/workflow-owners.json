@@ -95,6 +95,10 @@
       "owner": "gates",
       "why_off_pr": "re-learns the scoring weights from the codebase's whole incident history on release and on a Monday cron; a PR head is one point in that history, not the subject."
     },
+    "core-without-owned-tables.yml": {
+      "owner": "api",
+      "why_off_pr": "two full api suite runs (~40 minutes) with the plugin/fleet tables present and then dropped; main ruled on #20401 that this cost must never sit on a PR."
+    },
     "deploy.yml": {
       "owner": "deploy",
       "why_off_pr": "ships merged code to real hosts; a PR head must never reach a box."
