@@ -2348,7 +2348,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
       deployment!(site, %{
         status: "cancelled",
         stage: "PLAN",
-        failure_reason: "the operator cancelled the deploy",
+        failure_reason: "auto-deploy refused the publish",
         inserted_at: DateTime.add(from, 100, :second)
       })
 
@@ -2359,7 +2359,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert DeployLedger.classify(%{
                status: "cancelled",
                stage: "PLAN",
-               failure_reason: "the operator cancelled the deploy"
+               failure_reason: "auto-deploy refused the publish"
              }) == nil
 
       refute Enum.any?(census.classes, &(&1.count == 4))
@@ -4535,13 +4535,16 @@ defmodule BarkparkCloud.DeployLedgerTest do
     # ── dr-w11-bl-cancelled-rows-count-as-waiting ─────────────────────────
     #
     # Before this cohort existed, EVERY non-live row was a candidate wait, so a
-    # deploy a human deliberately stopped read as "still waiting" — and
-    # `dr-w11-s5-waiting-alert` is specified to read exactly this cohort.
+    # publish the FLEET refused read as "still waiting" — and
+    # `dr-w11-s5-waiting-alert` is specified to read exactly this cohort. Every
+    # `cancelled` row is fleet-produced (an auto-deploy refusal, a preview
+    # supersede or teardown, or a build box filing the terminal); no person can
+    # cancel a deploy (charter D614(c), D621).
 
     test "a site whose ONLY non-live row is CANCELLED appears, and is NOT still waiting",
          %{site: site} do
-      # The whole window for this site is one deploy a human stopped. No live
-      # row, no live mark, nothing in flight.
+      # The whole window for this site is one publish the fleet cancelled
+      # (D614(c)). No live row, no live mark, nothing in flight.
       deployments!(site, [
         %{status: "cancelled", inserted_at: DateTime.add(@dw_from, 100, :second)}
       ])
@@ -4619,7 +4622,8 @@ defmodule BarkparkCloud.DeployLedgerTest do
         %{status: "deferred", inserted_at: DateTime.add(@dw_from, 1_000, :second)}
       ])
 
-      # A site whose every row was stopped by hand. The alert must NEVER see it.
+      # A site whose every row the fleet cancelled (D614(c)). The alert must
+      # NEVER see it.
       deployments!(cancelled_site, [
         %{status: "cancelled", inserted_at: DateTime.add(@dw_from, 10, :second)},
         %{status: "cancelled", inserted_at: DateTime.add(@dw_from, 20, :second)}

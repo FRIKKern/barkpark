@@ -2210,8 +2210,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "bytes" => 5,
     # dr-w11-bl-cancelled-rows-count-as-waiting: NEWLY DUPLICATED, 1 -> 3.
     # `cancelled` was declared once (DeployCensusOutcomes.Cancelled). The
-    # delivery census now reports rows a human stopped as their own explicit
-    # cohort — the `unmetered` precedent, counted and never dropped — so
+    # delivery census now reports rows the fleet cancelled (D614(c)) as their
+    # own explicit cohort — the `unmetered` precedent, counted and never dropped — so
     # DeployDelivery.Cancelled and DeployDeliverySite.Cancelled are two new
     # declarations of an EXISTING name: they ride free on the NAME union
     # (`@go_tag_pinned` does not move) and this row is born at 3.

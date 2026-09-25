@@ -701,13 +701,15 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
 
   ## 11b. The blast radius of pass (0c), in the two directions that matter.
 
-  test "pass (0c) never resurrects or re-terminates a row a HUMAN cancelled" do
+  test "pass (0c) never resurrects or re-terminates a CANCELLED row" do
     bp = team_fixture() |> barkpark_fixture()
     site = static_site_fixture(bp)
     {:ok, d} = Registry.create_deployment(site, %{build_id: "c1", content_rev: "c1"})
 
-    # A person stopped this build. `cancelled` is terminal by a human's decision,
-    # and it is older than every horizon this sweep uses.
+    # The fleet cancelled this build (an auto-deploy refusal, a preview
+    # supersede or teardown, or a build box filing the terminal — charter
+    # D614(c); no person can cancel a deploy). `cancelled` is terminal, and the
+    # row is older than every horizon this sweep uses.
     Repo.update_all(
       from(x in Deployment, where: x.id == ^d.id),
       set: [status: "cancelled"]
