@@ -239,7 +239,7 @@ meta_value() { # <html-file> <marker-name>
 # shellcheck disable=SC2034  # the canonical allow-list contract; mirrored by Elixir/Go, not looped over in shell
 BUILD_ALLOW=(BARKPARK_API_URL BARKPARK_TOKEN BARKPARK_DATASET BARKPARK_WORKSPACE \
              BARKPARK_PROJECT BARKPARK_BUILD_ID BARKPARK_CONTENT_REV BARKPARK_SITE_BASE \
-             BARKPARK_DOC_TYPE BARKPARK_THEME)
+             BARKPARK_DOC_TYPE BARKPARK_THEME BARKPARK_FORMS_URL)
 
 # ---------------------------------------------------------------------------
 # The ONE shared Caddyfile leaf lock (D27). /etc/caddy/Caddyfile has THREE

@@ -50,7 +50,7 @@
 // a live regression. Both arms name the arrival AND the departure by call site.
 //
 // KEYING BY CALL SITE IS THE WHOLE POINT, and it is not a style preference.
-// The 85 write call sites collapse to 73 route keys; 11 of those keys are
+// The 88 write call sites collapse to 76 route keys; 11 of those keys are
 // multi-site. The decisive case is POST /v1/providers:
 //
 //   submitProviderCred()        — reached from the launch wizard's
@@ -100,19 +100,20 @@
 //     no-op for it". The check discriminates PATs, not people. Every console
 //     call site whose only guard above membership is `require_ability` (or
 //     `with_team_site(conn, {:ability, "write"}, …)`) is therefore PLAIN
-//     MEMBER here: 6 rows — loadSite (PATCH /v1/sites/:*), runPromote,
-//     runSiteRollback, runSiteDelete, createAndDeploy and runDeploy. Note who
+//     MEMBER here: 9 rows — loadSite (PATCH /v1/sites/:*), runPromote,
+//     runSiteRollback, runSiteDelete, createAndDeploy, runDeploy and the
+//     three form-inbox writes in wireSiteForms (N-08). Note who
 //     is NOT among them: openSiteEnvModal's guard is `with_team_site(conn, fn)`,
 //     tenancy with no ability term at all, so promoting it would need a
 //     different mistake than this one. A builder who counts `require_ability`
-//     as elevated gets 57, not 50 — those 6 plus the 1 row whose whole
+//     as elevated gets 60, not 50 — those 9 plus the 1 row whose whole
 //     authority lives below the router in Accounts.pat_abilities_allowed?/2,
 //     submitToken (see (c)).
 //
 // (b) THE VACUITY FLOOR ASSERTS "RESOLVED TO A ROUTE", NEVER "SEEN". A literal
-//     path extractor cannot read 15 of the 85 — they build their path from a
+//     path extractor cannot read 15 of the 88 — they build their path from a
 //     variable or a helper — and a census that counted only what it read
-//     literally would call that 70-of-70 and go green over a hole. Two of those
+//     literally would call that 73-of-73 and go green over a hole. Two of those
 //     15 are the console's HIGHEST-privilege writes (fleetRolloutAction and
 //     operatorConfirmBrake, the operator autoupdate brake). Worse, one of them
 //     does not drop at all: submitActivateDecision builds
@@ -321,7 +322,7 @@ const LABEL = APP === path.join(here, "app.js") ? "cloud/priv/static/app.js" : A
 const src = fs.readFileSync(APP, "utf8");
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE PIN — 85 write call sites, keyed by `fn|VERB route`.
+// THE PIN — 88 write call sites, keyed by `fn|VERB route`.
 //
 // A PIN ROW CARRIES NO LINE NUMBER, and adding one back is a regression. Every
 // `app.js:NNNN` this census prints is DERIVED from the live file at run time
@@ -597,6 +598,9 @@ const PIN = [
   { fn: "openSiteEnvModal", verb: "POST", route: "/v1/sites/:*/env", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE_M, note: "team-scoped member action" },
   { fn: "runPromote", verb: "POST", route: "/v1/sites/:*/deployments/:*/promote", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a): the promote/rollback pair are plain-member for a session" },
   { fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
+  { fn: "wireSiteForms", verb: "PUT", route: "/v1/sites/:*/forms", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "N-08 ruling (a): turning a site's form endpoint on/off is with_team_site(conn, {:ability, \"write\"}); no role read on the path" },
+  { fn: "wireSiteForms", verb: "PATCH", route: "/v1/sites/:*/forms/submissions/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "N-08 ruling (a): marking a submission seen/new/spam is the same team-scoped write tier" },
+  { fn: "wireSiteForms", verb: "POST", route: "/v1/sites/:*/forms/export", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "N-08 ruling (a): export is gated on write (a bulk personal-data copy) but still team-scoped only, no role read" },
   { fn: "runSiteDelete", verb: "DELETE", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "cch-w67 crown: the console's FIRST caller of DELETE /v1/sites/:id. NOT elevated, and the judgement is re-derivable rather than inherited: the route is with_team_site(conn, {:ability,\"write\"}), a browser session is assigned [\"root\"], and Registry.get_team_site filters on TENANCY only — no role read exists anywhere on the path. The INSTANCE Decommission on the same screen family is require_current_team_admin, a strictly higher tier; predicating this row on that band would withhold a control the server honours" },
   { fn: "createAndDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
   { fn: "runDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a); second call site on the same route as :12059" },
@@ -1754,7 +1758,16 @@ if (unresolved.length) {
 // which is the arm working exactly as designed. RE-DERIVED by RUNNING this
 // census on this tree and reading the `found` line it PRINTED (84/49/48/1),
 // never by arithmetic over two branches' numbers.
-const EXPECT = { total: 85, elevated: 50, predicated: 49, unpredicated: 1 };
+// task-71082f5541c13b53 (N-08): THREE MEMBER ROWS ADDED, no tier moved — the
+// form inbox's PUT /v1/sites/:*/forms, PATCH /v1/sites/:*/forms/submissions/:*
+// and POST /v1/sites/:*/forms/export, all three in wireSiteForms. Each route is
+// `with_team_site(conn, {:ability, "write"}, …)`: a browser session carries
+// ["root"] and Registry.get_team_site filters on TENANCY only, so there is no
+// role read anywhere on the path and nothing for a predicate to agree with —
+// ruling (a), the same judgement as PATCH /v1/sites/:* and DELETE /v1/sites/:*.
+// So total 85 -> 88 and nothing else moves. RE-DERIVED by RUNNING this census
+// on this tree and reading the `found` line it PRINTED, never by arithmetic.
+const EXPECT = { total: 88, elevated: 50, predicated: 49, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||

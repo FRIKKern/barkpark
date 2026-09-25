@@ -115,6 +115,11 @@ defmodule Barkpark.Sites.DeployRequest do
   # The engine's BUILD_ALLOW set, minus the two it derives itself from
   # SITE_SLUG/BUILD_ID (BARKPARK_BUILD_ID, BARKPARK_SITE_BASE are exported by
   # site-deploy.sh) — these are the vars a CALLER must supply per site.
+  #
+  # BARKPARK_FORMS_URL (task-71082f5541c13b53, N-08) is OPTIONAL: the control
+  # plane sends it only for a site whose owner turned forms on, and the starter
+  # renders its contact form only when it is present. It is the public intake
+  # URL, never a credential.
   @allowed_env_keys ~w(
     BARKPARK_API_URL
     BARKPARK_TOKEN
@@ -124,6 +129,7 @@ defmodule Barkpark.Sites.DeployRequest do
     BARKPARK_SITE_BASE
     BARKPARK_DOC_TYPE
     BARKPARK_THEME
+    BARKPARK_FORMS_URL
   )
 
   # Same regexes site-deploy.sh enforces (SITE_SLUG / BUILD_ID). Anchored with

@@ -206,6 +206,11 @@
     not_live: "The instance isn't live yet — wait for provisioning to finish.",
     no_admin_token: "No stored credentials for this instance — it may need a re-provision.",
     instance_unreachable: "Couldn't reach the instance — try again in a moment.",
+    // task-71082f5541c13b53 (N-08) — the 409 every /v1/sites/:id/forms route
+    // sends when the instance's plugin roster has no `forms`: the intake route
+    // does not exist there, so there is nothing to turn on or read. Names the
+    // state and the one party who can change it; claims nothing transient.
+    forms_unsupported: "This instance doesn't have the forms plugin turned on, so it can't take form submissions. Whoever operates the instance has to enable it.",
     // task-0dd7578bc3d2bcbd — the 409 on PATCH /v1/barkparks/:id/autoupdate when
     // an operator resumes a box that has NOT armed one-click apply. THE COPY
     // CARRIES THE REMEDY, because the refusal is otherwise unactionable: the
@@ -1267,7 +1272,7 @@
     toast({ kind: "success", title: title || "Copied to clipboard" });
   }
 
-  function downloadText(filename, text) {
+  function downloadText(filename, text, failBody) {
     try {
       var blob = new Blob([String(text == null ? "" : text)], { type: "text/plain;charset=utf-8" });
       var url = URL.createObjectURL(blob);
@@ -1280,7 +1285,7 @@
       // Revoking synchronously can race the download in some browsers.
       setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
     } catch (e) {
-      toast({ kind: "error", title: "Couldn't download the file", body: "Copy the codes instead." });
+      toast({ kind: "error", title: "Couldn't download the file", body: failBody || "Copy the codes instead." });
     }
   }
 
@@ -16736,6 +16741,365 @@
     });
   }
 
+  // ============================================================ FORMS INBOX
+  // task-71082f5541c13b53 (N-08): the per-site inbox for hosted-site form
+  // posts. Submissions are `form_submission` documents in the site's bound
+  // dataset ON THE BOX; the control plane relays four routes
+  // (GET|PUT /v1/sites/:id/forms, PATCH …/forms/submissions/:sub_id,
+  // POST …/forms/export). This section paints into #site-forms after the site
+  // detail paint, like the domains mount above it. Every derivation is PURE and
+  // node-pinned via __bpTestHook; loadSiteForms / wireSiteForms are the DOM half.
+  //
+  // One read, three honest outcomes, never collapsed into "no submissions":
+  //   ok               the inbox (an empty one says it is empty, and why)
+  //   forms_unsupported the instance has no forms plugin — the whole feature
+  //                    is unavailable there, and the copy says so
+  //   any other fault  "Couldn't load the form inbox" + the fault's own copy
+  var formsSeq = 0;
+  // The per-screen view state: which filter tab, which rows are ticked, and the
+  // last payload (so a row action repaints without a second read).
+  var formsView = { siteId: null, filter: "inbox", selected: {}, data: null };
+
+  var FORMS_FILTERS = [
+    { key: "inbox", label: "New" },
+    { key: "seen", label: "Seen" },
+    { key: "spam", label: "Spam" },
+    { key: "all", label: "All" }
+  ];
+
+  // The field order a person expects to read first; anything else follows,
+  // alphabetically. The template posts exactly name/email/message.
+  var FORMS_FIELD_ORDER = ["name", "email", "message"];
+
+  // Pure: the rows one filter tab shows. Spam is its own tab and is kept OUT
+  // of New and Seen; a machine-flagged `suspected` row stays in New/Seen (it
+  // was stored so a person can judge it) and carries a badge instead.
+  function formsFilterRows(subs, filter) {
+    return (subs || []).filter(function (s) {
+      var spam = s && s.spam === "spam";
+      if (filter === "all") return true;
+      if (filter === "spam") return spam;
+      if (spam) return false;
+      return filter === "seen" ? s.state === "seen" : s.state !== "seen";
+    });
+  }
+
+  // Pure: the count each tab carries.
+  function formsCounts(subs) {
+    var out = {};
+    FORMS_FILTERS.forEach(function (f) { out[f.key] = formsFilterRows(subs, f.key).length; });
+    return out;
+  }
+
+  // Pure: the PATCH body for one row action. Unknown actions are null so a
+  // stray data attribute can never send an empty or invented change.
+  function formsPatchBody(action) {
+    switch (action) {
+      case "seen": return { state: "seen" };
+      case "new": return { state: "new" };
+      case "spam": return { spam: "spam" };
+      case "clean": return { spam: "clean" };
+      default: return null;
+    }
+  }
+
+  // Pure: the actions one row offers — exactly one per axis, the one that
+  // CHANGES it.
+  function formsRowActions(s) {
+    var acts = [];
+    acts.push(s && s.state === "seen" ? { action: "new", label: "Mark as new" } : { action: "seen", label: "Mark as seen" });
+    acts.push(s && s.spam === "spam" ? { action: "clean", label: "Not spam" } : { action: "spam", label: "Spam" });
+    return acts;
+  }
+
+  // Pure: the fields in reading order.
+  function formsFieldEntries(fields) {
+    fields = fields || {};
+    var keys = Object.keys(fields);
+    var known = FORMS_FIELD_ORDER.filter(function (k) { return keys.indexOf(k) !== -1; });
+    var rest = keys.filter(function (k) { return FORMS_FIELD_ORDER.indexOf(k) === -1; }).sort();
+    return known.concat(rest).map(function (k) {
+      var v = fields[k];
+      return { key: k, value: Array.isArray(v) ? v.join(", ") : String(v == null ? "" : v) };
+    });
+  }
+
+  // Pure: the row's headline — who wrote, when the form says.
+  function formsSubmissionTitle(s) {
+    var f = (s && s.fields) || {};
+    var name = typeof f.name === "string" ? f.name.trim() : "";
+    var email = typeof f.email === "string" ? f.email.trim() : "";
+    if (name && email) return name + " <" + email + ">";
+    return name || email || "Submission";
+  }
+
+  function formsSubmissionRowHtml(s, selected) {
+    var id = String(s.id || "");
+    var title = formsSubmissionTitle(s);
+    var badges = badge(s.state === "seen" ? "Seen" : "New", s.state === "seen" ? "unknown" : "online");
+    if (s.spam === "spam") badges += badge("Spam", "down");
+    else if (s.spam === "suspected") badges += badge("Suspected spam", "warn");
+    var fields = formsFieldEntries(s.fields).map(function (e) {
+      return "<dt>" + esc(e.key) + "</dt><dd>" + esc(e.value) + "</dd>";
+    }).join("");
+    var acts = formsRowActions(s).map(function (a) {
+      return '<button class="btn btn-ghost btn-sm" type="button" data-forms-act="' + esc(a.action) +
+        '" data-sub-id="' + esc(id) + '">' + esc(a.label) + "</button>";
+    }).join("");
+    return '<div class="deploy-row">' +
+      '<div class="deploy-head">' +
+        '<input class="form-sub-check" type="checkbox" data-forms-select="' + esc(id) + '"' +
+          (selected ? " checked" : "") + ' aria-label="Select ' + esc(title) + '" />' +
+        '<div class="deploy-main"><div class="deploy-ref">' + esc(title) + "</div>" +
+          '<div class="deploy-meta">Received ' + esc(relTime(s.received_at)) +
+            (s.source && s.source.origin ? " &middot; " + '<span class="mono">' + esc(s.source.origin) + "</span>" : "") +
+          "</div></div>" +
+        '<div class="form-sub-badges">' + badges + "</div>" +
+      "</div>" +
+      (fields ? '<dl class="form-sub-fields">' + fields + "</dl>" : "") +
+      '<div class="form-sub-actions">' + acts + "</div>" +
+    "</div>";
+  }
+
+  // Pure: the one-line status of the endpoint, reconciling the control
+  // plane's bit (`enabled`: does the NEXT deploy render the form?) with the
+  // box's truth (`accepting`: does the intake take posts right now?).
+  function formsStatusCopy(forms) {
+    forms = forms || {};
+    if (forms.enabled && forms.accepting) {
+      return "On — the endpoint accepts submissions. The contact form appears on pages built after forms were turned on; redeploy the site if it isn't there yet.";
+    }
+    if (!forms.enabled && !forms.accepting) {
+      return "Off — the site renders no contact form and the endpoint accepts no submissions.";
+    }
+    if (forms.enabled) {
+      return "Forms are on here, but the instance isn't accepting submissions for this site. Turn forms off and on again to rewrite its endpoint.";
+    }
+    return "The endpoint accepts submissions, but forms are off here, so the next deploy won't include the contact form.";
+  }
+
+  // Pure: the whole section for a settled read. `model` is
+  // { status: "ok" | "unsupported" | "fault", data, fault, filter, selected }.
+  function siteFormsSectionHtml(model) {
+    model = model || {};
+    var head = '<div class="deploys-head"><h2>Form inbox</h2>';
+    if (model.status === "unsupported") {
+      return head + "</div>" + '<div class="empty-state"><h2>Forms aren\'t available on this instance</h2><p>' +
+        esc(ERRORS.forms_unsupported) + "</p></div>";
+    }
+    if (model.status !== "ok") {
+      return head + "</div>" + '<div class="empty-state"><h2>Couldn\'t load the form inbox</h2><p>' +
+        esc(readFailureCopy(model.fault || {}, "You don't have access to this site's form inbox.",
+          "The form inbox couldn't be loaded, and the answer didn't say why.")) +
+        '</p><button class="btn btn-ghost btn-sm" type="button" data-forms-retry>Try again</button></div>';
+    }
+    var data = model.data || {};
+    var forms = data.forms || {};
+    var subs = data.submissions || [];
+    var filter = model.filter || "inbox";
+    var selected = model.selected || {};
+    var toggle = forms.enabled
+      ? '<button class="btn btn-ghost btn-sm" type="button" data-forms-toggle="off">Turn off forms</button>'
+      : '<button class="btn btn-primary btn-sm" type="button" data-forms-toggle="on">Turn on forms</button>';
+    var counts = formsCounts(subs);
+    var tabs = FORMS_FILTERS.map(function (f) {
+      return '<button class="seg-btn" type="button" data-forms-filter="' + esc(f.key) + '" aria-pressed="' +
+        (f.key === filter ? "true" : "false") + '">' + esc(f.label) + " " + esc(String(counts[f.key])) + "</button>";
+    }).join("");
+    var rows = formsFilterRows(subs, filter);
+    var nSel = Object.keys(selected).filter(function (k) { return selected[k]; }).length;
+    var list;
+    if (!rows.length) {
+      var why = subs.length
+        ? "Nothing in this view. The other tabs hold the rest."
+        : forms.accepting
+          ? "No one has used the contact form yet. New submissions land here."
+          : "Turn on forms and redeploy the site to add a contact form to its pages. Submissions land here.";
+      list = '<div class="empty-state"><h2>No submissions</h2><p>' + esc(why) + "</p></div>";
+    } else {
+      list = rows.map(function (s) { return formsSubmissionRowHtml(s, !!selected[String(s.id)]); }).join("");
+    }
+    return head + toggle + "</div>" +
+      '<p class="forms-status">' + esc(formsStatusCopy(forms)) +
+        (forms.endpoint_url ? ' <span class="mono">' + esc(forms.endpoint_url) + "</span>" : "") + "</p>" +
+      '<div class="seg" role="group" aria-label="Filter submissions">' + tabs + "</div>" +
+      '<div class="forms-toolbar">' +
+        '<button class="btn btn-ghost btn-sm" type="button" data-forms-select-all>' +
+          (rows.length && rows.every(function (s) { return selected[String(s.id)]; }) ? "Clear selection" : "Select all") +
+        "</button>" +
+        '<button class="btn btn-ghost btn-sm" type="button" data-forms-export="csv"' + (nSel ? "" : " disabled") + ">Export CSV</button>" +
+        '<button class="btn btn-ghost btn-sm" type="button" data-forms-export="json"' + (nSel ? "" : " disabled") + ">Export JSON</button>" +
+        '<span class="forms-selected">' + esc(nSel === 1 ? "1 selected" : nSel + " selected") + "</span>" +
+      "</div>" +
+      '<div class="deploys">' + list + "</div>" +
+      (data.has_more ? '<p class="deploys-note">Showing the 200 most recent submissions.</p>' : "");
+  }
+
+  // Pure: the download's name — the site slug, never a path fragment.
+  function formsExportFilename(site, format) {
+    var slug = String((site && site.slug) || "site").replace(/[^A-Za-z0-9._-]/g, "") || "site";
+    return slug + "-submissions." + (format === "json" ? "json" : "csv");
+  }
+
+  // Pure: the ids to export — ticked AND present in the last payload, so a
+  // stale tick from another site can never ride along.
+  function formsSelectedIds(view) {
+    var subs = (view && view.data && view.data.submissions) || [];
+    var sel = (view && view.selected) || {};
+    return subs.map(function (s) { return String(s.id); }).filter(function (id) { return sel[id]; });
+  }
+
+  function paintSiteForms(site) {
+    var box = $("#site-forms");
+    if (!box || String(formsView.siteId) !== String(site.id)) return;
+    box.innerHTML = siteFormsSectionHtml(formsView.model);
+    wireSiteForms(box, site);
+  }
+
+  function loadSiteForms(site) {
+    var box = $("#site-forms");
+    if (!box) return;
+    // A site with no content binding has no dataset to hold submissions; the
+    // server would answer 422 no_content_binding. Paint nothing (no empty shell).
+    if (!site || !site.bootstrap_dataset) { box.innerHTML = ""; return; }
+    var seq = ++formsSeq;
+    if (String(formsView.siteId) !== String(site.id)) {
+      formsView = { siteId: site.id, filter: "inbox", selected: {}, data: null, model: null };
+    }
+    api("GET", "/v1/sites/" + encodeURIComponent(site.id) + "/forms").then(function (r) {
+      if (seq !== formsSeq) return; // a newer load owns the slot
+      if (r.ok && r.data && r.data.forms) {
+        formsView.data = r.data;
+        formsView.model = { status: "ok", data: r.data, filter: formsView.filter, selected: formsView.selected };
+      } else if (r.data && r.data.error === "forms_unsupported") {
+        formsView.data = null;
+        formsView.model = { status: "unsupported" };
+      } else {
+        formsView.data = null;
+        formsView.model = { status: "fault", fault: r };
+      }
+      paintSiteForms(site);
+    });
+  }
+
+  function formsRepaint(site) {
+    if (formsView.data) {
+      formsView.model = { status: "ok", data: formsView.data, filter: formsView.filter, selected: formsView.selected };
+    }
+    paintSiteForms(site);
+  }
+
+  function wireSiteForms(box, site) {
+    var retry = box.querySelector("[data-forms-retry]");
+    if (retry) retry.addEventListener("click", function () { loadSiteForms(site); });
+
+    var tog = box.querySelector("[data-forms-toggle]");
+    if (tog) tog.addEventListener("click", function () {
+      var on = tog.getAttribute("data-forms-toggle") === "on";
+      tog.disabled = true;
+      api("PUT", "/v1/sites/" + encodeURIComponent(site.id) + "/forms", { enabled: on }).then(function (r) {
+        if (r.ok) {
+          toast({
+            kind: "success",
+            title: on ? "Forms turned on" : "Forms turned off",
+            body: on
+              ? "Redeploy the site to add the contact form to its pages."
+              : "The endpoint refuses new submissions now. Redeploy the site to remove the form from its pages."
+          });
+          loadSiteForms(site);
+        } else {
+          tog.disabled = false;
+          toast({ kind: "error", title: on ? "Couldn't turn on forms" : "Couldn't turn off forms",
+            body: readFailureCopy(r, "You don't have permission to change this site's forms.",
+              "The change didn't go through, and the answer didn't say why.") });
+        }
+      });
+    });
+
+    var tabs = box.querySelectorAll("[data-forms-filter]");
+    for (var i = 0; i < tabs.length; i++) {
+      (function (b) {
+        b.addEventListener("click", function () {
+          formsView.filter = b.getAttribute("data-forms-filter");
+          formsRepaint(site);
+        });
+      })(tabs[i]);
+    }
+
+    var checks = box.querySelectorAll("[data-forms-select]");
+    for (var j = 0; j < checks.length; j++) {
+      (function (c) {
+        c.addEventListener("change", function () {
+          formsView.selected[c.getAttribute("data-forms-select")] = !!c.checked;
+          formsRepaint(site);
+        });
+      })(checks[j]);
+    }
+
+    var all = box.querySelector("[data-forms-select-all]");
+    if (all) all.addEventListener("click", function () {
+      var rows = formsFilterRows((formsView.data && formsView.data.submissions) || [], formsView.filter);
+      var every = rows.length && rows.every(function (s) { return formsView.selected[String(s.id)]; });
+      rows.forEach(function (s) { formsView.selected[String(s.id)] = !every; });
+      formsRepaint(site);
+    });
+
+    var acts = box.querySelectorAll("[data-forms-act]");
+    for (var k = 0; k < acts.length; k++) {
+      (function (b) {
+        b.addEventListener("click", function () {
+          var body = formsPatchBody(b.getAttribute("data-forms-act"));
+          var id = b.getAttribute("data-sub-id");
+          if (!body || !id) return;
+          b.disabled = true;
+          api("PATCH", "/v1/sites/" + encodeURIComponent(site.id) + "/forms/submissions/" + encodeURIComponent(id), body)
+            .then(function (r) {
+              if (r.ok && r.data && r.data.submission && formsView.data) {
+                formsView.data.submissions = (formsView.data.submissions || []).map(function (s) {
+                  return String(s.id) === String(id) ? r.data.submission : s;
+                });
+                formsRepaint(site);
+              } else {
+                b.disabled = false;
+                toast({ kind: "error", title: "Couldn't update the submission",
+                  body: readFailureCopy(r, "You don't have permission to change this site's submissions.",
+                    "The change didn't go through, and the answer didn't say why.") });
+              }
+            });
+        });
+      })(acts[k]);
+    }
+
+    var exps = box.querySelectorAll("[data-forms-export]");
+    for (var e = 0; e < exps.length; e++) {
+      (function (b) {
+        b.addEventListener("click", function () {
+          var format = b.getAttribute("data-forms-export") === "json" ? "json" : "csv";
+          var ids = formsSelectedIds(formsView);
+          if (!ids.length) return;
+          b.disabled = true;
+          api("POST", "/v1/sites/" + encodeURIComponent(site.id) + "/forms/export", { ids: ids, format: format })
+            .then(function (r) {
+              b.disabled = false;
+              if (!r.ok) {
+                toast({ kind: "error", title: "Couldn't export the submissions",
+                  body: readFailureCopy(r, "You don't have permission to export this site's submissions.",
+                    "The export didn't go through, and the answer didn't say why.") });
+                return;
+              }
+              var text = format === "json" ? JSON.stringify(r.data, null, 2) : r.text;
+              downloadText(formsExportFilename(site, format), text, "The export couldn't be saved as a file.");
+              var missing = format === "json" && r.data && r.data.missing ? r.data.missing.length : 0;
+              if (missing) {
+                toast({ kind: "info", title: "Some submissions weren't exported",
+                  body: missing + " of the selected submissions no longer exist on the instance." });
+              }
+            });
+        });
+      })(exps[e]);
+    }
+  }
+
   // =========================================================== SITES (tab)
   // Every site across the fleet, each labelled with its parent instance.
   function loadSites() {
@@ -17052,6 +17416,8 @@
       // gr-p3: the domains rungs — the shared checklist against the site's own
       // domain-status endpoint (painted only when domains are attached).
       loadSiteDomains(site);
+      // N-08: the form inbox — its own read, painted into #site-forms.
+      loadSiteForms(site);
       var g = $("#site-github");
       if (g) g.addEventListener("click", function () { openSiteGithub(site, domain); });
       var eb = $("#site-env-edit");
@@ -17420,6 +17786,7 @@
           // gr-p3: the domains rungs mount — loadSiteDomains paints it only
           // when the site has attached domains (no empty shell, D17).
           '<div class="site-domains" id="site-domains"></div>' +
+          '<div class="site-forms" id="site-forms"></div>' +
         "</div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("Site ID", site.id) +
@@ -31086,6 +31453,15 @@
       siteRecheckVerdict: siteRecheckVerdict, siteRecheckCopy: siteRecheckCopy,
       siteRecheckPlan: siteRecheckPlan, SITE_RECHECK_MAX_ATTEMPTS: SITE_RECHECK_MAX_ATTEMPTS,
       sitePreviewsSectionHtml: sitePreviewsSectionHtml,
+      // task-71082f5541c13b53 (N-08): the form inbox's pure halves, plus the
+      // DOM mount so the harness can drive a real read → paint → action.
+      formsFilterRows: formsFilterRows, formsCounts: formsCounts, formsPatchBody: formsPatchBody,
+      formsRowActions: formsRowActions, formsFieldEntries: formsFieldEntries,
+      formsSubmissionTitle: formsSubmissionTitle, formsSubmissionRowHtml: formsSubmissionRowHtml,
+      formsStatusCopy: formsStatusCopy, siteFormsSectionHtml: siteFormsSectionHtml,
+      formsExportFilename: formsExportFilename, formsSelectedIds: formsSelectedIds,
+      loadSiteForms: loadSiteForms,
+      getFormsView: function () { return formsView; },
       // W4 (charter D15-D17/D18): the SSE-driven deploy stage rail + one-motion
       // create-and-deploy. Only the PURE fold/signature/status/markup helpers are
       // node-pinned; the EventSource wiring + DOM mount are browser-verified.

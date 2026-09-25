@@ -1,5 +1,7 @@
 ---
 import Base from '../layouts/Base.astro'
+import ContactForm from '../components/ContactForm.astro'
+import { resolveFormsUrl } from '../lib/forms'
 import {
   resolveEnv,
   createBarkparkClient,
@@ -17,6 +19,9 @@ const { doc } = flagship
 // The deploy markers live in lib/barkpark.ts so the EMPTY case is assertable
 // without an Astro build — see `flagshipMarkers`.
 const markers = flagshipMarkers(flagship)
+// The contact form's opt-in: null unless the deploy engine set
+// BARKPARK_FORMS_URL for this site (forms turned on in the Cloud console).
+const formsUrl = resolveFormsUrl()
 
 const pageTitle = doc ? `${doc.title} · Barkpark Astro starter` : 'Barkpark Astro starter'
 ---
@@ -65,6 +70,8 @@ const pageTitle = doc ? `${doc.title} · Barkpark Astro starter` : 'Barkpark Ast
       </article>
     )
   }
+
+  {formsUrl && <ContactForm action={formsUrl} />}
 
   <footer style="margin-top:2.5rem;color:var(--muted);font-size:.8rem;">
     <p style="margin:0;">

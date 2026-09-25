@@ -307,8 +307,17 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # `side_effecting_get?/1` clause. It is session-gated like its
   # `/v1/providers/*` siblings, so `total` and `session` each rise by exactly
   # one; machine and public are untouched.
-  @baseline_total 75
-  @baseline_session 54
+  # 2026-09-25: 76 / 55 / 9 / 12. ONE ROUTE WAS ADDED — `GET
+  # /v1/sites/:id/forms` (N-08: a site's form endpoint state and its inbox). A
+  # bare HEAD of it MUTATES NOTHING: the body is `with_team_site/3` then
+  # `Sites.Forms.endpoint/2` and `Sites.Forms.list/3`, which issue only GET
+  # relays to the box (`/v1/plugins`, one doc read, one query) — no write on
+  # either side, no token mint, no nonce burn — so it owes no
+  # `side_effecting_get?/1` clause. It is user-or-PAT gated like its
+  # `/v1/sites/:id/*` siblings, so `total` and `session` each rise by exactly
+  # one; machine and public are untouched.
+  @baseline_total 76
+  @baseline_session 55
   @baseline_machine 9
   @baseline_public 12
 

@@ -48,7 +48,7 @@
    without one is how two irreconcilable numbers get cited as a pair: comments
    STRIPPED, then declarations counted — 9 `word-break` (4 break-word, 5
    break-all), 71 `min-width` (75 occurrences less the FOUR that are `@media
-   (min-width: …)` preludes, which are not declarations at all), and 34
+   (min-width: …)` preludes, which are not declarations at all), and 36
    `overflow-wrap`. The raw line greps are higher, and are deliberately NOT
    quoted here: this block and the per-site comments name the properties in
    prose, so any raw-grep figure counts its own paragraph and moves whenever a
@@ -7087,6 +7087,34 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* The site-detail Domains section: painted only when the site has attached
    domains (the mount leaves it empty otherwise — no empty shell, D17). */
 .site-domains { margin-top: 22px; }
+/* task-71082f5541c13b53 (N-08): the site-detail Form inbox. Rides the
+   deploy-list anatomy (.deploys-head / .seg / .deploys / .deploy-row /
+   .deploy-head / .deploy-main); these rules add only the inbox's own parts —
+   the per-row checkbox, badges, the field list, the row actions and the
+   toolbar. Tokens only. */
+.site-forms { margin-top: 22px; }
+.forms-status {
+  margin: 0 0 12px; font-size: 13px; color: var(--muted-text);
+  overflow-wrap: anywhere;
+}
+.forms-status .mono { font-family: var(--mono); font-size: 12px; }
+.forms-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0 0 10px;
+}
+.forms-selected { font-size: 12px; color: var(--muted-text); }
+.form-sub-check { flex: none; margin: 0; accent-color: var(--primary); }
+.form-sub-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.form-sub-fields {
+  display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: 4px 12px; margin: 10px 0 0; font-size: 13px;
+}
+.form-sub-fields dt { color: var(--muted-text); font-weight: 500; }
+/* A visitor's message is PROSE (break-word); the endpoint URL above is a
+   MACHINE STRING (anywhere) — the file's own wrap ruling. The grid's
+   minmax(0, 1fr) track is the parent-side escape. */
+.form-sub-fields dd { margin: 0; white-space: pre-wrap; overflow-wrap: break-word; }
+.form-sub-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 /* The v4 site-detail headline: domain + honest state chip on one line. */
 .site-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 

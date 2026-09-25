@@ -97,7 +97,12 @@ defmodule BarkparkCloud.Web.RouterDetailsInternalColumnTest do
   # removed from the contract. The key is the REQUEST BODY field the caller
   # typed, not a column — `subscriptions` carries `cancel_at_period_end`, a
   # different name — so ARM B below passes on its merits, not by exemption.
-  @router_details_maps 11
+  # 11 -> 16 (task-71082f5541c13b53, 2026-09-25): the N-08 forms routes refuse
+  # with five REQUEST BODY field names — `enabled` (PUT /v1/sites/:id/forms),
+  # `state` and `spam` (PATCH …/forms/submissions/:sub_id), `ids` and `format`
+  # (POST …/forms/export). Each is a key the caller typed; `forms_enabled` is
+  # the column and is never named.
+  @router_details_maps 16
 
   ## ────────────────────────────────────────────────────────────────────
   ## PART 1 — the driven reachability table
