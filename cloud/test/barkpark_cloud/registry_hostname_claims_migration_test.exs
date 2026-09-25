@@ -19,8 +19,8 @@ defmodule BarkparkCloud.RegistryHostnameClaimsMigrationTest do
   alias BarkparkCloud.{Accounts, Registry, Repo}
   alias BarkparkCloud.Registry.{Barkpark, HostnameClaim}
 
-  @version 20_260_925_120_000
-  @path "priv/repo/migrations/20260925120000_create_hostname_claims.exs"
+  @version 20_260_925_152_031
+  @path "priv/repo/migrations/20260925152031_create_hostname_claims.exs"
 
   setup do
     [{mod, _}] =
