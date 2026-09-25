@@ -1107,6 +1107,11 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
     user_auth: "account/session surface, keyed on the USER rather than on a workspace"
   }
 
+  # Capability switches (`BarkparkWeb.Plugs.RequireCapability`, task-2f59ba23bcad333e)
+  # run FIRST so a disabled subsystem 404s before auth. They resolve no token and
+  # assign no tenant, so the classification keys on the first pipeline AFTER them.
+  @capability_gate_pipelines [:studio_chat_capability, :cycle_fleet_capability]
+
   setup do
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
@@ -1342,7 +1347,7 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
     test "no flat route rides an UNCLASSIFIED non-:api pipeline" do
       unknown =
         for {verb, path, pipes} <- flat_routes_off_api(),
-            first = List.first(pipes),
+            first = pipes |> Enum.reject(&(&1 in @capability_gate_pipelines)) |> List.first(),
             not (is_atom(first) and Map.has_key?(@non_api_flat_pipelines, first)),
             do: "#{verb} #{path}  #{inspect(pipes)}"
 
