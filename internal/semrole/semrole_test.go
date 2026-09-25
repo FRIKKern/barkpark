@@ -25,6 +25,9 @@ var cloudTokens = []string{
 	// dr-w10-s1 / dr-w24-followup: the deploy verdict and the off-the-train
 	// sha, ranks 5 and 6. Warn, not danger — see For's own monotonicity note.
 	"deploys_failing", "diverged",
+	// dr-w15-s5: the box's own measured refusal to deploy, rank 5. Warn, for
+	// the same monotonicity reason.
+	"cannot_deploy",
 	// The usage-meter STATE token for a read that was attempted and FAILED
 	// (dr-w3-s6 followup): before this entry it fell to the neutral default and
 	// painted identically to the deliberate "unmetered".
@@ -56,7 +59,9 @@ func TestForCloudVocabulary(t *testing.T) {
 		// (degraded) is warn, so ranks 5 and 6 may not shout louder.
 		"deploys_failing": "warn", "DEPLOYS_FAILING": "warn", " diverged ": "warn",
 		"diverged": "warn",
-		"failed":   "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
+		// cannot_deploy sits directly under degraded (warn), so it is warn too.
+		"cannot_deploy": "warn", "CANNOT_DEPLOY": "warn",
+		"failed": "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
 		// Usage-meter quota states: near_limit warns, over_limit is danger.
 		"near_limit": "warn", "NEAR_LIMIT": "warn", " over_limit ": "danger", "over_limit": "danger",
 		// A meter whose read FAILED is a broken instrument — warn, and tonally
