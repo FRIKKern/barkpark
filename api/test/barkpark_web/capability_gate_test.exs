@@ -149,6 +149,9 @@ defmodule BarkparkWeb.CapabilityGateTest do
       %{raw: raw}
     end
 
+    # its ON arm reads registered_chat_hosts, so it needs the plugin/fleet tables present
+    # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+    @tag :owned_tables
     test "chat hosts page mounts ON and redirects OFF", %{conn: conn, ws: ws, raw: raw} do
       path = "/w/#{ws}/p/default/studio/chat-hosts"
 
@@ -159,6 +162,9 @@ defmodule BarkparkWeb.CapabilityGateTest do
       assert {:error, {:redirect, %{to: "/studio"}}} = live(as(scoped_conn(), raw), path)
     end
 
+    # its ON arm reads registered_chat_hosts, so it needs the plugin/fleet tables present
+    # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+    @tag :owned_tables
     test "chat page redirects OFF even with a chat provider enabled", %{
       conn: conn,
       ws: ws,

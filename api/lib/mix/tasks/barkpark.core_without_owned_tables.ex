@@ -26,10 +26,24 @@ defmodule Mix.Tasks.Barkpark.CoreWithoutOwnedTables do
      `--keep-dbs`, and exits 1 when any newly-red test is confirmed, or when
      either run printed no summary line.
 
+  ## What it runs
+
+  The suite (or the paths given), minus two sets whose subject IS the dropped
+  tables, so their red when those tables are gone is expected:
+
+    * test files named for an owner of a dropped table: a path segment, split
+      on `/`, `_` or `.`, that is `chat`, `github`, or the pair `cycle_fleet`,
+      `cycle_release` or `epic_fleet` (`@owner_test_path`);
+    * tests tagged `@tag :owned_tables`: core-directory tests that seed an owned
+      table, pin the full-schema table count, or turn a capability ON.
+
   Tests already red with the tables PRESENT are not this check's subject. With
   every plugin off, many tests fail because they need a plugin's schemas; tagging
   those is task-ba5085862f3da4e4. This check reports only what the missing
   tables change.
+
+  Not wired into CI: two full-suite runs take about 40 minutes. It is run by
+  this named alias.
   """
   @shortdoc "Differential: tests green with plugin/fleet tables present must stay green with them absent"
 
@@ -40,10 +54,22 @@ defmodule Mix.Tasks.Barkpark.CoreWithoutOwnedTables do
 
   @switches [keep_dbs: :boolean, seed: :integer]
 
+  @failure_header ~r/\b\d+\) ((?:test|doctest) .+ \([A-Z][\w.]+\)|[A-Z][\w.]+: failure on setup_all callback.*)$/
+
+  @owner_test_path ~r{(^|[/_.])(chat|github|cycle_fleet|cycle_release|epic_fleet)([/_.]|$)}
+
   @impl Mix.Task
   def run(args) do
-    {opts, test_args, _} = OptionParser.parse(args, strict: @switches)
+    {opts, paths, _} = OptionParser.parse(args, strict: @switches)
     Mix.Task.run("app.config")
+
+    {files, owner_files} =
+      if(paths == [], do: ["test"], else: paths)
+      |> Enum.flat_map(&test_files/1)
+      |> Enum.uniq()
+      |> Enum.split_with(&(not Regex.match?(@owner_test_path, &1)))
+
+    test_args = ["--exclude", "owned_tables" | files]
 
     base = Application.fetch_env!(:barkpark, :test_db_partition).suffix
     seed = Keyword.get_lazy(opts, :seed, fn -> :rand.uniform(999_999) end)
@@ -56,7 +82,11 @@ defmodule Mix.Tasks.Barkpark.CoreWithoutOwnedTables do
       Enum.each([present, absent], &fresh_db!/1)
       drop_owned!(absent)
 
-      shell("seed #{seed}; logs in #{log_dir}")
+      shell(
+        "seed #{seed}; #{length(files)} test files, #{length(owner_files)} owner test files " <>
+          "excluded, @tag :owned_tables excluded; logs in #{log_dir}"
+      )
+
       p = run_suite(present, test_args, seed, Path.join(log_dir, "present.log"))
       a = run_suite(absent, test_args, seed, Path.join(log_dir, "absent.log"))
 
@@ -70,6 +100,14 @@ defmodule Mix.Tasks.Barkpark.CoreWithoutOwnedTables do
       end
     after
       unless opts[:keep_dbs], do: Enum.each([present, absent], &drop_db/1)
+    end
+  end
+
+  defp test_files(path) do
+    cond do
+      File.dir?(path) -> Path.wildcard(Path.join(path, "**/*_test.exs"))
+      File.regular?(path) -> [path]
+      true -> Mix.raise("no such test path: #{path}")
     end
   end
 
@@ -131,8 +169,9 @@ defmodule Mix.Tasks.Barkpark.CoreWithoutOwnedTables do
       newly
     else
       shell("re-running #{length(files)} file(s) holding newly-red tests against both databases")
-      p = run_suite(present, files, seed, Path.join(log_dir, "confirm_present.log"))
-      a = run_suite(absent, files, seed, Path.join(log_dir, "confirm_absent.log"))
+      args = ["--exclude", "owned_tables" | files]
+      p = run_suite(present, args, seed, Path.join(log_dir, "confirm_present.log"))
+      a = run_suite(absent, args, seed, Path.join(log_dir, "confirm_absent.log"))
 
       newly
       |> MapSet.intersection(a.failed)
@@ -140,8 +179,10 @@ defmodule Mix.Tasks.Barkpark.CoreWithoutOwnedTables do
     end
   end
 
-  # A failure header is `  N) test NAME (Module)` or `  N) Module: failure on
-  # setup_all callback, ...`; the next non-blank line names `test/...:LINE`.
+  # A failure header is `  N) test NAME (Module)`, `  N) doctest ...` or
+  # `  N) Module: failure on setup_all callback, ...`, and the line under it
+  # names `test/...:LINE`. NOT anchored at line start: a log line or progress
+  # dots written by a concurrent test can share the header's line.
   defp parse(output, status) do
     lines = String.split(output, "\n")
 
@@ -149,11 +190,11 @@ defmodule Mix.Tasks.Barkpark.CoreWithoutOwnedTables do
       lines
       |> Enum.with_index()
       |> Enum.reduce({MapSet.new(), %{}}, fn {line, i}, {failed, files} ->
-        case Regex.run(~r/^\s+\d+\) (.+)$/, line) do
+        case Regex.run(@failure_header, line) do
           [_, id] ->
             file =
               lines
-              |> Enum.drop(i + 1)
+              |> Enum.slice((i + 1)..(i + 5)//1)
               |> Enum.find_value(&failure_file/1)
 
             {MapSet.put(failed, id), Map.put(files, id, file)}
@@ -163,7 +204,9 @@ defmodule Mix.Tasks.Barkpark.CoreWithoutOwnedTables do
         end
       end)
 
-    summary = Enum.find(lines, &Regex.match?(~r/^\d+ (doctests?, )?tests?, \d+ failures?/, &1))
+    summary =
+      Enum.find(lines, &Regex.match?(~r/^(\d+ doctests?, )?\d+ tests?, \d+ failures?/, &1))
+
     %{failed: failed, files: files, summary: summary, status: status}
   end
 

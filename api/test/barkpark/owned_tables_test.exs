@@ -73,6 +73,9 @@ defmodule Barkpark.OwnedTablesTest do
     assert OwnedTables.function_exists?("barkpark_revision_immutable()")
   end
 
+  # asserts the fleet functions exist, so it needs the plugin/fleet tables present
+  # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+  @tag :owned_tables
   test "every fleet function signature resolves while the migrations are in place" do
     for signature <- OwnedTables.functions() do
       assert OwnedTables.function_exists?(signature), "#{signature} does not resolve"
