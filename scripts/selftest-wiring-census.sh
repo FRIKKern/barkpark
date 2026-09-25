@@ -53,8 +53,10 @@
 #   R3 PARENT   a script in scripts/ dispatches to it (a `--selftest` exec, say)
 #               AND that parent's own basename appears in a workflow.
 #               e.g. elixir.yml:  bash scripts/elixir-impacted-tests.sh --selftest
-#   R4 DOOR     an ExUnit test under api/test/ System.cmd's it, so the REQUIRED
-#               Elixir gate runs it.  e.g. api/test/barkpark/pds_pull_proof_test.exs
+#   R4 DOOR     an ExUnit test under api/test/ or cloud/test/ System.cmd's it,
+#               so the REQUIRED Elixir gate (api/) or Cloud gate (cloud/) runs it.
+#               e.g. api/test/barkpark/pds_pull_proof_test.exs,
+#               cloud/test/barkpark_cloud/templates/standalone_export_test.exs
 #
 # THE EXEMPTION is a grep-able header line in the file's first 60 lines:
 #
@@ -65,7 +67,7 @@
 # environment-dependent harness into every PR is its own defect — but it must
 # be DECLARED, so the un-exempted remainder means something.
 #
-# HONEST LIMIT, stated once: R4 keys on api/test/**, which is NOT in this
+# HONEST LIMIT, stated once: R4 keys on api/test/** and cloud/test/**, which are NOT in this
 # workflow's paths, so a door added there does not re-trigger this census on
 # that PR. The push-to-main arm catches it. R2 and R3 are resolved from the
 # tree, not from a cached list, so neither can go stale.
@@ -234,19 +236,21 @@ LEGS
       ' >> "$selfdispatch"
   done
 
-  # R4's INDEX, same shape: every line of every api/test/**.exs that both
+  # R4's INDEX, same shape: every line of every api/test/**.exs or
+  # cloud/test/**.exs (the Cloud gate runs the latter; dwb-2) that both
   # System.cmd's something and BINDS a path (a @…_rel / @…_path attribute or the
   # System.cmd line itself). api/test/barkpark/pds_door_census_test.exs asserts a
   # census OUTPUT names these harnesses — a mention, not a run.
   doors="$(mktemp "${TMPDIR:-/tmp}/doors.XXXXXX")"
-  if [ -d "$root/api/test" ]; then
-    local door
-    for door in $(find -H "$root/api/test" -name '*.exs' -exec grep -lE 'System\.cmd' {} + 2>/dev/null | LC_ALL=C sort); do
+  local door door_root
+  for door_root in "$root/api/test" "$root/cloud/test"; do
+    [ -d "$door_root" ] || continue
+    for door in $(find -H "$door_root" -name '*.exs' -exec grep -lE 'System\.cmd' {} + 2>/dev/null | LC_ALL=C sort); do
       grep -v '^[[:space:]]*#' "$door" 2>/dev/null \
         | grep -E 'System\.cmd|@[a-z_]*(rel|path|harness|selftest|script)' \
         | sed "s|^|${door#"$root"/} |" >> "$doors"
     done
-  fi
+  done
 
   # Every scripts/… glob a workflow ACTUALLY RUNS, collected ONCE (see R2).
   #
@@ -541,6 +545,7 @@ selftest() {
   # disagreement between suite and subject this census exists to catch.
   [ -f "$ROOT/.github/shell-harness-legs.json" ] && cp "$ROOT/.github/shell-harness-legs.json" "$tmp/.github/shell-harness-legs.json"
   [ -d "$ROOT/api/test" ] && { mkdir -p "$tmp/api"; ln -s "$ROOT/api/test" "$tmp/api/test"; }
+  [ -d "$ROOT/cloud/test" ] && { mkdir -p "$tmp/cloud"; ln -s "$ROOT/cloud/test" "$tmp/cloud/test"; }
   # The C half's second root. Without it every `.claude/skills/...` row in the
   # grandfather ledger resolves "the file is GONE" and the POSITIVE CONTROL
   # below reds on the fixture's shape rather than on the tree's — the suite
