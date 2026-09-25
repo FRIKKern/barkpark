@@ -247,8 +247,11 @@ defmodule BarkparkWeb.Studio.AccountLive do
         <li>Every sign-in session is revoked, on every device, including this one. You are signed out immediately.</li>
         <li>Pending email links stop working and you are removed from every workspace.</li>
         <li>
-          Personal access tokens you created are not revoked by erasure. Revoke them before you
-          erase your account.
+          Personal access tokens you own are revoked, and your passkeys and social sign-in links
+          are removed.
+        </li>
+        <li>
+          Machine tokens you created as a workspace admin stay with that workspace.
         </li>
         <li>
           Your account is pseudonymised, not deleted: the audit log keeps its records of what this
