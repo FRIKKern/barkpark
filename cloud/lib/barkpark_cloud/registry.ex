@@ -10009,6 +10009,17 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  task-71082f5541c13b53 (N-08): record whether the site's form endpoint is on.
+  Called by the forms route only AFTER the box accepted the endpoint write, so
+  the bit never claims an endpoint the box does not hold.
+  """
+  def set_site_forms_enabled(%Site{} = site, enabled?) when is_boolean(enabled?) do
+    site
+    |> Site.forms_changeset(%{forms_enabled: enabled?})
+    |> Repo.update()
+  end
+
+  @doc """
   Repoint a Site's live deployment pointer — the static ROLLBACK's flip (charter
   D5). The box has already repointed its `current` symlink; this makes the control
   plane's view agree immediately, so `bp cloud site status` never reports the

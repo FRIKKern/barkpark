@@ -33316,6 +33316,10 @@ const CCHW65_MUST_ANSWER = [
   // cch-w73-bl: the install return leg made this 422 human-reachable and paid it
   // with a curated sentence; pinned here so a later deletion is not invisible.
   "installation_not_found",
+  // task-71082f5541c13b53 (N-08): every /v1/sites/:id/forms route's 409 when
+  // the instance has no forms plugin; the inbox paints this sentence as its
+  // own state, so a deletion must red here.
+  "forms_unsupported",
   "no_team", "not_live", "password_invalid", "plan_invalid", "portal_failed",
   "rate_limited", "repo_not_in_installation", "request_too_large", "role_too_high",
   "server_error", "suspended", "unsupported_media_type", "validation_failed",
@@ -36584,4 +36588,178 @@ test("cch-w73: newCreateRepo's success arm reads r.data.html_url and r.data.repo
   const okArm = fn.slice(okAt, elseAt);
   assert.match(okArm, /r\.data\.html_url/, "the success arm must read html_url (the Vercel clone href and the result link)");
   assert.match(okArm, /r\.data\.repo_full_name/, "the success arm must read repo_full_name (the link text and the toast body)");
+});
+
+// ── task-71082f5541c13b53 (N-08) · THE FORM INBOX ──────────────────────────
+// The per-site inbox on site detail: GET /v1/sites/:id/forms → a list with
+// New/Seen/Spam/All tabs, per-row state + spam actions, and a select-then-
+// export toolbar. The pure halves are pinned directly; the mount is driven
+// through a fake #site-forms with a programmed fetch, so the READ → PAINT path
+// (and its three honest outcomes) is exercised on the shipped file.
+
+const FORMS_SUBS = [
+  { id: "a", state: "new", spam: "clean", received_at: "2026-09-25T10:00:00Z",
+    fields: { name: "Kari", email: "kari@example.com", message: "Hei" }, source: { origin: "https://acme.barkpark.cloud" } },
+  { id: "b", state: "seen", spam: "clean", received_at: "2026-09-25T09:00:00Z", fields: { name: "Ola" }, source: {} },
+  { id: "c", state: "new", spam: "suspected", received_at: "2026-09-25T08:00:00Z", fields: { message: "http://x" }, source: {} },
+  { id: "d", state: "seen", spam: "spam", received_at: "2026-09-25T07:00:00Z", fields: { message: "buy" }, source: {} },
+];
+const FORMS_ON = { enabled: true, accepting: true, endpoint_url: "https://acme.barkpark.cloud/v1/plugins/forms/w/acme/p/blog/d/production/sites/blog/submissions" };
+
+test("N-08: formsFilterRows partitions New / Seen / Spam, keeps a suspected row in view, and All is everything", () => {
+  const ids = (f) => hooks.formsFilterRows(FORMS_SUBS, f).map((s) => s.id);
+  assert.deepEqual(Array.from(ids("inbox")), ["a", "c"]);
+  assert.deepEqual(ids("seen"), ["b"]);
+  assert.deepEqual(ids("spam"), ["d"]);
+  assert.deepEqual(ids("all"), ["a", "b", "c", "d"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(hooks.formsCounts(FORMS_SUBS))), { inbox: 2, seen: 1, spam: 1, all: 4 });
+  assert.deepEqual(hooks.formsFilterRows(null, "inbox").length, 0);
+});
+
+test("N-08: each row offers the ONE action per axis that changes it, and the PATCH body is exactly that change", () => {
+  const acts = (s) => Array.from(hooks.formsRowActions(s), (a) => a.action);
+  assert.deepEqual(acts({ state: "new", spam: "clean" }), ["seen", "spam"]);
+  assert.deepEqual(acts({ state: "seen", spam: "spam" }), ["new", "clean"]);
+  assert.deepEqual(acts({ state: "new", spam: "suspected" }), ["seen", "spam"]);
+
+  assert.deepEqual({ ...hooks.formsPatchBody("seen") }, { state: "seen" });
+  assert.deepEqual({ ...hooks.formsPatchBody("new") }, { state: "new" });
+  assert.deepEqual({ ...hooks.formsPatchBody("spam") }, { spam: "spam" });
+  assert.deepEqual({ ...hooks.formsPatchBody("clean") }, { spam: "clean" });
+  // A stray attribute can never send an empty or invented change.
+  assert.equal(hooks.formsPatchBody("archive"), null);
+  assert.equal(hooks.formsPatchBody(undefined), null);
+});
+
+test("N-08: the inbox renders rows, tabs, the toggle and an export that is DISABLED until something is ticked", () => {
+  const none = hooks.siteFormsSectionHtml({ status: "ok", data: { forms: FORMS_ON, submissions: FORMS_SUBS }, filter: "inbox", selected: {} });
+  assert.match(none, /<h2>Form inbox<\/h2>/);
+  assert.match(none, /data-forms-toggle="off">Turn off forms/);
+  assert.match(none, /data-forms-filter="inbox" aria-pressed="true">New 2</);
+  assert.match(none, /data-forms-filter="spam" aria-pressed="false">Spam 1</);
+  assert.match(none, /data-forms-select="a"/);
+  assert.match(none, /data-forms-select="c"/);
+  assert.ok(none.indexOf('data-forms-select="d"') === -1, "a spam row must not sit in the New tab");
+  assert.match(none, /Suspected spam/);
+  assert.match(none, /data-forms-export="csv" disabled/);
+  assert.match(none, /0 selected/);
+  assert.match(none, /data-forms-act="seen" data-sub-id="a">Mark as seen/);
+  assert.match(none, /Kari &lt;kari@example\.com&gt;/);
+
+  const one = hooks.siteFormsSectionHtml({ status: "ok", data: { forms: FORMS_ON, submissions: FORMS_SUBS }, filter: "inbox", selected: { a: true } });
+  assert.match(one, /data-forms-select="a" checked/);
+  assert.match(one, /data-forms-export="csv">Export CSV/);
+  assert.match(one, /data-forms-export="json">Export JSON/);
+  assert.match(one, /1 selected/);
+
+  const off = hooks.siteFormsSectionHtml({ status: "ok", data: { forms: { enabled: false, accepting: false }, submissions: [] }, filter: "inbox", selected: {} });
+  assert.match(off, /data-forms-toggle="on">Turn on forms/);
+  assert.match(off, /No submissions/);
+  assert.match(off, /Turn on forms and redeploy/);
+});
+
+test("N-08: a visitor's field values are ESCAPED — a form post can never inject markup into the console", () => {
+  const evil = [{ id: "x\"><img>", state: "new", spam: "clean", received_at: "2026-09-25T10:00:00Z",
+    fields: { message: "<script>alert(1)</script>", "<b>k</b>": "v" }, source: { origin: "\"><svg onload=1>" } }];
+  const html = hooks.siteFormsSectionHtml({ status: "ok", data: { forms: FORMS_ON, submissions: evil }, filter: "inbox", selected: {} });
+  assert.ok(html.indexOf("<script>") === -1);
+  assert.ok(html.indexOf("<svg") === -1);
+  assert.ok(html.indexOf("<b>k</b>") === -1);
+  assert.ok(html.indexOf('data-forms-select="x"><img>"') === -1);
+  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+});
+
+test("N-08: a failed read is never an empty inbox — unsupported and fault each say what happened", () => {
+  const unsupported = hooks.siteFormsSectionHtml({ status: "unsupported" });
+  assert.match(unsupported, /Forms aren't available on this instance/);
+  assert.match(unsupported, /forms plugin/);
+  assert.ok(unsupported.indexOf("No submissions") === -1);
+
+  const fault = hooks.siteFormsSectionHtml({ status: "fault", fault: { ok: false, status: 502, data: { error: "instance_unreachable" } } });
+  assert.match(fault, /Couldn't load the form inbox/);
+  assert.match(fault, /Couldn&#39;t reach the instance/);
+  assert.match(fault, /data-forms-retry/);
+  assert.ok(fault.indexOf("No submissions") === -1);
+  assert.ok(fault.indexOf("data-forms-toggle") === -1, "a failed read must not offer a toggle it cannot back");
+});
+
+test("N-08: the status line tells the four enabled × accepting states apart", () => {
+  const copies = [
+    hooks.formsStatusCopy({ enabled: true, accepting: true }),
+    hooks.formsStatusCopy({ enabled: false, accepting: false }),
+    hooks.formsStatusCopy({ enabled: true, accepting: false }),
+    hooks.formsStatusCopy({ enabled: false, accepting: true }),
+  ];
+  assert.equal(new Set(copies).size, 4);
+  assert.match(copies[0], /^On/);
+  assert.match(copies[1], /^Off/);
+  assert.match(copies[0], /redeploy/);
+});
+
+test("N-08: export names the file after the slug and sends only ticked ids that are in the payload", () => {
+  assert.equal(hooks.formsExportFilename({ slug: "blog" }, "csv"), "blog-submissions.csv");
+  assert.equal(hooks.formsExportFilename({ slug: "blog" }, "json"), "blog-submissions.json");
+  assert.equal(hooks.formsExportFilename({ slug: "../etc/x" }, "csv"), "..etcx-submissions.csv");
+  assert.equal(hooks.formsExportFilename({}, "csv"), "site-submissions.csv");
+
+  const view = { data: { submissions: FORMS_SUBS }, selected: { a: true, b: false, d: true, "stale-from-another-site": true } };
+  assert.deepEqual([...hooks.formsSelectedIds(view)], ["a", "d"]);
+  assert.deepEqual([...hooks.formsSelectedIds({})], []);
+});
+
+test("N-08: forms_unsupported has curated copy (the console reader census keys on the ERRORS map)", () => {
+  assert.match(APP_SRC, /\n    forms_unsupported: "/);
+});
+
+// The mount, driven: a fake #site-forms, a programmed fetch, and the shipped
+// loadSiteForms. Asserts the READ goes to this site's route and each outcome
+// paints its own state.
+async function formsMount(respond, site) {
+  const priorDoc = sandbox.document;
+  const priorFetch = sandbox.fetch;
+  const box = { innerHTML: "", querySelector: () => null, querySelectorAll: () => [] };
+  const calls = [];
+  sandbox.document = { ...priorDoc, querySelector: (sel) => (sel === "#site-forms" ? box : null) };
+  sandbox.fetch = (url, init) => {
+    calls.push({ url, method: init && init.method });
+    const [status, body] = respond(url, init);
+    return Promise.resolve({
+      ok: status >= 200 && status < 300, status,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(body),
+    });
+  };
+  try {
+    hooks.loadSiteForms(site);
+    for (let i = 0; i < 6; i += 1) await new Promise((r) => setImmediate(r));
+    return { box, calls };
+  } finally {
+    sandbox.document = priorDoc;
+    sandbox.fetch = priorFetch;
+  }
+}
+
+test("N-08: loadSiteForms reads THIS site's inbox and paints it", async () => {
+  const { box, calls } = await formsMount(() => [200, { forms: FORMS_ON, submissions: FORMS_SUBS, has_more: false }],
+    { id: "site 1", slug: "blog", bootstrap_dataset: "production" });
+  assert.deepEqual(calls.map((c) => c.method + " " + c.url), ["GET /v1/sites/site%201/forms"]);
+  assert.match(box.innerHTML, /Form inbox/);
+  assert.match(box.innerHTML, /data-forms-select="a"/);
+  assert.equal(hooks.getFormsView().filter, "inbox");
+});
+
+test("N-08: loadSiteForms paints forms_unsupported and a fault as themselves, never as empty", async () => {
+  const site = { id: "s2", slug: "blog", bootstrap_dataset: "production" };
+  const unsupported = await formsMount(() => [409, { error: "forms_unsupported" }], site);
+  assert.match(unsupported.box.innerHTML, /Forms aren't available on this instance/);
+
+  const fault = await formsMount(() => [502, { error: "instance_unreachable" }], site);
+  assert.match(fault.box.innerHTML, /Couldn't load the form inbox/);
+  assert.ok(fault.box.innerHTML.indexOf("No submissions") === -1);
+});
+
+test("N-08: a site with no content binding makes no read and paints no shell", async () => {
+  const { box, calls } = await formsMount(() => [200, {}], { id: "s3", slug: "c", bootstrap_dataset: null });
+  assert.equal(calls.length, 0);
+  assert.equal(box.innerHTML, "");
 });

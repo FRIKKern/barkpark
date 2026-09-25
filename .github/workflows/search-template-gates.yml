@@ -262,13 +262,14 @@ jobs:
       # matches nothing prints "# tests 0" and exits 0, so this job would go
       # green having proven nothing at all.
       #
-      # `--floor 1` is a COMMITTED literal, not a derived one — one spec file
-      # today. Adding a second spec reds with `raise the floor to 2`; bump it
-      # here. Never piped: a gate piped through tail or grep -q reports the
-      # PIPE's exit code.
+      # `--floor 2` is a COMMITTED literal, not a derived one — two spec files
+      # today (the content link, and the contact form's opt-in from N-08).
+      # Adding a third spec reds with `raise the floor to 3`; bump it here.
+      # Never piped: a gate piped through tail or grep -q reports the PIPE's
+      # exit code.
       - name: Run the astro-starter content-link specs
         working-directory: templates/astro-starter
-        run: node ../../scripts/node-test-floor.mjs --floor 1 'src/lib/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs --floor 2 'src/lib/**/*.test.ts'
 
   # THE READER FOR THE push:main ARM. Without this, a red on main lands in the
   # Actions tab that nobody opens — and this workflow was PR-only precisely

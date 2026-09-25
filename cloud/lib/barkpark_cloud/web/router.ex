@@ -198,6 +198,10 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/sites/:id        user(s)   delete a site — tear it down on the box + deregister (write ability)
       GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
       GET     /v1/sites/:id/doctor user  every substrate this site occupies, three-valued, each absence naming its repair (team-scoped)
+      GET     /v1/sites/:id/forms  user(s)   the site's form endpoint state + its inbox, newest first (read ability; N-08)
+      PUT     /v1/sites/:id/forms  user(s)   turn the site's form endpoint on/off on the box (write ability; N-08)
+      PATCH   /v1/sites/:id/forms/submissions/:sub_id user(s)  set one submission's state (new/seen) and/or spam disposition (write ability; N-08)
+      POST    /v1/sites/:id/forms/export user(s)  the selected submissions as CSV or JSON (write ability — bulk personal-data copy; N-08)
       POST    /v1/sites/:id/deploy user(s)   enqueue a Deployment (the build job) (write ability)
       GET     /v1/sites/:id/deployments user(s)  list a site's PRODUCTION deployments, newest first (read ability) — the only route that can express a DENOMINATOR, so an automation credential can compute the owner's own deploy number (D219 re-tiering)
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
@@ -317,6 +321,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Registry.HetznerCatalog
   alias BarkparkCloud.Registry.InstanceApiCatalog
   alias BarkparkCloud.Sites
+  alias BarkparkCloud.Sites.Forms
   alias BarkparkCloud.Sites.RollbackAttribution
   alias BarkparkCloud.Web.Auth
 
@@ -11602,6 +11607,183 @@ defmodule BarkparkCloud.Web.Router do
         end
     end
   end
+
+  # ── Forms inbox (task-71082f5541c13b53, N-08 criterion 2) ────────────────
+  #
+  # The control-plane door onto a hosted site's form intake. The endpoint and
+  # every submission live ON THE BOX, in the site's bound dataset
+  # (`Sites.Forms` moduledoc); these four routes only relay, over the instance
+  # admin credential, to the SCOPED `/w/:ws/p/:proj/v1/data/*` routes of that
+  # one binding. TEAM-SCOPED through `with_team_site/3`: a wrong-team, absent
+  # or malformed site id is the same 404 with no box call made, so the routes
+  # cannot be used to learn that another team's site exists, let alone read
+  # its inbox. Reads need the `read` ability, writes `write` (a browser session
+  # carries root, so the console is never locked out).
+  #
+  # Refusals, one vocabulary for all four (`forms_refusal/2`):
+  #   422 no_content_binding  the site has no workspace/project/dataset
+  #   409 forms_unsupported   the box's plugin roster has no `forms` (the
+  #                           intake route does not exist there)
+  #   409 not_live / no_admin_token   the box cannot be driven yet
+  #   502 instance_unreachable / instance_refused   the box did not answer / refused
+
+  # GET /v1/sites/:id/forms → 200 {forms, submissions, has_more}
+  get "/v1/sites/:id/forms" do
+    with_team_site(conn, {:ability, "read"}, fn conn, site ->
+      bp = Registry.get_barkpark(site.barkpark_id)
+
+      with {:ok, endpoint} <- Forms.endpoint(site, bp),
+           {:ok, page} <- Forms.list(site, bp) do
+        json(conn, 200, %{
+          forms: forms_json(site, bp, endpoint),
+          submissions: page.submissions,
+          has_more: page.has_more
+        })
+      else
+        {:error, reason} -> forms_refusal(conn, reason)
+      end
+    end)
+  end
+
+  # PUT /v1/sites/:id/forms {enabled: bool} → 200 {forms}
+  #
+  # The box write happens FIRST; the control plane's `forms_enabled` bit moves
+  # only after the box accepted it, so the bit never names an endpoint the box
+  # does not hold. The bit is what hands the NEXT deploy BARKPARK_FORMS_URL —
+  # the response says so (`redeploy_needed`), because a site already live keeps
+  # serving pages built without the form until it is rebuilt.
+  put "/v1/sites/:id/forms" do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      case conn.body_params do
+        %{"enabled" => enabled} when is_boolean(enabled) ->
+          bp = Registry.get_barkpark(site.barkpark_id)
+
+          with {:ok, endpoint} <- Forms.put_endpoint(site, bp, enabled),
+               {:ok, updated} <- Registry.set_site_forms_enabled(site, enabled) do
+            push_event(updated.team_id, "sites")
+
+            json(conn, 200, %{
+              forms: forms_json(updated, bp, endpoint),
+              redeploy_needed: site.forms_enabled != enabled
+            })
+          else
+            {:error, %Ecto.Changeset{} = cs} ->
+              json(conn, 422, %{error: "invalid", details: errors(cs)})
+
+            {:error, reason} ->
+              forms_refusal(conn, reason)
+          end
+
+        _ ->
+          json(conn, 422, %{error: "invalid", details: %{enabled: ["must be true or false"]}})
+      end
+    end)
+  end
+
+  # PATCH /v1/sites/:id/forms/submissions/:sub_id {state?, spam?} → 200 {submission}
+  #
+  # The submission is read first and must carry THIS site's slug — two sites
+  # may share a dataset, and an id from the neighbour's inbox is the same 404
+  # as an id that does not exist (`Sites.Forms.update_submission/4`).
+  patch "/v1/sites/:id/forms/submissions/:sub_id" do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      bp = Registry.get_barkpark(site.barkpark_id)
+      changes = if is_map(conn.body_params), do: conn.body_params, else: %{}
+
+      case Forms.update_submission(site, bp, conn.path_params["sub_id"], changes) do
+        {:ok, submission} -> json(conn, 200, %{submission: submission})
+        {:error, reason} -> forms_refusal(conn, reason)
+      end
+    end)
+  end
+
+  # POST /v1/sites/:id/forms/export {ids: [..], format: "csv" | "json"}
+  #   → 200 text/csv (attachment) | 200 {submissions, missing}
+  #
+  # A POST because the selection is a body (up to 1000 ids does not fit a
+  # URL). It writes nothing, but it is gated on `write`, not `read`: the read
+  # tier is widened INTO by every PAT tier and must stay GET-only
+  # (`router_ability_matrix_test.exs`), and a bulk copy of visitors' personal
+  # data out of the dataset is a heavier act than viewing the inbox — a
+  # read-only PAT can list, not export. Ids that are not this site's
+  # submissions come back in `missing` (JSON) or as the `x-barkpark-missing`
+  # count (CSV), never dropped without a trace.
+  post "/v1/sites/:id/forms/export" do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      params = if is_map(conn.body_params), do: conn.body_params, else: %{}
+      ids = params["ids"]
+      format = params["format"] || "csv"
+
+      cond do
+        not (is_list(ids) and ids != [] and length(ids) <= 1000 and Enum.all?(ids, &is_binary/1)) ->
+          json(conn, 422, %{
+            error: "invalid",
+            details: %{ids: ["select between 1 and 1000 submissions"]}
+          })
+
+        format not in ["csv", "json"] ->
+          json(conn, 422, %{error: "invalid", details: %{format: ["must be csv or json"]}})
+
+        true ->
+          bp = Registry.get_barkpark(site.barkpark_id)
+
+          case Forms.export(site, bp, ids) do
+            {:ok, %{submissions: subs, missing: missing}} when format == "json" ->
+              json(conn, 200, %{submissions: subs, missing: missing})
+
+            {:ok, %{submissions: subs, missing: missing}} ->
+              conn
+              |> put_resp_content_type("text/csv")
+              |> put_resp_header(
+                "content-disposition",
+                ~s(attachment; filename="#{site.slug}-submissions.csv")
+              )
+              |> put_resp_header("x-barkpark-missing", Integer.to_string(length(missing)))
+              |> send_resp(200, Forms.to_csv(subs))
+
+            {:error, reason} ->
+              forms_refusal(conn, reason)
+          end
+      end
+    end)
+  end
+
+  defp forms_json(site, bp, endpoint) do
+    %{
+      # The control plane's bit: does the NEXT deploy get BARKPARK_FORMS_URL?
+      enabled: site.forms_enabled == true,
+      # The box's truth: is the intake accepting posts for this site right now?
+      accepting: Map.get(endpoint, :present, false) and Map.get(endpoint, :enabled, false),
+      endpoint_present: Map.get(endpoint, :present, false),
+      endpoint_url: Forms.endpoint_url(site, bp),
+      allowed_origins: Map.get(endpoint, :allowed_origins, []),
+      fields: Map.get(endpoint, :fields, [])
+    }
+  end
+
+  defp forms_refusal(conn, :no_content_binding),
+    do: json(conn, 422, %{error: "no_content_binding"})
+
+  defp forms_refusal(conn, :forms_unsupported), do: json(conn, 409, %{error: "forms_unsupported"})
+  defp forms_refusal(conn, :not_live), do: json(conn, 409, %{error: "not_live"})
+  defp forms_refusal(conn, :no_admin_token), do: json(conn, 409, %{error: "no_admin_token"})
+  defp forms_refusal(conn, :decrypt_failed), do: json(conn, 500, %{error: "decrypt_failed"})
+  defp forms_refusal(conn, :instance_error), do: json(conn, 502, %{error: "instance_unreachable"})
+  defp forms_refusal(conn, :not_found), do: json(conn, 404, %{error: "not_found"})
+  defp forms_refusal(conn, :conflict), do: json(conn, 409, %{error: "conflict"})
+
+  defp forms_refusal(conn, :invalid) do
+    json(conn, 422, %{
+      error: "invalid",
+      details: %{
+        state: ["must be new or seen"],
+        spam: ["must be clean, suspected or spam"]
+      }
+    })
+  end
+
+  defp forms_refusal(conn, {:instance, status}),
+    do: json(conn, 502, %{error: "instance_refused", status: status})
 
   ## Catch-all → 404 JSON
 

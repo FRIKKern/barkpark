@@ -265,4 +265,29 @@ defmodule Barkpark.Sites.DeployRequestTest do
       assert DeployRequest.content_bound?(req)
     end
   end
+
+  describe "the forms opt-in env key (task-71082f5541c13b53, N-08)" do
+    @forms_url "https://box.example/v1/plugins/forms/w/acme/p/blog/d/production/sites/my-site/submissions"
+
+    test "BARKPARK_FORMS_URL is allow-listed and reaches the request env" do
+      assert "BARKPARK_FORMS_URL" in DeployRequest.allowed_env_keys()
+
+      assert {:ok, req} =
+               DeployRequest.new(params(%{"env" => %{"BARKPARK_FORMS_URL" => @forms_url}}))
+
+      assert req.env["BARKPARK_FORMS_URL"] == @forms_url
+    end
+
+    test "a request without it is unchanged (a site without forms deploys as before)" do
+      assert {:ok, req} =
+               DeployRequest.new(params(%{"env" => %{"BARKPARK_DATASET" => "production"}}))
+
+      refute Map.has_key?(req.env, "BARKPARK_FORMS_URL")
+    end
+
+    test "the allow-list stays closed: a near-miss key is still a 400" do
+      assert {:error, "invalid_env", _} =
+               DeployRequest.new(params(%{"env" => %{"BARKPARK_FORM_URL" => @forms_url}}))
+    end
+  end
 end
