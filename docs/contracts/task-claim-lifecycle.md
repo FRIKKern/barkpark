@@ -2,8 +2,7 @@
 
 # The task claim lifecycle — the fenced contract
 
-Companion to [TASK-SYSTEM.md](../setup/TASK-SYSTEM.md), the human guide (setup,
-Studio, organising work). **This file owns the machine half: what each verb does,
+Companion to [TASK-SYSTEM.md](../setup/TASK-SYSTEM.md), the human guide. **This file owns the machine half: what each verb does,
 what it fences on, every refusal it emits.**
 
 Lifecycle: `open · in_progress · blocked · done · cancelled`.
@@ -23,7 +22,7 @@ Lifecycle: `open · in_progress · blocked · done · cancelled`.
 - **Reader order is contractual.** Criteria first, then the purpose dossier; un-dossiered tasks label facts DERIVED. `why` is causal (the problem/risk), never a title/criterion restatement.
 - **Rail awareness (advisory).** Claim/queue-claim/close carry `rail_rev` (ETag of the parent rail: children + `blocks` edges); prime carries `rails: {parent_id → rail_rev}`. `notices`: `blocked_while_claimed`, plus `rail_changed` when body `observed_rail_rev` ≠ current. **Allow-and-fence (L4):** a blocker edge or `move` onto an `in_progress` task bumps its epoch.
 - **Stage** — `POST /v1/tasks/:id/stage`; NO epoch fence. `--note` persists to **`content.disposition_reason`** — DURABLE, unswept. It NEVER rides `content.engagement`: an EPHEMERAL lease of `object`/`holder`/`ts`/`lapse_ttl_seconds`/`lapses_at` and no `note`, deleted wholesale past `task_engagement_ttl_seconds` (900 s). So **`content.engagement.note` has no writer** — a census of it reads 0 and looks like a pass. `task.staged` names the key used as `staged.note_key`. A legacy `engagement.note` is promoted on lapse.
-- **Move (re-parent).** `POST /v1/tasks/:id/move` `{new_parent_id}` (null = root) flips `parent_id`, emits `task.reparented` `{from, to}`, returns `rail_rev` (dest) + `from_rail_rev`. Bad parent → 409 `invalid_parent`, self/descendant → `cycle`, same-parent → no-op.
+- **Move (re-parent).** `POST /v1/tasks/:id/move` `{new_parent_id}` (null = root) flips `parent_id`, emits `task.reparented` `{from, to}`, returns `rail_rev` (dest) + `from_rail_rev`. Bad parent → 409 `invalid_parent`, self/descendant → `cycle`, same-parent → no-op. Its note: [rules](ledger-notes.md).
 
 ## The refusal vocabulary
 
