@@ -16562,3 +16562,38 @@ name unrelated code.
   numstat and the diff read back from history. **The standing ask that would end the class: make
   the thaw record a condition of the thawing PR, not a follow-up, so the fence that reviews the
   harness change also carries its ledger row.**
+
+- **PDS-D763 — THAW RECORD for `7f4fc51bd`: `scripts/pds-pull-proof.sh` followed its sentinel census
+  from `scripts/` to `docs/ledgers/` when #20263 moved the ledgers.** *Filed by lead-studio-r22
+  (task-e2f3fd82fdf8aba0), 2026-09-25. Number minted through
+  `bash scripts/pds-record-parity.sh --allocate-d 1` and reserved in
+  `tooling/pds/d-number-reservations.tsv` in the same commit as this block — never hand-typed
+  (PDS-D725). This is a HISTORICAL thaw record under PDS-D759(i), never a statement of the current
+  freeze (PDS-D732); the live freeze identity stays DERIVED at run time by the `FREEZE_BLOB`
+  read in `scripts/pds-climb-preflight.sh` and this block is never compared to it.*
+
+  **THE BLOBS, READ AND NOT TYPED** — `git rev-parse`, never `shasum` (PDS-D154):
+  - pre  `git rev-parse 7f4fc51bd^:scripts/pds-pull-proof.sh` → `f64bdebd2b6059a26802b3ca6ce80767ae667310`
+  - post `git rev-parse 7f4fc51bd:scripts/pds-pull-proof.sh`  → `09eb0fc923c6aa0d8ed065f911a4056dc087687e`
+
+  **THE CHAIN IS INTACT.** This thaw's PRE blob is byte-identical to PDS-D762's POST blob, so
+  `7f4fc51bd` is the very next thaw after the last recorded one. Axis F counted 24 harness-moving
+  commits in window, 23 resolving to a record and exactly 1 unrecorded (`7f4fc51bd`); this block
+  takes that to 24 and 0.
+
+  **WHAT MOVED.** `+4 −4` (`git diff --numstat 7f4fc51bd^..7f4fc51bd -- scripts/pds-pull-proof.sh`).
+  One functional line — `SENTINEL_EXCLUSION_SOURCE_REL`, the path the harness reads the
+  `PDS_SENTINEL_EXCLUSION` roster from (PDS-D129) — went from `scripts/pds-schema-row-census.md` to
+  `docs/ledgers/pds-schema-row-census.md`, and three comments that name that file followed it.
+  The file itself did NOT move: `scripts/pds-pull-proof.sh` is still at its path. The task that
+  filed this red called it "moved"; the commit edited it.
+
+  **WHY IT IS A CORRECTION AND NOT A WEAKENING.** #20263 moved the census to
+  `docs/ledgers/`. Without this edit the harness would find no census at the old path and run
+  step 6 on its literal fallback, UNCHECKED — loud, but no longer derived from the one declaration.
+  The edit keeps the roster derived. No assertion was relaxed and no arm was removed.
+
+  **SAME CLASS AS PDS-D761 AND PDS-D762.** A path-only edit is still a thaw: axis F joins on the
+  post-merge blob OID, so any byte change to the harness needs a record. #20263 was a repo-tidy PR
+  reviewed outside the PDS fence, and the record was left behind again; axis F went DIVERGENT on
+  the advisory `PDS census / parity / scratch-target harnesses` check from its merge on.
