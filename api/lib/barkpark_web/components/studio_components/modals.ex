@@ -904,6 +904,9 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_profile, :boolean, default: false
   attr :user_name, :string, required: true
   attr :user_color, :string, required: true
+  # The scoped `…/studio/_account` page (download or erase your data). nil on a
+  # surface that cannot build a scoped path — the link is then not rendered.
+  attr :account_path, :string, default: nil
 
   def profile_modal(assigns) do
     ~H"""
@@ -950,7 +953,14 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               <% end %>
             </div>
           </div>
-          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+          <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 8px;">
+            <a
+              :if={@account_path}
+              href={@account_path}
+              class="text-sm"
+              style="margin-right: auto;"
+              data-test-id="profile-account-link"
+            >Download or erase your data</a>
             <button type="button" class="btn btn-sm" phx-click="close-profile">Cancel</button>
             <button type="submit" class="btn btn-primary btn-sm">Save</button>
           </div>
@@ -976,6 +986,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_profile, :boolean, default: false
   attr :user_name, :string, default: ""
   attr :user_color, :string, default: ""
+  attr :account_path, :string, default: nil
 
   attr :image_picker_field, :string, default: nil
   attr :uploads, :map, required: true
@@ -999,6 +1010,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
       show_profile={@show_profile}
       user_name={@user_name}
       user_color={@user_color}
+      account_path={@account_path}
     />
     <.image_picker_modal
       image_picker_field={@image_picker_field}
