@@ -164,7 +164,7 @@ jobs:
       # RUNTIME-UNAVAILABLE, b-unavailable=1/6, and seal-run.sh refuses (exit 6).
       # The version is READ from that declaration file, not retyped here, so the
       # guard's pin and this job cannot drift apart.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: cloud/priv/static/__node-version
 
