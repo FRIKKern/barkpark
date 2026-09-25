@@ -274,6 +274,8 @@ defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
   end
 
   test "a committed doc id and type rename after prefetch rejects history on the same row" do
+    Barkpark.DeletedWorkspaceResidue.purge_on_exit()
+
     Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
       workspace = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(workspace)
