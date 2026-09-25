@@ -157,6 +157,11 @@ defmodule Barkpark.Application do
     children =
       child_specs(plugin_children, oban_config, sync_children, self_update_children, boot_mode())
 
+    # Route every Oban job body onto the job pool. Attached BEFORE the tree
+    # starts so the first job Oban runs is already routed; a no-op per job
+    # whenever the pool is not running (see `Barkpark.Repo.route_job_to_job_pool/4`).
+    :ok = Barkpark.Repo.attach_job_pool_router()
+
     # Chapter 64 (layering isolates blast radius). The top supervisor keeps the
     # OTP-default 3-restarts-in-5s budget — made EXPLICIT here — but that budget
     # now guards only critical infra (Repo/Oban/PubSub/Endpoint) and the
@@ -355,7 +360,7 @@ defmodule Barkpark.Application do
   def child_specs(plugin_children, oban_config, sync_children, self_update_children, :seed) do
     plugin_children
     |> child_specs(oban_config, sync_children, self_update_children, :full)
-    |> Enum.reject(&(&1 == BarkparkWeb.Endpoint))
+    |> Enum.reject(&(&1 == BarkparkWeb.Endpoint or job_pool_child?(&1)))
     |> Enum.map(fn
       {Oban, config} -> {Oban, Keyword.merge(config, queues: false, plugins: false)}
       other -> other
@@ -364,6 +369,12 @@ defmodule Barkpark.Application do
 
   def child_specs(plugin_children, oban_config, sync_children, self_update_children, :full)
       when is_list(plugin_children) and is_list(sync_children) and is_list(self_update_children) do
+    plugin_children
+    |> static_full_children(oban_config, sync_children, self_update_children)
+    |> with_job_pool_before_oban()
+  end
+
+  defp static_full_children(plugin_children, oban_config, sync_children, self_update_children) do
     [
       # Dedicated Finch pool for the auth/login OUTBOUND path (Felix W10,
       # task-felix-outbound-pool-isolation + task-felix-sso-explicit-timeout).
@@ -495,6 +506,19 @@ defmodule Barkpark.Application do
       ]
   end
 
+  # jpf-bl-oban-pool-partition: splice the Oban JOB pool — a second instance of
+  # Barkpark.Repo that job bodies check out of, so background work can never
+  # drain the pool HTTP requests use — immediately BEFORE the Oban child, so
+  # Oban's first job finds it up. The list is unchanged when `:oban_pool_size`
+  # is 0 (config/test.exs). Derivation and numbers:
+  # `Barkpark.Repo.job_pool_child_specs/0`.
+  defp with_job_pool_before_oban(children) do
+    Enum.flat_map(children, fn
+      {Oban, _config} = oban -> Barkpark.Repo.job_pool_child_specs() ++ [oban]
+      other -> [other]
+    end)
+  end
+
   # The `:one_shot` exclusion predicate, spelled out beside the clause that uses
   # it. Everything NOT named here survives, so a child added to the `:full` list
   # above is present in one-shot mode too (the same derived-not-hand-picked rule
@@ -502,7 +526,13 @@ defmodule Barkpark.Application do
   # carries the incident that put it there.
   defp one_shot_excluded?(BarkparkWeb.Endpoint), do: true
   defp one_shot_excluded?({Oban, _config}), do: true
-  defp one_shot_excluded?(_other), do: false
+  # The Oban job pool serves only job bodies; with Oban absent it would hold
+  # `:oban_pool_size` idle connections for nothing.
+  defp one_shot_excluded?(child), do: job_pool_child?(child)
+
+  # `:seed` starts Oban inert (no queues), so it rejects the job pool too.
+  defp job_pool_child?(%{id: id}), do: id == Barkpark.Repo.job_pool_name()
+  defp job_pool_child?(_other), do: false
 
   # C4-1: fold plugin-contributed Oban Cron entries into the host's Oban
   # keyword config. Pure, side-effect-free, and unit-testable (see

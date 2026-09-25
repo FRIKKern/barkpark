@@ -1085,6 +1085,36 @@ if proxies = System.get_env("BARKPARK_TRUSTED_PROXIES") do
          end)
 end
 
+# ── The Oban JOB pool (jpf-bl-oban-pool-partition) ────────────────────────────
+#
+# Every Oban job body runs on a second `Barkpark.Repo` instance of this many
+# connections, never on the POOL_SIZE pool HTTP uses — see the pool note above
+# `repo_opts` below for the measurements and the connection arithmetic, and
+# `Barkpark.Repo.job_pool_child_specs/0` for the mechanism. Outside the :prod
+# block on purpose: dev gets the same partition (so a local load run measures
+# the shape prod runs), and :test gets NONE — the SQL sandbox owns the
+# connection there, and a real second pool could not see a test's rows.
+#
+# OBAN_POOL_SIZE overrides it; "0" disables the partition (every job back on the
+# shared pool — the pre-partition shape, kept as the incident escape hatch). A
+# malformed value REFUSES BOOT, as BARKPARK_DB_STATEMENT_TIMEOUT does.
+if config_env() != :test do
+  oban_pool_size =
+    case Integer.parse(String.trim(System.get_env("OBAN_POOL_SIZE") || "4")) do
+      {n, ""} when n >= 0 ->
+        n
+
+      _ ->
+        raise """
+        OBAN_POOL_SIZE is #{inspect(System.get_env("OBAN_POOL_SIZE"))}, which is not a
+        non-negative integer. It is the connection count of the Oban job pool;
+        "0" disables the partition. Unset, the default is 4.
+        """
+    end
+
+  config :barkpark, :oban_pool_size, oban_pool_size
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -1111,8 +1141,8 @@ if config_env() == :prod do
   # suite's own fan-out, where nothing is actually starved for long and no user is
   # waiting. Guerrilla prod's failures (root-caused live: tooling/grip/ledger/
   # dr-w5-500-class-distinct-requests-2026-08-06.md, birth-fence-500-root-cause-
-  # 2026-07-31.md) are a STRUCTURALLY oversubscribed pool: 29 declared Oban queue
-  # slots share this same POOL_SIZE (default 10) with all HTTP traffic on a 2-vCPU
+  # 2026-07-31.md) were a STRUCTURALLY oversubscribed pool: 29 declared Oban queue
+  # slots shared this same POOL_SIZE (default 10) with all HTTP traffic on a 2-vCPU
   # box already deep in swap, and individual jobs (EdgeProjector, SSR site builds)
   # have been observed holding a connection 12-38s — well past even a 5s target and
   # past the unconfigured-here Ecto :timeout default (15_000ms). Widening the queue
@@ -1123,11 +1153,31 @@ if config_env() == :prod do
   # raising POOL_SIZE on a 2-core box already 1.1 GB into swap" (bp-deploy-
   # reliability-charter.md D75) and "raising POOL_SIZE just moves contention into
   # Postgres — sizing waits for guerrilla-db-probe evidence" (bp-jarl-platform-
-  # followups-charter.md D11). The actual fix is tracked and gated on measurement:
-  # `jpf-bl-guerrilla-db-probe-arm` (read POOL_SIZE/max_connections/pg_stat_activity
-  # live) unblocks `jpf-bl-oban-pool-partition` (partition or cap Oban's pool share,
-  # then size POOL_SIZE on the numbers — NOT on feel). Both are open and unclaimed
-  # as of 2026-08-19; see also `mob-lm-guerrilla-pool-storm`.
+  # followups-charter.md D11).
+  #
+  # ── POOL_SIZE decision (jpf-bl-oban-pool-partition, 2026-09-25) ────────────
+  #
+  # MEASURED on guerrilla (cp-ops guerrilla-db-probe, run 36119486090,
+  # 2026-09-25T09:41Z): POOL_SIZE set nowhere, so this default 10 is live; only
+  # the green slot active; max_connections = 100; pg_stat_activity active 1 +
+  # idle 13 client backends (+5 background) = 11 app (10 pool + Oban's LISTEN
+  # notifier) + 3 other.
+  #
+  # THE FIX IS A PARTITION, NOT A RAISE. Oban job bodies now run on their own
+  # pool (OBAN_POOL_SIZE, default 4, set above this block), so the 29 declared
+  # queue slots take ZERO of these 10. A cap could not do it: OSS Oban has no
+  # global limit and the queue set has 9 queues, so the smallest possible
+  # aggregate is 9 of 10. Measured locally (scripts/mutate-load, 200
+  # create+publish rounds x 25, 29 slots of pg_sleep(3 s) jobs holding): shared
+  # pool 1/200 and 18/200 rounds landed, the rest 503 pool drops, create p95
+  # 9.1-21.0 s; partitioned 200/200 twice, create p95 324-511 ms, 0 pool drops.
+  #
+  # POOL_SIZE STAYS 10. Headroom exists — a flip holds 2 x (10 + 4 + 1 notifier
+  # + 1 transient export pool) + 3 other = 35 of 97 usable (100 - 3 superuser
+  # reserved) — but the measured 2026-09-05 500s were HTTP ledger polling on a
+  # 2-vCPU box 1 GB into swap, which more web connections would feed, not fix.
+  # Pinned by test/config/oban_pool_budget_test.exs; see also
+  # `mob-lm-guerrilla-pool-storm`.
   # ── statement_timeout: the SERVER-SIDE bound on ONE statement ──────────────
   #
   # MEASURED on guerrilla 2026-09-01T21:43-21:46Z (task-e2f5ecca0be9a6d1):
