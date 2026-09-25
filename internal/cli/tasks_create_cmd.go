@@ -814,6 +814,11 @@ func ensureTaskPortableBrief(body map[string]any) {
 	// shape is unchanged — strings.NewReplacer, one non-overlapping pass — and
 	// both corpus tests below still run through ensureTaskPortableBrief, so
 	// rewriting it as sequential ReplaceAll calls still reds them.
+	//
+	// LOSSY, ON PURPOSE: the purpose block is a display rendering of
+	// `description` that drops every "**", "__" and "`" — code spans lose their
+	// backticks. body["description"] itself is never touched here and is sent
+	// byte-verbatim. The full statement lives beside briefPurposeDroppedSequences.
 	description = briefPurposeStripOnePass(description)
 	// THE AUTO-STUB RULING (task-23c70e97c90809c6, ruling B: THE STUB STAYS).
 	// tooling/grip/ledger/brief-purpose-drift-2026-08-20.md counted 122 published
