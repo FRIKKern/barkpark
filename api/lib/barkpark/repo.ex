@@ -411,4 +411,130 @@ defmodule Barkpark.Repo do
   """
   @spec export_pool_size() :: integer()
   def export_pool_size, do: Application.get_env(:barkpark, :export_pool_size, 1)
+
+  # ── The Oban job pool (jpf-bl-oban-pool-partition) ─────────────────────────
+
+  @job_pool Barkpark.Repo.Jobs
+  @job_pool_handler_id "barkpark-oban-job-pool-router"
+
+  @doc """
+  The registered name of the second `Barkpark.Repo` instance that Oban job
+  bodies run on. A NAME, not a module: it is this repo, started twice.
+  """
+  @spec job_pool_name() :: atom()
+  def job_pool_name, do: @job_pool
+
+  @doc """
+  How many connections the Oban job pool gets. `0` disables it (config/test.exs:
+  the SQL sandbox owns the connection there, and a second real pool would not
+  see a test's uncommitted rows) and every job runs on the shared pool, exactly
+  as before this pool existed.
+  """
+  @spec job_pool_size() :: non_neg_integer()
+  def job_pool_size, do: Application.get_env(:barkpark, :oban_pool_size, 0)
+
+  @doc """
+  The child spec list for the Oban job pool: `[spec]`, or `[]` when
+  `job_pool_size/0` is `0`.
+
+  ## Why a partition and not a cap (the decision, with its numbers)
+
+  Every Oban job body used to check out of the ONE `POOL_SIZE` pool (prod
+  default 10) that every HTTP request uses, and `config/config.exs` declares 29
+  queue slots across 9 queues. Saturated background work could therefore take
+  all ten connections and leave HTTP none. Measured locally with
+  `scripts/mutate-load` (200 create+publish rounds x 25) while 29 slots of
+  `pg_sleep(3 s)` jobs ran: on the shared pool 1/200 and 18/200 rounds landed,
+  the rest `503` pool drops; on this partition 200/200 both times, create p95
+  under 0.52 s. The numbers and the POOL_SIZE arithmetic are in the note above
+  `repo_opts` in `config/runtime.exs`.
+
+  Capping the aggregate cannot fix that on this queue set: OSS Oban has no
+  global limit, so the floor is one slot per queue, i.e. 9 of 10 connections,
+  leaving HTTP one. Raising `POOL_SIZE` alone moves the contention into
+  Postgres and still lets Oban take every new connection. A partition does
+  what neither can: job bodies draw from THIS pool, so however many slots are
+  busy and however long they hold, the web pool keeps all `POOL_SIZE` members.
+
+  What still uses the shared pool, and why that is safe: Oban's own
+  producer / stager / cron / pruner queries (millisecond checkouts, never a
+  job body), an HTTP request that ENQUEUES a job (it stays on the request's
+  pool; its insert is one short statement), and any process a job body spawns
+  (the dynamic repo is per-process — no worker spawns one today).
+
+  ## Queue timing
+
+  29 slots share these few connections, so jobs WAIT for one. A job has no
+  caller waiting on it, so waiting is the right answer and failing is the wrong
+  one (it burns an attempt). On this pool only: `queue_target` / `queue_interval`
+  10 s / 60 s and a 60 s client `:timeout` (which counts the queue wait). With
+  Ecto's 15 s default, 87 back-to-back 3 s jobs on 4 connections lost 39 to
+  `57014 canceling statement due to user request`; at 60 s all 87 completed in
+  67 s. The waiters are bounded by the declared slots, and `statement_timeout`
+  (30 s in prod) still bounds each statement server-side. The web pool keeps
+  DBConnection's 50 ms / 1 s and Ecto's 15 s on purpose — see the note above
+  `repo_opts` in `config/runtime.exs`.
+  """
+  @spec job_pool_child_specs() :: [Supervisor.child_spec()]
+  def job_pool_child_specs do
+    case job_pool_size() do
+      size when is_integer(size) and size > 0 ->
+        opts =
+          config()
+          |> Keyword.drop([
+            :name,
+            :pool,
+            :pool_size,
+            :pool_count,
+            :queue_target,
+            :queue_interval,
+            :timeout
+          ])
+          |> Keyword.merge(
+            name: @job_pool,
+            # NEVER inherit `pool:` from config (in :test it is the SQL
+            # sandbox); this is always a real pool.
+            pool: DBConnection.ConnectionPool,
+            pool_size: size,
+            queue_target: 10_000,
+            queue_interval: 60_000,
+            timeout: 60_000
+          )
+
+        [Supervisor.child_spec({__MODULE__, opts}, id: @job_pool)]
+
+      _ ->
+        []
+    end
+  end
+
+  @doc """
+  Attach the `[:oban, :job, :start]` handler that routes a job body onto the
+  job pool. Oban emits that event from the job's own Task process, before
+  `perform/1`, so `put_dynamic_repo/1` there covers the whole body AND Oban's
+  ack of the job, and dies with the process. Idempotent.
+  """
+  @spec attach_job_pool_router() :: :ok
+  def attach_job_pool_router do
+    _ = :telemetry.detach(@job_pool_handler_id)
+
+    :ok =
+      :telemetry.attach(
+        @job_pool_handler_id,
+        [:oban, :job, :start],
+        &__MODULE__.route_job_to_job_pool/4,
+        nil
+      )
+  end
+
+  @doc false
+  # A contention remedy, never a correctness precondition: when the job pool is
+  # not running (disabled, one-shot/seed boot, or mid-restart) the job stays on
+  # the shared pool rather than failing. `Oban.Testing.perform_job/3` runs the
+  # executor in the TEST process; with the pool disabled in :test this is a
+  # no-op there, so a test's sandbox connection is never swapped away.
+  def route_job_to_job_pool(_event, _measurements, _meta, _config) do
+    if Process.whereis(@job_pool), do: put_dynamic_repo(@job_pool)
+    :ok
+  end
 end
