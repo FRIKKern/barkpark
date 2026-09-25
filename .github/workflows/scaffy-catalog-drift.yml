@@ -146,7 +146,7 @@ jobs:
           # parent (the base tip), so HEAD^1..HEAD is exactly what merging adds.
           fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod # honors the pinned toolchain
 
