@@ -45,8 +45,7 @@ says `drafts.gh-8463`, your key says `gh-8463`, the join yields nothing, no erro
 | `bp doc query` | `documents` |
 
 Reading `documents` off a tasks response yields `None`, and `or []` turns that into
-an empty list — which reads as *"the query worked, there is nothing"*. It inverts the
-answer instead of failing.
+an empty list — which reads as *"the query worked, there is nothing"*.
 
 > **Fix:** never `.get(key, [])` for a list you require. Assert the key, and print the
 > top-level key set the first time you touch a new route.
@@ -87,15 +86,15 @@ because it is unpublished, but because that verb does not project the field.
 ## Trap 5 — `.children` has no claim
 
 `.children` is authoritative for *who belongs*: on `dr-backlog-never-started`
-(2026-09-25) `child_count` 314 = `len(children)`. Seven keys: `criteria_progress`,
-`doc_id`, `execution_class`, `inserted_at`, `lifecycle_status`, `title`,
-`updated_at` — `criteria_progress` is **omitted** on a row with no criteria (1 of
-314), so read the key union, never `children[0]`.
+(2026-09-25) `child_count` 314 = `len(children)`. At most seven keys:
+`criteria_progress`, `doc_id`, `execution_class`, `inserted_at`, `lifecycle_status`,
+`title`, `updated_at`. Both this and `ls --parent` **omit** `criteria_progress` on a
+row with no criteria (1 of 314): test with `has()`, never `== null` (true for a
+missing key), and read the key union, never `children[0]`.
 
 There is **no `claim` or `assignee`**. Do not fetch per row: `bp task ls --parent
-<epic> --all -o json` returns the same 314 with both, plus `content`, in one read
-(`criteria_progress` is `null` there, not absent). The screen:
-[ledger-notes.md](ledger-notes.md#screening-an-epics-children).
+<epic> --all -o json` returns the same 314 with both, plus `content`, in one read.
+The screen: [ledger-notes.md](ledger-notes.md#screening-an-epics-children).
 
 Drafts are excluded from `.children`, `child_count` and the `--parent` read.
 
