@@ -47,7 +47,8 @@
 #   LAUNDERED        zero scheduled successes AND at least one success on some
 #                    other event. RED, and reported as its own line because it
 #                    is the state a naive reader calls healthy.
-#   STALE            it has succeeded, but not within --stale-days, while
+#   STALE            it has succeeded, but not within its ALLOWED SILENCE (derived
+#                    from its own cron, floor --stale-days — see below), while
 #                    scheduled runs kept happening. RED.
 #   NEVER RAN        a cron is declared and the API knows of ZERO completed
 #                    scheduled runs. Reported loudly, NOT red by default: a cron
@@ -139,12 +140,15 @@
 #   scripts/scheduled-arm-health.sh                       # whole tree, live API
 #   scripts/scheduled-arm-health.sh --workflow studio-journey-smoke.yml
 #   scripts/scheduled-arm-health.sh --runs-dir DIR        # offline fixtures
-#   --min-runs N (default 5) · --stale-days N (default 21) · --strict-never-ran
+#   --min-runs N (default 5) · --stale-days N (default 21, the FLOOR of the
+#   cron-derived allowed silence) · --slack-hours N (default 48) · --strict-never-ran
 #   --repo owner/name (default: read from .github/required-checks.json)
 #   --now ISO8601 (default: now — pinned by the self-test so it cannot rot)
 #
 # OFFLINE FIXTURES. --runs-dir DIR reads DIR/<basename>.schedule.json and
-# DIR/<basename>.all.json, each the raw `actions/workflows/<file>/runs` payload,
+# DIR/<basename>.all.json, each the raw `actions/workflows/<file>/runs` payload
+# (DIR/<basename>.all.page<N>.json for the deeper unfiltered pages; one that the
+# walk needs — total_count says it exists — and that is absent is UNREADABLE),
 # and DIR/jobs.<run_id>.json for the job-level read, each the raw
 # `actions/runs/<id>/jobs` payload. A referenced jobs fixture that is ABSENT is
 # UNREADABLE and exits 2 — never a quiet skip back onto the `ok` path.
@@ -188,6 +192,43 @@
 # ubuntu-latest); when that read is unavailable NOTHING is excused and the
 # line says so — the old, stricter verdict, never a quieter one.
 #
+# ─────────────────────────────────────────────────────────────────────────────
+#  A FILTERED LISTING CAN LAG; A FLAT THRESHOLD CANNOT READ A MONTHLY CRON
+#  (task-1662605eac0c70ee, measured 2026-09-25)
+# ─────────────────────────────────────────────────────────────────────────────
+# Two false STALE rows on run 36001198282 (2026-09-24):
+#
+#   breakglass-watch.yml (cron */30, also push/PR). This file ALREADY asked the
+#   server for `event=schedule&status=completed`. That listing answered
+#   total_count=207 with its newest success on 2026-08-23 — while scheduled
+#   successes existed every few hours (e.g. run 36122169740, 2026-09-25T10:06Z).
+#   The same query answered total_count=723 a day later, and on 2026-09-25T14:46Z
+#   `…&status=completed&event=schedule` answered total 703 / newest 20:44Z
+#   (09-24) while `…&event=schedule` answered 723 / newest 10:06Z (09-25) in the
+#   same minute. The FILTERED listing is served from an index that can lag the
+#   runs themselves by weeks. It is not "the newest N runs, then filtered":
+#   that reader never existed here.
+#   So: (1) status is filtered CLIENT-side, one fewer server filter; (2) the
+#   schedule rows of the unfiltered listing are UNIONED in, by id; (3) when the
+#   row would still be STALE, the unfiltered listing is walked further back
+#   (up to $WALK_PAGES pages) before the red is printed, because a push-heavy
+#   workflow's first unfiltered page can hold no scheduled run at all. Every
+#   row rescued this way is COUNTED on the line ("+N from the unfiltered
+#   listing"), so a lagging index is visible, never absorbed silently.
+#
+#   renew-mail-cert.yml (cron "17 4 1 * *"). Last scheduled success 09-01, next
+#   fire 10-01. A flat 21-day threshold reds it on day 22 of every month for
+#   doing exactly what it was told. The allowed silence is now DERIVED from the
+#   workflow's own cron(s): the longest interval between consecutive fires of
+#   the union of its schedules (several crons = the tightest schedule that still
+#   bounds the gap), plus --slack-hours for GitHub's late and dropped crons,
+#   and never less than --stale-days — that floor is a tolerance for a failure
+#   streak on a frequent cron, which the cron text cannot supply. Monthly:
+#   31d + 48h = 33d. Every row prints the cron(s), the gap and the threshold.
+#   The gap is computed by python3 (stdlib only). Where it cannot be computed
+#   the row uses the --stale-days floor and SAYS so — the old, stricter verdict,
+#   never a quieter one.
+#
 # EXIT: 0 no red · 1 at least one red · 2 cannot measure.
 #
 # bash 3.2 compatible (macOS system bash): no associative arrays, no mapfile.
@@ -198,6 +239,8 @@ ROOT="${SAH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 WORKFLOWS_DIR="$ROOT/.github/workflows"
 MIN_RUNS=5
 STALE_DAYS=21
+SLACK_HOURS=48
+WALK_PAGES=5
 STRICT_NEVER_RAN=0
 RUNS_DIR=""
 ONLY=""
@@ -209,6 +252,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --min-runs) MIN_RUNS="${2:-}"; shift 2 ;;
     --stale-days) STALE_DAYS="${2:-}"; shift 2 ;;
+    --slack-hours) SLACK_HOURS="${2:-}"; shift 2 ;;
     --strict-never-ran) STRICT_NEVER_RAN=1; shift ;;
     --runs-dir) RUNS_DIR="${2:-}"; shift 2 ;;
     --workflow) ONLY="${2:-}"; shift 2 ;;
@@ -219,6 +263,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+case "$STALE_DAYS$SLACK_HOURS$MIN_RUNS" in *[!0-9]*|'') echo "scheduled-arm-health: REFUSING — --stale-days/--slack-hours/--min-runs take whole numbers" >&2; exit 2 ;; esac
 [ -d "$WORKFLOWS_DIR" ] || { echo "scheduled-arm-health: REFUSING — no .github/workflows/ under $ROOT" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "scheduled-arm-health: REFUSING — jq is not on PATH" >&2; exit 2; }
 [ -n "$NOW_ISO" ] || NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -243,16 +288,19 @@ if [ -z "$REPO" ] && [ -z "$RUNS_DIR" ]; then
   [ -n "$REPO" ] || { echo "scheduled-arm-health: REFUSING — no repo in .github/required-checks.json and no --repo" >&2; exit 2; }
 fi
 
-# Fetch one workflow's completed runs for one event scope. Echoes the JSON body,
-# or the literal UNREADABLE — which the caller turns into exit 2, never a skip.
+# Fetch one workflow's runs for one event scope (and, for `all`, one page).
+# Echoes the JSON body, or the literal UNREADABLE — which the caller turns into
+# exit 2, never a skip. NO server-side status filter: see "A FILTERED LISTING
+# CAN LAG" above; `completed` is selected client-side in summarise().
 fetch_runs() {
-  local base="$1" scope="$2" body="" q=""
+  local base="$1" scope="$2" page="${3:-1}" body="" q=""
   if [ -n "$RUNS_DIR" ]; then
     local f="$RUNS_DIR/$base.$scope.json"
+    [ "$page" -eq 1 ] || f="$RUNS_DIR/$base.$scope.page$page.json"
     [ -f "$f" ] || { echo UNREADABLE; return 0; }
     body="$(cat "$f")"
   else
-    q="per_page=100&status=completed"
+    q="per_page=100&page=$page"
     [ "$scope" = "schedule" ] && q="$q&event=schedule"
     body="$(gh api "repos/$REPO/actions/workflows/$base/runs?$q" 2>&1)" || { echo UNREADABLE; return 0; }
   fi
@@ -298,11 +346,14 @@ newest_success_id() {
     | sed 's/^null$//'
 }
 
-# total_count <TAB> received <TAB> success <TAB> failure <TAB> newest-success-iso
+# total_count <TAB> received <TAB> completed <TAB> success <TAB> failure <TAB> newest-success-iso
+# A row with no `status` (an older fixture) counts as completed.
 summarise() {
   jq -r '
-    (.workflow_runs // []) as $r
-    | [ (.total_count // ($r|length)),
+    (.workflow_runs // []) as $all
+    | [ $all[] | select((.status // "completed") == "completed") ] as $r
+    | [ (.total_count // ($all|length)),
+        ($all|length),
         ($r|length),
         ([$r[]|select(.conclusion=="success")]|length),
         ([$r[]|select(.conclusion=="failure")]|length),
@@ -343,10 +394,103 @@ excused_skip() {
   return 1
 }
 
+# union_schedule <filtered-listing-json> <unfiltered-page-json> — the filtered
+# listing plus every `event == schedule` row of the unfiltered page whose id it
+# does not already carry. Keeps the filtered listing's total_count and records
+# how many rows were added as .rescued, so the caller can print it.
+# Both documents go in on stdin (jq -s): a 100-run page as --argjson overflows
+# ARG_MAX, measured on the live read of absent-context-census.yml.
+union_schedule() {
+  jq -c -s '
+    .[1] as $extra
+    | .[0]
+    | (.workflow_runs // []) as $mine
+    | ([ $mine[] | .id | select(. != null) ]) as $ids
+    | [ ($extra.workflow_runs // [])[]
+        | select((.event // "") == "schedule" and .id != null)
+        | select(.id as $i | ($ids | index($i)) == null) ] as $add
+    | .workflow_runs = ($mine + $add)
+    | .rescued = ((.rescued // 0) + ($add | length))' <<<"$1
+$2"
+}
+
+# oldest_iso <runs-json> — the oldest start time on one page, empty when none.
+oldest_iso() { jq -r '[(.workflow_runs // [])[] | (.run_started_at // .created_at // empty)] | sort | first // ""'; }
+
+# cron_exprs <workflow-file> — each `- cron:` value, one per line, unquoted.
+cron_exprs() {
+  sed -n -E 's/^[[:space:]]*-[[:space:]]*cron:[[:space:]]*//p' "$1" \
+    | sed -E 's/[[:space:]]+#.*$//; s/^["'"'"']//; s/["'"'"'][[:space:]]*$//; s/[[:space:]]+$//'
+}
+
+# cron_max_gap <expr>... — the longest interval, in seconds, between consecutive
+# fires of the UNION of the given crons (UTC, the way GitHub reads them). Prints
+# nothing when python3 is missing or an expression does not parse; the caller
+# then falls back to the --stale-days floor and says so.
+cron_max_gap() {
+  python3 - "$@" 2>/dev/null <<'PY'
+import sys, datetime
+NAMES = {"jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,"jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12,
+         "sun":0,"mon":1,"tue":2,"wed":3,"thu":4,"fri":5,"sat":6}
+def field(s, lo, hi):
+    out = set()
+    for part in s.lower().split(","):
+        step = 1
+        if "/" in part:
+            part, st = part.split("/", 1); step = int(st)
+            if step < 1: raise ValueError(s)
+        if part == "*":
+            a, b = lo, hi
+        elif "-" in part:
+            x, y = part.split("-", 1); a, b = int(NAMES.get(x, x)), int(NAMES.get(y, y))
+        else:
+            a = int(NAMES.get(part, part)); b = hi if step > 1 else a
+        if a < lo or b > hi or a > b: raise ValueError(s)
+        out.update(range(a, b + 1, step))
+    return out
+def fires(expr, start, days):
+    f = expr.split()
+    if len(f) != 5: raise ValueError(expr)
+    mi, hr = field(f[0], 0, 59), field(f[1], 0, 23)
+    dom, mon = field(f[2], 1, 31), field(f[3], 1, 12)
+    dow = {d % 7 for d in field(f[4], 0, 7)}
+    dom_star, dow_star = f[2].startswith("*"), f[4].startswith("*")
+    for n in range(days):
+        d = start + datetime.timedelta(days=n)
+        if d.month not in mon: continue
+        in_dom, in_dow = d.day in dom, (d.isoweekday() % 7) in dow
+        # Vixie cron: when BOTH day fields are restricted, either one matches.
+        ok = (in_dom and in_dow) if (dom_star or dow_star) else (in_dom or in_dow)
+        if not ok: continue
+        base = datetime.datetime(d.year, d.month, d.day)
+        for h in sorted(hr):
+            for m in sorted(mi):
+                yield base + datetime.timedelta(hours=h, minutes=m)
+# Nine years from a fixed start covers every month length and two leap days,
+# so even "0 0 29 2 *" has a gap to measure.
+start, days = datetime.date(2025, 1, 1), 9 * 366
+times = set()
+for e in sys.argv[1:]:
+    times.update(fires(e, start, days))
+t = sorted(times)
+if len(t) < 2: raise SystemExit(1)
+print(int(max((b - a).total_seconds() for a, b in zip(t, t[1:]))))
+PY
+}
+
+# human duration for seconds: 1800 -> 30m, 90000 -> 1d1h
+dur() {
+  local s="$1" d h m
+  d=$((s / 86400)); h=$(((s % 86400) / 3600)); m=$(((s % 3600) / 60))
+  if [ "$d" -gt 0 ]; then printf '%sd%s' "$d" "$([ "$h" -gt 0 ] && printf '%sh' "$h")"
+  elif [ "$h" -gt 0 ]; then printf '%sh%s' "$h" "$([ "$m" -gt 0 ] && printf '%sm' "$m")"
+  else printf '%sm' "$m"; fi
+}
+
 say() { printf '%s\n' "$*"; }
 
 say "scheduled-arm-health — roster = the tree at ${ROOT}, as of $NOW_ISO"
-say "  min-runs=$MIN_RUNS  stale-days=$STALE_DAYS  strict-never-ran=$STRICT_NEVER_RAN  source=${RUNS_DIR:-live API ($REPO)}"
+say "  min-runs=$MIN_RUNS  stale-days(floor)=$STALE_DAYS  slack-hours=$SLACK_HOURS  strict-never-ran=$STRICT_NEVER_RAN  source=${RUNS_DIR:-live API ($REPO)}"
 say ""
 
 FILES=""
@@ -395,17 +539,78 @@ while IFS= read -r base; do
     exit 2
   fi
 
-  IFS="$(printf '\t')" read -r s_tc s_got s_ok s_fail s_last <<EOF
+  # ── ALLOWED SILENCE, FROM THIS WORKFLOW'S OWN CRON(S) ─────────────────────
+  crons="$(cron_exprs "$WORKFLOWS_DIR/$base")"
+  cron_list="$(printf '%s' "$crons" | tr '\n' '|' | sed 's/|$//; s/|/", "/g')"
+  gap=""
+  cron_args=()
+  while IFS= read -r c; do [ -n "$c" ] && cron_args+=("$c"); done <<EOF
+$crons
+EOF
+  [ "${#cron_args[@]}" -eq 0 ] || gap="$(cron_max_gap "${cron_args[@]}")"
+  floor_s=$((STALE_DAYS * 86400))
+  if [ -n "$gap" ]; then
+    allowed_s=$((gap + SLACK_HOURS * 3600))
+    allowed_how="cron \"$cron_list\" max gap $(dur "$gap") + ${SLACK_HOURS}h slack"
+    if [ "$allowed_s" -lt "$floor_s" ]; then
+      allowed_s=$floor_s
+      allowed_how="$allowed_how, raised to the --stale-days floor ${STALE_DAYS}d"
+    fi
+  else
+    allowed_s=$floor_s
+    allowed_how="cron \"$cron_list\" gap NOT COMPUTED (python3 missing or cron unparsed) — --stale-days floor ${STALE_DAYS}d"
+  fi
+
+  # ── THE FILTERED LISTING CAN LAG: UNION THE UNFILTERED ROWS ─────────────────
+  sched="$(union_schedule "$sched" "$allev")" || {
+    say "CANNOT MEASURE  $base — the schedule and all-events listings could not be merged."
+    exit 2
+  }
+  walked=1
+  while :; do
+    IFS="$(printf '\t')" read -r s_tc s_got s_done s_ok s_fail s_last <<EOF
 $(printf '%s' "$sched" | summarise)
 EOF
-  IFS="$(printf '\t')" read -r a_tc a_got a_ok a_fail a_last <<EOF
+    last_epoch="$(iso_epoch "$s_last")"
+    # Walk deeper only while the row would be STALE (or has no success yet)
+    # and the unfiltered listing still has older runs to show.
+    if [ -n "$last_epoch" ] && [ $((NOW_EPOCH - last_epoch)) -le "$allowed_s" ]; then break; fi
+    [ "$walked" -lt "$WALK_PAGES" ] || break
+    a_total="$(jq -r '.total_count // 0' <<<"$allev")"
+    [ "$((walked * 100))" -lt "${a_total:-0}" ] || break
+    walked=$((walked + 1))
+    deeper="$(fetch_runs "$base" all "$walked")"
+    if [ "$deeper" = UNREADABLE ]; then
+      say "CANNOT MEASURE  $base — page $walked of the unfiltered runs listing could not be read."
+      say "                The filtered listing alone said this row is stale, and it can lag; not looking is not a verdict."
+      exit 2
+    fi
+    sched="$(union_schedule "$sched" "$deeper")" || {
+      say "CANNOT MEASURE  $base — page $walked of the unfiltered listing could not be merged."
+      exit 2
+    }
+    d_oldest="$(printf '%s' "$deeper" | oldest_iso)"
+    # A page that already reaches back past the newest known success cannot be
+    # followed by a newer one: stop.
+    if [ -n "$last_epoch" ] && [ -n "$d_oldest" ]; then
+      d_epoch="$(iso_epoch "$d_oldest")"
+      [ -z "$d_epoch" ] || [ "$d_epoch" -gt "$last_epoch" ] || { IFS="$(printf '\t')" read -r s_tc s_got s_done s_ok s_fail s_last <<EOF
+$(printf '%s' "$sched" | summarise)
+EOF
+        break; }
+    fi
+  done
+  rescued="$(jq -r '.rescued // 0' <<<"$sched")"
+  IFS="$(printf '\t')" read -r _ a_got a_done a_ok a_fail _ <<EOF
 $(printf '%s' "$allev" | summarise)
 EOF
 
-  window="scheduled total_count=$s_tc received=$s_got · success=$s_ok failure=$s_fail"
-  [ "$s_tc" = "$s_got" ] || window="$window (TRUNCATED READ: $s_got of $s_tc — every verdict below is relative to the $s_got read)"
+  window="scheduled total_count=$s_tc received=$s_got completed=$s_done · success=$s_ok failure=$s_fail"
+  [ "${rescued:-0}" -eq 0 ] || window="$window (+$rescued scheduled row(s) the filtered listing did NOT return, found in $walked page(s) of the unfiltered listing — the filtered index LAGGED)"
+  [ "$s_got" -lt "$s_tc" ] && window="$window (TRUNCATED READ: $s_got of $s_tc — every verdict below is relative to the $s_got read)"
+  a_got="$a_done"
 
-  if [ "${s_got:-0}" -eq 0 ]; then
+  if [ "${s_done:-0}" -eq 0 ]; then
     NEVER_RAN_N=$((NEVER_RAN_N + 1))
     say "NEVER RAN       $base — declares a cron and has ZERO completed scheduled runs."
     say "                all events: success=$a_ok failure=$a_fail of $a_got read."
@@ -415,10 +620,10 @@ EOF
   fi
 
   if [ "${s_ok:-0}" -eq 0 ]; then
-    if [ "${s_got:-0}" -ge "$MIN_RUNS" ]; then
+    if [ "${s_done:-0}" -ge "$MIN_RUNS" ]; then
       REDS=$((REDS + 1))
       say "NEVER SUCCEEDED $base — $window"
-      say "                NOT ONE of the $s_got completed scheduled runs read here succeeded."
+      say "                NOT ONE of the $s_done completed scheduled runs read here succeeded."
       if [ "${a_ok:-0}" -gt 0 ]; then
         say "                LAUNDERED: across ALL events this workflow reads success=$a_ok of $a_got —"
         say "                those greens are a DIFFERENT ARM on a different event. A reader that does not"
@@ -426,7 +631,7 @@ EOF
       fi
       say "                A scheduled arm that has never once succeeded is not a flake; it has never worked."
     else
-      say "young           $base — $window; $s_got runs is under --min-runs=$MIN_RUNS, no verdict yet."
+      say "young           $base — $window; $s_done runs is under --min-runs=$MIN_RUNS, no verdict yet."
     fi
     continue
   fi
@@ -436,10 +641,13 @@ EOF
     say "CANNOT MEASURE  $base — newest scheduled success timestamp '$s_last' did not parse."
     exit 2
   fi
-  age_days=$(( (NOW_EPOCH - last_epoch) / 86400 ))
-  if [ "$age_days" -gt "$STALE_DAYS" ]; then
+  age_s=$((NOW_EPOCH - last_epoch))
+  age_days=$((age_s / 86400))
+  if [ "$age_s" -gt "$allowed_s" ]; then
     REDS=$((REDS + 1))
-    say "STALE           $base — $window; newest scheduled success $s_last is ${age_days}d old (> $STALE_DAYS)."
+    say "STALE           $base — $window; newest scheduled success $s_last is $(dur "$age_s") old (> allowed $(dur "$allowed_s"))."
+    say "                allowed silence: $allowed_how."
+    [ "$walked" -le 1 ] || say "                confirmed against $walked page(s) of the unfiltered listing: no newer scheduled success."
   else
     # ── THE JOB-LEVEL READ ───────────────────────────────────────────────────
     # Everything above this point is a RUN-LEVEL `.conclusion` count, and a
@@ -475,7 +683,7 @@ EOF
     o_win_id="$(printf '%s' "$allev" | newest_success_id schedule)"
     if [ -z "$o_win_id" ]; then
       OK_N=$((OK_N + 1))
-      say "ok              $base — $window; newest scheduled success $s_last (${age_days}d)."
+      say "ok              $base — $window; newest scheduled success $s_last (${age_days}d; allowed $(dur "$allowed_s"): $allowed_how)."
       say "                job read: run $s_win_id executed $s_exec_n job(s); no non-schedule success exists to"
       say "                compare against, so the cron is this workflow's only arm and cannot be redundant."
       continue
@@ -490,7 +698,7 @@ EOF
     UNIQUE_TO_CRON=""
     while IFS= read -r j; do
       [ -n "$j" ] || continue
-      printf '%s\n' "$o_exec" | grep -Fxq -- "$j" || UNIQUE_TO_CRON="$UNIQUE_TO_CRON$j
+      grep -Fxq -- "$j" <<<"$o_exec" || UNIQUE_TO_CRON="$UNIQUE_TO_CRON$j
 "
     done <<EOF
 $s_exec
@@ -535,7 +743,7 @@ EOF
     # split the reader reds 10 of 29 and its verdict stops meaning anything.
     if [ -z "$UNIQUE_TO_CRON" ] && [ "$s_skipped_n" -eq 0 ]; then
       OK_N=$((OK_N + 1))
-      say "ok (rerun)      $base — $window; newest scheduled success $s_last (${age_days}d)."
+      say "ok (rerun)      $base — $window; newest scheduled success $s_last (${age_days}d; allowed $(dur "$allowed_s"): $allowed_how)."
       say "                job read: scheduled run $s_win_id executed the SAME job(s) the push arm executes and"
       say "                skipped none. A repeat of a full run, not a launder — it buys time-coverage only."
       [ -z "$s_excused" ] || say "                excused skips (reporter or pull_request-only, never the cron's job): $(printf '%s' "$s_excused" | tr '\n' '|' | sed 's/|$//')"
@@ -558,7 +766,7 @@ EOF
     fi
 
     OK_N=$((OK_N + 1))
-    say "ok              $base — $window; newest scheduled success $s_last (${age_days}d)."
+    say "ok              $base — $window; newest scheduled success $s_last (${age_days}d; allowed $(dur "$allowed_s"): $allowed_how)."
     say "                job read: scheduled run $s_win_id executed $(printf '%s' "$UNIQUE_TO_CRON" | tr '\n' '|' | sed 's/|$//') which the"
     say "                non-schedule arm (run $o_win_id) does not. The cron buys coverage nothing else buys."
   fi
