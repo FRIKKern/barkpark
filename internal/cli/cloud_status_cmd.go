@@ -928,8 +928,13 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	// FAILED blue is correctly `ok` and still needs the sentence). Joined with
 	// the same separator the strained reason uses for its swap clause, and every
 	// empty one drops out rather than leaving a dangling dot.
-	parts := make([]string, 0, 7)
-	for _, s := range []string{reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
+	//
+	// darkMarker LEADS (dr-bl-w9-muscle-1): how long the box has been silent is
+	// the first thing an operator needs and the one thing the rung word cannot
+	// say — muscle-1's rung is removal_failed and its reason is a 200-character
+	// deprovision error, behind which a trailing "dark 50d" would be cut off.
+	parts := make([]string, 0, 8)
+	for _, s := range []string{darkMarker(b, status), reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
@@ -1357,6 +1362,12 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		// box whose stored sha was blank when a sha first arrived (that commit may
 		// have been running long before the first beat carrying it reached us).
 		"git_commit_first_seen_at": r.BP.GitCommitFirstSeenAt,
+		// dr-bl-w9-muscle-1: the raw last beat, ALWAYS present (empty when the
+		// plane has none — git_commit's rule), and its reading: state plus a
+		// duration key that exists only when a number stands behind it
+		// (cloud_status_dark.go beatRow). Never a zero for "no beat on record".
+		"last_seen_at": r.BP.LastSeenAt,
+		"beat":         beatRow(r.BP),
 		// The 5xx tri-state (dr-w5-followup): nil-as-unmeasured, zero-as-zero,
 		// rate-as-itself — the json render where the three states stay three.
 		"err_5xx":       err5xxRow(r.BP),
@@ -1642,6 +1653,9 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 			},
 			"deploy":    fleetDeploy,
 			"barkparks": rows,
+			// dr-bl-w9-muscle-1: always present, with `checked` — an empty
+			// `groups` is only evidence when the reader can see what was looked at.
+			"duplicates": duplicatesJSON(findDuplicateRows(list)),
 		})
 		return exitOK
 	}
@@ -1657,6 +1671,7 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 	renderStatusBucket(out, "IN-FLIGHT", "in-flight", ranked)
 	renderStatusBucket(out, "HEALTHY", "healthy", ranked)
 	renderStatusDeploy(out, deploy, ranked)
+	renderDuplicates(out, findDuplicateRows(list))
 	return exitOK
 }
 
