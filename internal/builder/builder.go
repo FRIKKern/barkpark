@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/buildlog"
+	"github.com/FRIKKern/barkpark/internal/tokensource"
 )
 
 // DefaultInterval is the claim-poll cadence when Builder.Interval is zero.
@@ -65,6 +66,12 @@ type Builder struct {
 	Interval   time.Duration
 	HTTPClient *http.Client
 	Runner     CommandRunner
+
+	// TokenSource, when set, owns the control-plane bearer: its transport sets
+	// Authorization on every request and, on a 401, re-reads --token-file and
+	// replays once if the token changed (a supersede-mint rewrote it). It
+	// supersedes Token. See internal/tokensource.
+	TokenSource *tokensource.Source
 }
 
 // Deployment mirrors the JSON shape the control plane returns from /claim and
@@ -786,10 +793,21 @@ func sortedKeys(env map[string]string) []string {
 // hung control-plane connection can't freeze the claim/transition loop with
 // no crash and no log — http.DefaultClient has Timeout 0 (no deadline).
 func (b *Builder) http() *http.Client {
-	if b.HTTPClient != nil {
-		return b.HTTPClient
+	c := b.HTTPClient
+	if c == nil {
+		c = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return b.withTokenSource(c)
+}
+
+// withTokenSource wraps c's transport with TokenSource (when set) so every
+// control-plane call — claim, transition, site env, console — follows a
+// rewritten token file instead of 401-looping until restart.
+func (b *Builder) withTokenSource(c *http.Client) *http.Client {
+	if b.TokenSource == nil {
+		return c
+	}
+	return b.TokenSource.Client(c)
 }
 
 func (b *Builder) runner() CommandRunner {
@@ -800,8 +818,12 @@ func (b *Builder) runner() CommandRunner {
 }
 
 func (b *Builder) attachAuth(req *http.Request) {
-	if b.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+b.Token)
+	tok := b.Token
+	if b.TokenSource != nil {
+		tok = b.TokenSource.Token()
+	}
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 }
 
