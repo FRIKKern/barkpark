@@ -1,0 +1,113 @@
+{
+  "meters": {
+    "cpu": {
+      "value": 12.0,
+      "source": "telemetry.cpu_percent",
+      "quota": 100,
+      "measured_at": "2026-09-25T10:37:01Z",
+      "over_at": 90,
+      "warn_at": 70
+    },
+    "ram": {
+      "value": 55.0,
+      "source": "telemetry.mem_used_percent",
+      "quota": 100,
+      "measured_at": "2026-09-25T10:37:01Z",
+      "over_at": 90,
+      "warn_at": 70
+    },
+    "db_size": {
+      "value": 52428800,
+      "source": "telemetry.pg_size_bytes",
+      "quota": null,
+      "measured_at": "2026-09-25T10:37:01Z",
+      "over_at": null,
+      "warn_at": null
+    },
+    "disk": {
+      "value": 41.5,
+      "source": "telemetry.disk_used_percent",
+      "quota": 100,
+      "measured_at": "2026-09-25T10:37:01Z",
+      "over_at": 90,
+      "warn_at": 70
+    },
+    "req_per_s": {
+      "value": "unmetered",
+      "source": "telemetry.req_per_s",
+      "err_5xx_per_s": 0.0,
+      "quota": null,
+      "measured_at": "2026-09-25T10:37:01Z",
+      "over_at": 270,
+      "warn_at": 210
+    },
+    "p95_ms": {
+      "value": "unmetered",
+      "source": "telemetry.p95_ms",
+      "quota": null,
+      "measured_at": "2026-09-25T10:37:01Z",
+      "over_at": 1000,
+      "warn_at": 500
+    },
+    "seats": {
+      "value": 3,
+      "source": "control-plane.team_members",
+      "pending_invitations": 1,
+      "quota": null,
+      "measured_at": null,
+      "over_at": null,
+      "warn_at": null
+    },
+    "instances": {
+      "value": 2,
+      "source": "control-plane.team_instances",
+      "quota": 5,
+      "measured_at": null,
+      "over_at": null,
+      "warn_at": 4
+    },
+    "datasets": {
+      "value": "unmetered",
+      "source": "instance.datasets",
+      "quota": null,
+      "measured_at": null,
+      "over_at": null,
+      "warn_at": null,
+      "unavailable_reason": "unauthorized"
+    },
+    "documents": {
+      "value": "unmetered",
+      "source": "instance.documents",
+      "quota": null,
+      "measured_at": null,
+      "over_at": null,
+      "warn_at": null,
+      "unavailable_reason": "unauthorized"
+    },
+    "webhooks": {
+      "value": "unmetered",
+      "source": "instance.webhooks",
+      "quota": null,
+      "measured_at": null,
+      "over_at": null,
+      "warn_at": null,
+      "unavailable_reason": "unauthorized"
+    },
+    "api_requests": {
+      "value": "unmetered",
+      "source": "not-metered",
+      "quota": null,
+      "measured_at": null,
+      "over_at": null,
+      "warn_at": null
+    },
+    "bandwidth": {
+      "value": "unmetered",
+      "source": "not-metered",
+      "quota": null,
+      "measured_at": null,
+      "over_at": null,
+      "warn_at": null
+    }
+  }
+}
