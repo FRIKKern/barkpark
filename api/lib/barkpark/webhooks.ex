@@ -183,7 +183,7 @@ defmodule Barkpark.Webhooks do
   # hiccup can never fail the CRUD that already committed. Field hygiene: the
   # signing `secret` is NEVER put in metadata.
   defp audit_webhook({:ok, %Webhook{} = webhook} = result, action) do
-    Audit.emit(%{
+    Audit.emit_best_effort(%{
       category: "plugin_settings",
       action: action,
       subject: webhook.id,
@@ -193,10 +193,6 @@ defmodule Barkpark.Webhooks do
     })
 
     result
-  rescue
-    _ -> result
-  catch
-    _, _ -> result
   end
 
   defp audit_webhook(result, _action), do: result
@@ -825,7 +821,7 @@ defmodule Barkpark.Webhooks do
   # only happens on a THRESHOLD CROSSING, and the `active == true` guard above
   # makes a crossing a once-per-dark-interval event.
   defp emit_latch_event(%Webhook{} = w, action, extra) do
-    Audit.emit(%{
+    Audit.emit_best_effort(%{
       category: "plugin_settings",
       action: action,
       subject: w.id,
@@ -833,12 +829,6 @@ defmodule Barkpark.Webhooks do
       project_id: w.project_id,
       metadata: Map.merge(%{"name" => w.name, "dataset" => w.dataset}, extra)
     })
-
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
   end
 
   # Human-readable disable reason, bounded so a long transport error can't
