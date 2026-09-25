@@ -145,10 +145,11 @@
   --primary-hsl: 151.96 71.81% 29.22%;
   --ring-hsl: 163 42% 30%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 151.96 71.81% 29.22%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
+  --ok-hsl: 142 72% 26%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(151.96 71.81% 23.22%);
+  --ok-strong: hsl(142 72% 20%);
   --provider-hetzner: #c4123a;
   --provider-azure: #0f6cbd;
   /* Motion (decision 29) — durations + easing + the --t shorthand. Theme-
@@ -192,10 +193,11 @@
   --primary-hsl: 152.92 60% 52.94%;
   --ring-hsl: 152.92 60% 52.94%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 152.92 60% 52.94%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
+  --ok-hsl: 142 52% 52%;
   --ok: hsl(var(--ok-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(152.92 60% 60.94%);
+  --ok-strong: hsl(142 52% 60%);
   --provider-hetzner: #f0728a;
   --provider-azure: #4aa3e0;
 }
@@ -218,10 +220,7 @@ html[data-bp-theme="evergreen"] {
   --primary-hsl: 151.96 71.81% 29.22%;
   --ring-hsl: 163 42% 30%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 151.96 71.81% 29.22%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(151.96 71.81% 23.22%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="evergreen"][data-theme="dark"] {
   --primary: hsl(152.92 60% 52.94%);
@@ -230,10 +229,7 @@ html[data-bp-theme="evergreen"][data-theme="dark"] {
   --primary-hsl: 152.92 60% 52.94%;
   --ring-hsl: 152.92 60% 52.94%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 152.92 60% 52.94%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(152.92 60% 60.94%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
 html[data-bp-theme="charple"] {
   --primary: hsl(282.39 44.23% 40.78%);
@@ -242,10 +238,7 @@ html[data-bp-theme="charple"] {
   --primary-hsl: 282.39 44.23% 40.78%;
   --ring-hsl: 282.39 44.23% 48.78%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 282.39 44.23% 40.78%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(282.39 44.23% 34.78%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="charple"][data-theme="dark"] {
   --primary: hsl(282.56 58.11% 70.98%);
@@ -254,10 +247,7 @@ html[data-bp-theme="charple"][data-theme="dark"] {
   --primary-hsl: 282.56 58.11% 70.98%;
   --ring-hsl: 282.56 58.11% 70.98%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 282.56 58.11% 70.98%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(282.56 58.11% 78.98%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
 html[data-bp-theme="ember"] {
   --primary: hsl(19.33 71.29% 40.98%);
@@ -266,10 +256,7 @@ html[data-bp-theme="ember"] {
   --primary-hsl: 19.33 71.29% 40.98%;
   --ring-hsl: 19.33 71.29% 48.98%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 19.33 71.29% 40.98%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(19.33 71.29% 34.98%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="ember"][data-theme="dark"] {
   --primary: hsl(19.01 75.53% 63.14%);
@@ -278,10 +265,7 @@ html[data-bp-theme="ember"][data-theme="dark"] {
   --primary-hsl: 19.01 75.53% 63.14%;
   --ring-hsl: 19.01 75.53% 63.14%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 19.01 75.53% 63.14%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(19.01 75.53% 71.14%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
 html[data-bp-theme="fjord"] {
   --primary: hsl(191.6 80.95% 28.82%);
@@ -290,10 +274,7 @@ html[data-bp-theme="fjord"] {
   --primary-hsl: 191.6 80.95% 28.82%;
   --ring-hsl: 191.6 80.95% 36.82%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 191.6 80.95% 28.82%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(191.6 80.95% 22.82%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary: hsl(193.27 62.43% 64.51%);
@@ -302,10 +283,7 @@ html[data-bp-theme="fjord"][data-theme="dark"] {
   --primary-hsl: 193.27 62.43% 64.51%;
   --ring-hsl: 193.27 62.43% 64.51%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 193.27 62.43% 64.51%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(193.27 62.43% 72.51%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
 html[data-bp-theme="iris"] {
   --primary: hsl(248.75 63.72% 55.69%);
@@ -314,10 +292,7 @@ html[data-bp-theme="iris"] {
   --primary-hsl: 248.75 63.72% 55.69%;
   --ring-hsl: 248.75 63.72% 62%;
   --ring-soft: hsl(var(--ring-hsl) / 0.15);
-  --ok-hsl: 248.75 63.72% 55.69%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.15);
-  --ok-strong: hsl(248.75 63.72% 49.69%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
 }
 html[data-bp-theme="iris"][data-theme="dark"] {
   --primary: hsl(248.87 100% 77.45%);
@@ -326,10 +301,7 @@ html[data-bp-theme="iris"][data-theme="dark"] {
   --primary-hsl: 248.87 100% 77.45%;
   --ring-hsl: 248.87 100% 77.45%;
   --ring-soft: hsl(var(--ring-hsl) / 0.2);
-  --ok-hsl: 248.87 100% 77.45%;
-  --ok: hsl(var(--ok-hsl));
-  --ok-soft: hsl(var(--ok-hsl) / 0.2);
-  --ok-strong: hsl(248.87 100% 85.45%);
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
 }
 /* Motion collapses when the user asks for it (decision 29). Only the token
    durations go to 0 — spinner keyframes keep their literal duration because
@@ -1667,10 +1639,14 @@ select.form-input {
   cursor: pointer;
 }
 .size-opt:hover { border-color: var(--dim); }
-/* GR22: --primary-soft retired (this was its sole consumer) — the selected tint
-   reads --ok-soft, the same accent channel/alpha by GR6 law (the --ok family
-   TRACKS accent.primary), so the bytes painted are identical. */
-.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary); background: var(--ok-soft); }
+/* GR22 retired --primary-soft here and borrowed --ok-soft, on the GR6 premise
+   that the --ok family TRACKS accent.primary so the bytes painted are identical.
+   cch DEFECT-A broke that premise: --ok is now one semantic green at every
+   accent. A SELECTED size is a BRAND state, not a success state, so the borrow
+   is reversed rather than repointed — --primary-soft is emitted again, same
+   channel and the same per-theme alpha the borrow relied on, and the bytes
+   painted here are once more identical to what GR22 shipped. */
+.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary); background: var(--primary-soft); }
 .size-opt-radio { flex: 0 0 auto; accent-color: var(--primary); }
 .size-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .size-opt-name { font-size: 13px; font-weight: 600; color: var(--text); }
@@ -3372,7 +3348,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 /* …and failure SNAPS (0ms) — a break is never eased in (ladder snap law). */
 .new-step.failed .new-step-dot,
 .new-step.failed .new-step-label { transition: none; }
-.new-step.done .new-step-dot { background: var(--ok); border-color: var(--ok); } /* done glyph = mint (--ok tracks the accent, GR6) */
+.new-step.done .new-step-dot { background: var(--ok); border-color: var(--ok); } /* done glyph = the SUCCESS green; --ok stopped tracking the accent at cch DEFECT-A */
 /* The active dot IS the per-phase loading bar: a conic ring filled by --p
    (stepRingProgress over the phase's expected duration, ticked in place every
    second). Registered as a <percentage> so the fill animates smoothly between
@@ -5241,9 +5217,18 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    150°+ away, so the two washes converged: sampled RGB distance 6.1 (light) /
    8.3 (dark) against 19.5–48.2 elsewhere — a 2.5–6x outlier, and the one defect
    the ~1,585-shot accent matrix found.
+   SUPERSEDED IN ITS PREMISE, NOT IN ITS RULE (cch DEFECT-A, 2026-09-20): --ok-hsl
+   no longer tracks --primary-hsl, so the ~19° ember convergence this block
+   describes cannot recur and the numbers above are HISTORY, measured on the
+   pre-DEFECT-A binding. The alpha separation below is KEPT on its own merit —
+   "a passing check should not shout" is a reading argument, not a hue
+   workaround, and it is hue-independent by construction, so the new green
+   cannot make it wrong. GR90's ruling that "--ok-hsl is NOT touched (it must
+   keep tracking the brand)" is the part that is overturned; see
+   design/emit.mjs cloudOkVars() for the measurement that overturned it.
    The fix separates the pair on ALPHA, not hue, so it works identically in all
-   five identities and gets no worse where hue already separates. --ok-hsl is NOT
-   touched (it must keep tracking the brand) and the FAIL wash is NOT touched
+   five identities and gets no worse where hue already separates. The FAIL wash
+   is NOT touched
    either — deepening it was measured and rejected: it does separate (ember-light
    6.1 → 45.9 at 0.28) but it drags the --danger glyph from 4.71:1 to 3.71:1,
    and because __css_check measures the --danger-soft TOKEN rather than this

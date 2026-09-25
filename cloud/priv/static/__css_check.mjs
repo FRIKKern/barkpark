@@ -3584,6 +3584,192 @@ for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
 // (#4592 — the modal root). Runs alongside E9, which sees only token blocks.
 for (const e of orphanCommentErrors(cssRaw)) errors.push(e);
 
+// E21 — a SEMANTIC STATE ROLE must never be painted with the BRAND.
+//
+// THE DEFECT THIS ARM EXISTS FOR (cch DEFECT-A, filed off
+// gr-backlog-accent-matrix-rereview: 2760 shots, 138 scenarios reviewed by eye
+// at five accents, 2026-09-20). The emitter declared `--ok-hsl: <accent.primary>`
+// inside every `html[data-bp-theme="…"]` block, so success/health — badges,
+// ticks, meters, deploy rails, summary chips — wore the BRAND hue while
+// `--danger` kept the designer red. At ember the healthy state and the failed
+// state read as one warm hue on 24 screens. "Good" and "bad" are the one pair a
+// console may never collapse, and nothing in this file could see it: E5 asserts
+// LEGIBILITY (each role against its ground) and is perfectly happy with two
+// roles that are legible AND indistinguishable from each other.
+//
+// TWO ARMS, AND THEY CATCH DIFFERENT THINGS — stated plainly because either one
+// alone is a false comfort:
+//   (b) IDENTITY-INVARIANCE is the arm that actually owns the defect. Every
+//       semantic role must resolve to the SAME literal in every identity state
+//       of the same mode. It does not care HOW the role was bound to the brand:
+//       a per-identity `--ok-hsl:` declaration, an indirect `--ok: var(--primary)`
+//       in the bare :root, a `var(--accent)` alias — all three make the resolved
+//       value move with `[data-bp-theme]`, and all three red here. That is the
+//       criterion's "reds when the role is mapped back to the accent token".
+//   (c) OK/DANGER HUE DISTANCE is the CONSEQUENCE arm, and it is WEAKER — say so
+//       rather than let a reader assume it is the guard. On the pre-fix file it
+//       reds ember (ok hue 19.3° vs danger 0.0°, distance 19.3°) and passes
+//       evergreen (152.0° vs 0.0°, distance 152.0°) — it would have caught the
+//       screens the reviewers saw and MISSED the root cause on the other four
+//       accents. It is here because it is the property a person actually looks
+//       at, and because it fails on a future token tune that (b) cannot see:
+//       nothing stops someone re-pointing `--danger` at an orange.
+//   (a) is the PRECONDITION for both. An arm that can measure nothing is not an
+//       arm, and this one has two ways to go vacuous (no identity ramps parsed,
+//       or a role that does not resolve) — both of which would print a clean
+//       green over an unexamined file.
+//
+// SCOPE BOUNDARY (charter D40 — a check states what it does NOT own): E21 owns
+// the TOKEN VALUES. It does not know which RULE consumes which role, so a
+// success surface hard-wired to `var(--primary)` at the rule site is E21-invisible
+// by construction. That class belongs to a rule-level detector; E13/E15/E16/E18
+// are its family and none of them covers the success voice today.
+const e21Notes = [];
+const SEMANTIC_ROLE_TOKENS = [
+  "--ok", "--ok-hsl", "--ok-soft", "--ok-strong",
+  "--danger", "--danger-hsl", "--danger-soft",
+  "--warn", "--warn-hsl", "--warn-soft", "--warn-strong",
+  "--info", "--info-hsl", "--info-soft",
+];
+// 45° is not a perceptual ruling, it is a FENCE POST, and it is picked from the
+// measured population rather than taste: the pre-fix ember pair sat at 18.8° and
+// the four accents that survived review sat at 78° (charple) to 151° (evergreen),
+// so any post between ~20 and ~78 separates the screens the reviewers flagged
+// from the ones they cleared. 45 is the middle of that gap. Raising it is a
+// DESIGN decision and needs a matrix, not an edit here.
+const OK_DANGER_MIN_HUE_DEG = 45;
+function hueDeg(c) {
+  const max = Math.max(c.r, c.g, c.b), min = Math.min(c.r, c.g, c.b), d = max - min;
+  if (d === 0) return null; // achromatic — hue is undefined, not 0
+  const h = max === c.r ? ((c.g - c.b) / d) % 6 : max === c.g ? (c.b - c.r) / d + 2 : (c.r - c.g) / d + 4;
+  return ((h * 60) % 360 + 360) % 360;
+}
+const hueGap = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+const chroma = (c) => Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b);
+function semanticRoleErrors() {
+  const errs = [];
+  // (a) PRECONDITION — prove the arm HAS a subject before it reports on one.
+  if (!IDENTITY_RAMPS.length) {
+    errs.push(
+      "E21 app.css  ZERO `html[data-bp-theme=\"…\"]` identity ramps parsed, so the " +
+        "identity-invariance arm has no states to compare and would pass over any binding " +
+        "at all. Either the ramps were removed (then delete this arm in the same commit " +
+        "and say so) or the block regex stopped matching — fix the parse, do not read this " +
+        "run as a verdict on the semantic roles.",
+    );
+  }
+  const modes = { light: [], dark: [] };
+  for (const [name, map] of THEME_STATES) {
+    if (name === "base-light" || name === "base-dark") continue; // the ramps are the subject
+    modes[name.endsWith("-dark") ? "dark" : "light"].push([name, map]);
+  }
+  for (const tok of SEMANTIC_ROLE_TOKENS) {
+    for (const [name, map] of THEME_STATES) {
+      const v = resolveValue(tok, map);
+      if (v === undefined || /UNRESOLVED/.test(v)) {
+        errs.push(
+          `E21 app.css  semantic role ${tok} does not resolve in theme state ${name} ` +
+            `(got ${v === undefined ? "no declaration" : v}). Both arms below compare resolved ` +
+            `literals, so an unresolvable role is skipped silently — which is a green with no ` +
+            `subject, not a pass.`,
+        );
+      }
+    }
+  }
+  if (errs.length) return errs; // a broken precondition makes every verdict below meaningless
+  // (b) IDENTITY-INVARIANCE — the arm that owns DEFECT-A.
+  for (const mode of ["light", "dark"]) {
+    const states = modes[mode];
+    if (states.length < 2) continue;
+    for (const tok of SEMANTIC_ROLE_TOKENS) {
+      const seen = new Map(); // resolved literal -> [state names]
+      for (const [name, map] of states) {
+        const v = resolveValue(tok, map);
+        if (!seen.has(v)) seen.set(v, []);
+        seen.get(v).push(name);
+      }
+      if (seen.size === 1) continue;
+      const spread = [...seen.entries()]
+        .map(([v, ns]) => `${ns.join("/")}=${v}`)
+        .join("  ");
+      errs.push(
+        `E21 app.css  semantic role ${tok} VARIES WITH THE ACCENT in ${mode} mode — ` +
+          `${seen.size} distinct values across ${states.length} identity states: ${spread}. ` +
+          `A state voice that moves with [data-bp-theme] is the brand wearing a role's name: ` +
+          `it lets one accent collapse "good" and "bad" onto the same hue (DEFECT-A, ember, ` +
+          `24 screens). Declare it ONCE, in the bare :root / [data-theme="dark"] pair — in ` +
+          `design/emit.mjs that is cloudOkVars()/cloudStatusVars(), never cloudAccentVars(), ` +
+          `whose output is copied into every identity block.`,
+      );
+    }
+  }
+  // (c) OK/DANGER HUE DISTANCE — the consequence a person actually sees.
+  for (const [name, map] of THEME_STATES) {
+    const ok = parseColor(resolveValue("--ok", map));
+    const danger = parseColor(resolveValue("--danger", map));
+    if (!ok || !danger) {
+      errs.push(
+        `E21 app.css  theme state ${name}: --ok and/or --danger did not parse as a literal ` +
+          `colour (--ok=${resolveValue("--ok", map)}, --danger=${resolveValue("--danger", map)}), ` +
+          `so the hue-distance arm measured nothing for this state.`,
+      );
+      continue;
+    }
+    const [ho, hd] = [hueDeg(ok), hueDeg(danger)];
+    if (ho === null || hd === null || chroma(ok) < 0.05 || chroma(danger) < 0.05) {
+      errs.push(
+        `E21 app.css  theme state ${name}: --ok or --danger is (near-)ACHROMATIC ` +
+          `(chroma ${chroma(ok).toFixed(3)} / ${chroma(danger).toFixed(3)}), so hue distance is ` +
+          `undefined and two greys would pass this arm by accident.`,
+      );
+      continue;
+    }
+    const gap = hueGap(ho, hd);
+    if (gap < OK_DANGER_MIN_HUE_DEG) {
+      errs.push(
+        `E21 app.css  theme state ${name}: --ok (${ho.toFixed(1)}°) and --danger ` +
+          `(${hd.toFixed(1)}°) are ${gap.toFixed(1)}° apart, under the ${OK_DANGER_MIN_HUE_DEG}° ` +
+          `floor — a healthy state and a failed state read as the same hue on this accent. ` +
+          `This is DEFECT-A's signature: fix the ROLE BINDING (see the arm above), not the ` +
+          `screens, and never by loosening this number.`,
+      );
+    }
+  }
+  return errs;
+}
+for (const e of semanticRoleErrors()) errors.push(e);
+
+// E21's OWN CONTROL, run inside the measurement. The shipped call above can only
+// print a clean nothing; this says whether that nothing was MEASURED. It rebinds
+// --ok to the brand in a COPY of each identity state — exactly the pre-fix
+// emitter's output — and asserts the arm reds. A control that cannot fail is the
+// thing this arm was written to stop shipping.
+{
+  const rebound = THEME_STATES.map(([n, m]) => [n, { ...m, "--ok-hsl": m["--primary-hsl"] }]);
+  const real = THEME_STATES.splice(0, THEME_STATES.length, ...rebound);
+  const fired = semanticRoleErrors();
+  THEME_STATES.splice(0, THEME_STATES.length, ...real);
+  const shipped = semanticRoleErrors().length; // the REAL verdict, re-read for the note
+  const invariance = fired.filter((e) => /VARIES WITH THE ACCENT/.test(e)).length;
+  const hue = fired.filter((e) => /apart, under the/.test(e)).length;
+  if (!invariance || !hue) {
+    errors.push(
+      `E21 __css_check.mjs  CONTROL DID NOT FIRE: re-binding --ok-hsl to --primary-hsl ` +
+        `(the pre-fix emitter's exact output) produced ${invariance} invariance error(s) and ` +
+        `${hue} hue-distance error(s); both must be non-zero. The run above therefore ` +
+        `proves nothing about the semantic roles.`,
+    );
+  } else {
+    e21Notes.push(
+      `E21 control: re-binding --ok-hsl to the brand reds ${invariance} identity-invariance ` +
+        `arm(s) and ${hue} ok/danger hue-distance arm(s) across ${THEME_STATES.length} theme ` +
+        `state(s); the shipped binding yields ${shipped} E21 error(s). ` +
+        `${SEMANTIC_ROLE_TOKENS.length} role token(s), ` +
+        `${IDENTITY_RAMPS.length} identity ramp(s), ${OK_DANGER_MIN_HUE_DEG}° hue floor.`,
+    );
+  }
+}
+
 // E14 — wrap-recipe declaration parity (charter D220): the hand-built copies
 // share a byte-identical five-declaration core wearing different jackets, and
 // nothing asserted that the core still agrees. The copy inventory is printed
@@ -3745,6 +3931,11 @@ console.log(
     Object.entries(focusScanCensus()).map(([f, n]) => `${f} ${n}`).join(", ") +
     ` — a 0 is COVERAGE, not yield: the file declares no focus rule at all`,
 );
+
+// E21 census, printed unconditionally for the same reason as E12's: the arm's
+// clean run is indistinguishable in a log from an arm that never ran, and this
+// line carries the control's own firing counts.
+for (const n of e21Notes) console.log(`\n${n}`);
 
 // E14 inventory: the copies the scan actually SAW, with their true line
 // numbers. Printed unconditionally so a scan degrading to fewer copies is
