@@ -295,6 +295,38 @@ const TERMINAL = 'TERMINAL';
 const SERVER = process.env.BP_SERVER || 'https://guerrilla.barkpark.cloud';
 const TOKEN = process.env.BP_TOKEN;
 const REPO = arg('--repo') || process.cwd();
+
+// ORIGIN/MAIN, PINNED BY THE CALLER (task-76866f421d2b91c9). Every ancestry and
+// freshness leg below reads ONE rev, `ORIGIN_MAIN`. By default that is the live ref
+// `origin/main`, re-read on every git call — correct for one run of this program, and
+// WRONG for a caller that spawns it a hundred-odd times: seal-predicate.test.mjs takes
+// 100-600 s, another lane's merge moves `refs/remotes/origin/main` inside that window,
+// and every later spawn then refuses with REPO-BEHIND-ORIGIN-MAIN. Measured 2026-09-25 in
+// a private clone whose ref was moved 25 s into the run: behind 0 at start, 1 at end,
+// # tests 152, # fail 46, the behind-refusal quoted 12 times. The subject had not changed;
+// the world the suite sampled had, N times, and each sample read as a product defect.
+//
+// So a caller may resolve origin/main ONCE and hand the sha down:
+//
+//   SEAL_ORIGIN_MAIN_PIN=<40-hex sha>  SEAL_ORIGIN_MAIN_PIN_REPO=<the --repo it was read from>
+//
+// Both or neither. The pin binds ONLY when SEAL_ORIGIN_MAIN_PIN_REPO realpaths to this
+// run's --repo, because the suite also drives synthetic repositories with their own
+// `origin/main` and a sha from the real tree means nothing in their stores. A pin that is
+// malformed, half-set, or names a commit this store does not hold is an INFRA FAULT
+// (ORIGIN-MAIN-PIN-UNREADABLE), never a silent fall-back to the live ref — falling back
+// would reintroduce the moving world this exists to hold still.
+//
+// WHAT THE PIN DOES NOT DO: it does not fetch, and it does not move any ref. It changes
+// WHICH origin/main a run measures against — the one the caller saw at its start — and
+// every sentence that names origin/main says so when it is pinned.
+const ORIGIN_MAIN_PIN_RAW = process.env.SEAL_ORIGIN_MAIN_PIN || '';
+const ORIGIN_MAIN_PIN_REPO = process.env.SEAL_ORIGIN_MAIN_PIN_REPO || '';
+const samePath = (a, b) => { try { return realpathSync(a) === realpathSync(b); } catch { return false; } };
+const ORIGIN_MAIN_PIN = ORIGIN_MAIN_PIN_RAW && ORIGIN_MAIN_PIN_REPO && samePath(ORIGIN_MAIN_PIN_REPO, REPO)
+  ? ORIGIN_MAIN_PIN_RAW : null;
+const ORIGIN_MAIN = ORIGIN_MAIN_PIN || 'origin/main';
+const pinNote = () => (ORIGIN_MAIN_PIN ? ` [origin/main PINNED by the caller at ${ORIGIN_MAIN_PIN.slice(0, 12)}; the live ref is not re-read]` : '');
 // A boolean flag, never `arg('--ladder-only')`: it takes no value, so reading one
 // would swallow the next flag and silently mode-shift a run nobody asked to shift.
 const LADDER_ONLY = argv.includes('--ladder-only');
@@ -1685,15 +1717,15 @@ function diffIntegrity(sha) {
 // The reading string names ALL FOUR probes on every unavailable sentence, so a reader
 // never has to guess which leg answered what.
 function historyProbe(sha) {
-  const ref = gitProbe(['rev-parse', '--verify', '--quiet', 'origin/main']);
+  const ref = gitProbe(['rev-parse', '--verify', '--quiet', ORIGIN_MAIN]);
   const obj = gitProbe(['cat-file', '-e', `${sha}^{commit}`]);
   let ancRc = null;
-  if (ref.rc === 0 && obj.rc === 0) ancRc = gitProbe(['merge-base', '--is-ancestor', sha, 'origin/main']).rc;
+  if (ref.rc === 0 && obj.rc === 0) ancRc = gitProbe(['merge-base', '--is-ancestor', sha, ORIGIN_MAIN]).rc;
   const walk = walkTruncation();
   const reading = () => `[ref: origin/main ${ref.rc === 0 ? `resolves to ${ref.out.slice(0, 12)}` : `DOES NOT RESOLVE (rev-parse --verify rc ${ref.rc})`}`
     + ` | object: ${obj.rc === 0 ? 'present' : `ABSENT (cat-file -e rc ${obj.rc})`}`
     + ` | walk: ${walk.state} (${walk.reason})`
-    + ` | ancestry: ${ancRc === null ? 'NOT RUN — an earlier probe already answered' : `merge-base --is-ancestor rc ${ancRc}`}]`;
+    + ` | ancestry: ${ancRc === null ? 'NOT RUN — an earlier probe already answered' : `merge-base --is-ancestor rc ${ancRc}`}]${pinNote()}`;
   const unavailable = (code, why) => ({
     verdict: 'unavailable',
     code,
@@ -1715,7 +1747,7 @@ function historyProbe(sha) {
     // The cheap corroborator, measured: after an rc-1 answer, `git merge-base <sha>
     // origin/main` prints a real sha for a genuinely non-ancestor tip and NOTHING for a
     // walk that could not reach far enough. Fails closed on "nothing".
-    const mb = gitProbe(['merge-base', sha, 'origin/main']);
+    const mb = gitProbe(['merge-base', sha, ORIGIN_MAIN]);
     if (mb.rc !== 0 || !mb.out)
       return unavailable('NO-MERGE-BASE',
         `merge-base answered "no" and \`git merge-base ${sha} origin/main\` then found NO common ancestor at all (rc ${mb.rc}). A commit genuinely off main still shares a fork point with it; sharing none means this store cannot place the commit, not that the product lacks the fix.`);
@@ -2278,8 +2310,25 @@ function ladderOnly(fixture, guardOverride, stamp, head, runStart = null) {
 // A NON-NUMERIC ANSWER IS TREATED AS NO ANSWER for the same reason: `rev-list` exiting 0
 // with prose is a git this program does not recognise, and inventing `Number(...)` = NaN
 // from it would refuse every run on every machine where that ever happened.
+// THE PIN IS CHECKED BEFORE IT IS TRUSTED. Live path only (the fixture path reads no
+// ancestry). Half a contract is refused rather than guessed at: a pin with no repo, or a
+// repo with no pin, is a caller that meant to hold the world still and did not.
+function assertOriginMainPinReadable() {
+  if (!ORIGIN_MAIN_PIN_RAW && !ORIGIN_MAIN_PIN_REPO) return;
+  const bad = (why) => new Infra(
+    `SEAL_ORIGIN_MAIN_PIN=${JSON.stringify(ORIGIN_MAIN_PIN_RAW)} SEAL_ORIGIN_MAIN_PIN_REPO=${JSON.stringify(ORIGIN_MAIN_PIN_REPO)}: ${why} `
+    + 'A caller that pins origin/main is asking this run to measure against ONE commit it resolved at its own start; '
+    + 'falling back to the live ref would measure a different world without saying so. Nothing is asserted about any clause.',
+    'ORIGIN-MAIN-PIN-UNREADABLE');
+  if (!ORIGIN_MAIN_PIN_RAW || !ORIGIN_MAIN_PIN_REPO) throw bad('only one of the two variables is set; the pin is BOTH or NEITHER.');
+  if (!/^[0-9a-f]{40}$/.test(ORIGIN_MAIN_PIN_RAW)) throw bad('the pin is not a full 40-hex commit id.');
+  if (!ORIGIN_MAIN_PIN) return; // scoped to another repository — this --repo reads its own origin/main
+  if (gitProbe(['cat-file', '-e', `${ORIGIN_MAIN_PIN}^{commit}`]).rc !== 0)
+    throw bad(`the pinned commit is not in the object store under --repo ${REPO}.`);
+}
+
 function assertRepoNotBehindOriginMain() {
-  const r = gitProbe(['rev-list', '--count', 'HEAD..origin/main']);
+  const r = gitProbe(['rev-list', '--count', `HEAD..${ORIGIN_MAIN}`]);
   if (r.rc !== 0 || !/^[0-9]+$/.test(r.out)) return;
   const behind = Number(r.out);
   if (behind === 0) return;
@@ -2293,7 +2342,7 @@ function assertRepoNotBehindOriginMain() {
     + 'b=PASS just as easily. A claim about the PRODUCT may not be derived from a fact about the DIRECTORY\'s DATE. '
     + 'Nothing is asserted about clause (b). Bring the tree to origin/main (`git fetch origin main && git merge '
     + '--ff-only origin/main`, or `make update`) and re-run. This leg does NOT fetch: a predicate may not move the '
-    + 'ref it measures against, so a STALE origin/main ref reads 0 behind and is invisible here.',
+    + `ref it measures against, so a STALE origin/main ref reads 0 behind and is invisible here.${pinNote()}`,
     'REPO-BEHIND-ORIGIN-MAIN');
 }
 
@@ -2319,7 +2368,9 @@ function assertRepoNotBehindOriginMain() {
 // merge on the remote that nobody fetched during the run moves nothing here.
 function repoHeads() {
   const head = gitProbe(['rev-parse', 'HEAD']);
-  const om = gitProbe(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main']);
+  // Pinned, the run's origin/main IS the pin, so the fence compares the pin with itself and
+  // a live-ref move is — correctly — not this run's business. HEAD is still read live.
+  const om = gitProbe(['rev-parse', '--verify', '--quiet', ORIGIN_MAIN_PIN ? `${ORIGIN_MAIN_PIN}^{commit}` : 'refs/remotes/origin/main']);
   return {
     head: head.rc === 0 && head.out ? head.out : null,
     originMain: om.rc === 0 && om.out ? om.out : null,
@@ -2370,6 +2421,7 @@ function assertReadableRepoRoot(ledgerPath) {
       + 'fixture (--ledger) stands `landed` in for ancestry and is not subject to this leg.',
       'REPO-NOT-A-GIT-WORK-TREE');
 
+  assertOriginMainPinReadable();
   assertRepoNotBehindOriginMain();
 
   try {
