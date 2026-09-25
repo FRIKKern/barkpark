@@ -45,6 +45,7 @@ defmodule Barkpark.Content.PaperAccess do
 
   alias Barkpark.Repo
   alias Barkpark.Content.PaperAccessLog
+  alias Barkpark.OwnedTables
 
   @default_ttl_days 90
   @default_limit 100
@@ -91,9 +92,15 @@ defmodule Barkpark.Content.PaperAccess do
   is why it IS asynchronous) but does not move it out of the census. Rather
   than raise a budget the reader has not actually spent, that one test turns
   the trail off and says so.
+
+  Also false when the Bulldocs plugin, which owns `paper_access_log`, is not
+  installed (`Barkpark.OwnedTables`, task-d3ecc509d4ea227d).
   """
   @spec enabled?() :: boolean()
-  def enabled?, do: Application.get_env(:barkpark, :paper_access_log_enabled, true) != false
+  def enabled?,
+    do:
+      Application.get_env(:barkpark, :paper_access_log_enabled, true) != false and
+        OwnedTables.enabled?("paper_access_log")
 
   defp spawn_record(attrs) do
     case Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn -> record_now(attrs) end) do
@@ -167,6 +174,12 @@ defmodule Barkpark.Content.PaperAccess do
   """
   @spec list(String.t(), keyword()) :: [PaperAccessLog.t()]
   def list(slug, opts \\ []) when is_binary(slug) do
+    if OwnedTables.present?("paper_access_log"), do: list_rows(slug, opts), else: []
+  end
+
+  # `paper_access_log` is a Bulldocs table: with the plugin off it may not
+  # exist, and the trail then reads empty (task-d3ecc509d4ea227d).
+  defp list_rows(slug, opts) do
     limit = opts |> Keyword.get(:limit, @default_limit) |> clamp_limit()
 
     PaperAccessLog
@@ -198,6 +211,11 @@ defmodule Barkpark.Content.PaperAccess do
   @spec prune(pos_integer() | non_neg_integer() | nil) :: {:ok, non_neg_integer()}
   def prune(days \\ nil) do
     days = if is_integer(days) and days >= 0, do: days, else: ttl_days()
+
+    if OwnedTables.present?("paper_access_log"), do: prune_older_than(days), else: {:ok, 0}
+  end
+
+  defp prune_older_than(days) do
     cutoff = DateTime.add(DateTime.utc_now(), -days * 86_400, :second)
 
     {deleted, _} =
