@@ -46,10 +46,17 @@ defmodule Barkpark.OwnedTablesTest do
   end
 
   test "a plugin's table follows the plugin registry" do
-    assert OwnedTables.owner("task_edges") == {:plugin, "tasks"}
+    assert OwnedTables.owner("github_sync_conflicts") == {:plugin, "github"}
 
-    registered? = Enum.any?(Barkpark.Plugins.Registry.all(), &(&1.name == "tasks"))
-    assert OwnedTables.enabled?("task_edges") == registered?
+    registered? = Enum.any?(Barkpark.Plugins.Registry.all(), &(&1.name == "github"))
+    assert OwnedTables.enabled?("github_sync_conflicts") == registered?
+  end
+
+  test "the ruled core tables are not owned (a core route, fence or module reads them)" do
+    for table <-
+          ~w(task_edges paper_access_log paper_events pulse_counters pulse_events pulse_meters) do
+      assert OwnedTables.owner(table) == :core, "#{table} must be core under the 16:35Z rule"
+    end
   end
 
   test "an off owner's table is present only while the relation exists" do
@@ -64,6 +71,12 @@ defmodule Barkpark.OwnedTablesTest do
   test "function_exists?/1 reads the live catalog" do
     refute OwnedTables.function_exists?("no_such_function_d3ecc509(uuid)")
     assert OwnedTables.function_exists?("barkpark_revision_immutable()")
+  end
+
+  test "every fleet function signature resolves while the migrations are in place" do
+    for signature <- OwnedTables.functions() do
+      assert OwnedTables.function_exists?(signature), "#{signature} does not resolve"
+    end
   end
 
   test "every owned table is named by a migration" do
