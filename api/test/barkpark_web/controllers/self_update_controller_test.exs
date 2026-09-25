@@ -24,6 +24,12 @@ defmodule BarkparkWeb.SelfUpdateControllerTest do
     # The Runner is a singleton whose run state outlives each test — make sure
     # no previous run is still in flight before AND after every test.
     await_not_running()
+
+    # Keep the Runner's durable run records out of the checkout. The
+    # await_not_running on_exit is registered after, so (LIFO) it runs first.
+    dir = Path.join(System.tmp_dir!(), "bp-self-update-ctl-#{System.unique_integer([:positive])}")
+    put_runner_cfg(run_state_dir: dir, deploy_status_file: Path.join(dir, "deploy-status.json"))
+    on_exit(fn -> File.rm_rf(dir) end)
     on_exit(fn -> await_not_running() end)
     :ok
   end

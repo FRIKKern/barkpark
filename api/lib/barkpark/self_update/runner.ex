@@ -21,12 +21,59 @@ defmodule Barkpark.SelfUpdate.Runner do
   via `BARKPARK_SELF_UPDATE_CD`.
 
   Never-crash contract: `trigger/0` and `status/0` never raise — a dead
-  process degrades to `{:error, :disabled}` / an idle status map, and a
-  command that fails to start or dies abnormally lands as a `:done` state
+  process degrades to `{:error, :disabled}` / the on-disk status (below), and
+  a command that fails to start or dies abnormally lands as a `:done` state
   with a non-zero exit code, never as a Runner crash.
+
+  ## Durable run records (the run outlives the process that started it)
+
+  The default command RESTARTS the service that owns this process:
+  `deploy-rebuild.sh` ends in `systemctl restart barkpark`, and systemd
+  SIGTERMs the whole cgroup — the BEAM, this GenServer, the port and the
+  script itself. So in-memory state alone made the happy path report `:idle`
+  with an empty log, indistinguishable from "never ran". The run is therefore
+  recorded on disk, following `Barkpark.Sites.DeployRunner`'s pattern
+  (manifest at trigger, terminal record at exit, re-attach on `init/1`):
+
+    * `run.manifest.json` — written at trigger: run id, mode, `started_at`
+      and the child's OS pid. A POINTER, not a record: no outcome.
+    * `run.log` — every captured line, appended as it arrives, already
+      folded through `Barkpark.Sites.BuildLogScrub.raw/1` (the same pattern
+      set DeployRunner's recorded logs use). Scrubbed AT WRITE, so unlike
+      DeployRunner's finalize-time fold there is no raw window on disk.
+    * `run.terminal.json` — written at exit (natural exit, abnormal port
+      death, deadline): exit code, timestamps and the bounded scrubbed log.
+
+  One global run slot means ONE set of fixed-name files, overwritten per
+  trigger — bounded at one run by construction, no retention sweep needed.
+  They live in `run_state_dir` (default `<repo>/.bp-self-update-runs`, the
+  same location class as DeployRunner's `.bp-site-deploy-runs`: writable by
+  the running release and outside `_build`, which a rebuild nukes).
+
+  `init/1` and the dead-process `status/0` fallback read them back:
+
+    * terminal record for the manifest's run → `:done` with its real outcome.
+    * manifest, no terminal record, child pid still alive → re-attached as
+      `:running` (single-flight slot re-claimed, deadline re-armed against the
+      ORIGINAL `started_at`, pid polled until it exits) — DeployRunner's
+      re-attach of a still-active unit.
+    * manifest, no terminal record, child gone → the run died with the BEAM.
+      Like DeployRunner reconstructing a vanished unit from the engine's own
+      durable status file, the outcome is recovered from `deploy-rebuild.sh`'s
+      flight recorder (`<repo>/.deploy-status.json`), matched on the child's
+      pid (self-update.sh `exec`s deploy-rebuild.sh, so `$$` is the pid we
+      spawned) and a timestamp not older than the run. `phase=restart
+      outcome=applied` — written immediately before the restart that killed
+      us — is exit 0. With no matching record the run is `:done` with exit
+      `-3` (interrupted, outcome unknown) — never `:idle`. The recovered
+      outcome is then written as the terminal record, so it is stable.
   """
 
   use GenServer
+
+  require Logger
+
+  alias Barkpark.Sites.BuildLogScrub
 
   @default_command {"bash", ["scripts/self-update.sh"]}
   # Rollback rides the SAME Runner single-flight as self-update (one run slot
@@ -52,6 +99,28 @@ defmodule Barkpark.SelfUpdate.Runner do
   # exit 0 prints `TARGET_SHA=<40-hex>` (charter W6 contract); tolerate a short
   # sha for stub-command tests, but require hex so a garbage line can't pass.
   @target_sha_re ~r/TARGET_SHA=([0-9a-fA-F]{7,40})\b/
+
+  # Exit code for a run the BEAM restarted under with no terminal record and no
+  # matching deploy-rebuild flight record: interrupted, outcome unknown. Beside
+  # -1 (port closed abnormally) and -2 (deadline force-close).
+  @interrupted_exit -3
+
+  # How often a re-attached run's child pid is probed for liveness.
+  @default_orphan_poll_ms 5_000
+
+  @manifest_file "run.manifest.json"
+  @log_file "run.log"
+  @terminal_file "run.terminal.json"
+
+  # deploy-rebuild.sh's `write_status` phase/outcome → the exit code the script
+  # would have returned had it survived to return one (its header documents
+  # 0 ok · 1 build failed · 13 migrate failed · 15 restart unverified).
+  @deploy_status_exits %{
+    {"restart", "applied"} => 0,
+    {"build", "failed"} => 1,
+    {"migrate", "failed"} => 13,
+    {"restart", "unverified"} => 15
+  }
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -186,11 +255,24 @@ defmodule Barkpark.SelfUpdate.Runner do
 
   @doc """
   The current run status: `state` (`:idle` | `:running` | `:done`),
-  `exit_code` (nil until a run finishes), the bounded `log` (oldest line
-  first), and `started_at` / `finished_at`. Never raises.
+  `exit_code` (nil until a run finishes; `-1` port died, `-2` deadline,
+  `-3` interrupted by a BEAM restart with no recoverable outcome), the bounded
+  `log` (oldest line first), and `started_at` / `finished_at`. Never raises.
+
+  When the process is not answering it falls back to the durable run records
+  (see the moduledoc), never to a blank `:idle` that would hide a real run.
   """
   @spec status() :: map()
-  def status, do: safe_call(:status, render_status(initial_state()))
+  def status, do: safe_call(:status, render_status(disk_state()))
+
+  @doc """
+  The directory holding the durable run records. Must survive a BEAM restart
+  and a rebuild — see the moduledoc.
+  """
+  @spec run_state_dir() :: String.t()
+  def run_state_dir do
+    Keyword.get(config(), :run_state_dir) || Path.join(run_cd(), ".bp-self-update-runs")
+  end
 
   defp safe_call(msg, fallback) do
     case Process.whereis(__MODULE__) do
@@ -213,7 +295,7 @@ defmodule Barkpark.SelfUpdate.Runner do
     # The command port is linked to this process; trap so an abnormal port
     # death becomes a :done state instead of taking the Runner down.
     Process.flag(:trap_exit, true)
-    {:ok, initial_state()}
+    {:ok, recover()}
   end
 
   @impl true
@@ -232,16 +314,21 @@ defmodule Barkpark.SelfUpdate.Runner do
             # can't wedge true (and block every future trigger) until a BEAM restart.
             schedule_run_deadline(port)
 
-            {:reply, {:ok, :started},
-             %{
-               state
-               | run: :running,
-                 port: port,
-                 mode: mode,
-                 log: [],
-                 started_at: DateTime.utc_now(),
-                 finished_at: nil
-             }}
+            state = %{
+              state
+              | run: :running,
+                port: port,
+                mode: mode,
+                log: [],
+                started_at: DateTime.utc_now(),
+                finished_at: nil,
+                run_id: new_run_id(),
+                os_pid: port_os_pid(port),
+                orphan?: false
+            }
+
+            _ = persist_start(state)
+            {:reply, {:ok, :started}, state}
 
           {:error, _reason} ->
             {:reply, {:error, :start_failed}, state}
@@ -259,13 +346,13 @@ defmodule Barkpark.SelfUpdate.Runner do
   end
 
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
-    {:noreply, %{state | run: {:done, code}, port: nil, finished_at: DateTime.utc_now()}}
+    {:noreply, finish(state, code)}
   end
 
   def handle_info({:EXIT, port, reason}, %{port: port} = state) when state.run == :running do
     # Abnormal port death without an exit_status — record a failure, never crash.
     state = push_log(state, "[runner] command port closed: #{inspect(reason)}")
-    {:noreply, %{state | run: {:done, -1}, port: nil, finished_at: DateTime.utc_now()}}
+    {:noreply, finish(state, -1)}
   end
 
   # Deadline watchdog fired for the CURRENT run — force-close the port and record
@@ -278,7 +365,37 @@ defmodule Barkpark.SelfUpdate.Runner do
     state =
       push_log(state, "[runner] run exceeded #{run_deadline_ms()}ms deadline — force-closed")
 
-    {:noreply, %{state | run: {:done, -2}, port: nil, finished_at: DateTime.utc_now()}}
+    {:noreply, finish(state, -2)}
+  end
+
+  # A RE-ATTACHED run (its child outlived the process that spawned it): poll the
+  # pid; once it is gone, recover the outcome exactly as `init/1` would have.
+  def handle_info(
+        {:orphan_check, run_id},
+        %{run: :running, orphan?: true, run_id: run_id} = state
+      ) do
+    if os_pid_alive?(state.os_pid) do
+      schedule_orphan_check(run_id)
+      {:noreply, state}
+    else
+      {:noreply, finish_interrupted(%{state | log: read_log_tail()})}
+    end
+  end
+
+  # A re-attached run that outlived its deadline. There is no port to close and
+  # a bare pid is not ours to signal (it may have been reused) — release the
+  # slot and say so; the script's own flock remains the cross-process backstop.
+  def handle_info(
+        {:orphan_deadline, run_id},
+        %{run: :running, orphan?: true, run_id: run_id} = state
+      ) do
+    state =
+      push_log(
+        state,
+        "[runner] re-attached run exceeded #{run_deadline_ms()}ms deadline — released, pid #{state.os_pid} not signalled"
+      )
+
+    {:noreply, finish(state, -2)}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -309,7 +426,17 @@ defmodule Barkpark.SelfUpdate.Runner do
   defp initial_state do
     # `mode` records which verb the current/last run is — defaults to
     # :self_update so a box that has never run reports the primary verb.
-    %{run: :idle, port: nil, mode: :self_update, log: [], started_at: nil, finished_at: nil}
+    %{
+      run: :idle,
+      port: nil,
+      mode: :self_update,
+      log: [],
+      started_at: nil,
+      finished_at: nil,
+      run_id: nil,
+      os_pid: nil,
+      orphan?: false
+    }
   end
 
   # Each mode resolves its own injectable command (tests stub these); the
@@ -348,11 +475,318 @@ defmodule Barkpark.SelfUpdate.Runner do
     Keyword.get(config(), :cd) || Path.dirname(File.cwd!())
   end
 
-  # Bounded log: newest-first internally, oldest dropped beyond the cap.
+  # Bounded log: newest-first internally, oldest dropped beyond the cap. Every
+  # line is folded through the recorded-log scrubber FIRST, so neither the
+  # served status nor the on-disk record ever holds a raw secret-shaped value.
   defp push_log(state, line) do
-    max = Keyword.get(config(), :max_log_lines, @default_max_log_lines)
-    %{state | log: Enum.take([line | state.log], max)}
+    line = BuildLogScrub.raw(line)
+    _ = append_log_line(state, line)
+    %{state | log: Enum.take([line | state.log], max_log_lines())}
   end
+
+  defp max_log_lines, do: Keyword.get(config(), :max_log_lines, @default_max_log_lines)
+
+  # ── durable run records ─────────────────────────────────────────────────
+  #
+  # Every write is best-effort: a record that cannot be written must never
+  # block, fail or crash an update — it only costs the post-restart status.
+  # Paths are `run_state_dir()` (config or a repo-root join) plus a fixed file
+  # name; nothing request-derived reaches a path.
+
+  defp finish(state, code) do
+    state = %{state | run: {:done, code}, port: nil, finished_at: DateTime.utc_now()}
+    _ = write_terminal(state)
+    state
+  end
+
+  defp new_run_id, do: Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+
+  defp port_os_pid(port) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, pid} -> pid
+      _ -> nil
+    end
+  end
+
+  defp record_path(name), do: Path.join(run_state_dir(), name)
+
+  # Order matters: the previous run's terminal record goes FIRST, so a crash
+  # between the two steps leaves a manifest with no terminal record (→ recovered
+  # as interrupted), never a stale terminal record the new manifest would adopt.
+  # (The run_id match makes that doubly impossible.)
+  # sobelow_skip ["Traversal.FileModule"]
+  defp persist_start(state) do
+    File.mkdir_p!(run_state_dir())
+    _ = File.rm(record_path(@terminal_file))
+    File.write!(record_path(@log_file), "")
+
+    write_json(@manifest_file, %{
+      "run_id" => state.run_id,
+      "mode" => Atom.to_string(state.mode),
+      "started_at" => DateTime.to_iso8601(state.started_at),
+      "os_pid" => state.os_pid
+    })
+  rescue
+    error -> record_failed(:manifest, error)
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp append_log_line(%{run_id: nil}, _line), do: :ok
+
+  defp append_log_line(_state, line) do
+    File.write(record_path(@log_file), [line, "\n"], [:append])
+  rescue
+    _ -> :ok
+  end
+
+  defp write_terminal(%{run_id: nil}), do: :ok
+
+  defp write_terminal(state) do
+    write_json(@terminal_file, %{
+      "run_id" => state.run_id,
+      "mode" => Atom.to_string(state.mode),
+      "exit_code" => run_exit_code(state.run),
+      "started_at" => iso(state.started_at),
+      "finished_at" => iso(state.finished_at),
+      "log" => Enum.reverse(state.log),
+      "log_scrub" => BuildLogScrub.version()
+    })
+  rescue
+    error -> record_failed(:terminal, error)
+  end
+
+  # Write-then-rename so a reader never sees a half-written record.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp write_json(name, map) do
+    path = record_path(name)
+    tmp = path <> ".tmp"
+    File.write!(tmp, Jason.encode!(map))
+    File.rename!(tmp, path)
+    :ok
+  end
+
+  defp record_failed(what, error) do
+    Logger.warning("[self-update] #{what} record not written: #{inspect(error)}")
+    {:error, error}
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_json(name) do
+    with {:ok, raw} <- File.read(record_path(name)),
+         {:ok, %{} = json} <- Jason.decode(raw) do
+      json
+    else
+      _ -> nil
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_log_tail do
+    case File.read(record_path(@log_file)) do
+      {:ok, raw} ->
+        raw
+        |> String.split("\n", trim: true)
+        |> Enum.take(-max_log_lines())
+        |> Enum.reverse()
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  # ── recovery (init/1 and the dead-process status fallback) ─────────────
+
+  # init/1: rebuild state from the records, then perform the side effects the
+  # pure read cannot — re-arm a re-attached run, persist a recovered outcome.
+  defp recover do
+    case read_disk() do
+      {:idle, state} ->
+        state
+
+      {:terminal, state} ->
+        state
+
+      {:alive, state} ->
+        schedule_orphan_check(state.run_id)
+        Process.send_after(self(), {:orphan_deadline, state.run_id}, remaining_deadline_ms(state))
+        state
+
+      {:gone, state} ->
+        finish_interrupted(state)
+    end
+  rescue
+    # A malformed record must never take the boot down — degrade to idle.
+    error ->
+      Logger.warning("[self-update] run-record recovery skipped: #{inspect(error)}")
+      initial_state()
+  end
+
+  # status/0 fallback when the process is not answering: the same read, no
+  # writes and no timers (this runs in the CALLER's process).
+  defp disk_state do
+    case read_disk() do
+      {:gone, state} -> interrupted_outcome(state)
+      {_kind, state} -> state
+    end
+  rescue
+    _ -> initial_state()
+  end
+
+  defp read_disk do
+    with %{"run_id" => run_id} = manifest when is_binary(run_id) <- read_json(@manifest_file),
+         {:ok, started_at, _} <- DateTime.from_iso8601(to_string(manifest["started_at"])) do
+      base = %{
+        initial_state()
+        | mode: decode_mode(manifest["mode"]),
+          started_at: started_at,
+          run_id: run_id,
+          os_pid: pid_or_nil(manifest["os_pid"])
+      }
+
+      case read_json(@terminal_file) do
+        %{"run_id" => ^run_id} = terminal ->
+          {:terminal, from_terminal(base, terminal)}
+
+        _no_terminal ->
+          state = %{base | run: :running, log: read_log_tail()}
+
+          if os_pid_alive?(state.os_pid),
+            do: {:alive, %{state | orphan?: true}},
+            else: {:gone, state}
+      end
+    else
+      _ -> {:idle, initial_state()}
+    end
+  end
+
+  defp from_terminal(base, terminal) do
+    code =
+      if is_integer(terminal["exit_code"]), do: terminal["exit_code"], else: @interrupted_exit
+
+    %{
+      base
+      | run: {:done, code},
+        mode: decode_mode(terminal["mode"]),
+        log: terminal["log"] |> List.wrap() |> Enum.filter(&is_binary/1) |> Enum.reverse(),
+        finished_at: parse_dt(terminal["finished_at"])
+    }
+  end
+
+  defp finish_interrupted(state) do
+    state = interrupted_outcome(state)
+    _ = write_terminal(state)
+    state
+  end
+
+  # The run's child is gone and left no terminal record: the BEAM (and with it
+  # this process) died mid-run — on the happy path, by the restart the run
+  # itself queued. Recover the outcome from deploy-rebuild.sh's own flight
+  # recorder when it names THIS run; otherwise say interrupted, never idle.
+  defp interrupted_outcome(state) do
+    now = DateTime.utc_now()
+
+    case matching_deploy_status(state) do
+      %{"phase" => phase, "outcome" => outcome} = record ->
+        code = Map.get(@deploy_status_exits, {phase, outcome}, @interrupted_exit)
+
+        line =
+          "[runner] service restarted during this run; deploy-rebuild recorded " <>
+            "phase=#{phase} outcome=#{outcome} sha=#{record["sha"]} at #{record["ts"]}"
+
+        %{push_log_memory(state, line) | run: {:done, code}, port: nil, finished_at: now}
+
+      nil ->
+        line =
+          "[runner] interrupted: the service restarted while this run was in flight " <>
+            "and no terminal record exists — outcome unknown"
+
+        %{
+          push_log_memory(state, line)
+          | run: {:done, @interrupted_exit},
+            port: nil,
+            finished_at: now
+        }
+    end
+  end
+
+  # Recovery lines are appended to memory + the terminal record, not run.log:
+  # the log file is the child's captured output.
+  defp push_log_memory(state, line),
+    do: %{state | log: Enum.take([line | state.log], max_log_lines())}
+
+  # A flight record belongs to this run only if deploy-rebuild wrote it from the
+  # pid we spawned (self-update.sh `exec`s it, so `$$` is our child's pid) and
+  # no earlier than the run started (its `ts` is second-granular).
+  defp matching_deploy_status(%{os_pid: pid, started_at: %DateTime{} = started_at})
+       when is_integer(pid) do
+    with %{"pid" => ^pid, "ts" => ts} = record <- read_deploy_status(),
+         {:ok, at, _} <- DateTime.from_iso8601(to_string(ts)),
+         true <- DateTime.compare(at, DateTime.truncate(started_at, :second)) != :lt do
+      record
+    else
+      _ -> nil
+    end
+  end
+
+  defp matching_deploy_status(_state), do: nil
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_deploy_status do
+    path =
+      Keyword.get(config(), :deploy_status_file) || Path.join(run_cd(), ".deploy-status.json")
+
+    with {:ok, raw} <- File.read(path),
+         {:ok, %{} = json} <- Jason.decode(raw) do
+      json
+    else
+      _ -> nil
+    end
+  end
+
+  defp schedule_orphan_check(run_id) do
+    ms = Keyword.get(config(), :orphan_poll_ms, @default_orphan_poll_ms)
+    Process.send_after(self(), {:orphan_check, run_id}, ms)
+  end
+
+  defp remaining_deadline_ms(state) do
+    elapsed = DateTime.diff(DateTime.utc_now(), state.started_at, :millisecond)
+    max(run_deadline_ms() - elapsed, 0)
+  end
+
+  # `kill -0` probes existence without signalling. Pid reuse can make a dead
+  # run look alive; the re-armed deadline bounds how long that can hold the slot.
+  # sobelow_skip ["CI.System"]
+  defp os_pid_alive?(pid) when is_integer(pid) and pid > 0 do
+    case System.find_executable("kill") do
+      nil ->
+        false
+
+      kill ->
+        match?({_, 0}, System.cmd(kill, ["-0", Integer.to_string(pid)], stderr_to_stdout: true))
+    end
+  rescue
+    _ -> false
+  end
+
+  defp os_pid_alive?(_pid), do: false
+
+  defp decode_mode("rollback"), do: :rollback
+  defp decode_mode(_other), do: :self_update
+
+  defp pid_or_nil(pid) when is_integer(pid), do: pid
+  defp pid_or_nil(_other), do: nil
+
+  defp parse_dt(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, dt, _} -> dt
+      _ -> nil
+    end
+  end
+
+  defp parse_dt(_value), do: nil
+
+  defp iso(nil), do: nil
+  defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 
   defp render_status(state) do
     %{
