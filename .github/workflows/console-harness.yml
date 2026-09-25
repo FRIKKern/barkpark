@@ -2727,7 +2727,9 @@ jobs:
       # step that actually decided the job, in both directions. It NAMES a
       # failure; it never grades one — `console-gate` computes `bad` from
       # `result` alone.
-      verdict: ${{ steps.roster.outputs.verdict || steps.tier.outputs.verdict }}
+      # `stopwatch` (dwb-12) is the last step, so the same argument holds one
+      # step further down: it can only publish if `tier` and `roster` exited 0.
+      verdict: ${{ steps.stopwatch.outputs.verdict || steps.roster.outputs.verdict || steps.tier.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -2841,6 +2843,68 @@ jobs:
             *)
               verdict UNINTERPRETABLE
               echo "::error title=Roster phone band render UNINTERPRETABLE::breakpoint-sweep.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+      # ── DWB STOPWATCH SELF-TEST (task dwb-12). A STEP here, not a job, for
+      # the reason the roster step gives: zero aggregator surface. This job
+      # already has what it needs: Node 22 (CDP over the global WebSocket),
+      # an explicit CHROME, and the console path filter (the stopwatch drives
+      # cloud/priv/static/app.js's /new flow).
+      #
+      # OFFLINE ONLY. It serves this tree's SPA from a stub control plane on
+      # 127.0.0.1 and never contacts a Barkpark host: live runs provision real
+      # instances and are owner item 52, never CI. The first two commands prove
+      # the live guard refuses (exit 2) without BOTH --live and --host.
+      #
+      # The self-test runs six fixtures and asserts each budget both ways: a
+      # clean fixture passes all four; a sixth click, a p95 past the (scaled)
+      # instance-live budget, a bare spinner past 2 s, and a token-paste or
+      # two-click Studio entry each fail with that budget named. Exit 1 = an arm
+      # gave the wrong verdict; exit 2 = it refused to measure.
+      - name: DWB stopwatch — offline self-test (dwb-12)
+        id: stopwatch
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
+          sw=cloud/priv/static/__preview__/dwb-stopwatch.mjs
+          guard() {
+            label=$1; shift
+            rc=0; out=$(node "$sw" "$@" 2>&1) || rc=$?
+            case "$out" in *"owner item 52"*) named=yes ;; *) named=no ;; esac
+            if [ "$rc" -ne 2 ] || [ "$named" != yes ]; then
+              verdict MEASURED_DEFECT
+              echo "::error title=DWB stopwatch live guard OPEN::${label}: exited ${rc} (want 2), named owner item 52: ${named}. Live mode must refuse without BOTH --live and --host."
+              printf '%s\n' "$out"
+              exit 1
+            fi
+            echo "live guard holds: ${label} -> exit 2, names owner item 52"
+          }
+          guard "--live without --host" --live
+          guard "--host without --live" --host https://example.invalid
+          rc=0
+          node "$sw" --selftest --json /tmp/dwb-stopwatch-selftest.json || rc=$?
+          case "$rc" in
+            0)
+              verdict OK
+              echo "DWB stopwatch: every arm gave its expected verdict; each of c0-c3 proven able to pass and fail."
+              ;;
+            2)
+              verdict REFUSED
+              echo "::error title=DWB stopwatch REFUSED::The stopwatch refused to measure (exit 2) — Chrome bring-up, a squatted port, or the /new flow reached a screen the script cannot drive. NO claim is made about the budgets. The log above names the cause."
+              exit 1
+              ;;
+            1)
+              verdict MEASURED_DEFECT
+              echo "::error title=DWB stopwatch self-test WRONG VERDICT::At least one arm gave the wrong verdict (exit 1): see the 'arm WRONG' lines above. Either the /new flow changed under a fixture, or a budget check can no longer pass or fail."
+              exit 1
+              ;;
+            *)
+              verdict UNINTERPRETABLE
+              echo "::error title=DWB stopwatch UNINTERPRETABLE::dwb-stopwatch.mjs exited ${rc}, outside its vocabulary (0 / 1 / 2). Cannot tell, therefore red."
               exit 1
               ;;
           esac
