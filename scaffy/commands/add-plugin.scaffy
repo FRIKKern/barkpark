@@ -251,3 +251,4 @@ ASSERT FILE "api/test/barkpark/plugins/{{.plugin_name}}_test.exs" CONTAINS "defm
 # assert; discovery is proven at boot by the host, not by this command.
 ASSERT CMD "cd api && mix compile" TIER ci
 ASSERT CMD "cd api && mix test test/barkpark/plugins/{{.plugin_name}}_test.exs" TIER ci
+
