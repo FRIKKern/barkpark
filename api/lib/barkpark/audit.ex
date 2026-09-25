@@ -198,6 +198,15 @@ defmodule Barkpark.Audit do
   is re-entrant within that transaction. Exposed so a caller that takes another
   advisory lock AND may emit in the same transaction can take this one FIRST,
   keeping one global lock order (`DedupWall.lock_publish_scope!/3` does).
+
+  The order against the WORKSPACE ROW runs the other way: any writer that
+  inserts a row referencing `workspaces(ws)` takes FOR KEY SHARE on it (the FK
+  check) and emits afterwards, so the row lock comes BEFORE audit(ws). A
+  transaction holding audit(ws) must therefore never take a row lock on
+  `workspaces(ws)` that conflicts with KEY SHARE — a key-modifying UPDATE
+  (`id`, `slug`) or FOR UPDATE. `lib/` has no such write (no workspace rename);
+  a test that renamed the shared Default after auditing did, and deadlocked the
+  async suite (task-8051eddcd3c9f30f).
   """
   @spec lock_chain!(String.t() | nil) :: :ok
   def lock_chain!(workspace_id) do

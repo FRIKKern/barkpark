@@ -33,29 +33,29 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Content
-  alias Barkpark.Repo
   alias Barkpark.Tenancy
 
   @slug "2026-05-25-leak-probe"
 
   @doc """
-  Simulate "no seeded Default tenant" without an FK-entangled teardown.
+  Simulate "no seeded Default tenant" without an FK-entangled teardown: vacate
+  the seat (`workspaces.is_default`, task-566dc5be4871353b) and nothing else.
 
-  This used to be a RENAME, back when `Tenancy.get_default_workspace/0`
-  looked up `slug == "default"`. Since task-566dc5be4871353b the seat is
-  the uncast `workspaces.is_default` column, so a rename vacates nothing —
-  which is precisely the property that change bought. The rename is kept
-  only so the row is also unreachable by name; the seat is cleared by the
-  shared fixture.
+  NO RENAME (task-8051eddcd3c9f30f). This used to also rename the Default's
+  slug "so the row is unreachable by name" — nothing resolves the Default by
+  name any more. The rename was a key-modifying UPDATE (`slug` has a unique
+  index), i.e. FOR UPDATE on the SHARED Default row, taken while this test's
+  sandbox transaction already held audit(Default) from the setup's
+  `upsert_paper`. Every concurrent async test that wrote a row referencing the
+  Default holds FOR KEY SHARE on it (the FK check) and then emits audit, so
+  the two orders met and Postgres raised 40P01 — in this test or in theirs.
+  Vacating updates only `is_default` (partial unique index, not a key column):
+  FOR NO KEY UPDATE, which KEY SHARE does not block.
 
   Public so `Barkpark.Papers.PublicPaperScopeLockOrderTest` (below) runs the
   same statements on unboxed connections.
   """
   def retire_default_workspace! do
-    Tenancy.get_default_workspace()
-    |> Ecto.Changeset.change(slug: "not-default-#{System.unique_integer([:positive])}")
-    |> Repo.update!()
-
     vacate_default_seat!()
   end
 
