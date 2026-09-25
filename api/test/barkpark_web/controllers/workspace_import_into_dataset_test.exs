@@ -198,7 +198,7 @@ defmodule BarkparkWeb.WorkspaceImportIntoDatasetTest do
              ).status == 404
 
       assert post_import(
-               build_conn(),
+               scoped_conn(),
                raw,
                ws_b.slug,
                %{into_dataset: "copy", into_project: "nope"},
@@ -218,7 +218,7 @@ defmodule BarkparkWeb.WorkspaceImportIntoDatasetTest do
 
       assert post_import(conn, raw, ws_b.slug, query, bundle).status == 200
 
-      err = post_import(build_conn(), raw, ws_b.slug, query, bundle) |> json_response(409)
+      err = post_import(scoped_conn(), raw, ws_b.slug, query, bundle) |> json_response(409)
       assert err["error"]["code"] == "conflict"
       assert err["error"]["reason"] == "dataset_slug_conflict"
       assert length(datasets_named(proj_b.id, "copy")) == 1
@@ -259,7 +259,7 @@ defmodule BarkparkWeb.WorkspaceImportIntoDatasetTest do
 
       merge =
         post_import(
-          build_conn(),
+          scoped_conn(),
           raw,
           ws_b.slug,
           %{into_dataset: "copy", into_project: proj_b.slug, mode: "merge"},
