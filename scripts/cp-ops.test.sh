@@ -141,7 +141,6 @@ all_cases() {
   run_case site-artifact-fetch/bad-ref site-artifact-fetch BOX_IP=10.0.0.7 ARTIFACT_REPO=acme/site 'ARTIFACT_REF=main$(id)'
   run_case box-logs/ok box-logs BOX_IP=10.0.0.7 UNIT=barkpark-runtime
   run_case box-logs/bad-unit box-logs BOX_IP=10.0.0.7 UNIT=sshd
-  run_case builder-token-fix/ok builder-token-fix BOX_IP=10.0.0.7
   run_case box-file-tail/ok box-file-tail BOX_IP=10.0.0.7 FILE_PATH=/var/log/barkpark-builder/build-1.log
   run_case box-file-tail/escape box-file-tail BOX_IP=10.0.0.7 FILE_PATH=/var/log/barkpark-builder/../../etc/shadow
   run_case caddy-repair/ok caddy-repair BOX_IP=10.0.0.7

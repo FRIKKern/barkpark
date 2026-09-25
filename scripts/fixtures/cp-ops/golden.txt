@@ -295,50 +295,6 @@ root@cp.example.invalid
 === case box-logs/bad-unit: op=box-logs [BOX_IP=10.0.0.7] [UNIT=sshd]
 unit not in allowlist
 === exit 1
-=== case builder-token-fix/ok: op=builder-token-fix [BOX_IP=10.0.0.7]
->>> ssh argc=8
---- argv[0]
--i
---- argv[1]
-/tmp/deploy_key
---- argv[2]
--o
---- argv[3]
-StrictHostKeyChecking=accept-new
---- argv[4]
--o
---- argv[5]
-UserKnownHostsFile=/tmp/known
---- argv[6]
-root@cp.example.invalid
---- argv[7]
-
-      set -euo pipefail
-      # No pipe into head: under pipefail a truncating reader SIGPIPEs
-      # its producer and the pipeline returns 141 -- a step failure
-      # under set -e, and a silently wrong status otherwise, visible
-      # only when docker is slow enough to still be writing. head on
-      # a regular FILE cannot SIGPIPE anything.
-      docker ps -q --filter ancestor=cloud-control_plane:latest >/tmp/cp-ops-cid.txt
-      c=$(head -1 /tmp/cp-ops-cid.txt)
-      [ -n "$c" ] || { echo 'no control_plane container'; exit 1; }
-      WT=$(docker exec "$c" printenv WORKER_TOKEN)
-      [ -n "$WT" ] || { echo 'WORKER_TOKEN unset in container'; exit 1; }
-      KEY=/root/.ssh/barkpark_indx
-      printf '%s' "$WT" | ssh -i "$KEY" -o StrictHostKeyChecking=accept-new root@10.0.0.7 '
-        set -euo pipefail
-        umask 077
-        cat > /etc/barkpark/worker.token
-        sed -i "s#--token-file /etc/barkpark/agent.token#--token-file /etc/barkpark/worker.token#" /etc/systemd/system/barkpark-builder.service
-        systemctl daemon-reload
-        systemctl restart barkpark-builder
-        sleep 2
-        systemctl is-active barkpark-builder
-        echo builder-token-fix complete
-      '
-    
---- stdin: 0 bytes
-=== exit 0
 === case box-file-tail/ok: op=box-file-tail [BOX_IP=10.0.0.7] [FILE_PATH=/var/log/barkpark-builder/build-1.log]
 >>> ssh argc=8
 --- argv[0]

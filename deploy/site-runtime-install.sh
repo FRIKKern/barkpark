@@ -152,13 +152,17 @@ mkdir -p /var/lib/barkpark-builder/images /var/log/barkpark-builder
 # on the box, and it is the per-box, hashed, revocable one (jpf-w1-builder-identity).
 #
 # There used to be a preference here: if /etc/barkpark/worker.token existed (put
-# there by cp-ops builder-token-fix) the builder used it instead. That token is
-# the SHARED fleet WORKER_TOKEN, which also opens /v1/internal/* — list and
+# there by a cp-ops operation, since removed) the builder used it instead. That
+# token is the SHARED fleet WORKER_TOKEN, which also opens /v1/internal/* — list and
 # deprovision any box — and, until this change, read any site's decrypted env.
 # Preferring it meant a box that had ever been hand-fixed kept holding the
 # fleet's keys through every reinstall, on hardware that runs untrusted nixpacks
 # builds. The preference is deleted rather than inverted so reinstalls CONVERGE:
 # a box cannot stay on the old credential by still having the old file.
+# The remedy for a box still on worker.token is to rerun this script (cp-ops
+# site-runtime-install): it rewrites the builder unit onto the box's own
+# agent.token. It does not delete the stale worker.token file; rotating
+# WORKER_TOKEN afterwards is what retires it (deploy/systemd/README.md).
 #
 # The builder unit therefore names agent.token directly and carries no token
 # placeholder, exactly like the runtime unit beside it.
