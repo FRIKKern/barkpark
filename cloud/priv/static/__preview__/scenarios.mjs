@@ -2258,7 +2258,8 @@ const THEATER_IDS = {
   ready: "5b2c1e00-0000-4000-8000-0000000000e3",
 };
 // Template envelope ⇐ GET /v1/templates (slug/title/description/what_you_get
-// drive the /new card; deployable gates the GitHub affordance on ready).
+// drive the /new card; deployable gates the GitHub affordance on ready;
+// repo + app_dir make the no-token Vercel fallback a live clone link).
 const theaterTemplate = {
   slug: "astro-blog",
   title: "Astro Blog",
@@ -2269,6 +2270,9 @@ const theaterTemplate = {
     "Instant content updates on your live site",
   ],
   deployable: true,
+  repo: "https://github.com/FRIKKern/barkpark",
+  app_dir: "templates/astro-blog",
+  no_app_dir_reason: null,
 };
 // Catalog envelope ⇐ GET /v1/providers/hetzner/catalog (router.ex: regions[] +
 // server_types[].monthly_price + currency). cx22 is the priced row the theater
