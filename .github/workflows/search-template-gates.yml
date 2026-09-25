@@ -179,7 +179,7 @@ jobs:
     name: Vendored renderer block coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -190,7 +190,7 @@ jobs:
     name: Vendored SDK freshness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -208,7 +208,7 @@ jobs:
     name: Starter-template contrast/focus literals
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Self-test the tripwire (its negative half must red)
         run: bash scripts/templates-literal-check.sh --selftest
       - name: Scan the starter templates
@@ -218,7 +218,7 @@ jobs:
     name: Flagship template bp-command parse
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -249,7 +249,7 @@ jobs:
     name: Astro starter content-link specs (dep-free, no browser)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Node 22 strips TypeScript types natively — no npm ci, no build step, so
       # this job stays seconds-fast and cannot be broken by a dependency. The
       # template's `@barkpark/core` value imports are resolved by
@@ -291,7 +291,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: File (or update) the CI failure issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

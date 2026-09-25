@@ -94,7 +94,7 @@ jobs:
     steps:
       # Shallow is enough: this job reads the PR BODY out of the event payload
       # and never walks history. It checks out only to reach the two scripts.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: task-lease-renew.sh syntax check
         run: bash -n scripts/task-lease-renew.sh
@@ -138,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Harness first — the sweep must be able to fail
         run: bash scripts/task-lease-sweep.test.sh
       - name: Sweep every open PR's row

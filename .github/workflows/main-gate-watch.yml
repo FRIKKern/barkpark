@@ -216,7 +216,7 @@ jobs:
       rc: ${{ steps.watch.outputs.rc }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The scream's own tripwire, first. If the read stops being able to fail —
       # on a RED tip AND on a tip with no verdict at all — the watch below is
@@ -258,7 +258,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # The convergence step below resolves the sha the control plane SERVES,
           # which is behind main's tip whenever a deploy is late — exactly the
@@ -339,7 +339,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The tripwire first: if the read has stopped being able to lose, whatever
       # it says about main below is decoration.
@@ -367,7 +367,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Shell syntax
         run: bash -n scripts/main-gate-watch.sh
       - name: Shell syntax (main-gate-watch-route.sh)
@@ -466,7 +466,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:
@@ -524,7 +524,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:
@@ -575,7 +575,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:

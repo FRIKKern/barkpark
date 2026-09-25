@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
       - name: read every declared cron against its real scheduled runs
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}

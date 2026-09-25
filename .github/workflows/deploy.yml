@@ -167,7 +167,7 @@ jobs:
       cp: ${{ steps.f.outputs.cp }}
       instance: ${{ steps.f.outputs.instance }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: f
@@ -516,7 +516,7 @@ jobs:
       # from it exactly on a rollback, the one case `previous_sha` exists for.
       previous_sha: ${{ steps.prev.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: prev
         name: Read the sha the control plane is serving BEFORE this deploy
         # ANONYMOUS and read-only: /health is public and returns `git_sha`
@@ -718,7 +718,7 @@ jobs:
       # control plane's process-derived /health `serving_since`.
       serving_since: ${{ steps.served.outputs.serving_since }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: prev
         name: Read the sha the content instance is serving BEFORE this deploy
         # Over the SSH this job already holds — no new secret, no new hop. An
@@ -1055,7 +1055,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:
@@ -1139,7 +1139,7 @@ jobs:
     outputs:
       delivered: ${{ steps.post.outputs.delivered }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The range needs the PREVIOUS sha's commit object, which is arbitrarily
           # far back on a rollback or after a long docs-only stretch.
@@ -1920,7 +1920,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:
@@ -2091,7 +2091,7 @@ jobs:
       converged: ${{ steps.check.outputs.converged }}
       detail: ${{ steps.check.outputs.detail }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The range walks back to whatever the box is serving, which after a
           # strand is arbitrarily far behind. A shallow clone makes every sha
@@ -2326,7 +2326,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:

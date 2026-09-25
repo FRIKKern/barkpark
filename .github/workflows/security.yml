@@ -219,7 +219,7 @@ jobs:
       # fires on the next api/ merge and main-red-owner.yml owns the red.
       locks: ${{ steps.sets.outputs.locks }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
           # `refs/pull/N/merge` — a commit that already contains main's advance
@@ -412,7 +412,7 @@ jobs:
     name: Security gate shape ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Harness (the ratchet must be able to fail)
         run: bash scripts/security-gate-shape.test.sh
 
@@ -446,7 +446,7 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -634,7 +634,7 @@ jobs:
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Selftest (the overlap + binding ratchets must be able to fail)
         id: s1
@@ -804,7 +804,7 @@ jobs:
       verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -926,7 +926,7 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -1450,7 +1450,7 @@ jobs:
       contents: read
       issues: write # the ONLY reason this job carries a permissions block
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: File (or update) the CI failure issue
         env:

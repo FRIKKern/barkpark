@@ -140,7 +140,7 @@ jobs:
     name: served-catalog drift gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # pull_request checks out the merge commit; depth 2 brings its first
           # parent (the base tip), so HEAD^1..HEAD is exactly what merging adds.

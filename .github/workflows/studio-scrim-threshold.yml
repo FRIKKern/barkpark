@@ -83,7 +83,7 @@ jobs:
     outputs:
       scrim: ${{ steps.set.outputs.scrim }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The PR HEAD, not the merge ref, and full history so the base sha is
           # resolvable for the diff below.
@@ -144,7 +144,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:

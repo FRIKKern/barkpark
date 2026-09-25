@@ -1681,7 +1681,7 @@ jobs:
       scratchpad-reaper: ${{ steps.sets.outputs.scratchpad-reaper }}
       echo-json-parse: ${{ steps.sets.outputs.echo-json-parse }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # THE PR HEAD, not the merge ref. Without `ref:` checkout lands on
           # refs/pull/N/merge, which already contains main's advance, while
@@ -1841,7 +1841,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.leg.timeout }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         id: setup
         with:
           # Per-leg, because five legs genuinely need a full clone (they build
