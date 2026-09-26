@@ -12,6 +12,7 @@ Elixir/Phoenix backend: CRUD, real-time, plugins, Studio. Dev: `mix phx.server` 
 | `lib/barkpark/plugins/` | Registry, resolver chain, Bootstrap, `tasks.ex`, `bulldocs.ex`, `sheets.ex` (§§ below), `onixedit/` |
 | `lib/barkpark/plugins/onixedit/export/*.ex` | ONIX 3.0 export submodules (header, message, codelists, validator, detail composites) |
 | `lib/barkpark/tasks.ex` | Task substrate utilities — claim/close/relabel, `mutation_events` emit |
+| `lib/barkpark/managed_runtime/write_admission.ex` | Internal explicit-start drain journal; unwired to writers, no seal capability. Tests: `test/barkpark/managed_runtime/write_admission_test.exs`. |
 | `lib/barkpark_web/router.ex` | All routes incl. `GET /v1/capabilities`; scoped `/w/:workspace_slug/p/:project_slug` mirror |
 | `lib/barkpark_web/live/studio/studio_live.ex` | Multi-pane Studio LiveView — section index in its header comment |
 | `lib/barkpark_web/studio/pane_builder.ex` | Pane construction — **under `studio/`, NOT `live/studio/`** |
