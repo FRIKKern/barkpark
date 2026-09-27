@@ -12,8 +12,8 @@ Elixir/Phoenix backend: CRUD, real-time, plugins, Studio. Dev: `mix phx.server` 
 | `lib/barkpark/plugins/` | Registry, resolver chain, Bootstrap, `tasks.ex`, `bulldocs.ex`, `sheets.ex` (§§ below), `onixedit/` |
 | `lib/barkpark/plugins/onixedit/export/*.ex` | ONIX 3.0 export submodules (header, message, codelists, validator, detail composites) |
 | `lib/barkpark/tasks.ex` | Task substrate utilities — claim/close/relabel, `mutation_events` emit |
-| `lib/barkpark/managed_runtime/write_admission.ex` | Durable write-admission coordinator for a dedicated managed instance; off unless `config :barkpark, :write_admission` is enabled (BARKPARK_WRITE_ADMISSION_INSTANCE/JOURNAL). Children in `$callers` inherit admission. No seal capability is advertised. Tests: `test/barkpark/managed_runtime/write_admission_test.exs`. |
-| `lib/barkpark/managed_runtime/write_admission/door.ex` | `Door.admit/1` wraps content doors (Writer create/upsert, Lifecycle, Mutations); passthrough when disabled, refuses with `{:error, {:write_admission, reason}}` (503 `storage_unavailable`, `reason: write_admission_*`). Tests: `test/barkpark/managed_runtime/write_admission/door_test.exs`. |
+| `lib/barkpark/managed_runtime/write_admission.ex` | Write-admission coordinator; off unless `config :barkpark, :write_admission` is enabled. No seal capability. Tests: `test/barkpark/managed_runtime/`. |
+| `lib/barkpark/managed_runtime/write_admission/door.ex` | `Door.admit/1` fronts Writer, Lifecycle and Mutations doors; refusal is 503 `storage_unavailable`, `reason: write_admission_*`. |
 | `lib/barkpark_web/router.ex` | All routes incl. `GET /v1/capabilities`; scoped `/w/:workspace_slug/p/:project_slug` mirror |
 | `lib/barkpark_web/live/studio/studio_live.ex` | Multi-pane Studio LiveView — section index in its header comment |
 | `lib/barkpark_web/studio/pane_builder.ex` | Pane construction — **under `studio/`, NOT `live/studio/`** |
