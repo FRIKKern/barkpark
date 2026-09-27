@@ -153,6 +153,11 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # arm cannot move the other one silently.
       {"connection_unavailable", {:error, {:connection_unavailable, "tcp recv: closed"}},
        "storage_unavailable", 503, [:reason]},
+      # Write admission (Barkdown C083): a dedicated instance holding writes for
+      # a library switch. Same public transient code and 503; `reason` carries
+      # the admission state so a client can tell a hold from a media fault.
+      {"write_admission_closed", {:error, {:write_admission, :admission_closed}},
+       "storage_unavailable", 503, [:reason]},
       # The READ twin (task-5a7f007878b56e6a). Same public code, same 503, same
       # `reason` — a DIFFERENT hint, because the write arm above tells the
       # caller to check whether the write LANDED and a read wrote nothing.

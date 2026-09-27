@@ -31,6 +31,7 @@ defmodule Barkpark.Content.Writer do
   }
 
   alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Content.{PreWriteFences, PreWriteTransforms}
 
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
@@ -199,7 +200,10 @@ defmodule Barkpark.Content.Writer do
   `{:halt, reason}` returns `{:error, {:halted, reason}}` and skips the
   write. Fires `:after_save` asynchronously after a successful write.
   """
-  def create_document(type, attrs, dataset, opts \\ []) do
+  def create_document(type, attrs, dataset, opts \\ []),
+    do: Door.admit(fn -> admitted_create_document(type, attrs, dataset, opts) end)
+
+  defp admitted_create_document(type, attrs, dataset, opts) do
     # Two envelope/user-field NAME COLLISIONS, refused BEFORE the envelope
     # coercion — [collide-refusal] for the mixed shape, [status-collision] for
     # a flat `status` that cannot be a lifecycle value. See each function for
@@ -787,7 +791,10 @@ defmodule Barkpark.Content.Writer do
   `opts` accepts `:source` and `:user_id`. Fires `:before_save` and
   `:after_save` around the DB write, same contract as `create_document/4`.
   """
-  def upsert_document(type, attrs, dataset, opts \\ []) do
+  def upsert_document(type, attrs, dataset, opts \\ []),
+    do: Door.admit(fn -> admitted_upsert_document(type, attrs, dataset, opts) end)
+
+  defp admitted_upsert_document(type, attrs, dataset, opts) do
     # [own-status-field], patch/autosave half: the same schema question the
     # create door asks, asked here so a flat `status` reaches the same place on
     # both doors. A document whose type declares its own `status` field would

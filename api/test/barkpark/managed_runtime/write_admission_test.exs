@@ -448,6 +448,163 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
     assert Admission.status(next).pending == 1
   end
 
+  test "a child in $callers joins its ancestor's admission and blocks that settlement", %{
+    gate: gate
+  } do
+    {:ok, root} = Admission.checkout(gate)
+    parent = self()
+
+    child =
+      spawn(fn ->
+        Process.put(:"$callers", [parent])
+        {:ok, ticket} = Admission.checkout(gate)
+        send(parent, :joined)
+
+        receive do
+          :settle -> send(parent, {:child_settled, Admission.checkin(gate, ticket)})
+        end
+      end)
+
+    assert_receive :joined
+    # One journaled root, two admitted processes.
+    assert Admission.status(gate).pending == 1
+    assert {:error, :children_pending} = Admission.checkin(gate, root)
+    {:ok, :closing, _hold} = begin_hold_from_other_process(gate, "with-child")
+    assert Admission.status(gate).phase == :closing
+    send(child, :settle)
+    assert_receive {:child_settled, :ok}
+    assert Admission.status(gate).pending == 1
+    assert :ok = Admission.checkin(gate, root)
+    assert Admission.status(gate).phase == :held
+  end
+
+  test "Task children inherit admission without a journal change; strangers do not", %{gate: gate} do
+    {:ok, root} = Admission.checkout(gate)
+    {:ok, :closing, _hold} = begin_hold_from_other_process(gate, "task-child")
+
+    # Task.async sets $callers, so the child is admitted even while closing.
+    assert {:ok, ticket} = Task.async(fn -> Admission.checkout(gate) end) |> Task.await()
+    # The task exited after checkout without settling: that is a lost writer.
+    await_phase(gate, :recovery_required)
+    assert Admission.status(gate).pending == 1
+    assert {:error, :invalid_ticket} = Admission.checkin(gate, ticket)
+    # A process with no admitted ancestor is a stranger and is refused.
+    assert {:error, :admission_closed} = spawn_checkout(gate, [])
+    assert {:error, :children_pending} = Admission.checkin(gate, root)
+  end
+
+  test "a failed settlement is ordinary while open and recovery while closing", %{gate: gate} do
+    {:ok, ticket} = Admission.checkout(gate)
+    assert :ok = Admission.checkin(gate, ticket, :failed)
+    assert Admission.status(gate).phase == :open
+    assert Admission.status(gate).pending == 0
+
+    parent = self()
+
+    writer =
+      spawn(fn ->
+        {:ok, ticket} = Admission.checkout(gate)
+        send(parent, :admitted)
+
+        receive do
+          :fail -> send(parent, {:settled, Admission.checkin(gate, ticket, :failed)})
+        end
+      end)
+
+    assert_receive :admitted
+    {:ok, :closing, hold} = begin_hold(gate, "failing-drain")
+    send(writer, :fail)
+    assert_receive {:settled, :ok}
+    assert Admission.status(gate).phase == :recovery_required
+    assert Admission.status(gate).pending == 0
+    assert false == Admission.held?(gate, hold)
+  end
+
+  test "a writer that dies while open releases its admission; a dead child keeps the root pending",
+       %{
+         gate: gate
+       } do
+    parent = self()
+
+    writer =
+      spawn(fn ->
+        {:ok, _} = Admission.checkout(gate)
+        send(parent, :admitted)
+        receive do: (:die -> :ok)
+      end)
+
+    assert_receive :admitted
+    assert Admission.status(gate).pending == 1
+    ref = Process.monitor(writer)
+    send(writer, :die)
+    assert_receive {:DOWN, ^ref, :process, ^writer, _}
+    await_pending(gate, 0)
+    assert Admission.status(gate).phase == :open
+
+    {:ok, root} = Admission.checkout(gate)
+
+    child =
+      spawn(fn ->
+        Process.put(:"$callers", [parent])
+        {:ok, _} = Admission.checkout(gate)
+        send(parent, :joined)
+        receive do: (:die -> :ok)
+      end)
+
+    assert_receive :joined
+    ref = Process.monitor(child)
+    send(child, :die)
+    assert_receive {:DOWN, ^ref, :process, ^child, _}
+    # The root is still admitted, so its journal entry stays.
+    assert Admission.status(gate).pending == 1
+    assert :ok = Admission.checkin(gate, root)
+    assert Admission.status(gate).pending == 0
+  end
+
+  defp spawn_checkout(gate, callers) do
+    parent = self()
+
+    spawn(fn ->
+      Process.put(:"$callers", callers)
+      send(parent, {:checkout, Admission.checkout(gate)})
+    end)
+
+    receive do
+      {:checkout, result} -> result
+    after
+      1_000 -> flunk("no checkout reply")
+    end
+  end
+
+  defp begin_hold_from_other_process(gate, operation) do
+    parent = self()
+
+    spawn(fn ->
+      result = Admission.begin_hold(gate, operation, Admission.status(gate).generation)
+      send(parent, {:hold, result})
+
+      receive do
+        :release -> :ok
+      end
+    end)
+
+    receive do
+      {:hold, result} -> result
+    after
+      1_000 -> flunk("no hold reply")
+    end
+  end
+
+  defp await_pending(gate, pending, attempts \\ 100)
+  defp await_pending(gate, pending, 0), do: assert(Admission.status(gate).pending == pending)
+
+  defp await_pending(gate, pending, attempts) do
+    if Admission.status(gate).pending != pending do
+      Process.sleep(5)
+      await_pending(gate, pending, attempts - 1)
+    end
+  end
+
   defp begin_hold(gate, operation),
     do: Admission.begin_hold(gate, operation, Admission.status(gate).generation)
 

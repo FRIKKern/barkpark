@@ -64,6 +64,7 @@ defmodule Barkpark.Content.Mutations do
 
   alias Barkpark.Repo
   alias Barkpark.Content
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   alias Barkpark.Content.{
     BoundFieldSync,
@@ -105,7 +106,7 @@ defmodule Barkpark.Content.Mutations do
       [:barkpark, :content, :mutate],
       %{count: length(mutations), dataset: dataset, workspace_id: workspace_id},
       fn ->
-        result = do_apply_mutations(mutations, dataset, opts)
+        result = Door.admit(fn -> do_apply_mutations(mutations, dataset, opts) end)
         {result, %{count: length(mutations), dataset: dataset, workspace_id: workspace_id}}
       end
     )

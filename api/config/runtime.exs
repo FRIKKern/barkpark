@@ -196,6 +196,28 @@ case System.get_env("BARKPARK_CAPABILITIES_OFF") do
     :ok
 end
 
+# Write admission for a dedicated managed instance (Barkdown migration, C083).
+# Both variables are required to enable it; a half-configured pair refuses the
+# boot rather than starting a server that silently admits every write.
+# BARKPARK_WRITE_ADMISSION_INITIALIZE=1 provisions a new journal once and
+# refuses an existing file.
+case {System.get_env("BARKPARK_WRITE_ADMISSION_INSTANCE"),
+      System.get_env("BARKPARK_WRITE_ADMISSION_JOURNAL")} do
+  {nil, nil} ->
+    :ok
+
+  {instance, journal}
+  when is_binary(instance) and instance != "" and is_binary(journal) and journal != "" ->
+    config :barkpark, :write_admission,
+      enabled: true,
+      instance_id: instance,
+      journal: journal,
+      initialize: System.get_env("BARKPARK_WRITE_ADMISSION_INITIALIZE") == "1"
+
+  _ ->
+    raise "BARKPARK_WRITE_ADMISSION_INSTANCE and BARKPARK_WRITE_ADMISSION_JOURNAL must be set together"
+end
+
 # "Log in with Barkpark Cloud" (instance-login handoff): on a cloud-managed
 # instance, the control plane's public origin here puts the cloud sign-in
 # button on /login. The button deep-links to the cloud SPA, which mints a
