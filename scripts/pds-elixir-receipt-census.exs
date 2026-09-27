@@ -674,9 +674,32 @@ defmodule PDS.Census do
     # counts, route depth 6, @write_verbs without `transaction`, corpus api/lib/**/*.ex).
     # Engine printed live by that run:
     #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
-    write: 57,
+    #
+    # RE-DERIVED AGAIN 2026-09-27 at codex/managed-write-wiring (Barkdown C083, write
+    # admission doors): write-routed 57 -> 56 and unrouted 14 -> 15. Fronting
+    # `Writer.create_document/4` and `upsert_document/4` with
+    # `WriteAdmission.Door.admit/1` inserted ONE closure hop (public head -> Door.admit's
+    # `fn` -> `admitted_upsert_document/4`) between every context caller and the row
+    # write — the same shape #17321 recorded above for `write_atomically/1`. ONE receipt
+    # can no longer reach a write verb inside the depth-6 budget: `--sites` diffed
+    # against origin/main (1c6c3f21f) names it —
+    #   barkpark/plugins/sheets/web/import_controller.ex
+    #       Sheets.Web.ImportController.create/2   [WRITE d6] -> [UNROUTED]
+    # and the census's own depth sweep lists that same site among the "unrouted @6 that
+    # ROUTE at @route_depth 10", so it did not fall out of the route relation; the
+    # budget stopped seeing it. `textual` (115), `ast` (106), `phantom` (9), `consumer`
+    # (4), `emitted` (102) and `read` (31) all read `==` in the same run.
+    #
+    # NOT DONE, DELIBERATELY: the hop is removable by inlining the door into each writer
+    # body, but the door owns checkout, settlement-on-exception and the bounded wait for
+    # inherited children in ONE place; restructuring the fix to flatter the lens is the
+    # ruling task-a0ce4e18f6776400 already refused. DERIVED BY THE INSTRUMENT, not typed:
+    # the `derived` half of this census's own D448-DRIFT-REFUSES line, run from the repo
+    # root on this commit's tree, lens unchanged. Engine printed live by that run:
+    #   Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    write: 56,
     read: 31,
-    unrouted: 14
+    unrouted: 15
   }
 
   # THE ROW THE TWO D448 SELFTEST CASES INJECT, BUILT THE WAY drift/4 BUILDS IT — including

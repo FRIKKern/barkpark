@@ -1167,6 +1167,25 @@ defmodule Barkpark.Content.Errors do
       details: %{retry_after: retry_after}
     }
 
+  # Write admission (C083, Barkdown migration): a dedicated instance that is
+  # draining or holding writes for a library switch refuses new writes. Same
+  # public 503 transient shape as `storage_unavailable` above, for the same
+  # reason: one code, one status, retry is the right reflex, and `reason`
+  # discriminates. `admission_closed` means hold in progress; `unavailable` or
+  # `unconfigured` means the instance is enabled for admission but its
+  # coordinator is not running, which fails closed rather than writing.
+  defp build({:error, {:write_admission, reason}}) when is_atom(reason),
+    do: %{
+      code: "storage_unavailable",
+      message: "writes are not admitted while this instance is being switched",
+      status: 503,
+      reason: "write_admission_#{reason}",
+      hint:
+        "Transient: this instance is holding writes for a migration step, so " <>
+          "nothing was stored or refused on its merits. Retry once the switch " <>
+          "completes; if it persists, the instance needs explicit recovery."
+    }
+
   defp build({:error, reason}) when is_binary(reason),
     do: %{code: "internal_error", message: reason, status: 500}
 

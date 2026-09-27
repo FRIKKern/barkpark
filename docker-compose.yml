@@ -241,6 +241,12 @@ services:
       - BARKPARK_CAPABILITIES_OFF
       - BARKPARK_CLAUDE_CHAT
       - BARKPARK_TMUX_CONSOLE
+      # Write admission for a dedicated managed instance (Barkdown C083).
+      # Passthrough-only: unset keeps admission OFF; INSTANCE and JOURNAL must
+      # be set together, INITIALIZE=1 provisions the journal once.
+      - BARKPARK_WRITE_ADMISSION_INSTANCE
+      - BARKPARK_WRITE_ADMISSION_JOURNAL
+      - BARKPARK_WRITE_ADMISSION_INITIALIZE
     volumes:
       - uploads:/app/uploads
     depends_on:

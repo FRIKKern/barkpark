@@ -16,6 +16,15 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
   `initialize: true` is only for first provisioning and refuses an existing file.
   Normal startup refuses missing, corrupt, foreign or repair-needing journals.
   Process-restart evidence is distinct from a power-loss durability guarantee.
+
+  Child admission: a process whose `$callers` ancestor holds admission joins
+  that ancestor's root instead of opening a new one, so plugin hooks and
+  supervised tasks spawned inside a write are part of the same settlement. The
+  root's final settlement is refused with `children_pending` while any such
+  child is still admitted. A `:failed` settlement while an operation is closing
+  leaves the instance in recovery; while open it is an ordinary failure. Writer
+  death while open releases that admission for the same reason: nothing is
+  seeking exclusion, and a later hold drains from a fresh start.
   """
 
   use GenServer
@@ -32,10 +41,17 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
   end
 
   @doc "Admit the calling process; nested calls require matching settlements."
-  def checkout(server), do: GenServer.call(server, :checkout)
+  def checkout(server),
+    do: GenServer.call(server, {:checkout, Process.get(:"$callers", [])})
 
-  @doc "Acknowledge that all effects owned by this admission have settled."
-  def checkin(server, ticket), do: GenServer.call(server, {:checkin, ticket})
+  @doc """
+  Acknowledge that all effects owned by this admission have settled.
+
+  `:failed` records that the write raised or exited: while an operation is
+  closing, the instance moves to recovery; while open, it settles normally.
+  """
+  def checkin(server, ticket, outcome \\ :settled) when outcome in [:settled, :failed],
+    do: GenServer.call(server, {:checkin, ticket, outcome})
 
   @doc "Retain an uncertain effect; it must not count as successful settlement."
   def uncertain(server, ticket), do: GenServer.call(server, {:uncertain, ticket})
@@ -94,51 +110,66 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
     {:reply, Map.merge(view, %{boot: state.boot, pending: length(state.record.pending)}), state}
   end
 
-  def handle_call(:checkout, {owner, _}, state) do
+  def handle_call({:checkout, callers}, {owner, _}, state) do
     case Map.get(state.writers, owner) do
       %{tickets: tickets} = writer when state.record.phase in [:open, :closing] ->
-        ticket = {state.boot, state.record.generation, random_id()}
+        ticket = new_ticket(state)
 
         {:reply, {:ok, ticket},
          put_in(state.writers[owner], %{writer | tickets: MapSet.put(tickets, ticket)})}
 
-      nil when state.record.phase == :open and map_size(state.writers) < @max_writers ->
-        ticket = {state.boot, state.record.generation, random_id()}
+      nil ->
+        case inherited_root(callers, state) do
+          {:ok, root} when state.record.phase in [:open, :closing] ->
+            # The root is already journaled as pending, so a child needs no
+            # persistence; it only extends the root's settlement.
+            ticket = new_ticket(state)
 
-        writer = %{
-          root: elem(ticket, 2),
-          tickets: MapSet.new([ticket]),
-          monitor: Process.monitor(owner)
-        }
+            {:reply, {:ok, ticket},
+             put_in(state.writers[owner], writer(root, ticket, owner, false))}
 
-        state = put_in(state.writers[owner], writer)
-        state = put_in(state.record.pending, [elem(ticket, 2) | state.record.pending])
-        commit(state, {:ok, ticket})
+          :none when state.record.phase == :open and map_size(state.writers) < @max_writers ->
+            ticket = new_ticket(state)
+            state = put_in(state.writers[owner], writer(elem(ticket, 2), ticket, owner, true))
+            state = put_in(state.record.pending, [elem(ticket, 2) | state.record.pending])
+            commit(state, {:ok, ticket})
 
-      nil when state.record.phase == :open ->
-        {:reply, {:error, :capacity}, state}
+          :none when state.record.phase == :open ->
+            {:reply, {:error, :capacity}, state}
+
+          _ ->
+            {:reply, {:error, :admission_closed}, state}
+        end
 
       _ ->
         {:reply, {:error, :admission_closed}, state}
     end
   end
 
-  def handle_call({:checkin, ticket}, {owner, _}, state) do
+  def handle_call({:checkin, ticket, outcome}, {owner, _}, state) do
     case Map.get(state.writers, owner) do
       %{tickets: tickets} = writer ->
+        {state, failed_while_closing} = note_outcome(state, outcome)
+
         cond do
           not MapSet.member?(tickets, ticket) ->
             {:reply, {:error, :invalid_ticket}, state}
 
           MapSet.size(tickets) > 1 ->
-            {:reply, :ok,
-             put_in(state.writers[owner], %{writer | tickets: MapSet.delete(tickets, ticket)})}
+            state =
+              put_in(state.writers[owner], %{writer | tickets: MapSet.delete(tickets, ticket)})
+
+            if failed_while_closing, do: commit(state, :ok), else: {:reply, :ok, state}
+
+          writer.root_owner? and root_shared?(state, owner, writer.root) ->
+            # Children that inherited this admission are still running; their
+            # effects belong to this settlement, so it cannot complete yet.
+            if failed_while_closing,
+              do: commit(state, {:error, :children_pending}),
+              else: {:reply, {:error, :children_pending}, state}
 
           true ->
-            Process.demonitor(writer.monitor, [:flush])
-            state = %{state | writers: Map.delete(state.writers, owner)}
-            state = put_in(state.record.pending, List.delete(state.record.pending, writer.root))
-            commit(maybe_held(state), :ok)
+            commit(maybe_held(release(state, owner)), :ok)
         end
 
       _ ->
@@ -228,17 +259,19 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
     lost_writer = match?(%{monitor: ^monitor}, Map.get(state.writers, owner))
     lost_holder = match?(%{monitor: ^monitor}, state.holder)
 
-    if lost_writer or lost_holder do
-      # Keep pending evidence. Process death says nothing about a blob or child
-      # effect that may already have escaped; it is not a successful settlement.
-      state = put_in(state.record.phase, :recovery_required)
+    cond do
+      lost_writer and state.record.phase == :open ->
+        # No operation is seeking exclusion: a crashed writer is an ordinary
+        # failed request. A later hold drains whatever is admitted then.
+        persist_or_stop(release(state, owner))
 
-      case persist(state) do
-        {:ok, state} -> {:noreply, state}
-        {:error, reason} -> {:stop, {:journal_unavailable, reason}, state}
-      end
-    else
-      {:noreply, state}
+      lost_writer or lost_holder ->
+        # Keep pending evidence. Process death says nothing about a blob or child
+        # effect that may already have escaped; it is not a successful settlement.
+        persist_or_stop(put_in(state.record.phase, :recovery_required))
+
+      true ->
+        {:noreply, state}
     end
   end
 
@@ -258,6 +291,52 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
     do: put_in(state.record.phase, :held)
 
   defp maybe_held(state), do: state
+
+  defp new_ticket(state), do: {state.boot, state.record.generation, random_id()}
+
+  defp writer(root, ticket, owner, root_owner?),
+    do: %{
+      root: root,
+      root_owner?: root_owner?,
+      tickets: MapSet.new([ticket]),
+      monitor: Process.monitor(owner)
+    }
+
+  # The nearest `$callers` ancestor that holds admission; its root is inherited.
+  defp inherited_root(callers, state) do
+    Enum.find_value(callers, :none, fn pid ->
+      case Map.get(state.writers, pid) do
+        %{root: root} -> {:ok, root}
+        _ -> nil
+      end
+    end)
+  end
+
+  defp root_shared?(state, owner, root),
+    do: Enum.any?(state.writers, fn {pid, writer} -> pid != owner and writer.root == root end)
+
+  # Remove a writer; its root leaves the journal once no admitted process shares it.
+  defp release(state, owner) do
+    writer = Map.fetch!(state.writers, owner)
+    Process.demonitor(writer.monitor, [:flush])
+    state = %{state | writers: Map.delete(state.writers, owner)}
+
+    if root_shared?(state, owner, writer.root),
+      do: state,
+      else: put_in(state.record.pending, List.delete(state.record.pending, writer.root))
+  end
+
+  defp note_outcome(state, :failed) when state.record.phase == :closing,
+    do: {put_in(state.record.phase, :recovery_required), true}
+
+  defp note_outcome(state, _outcome), do: {state, false}
+
+  defp persist_or_stop(state) do
+    case persist(state) do
+      {:ok, state} -> {:noreply, state}
+      {:error, reason} -> {:stop, {:journal_unavailable, reason}, state}
+    end
+  end
 
   defp commit(state, reply) do
     case persist(state) do

@@ -99,6 +99,11 @@ config :barkpark, :mail,
 
 config :barkpark, :idempotency, ttl_seconds: 86_400
 
+# Write admission for a dedicated managed instance (Barkdown migration, C083).
+# Off everywhere by default: `Barkpark.ManagedRuntime.WriteAdmission.Door` is a
+# passthrough. Runtime enables it from BARKPARK_WRITE_ADMISSION_* (runtime.exs).
+config :barkpark, :write_admission, enabled: false
+
 # Per-kind DEFAULT expiry (days) for NEWLY minted api tokens that request none
 # (task-a0f8cfd7f4800236; `Barkpark.Auth.TokenExpiry`). SHIPS nil = no default:
 # every mint behaves exactly as before until the owner sets a value (owner item

@@ -35,6 +35,7 @@ defmodule Barkpark.Content.Lifecycle do
 
   alias Barkpark.Repo
   alias Barkpark.Content
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   alias Barkpark.Content.{
     AuthoringWall,
@@ -64,8 +65,10 @@ defmodule Barkpark.Content.Lifecycle do
   defp span_write(op, opts, fun) do
     meta = %{op: op, workspace_id: Keyword.get(opts, :workspace_id) || "global"}
 
+    # Every lifecycle door passes through write admission here (C083); the
+    # span still measures the caller-visible cost including that wait.
     :telemetry.span([:barkpark, :content, :lifecycle], meta, fn ->
-      {fun.(), meta}
+      {Door.admit(fun), meta}
     end)
   end
 
