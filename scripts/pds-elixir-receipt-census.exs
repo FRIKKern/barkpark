@@ -683,8 +683,8 @@ defmodule PDS.Census do
     # write — the same shape #17321 recorded above for `write_atomically/1`. ONE receipt
     # can no longer reach a write verb inside the depth-6 budget: `--sites` diffed
     # against origin/main (1c6c3f21f) names it —
-    #   barkpark/plugins/sheets/web/import_controller.ex:67
-    #       Sheets.Web.ImportController.create   [WRITE d6] -> [UNROUTED]
+    #   barkpark/plugins/sheets/web/import_controller.ex
+    #       Sheets.Web.ImportController.create/2   [WRITE d6] -> [UNROUTED]
     # and the census's own depth sweep lists that same site among the "unrouted @6 that
     # ROUTE at @route_depth 10", so it did not fall out of the route relation; the
     # budget stopped seeing it. `textual` (115), `ast` (106), `phantom` (9), `consumer`
