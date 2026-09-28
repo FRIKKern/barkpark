@@ -1049,6 +1049,7 @@ defmodule PDS.Census do
     # roster anchor — which is exactly what `status_only_receipt` names.
     {:post, "/v1/admin/write-admission/hold", "BarkparkWeb.WriteAdmissionController", :hold, :status_only_receipt},
     {:delete, "/v1/admin/write-admission/hold/:capability", "BarkparkWeb.WriteAdmissionController", :reopen, :status_only_receipt},
+    {:post, "/v1/admin/write-admission/recover", "BarkparkWeb.WriteAdmissionController", :recover, :status_only_receipt},
     # SiteDeployController.trigger IS DISPOSED IN WRITING, NOT SILENTLY (PDS-D554/PDS-D566).
     # IT IS THE ONE MEMBER A BFS AT DEPTHS 2..12 RECOVERS OUT OF EVERY EXCLUDED ROW, and
     # it stays in `status_only_receipt` with this comment rather than being moved, because
@@ -1322,6 +1323,7 @@ defmodule PDS.Census do
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
     {:post, "/v1/admin/write-admission/hold", "BarkparkWeb.WriteAdmissionController", :hold} => {"BarkparkWeb.WriteAdmissionController.hold/2", 2, "111003360"},
     {:delete, "/v1/admin/write-admission/hold/:capability", "BarkparkWeb.WriteAdmissionController", :reopen} => {"BarkparkWeb.WriteAdmissionController.reopen/2", 1, "39928"},
+    {:post, "/v1/admin/write-admission/recover", "BarkparkWeb.WriteAdmissionController", :recover} => {"BarkparkWeb.WriteAdmissionController.recover/2", 2, "76331147"},
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger} => {"BarkparkWeb.SiteDeployController.trigger/2", 1, "51850737"},
     {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create} => {"BarkparkWeb.WorkspaceReinstateController.create/2", 1, "25110011"},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create} => {"BarkparkWeb.AppTokenController.create/2", 1, "77961954"},

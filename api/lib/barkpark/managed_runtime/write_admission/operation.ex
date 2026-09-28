@@ -55,6 +55,17 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.Operation do
     end
   end
 
+  @doc "Explicit recovery after a failed or interrupted hold: reopen admission, then resume the queues."
+  def recover(generation, pending, opts \\ []) do
+    oban = Keyword.get(opts, :oban, Oban)
+
+    with :ok <- enabled(),
+         {:ok, server} <- server(),
+         :ok <- WriteAdmission.recover(server, generation, pending) do
+      resume(oban)
+    end
+  end
+
   defp enabled, do: if(Door.enabled?(), do: :ok, else: {:error, :write_admission_disabled})
 
   defp server do

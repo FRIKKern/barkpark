@@ -28,6 +28,29 @@ defmodule BarkparkWeb.WriteAdmissionController do
     })
   end
 
+  def instance(conn, _params) do
+    case Holder.instance() do
+      {:ok, view} -> json(conn, view)
+      {:error, reason} -> refuse(conn, reason)
+    end
+  end
+
+  def recover(conn, %{"generation" => generation, "pending" => pending})
+      when is_integer(generation) and is_integer(pending) do
+    case Holder.recover(generation, pending) do
+      {:ok, view} -> json(conn, view)
+      {:error, reason} -> refuse(conn, reason)
+    end
+  end
+
+  def recover(conn, _params) do
+    ErrorResponse.emit_fields(conn, :bad_request, %{
+      code: "invalid_recovery",
+      message:
+        "recovery names the generation and the pending count it reconciled, both integers read from the instance view"
+    })
+  end
+
   def show(conn, %{"capability" => capability}) do
     case Holder.status(capability) do
       {:ok, view} -> json(conn, view)
@@ -62,6 +85,15 @@ defmodule BarkparkWeb.WriteAdmissionController do
     ErrorResponse.emit_fields(conn, :conflict, %{
       code: "admission_closed",
       message: "another operation holds this instance, or its generation moved",
+      reason: "write_admission_#{reason}"
+    })
+  end
+
+  defp refuse(conn, reason) when reason in [:not_in_recovery, :unreconciled, :writers_present] do
+    ErrorResponse.emit_fields(conn, :conflict, %{
+      code: "recovery_refused",
+      message:
+        "the instance is not in recovery, its pending count moved, or writers are still admitted; read the instance view and retry",
       reason: "write_admission_#{reason}"
     })
   end

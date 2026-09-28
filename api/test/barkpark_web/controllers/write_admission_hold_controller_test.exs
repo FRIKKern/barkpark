@@ -94,6 +94,102 @@ defmodule BarkparkWeb.WriteAdmissionHoldControllerTest do
     assert resp.status == 404
   end
 
+  test "a lost holder leaves recovery_required; explicit recovery reopens with a fresh generation",
+       %{
+         conn: conn,
+         gate: gate,
+         holder: holder
+       } do
+    resp = conn |> as(@admin) |> post(@path, Jason.encode!(%{"operation" => "switch"}))
+    assert resp.status == 200, resp.resp_body
+    held = Jason.decode!(resp.resp_body)
+
+    # The Holder dies (a restart of the owning process); the coordinator keeps the instance blocked.
+    Process.unlink(holder)
+    Process.exit(holder, :kill)
+    # The test supervisor restarts it, as the serving tree would; the fresh Holder owns nothing.
+    next = await_holder(holder)
+    assert Process.alive?(next)
+    assert Admission.status(gate).phase == :recovery_required
+
+    resp = conn |> as(@admin) |> get("/v1/admin/write-admission")
+    assert resp.status == 200, resp.resp_body
+    view = Jason.decode!(resp.resp_body)
+    assert view["phase"] == "recovery_required"
+    assert view["generation"] == held["generation"]
+    assert view["pending"] == 0
+    assert view["held"] == nil
+
+    resp = conn |> as(@admin) |> get("#{@path}/#{held["capability"]}")
+    assert resp.status == 404
+    resp = conn |> as(@admin) |> post(@path, Jason.encode!(%{"operation" => "switch-2"}))
+    assert resp.status == 409
+
+    resp =
+      conn
+      |> as(@admin)
+      |> post(
+        "/v1/admin/write-admission/recover",
+        Jason.encode!(%{"generation" => view["generation"] + 1, "pending" => 0})
+      )
+
+    assert resp.status == 409
+    assert Jason.decode!(resp.resp_body)["error"]["code"] == "admission_closed"
+
+    resp =
+      conn
+      |> as(@admin)
+      |> post(
+        "/v1/admin/write-admission/recover",
+        Jason.encode!(%{"generation" => view["generation"], "pending" => 1})
+      )
+
+    assert resp.status == 409
+    assert Jason.decode!(resp.resp_body)["error"]["code"] == "recovery_refused"
+
+    resp =
+      conn
+      |> as(@admin)
+      |> post("/v1/admin/write-admission/recover", Jason.encode!(%{"generation" => "1"}))
+
+    assert resp.status == 400
+
+    resp =
+      conn
+      |> as(@admin)
+      |> post(
+        "/v1/admin/write-admission/recover",
+        Jason.encode!(%{"generation" => view["generation"], "pending" => 0})
+      )
+
+    assert resp.status == 200, resp.resp_body
+    recovered = Jason.decode!(resp.resp_body)
+    assert recovered["phase"] == "open"
+    assert recovered["generation"] == view["generation"] + 1
+    assert Admission.status(gate).phase == :open
+
+    resp = conn |> as(@admin) |> post(@path, Jason.encode!(%{"operation" => "switch-3"}))
+    assert resp.status == 200, resp.resp_body
+
+    resp =
+      conn
+      |> as(@admin)
+      |> post(
+        "/v1/admin/write-admission/recover",
+        Jason.encode!(%{"generation" => recovered["generation"], "pending" => 0})
+      )
+
+    assert resp.status == 409
+  end
+
+  defp await_holder(old, waited \\ 0) do
+    case Process.whereis(Holder) do
+      pid when is_pid(pid) and pid != old -> pid
+      _ when waited > 2_000 -> flunk("the Holder was not restarted")
+      _ -> :timer.sleep(20) && await_holder(old, waited + 20)
+    end
+  end
+
   test "non-admin is forbidden; a missing operation is a bad request", %{conn: conn} do
     resp = conn |> as(@junior) |> post(@path, Jason.encode!(%{"operation" => "switch"}))
     assert resp.status == 403

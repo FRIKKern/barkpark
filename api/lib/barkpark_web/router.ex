@@ -2768,9 +2768,11 @@ defmodule BarkparkWeb.Router do
   scope "/v1/admin/write-admission", BarkparkWeb do
     pipe_through([:api, :require_admin, :require_platform_operator])
 
+    get("/", WriteAdmissionController, :instance)
     post("/hold", WriteAdmissionController, :hold)
     get("/hold/:capability", WriteAdmissionController, :show)
     delete("/hold/:capability", WriteAdmissionController, :reopen)
+    post("/recover", WriteAdmissionController, :recover)
   end
 
   # ── Webhooks — requires admin token ────────────────────────────────────

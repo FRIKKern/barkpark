@@ -69,6 +69,16 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
   @doc "Inspect state without exposing owner tickets or hold capabilities."
   def status(server), do: GenServer.call(server, :status)
 
+  @doc """
+  Explicit recovery: reopen an instance that is `recovery_required` once the
+  operator has reconciled its uncertain effects. `generation` must be the
+  current one and `pending` the number of unsettled roots the journal carries,
+  so the caller proves it read the state it is clearing. Refused while any
+  writer is admitted. Advances the generation; every earlier ticket refuses.
+  """
+  def recover(server, generation, pending),
+    do: GenServer.call(server, {:recover, generation, pending})
+
   @impl true
   def init(opts) do
     journal = Keyword.fetch!(opts, :journal)
@@ -251,6 +261,35 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
 
       _ ->
         {:reply, {:error, :invalid_hold}, state}
+    end
+  end
+
+  def handle_call({:recover, generation, pending}, _from, state) do
+    cond do
+      state.record.phase != :recovery_required ->
+        {:reply, {:error, :not_in_recovery}, state}
+
+      generation !== state.record.generation ->
+        {:reply, {:error, :stale_generation}, state}
+
+      pending !== length(state.record.pending) ->
+        {:reply, {:error, :unreconciled}, state}
+
+      map_size(state.writers) > 0 ->
+        {:reply, {:error, :writers_present}, state}
+
+      true ->
+        if state.holder, do: Process.demonitor(state.holder.monitor, [:flush])
+
+        record = %{
+          state.record
+          | phase: :open,
+            pending: [],
+            operation: nil,
+            generation: state.record.generation + 1
+        }
+
+        commit(%{state | holder: nil, record: record}, :ok)
     end
   end
 

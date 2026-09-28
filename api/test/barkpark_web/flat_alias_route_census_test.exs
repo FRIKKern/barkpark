@@ -228,6 +228,14 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "instance-operational, no tenant rows: drives Barkpark.SelfUpdate.Runner — this box's " <>
          "own update and rollback executor. Source carries no scope marker at all."},
     # WriteAdmissionController (C083 trusted hold endpoint)
+    {"GET", "/v1/admin/write-admission"} =>
+      {:global,
+       "instance-operational, no tenant rows: the write-admission coordinator's view. Source " <>
+         "carries no scope marker at all."},
+    {"POST", "/v1/admin/write-admission/recover"} =>
+      {:global,
+       "instance-operational, no tenant rows: explicit recovery of the coordinator after an " <>
+         "interrupted hold. Source carries no scope marker at all."},
     {"POST", "/v1/admin/write-admission/hold"} =>
       {:global,
        "instance-operational, no tenant rows: begins the managed hold on this instance's " <>

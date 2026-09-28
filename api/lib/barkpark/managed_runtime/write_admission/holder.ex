@@ -33,6 +33,13 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.Holder do
   @doc "Abort the hold `capability` names: reopen admission, resume queues."
   def reopen(server \\ __MODULE__, capability), do: call(server, {:reopen, capability})
 
+  @doc "The instance view: phase, generation, boot, pending roots, current operation."
+  def instance(server \\ __MODULE__), do: call(server, :instance)
+
+  @doc "Explicit recovery from `recovery_required`; see `WriteAdmission.recover/3`."
+  def recover(server \\ __MODULE__, generation, pending),
+    do: call(server, {:recover, generation, pending})
+
   defp call(server, message) do
     GenServer.call(server, message)
   catch
@@ -93,6 +100,38 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.Holder do
 
       _ ->
         {:reply, {:error, :invalid_hold}, state}
+    end
+  end
+
+  def handle_call(:instance, _from, state) do
+    case current() do
+      %{phase: phase} = status when phase in [:unconfigured, :unavailable] ->
+        {:reply, {:error, phase}, state}
+
+      status ->
+        {:reply,
+         {:ok,
+          %{
+            phase: status.phase,
+            generation: status.generation,
+            boot: status.boot,
+            pending: status.pending,
+            operation: status.operation,
+            held: if(state.hold, do: state.hold.operation, else: nil)
+          }}, state}
+    end
+  end
+
+  def handle_call({:recover, generation, pending}, _from, state) do
+    case Operation.recover(generation, pending) do
+      :ok ->
+        status = current()
+
+        {:reply, {:ok, %{phase: status.phase, generation: status.generation, boot: status.boot}},
+         %{state | hold: nil}}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 

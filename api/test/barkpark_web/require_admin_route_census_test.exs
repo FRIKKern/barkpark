@@ -296,6 +296,12 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:instance_global, @operator_guard, "Deletes from the global tier. RULING row 4."},
 
     # ── /v1/admin — operator primitives ──
+    {:get, "/v1/admin/write-admission"} =>
+      {:instance_global, @operator_guard,
+       "Operator: write-admission instance view. RULING row 1."},
+    {:post, "/v1/admin/write-admission/recover"} =>
+      {:instance_global, @operator_guard,
+       "Operator: explicit recovery of the write-admission coordinator. RULING row 1."},
     {:post, "/v1/admin/write-admission/hold"} =>
       {:instance_global, @operator_guard,
        "Operator: begins the managed write-admission hold (Barkdown C083). RULING row 1."},
