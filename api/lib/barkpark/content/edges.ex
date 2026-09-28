@@ -16,6 +16,7 @@ defmodule Barkpark.Content.Edges do
   import Ecto.Query
   alias Barkpark.Repo
   alias Barkpark.Content
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Content.{Broadcast, Document, DraftId, SchemaDefinition, Writer, WriteScope}
 
   import Barkpark.Content.Scope,
@@ -98,7 +99,12 @@ defmodule Barkpark.Content.Edges do
   scalar `reference` fields (delete the field) AND `arrayOf`-of-`reference`
   fields (`List.delete` the element, keeping the array's other references).
   """
-  def disconnect_references(doc_id, dataset, opts \\ []) do
+  def disconnect_references(doc_id, dataset, opts \\ []),
+    do: Door.admit!(fn -> admitted_disconnect_references(doc_id, dataset, opts) end)
+
+  # C083: the referencer strip is a door; it runs before the Lifecycle door in the
+  # Studio delete and unpublish handlers, so a hold must refuse it on its own.
+  defp admitted_disconnect_references(doc_id, dataset, opts) do
     pub_id = DraftId.published_id(doc_id)
 
     # arrayOf-of-reference referencers come from the materialised inbound-edge
