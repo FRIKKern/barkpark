@@ -51,6 +51,7 @@ defmodule Barkpark.Content.Papers.ValueWriteback do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Broadcast, CallerContext, Document, DraftId, Envelope, Graph}
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   @revision_action "valueref-writeback"
 
@@ -156,11 +157,15 @@ defmodule Barkpark.Content.Papers.ValueWriteback do
       # uses — so the shared truth every valueref renders actually changes.
       # A draft-only target ends at the patch (publishing it here would
       # silently change its VISIBILITY, not just its value).
-      with {:ok, {_tx_id, _results}} <- Content.apply_mutations([mutation], dataset, opts),
-           :ok <- maybe_propagate_publish(info, dataset, opts) do
-        tap_provenance_revision(info.doc_id, info.type, dataset, opts)
-        {:ok, %{doc_id: info.doc_id, type: info.type, impact: info.impact}}
-      end
+      # C083: the patch, the propagated publish and the provenance revision are one
+      # admitted write; a hold refuses before the first of them.
+      Door.admit(fn ->
+        with {:ok, {_tx_id, _results}} <- Content.apply_mutations([mutation], dataset, opts),
+             :ok <- maybe_propagate_publish(info, dataset, opts) do
+          tap_provenance_revision(info.doc_id, info.type, dataset, opts)
+          {:ok, %{doc_id: info.doc_id, type: info.type, impact: info.impact}}
+        end
+      end)
     end
   end
 
