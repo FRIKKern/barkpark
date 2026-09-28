@@ -41,14 +41,14 @@
    min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
      A flex item and a grid track both floor at their content's min-content, so
      a wrap on the child without this on the parent yields a SPILL, not a wrap.
-     66 of this file's 73 `min-width` declarations are this escape, and none of
+     67 of this file's 74 `min-width` declarations are this escape, and none of
      them had a written ruling until this block.
 
    EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
    without one is how two irreconcilable numbers get cited as a pair: comments
    STRIPPED, then declarations counted — 9 `word-break` (4 break-word, 5
-   break-all), 73 `min-width` (77 occurrences less the FOUR that are `@media
-   (min-width: …)` preludes, which are not declarations at all), and 37
+   break-all), 74 `min-width` (78 occurrences less the FOUR that are `@media
+   (min-width: …)` preludes, which are not declarations at all), and 38
    `overflow-wrap`. The raw line greps are higher, and are deliberately NOT
    quoted here: this block and the per-site comments name the properties in
    prose, so any raw-grep figure counts its own paragraph and moves whenever a
@@ -4160,6 +4160,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    unbreakable token. */
 .attention-reason { font-size: 13px; color: var(--muted-text); line-height: var(--leading-sm); overflow-wrap: anywhere; }
 .attention-acts { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+/* A GROUPED row: several boxes sharing one info-level reason ("Update
+   available · 3 commits behind main") collapse into one row — the shared chip,
+   "N instances" where a name would be, the reason once, then every member as
+   its own link. Warn/danger rows are never grouped (attentionGroups). */
+.attention-row--group { align-items: flex-start; }
+.attention-row--group .status-pill { margin-top: 1px; }
+.attention-group-names { display: flex; flex-wrap: wrap; gap: 2px 12px; min-width: 0; margin-top: 2px; }
+.attention-group-name { font-size: var(--text-xs); font-weight: 500; color: var(--muted-text); overflow-wrap: anywhere; }
+.attention-group-name:hover { color: var(--primary); }
+/* A chip carrying a hover note says so. */
+.status-pill-chip[title] { cursor: help; }
 
 /* GR65 tablet stack, revived by GR109. STACK, don't just wrap: `.attention-main`
    is flex:1 min-width:0, so a mere flex-wrap lets it collapse instead of

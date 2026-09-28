@@ -5373,8 +5373,8 @@ test("dr-w5-followup (c2): EVERY statusPill render site is enumerated FROM THE C
   const producers = (APP_SRC.match(/status-pill status-pill--' \+ esc\(([a-zA-Z0-9_.]+)\)/g) || []);
   assert.ok(producers.some((p) => p.includes("esc(meta.role)")),
     "statusMetaPill no longer paints its role from the meta it was handed");
-  assert.match(APP_SRC, /function statusPill\(bp, extraClass, opts\) \{\s*var meta = statusOf\(bp\);\s*if \(opts && opts\.detail === false\) meta = \{ role: meta\.role, label: meta\.label \};\s*return statusMetaPill\(meta, extraClass\);\s*\}/,
-    "statusPill is no longer a delegation to statusMetaPill over statusOf's answer (role + label always statusOf's; only the detail may be dropped)");
+  assert.match(APP_SRC, /function statusPill\(bp, extraClass, opts\) \{\s*var meta = statusOf\(bp\);[\s\S]*?return statusMetaPill\(meta, extraClass\);\s*\}/,
+    "statusPill is no longer a delegation to statusMetaPill over statusOf's answer (role + label always statusOf's; only the detail may be dropped or folded into the hover note)");
 
   // ── THE RENDERS. All four sites, driven, for both new states.
   const STRAINED = { ...VITAL_BOX({ cpu_cores: 2, load15: 3.6 }), id: "b1", name: "guerrilla" };
@@ -5660,14 +5660,20 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
   assert.equal(s.role, "info");
   // Not the false all-clear "A newer release is available": the detail names the
   // disagreement, in the Go twin's phrasing (behindDetail).
-  assert.equal(s.detail, "2493 commits behind main · release-tag grade still reads current");
+  // The FACT is the inline detail; the release-tag clause is the chip's hover
+  // note (statusMetaPill renders it as the chip's title) — jargon nobody acts
+  // on from a queue, still one hover away, and still whole in the fleet mono
+  // line / updatePanelHtml through commitBehindDetail.
+  assert.equal(s.detail, "2493 commits behind main");
+  assert.equal(s.note, "release-tag grade still reads current");
+  assert.equal(hooks.commitBehindDetail(tagCurrentCommitBehind), "2493 commits behind main · release-tag grade still reads current");
 
   // The unmetered arm: ancestry behind, distance null — still `behind`, and the
   // detail never fabricates a number.
   const unmetered = { ...LIVE, update_state: "current", commit_ancestry: "behind", commit_distance: null };
   assert.equal(hooks.classifyBp(unmetered), "behind");
-  assert.equal(hooks.statusOf(unmetered).detail,
-    "behind main by an unmeasured number of commits · release-tag grade still reads current");
+  assert.equal(hooks.statusOf(unmetered).detail, "behind main by an unmeasured number of commits");
+  assert.equal(hooks.statusOf(unmetered).note, "release-tag grade still reads current");
 
   // NON-REGRESSION, both directions: ancestry `current` is not behind, an absent
   // ancestry (older control plane) is not behind, and a release-tag behind keeps
@@ -18866,6 +18872,59 @@ test("attentionRowHtml: pill + linked name + reason + View instance + (live) Ope
   // A failed (host-less) box gets no Open Studio.
   const failed = hooks.attentionRowHtml({ id: "b2", name: "X", provision_status: "failed" });
   assert.doesNotMatch(failed, /Open Studio/);
+});
+
+// ── the queue says a shared fact ONCE ─────────────────────────────────────
+// Five boxes that are all "Update available · 3 commits behind main" are one
+// fact about the fleet. attentionGroups collapses identical INFO rows into one
+// group item; warn/danger rows are each their own emergency and never group.
+test("attention queue: identical info-level rows collapse into ONE group row; warn/danger never do", () => {
+  const behind = (id, name, n) => ({ ...LIVE_BOX, id, name, update_state: "current", commit_ancestry: "behind", commit_distance: n });
+  const degraded = { ...LIVE_BOX, id: "d1", name: "Gyldendal", health_status: "down" };
+  const items = hooks.attentionGroups([degraded, behind("a", "dnd", 3), behind("b", "gyl", 3), behind("c", "jarl", 4), behind("e", "regnskap", 3)]);
+  assert.equal(items.length, 3, "degraded + one group of three + the odd-distance single");
+  assert.equal(items[0].bp.id, "d1", "a warn row stays a row, in place");
+  assert.ok(items[1].group, "the three identical behind rows became a group where the first sat");
+  assert.deepEqual([...items[1].bps].map((b) => b.id), ["a", "b", "e"]);
+  assert.equal(items[1].reason, "3 commits behind main");
+  assert.equal(items[1].note, "release-tag grade still reads current");
+  assert.ok(!items[2].group && items[2].bp.id === "c", "a different distance is a different fact — its own row");
+  // Two identical warn rows are NOT grouped.
+  assert.equal(hooks.attentionGroups([degraded, { ...degraded, id: "d2" }]).length, 2);
+  // A group of one renders as the plain row it would have been.
+  assert.ok(!hooks.attentionGroups([behind("z", "solo", 3)])[0].group);
+  // The group row: shared chip (note on hover), "N instances", the reason once,
+  // every member linked, the fleet filter as the action, and no second copy of
+  // the sentence inside the pill.
+  const html = hooks.attentionGroupRowHtml(items[1]);
+  assert.match(html, /class="attention-row attention-row--group" data-ids="a b e"/);
+  assert.match(html, /status-pill-chip" title="release-tag grade still reads current"/);
+  assert.match(html, /attention-name">3 instances</);
+  assert.match(html, /attention-reason">3 commits behind main</);
+  assert.equal((html.match(/class="attention-group-name"/g) || []).length, 3);
+  assert.match(html, /href="#instance\/a"><bdi>dnd<\/bdi>/);
+  assert.match(html, /href="#fleet\/attention"/);
+  assert.doesNotMatch(html, /status-pill-detail/);
+  // attentionItemHtml dispatches both shapes.
+  assert.match(hooks.attentionItemHtml(items[0]), /data-id="d1"/);
+  assert.match(hooks.attentionItemHtml(items[1]), /attention-row--group/);
+});
+
+// Severity decides where a card's sentence lives: a warn/danger reason is why
+// the card is tinted and stays inline; an info reason is news the queue above
+// already carries, so the card keeps it on the chip's hover title.
+test("overview card: an info-level reason lives on the chip's hover title; a warn reason stays inline", () => {
+  const behindCard = hooks.instanceCardHtml({ ...LIVE_BOX, update_state: "current", commit_ancestry: "behind", commit_distance: 3 }, {});
+  assert.match(behindCard, /status-pill-chip" title="3 commits behind main · release-tag grade still reads current"/);
+  assert.doesNotMatch(behindCard, /status-pill-detail/);
+  const degradedCard = hooks.instanceCardHtml({ ...LIVE_BOX, health_status: "down" }, {});
+  assert.match(degradedCard, /status-pill-detail">Health down</);
+  assert.doesNotMatch(degradedCard, /status-pill-chip" title=/);
+  // The single attention row keeps the note on its chip too — the reason column
+  // carries the fact, the hover carries the clause.
+  const row = hooks.attentionRowHtml({ ...LIVE_BOX, update_state: "current", commit_ancestry: "behind", commit_distance: 3 });
+  assert.match(row, /status-pill-chip" title="release-tag grade still reads current"/);
+  assert.match(row, /attention-reason">3 commits behind main</);
 });
 
 test("instanceCardStats: four stats, over/warn meter tints its value amber", () => {
