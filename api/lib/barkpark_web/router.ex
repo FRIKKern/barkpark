@@ -193,6 +193,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.RequireScimToken)
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
   end
 
   # SSO browser redirect flows (OIDC, social login) — need a session to carry
@@ -226,6 +227,8 @@ defmodule BarkparkWeb.Router do
       "content-security-policy" =>
         "script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
     })
+
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
   end
 
   # Localhost fast-path pipeline (Barkpark Cloud P4 / Move B). Deliberately
@@ -927,6 +930,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ResolveTokenOwner)
     plug(BarkparkWeb.Plugs.RequirePrincipalUser)
     plug(BarkparkWeb.Plugs.RequireOrgMfaEnrolment)
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
   end
 
   # Browser Studio uploads send `credentials: same-origin` with the session
@@ -1026,6 +1030,7 @@ defmodule BarkparkWeb.Router do
   pipeline :require_admin do
     plug(BarkparkWeb.Plugs.RequireToken)
     plug(BarkparkWeb.Plugs.RequireAdmin)
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
   end
 
   # THE admin gate for every FLAT (`/v1/...`, no `/w/:ws/p/:project` in the
@@ -1092,6 +1097,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
     plug(BarkparkWeb.Plugs.RequireAdmin)
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
   end
 
   # Chat tenancy gate (Connectors charter D18/D19a). RequireToken sets
@@ -1111,12 +1117,14 @@ defmodule BarkparkWeb.Router do
   # `BARKPARK_CAPABILITIES_OFF`.
   pipeline :studio_chat_capability do
     plug(BarkparkWeb.Plugs.RequireCapability, :studio_chat)
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
   end
 
   # CycleFleet requires EpicFleet (`Barkpark.Capability` §Dependencies), so this
   # also refuses when EpicFleet is off.
   pipeline :cycle_fleet_capability do
     plug(BarkparkWeb.Plugs.RequireCapability, :cycle_fleet)
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
   end
 
   pipeline :require_chat_host_admin do
@@ -1149,6 +1157,7 @@ defmodule BarkparkWeb.Router do
   pipeline :scoped_admin do
     plug(BarkparkWeb.Plugs.RequireToken)
     plug(BarkparkWeb.Plugs.RequireWorkspaceRole)
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
   end
 
   pipeline :idempotent do
@@ -1182,6 +1191,14 @@ defmodule BarkparkWeb.Router do
   # so is every workspace-scoped admin route -- those re-bind through
   # `Tenancy.Auth.workspace_admin?/2`, and an instance allowlist in front of
   # them would lock tenant admins out of their own workspaces.
+  # C083 (Barkdown D-managed-writers): refuses mutating requests on the route
+  # groups a managed instance does not offer during a switch. Appended to the
+  # admin, SCIM, SSO, access, scoped-admin and fleet pipelines above, and to the
+  # two token-only scopes (workspace create, access mint) that carry such writes.
+  pipeline :managed_refusal do
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
+  end
+
   pipeline :require_platform_operator do
     plug(BarkparkWeb.Plugs.RequirePlatformOperator)
   end
@@ -2573,7 +2590,7 @@ defmodule BarkparkWeb.Router do
   # grantee CLAIM/MINE are NOT here — they need a USER identity (session or
   # owned token), so they sit in the `/v1/access` grantee block ABOVE.
   scope "/v1", BarkparkWeb do
-    pipe_through([:api, :require_token])
+    pipe_through([:api, :require_token, :managed_refusal])
 
     post("/access", AccessController, :mint)
     get("/access", AccessController, :index)
@@ -3390,7 +3407,7 @@ defmodule BarkparkWeb.Router do
   # non-member to avoid leaking existence. Token-gated only — NOT the path
   # tenancy macro / scoped plugin mounts (those live under /w/:ws/p/:project).
   scope "/api", BarkparkWeb do
-    pipe_through([:api, :require_token])
+    pipe_through([:api, :require_token, :managed_refusal])
 
     # `private:` exempts the LIST from DeriveWorkspaceFromToken's archive halt —
     # a token bound to an archived workspace must still be able to SEE it
