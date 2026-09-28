@@ -398,7 +398,9 @@ defmodule Barkpark.Application do
         {Barkpark.ManagedRuntime.WriteAdmission,
          journal: Keyword.fetch!(config, :journal),
          instance_id: Keyword.fetch!(config, :instance_id),
-         initialize: Keyword.get(config, :initialize, false)}
+         initialize: Keyword.get(config, :initialize, false)},
+        # Owns HTTP-requested holds (the trusted hold endpoint).
+        Barkpark.ManagedRuntime.WriteAdmission.Holder
       ]
     else
       []
@@ -431,6 +433,7 @@ defmodule Barkpark.Application do
   def refuse_managed_offline_boot!(_mode, _config), do: :ok
 
   defp write_admission_child?({Barkpark.ManagedRuntime.WriteAdmission, _}), do: true
+  defp write_admission_child?(Barkpark.ManagedRuntime.WriteAdmission.Holder), do: true
   defp write_admission_child?(_), do: false
 
   defp static_full_children(plugin_children, oban_config, sync_children, self_update_children) do

@@ -24,6 +24,9 @@ defmodule BarkparkWeb.Plugs.RefuseWhileHeld do
 
   def call(%Plug.Conn{method: method} = conn, _opts) when method in @reads, do: conn
 
+  # The hold endpoint is the one admin write that must answer while held.
+  def call(%Plug.Conn{path_info: ["v1", "admin", "write-admission" | _]} = conn, _opts), do: conn
+
   def call(conn, _opts) do
     if Door.enabled?() do
       case Door.admit(fn -> :ok end) do

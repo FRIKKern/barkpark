@@ -2762,6 +2762,17 @@ defmodule BarkparkWeb.Router do
     post("/workspaces/:slug/reinstate", WorkspaceReinstateController, :create)
   end
 
+  # C083 trusted hold endpoint (Barkdown seal-admission contract): operator-gated,
+  # owned by WriteAdmission.Holder. RefuseWhileHeld exempts this path so status
+  # and reopen answer while held.
+  scope "/v1/admin/write-admission", BarkparkWeb do
+    pipe_through([:api, :require_admin, :require_platform_operator])
+
+    post("/hold", WriteAdmissionController, :hold)
+    get("/hold/:capability", WriteAdmissionController, :show)
+    delete("/hold/:capability", WriteAdmissionController, :reopen)
+  end
+
   # ── Webhooks — requires admin token ────────────────────────────────────
   # `:flat_admin_api`, not `[:api, :require_admin]`: the sharpest row of the
   # D45/D49 remainder. `create_webhook` stamps `workspace_id` from
