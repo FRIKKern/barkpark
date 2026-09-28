@@ -182,6 +182,70 @@ defmodule BarkparkWeb.WriteAdmissionHoldControllerTest do
     assert resp.status == 409
   end
 
+  test "a writer that dies while closing leaves an uncertain root; recovery names its count", %{
+    conn: conn,
+    gate: gate
+  } do
+    parent = self()
+
+    writer =
+      spawn(fn ->
+        {:ok, _ticket} = Admission.checkout(gate)
+        send(parent, :admitted)
+        receive do: (:die -> :ok)
+      end)
+
+    assert_receive :admitted
+    resp = conn |> as(@admin) |> post(@path, Jason.encode!(%{"operation" => "switch"}))
+    assert resp.status == 202, resp.resp_body
+    assert Jason.decode!(resp.resp_body)["phase"] == "closing"
+
+    send(writer, :die)
+    await_phase(gate, :recovery_required)
+    resp = conn |> as(@admin) |> get("/v1/admin/write-admission")
+    view = Jason.decode!(resp.resp_body)
+    assert view["phase"] == "recovery_required"
+    assert view["pending"] == 1
+    assert view["held"] == "switch"
+
+    resp =
+      conn
+      |> as(@admin)
+      |> post(
+        "/v1/admin/write-admission/recover",
+        Jason.encode!(%{"generation" => view["generation"], "pending" => 0})
+      )
+
+    assert resp.status == 409
+    assert Jason.decode!(resp.resp_body)["error"]["reason"] == "write_admission_unreconciled"
+
+    resp =
+      conn
+      |> as(@admin)
+      |> post(
+        "/v1/admin/write-admission/recover",
+        Jason.encode!(%{"generation" => view["generation"], "pending" => 1})
+      )
+
+    assert resp.status == 200, resp.resp_body
+    assert %{phase: :open, pending: 0} = Admission.status(gate)
+
+    assert Jason.decode!(
+             conn
+             |> as(@admin)
+             |> get("/v1/admin/write-admission")
+             |> Map.get(:resp_body)
+           )["held"] == nil
+  end
+
+  defp await_phase(gate, phase, waited \\ 0) do
+    case Admission.status(gate).phase do
+      ^phase -> :ok
+      _ when waited > 2_000 -> flunk("phase never became #{phase}")
+      _ -> :timer.sleep(20) && await_phase(gate, phase, waited + 20)
+    end
+  end
+
   defp await_holder(old, waited \\ 0) do
     case Process.whereis(Holder) do
       pid when is_pid(pid) and pid != old -> pid

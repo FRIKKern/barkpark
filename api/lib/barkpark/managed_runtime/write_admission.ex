@@ -275,11 +275,14 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
       pending !== length(state.record.pending) ->
         {:reply, {:error, :unreconciled}, state}
 
-      map_size(state.writers) > 0 ->
+      Enum.any?(state.writers, fn {pid, _} -> Process.alive?(pid) end) ->
         {:reply, {:error, :writers_present}, state}
 
       true ->
+        # Dead writers are the uncertain effects the operator just reconciled; a
+        # live one would be a writer admitted before the failure and still running.
         if state.holder, do: Process.demonitor(state.holder.monitor, [:flush])
+        for {_pid, writer} <- state.writers, do: Process.demonitor(writer.monitor, [:flush])
 
         record = %{
           state.record
@@ -289,7 +292,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission do
             generation: state.record.generation + 1
         }
 
-        commit(%{state | holder: nil, record: record}, :ok)
+        commit(%{state | holder: nil, writers: %{}, record: record}, :ok)
     end
   end
 

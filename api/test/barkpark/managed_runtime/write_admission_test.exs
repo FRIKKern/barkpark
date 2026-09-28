@@ -206,6 +206,36 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
     assert {:ok, :held, _} = begin_hold(gate, "after-recovery")
   end
 
+  test "recovery clears a dead writer's uncertain root but refuses while one is alive", %{
+    gate: gate
+  } do
+    parent = self()
+
+    writer = fn ->
+      spawn(fn ->
+        {:ok, _} = Admission.checkout(gate)
+        send(parent, :admitted)
+        receive do: (:die -> :ok)
+      end)
+    end
+
+    dead = writer.()
+    assert_receive :admitted
+    alive = writer.()
+    assert_receive :admitted
+    {:ok, :closing, _} = begin_hold(gate, "switch")
+    send(dead, :die)
+    await_phase(gate, :recovery_required)
+    %{generation: generation, pending: 2} = Admission.status(gate)
+    assert {:error, :writers_present} = Admission.recover(gate, generation, 2)
+    send(alive, :die)
+    await_phase(gate, :recovery_required)
+    assert {:error, :unreconciled} = Admission.recover(gate, generation, 1)
+    assert :ok = Admission.recover(gate, generation, 2)
+    assert %{phase: :open, pending: 0, generation: next} = Admission.status(gate)
+    assert next == generation + 1
+  end
+
   for phase <- [:open, :closing, :held] do
     test "coordinator death in #{phase} cannot reopen interrupted work", %{
       gate: gate,
