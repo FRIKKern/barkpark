@@ -1335,6 +1335,7 @@ defmodule BarkparkWeb.Router do
     live_session :admin_studio,
       on_mount: [
         {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.WriteAdmissionLive, :refuse_while_held},
         {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.StudioChrome, :default}
       ],
@@ -1373,6 +1374,7 @@ defmodule BarkparkWeb.Router do
     live_session :admin_swatch,
       on_mount: [
         {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.WriteAdmissionLive, :refuse_while_held},
         {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.StudioChrome, :default}
       ],
@@ -1446,6 +1448,7 @@ defmodule BarkparkWeb.Router do
     live_session :plugin_admin,
       on_mount: [
         {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.WriteAdmissionLive, :refuse_while_held},
         {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.StudioChrome, :default}
       ],
@@ -1491,6 +1494,7 @@ defmodule BarkparkWeb.Router do
     live_session :plugin_ops,
       on_mount: [
         {BarkparkWeb.LiveAuth, :ops},
+        {BarkparkWeb.WriteAdmissionLive, :refuse_while_held},
         {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.StudioChrome, :default}
       ],
@@ -1732,6 +1736,7 @@ defmodule BarkparkWeb.Router do
     live_session :scoped_plugin_admin,
       on_mount: [
         {BarkparkWeb.LiveAuth, :scoped_admin},
+        {BarkparkWeb.WriteAdmissionLive, :refuse_while_held},
         {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.PluginScopeSession, :scope},
         {BarkparkWeb.StudioChrome, :default}
@@ -1756,6 +1761,7 @@ defmodule BarkparkWeb.Router do
     live_session :scoped_admin_studio,
       on_mount: [
         {BarkparkWeb.LiveAuth, :scoped_admin},
+        {BarkparkWeb.WriteAdmissionLive, :refuse_while_held},
         {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.LiveScope, :resolve},
         {BarkparkWeb.StudioChrome, :default}
@@ -1800,6 +1806,7 @@ defmodule BarkparkWeb.Router do
     live_session :scoped_plugin_ops,
       on_mount: [
         {BarkparkWeb.LiveAuth, :ops},
+        {BarkparkWeb.WriteAdmissionLive, :refuse_while_held},
         {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.PluginScopeSession, :scope},
         {BarkparkWeb.StudioChrome, :default}
@@ -1861,6 +1868,7 @@ defmodule BarkparkWeb.Router do
     live_session :scoped_admin_studio_dataset,
       on_mount: [
         {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.WriteAdmissionLive, :refuse_while_held},
         {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.StudioChrome, :default}
       ],
