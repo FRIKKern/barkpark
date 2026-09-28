@@ -3518,7 +3518,7 @@ const EXPECTATIONS = {
       assert.ok(!pillLabels.some((l) => /\bStopped\b/i.test(l)),
         `no pill paints the literal word Stopped (labels: ${JSON.stringify(pillLabels)})`);
       assert.ok(
-        /suspended-card-banner[\s\S]*?<span class="status-pill status-pill--danger"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Suspended<\/span>/.test(grid),
+        /suspended-card-banner[\s\S]*?<span class="status-pill status-pill--danger"><span class="status-pill-chip"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Suspended<\/span>/.test(grid),
         "the suspended card's own pill is the danger pill labelled Suspended");
     },
   },
@@ -6640,7 +6640,7 @@ const EXPECTATIONS = {
         `the lifecycle card's pill labels are read at all (want the ladder's stopped chip, got ${JSON.stringify(lifeLabels)} from ${JSON.stringify(lifeCard.slice(0, 300))})`);
       assert.ok(!lifeLabels.some((l) => /\bStopped\b/i.test(l)),
         `the lifecycle ladder paints the literal word Stopped (labels: ${JSON.stringify(lifeLabels)})`);
-      assert.ok(lifeCard.includes('<span class="status-pill status-pill--neutral status-pill--stopped bp-inst--stopped"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Suspended</span></span>'),
+      assert.ok(lifeCard.includes('<span class="status-pill status-pill--neutral status-pill--stopped bp-inst--stopped"><span class="status-pill-chip"><span class="status-pill-dot" aria-hidden="true"></span><span class="status-pill-label">Suspended</span></span>'),
         `the ladder's stopped chip is the neutral stopped-variant pill labelled Suspended (labels: ${JSON.stringify(lifeLabels)})`);
       // 1. The precondition: the unknown arm really is on screen.
       assert.ok(before.includes('<div class="inst-life-disabled"><button class="btn btn-ghost btn-sm" type="button" disabled aria-describedby="inst-update-actions-reason">Roll back&hellip;</button></div>'),

@@ -2638,7 +2638,7 @@ test("gr-backlog-css: the E10 fixture reds --orphan-check and ONLY --orphan-chec
   // asserted-in-prose.
   const indexHtml = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
   const appJs = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
-  for (const name of ["__css_check.fixture.css", "__css_check.orphan.fixture.css", "__css_check.wrapparity.fixture.css"]) {
+  for (const name of ["__css_check.fixture.css", "__css_check.orphan.fixture.css"]) {
     assert.ok(!indexHtml.includes(name), name + " must never be linked from index.html");
     assert.ok(!appJs.includes(name), name + " must never be loaded by the SPA");
   }
@@ -2682,219 +2682,6 @@ test("cch-w20-bl type floor: no app.css declaration resolves below 12px outside 
     `${ALLOWLIST.length} site(s) are exempt by NAME in type-floor.mjs's committed literal; each carries its own\n` +
     `written reason and a stale entry is fatal. Raise the declaration, or argue it there.\n\n` +
     r.errors.join("\n"));
-});
-
-// ── cch-w19-s4 · E14 wrap-recipe parity, driven in every direction ──────────
-// Charter D220 REFUSED D210's fourth-host extraction trigger and replaced it
-// with this instrument: the five-declaration recipe does not fix the fourth
-// host (driven — every clipped op-gate cell stays clipped), so host COUNT was
-// never the sin. DIVERGENCE between the three hand-built copies is, and nothing
-// measured it. These tests execute the committed fixture two-directionally the
-// way the E9/E10 pair above does, and additionally DRIVE the three design
-// choices that make the predicate correct — each is load-bearing, and each
-// would be silently "simplified" away without a leg that fails when it is.
-const wrapTmp = (name, css) => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), "bp-wrapparity-"));
-  const f = path.join(d, name);
-  fs.writeFileSync(f, css, "utf8");
-  return f;
-};
-// The FIVE PINNED copies, byte-identical cores under DIFFERENT jackets.
-// Every synthetic case below is built on top of these so the two anti-vacuity
-// guards (zero copies, missing pinned host) never mask the leg under test.
-// `.attention-row` joined the pin in W20-S6's review commit, in the same change
-// that added it to WRAP_REQUIRED_HOSTS — the fourth copy was counted but not
-// required, so a scan losing exactly that copy still read clean.
-// `.detail-title-row` joined it the same way one wave later
-// (cch-w24-bl-detail-title-row-not-a-required-wrap-host): cch-w24-s2 authored
-// the fifth copy and bumped the app.css COUNT pin below 4 -> 5, but left it out
-// of WRAP_REQUIRED_HOSTS, so a scan degrading to 4-of-5 that lost exactly the
-// failed instance's own detail header still read clean. It is spelt as its own
-// line here (app.css ships it as a comma member of the `.instance-card-head`
-// prelude) because the survivor loop below filters these lines by host prefix.
-const WRAP_SURVIVORS = [
-  ".attention-row .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
-  ".detail-rail .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; }",
-  ".detail-title-row .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
-  ".fleet-status .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
-  ".instance-card-head .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
-].join("\n");
-const WRAP_CORE_TEXT = "white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px;";
-
-test("cch-w19-s4: the E14 fixture reds --wrap-parity-check and ONLY --wrap-parity-check", () => {
-  const fixture = fileURLToPath(new URL("./__css_check.wrapparity.fixture.css", import.meta.url));
-  const red = runCssCheck("--wrap-parity-check", fixture);
-  assert.equal(red.status, 1, "the committed D220 fixture must exit 1 — a green fixture is a dead proof:\n" + red.out);
-  assert.match(red.out, /1 E14 error\(s\)/, "exactly one E14 error, per the fixture header:\n" + red.out);
-  assert.match(red.out, /\.op-gate \.status-pill declares/, "and it must name the drifting copy:\n" + red.out);
-  assert.match(red.out, /min-height: 24px \(not declared\)/, "and the MISSING declaration, not just 'diverges':\n" + red.out);
-  // E9's lesson, inherited: the diagnostic cites the file it actually READ.
-  assert.match(red.out, /E14 __css_check\.wrapparity\.fixture\.css:\d+/, "E14 must cite the scanned file:\n" + red.out);
-  assert.ok(!/E14 app\.css:/.test(red.out), "E14 cited app.css while scanning a fixture:\n" + red.out);
-  // The other direction: the sibling fixture modes are blind to this class, so
-  // the three are pinned as complements rather than substitutes.
-  for (const flag of ["--swallow-check", "--orphan-check"]) {
-    const green = runCssCheck(flag, fixture);
-    assert.equal(green.status, 0, flag + " does not see declaration divergence — that is E14's reason to exist:\n" + green.out);
-  }
-});
-
-test("cch-w19-s4: E14 does NOT assert the jacket — a jacketless fourth host greens", () => {
-  // DESIGN CHOICE 2, driven. align-items / the -dot and -detail rules / the
-  // wrapper's own flex-wrap are per-HOST: .detail-rail ships none of them. A
-  // fourth host carrying the bare five and nothing else is LEGAL, and this is
-  // the leg that makes it so rather than arguing it in a comment.
-  const f = wrapTmp("jacketless.css", WRAP_SURVIVORS + "\n.op-gate .status-pill { " + WRAP_CORE_TEXT + " }\n");
-  const r = runCssCheck("--wrap-parity-check", f);
-  assert.equal(r.status, 0, "a jacketless fourth host with the full core must GREEN:\n" + r.out);
-  assert.match(r.out, /6 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED as the next copy:\n" + r.out);
-  assert.match(r.out, /0 E14 error\(s\)/, r.out);
-});
-
-test("cch-w19-s4: a fourth host dropping one core declaration reds under BOTH combinators", () => {
-  // The predicate must not be evadable by swapping the descendant combinator
-  // for a child combinator — a drifting copy written `.op-gate > .status-pill`
-  // is the same defect on screen.
-  for (const sel of [".op-gate .status-pill", ".op-gate > .status-pill"]) {
-    const f = wrapTmp("drift.css", WRAP_SURVIVORS + "\n" + sel + " { white-space: normal; height: auto; padding-top: 2px; padding-bottom: 2px; }\n");
-    const r = runCssCheck("--wrap-parity-check", f);
-    assert.equal(r.status, 1, sel + " drops min-height and must RED:\n" + r.out);
-    assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the other survivors stay ok:\n" + r.out);
-    assert.match(r.out, /\.op-gate/, "and the error must name the drifting host:\n" + r.out);
-    for (const ok of [".detail-rail", ".detail-title-row", ".fleet-status", ".instance-card-head"]) {
-      assert.ok(!new RegExp("E14 [^\\n]*\\" + ok + " \\.status-pill declares").test(r.out), ok + " must not be blamed:\n" + r.out);
-    }
-  }
-});
-
-test("cch-w19-s4: the trigger is the DECLARATION, not the selector", () => {
-  // DESIGN CHOICE 1, driven. A wrapper-scoped rule touching none of the five is
-  // not a wrap copy: it is not counted and it cannot red. Without this, every
-  // future `.foo .status-pill { margin-left: 4px }` would be false-redded and
-  // the check would be turned off within a wave.
-  const f = wrapTmp("outofscope.css", WRAP_SURVIVORS + "\n.some-rail .status-pill { margin-left: 4px; }\n");
-  const r = runCssCheck("--wrap-parity-check", f);
-  assert.equal(r.status, 0, "a wrapper-scoped rule declaring no core property must not red:\n" + r.out);
-  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and must not even be COUNTED as a copy:\n" + r.out);
-  assert.ok(!/some-rail/.test(r.out), "and must not be mentioned at all:\n" + r.out);
-});
-
-test("cch-w19-s4: a vacuous green is refused — zero copies is an ERROR", () => {
-  // A scan that stops seeing the copies would otherwise report the stylesheet
-  // clean, which is the exact failure mode this epic keeps finding in gates.
-  const f = wrapTmp("empty.css", ".status-pill { height: 24px; white-space: nowrap; }\n");
-  const r = runCssCheck("--wrap-parity-check", f);
-  assert.equal(r.status, 1, "zero wrapper-scoped copies must exit 1, not report clean:\n" + r.out);
-  assert.match(r.out, /ZERO wrapper-scoped \.status-pill wrap copies found/, r.out);
-  // And the base rule is excluded by SELECTOR SHAPE, not by an allowlist: it
-  // declares core properties at non-core values by design and is invisible here.
-  assert.match(r.out, /0 wrapper-scoped wrap copy\(ies\)/, "the bare .status-pill must not count as a copy:\n" + r.out);
-});
-
-test("cch-w19-s4: the survivor selectors are pinned — losing one reds", () => {
-  // The zero-guard cannot see PARTIAL blindness: a scan degrading to 1 of 4
-  // still reports clean. These pins close that, and they are same-file pins of
-  // this repo's OWN selectors (pin-your-own, derive-foreign). `.attention-row`
-  // joined the loop with W20-S6's fourth copy — a pin that is not driven here
-  // is a pin nobody has proven can bite.
-  for (const host of [".attention-row", ".detail-rail", ".detail-title-row", ".fleet-status", ".instance-card-head"]) {
-    const kept = WRAP_SURVIVORS.split("\n").filter((l) => !l.startsWith(host + " ")).join("\n");
-    const f = wrapTmp("missing.css", kept + "\n");
-    const r = runCssCheck("--wrap-parity-check", f);
-    assert.equal(r.status, 1, "removing " + host + " must red:\n" + r.out);
-    assert.match(r.out, new RegExp("the pinned wrap copy .\\" + host + " \\.status-pill. is MISSING"), r.out);
-  }
-});
-
-test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all five copies there", () => {
-  // The shipped tree is the subject the check was written for. If it cannot
-  // green there it will be deleted, and if it cannot SEE there it is decorative.
-  //
-  // W20-S6 BUMPED THIS PIN 3 -> 4 AND WIDENED THE LOOP, in the same commit that
-  // authored `.attention-row .status-pill`. That is the pin working, not the pin
-  // being in the way: a NEW wrapper-scoped copy is a CHANGE to the recipe's
-  // blast radius, and the epic's own count is the thing that notices. The count
-  // is a same-file pin of this repo's own stylesheet (pin-your-own,
-  // derive-foreign), so it is bumped deliberately, never derived from the file
-  // it is meant to measure.
-  //
-  // cch-w24-s2 BUMPED IT 4 -> 5, in review, for the same reason. The failed
-  // instance's own detail header gained the wrap by joining the
-  // `.instance-card-head` prelude as a COMMA MEMBER — delta-heads 0, CSSOM
-  // PARITY PASS, no new rule authored — and it is still a fifth wrapper-scoped
-  // copy with its own blast radius. THE COUNT IS WHAT NOTICED: nothing else in
-  // the wave's gates moved, and the slice's own gate (guard + __css_check +
-  // cssom-parity) did not include this harness. A comma member is invisible to
-  // a rule-head count and visible to this one, which is the whole point of
-  // keeping both.
-  //
-  // NOW ALSO IN `WRAP_REQUIRED_HOSTS` (__css_check.mjs), which is the stronger
-  // pin and W20-S6's precedent: counted-but-not-required could not see a scan
-  // degrading to 4-of-5. That was deferred from the w24 review because it
-  // cascades into every E14 fixture stylesheet — a deliberate edit to a curated
-  // oracle — and landed as its own slice,
-  // `cch-w24-bl-detail-title-row-not-a-required-wrap-host`. THE COUNT BELOW AND
-  // THE REQUIRED-HOST LIST ARE NOT REDUNDANT: the count notices a NEW copy
-  // (nothing requires a host that does not exist yet), the required list
-  // notices a LOST one. This test drives both, and the survivor loop above
-  // drives the new pin against a synthetic stylesheet that omits it.
-  const appCss = fileURLToPath(new URL("./app.css", import.meta.url));
-  const r = runCssCheck("--wrap-parity-check", appCss);
-  assert.equal(r.status, 0, "app.css must be green under E14:\n" + r.out);
-  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, r.out);
-  for (const host of [".attention-row", ".detail-rail", ".detail-title-row", ".fleet-status", ".instance-card-head"]) {
-    assert.match(r.out, new RegExp("\\" + host + " \\.status-pill:\\d+"), host + " must be seen with a line number:\n" + r.out);
-  }
-});
-
-// ── cch-w19-bl-e14-shorthand-blind · E14 and the SHORTHAND it could not see ──
-// THE GAP, MEASURED BEFORE IT WAS FIXED. `padding` is not one of E14's five
-// pinned core NAMES, so a wrapper-scoped `.status-pill` rule written
-// `{ padding: 2px 11px }` neither TRIGGERED the check nor SATISFIED
-// `padding-top`/`padding-bottom`. Run against the pre-fix check, the exact
-// stylesheet the first leg below builds printed `4 wrapper-scoped wrap copy(ies)
-// … 0 E14 error(s)` and exited 0 — the fifth copy was INVISIBLE, not red. That
-// is the asymmetry that matters: a drifting fourth copy went unseen.
-//
-// THE REMEDY IS TRIGGER-ON-SHORTHAND, NOT EXPAND-SHORTHAND, and the argument is
-// in the E14 header entry of __css_check.mjs (the losing option is named there
-// with the reason it lost). These three legs drive what that choice BUYS, and
-// the third is the one a naive implementation fails.
-test("cch-w19-bl-e14: a shorthand-only fourth copy is COUNTED and REDS", () => {
-  const f = wrapTmp("shorthand.css", WRAP_SURVIVORS + "\n.op-gate .status-pill { padding: 2px 11px; }\n");
-  const r = runCssCheck("--wrap-parity-check", f);
-  assert.equal(r.status, 1, "a shorthand fourth copy must RED, not vanish:\n" + r.out);
-  assert.match(r.out, /6 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED — invisibility was the defect:\n" + r.out);
-  assert.match(r.out, /1 E14 error\(s\)/, "and exactly one — the five survivors stay ok:\n" + r.out);
-  assert.match(r.out, /\.op-gate \.status-pill declares padding —/, "the error must name the host AND the shorthand:\n" + r.out);
-  assert.match(r.out, /set through the shorthand `padding: 2px 11px`/, "and say WHY, not just 'not declared':\n" + r.out);
-});
-
-test("cch-w19-bl-e14: shorthand plus the core RESTATED in longhand after it greens", () => {
-  // The legitimate way to give the pill horizontal padding. Remedy (b) must not
-  // outlaw it, or the check gets turned off within a wave — the same reason
-  // design choice 1 refuses to trigger on the selector.
-  const f = wrapTmp("legal.css", WRAP_SURVIVORS +
-    "\n.op-gate .status-pill { white-space: normal; height: auto; min-height: 24px; padding: 2px 11px; padding-top: 2px; padding-bottom: 2px; }\n");
-  const r = runCssCheck("--wrap-parity-check", f);
-  assert.equal(r.status, 0, "shorthand + longhand restatement is a legal sixth copy:\n" + r.out);
-  assert.match(r.out, /6 wrapper-scoped wrap copy\(ies\)/, "and it is still COUNTED:\n" + r.out);
-  assert.match(r.out, /0 E14 error\(s\)/, r.out);
-});
-
-test("cch-w19-bl-e14: the shorthand AFTER the longhands reds — the cascade-order trap", () => {
-  // A second false green on the pre-fix check, and the one a
-  // "just require the longhand to be present" implementation still ships: all
-  // five longhands are here at canonical values, and a `padding: 3px 11px`
-  // AFTER them wins the cascade and makes the chip 3px, not 2px. Driven
-  // against the pre-fix check this stylesheet printed 0 E14 error(s) too.
-  const f = wrapTmp("order.css", WRAP_SURVIVORS +
-    "\n.op-gate .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; padding: 3px 11px; }\n");
-  const r = runCssCheck("--wrap-parity-check", f);
-  assert.equal(r.status, 1, "a shorthand that OVERRIDES the restated longhands must red:\n" + r.out);
-  assert.match(r.out, /1 E14 error\(s\)/, r.out);
-  assert.match(r.out, /set through the shorthand `padding: 3px 11px`/, "and name the shorthand that won:\n" + r.out);
-  assert.match(r.out, /restate `padding-top: 2px` in longhand AFTER that shorthand/, "and say how to fix it:\n" + r.out);
 });
 
 // ── cch-w12-bl-e12-blind-to-border-width · E12's escape must be able to PAINT ─
@@ -5586,8 +5373,8 @@ test("dr-w5-followup (c2): EVERY statusPill render site is enumerated FROM THE C
   const producers = (APP_SRC.match(/status-pill status-pill--' \+ esc\(([a-zA-Z0-9_.]+)\)/g) || []);
   assert.ok(producers.some((p) => p.includes("esc(meta.role)")),
     "statusMetaPill no longer paints its role from the meta it was handed");
-  assert.match(APP_SRC, /function statusPill\(bp, extraClass\) \{\s*return statusMetaPill\(statusOf\(bp\), extraClass\);\s*\}/,
-    "statusPill is no longer a pure delegation to statusMetaPill over statusOf's answer");
+  assert.match(APP_SRC, /function statusPill\(bp, extraClass, opts\) \{\s*var meta = statusOf\(bp\);\s*if \(opts && opts\.detail === false\) meta = \{ role: meta\.role, label: meta\.label \};\s*return statusMetaPill\(meta, extraClass\);\s*\}/,
+    "statusPill is no longer a delegation to statusMetaPill over statusOf's answer (role + label always statusOf's; only the detail may be dropped)");
 
   // ── THE RENDERS. All four sites, driven, for both new states.
   const STRAINED = { ...VITAL_BOX({ cpu_cores: 2, load15: 3.6 }), id: "b1", name: "guerrilla" };
@@ -20423,7 +20210,7 @@ const railValueOf = (html, key) => {
   return m && m[1];
 };
 const bindingPillOf = (html) => {
-  const m = html.match(/<span class="status-pill status-pill--(\w+)" title="([^"]*)"><span class="status-pill-dot"[^>]*><\/span><span class="status-pill-label">([^<]*)</);
+  const m = html.match(/<span class="status-pill status-pill--(\w+)" title="([^"]*)"><span class="status-pill-chip"><span class="status-pill-dot"[^>]*><\/span><span class="status-pill-label">([^<]*)</);
   return m && { role: m[1], title: m[2], label: m[3] };
 };
 
@@ -35808,14 +35595,14 @@ test("gr-backlog-d24 (g): the absorbed call sites still render the shared family
     "the update badge lost the family's dot");
 
   const site = hooks.siteStatusPill({});
-  assert.match(site, /^<span class="status-pill status-pill--neutral"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Not deployed<\/span><\/span>$/,
+  assert.match(site, /^<span class="status-pill status-pill--neutral"><span class="status-pill-chip"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Not deployed<\/span><\/span><\/span>$/,
     "a never-deployed site no longer reads as the neutral shared chip: " + site);
 
   const wh = hooks.webhookCardHtml({ url: "https://x.test/h", events: ["doc.created"], active: true }, {}, "production");
-  assert.match(wh, /<span class="status-pill status-pill--ok"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Active<\/span><\/span>/,
+  assert.match(wh, /<span class="status-pill status-pill--ok"><span class="status-pill-chip"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Active<\/span><\/span>/,
     "an active webhook no longer reads as the shared ok chip");
   const whOff = hooks.webhookCardHtml({ url: "https://x.test/h", events: ["doc.created"], active: false }, {}, "production");
-  assert.match(whOff, /<span class="status-pill status-pill--neutral"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Disabled<\/span><\/span>/,
+  assert.match(whOff, /<span class="status-pill status-pill--neutral"><span class="status-pill-chip"><span class="status-pill-dot" aria-hidden="true"><\/span><span class="status-pill-label">Disabled<\/span><\/span>/,
     "a disabled webhook no longer reads as the shared neutral chip");
 
   const chip = hooks.siteBindingChip({ workspace: "w", project: "p", dataset: "d", token: "present" });

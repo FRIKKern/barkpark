@@ -8182,12 +8182,20 @@
   // (or `statusOf`'s shape, which is the same `{role,label,detail}` plus a
   // detail segment); `extraClass` rides after the role; `attrs` is a pre-escaped
   // attribute string for the callers that need a title / aria-label.
+  //
+  // SHAPE: the CAPSULE is `.status-pill-chip` (dot + label, one line, never
+  // wraps) and `.status-pill-detail` is PROSE beside it, outside the chrome.
+  // The detail used to sit inside the capsule, so a two-clause reason painted
+  // a tinted balloon around a bold word and a paragraph on every card; the
+  // outer `.status-pill` is now a layout row that paints nothing itself.
   function statusMetaPill(meta, extraClass, attrs) {
     return '<span class="status-pill status-pill--' + esc(meta.role) +
       (meta.variant ? STATUS_PILL_VARIANT_CLASS[meta.variant] || "" : "") +
       (extraClass ? " " + extraClass : "") + '"' + (attrs || "") + ">" +
-      '<span class="status-pill-dot" aria-hidden="true"></span>' +
-      '<span class="status-pill-label">' + esc(meta.label) + "</span>" +
+      '<span class="status-pill-chip">' +
+        '<span class="status-pill-dot" aria-hidden="true"></span>' +
+        '<span class="status-pill-label">' + esc(meta.label) + "</span>" +
+      "</span>" +
       (meta.detail ? '<span class="status-pill-detail">' + esc(meta.detail) + "</span>" : "") +
     "</span>";
   }
@@ -8196,8 +8204,13 @@
   // the semantic role. This is the only status affordance in a fleet row and
   // the instance-detail header (charter decision 6). It is now one consumer of
   // statusMetaPill among several rather than its own component.
-  function statusPill(bp, extraClass) {
-    return statusMetaPill(statusOf(bp), extraClass);
+  // `opts.detail === false` renders the chip alone — for a host that already
+  // says WHY in prose of its own (the attention queue's `.attention-reason`),
+  // so one row never prints the same sentence twice.
+  function statusPill(bp, extraClass, opts) {
+    var meta = statusOf(bp);
+    if (opts && opts.detail === false) meta = { role: meta.role, label: meta.label };
+    return statusMetaPill(meta, extraClass);
   }
 
   // A deploy-ledger row's status chip — the deploy-side consumer of the same
@@ -9258,13 +9271,15 @@
       bp.deprovision_status === "failed";
     return !!bp.host && !bp.suspended && !removing;
   }
-  // Pure: one attention-queue row — pill + clickable name + reason + View
-  // instance + (when live) Open Studio. Open Studio reuses the .fleet-open-studio
+  // Pure: one attention-queue row — chip-only pill + clickable name + reason
+  // + View instance + (when live) Open Studio. The reason column IS the pill's
+  // detail sentence (attentionReason reads statusOf(bp).detail), so the pill
+  // renders without it — the WHY is said once, in the column built to wrap it. Open Studio reuses the .fleet-open-studio
   // hook so wireFleetRows wires it (stopPropagation-safe); the name/View links
   // are plain hash navigations (no JS wiring).
   function attentionRowHtml(bp) {
     return '<div class="attention-row" data-id="' + esc(bp.id) + '">' +
-      statusPill(bp) +
+      statusPill(bp, "", { detail: false }) +
       '<div class="attention-main">' +
         '<a class="attention-name" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>" +
         '<span class="attention-reason">' + esc(attentionReason(bp)) + "</span>" +
@@ -16546,7 +16561,11 @@
     return kind || "";
   }
 
-  // Pure: one rung chip in the v4 rung-pill grammar (.dom-rung, gr-p3): ok → ●,
+  // Pure: one rung ROW — the capsule (.dom-rung: glyph + label, one line) and
+  // the server's evidence (.dom-rung-code) as SIBLINGS, never the evidence
+  // inside the capsule (that shape painted a 100px-tall balloon in the rail).
+  // The listitem is the row, so the accessible name covers both halves.
+  // Rung-pill grammar (.dom-rung, gr-p3): ok → ●,
   // failed → ✕, active → ◐, unknown → ?, waiting → ·, proxied → ● info
   // (informational — the domain is fronted by a proxy, so origin-pointing is a
   // mode, not a check). The accessible name carries the state in WORDS, never
@@ -16574,10 +16593,12 @@
       : row.role === "active" ? "in progress"
       : row.role === "unknown" ? "could not check"
       : blocked ? "not checked" : "waiting";
-    return '<span class="dom-rung dom-rung--' + esc(row.role) + '" role="listitem" aria-label="' +
+    return '<span class="dom-rung-row" role="listitem" aria-label="' +
       esc(row.label + " — " + state) + '">' +
-      '<span class="dom-rung-glyph" aria-hidden="true">' + glyph + "</span>" +
-      esc(row.label) +
+      '<span class="dom-rung dom-rung--' + esc(row.role) + '">' +
+        '<span class="dom-rung-glyph" aria-hidden="true">' + glyph + "</span>" +
+        esc(row.label) +
+      "</span>" +
       (showEvidence && row.evidence ? '<span class="dom-rung-code">' + esc(row.evidence) + "</span>" : "") +
       "</span>";
   }
