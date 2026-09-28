@@ -162,6 +162,11 @@ defmodule Barkpark.Application do
     # whenever the pool is not running (see `Barkpark.Repo.route_job_to_job_pool/4`).
     :ok = Barkpark.Repo.attach_job_pool_router()
 
+    # Write admission for Oban jobs (Barkdown C083): the same seam, attached only
+    # when the instance admits writes, so an unmanaged server pays nothing.
+    if Barkpark.ManagedRuntime.WriteAdmission.Door.enabled?(),
+      do: :ok = Barkpark.ManagedRuntime.WriteAdmission.ObanAdmission.attach()
+
     # Chapter 64 (layering isolates blast radius). The top supervisor keeps the
     # OTP-default 3-restarts-in-5s budget — made EXPLICIT here — but that budget
     # now guards only critical infra (Repo/Oban/PubSub/Endpoint) and the
