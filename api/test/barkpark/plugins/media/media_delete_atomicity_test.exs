@@ -271,8 +271,10 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
   defp delete_file_source! do
     source = File.read!(Path.join(__DIR__, "../../../../lib/barkpark/media.ex"))
 
+    # The public `delete_file/2` is the write-admission door (C083); the body
+    # this pin reads lives in the admitted private clause.
     [_head, tail] =
-      String.split(source, "def delete_file(id, opts) when is_list(opts) do", parts: 2)
+      String.split(source, "defp admitted_delete_file(id, opts) when is_list(opts) do", parts: 2)
 
     [body, _rest] = String.split(tail, "# ── Deferred media-delete effects", parts: 2)
     body

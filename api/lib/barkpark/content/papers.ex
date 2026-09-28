@@ -42,6 +42,7 @@ defmodule Barkpark.Content.Papers do
   alias Barkpark.Content.Papers.{BlockOps, Hollow}
   alias Barkpark.PortableDoc.{BodyWalk, HtmlSanitizer, Projection, Render, Synthesis}
   alias Barkpark.Repo
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -246,7 +247,8 @@ defmodule Barkpark.Content.Papers do
             {:blocks, blocks, rendered}
 
           {:stale, rendered} ->
-            refresh_html_cache(paper, blocks, rendered)
+            # A held managed instance serves the derived HTML without persisting it (C083).
+            Door.admit_or_skip(fn -> refresh_html_cache(paper, blocks, rendered) end, :ok)
             {:blocks, blocks, rendered}
 
           :divergent ->

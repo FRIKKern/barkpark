@@ -697,8 +697,25 @@ defmodule PDS.Census do
     # the `derived` half of this census's own D448-DRIFT-REFUSES line, run from the repo
     # root on this commit's tree, lens unchanged. Engine printed live by that run:
     #   Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
-    write: 56,
-    read: 31,
+    #
+    # RE-DERIVED AGAIN 2026-09-28 at codex/write-admission-slice2 (Barkdown C083 slice 2,
+    # BlockOps and media doors): write-routed 56 -> 54 and read-routed 31 -> 33. Fronting
+    # every `Papers.BlockOps` entry with `WriteAdmission.Door.admit/1` inserted the same ONE
+    # closure hop as slice 1 did for Writer, this time between the ingest controller and
+    # `upsert_blocks_doc`'s row write. TWO receipts can no longer reach a write verb inside
+    # the depth-6 budget and land in the READ class — `--sites` diffed against origin/main
+    # (c35d45aaf) names them, both in barkpark_web/controllers/bulldocs_ingest_controller.ex:
+    #   BulldocsIngestController.sync/2            [WRITE d6] -> [READ]
+    #   BulldocsIngestController.ingest_session/2  [WRITE d6] -> [READ]
+    # and the depth sweep shows the same sites at [WRITE d6] one hop deeper, so they did not
+    # fall out of the route relation. `textual` (115), `ast` (106), `phantom` (9), `consumer`
+    # (4), `emitted` (102) and `unrouted` (15) all read `==` in the same run. Same ruling as
+    # the two entries above: the hop stays, the door is one place. DERIVED BY THE INSTRUMENT,
+    # not typed: the `derived` half of this census's own D448-DRIFT-REFUSES line, run from the
+    # repo root on this commit's tree, lens unchanged. Engine printed live by that run:
+    #   Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    write: 54,
+    read: 33,
     unrouted: 15
   }
 
