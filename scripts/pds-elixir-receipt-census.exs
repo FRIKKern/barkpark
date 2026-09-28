@@ -714,8 +714,15 @@ defmodule PDS.Census do
     # not typed: the `derived` half of this census's own D448-DRIFT-REFUSES line, run from the
     # repo root on this commit's tree, lens unchanged. Engine printed live by that run:
     #   Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
-    write: 54,
-    read: 33,
+    #
+    # RE-DERIVED AGAIN 2026-09-28 at codex/write-admission-slice4 (Barkdown C083 slice 4, the task
+    # board door): write-routed 54 -> 52 and read-routed 33 -> 35. `Tasks.Internal.fenced_content_write/4`
+    # and `insert_mutation_event!/1` now pass through `WriteAdmission.Door.admit!/1`, the same ONE
+    # closure hop as the earlier entries, between every task verb and the fenced `Repo.update_all`;
+    # two task-verb receipts land in the READ class at depth 6. Same ruling: the hop stays, the door is
+    # one place. Engine printed live by that run: Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    write: 52,
+    read: 35,
     unrouted: 15
   }
 
@@ -793,7 +800,11 @@ defmodule PDS.Census do
   # and collapsing it (collapse_draft_twin/5 deleted), so the longest write chain lost
   # two hops and the table went flat at 10 — write 78 / read 15 / unrouted 3, identical
   # at 12/14/16. Read off the run, not typed; ROUTE-DEPTH-IS-CLOSURE reds if it moves.
-  @route_depth 10
+  # RE-DERIVED 2026-09-28 (10 -> 12): Tasks.Internal.fenced_content_write/4 and
+  # insert_mutation_event!/1 now pass through WriteAdmission.Door.admit!/1 (Barkdown C083
+  # slice 4), so every task-verb write chain gained the door's closure hops and the
+  # table goes flat at 12 — write 83 / read 16 / unrouted 3, identical at 14/16.
+  @route_depth 12
   @sweep [1, 2, 3, 4, 5, 6]
 
   # DEPTHS PAST THE CENSUS DEPTH, MEASURED RATHER THAN ASSERTED. The claim "the route
