@@ -41,14 +41,14 @@
    min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
      A flex item and a grid track both floor at their content's min-content, so
      a wrap on the child without this on the parent yields a SPILL, not a wrap.
-     64 of this file's 71 `min-width` declarations are this escape, and none of
+     66 of this file's 73 `min-width` declarations are this escape, and none of
      them had a written ruling until this block.
 
    EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
    without one is how two irreconcilable numbers get cited as a pair: comments
    STRIPPED, then declarations counted — 9 `word-break` (4 break-word, 5
-   break-all), 71 `min-width` (75 occurrences less the FOUR that are `@media
-   (min-width: …)` preludes, which are not declarations at all), and 36
+   break-all), 73 `min-width` (77 occurrences less the FOUR that are `@media
+   (min-width: …)` preludes, which are not declarations at all), and 37
    `overflow-wrap`. The raw line greps are higher, and are deliberately NOT
    quoted here: this block and the per-site comments name the properties in
    prose, so any raw-grep figure counts its own paragraph and moves whenever a
@@ -4038,7 +4038,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    nobody can read. The label keeps an 18px line inside the taller chip; the
    24px row line-height stays for the prose everywhere else. */
 .detail-rail .status-pill-chip { height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; white-space: normal; }
-.detail-rail .status-pill-label { white-space: normal; overflow: visible; text-overflow: clip; line-height: 18px; }
+.detail-rail .status-pill-label { white-space: normal; overflow: visible; text-overflow: clip; line-height: var(--leading-base); }
 .status-pill--ok .status-pill-chip { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
 .status-pill--ok .status-pill-dot { background: var(--ok); }
 .status-pill--info .status-pill-chip { background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.28); }
@@ -4158,7 +4158,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    it wraps rather than ellipsing ("release-ta…" told nobody anything).
    `anywhere` because a provision_error is a machine string that can be one
    unbreakable token. */
-.attention-reason { font-size: 13px; color: var(--muted-text); line-height: 1.45; overflow-wrap: anywhere; }
+.attention-reason { font-size: 13px; color: var(--muted-text); line-height: var(--leading-sm); overflow-wrap: anywhere; }
 .attention-acts { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 
 /* GR65 tablet stack, revived by GR109. STACK, don't just wrap: `.attention-main`
@@ -6900,7 +6900,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   flex: 1 1 10rem;
   min-width: 0;
   padding-top: 4px;
-  line-height: 1.45;
+  line-height: var(--leading-xs);
   white-space: normal;
   overflow-wrap: anywhere;
   text-align: left;
