@@ -1798,10 +1798,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
     cards =
       Enum.map(presentation.cards, fn card ->
+        # A preferred-copy card is always the editable card. A live-copy card
+        # becomes one only when it paints copy of its own (eyebrow, meta,
+        # reason); otherwise it stays the reader's link to the linked paper.
         admission =
-          case Blocks.paper_link_reference_copy_admission(assigns.block, card.index) do
-            {:ok, admitted} -> admitted
-            {:error, _reason} -> nil
+          with true <- paper_link_card_has_own_copy?(card),
+               {:ok, admitted} <-
+                 Blocks.paper_link_reference_card_admission(assigns.block, card.index) do
+            admitted
+          else
+            _ -> nil
           end
 
         card
@@ -1817,6 +1823,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         |> Map.put(
           :eyebrow_admission,
           paper_link_ref_field_admission(assigns.block, card.index, "eyebrow")
+        )
+        |> Map.put(
+          :meta_admission,
+          paper_link_ref_field_admission(assigns.block, card.index, "meta")
+        )
+        |> Map.put(
+          :reason_admission,
+          paper_link_ref_field_admission(assigns.block, card.index, "reason")
         )
       end)
 
@@ -2001,6 +2015,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           Map.get(assigns.card, :eyebrow_admission)
         )
       )
+      |> assign(
+        :meta_dom_id,
+        paper_link_ref_field_dom_id(
+          "meta",
+          assigns.block["id"],
+          assigns.card.index,
+          Map.get(assigns.card, :meta_admission)
+        )
+      )
+      |> assign(
+        :reason_dom_id,
+        paper_link_ref_field_dom_id(
+          "reason",
+          assigns.block["id"],
+          assigns.card.index,
+          Map.get(assigns.card, :reason_admission)
+        )
+      )
 
     ~H"""
     <div
@@ -2027,10 +2059,94 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <%= if !Map.get(@card, :eyebrow_text), do: raw(@card.before_title_html) %>
       <.paper_link_ref_title block={@block} card={@card} dom_id={@title_dom_id} />
       <.paper_link_ref_description block={@block} card={@card} dom_id={@description_dom_id} />
-      <%= raw(@card.after_copy_html) %>
-      <span :if={@card.footer_text} style={@card.footer_style}>
+      <%= if @card.kind == :default do %>
+        <.paper_link_ref_reason
+          :if={@card.reason_text}
+          block={@block}
+          card={@card}
+          dom_id={@reason_dom_id}
+        />
+        <%= raw(@card.metadata_html) %>
+      <% else %>
+        <%= raw(@card.after_copy_html) %>
+      <% end %>
+      <div
+        :if={@card.kind == :chapters && @card.meta_text && @card.meta_admission}
+        class="bp-paper-link-ref-footer"
+        style={@card.footer_style}
+      >
+        <%= @card.footer_label %> · <.paper_link_ref_meta
+          block={@block}
+          card={@card}
+          dom_id={@meta_dom_id}
+        /> &nbsp;→
+      </div>
+      <span
+        :if={@card.footer_text && !(@card.kind == :chapters && @card.meta_text && @card.meta_admission)}
+        style={@card.footer_style}
+      >
         <%= @card.footer_text %> &nbsp;→
       </span>
+    </div>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+  attr(:dom_id, :string, default: nil)
+
+  # A chapters card's authored meta inside the generated footer ("Live edition ·
+  # 74 changes →"): only the meta takes the caret; the edition label and the arrow
+  # stay generated text.
+  defp paper_link_ref_meta(assigns) do
+    ~H"""
+    <span class="bp-paper-link-ref-meta-owner"><span class="bp-paper-link-ref-meta-paint-wrapper"><button
+          type="button"
+          phx-click={JS.focus(to: "#" <> @dom_id)}
+          aria-label={"Edit related paper meta: " <> @card.meta_text}
+          aria-controls={@dom_id}
+          data-paper-link-ref-meta-paint
+        ><%= @card.meta_text %></button></span><.paper_link_ref_form
+        block={@block}
+        card={@card}
+        dom_id={@dom_id}
+        field="meta"
+        source={@card.meta_source}
+        authored
+        placeholder={@card.meta_text}
+      /></span>
+    """
+  end
+
+  attr(:block, :map, required: true)
+  attr(:card, :map, required: true)
+  attr(:dom_id, :string, default: nil)
+
+  # A default-layout card's "Why it matters" reason: the generated label stays
+  # text; the ref's own reason edits in place. A reason from the block-level
+  # `reasons` map (not this ref's own) stays plain text.
+  defp paper_link_ref_reason(assigns) do
+    ~H"""
+    <div class="bp-paper-link-ref-reason-owner" style={@card.reason_style}>
+      <strong>Why it matters:</strong>
+      <span class="bp-paper-link-ref-reason-paint-wrapper"><button
+          :if={@card.reason_authored? && @card.reason_admission}
+          type="button"
+          phx-click={JS.focus(to: "#" <> @dom_id)}
+          aria-label="Edit related paper reason"
+          aria-controls={@dom_id}
+          data-paper-link-ref-reason-paint
+        ><%= @card.reason_text %></button><span :if={!@card.reason_authored? || !@card.reason_admission}><%= @card.reason_text %></span></span>
+      <.paper_link_ref_form
+        :if={@card.reason_authored? && @card.reason_admission}
+        block={@block}
+        card={@card}
+        dom_id={@dom_id}
+        field="reason"
+        source={@card.reason_source}
+        authored
+        placeholder={@card.reason_text}
+      />
     </div>
     """
   end
@@ -2206,6 +2322,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     do: paper_link_ref_dom_id(field, block_id, index, guard)
 
   defp paper_link_ref_field_dom_id(_field, _block_id, _index, nil), do: nil
+
+  defp paper_link_card_has_own_copy?(card) do
+    Map.get(card, :prefer_authored_copy?) == true or not is_nil(card.eyebrow) or
+      (card.kind == :chapters and not is_nil(card.meta)) or
+      (card.kind == :default and Map.get(card, :reason_authored?) == true and
+         not is_nil(Map.get(card, :reason_text)))
+  end
 
   defp contextual_panel_focus(dom_id) do
     JS.remove_attribute("open", to: {:closest, ".bp-paper-contextual-controls"})

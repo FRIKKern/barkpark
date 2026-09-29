@@ -28,7 +28,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   @paper_link_ref_guard_max_bytes 16 * 1024
   # Authored per-reference copy a paper-links card paints and Edit edits in place.
   # The guard identity excludes exactly these, so a DOM id stays stable while typing.
-  @paper_link_ref_copy_fields ~w(title description eyebrow)
+  @paper_link_ref_copy_fields ~w(title description eyebrow meta reason)
+  # title/description compete with the linked paper's live metadata: they are the
+  # painted copy only when the ref sets prefer_authored_copy. eyebrow, meta and
+  # reason are always this block's own copy, so any uniquely identified ref admits them.
+  @paper_link_ref_live_competing_fields ~w(title description)
 
   @doc false
   def block_form_source(params), do: Map.drop(params, ["if_rev", "request_id"])
@@ -148,11 +152,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
+  # Admission for a ref whose authored title/description are the painted copy
+  # (prefer_authored_copy). The configure panel and the title/description forms
+  # read this one.
   @doc false
-  def paper_link_reference_copy_admission(%{"type" => "paper-links", "refs" => refs}, index)
+  def paper_link_reference_copy_admission(
+        %{"type" => "paper-links", "refs" => refs} = block,
+        index
+      )
       when is_list(refs) and is_integer(index) and index >= 0 do
     with ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index),
-         true <- Map.get(ref, "prefer_authored_copy") === true,
+         true <- Map.get(ref, "prefer_authored_copy") === true do
+      paper_link_reference_card_admission(block, index)
+    else
+      _ -> {:error, :paper_link_reference_copy_unavailable}
+    end
+  end
+
+  def paper_link_reference_copy_admission(_block, _index),
+    do: {:error, :paper_link_reference_copy_unavailable}
+
+  # Admission for ANY uniquely identified ref: the card edits its own copy
+  # (eyebrow, meta, reason) in place even when title/description are the linked
+  # paper's live metadata (task-0b0790fbf00c236d).
+  @doc false
+  def paper_link_reference_card_admission(%{"type" => "paper-links", "refs" => refs}, index)
+      when is_list(refs) and is_integer(index) and index >= 0 do
+    with ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index),
          slug when is_binary(slug) <- Map.get(ref, "slug"),
          trimmed_slug when trimmed_slug != "" <- String.trim(slug),
          1 <- Enum.count(refs, &(paper_link_ref_trimmed_slug(&1) == trimmed_slug)),
@@ -163,7 +189,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
-  def paper_link_reference_copy_admission(_block, _index),
+  def paper_link_reference_card_admission(_block, _index),
     do: {:error, :paper_link_reference_copy_unavailable}
 
   @doc false
@@ -174,7 +200,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
       )
       when is_list(refs) and is_integer(index) and index >= 0 and
              field in @paper_link_ref_copy_fields do
-    with {:ok, admission} <- paper_link_reference_copy_admission(block, index),
+    admit =
+      if field in @paper_link_ref_live_competing_fields,
+        do: &paper_link_reference_copy_admission/2,
+        else: &paper_link_reference_card_admission/2
+
+    with {:ok, admission} <- admit.(block, index),
          ref when is_map(ref) and not is_struct(ref) <- Enum.at(refs, index),
          true <- paper_link_ref_copy_field_representable?(ref, field) do
       {:ok, admission}

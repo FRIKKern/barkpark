@@ -29,7 +29,7 @@ assert.match(shell, /\[data-paper-link-card-editable\]\s*\{[^}]*position:\s*rela
   "local copy and navigation share the existing card footprint");
 assert.match(shell, /\[data-paper-link-open\]\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0[^}]*z-index:\s*1/s,
   "the separate destination link does not add a reader-height row");
-for (const field of ["title", "description"]) {
+for (const field of ["title", "description", "eyebrow", "meta", "reason"]) {
   assert.match(shell, new RegExp(`\\.bp-paper-link-ref-${field}-form:not\\(:focus-within\\)\\s*\\{[^}]*position:\\s*absolute[^}]*clip-path:\\s*inset\\(50%\\)`, "s"),
     `${field} has only one canonical, resting-clipped form`);
 }
