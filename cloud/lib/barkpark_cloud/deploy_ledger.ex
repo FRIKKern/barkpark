@@ -218,6 +218,10 @@ defmodule BarkparkCloud.DeployLedger do
   # presentation only; `classify/2`'s own arms are ordered by specificity.
   @classes [
     "BOX_BUSY_409",
+    # dr-w9-followup-prebuilt-terminal-409-also-lost: the OTHER terminal 409
+    # `Sites.Deploy.defer/3` writes. Measured before it was named: 0 rows of
+    # 12,965 attempted, fleet-wide, 2026-08-06..2026-09-29.
+    "PREBUILT_REFUSED_409",
     "ABANDONED_AT_CAPACITY",
     "ABANDONED_BOX_STUCK",
     "ABANDONED_UNCLASSIFIED",
@@ -303,6 +307,8 @@ defmodule BarkparkCloud.DeployLedger do
 
   @labels %{
     "BOX_BUSY_409" => "the box was already deploying (HTTP 409)",
+    "PREBUILT_REFUSED_409" =>
+      "the box was already deploying (HTTP 409) and this prebuilt upload is never retried — the publish is lost until it is uploaded again",
     "ABANDONED_AT_CAPACITY" =>
       "the box stayed at its concurrent-build cap and the publish was given up on",
     "ABANDONED_BOX_STUCK" => "the box kept refusing this site and the publish was given up on",
@@ -702,6 +708,8 @@ defmodule BarkparkCloud.DeployLedger do
     # THE BOX ANSWERED, AND SAID NO — its own words off its own door, plus the
     # two abandonment terminals of a refusal chain.
     "BOX_BUSY_409" => :box,
+    # Same door, same "not now" as `BOX_BUSY_409`; only the retry is missing.
+    "PREBUILT_REFUSED_409" => :box,
     "BOX_500" => :box,
     "BOX_UNAVAILABLE_503" => :box,
     "BOX_DEPLOY_DISABLED_503" => :box,
@@ -887,7 +895,9 @@ defmodule BarkparkCloud.DeployLedger do
   #      `cond` arm sends a prebuilt publish straight to `fail/3` with NO extra
   #      map, so it stamps no `deferral_depth`/`deferral_bound` and appends no
   #      abandonment sentence. A prebuilt chain can be refused forever and BOTH
-  #      bases — columns and prose — stay silent on it.
+  #      bases — columns and prose — stay silent on it. (Each such refusal is
+  #      named `PREBUILT_REFUSED_409` in the failure numerator instead — counted,
+  #      but outside this cohort; see `refusal_class/2`.)
   #
   #   2. A LOST FENCED CAS ERASES AN ABANDONMENT FROM BOTH BASES, SILENTLY.
   #      `fail/3` settles the terminal round under a fenced compare-and-set; when
@@ -1084,8 +1094,25 @@ defmodule BarkparkCloud.DeployLedger do
   # keeps its ordinary name (D8 — no catch-all), and a terminal 409 whose code
   # word the ledger has never named rises in `UNCLASSIFIED` rather than being
   # absorbed by whichever abandonment bucket it most resembles.
+  #
+  # THE PREBUILT TERMINAL (dr-w9-followup-prebuilt-terminal-409-also-lost). A
+  # PREBUILT deploy is never deferred — its bytes cannot be rebuilt — so a busy
+  # box's 409 settles it `failed` with `Sites.Deploy.prebuilt_refusal_reason/1`'s
+  # clause and NOTHING retries it: a lost publish until a human re-uploads. It
+  # wore `BOX_BUSY_409`, the transient name, which is the mislabel dr-w9-s2 fixed
+  # for the chain-terminal case. It gets its own name, NOT an `ABANDONED_*` one,
+  # on purpose: that prefix routes the row to `:deployment_abandoned`, whose copy
+  # says "the rebuild chain … A later publish starts a new chain" — false for
+  # bytes the fleet cannot rebuild, and it would drop the re-upload remedy this
+  # row's reason carries to the person. Anchored at the END of the reason (the
+  # producer appends it last), so a box message that merely quotes the words
+  # cannot promote an ordinary 409.
   defp refusal_class("409", reason) do
-    if abandoned?(reason), do: abandoned_class(reason), else: "BOX_BUSY_409"
+    cond do
+      abandoned?(reason) -> abandoned_class(reason)
+      prebuilt_terminal?(reason) -> "PREBUILT_REFUSED_409"
+      true -> "BOX_BUSY_409"
+    end
   end
 
   # The 503 splits the same way, and for a harder reason: `BOX_UNAVAILABLE_503`
@@ -1152,6 +1179,10 @@ defmodule BarkparkCloud.DeployLedger do
   @abandoned ~r/ — and it has now refused \d+ rebuilds in a row for this site,/
 
   defp abandoned?(reason), do: Regex.match?(@abandoned, reason)
+
+  @prebuilt_terminal ~r/ — re-run the upload once the in-flight deploy finishes\z/
+
+  defp prebuilt_terminal?(reason), do: Regex.match?(@prebuilt_terminal, reason)
 
   defp abandoned_class(reason) do
     case deferral_code(reason) do

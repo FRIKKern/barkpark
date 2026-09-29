@@ -1584,6 +1584,12 @@ defmodule BarkparkCloud.SitesDeployTest do
       # name the human action instead.
       assert row.failure_reason =~ "re-run the upload"
       assert pending_auto_deploy_jobs(site.id) == []
+
+      # The REAL row the driver wrote is named the lost publish it is
+      # (dr-w9-followup-prebuilt-terminal-409-also-lost) — not the transient
+      # BOX_BUSY_409, and not an abandonment (whose alert copy promises a rebuild).
+      assert DeployLedger.classify(row) == "PREBUILT_REFUSED_409"
+      refute BarkparkCloud.Notifications.AbandonmentPolicy.abandonment?(row)
     end
 
     test "a NON-409 refusal is still terminal — the deferral is scoped to the box's one transient no" do

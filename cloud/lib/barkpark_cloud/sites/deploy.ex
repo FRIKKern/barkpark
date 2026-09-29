@@ -1721,7 +1721,7 @@ defmodule BarkparkCloud.Sites.Deploy do
 
     cond do
       Deployment.prebuilt?(deployment) ->
-        fail(ctx, reason <> " — re-run the upload once the in-flight deploy finishes")
+        fail(ctx, prebuilt_refusal_reason(reason))
 
       prior >= max_consecutive_deferrals(cause) - 1 ->
         # THE ABANDONMENT STAMPS ITS OWN COLUMNS (deploy-reliability W28, S6).
@@ -1943,6 +1943,21 @@ defmodule BarkparkCloud.Sites.Deploy do
   def abandonment_reason(reason, rounds, cause) do
     reason <>
       " — and it has now refused #{rounds} rebuilds in a row for this site, #{terminal_verdict(cause)}"
+  end
+
+  @doc """
+  The terminal sentence of a PREBUILT deploy a busy box refused: the box's own
+  refusal plus the human action, because nothing on the fleet will retry it.
+
+  PUBLIC ON PURPOSE, for the same reason as `abandonment_reason/3`: the ledger
+  names this row `PREBUILT_REFUSED_409` (a lost publish) by reading this exact
+  clause at the END of the raw `failure_reason`, and `deploy_ledger_test.exs`
+  builds its fixture through this function, so a reword reds at edit time
+  instead of silently folding the row back into `BOX_BUSY_409`.
+  """
+  @spec prebuilt_refusal_reason(String.t()) :: String.t()
+  def prebuilt_refusal_reason(reason) when is_binary(reason) do
+    reason <> " — re-run the upload once the in-flight deploy finishes"
   end
 
   # The deferral's NAMED cause for the round BEING CREATED, from the same

@@ -229,8 +229,9 @@ defmodule BarkparkCloud.DeployLedgerTest do
                     @abandon_busy
   # The OTHER terminal 409 `defer/3` writes — a prebuilt deploy, which is never
   # deferred because its bytes cannot be rebuilt. It is not an abandoned chain,
-  # and must keep the ordinary name.
-  @prebuilt_terminal @r409_coded <> " — re-run the upload once the in-flight deploy finishes"
+  # but it IS a lost publish: nothing retries it. Built through the PRODUCER, so
+  # a reword of the clause reds here instead of silently degrading the class.
+  @prebuilt_terminal BarkparkCloud.Sites.Deploy.prebuilt_refusal_reason(@r409_coded)
 
   ## Fixtures
 
@@ -449,11 +450,47 @@ defmodule BarkparkCloud.DeployLedgerTest do
              }) == "BOX_AT_CAPACITY_DEFERRED"
 
       # The other terminal 409 `defer/3` writes — the prebuilt refusal — is not
-      # an abandoned chain and keeps the ordinary name.
-      assert DeployLedger.classify("PLAN", @prebuilt_terminal) == "BOX_BUSY_409"
+      # an abandoned chain, and it no longer wears the transient name either
+      # (dr-w9-followup-prebuilt-terminal-409-also-lost): see the next test.
+      refute DeployLedger.classify("PLAN", @prebuilt_terminal) == "BOX_BUSY_409"
       # It really does carry a terminal clause, so this is not a fixture that
       # quietly dropped the thing under test.
       assert String.contains?(@prebuilt_terminal, "re-run the upload")
+    end
+
+    test "a PREBUILT deploy a busy box refused is a named lost publish, not the transient BOX_BUSY_409" do
+      # Both shapes the box's 409 arrives in, through the producer's own clause.
+      for refusal <- [@r409_coded, @r409_bare] do
+        reason = BarkparkCloud.Sites.Deploy.prebuilt_refusal_reason(refusal)
+        assert DeployLedger.classify("PLAN", reason) == "PREBUILT_REFUSED_409"
+
+        assert DeployLedger.classify(%{status: "failed", stage: "PLAN", failure_reason: reason}) ==
+                 "PREBUILT_REFUSED_409"
+      end
+
+      class = "PREBUILT_REFUSED_409"
+      # Registered in the taxonomy and labelled (D8: a named class, not a bucket).
+      assert class in DeployLedger.classes()
+      refute DeployLedger.label(class) == class
+      assert DeployLedger.label(class) =~ "never retried"
+      assert DeployLedger.label(class) =~ "lost"
+      # A FAILURE: attempted, terminal, in the numerator.
+      refute DeployLedger.deferred?(class)
+      refute DeployLedger.not_attempted?(class)
+      # …and NOT an abandonment: that prefix would send the "rebuild chain given
+      # up on … a later publish starts a new chain" alert, which is false for
+      # bytes the fleet cannot rebuild.
+      refute String.starts_with?(class, "ABANDONED_")
+
+      # ANCHORED AT THE END. A box whose own message merely quotes the clause,
+      # with more text after it, is still an ordinary busy box.
+      quoted =
+        "the instance refused the deploy (HTTP 409): already_running — re-run the upload once the in-flight deploy finishes, said nobody"
+
+      assert DeployLedger.classify("PLAN", quoted) == "BOX_BUSY_409"
+
+      # A chain-terminal abandonment still wins over the prebuilt reader.
+      assert DeployLedger.classify("PLAN", @a_busy) == "ABANDONED_BOX_STUCK"
     end
 
     test "both ABANDONED classes are named, labelled, and counted as failures" do
@@ -1397,10 +1434,12 @@ defmodule BarkparkCloud.DeployLedgerTest do
       # ARCHIVE_UNSUPPORTED_ENTRY_400, BOX_UNAUTHORIZED_401,
       # BOX_ROUTE_UNKNOWN_404, CONTAINER_START_REFUSED_125) take it to 28, and
       # each one is asserted BY NAME below so a rename cannot be absorbed by the
-      # count alone.
-      assert length(DeployLedger.classes()) == 28
+      # count alone. PREBUILT_REFUSED_409 (the prebuilt lost publish) takes it
+      # to 29.
+      assert length(DeployLedger.classes()) == 29
 
       for named <- [
+            "PREBUILT_REFUSED_409",
             "ARCHIVE_TOO_LARGE_400",
             "ARCHIVE_UNSUPPORTED_ENTRY_400",
             "BOX_UNAUTHORIZED_401",
