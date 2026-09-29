@@ -706,7 +706,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   connectedCallback() {
-    if (this._editor) return; // double-mount guard
+    if (this._editor || this._mountFailure) return; // double-mount guard
 
     ensureStyles();
 
@@ -741,7 +741,7 @@ class BpPaperCanvas extends HTMLElement {
     // host) is not reachable from inside Extension.create's plugin factory.
     const host = this;
 
-    this._editor = new Editor({
+    this._editor = this._createEditorSafely(() => new Editor({
       element: this._mount,
       editable: this._editable,
       extensions: [
@@ -1146,7 +1146,10 @@ class BpPaperCanvas extends HTMLElement {
         this._richFocusIntent = true;
         if (this._bubble) this._bubble.update();
       },
-    });
+    }));
+    // A node view that throws while the run is first painted leaves no editor
+    // (construction threw) or an empty one: show the read-only fallback instead.
+    if (!this._editor || !this._verifyPainted("create")) return;
 
     // Selection format toolbar — REUSED verbatim from ../format-bubble.js. It is
     // agnostic to how many blocks the editor holds: it floats on any non-empty
@@ -1200,7 +1203,8 @@ class BpPaperCanvas extends HTMLElement {
 
   attributeChangedCallback(name, _old, val) {
     if (name === "editable") {
-      this._editable = val !== "false";
+      // A run that failed to mount stays read-only whatever the host asks.
+      this._editable = val !== "false" && !this._mountFailure;
       if (this._editor) this._editor.setEditable(this._editable);
     }
   }
@@ -3726,10 +3730,85 @@ class BpPaperCanvas extends HTMLElement {
       this._programmaticApply = true;
       try {
         this._editor.commands.setContent(runToTiptap(this._blocks), false);
+      } catch (error) {
+        this._failMount("seed", error);
+        return;
       } finally {
         this._programmaticApply = false;
       }
+      this._verifyPainted("seed");
     }
+  }
+
+  // A run whose content could not be painted must never rest as an EMPTY editor:
+  // the author would see prose missing, and any structural edit on the empty run
+  // could persist the loss (task-7188bd8e9eb2625a). ProseMirror aborts a paint
+  // when a node view throws, leaving the new state behind an empty (or partial)
+  // DOM. Detect both shapes and fall back to a read-only paint of the run.
+  _createEditorSafely(factory) {
+    try {
+      return factory();
+    } catch (error) {
+      this._failMount("create", error);
+      return null;
+    }
+  }
+
+  _verifyPainted(stage) {
+    if (this._mountFailure) return false;
+    const view = this._editor && this._editor.view;
+    if (!view || !view.dom) return true;
+    const expected = this._editor.state.doc.childCount;
+    if (expected > 0 && view.dom.childElementCount === 0) {
+      this._failMount(stage, new Error("the editor painted no blocks"));
+      return false;
+    }
+    return true;
+  }
+
+  _failMount(stage, error) {
+    const message = String((error && error.message) || error || "unknown failure");
+    const blockIds = (this._blocks || []).map((block) => block && block.id).filter(Boolean);
+    this._mountFailure = { stage, message };
+    try {
+      console.error("bp-paper-canvas: this run could not open for editing (" + stage + ")", error);
+    } catch (_e) {}
+    this._editable = false;
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
+    this._debounceTimer = null;
+    try {
+      if (this._editor) this._editor.setEditable(false);
+    } catch (_e) {}
+    if (this._mount) this._mount.hidden = true;
+    this.setAttribute("data-mount-failed", "true");
+    let fallback = [...this.children].find((child) => child.classList.contains("bp-canvas-mount-failed"));
+    if (!fallback) {
+      fallback = document.createElement("div");
+      fallback.className = "bp-canvas-mount-failed";
+      this.appendChild(fallback);
+    }
+    fallback.replaceChildren();
+    const notice = document.createElement("p");
+    notice.className = "bp-canvas-mount-failed__notice";
+    notice.setAttribute("role", "alert");
+    notice.textContent =
+      "This part of the paper could not open for editing. It is shown read-only; nothing in it was changed.";
+    fallback.appendChild(notice);
+    for (const block of this._blocks || []) {
+      const row = document.createElement("div");
+      row.className = "bp-canvas-mount-failed__block";
+      if (block && block.id) row.setAttribute("data-bp-id", block.id);
+      if (block && block.type) row.setAttribute("data-bp-type", block.type);
+      row.textContent = readOnlyBlockText(block);
+      fallback.appendChild(row);
+    }
+    this.dispatchEvent(
+      new CustomEvent("bp-canvas-mount-failed", {
+        detail: { stage, message, blockIds },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   get blocks() {
@@ -3745,6 +3824,32 @@ class BpPaperCanvas extends HTMLElement {
   get acknowledgedSaves() {
     return this._acknowledgedSaves;
   }
+}
+
+// The text a reader would see in one block, for the read-only mount fallback:
+// every inline `value` in document order, plus a field's label and value.
+function readOnlyBlockText(block) {
+  const parts = [];
+  const walk = (node) => {
+    if (node == null) return;
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (typeof node !== "object") return;
+    if (node.type === "text" && typeof node.value === "string") parts.push(node.value);
+    walk(node.content);
+    walk(node.children);
+    walk(node.items);
+  };
+  if (block && typeof block === "object") {
+    if (typeof block.label === "string" && block.label) parts.push(block.label);
+    if (typeof block.title === "string" && block.title) parts.push(block.title);
+    walk(block.content);
+    walk(block.items);
+    if (block.value != null && typeof block.value !== "object") parts.push(String(block.value));
+  }
+  return parts.join(" ").trim();
 }
 
 if (!customElements.get("bp-paper-canvas")) {

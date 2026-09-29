@@ -512,7 +512,16 @@ export const Field = Node.create({
       // (buildPickerNodeView) that mirrors the per-block picker render + lifts the
       // BarkparkFieldBlockBridge identity coercion. Native types fall through.
       if (isPickerFieldType(fieldType)) {
-        return buildPickerNodeView({ node, editor, getPos, fieldType });
+        // A picker WC that throws while it is built (a missing global, an
+        // upgrade-order bug) must not take the whole run down with it: ProseMirror
+        // aborts the paint and the author sees an EMPTY editor where the prose was
+        // (task-7188bd8e9eb2625a). Paint the stored value read-only and say so.
+        try {
+          return buildPickerNodeView({ node, editor, getPos, fieldType });
+        } catch (error) {
+          reportNodeViewFailure(editor, node, fieldType, error);
+          return buildPickerReadOnlyView(node, fieldType, { failed: true });
+        }
       }
 
       const dom = document.createElement("div");
@@ -688,29 +697,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   // An item-share edit grant authorizes writes to this one paper, not dataset
   // discovery. Keep the already-stored value visible, but do not mount either
   // picker WC (both issue independent HTTP browse requests when upgraded).
-  if (!scope.pickerBrowse) {
-    const current = document.createElement("output");
-    current.className = "bp-canvas-field-control bp-paper-picker-current";
-    current.setAttribute("data-test-id", "paper-picker-current");
-    current.textContent = value == null ? "" : String(value);
-    dom.appendChild(labelEl);
-    dom.appendChild(current);
-
-    return {
-      dom,
-      update(updatedNode) {
-        if (!isPickerFieldType(updatedNode.attrs && updatedNode.attrs.bpType)) return false;
-        node = updatedNode;
-        applyLockCue(dom, node);
-        labelEl.textContent = (node.attrs && node.attrs.label) || "";
-        const next = node.attrs && node.attrs.value;
-        current.textContent = next == null ? "" : String(next);
-        return true;
-      },
-      stopEvent: () => true,
-      ignoreMutation: () => true,
-    };
-  }
+  if (!scope.pickerBrowse) return buildPickerReadOnlyView(node, fieldType);
 
   // The picker WC — the EDIT island PM does NOT manage. Seed value + scope as
   // ATTRIBUTES, mirroring the per-block <bp-media-picker>/<bp-reference-picker> render
@@ -912,6 +899,63 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
       }
     },
   };
+}
+
+// The read-only picker atom: label + the stored value, no WC. Used when the grant
+// cannot browse (an item-share edit grant authorizes writes to this one paper, not
+// dataset discovery) and when the picker WC failed to build (`failed`).
+function buildPickerReadOnlyView(node, fieldType, { failed = false } = {}) {
+  const dom = document.createElement("div");
+  dom.className = "bp-canvas-field bp-canvas-field-picker";
+  dom.setAttribute("data-bp-type", "field");
+  dom.setAttribute("data-field-type", fieldType);
+  if (failed) dom.setAttribute("data-node-view-failed", "true");
+  applyLockCue(dom, node);
+  const labelEl = document.createElement("label");
+  labelEl.className = "bp-canvas-field-label";
+  labelEl.textContent = (node.attrs && node.attrs.label) || "";
+  const current = document.createElement("output");
+  current.className = "bp-canvas-field-control bp-paper-picker-current";
+  current.setAttribute("data-test-id", "paper-picker-current");
+  const value = node.attrs && node.attrs.value;
+  current.textContent = value == null ? "" : String(value);
+  dom.appendChild(labelEl);
+  dom.appendChild(current);
+
+  return {
+    dom,
+    update(updatedNode) {
+      if (!isPickerFieldType(updatedNode.attrs && updatedNode.attrs.bpType)) return false;
+      if (((updatedNode.attrs && updatedNode.attrs.bpType) || "") !== fieldType) return false;
+      node = updatedNode;
+      applyLockCue(dom, node);
+      labelEl.textContent = (node.attrs && node.attrs.label) || "";
+      const next = node.attrs && node.attrs.value;
+      current.textContent = next == null ? "" : String(next);
+      return true;
+    },
+    stopEvent: () => true,
+    ignoreMutation: () => true,
+  };
+}
+
+// Say that a node view could not be built: a console error for the author's
+// devtools and a bubbling `bp-canvas-node-failed` event a host can surface.
+function reportNodeViewFailure(editor, node, fieldType, error) {
+  const detail = {
+    blockId: (node && node.attrs && node.attrs.bpId) || null,
+    type: fieldType,
+    message: String((error && error.message) || error),
+  };
+  try {
+    console.error("bp-paper-canvas: " + fieldType + " could not open for editing", error);
+  } catch (_e) {}
+  try {
+    const mount = editor && editor.options && editor.options.element;
+    if (mount && typeof mount.dispatchEvent === "function") {
+      mount.dispatchEvent(new CustomEvent("bp-canvas-node-failed", { detail, bubbles: true, composed: true }));
+    }
+  } catch (_e) {}
 }
 
 // Read the canvas-host scope (dataset / scope-prefix / bearer token) for the pickers.
