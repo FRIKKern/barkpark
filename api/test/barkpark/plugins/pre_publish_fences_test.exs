@@ -41,6 +41,8 @@ defmodule Barkpark.Plugins.PrePublishFencesTest do
       assert Barkpark.Plugins.Tasks.pre_publish_fences() == @publish_order
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "the Registry resolves exactly those two, in that order, under the default load order" do
       assert Registry.collect_pre_publish_fences() == @publish_order
     end
@@ -57,6 +59,8 @@ defmodule Barkpark.Plugins.PrePublishFencesTest do
       assert Registry.collect_pre_publish_fences() == []
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "with Tasks out of the load order a publish runs no door gate: an open -> done " <>
            "forge is refused with Tasks in, and lands with it out" do
       scope = seed_task_schema!()
@@ -79,6 +83,8 @@ defmodule Barkpark.Plugins.PrePublishFencesTest do
       assert published.content["lifecycle_status"] == "done"
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "with Tasks out of the load order the in-transaction phase refuses nothing: a " <>
            "criteria regression is refused with Tasks in, and passes with it out" do
       incumbent = %Document{

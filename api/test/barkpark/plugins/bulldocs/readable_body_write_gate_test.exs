@@ -108,6 +108,8 @@ defmodule Barkpark.Plugins.Bulldocs.ReadableBodyWriteGateTest do
           typeless_wrapper: "body = {content} with no type",
           parked_nodes: "body = null with nodes parked at top-level content"
         ] do
+      # Plugins-off: the bulldocs plugin owns the paper schema, its fences and its routes
+      @tag :requires_plugins
       test "create is refused: #{label}", ctx do
         content = dialect(unquote(name))
         doc_id = "rb-create-#{unquote(name)}-#{System.unique_integer([:positive])}"
@@ -133,6 +135,8 @@ defmodule Barkpark.Plugins.Bulldocs.ReadableBodyWriteGateTest do
                  Content.get_document(doc_id, "paper", "production", workspace_id: ctx.ws.id)
       end
 
+      # Plugins-off: the bulldocs plugin owns the paper schema, its fences and its routes
+      @tag :requires_plugins
       test "createOrReplace is refused: #{label}", ctx do
         content = dialect(unquote(name))
         doc_id = "rb-replace-#{unquote(name)}-#{System.unique_integer([:positive])}"
@@ -263,6 +267,8 @@ defmodule Barkpark.Plugins.Bulldocs.ReadableBodyWriteGateTest do
     # body forward — and this gate refuses it. Nothing at rest changes (the row
     # is untouched, still readable-by-nobody exactly as before); the edit simply
     # has to carry the repair. This is the gate being a gate that can lose.
+    # Plugins-off: the bulldocs plugin owns the paper schema, its fences and its routes
+    @tag :requires_plugins
     test "a metadata-only patch of a legacy-broken row is refused, and the row is untouched",
          ctx do
       %{ws: ws, project: project} = ctx
@@ -327,6 +333,8 @@ defmodule Barkpark.Plugins.Bulldocs.ReadableBodyWriteGateTest do
     # refusal. These are all refusals on origin/main today; the arms pin live
     # behaviour and change nothing.
 
+    # Plugins-off: the bulldocs plugin owns the paper schema, its fences and its routes
+    @tag :requires_plugins
     test "the \"blocks\" disjunct decides alone: blocks as a ProseMirror map, no body key", ctx do
       # `Projection.read_blocks/1` matches "blocks" only `when is_list(blocks)`,
       # so a ProseMirror doc NODE parked at content.blocks is unreadable — and
@@ -367,6 +375,8 @@ defmodule Barkpark.Plugins.Bulldocs.ReadableBodyWriteGateTest do
              "control (blocks key removed) was not accepted — got #{inspect(control_written)}"
     end
 
+    # Plugins-off: the bulldocs plugin owns the paper schema, its fences and its routes
+    @tag :requires_plugins
     test "the \"body_html\" disjunct decides alone: a whitespace body_html, no body key", ctx do
       # `html_source?/1` trims, so "   " is NOT an HTML source; nothing else in
       # this content offers a body, so only
@@ -398,6 +408,8 @@ defmodule Barkpark.Plugins.Bulldocs.ReadableBodyWriteGateTest do
              "control (body_html key removed) was not accepted — got #{inspect(control_written)}"
     end
 
+    # Plugins-off: the bulldocs plugin owns the paper schema, its fences and its routes
+    @tag :requires_plugins
     test "the top-level content-list disjunct decides alone: parked nodes with NO body key",
          ctx do
       # Dialect 3 without its null "body" key — the shape a writer produces by

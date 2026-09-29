@@ -421,6 +421,8 @@ defmodule Barkpark.Plugins.LoadOrderReadersTest do
   end
 
   describe "every content holder — the REAL registered plugins (BARKPARK_PLUGINS shape)" do
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a load order of real plugin NAMES warns about none of them, and Tasks still " <>
            "contributes to every holder",
          ctx do

@@ -19,6 +19,9 @@ defmodule Barkpark.Plugins.Github.MirrorLabelClampTest do
   # async: false — Auth is a singleton GenServer and we mutate Application env.
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+  @moduletag :requires_plugins
+
   alias Barkpark.{Content, LabelFixtures, Tasks, TenancyFixtures}
   alias Barkpark.Plugins.Github.{Auth, Link, MirrorJob}
 

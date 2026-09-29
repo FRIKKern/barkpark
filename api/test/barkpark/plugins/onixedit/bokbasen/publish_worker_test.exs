@@ -2,6 +2,9 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorkerTest do
   # async: false because Auth is a singleton GenServer and tests
   # mutate Application env for credentials.
   use Barkpark.DataCase, async: false
+
+  # Plugins-off: the onixedit plugin starts Bokbasen.Auth and owns the book schemas
+  @moduletag :requires_plugins
   use Oban.Testing, repo: Barkpark.Repo
 
   import ExUnit.CaptureLog

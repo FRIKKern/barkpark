@@ -167,6 +167,8 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLiveTest do
     # explained disabled shape when it is present); the DESK half is untouched
     # — `Barkpark.Structure` still tiers desk items itself and Fleet is still
     # absent there.
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the Fleet desk link vanishes and the top-menu tab is never ENABLED when the Tasks plugin is disabled" do
       ws = create_workspace!()
       ctx = %{dataset: @dataset, workspace_id: ws.id}

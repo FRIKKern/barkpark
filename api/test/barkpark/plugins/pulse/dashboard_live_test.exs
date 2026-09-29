@@ -69,6 +69,8 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
     assert Enum.any?(items, &(&1[:type] == :link and &1[:path] == "/admin/pulse"))
   end
 
+  # Plugins-off: the pulse plugin supervises Pulse.Metrics and mounts its routes
+  @tag :requires_plugins
   test "the Lightning Storm link survives into the desk tree under Plugins when enabled" do
     # pulse is OFF by default (ssp-w1 tiered desk): unscoped legacy builds
     # carry no pulse link; a workspace that enables pulse gets it under the

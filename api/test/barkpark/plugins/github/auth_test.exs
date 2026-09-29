@@ -3,6 +3,9 @@ defmodule Barkpark.Plugins.Github.AuthTest do
   # shared `Application.env` GitHub config key.
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+  @moduletag :requires_plugins
+
   alias Barkpark.Plugins.Github.Auth
   alias Barkpark.Plugins.Github.Errors.AuthError
   alias Barkpark.Plugins.Settings, as: Plugins

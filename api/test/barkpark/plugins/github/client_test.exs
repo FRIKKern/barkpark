@@ -3,6 +3,9 @@ defmodule Barkpark.Plugins.Github.ClientTest do
   # mutate Application env for credentials.
   use ExUnit.Case, async: false
 
+  # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+  @moduletag :requires_plugins
+
   import ExUnit.CaptureLog
 
   alias Barkpark.Plugins.Github.Auth

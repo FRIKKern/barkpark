@@ -5,6 +5,9 @@ defmodule Barkpark.Quiz.RoomCrossoverTest do
   """
   use ExUnit.Case, async: true
 
+  # Plugins-off: the quiz plugin starts Barkpark.Quiz.RoomRegistry and the room supervisors
+  @moduletag :requires_plugins
+
   alias Barkpark.Quiz
   alias Barkpark.Quiz.Heatmap
 

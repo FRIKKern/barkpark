@@ -61,11 +61,15 @@ defmodule Barkpark.Plugins.MutateDoorFencesTest do
       assert Barkpark.Plugins.Tasks.mutate_door_fences() == @fence_order
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "the Registry resolves exactly those four, in that order, under the default load order" do
       assert Registry.collect_mutate_door_fences() == @fence_order
       assert MutateDoorFences.list() == @fence_order
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test ":before_rev runs BEFORE ensure_rev: a create that forks a claimed published task " <>
            "AND carries a stale revision is refused as a FORK",
          %{scope: scope} do
@@ -94,6 +98,8 @@ defmodule Barkpark.Plugins.MutateDoorFencesTest do
       assert Map.keys(errors) == ["claim"]
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "within :after_claim, disposition-by-verb is judged before the owner registry",
          %{scope: scope} do
       id = uniq("mdf-disp-owner")
@@ -115,6 +121,8 @@ defmodule Barkpark.Plugins.MutateDoorFencesTest do
       assert Map.keys(owner_errors) == ["disposition_owner"]
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "RULING (ii): a disposition + bad priority patch still refuses on DISPOSITION first, " <>
            "not on the writer's kind check",
          %{scope: scope} do
@@ -139,6 +147,8 @@ defmodule Barkpark.Plugins.MutateDoorFencesTest do
   end
 
   describe "the published row" do
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "RULING (i): a bare-id patch of a PUBLISHED task (no draft) changing the disposition " <>
            "is refused exactly as before, naming the stage verb",
          %{scope: scope} do
@@ -179,6 +189,8 @@ defmodule Barkpark.Plugins.MutateDoorFencesTest do
       assert MutateDoorFences.run([], :after_claim, []) == :ok
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "with Tasks out of the load order the raw disposition write LANDS " <>
            "(refused with Tasks in)",
          %{scope: scope} do
@@ -196,6 +208,8 @@ defmodule Barkpark.Plugins.MutateDoorFencesTest do
       assert pub.content["disposition"] == "closed"
     end
 
+    # Plugins-off: exercises the write/publish fences that enabled plugins register
+    @tag :requires_plugins
     test "with Tasks out of the load order the create-family fork LANDS and the legacy " <>
            "delegate is :ok (both refuse with Tasks in)",
          %{scope: scope} do

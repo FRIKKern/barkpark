@@ -72,6 +72,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
   end
 
   describe "register_all_schemas/0 — DB-level" do
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "installs the OnixEdit book schema" do
       assert {:ok, count} = Bootstrap.register_all_schemas()
       assert count >= 1

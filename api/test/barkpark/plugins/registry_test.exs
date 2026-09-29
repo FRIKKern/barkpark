@@ -25,6 +25,8 @@ defmodule Barkpark.Plugins.RegistryTest do
     # disk walk, so the frozen baseline is always the post-discovery "real" set.
     # This test simulates the old poison order without relying on on_exit ordering.
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "reset/0 does not restore a stub registered before the first explicit reset" do
       # Simulate the poisoning scenario: register a stub, then call reset().
       # Under the old lazy logic, this first reset would freeze the stub into

@@ -609,6 +609,8 @@ defmodule Barkpark.Plugins.Bulldocs.MastersLinkedTest do
   end
 
   describe "master delete refusal" do
+    # Plugins-off: the bulldocs plugin owns the paper schema, its fences and its routes
+    @tag :requires_plugins
     test "deleting a master with live instances is refused 409 listing the instance ids", ctx do
       master = master!(ctx)
       mid = Masters.master_id(master)

@@ -13,6 +13,9 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
 
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+  @moduletag :requires_plugins
+
   import Ecto.Query
   import ExUnit.CaptureLog
 
