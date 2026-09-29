@@ -1423,9 +1423,28 @@ function clampfWidth(n: unknown, left: number): number {
   return typeof n === 'number' ? Math.min(Math.max(n, 1), 100 - left) : Math.max(1, 100 - left)
 }
 
+// The two cannot-place strings: components.ex roadmap_unplaced_copy/0 and
+// roadmap_lane_unplaced_copy/0. An Elixir test reads these literals (and the Go
+// twin's) so the three surfaces cannot drift (roadmap_unplaced_copy_lock_test.exs).
+export const ROADMAP_UNPLACED_COPY = 'No schedule to place these items on.'
+export const ROADMAP_LANE_UNPLACED_COPY = 'not scheduled'
+
+// Is a row's position READ from the author, or invented by the clamp? Author
+// pct only: a NUMBER in left or width (components.ex roadmap_placeable?/2's pct
+// arm; this reader has no date rails). A live-query row has neither, and the
+// clamp would paint it as the same full-width bar as every other such lane.
+const placeable = (m: Record<string, unknown>) =>
+  typeof m.left === 'number' || typeof m.width === 'number'
+
 const roadmap: Emit = (b) => {
   const rows = asList(b.snapshot)
   if (rows.length === 0) return `<div class="bp-tasks bp-tasks--empty">No roadmap items.</div>`
+  // NOT ONE row has geometry: say so, then list the items (never drop them).
+  if (!rows.some((r) => isMap(r) && placeable(r)))
+    return (
+      `<div class="bp-tasks bp-tasks--empty">${ROADMAP_UNPLACED_COPY}</div>` +
+      renderBlock({ type: 'tasks', snapshot: rows })
+    )
   const todayVal = b.today
   const today =
     typeof todayVal === 'number'
@@ -1441,11 +1460,17 @@ const roadmap: Emit = (b) => {
       const m = isMap(r) ? r : {}
       const role = roleOf(m.status)
       const title = escapeHtml(str(m.title))
-      const phase = truthy(m.phase_row)
+      const placed = placeable(m)
       const left = clampf(m.left)
       const width = clampfWidth(m.width, left)
-      const cls = phase ? 'bp-rm__lane bp-rm__lane--phase' : 'bp-rm__lane'
-      return `<div class="${cls}"><span class="bp-rm__lbl">${draftHtml(m)}${title}</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--${role}" style="left:${left}%;width:${width}%"></span>${today}</div></div>`
+      const cls =
+        'bp-rm__lane' +
+        (truthy(m.phase_row) ? ' bp-rm__lane--phase' : '') +
+        (placed ? '' : ' bp-rm__lane--unplaced')
+      const body = placed
+        ? `<span class="bp-rm__bar bp-rm__bar--${role}" style="left:${left}%;width:${width}%"></span>`
+        : `<span class="bp-rm__unplaced">${ROADMAP_LANE_UNPLACED_COPY}</span>`
+      return `<div class="${cls}"><span class="bp-rm__lbl">${draftHtml(m)}${title}</span><div class="bp-rm__track">${body}${today}</div></div>`
     })
     .join('')
   return `<div class="bp-roadmap">${scale}<div class="bp-rm__lanes">${lanes}</div></div>`

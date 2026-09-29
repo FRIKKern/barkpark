@@ -1621,6 +1621,10 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-rm__bar--blocked { background: var(--st-warn); }
 .bp-paper-surface .bp-rm__bar--done { background: var(--st-ok); }
 .bp-paper-surface .bp-rm__bar--cancel { background: var(--paper-ink-faint); }
+/* A lane with no geometry (task-e8e80abb16460f44): no bar, a dashed empty track
+   and the "not scheduled" marker, so it never reads as a full-span bar. */
+.bp-paper-surface .bp-rm__lane--unplaced .bp-rm__track { background: none; border: 1px dashed var(--paper-rule); }
+.bp-paper-surface .bp-rm__unplaced { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-family: var(--paper-font-mono); font-size: x-small; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-rm__today { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--st-danger); opacity: 0.6; }
 /* roadmap v2 point markers — the HTML twin of the Go reader's diamond glyphs
    (internal/pdrender/taskblocks.go: note ◇ at the bar's start, milestone ◆ at its
