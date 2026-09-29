@@ -23,7 +23,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
 
     ~H"""
     <div class="bp-paper-contextual-editor" data-test-id="paper-technical-contextual-editor">
-      <div class="bp-paper-contextual-preview" data-test-id="paper-technical-preview">
+      <div
+        class="bp-paper-contextual-preview"
+        data-test-id="paper-technical-preview"
+        {painted_copy_attrs(@block, @id)}
+      >
         <%= if @preview == "" do %>
           <p class="bp-paper-edit-readonly">Configure {@label} to add content.</p>
         <% else %>
@@ -65,6 +69,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
     </div>
     """
   end
+
+  @doc """
+  The painted-copy wiring of a footnote preview: each note the reader paints
+  (`compose.ex` footnote_row_html/1 paints a map note with non-empty string
+  text, and nothing else) edits where it reads through the
+  BarkparkPaperPaintedCopy hook, writing its panel field `note-<i>-text`.
+  The reader HTML itself is unchanged. Other types get no wiring.
+  """
+  def painted_copy_attrs(%{"type" => "footnote"} = block, id) do
+    names =
+      block
+      |> Map.get("notes")
+      |> List.wrap()
+      |> Enum.with_index()
+      |> Enum.filter(fn {note, _} ->
+        is_map(note) and is_binary(Map.get(note, "text")) and Map.get(note, "text") != ""
+      end)
+      |> Enum.map_join(",", fn {_, index} -> "note-#{index}-text" end)
+
+    if names == "" or not is_list(Map.get(block, "notes")) do
+      %{}
+    else
+      %{
+        "id" => "technical-preview-" <> id,
+        "phx-hook" => "BarkparkPaperPaintedCopy",
+        "data-painted-copy" => "li",
+        "data-painted-copy-names" => names,
+        "data-painted-copy-form" => "technical-block-form-" <> id,
+        "data-painted-copy-label" => "Footnote"
+      }
+    end
+  end
+
+  def painted_copy_attrs(_block, _id), do: %{}
 
   defp technical_label("diff"), do: "diff"
   defp technical_label("filetree"), do: "file tree"

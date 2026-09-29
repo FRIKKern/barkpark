@@ -5121,6 +5121,100 @@
       ...(leaseOverflow ? { paper_canvas_lease_overflow: true } : {}),
     };
   };
+  // Painted copy: a contextual preview's own reader rows edit where they read
+  // (footnote notes; task-bbfdcf4c80b8300d long tail). The server paints the
+  // reader HTML unchanged; the preview names which rows are hosts
+  // (data-painted-copy, a selector), the form field each one writes
+  // (data-painted-copy-names, one per painted row, comma-separated) and the form
+  // (data-painted-copy-form). A host's input copies its text into that field and
+  // fires the field's input, so the form's ordinary autosave runs. Rows are
+  // decorated only when the painted count matches the names. A focused host
+  // keeps its text and caret across a server patch.
+  Hooks.BarkparkPaperPaintedCopy = {
+    mounted() {
+      this._input = (event) => {
+        const host = event.target.closest?.("[data-painted-copy-name]");
+        if (!host || !this.el.contains(host)) return;
+        const form = document.getElementById(this.el.dataset.paintedCopyForm || "");
+        const field = form?.elements?.namedItem(host.dataset.paintedCopyName);
+        if (!field) return;
+        field.value = host.textContent;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      this._key = (event) => {
+        const host = event.target.closest?.("[data-painted-copy-name]");
+        if (!host || event.isComposing) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          host.blur();
+        } else if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "a") {
+          // Select this row only, never the whole page.
+          event.preventDefault();
+          const range = document.createRange();
+          range.selectNodeContents(host);
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+      };
+      this._beforeInput = (event) => {
+        if (event.target.closest?.("[data-painted-copy-name]") &&
+          ["insertParagraph", "insertLineBreak"].includes(event.inputType)) event.preventDefault();
+      };
+      this.el.addEventListener("input", this._input);
+      this.el.addEventListener("keydown", this._key);
+      this.el.addEventListener("beforeinput", this._beforeInput);
+      this._decorate();
+    },
+    beforeUpdate() {
+      const host = document.activeElement?.closest?.("[data-painted-copy-name]");
+      if (!host || !this.el.contains(host)) { this._held = null; return; }
+      const selection = window.getSelection();
+      const offset = selection && selection.rangeCount && host.contains(selection.anchorNode)
+        ? selection.anchorOffset : host.textContent.length;
+      this._held = { name: host.dataset.paintedCopyName, text: host.textContent, offset };
+    },
+    updated() {
+      this._decorate();
+      const held = this._held;
+      this._held = null;
+      if (!held) return;
+      const host = [...this.el.querySelectorAll("[data-painted-copy-name]")]
+        .find((el) => el.dataset.paintedCopyName === held.name);
+      if (!host) return;
+      if (host.textContent !== held.text) host.textContent = held.text;
+      host.focus();
+      const node = host.firstChild;
+      if (!node) return;
+      const range = document.createRange();
+      range.setStart(node, Math.min(held.offset, node.textContent.length));
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    },
+    destroyed() {
+      this.el.removeEventListener("input", this._input);
+      this.el.removeEventListener("keydown", this._key);
+      this.el.removeEventListener("beforeinput", this._beforeInput);
+    },
+    _decorate() {
+      const names = (this.el.dataset.paintedCopyNames || "").split(",").filter(Boolean);
+      const hosts = [...this.el.querySelectorAll(this.el.dataset.paintedCopy || ":not(*)")];
+      if (!names.length || hosts.length !== names.length) return;
+      const label = this.el.dataset.paintedCopyLabel || "Text";
+      hosts.forEach((host, index) => {
+        host.contentEditable = "plaintext-only";
+        host.setAttribute("role", "textbox");
+        host.setAttribute("aria-label", `${label} ${index + 1}`);
+        host.setAttribute("aria-multiline", "false");
+        host.dataset.paintedCopyName = names[index];
+        host.tabIndex = 0;
+        host.style.cursor = "text";
+      });
+    },
+  };
+
   window.BarkparkPaperEditorBeforeElUpdated = bpPaperBeforeElUpdated;
   window.BarkparkPaperEditorHooks = Hooks;
 })();
