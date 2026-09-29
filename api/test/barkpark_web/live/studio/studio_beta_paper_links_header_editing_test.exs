@@ -89,6 +89,44 @@ defmodule BarkparkWeb.Studio.StudioBetaPaperLinksHeaderEditingTest do
            |> LazyHTML.text() == "  Studio heading  "
   end
 
+  # The reader paints the heading as <h2 style={title_style}> under the paper
+  # surface's h2 rule (weight 400 and h2 tracking in the article palette). The
+  # editable heading must carry that rule, not a hard-coded bold: the August
+  # Chronicle's related-paper headings painted 700 in Edit, 400 in View.
+  test "the editable heading carries the reader's h2 typography, never a forced bold",
+       %{conn: conn} do
+    for layout <- [nil, "chapters"] do
+      block =
+        %{
+          "id" => "related",
+          "type" => "paper-links",
+          "title" => "Worth opening next",
+          "refs" => ["legacy-paper"]
+        }
+        |> then(&if(layout, do: Map.put(&1, "layout", layout), else: &1))
+
+      doc = create_document!([block])
+      {:ok, view, _html} = live(conn, studio_path(doc.doc_id))
+      view |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
+
+      [style] =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(".bp-paper-links-title-owner")
+        |> LazyHTML.attribute("style")
+
+      refute style =~ "font-weight:bold", "layout #{inspect(layout)}: #{style}"
+      assert style =~ "font-weight:var(--bp-h2-weight)"
+      assert style =~ "letter-spacing:var(--bp-h2-tracking)"
+      assert style =~ "font-family:var(--paper-font-serif)"
+      # the layout's own declarations come AFTER the h2 rule, so they still win
+      [h2_rule, layout_rule] = String.split(style, "text-wrap:balance;", parts: 2)
+      assert h2_rule =~ "font-weight"
+      assert layout_rule =~ "font-size"
+    end
+  end
+
   defp create_document!(blocks) do
     id = "beta-paper-links-#{System.unique_integer([:positive])}"
 
