@@ -151,16 +151,17 @@ jobs:
       # carries no tag fails here, so the core suite stays a tag exclusion, not a
       # file-name guess. `mix test` (the alias) creates and migrates the job's
       # own barkpark_test database; the differential above dropped only its two.
-      # test/barkpark_web/live is left out until its modules are tagged — that
-      # folder is the remaining work on task-ba5085862f3da4e4.
+      # The WHOLE suite runs, test/barkpark_web/live included. That database
+      # is fresh and never booted with a plugin on, so no plugin schema rows
+      # exist. A local rerun on a reused database can pass tests that fail
+      # here.
       - name: Core suite with plugins off (tagged plugin tests excluded)
         if: ${{ !cancelled() }}
         run: |
           set -o pipefail
-          mapfile -t files < <(find test -name '*_test.exs' -not -path 'test/barkpark_web/live/*' | sort)
           BARKPARK_PLUGINS=, \
           BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet \
-            mix test --exclude requires_plugins "${files[@]}" 2>&1 | tee plugins-off-core.log
+            mix test --exclude requires_plugins 2>&1 | tee plugins-off-core.log
 
       # The two counts are the run's record: PRESENT and ABSENT summary lines,
       # the newly-red tally, and every confirmed NEWLY RED test.
