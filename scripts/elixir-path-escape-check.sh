@@ -441,11 +441,13 @@ internal/cli/testdata/**
 internal/cli/tasks_history_events.go
 internal/cli/tasks_history_events_test.go
 internal/pdrender/testdata/**
+internal/pdrender/taskblocks.go
 internal/provisioner/catalog/templates/**
 internal/taskboard/**
 internal/wasmimages/imagemap.go
 js/packages/core/src/errors.ts
 js/packages/react/src/blocks/sheet.ts
+js/packages/react/src/blocks/core.ts
 js/packages/react/tests/fixtures/**
 scripts/async_env_seam_scan.exs
 scripts/check-deployyml-filters.sh
