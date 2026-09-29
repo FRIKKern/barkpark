@@ -189,6 +189,39 @@ defmodule BarkparkWeb.SelfUpdateControllerTest do
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "already_running"
     end
 
+    # task-b4b2bb60b63e28ea: the control plane's egress rides the trigger body
+    # and reaches the run's command as BARKPARK_CLOUD_EGRESS_IPS, so
+    # instance-deploy.sh takes the backfill branch instead of the WARN one.
+    test "POST with cloud_egress_ips hands the command BARKPARK_CLOUD_EGRESS_IPS", %{conn: conn} do
+      put_runner_cfg(
+        enabled: true,
+        command: {"bash", ["-c", "echo \"egress=${BARKPARK_CLOUD_EGRESS_IPS:-UNSET}\""]}
+      )
+
+      resp =
+        conn
+        |> admin_conn()
+        |> post("/v1/admin/self-update", %{"cloud_egress_ips" => "203.0.113.7, 2a01:4f9::1"})
+
+      assert resp.status == 202
+      assert "egress=203.0.113.7,2a01:4f9::1" in await_done()["log"]
+    end
+
+    test "a malformed cloud_egress_ips is NOT passed, and the update still runs", %{conn: conn} do
+      put_runner_cfg(
+        enabled: true,
+        command: {"bash", ["-c", "echo \"egress=${BARKPARK_CLOUD_EGRESS_IPS:-UNSET}\""]}
+      )
+
+      resp =
+        conn
+        |> admin_conn()
+        |> post("/v1/admin/self-update", %{"cloud_egress_ips" => "203.0.113.7,10.0.0.0/8"})
+
+      assert resp.status == 202
+      assert "egress=UNSET" in await_done()["log"]
+    end
+
     test "GET status carries the run mode", %{conn: conn} do
       put_runner_cfg(enabled: true, command: {"bash", ["-c", "echo hi"]})
       assert conn |> admin_conn() |> post("/v1/admin/self-update") |> Map.get(:status) == 202
