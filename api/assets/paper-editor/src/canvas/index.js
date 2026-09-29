@@ -317,6 +317,27 @@ import {
 import { Wikilink, Blockref, Tag, Valueref } from "../marks.js";
 import { DEBOUNCE_MS, PLACEHOLDER } from "../contract.js";
 
+// Left is the model's "no alignment" (convert.js stores only center/right; run-convert
+// treats left and absent as one), so Edit paints it as NO alignment too. Stock TextAlign
+// writes an inline `text-align: left` for its default on every paragraph and heading,
+// overriding the inherited `start` the reader paints: a View/Edit divergence on every
+// block, and the wrong edge in right-to-left text.
+export const ReaderTextAlign = TextAlign.extend({
+  addGlobalAttributes() {
+    return this.parent().map((group) => ({
+      ...group,
+      attributes: {
+        ...group.attributes,
+        textAlign: {
+          ...group.attributes.textAlign,
+          renderHTML: ({ textAlign }) =>
+            textAlign === "center" || textAlign === "right" ? { style: `text-align: ${textAlign}` } : {},
+        },
+      },
+    }));
+  },
+});
+
 // Collect attribute-only refreshes without replacing text or changing its undo
 // mappings. List carriers live on descendants, not just the top-level block.
 function attributeRefreshes(node, replacement, position) {
@@ -843,7 +864,7 @@ class BpPaperCanvas extends HTMLElement {
         Highlight.configure({ HTMLAttributes: { class: "bp-highlight" } }),
         Subscript,
         Superscript,
-        TextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right"], defaultAlignment: "left" }),
+        ReaderTextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right"], defaultAlignment: "left" }),
         // Checklist: the list block with task:true (convert.js listToTiptap). `[ ] ` typed at the
         // start of a paragraph wraps it; the checkbox is a native control whose toggle is an
         // ordinary transaction, so runToOps patches the item's `checked`.
