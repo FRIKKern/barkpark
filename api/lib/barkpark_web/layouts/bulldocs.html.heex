@@ -910,6 +910,15 @@
       --bp-evidence-band-max: 1360px;
       --bp-evidence-fill: 0.74;
     }
+    <%!-- A surface NESTED in the article (Edit's canvas paint holes wrap each
+          read-only block's reader HTML in its own `.bp-paper-surface`) would
+          re-declare the shared default band (1040px) and paint breakout blocks
+          narrower than View. Carry the article's stage into it. --%>
+    .bp-paper-shell.bp-paper-article .bp-paper-surface {
+      --bp-evidence-band: 1180px;
+      --bp-evidence-band-max: 1360px;
+      --bp-evidence-fill: 0.74;
+    }
     /* WIDE PAPERS (`style: "article-wide"` → bulldocs_live.ex stamps
        `.bp-paper-shell--wide`). A scorecard, matrix or dashboard paper improves
        with width the way a table does, so the shell opens to the evidence
