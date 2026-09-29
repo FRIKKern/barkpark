@@ -47,11 +47,11 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
   # these is required to be compliant. It exists so the scan cannot go green by
   # finding nothing — if a site is renamed away, fix this list deliberately.
   @known_sites [
+    "lib/barkpark/plugins/bulldocs/web/bulldocs_form_controller.ex",
     "lib/barkpark/plugins/forms/web/submission_controller.ex",
     "lib/barkpark/quiz/spawn_budget.ex",
     "lib/barkpark_web/channels/user_socket.ex",
     "lib/barkpark_web/controllers/app_token_controller.ex",
-    "lib/barkpark_web/controllers/bulldocs_form_controller.ex",
     "lib/barkpark_web/controllers/pulse_controller.ex",
     "lib/barkpark_web/live/studio/account_live.ex",
     "lib/barkpark_web/plugs/auth_write_rate_limit.ex",

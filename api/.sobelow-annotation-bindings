@@ -22,6 +22,7 @@ lib/barkpark/media/renditions.ex	delete_for_file
 lib/barkpark/media/renditions.ex	generate
 lib/barkpark/migration_paths.ex	read_manifest
 lib/barkpark/plugins/bulldocs.ex	register_schemas
+lib/barkpark/plugins/bulldocs/web/bulldocs_email_controller.ex	show
 lib/barkpark/plugins/frt.ex	load_schema!
 lib/barkpark/plugins/github.ex	validate_settings
 lib/barkpark/plugins/github/health.ex	queue_snapshot
@@ -158,7 +159,6 @@ lib/barkpark/tenancy/workspace_bundle/janitor.ex	os_process_alive?
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	own
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	owner_alive?
 lib/barkpark/tenancy/workspace_bundle/janitor.ex	remove
-lib/barkpark_web/controllers/bulldocs_email_controller.ex	show
 lib/barkpark_web/controllers/cycle_fleet_controller.ex	release_paper_render
 lib/barkpark_web/controllers/error_html.ex	render
 lib/barkpark_web/controllers/media_controller.ex	maybe_send_file

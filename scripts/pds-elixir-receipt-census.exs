@@ -1542,7 +1542,7 @@ defmodule PDS.Census do
           "ignored, so the receipt does not pass an unhandled event off as handled work."
     },
     %{
-      key: {"api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
+      key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_form_controller.ex",
             "BarkparkWeb.BulldocsFormController.submit/2", "123699679", "17468236"},
       basis_spans: [{22, 24}, {53, 53}],
       basis_token: "the trap stays invisible",
@@ -2162,16 +2162,16 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence:
         {"api/test/barkpark_web/controllers/auth_controller_test.exs",
          ~S|test "an enrolled user's stale session is challenged; step-up (TOTP) clears it", %{|}},
-    # barkpark_web/controllers/bulldocs_form_controller.ex:50
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
+    # barkpark/plugins/bulldocs/web/bulldocs_form_controller.ex:50 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_form_controller.ex",
             "BarkparkWeb.BulldocsFormController.submit/2", "123699679", "127244318"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/bulldocs_form_controller.ex:54
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
+    # barkpark/plugins/bulldocs/web/bulldocs_form_controller.ex:54 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_form_controller.ex",
             "BarkparkWeb.BulldocsFormController.submit/2", "123699679", "17468236"},
       verdict: "UNJUDGED", basis: :declared_basis},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:164
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    # barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex:164 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.ingest_blocks/5", "1989150", "124223564"},
       stale_ack: %{recorded: {"1989150", "124223564"}, current: {"82242138", "63570316"},
         why:
@@ -2179,7 +2179,7 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs `a valid block paper (locked title at index 0) still saves — positive control`) reads nothing back at all, so it cannot even assert that."},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex, ingest_html_write/2 — the
+    # barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex, ingest_html_write/2 — the
     # html receipt. Cited by DEF, not by line: this row exists BECAUSE a def moved and
     # a line-keyed reference went stale, so citing a line here would reproduce the bug.
     # Mixed-write wave (pe-w2-verbatim-html-overwrite-hazard): ingest_html/4 grew
@@ -2193,54 +2193,54 @@ defmodule PDS.Census do
     # the write emits as before. One site in, one site out — this is a re-key,
     # NOT a split into two emitting sites: ingest_html/4 now emits no receipt of
     # its own, it either delegates or returns the 422 refusal envelope.
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.ingest_html_write/2", "78800622", "124223564"},
       verdict: "PROVEN", basis: :end_to_end_unmutated, evidence:
         {"api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs",
          ~S|test "a second POST with the same slug updates in place (upsert)", %{conn: conn} do|}},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:321
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    # barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex:321 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.ingest_session/2", "11366553", "107043790"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:431
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    # barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex:431 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.apply_session_op/2", "38576492", "88664755"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:502
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    # barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex:502 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.append_session_event/2", "51520286", "61088078"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:551
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    # barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex:551 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.touch_session_conversation/2", "104647366", "61088078"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex — the batch receipt.
+    # barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex — the batch receipt.
     # BPML wave: the batch clause of apply_op/2 split into apply_op_batch/4 (clause
     # grouping under --warnings-as-errors) — the SAME receipt at a new def, so this
     # row re-keys; verdict and note carry over unchanged.
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.apply_op_batch/4", "93603959", "10224315"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. The brief ruled it end_to_end_unmutated; the arm refused the citation (bulldocs_ingest_controller_test.exs `a 3-op batch applies atomically and returns a minimal receipt with the new rev` drives the batch route but never reads the paper back), so the receipt-vs-stored-row question is unjudged."},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:715
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    # barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex:715 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.apply_op/2", "85655901", "15024779"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. Same shape as its batch sibling: bulldocs_ingest_controller_test.exs `valid op + bearer applies, bumps rev, broadcasts a delta, returns the fragment` drives the single-op route and asserts the returned fragment, and nothing reads the stored paper back."},
-    # barkpark_web/controllers/bulldocs_ingest_controller.ex:814
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    # barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex:814 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.propose/2", "78347098", "122622379"},
       verdict: "UNJUDGED", basis: :unexamined},
     # BPML working-copy sync (masterplan W3) — the UNCHANGED receipt: `ok: true,
     # unchanged: true` claims nothing was written, and no test re-reads the row to
     # prove the nothing. Unjudged until one does.
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.sync_apply/6", "123013536", "126012198"},
       verdict: "UNJUDGED", basis: :unexamined},
     # BPML working-copy sync — the APPLIED receipt.
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.sync_persist/6", "94329464", "19447210"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
@@ -2248,13 +2248,13 @@ defmodule PDS.Census do
     # BPML create-on-push (masterplan W3 / charter D41, rides #11934) — the CREATED
     # receipt: `ok: true, created: true` after Content.upsert_paper births the paper
     # through the full publish wall on an absent slug.
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.sync_create_persist/6", "68602513", "127789733"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
         "A RECEIPT, not a phantom, but UNJUDGED by this lens — same shape as its sync_persist/6 sibling. The create test (bulldocs_ingest_controller_test.exs `a wall-passing document CREATES the paper (200 created), and pulls back clean`) drives the create-on-push sync route AND reads the stored row back with `Content.get_paper(slug)`, asserting the persisted title, blocks, description and tags — a genuine receipt-vs-stored-row differential. But `Content.get_paper(` is not in @repo_tokens (`Repo.` · `Content.get_document(` · `Conflicts.list(`), so end_to_end's falsifier cannot see the second hop; the row says what the lens can stand behind, not more."},
-    # barkpark_web/controllers/bulldocs_intents_controller.ex:50
-    %{key: {"api/lib/barkpark_web/controllers/bulldocs_intents_controller.ex",
+    # barkpark/plugins/bulldocs/web/bulldocs_intents_controller.ex:50 (lineref-ok: path re-pointed by the plugin move)
+    %{key: {"api/lib/barkpark/plugins/bulldocs/web/bulldocs_intents_controller.ex",
             "BarkparkWeb.BulldocsIntentsController.mark_processed/2", "120960553", "126280052"},
       verdict: "UNJUDGED", basis: :unexamined},
     # barkpark/plugins/github/web/github_adopt_controller.ex:66 (lineref-ok: path re-pointed by the plugin move)
@@ -7066,9 +7066,9 @@ defmodule PDS.Census do
   # predicate ACTUALLY fires on, printed by the run that derived it, not transcribed from
   # the filing — which is why it is keyed on {path, def, payload key} and not on a line.
   @response_carries_read_expected [
-    {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    {"barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
      "BarkparkWeb.BulldocsIngestController.ingest_blocks/5", "scoped_liveview_path"},
-    {"barkpark_web/controllers/bulldocs_ingest_controller.ex",
+    {"barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
      "BarkparkWeb.BulldocsIngestController.ingest_html_write/2", "scoped_liveview_path"},
     {"barkpark_web/controllers/query_controller.ex", "BarkparkWeb.QueryController.counts/2",
      "counts"},

@@ -27,7 +27,7 @@
       "raw": "bulldocs_intents_controller.ex:50) and is what makes this routed"
     },
     {
-      "doc": "api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+      "doc": "api/lib/barkpark/plugins/bulldocs/web/bulldocs_ingest_controller.ex",
       "raw": "errors.ex:289/:316/:330)."
     },
     {
