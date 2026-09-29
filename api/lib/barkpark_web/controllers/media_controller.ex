@@ -386,6 +386,14 @@ defmodule BarkparkWeb.MediaController do
       {:error, :unknown_preset} ->
         unknown_preset(conn, preset)
 
+      # C083: a held instance cannot write the rendition; 503 transient, never 404.
+      {:error, {:write_admission, _}} = refused ->
+        env = Errors.to_envelope(refused, conn)
+
+        conn
+        |> put_status(env.status)
+        |> json(%{error: Map.delete(env, :status)})
+
       {:error, _} ->
         not_found(conn, "rendition unavailable")
     end
