@@ -254,6 +254,14 @@ function pick(el, role) {
   o.role = role;
   return o;
 }
+function transparentInk(color) {
+  return color === "transparent" || /^rgba\\(.*,\\s*0\\)$/.test(color);
+}
+function paintLayer(control, t) {
+  if (!transparentInk(getComputedStyle(control).color) || !control.parentElement) return null;
+  return Array.from(control.parentElement.children).find((el) =>
+    el !== control && !hidden(el) && norm(el.textContent) === t && !transparentInk(getComputedStyle(el).color)) || null;
+}
 function ownersFor(root) {
   const out = {};
   const add = (t, style) => {
@@ -273,7 +281,19 @@ function ownersFor(root) {
   // focused state changes only the outline, never the type.
   for (const c of root.querySelectorAll("input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea")) {
     const t = norm(c.value || "");
-    if (t && !hidden(c)) add(t, pick(c, "control"));
+    if (!t || hidden(c)) continue;
+    const style = pick(c, "control");
+    // A control whose own ink is transparent does not paint its glyphs: a
+    // sibling layer carrying the same text does (the canvas code block's
+    // textarea over .bp-canvas-code-hl). The ink the reader sees is THAT
+    // layer's, so the colour axis is read from it; every metric stays the
+    // control's, since the caret must land on the painted glyphs.
+    const layer = paintLayer(c, t);
+    if (layer) {
+      style.color = getComputedStyle(layer).color;
+      style.tag += " painted-by:" + layer.tagName.toLowerCase() + "." + layer.className.trim().split(/\\s+/)[0];
+    }
+    add(t, style);
   }
   for (const li of root.querySelectorAll("li")) {
     const t = norm(li.textContent);
