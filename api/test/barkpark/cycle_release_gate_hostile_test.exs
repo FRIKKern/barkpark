@@ -39,6 +39,12 @@ defmodule Barkpark.CycleReleaseGateHostileAdapter do
 
       :capture_failure ->
         {:error, {:credential_detail, "must-never-be-persisted"}}
+
+      # task-455ede261044ef0b: the real HTTP leg RAISES inside Req (a host-less
+      # URL). It must surface as an error so CycleFleet stamps capture_failed,
+      # not kill the calling process through a linked task.
+      :capture_raises ->
+        Barkpark.CycleFleet.ReleaseCaptureAdapter.BoundedHTTP.get("http://", [])
     end
   end
 
@@ -269,7 +275,13 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
     restore_document!(base)
 
     failed_challenge_ids =
-      for mode <- [:missing_capture, :candidate_drift, :header_drift, :capture_failure] do
+      for mode <- [
+            :missing_capture,
+            :candidate_drift,
+            :header_drift,
+            :capture_failure,
+            :capture_raises
+          ] do
         Application.put_env(:barkpark, :cycle_release_capture_test_mode, mode)
         assert {:error, _reason} = activate(fixture, "activate-hostile-#{mode}")
 
@@ -284,7 +296,10 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
         assert challenge.failed_at
 
         assert challenge.failure ==
-                 if(mode == :capture_failure, do: "capture_failed", else: "finalize_failed")
+                 if(mode in [:capture_failure, :capture_raises],
+                   do: "capture_failed",
+                   else: "finalize_failed"
+                 )
 
         refute inspect(challenge) =~ "must-never-be-persisted"
         challenge.id

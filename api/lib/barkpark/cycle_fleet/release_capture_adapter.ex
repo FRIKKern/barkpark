@@ -347,13 +347,9 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
       end)
     end
 
-    defp close_command_port(port) do
-      Port.close(port)
-    rescue
-      _ -> :ok
-    catch
-      _, _ -> :ok
-    end
+    # A command that outlived its timeout is by definition not exiting on its
+    # own; reap it rather than orphan it (task-aa975de15eff4e6b).
+    defp close_command_port(port), do: Barkpark.PortReaper.reap(port)
 
     defp normalize_headers(headers) do
       Map.new(headers, fn {name, value} ->
@@ -424,8 +420,14 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
       timeout = Keyword.get(opts, :timeout, @default_timeout)
       expected_content_type = Keyword.get(opts, :expected_content_type)
 
+      # UNLINKED on purpose (task-455ede261044ef0b). A linked Task.async turns a
+      # raise inside Req or the body collector into an exit signal that kills
+      # the CALLING request process — no `rescue` can catch it — so the caller's
+      # `fail_release_challenge(..., "capture_failed", ...)` arm was unreachable
+      # and the challenge was left with no terminal status. async_nolink makes
+      # the crash a `{:exit, reason}` yield result, handled below.
       task =
-        Task.async(fn ->
+        Task.Supervisor.async_nolink(Barkpark.TaskSupervisor, fn ->
           Req.get(url,
             headers: headers,
             redirect: false,
@@ -452,6 +454,9 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapter do
 
         {:ok, {:error, reason}} ->
           {:error, reason}
+
+        {:exit, _reason} ->
+          {:error, :http_request_crashed}
 
         nil ->
           {:error, :request_timeout}

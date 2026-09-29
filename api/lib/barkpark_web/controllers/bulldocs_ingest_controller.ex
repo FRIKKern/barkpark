@@ -423,6 +423,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
         conn
         |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
+      # C083: a held instance refuses the write at the door. 503 transient, never an op fault.
+      {:error, {:write_admission, _}} = refused ->
+        write_admission_refused(conn, refused)
+
       {:error, _other} ->
         conn
         |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -1302,6 +1306,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
             conn
             |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
+          # C083: a held instance refuses the write at the door. 503 transient, never an op fault.
+          {:error, {:write_admission, _}} = refused ->
+            write_admission_refused(conn, refused)
+
           {:error, _other} ->
             conn
             |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -1516,6 +1524,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
             conn
             |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
 
+          # C083: a held instance refuses the write at the door. 503 transient, never an op fault.
+          {:error, {:write_admission, _}} = refused ->
+            write_admission_refused(conn, refused)
+
           {:error, _other} ->
             conn
             |> ErrorResponse.emit_fields(:unprocessable_entity, %{
@@ -1606,6 +1618,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
           {:error, {:halted, reason}} ->
             conn
             |> ErrorResponse.emit_fields(:conflict, %{code: "halted", message: reason})
+
+          # C083: a held instance refuses the write at the door. 503 transient, never an op fault.
+          {:error, {:write_admission, _}} = refused ->
+            write_admission_refused(conn, refused)
 
           {:error, _other} ->
             conn
@@ -1754,6 +1770,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
               op: op_kind,
               target: target
             })
+
+          # C083: a held instance refuses the write at the door. 503 transient, never an op fault.
+          {:error, {:write_admission, _}} = refused ->
+            write_admission_refused(conn, refused)
 
           {:error, _other} ->
             conn
@@ -2116,5 +2136,15 @@ defmodule BarkparkWeb.BulldocsIngestController do
     else
       _ -> nil
     end
+  end
+
+  # C083: the door's refusal as the canonical transient envelope (503 `storage_unavailable`),
+  # the same answer every other write door gives while the instance is held.
+  defp write_admission_refused(conn, refused) do
+    env = Errors.to_envelope(refused, conn)
+
+    conn
+    |> put_status(env.status)
+    |> json(%{error: Map.delete(env, :status)})
   end
 end

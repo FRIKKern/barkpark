@@ -35,6 +35,7 @@ class BpReferencePicker extends HTMLElement {
     super();
     this._value = "";
     this._refType = "";
+    this._refTypes = [];
     this._dataset = "production";
     this._loading = false;
     this._debounceMs = 350;
@@ -74,7 +75,11 @@ class BpReferencePicker extends HTMLElement {
     // Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2). "" on
     // the flat surface keeps every fetch byte-identical.
     this._scopePrefix = this.getAttribute("scope-prefix") || "";
-    this._searchIntel.clientId = BpSearchIntel.clientId("documents", this._dataset);
+    // bp-search-intel.js is a sibling script; a surface that loads the picker
+    // without it still gets a working picker, only without search telemetry.
+    this._searchIntel.clientId = typeof BpSearchIntel === "undefined"
+      ? null
+      : BpSearchIntel.clientId("documents", this._dataset);
     this._render();
     if (this._value) this._loadSelectedTitle();
   }
@@ -213,6 +218,7 @@ class BpReferencePicker extends HTMLElement {
 
   _searchHeaders(opts) {
     opts = opts || {};
+    if (typeof BpSearchIntel === "undefined") return { Accept: "application/json" };
     return BpSearchIntel.searchHeaders(this._searchIntel, {
       source: "studio-picker",
       record: opts.record
@@ -220,10 +226,12 @@ class BpReferencePicker extends HTMLElement {
   }
 
   _captureSearchEventId(body) {
+    if (typeof BpSearchIntel === "undefined") return;
     BpSearchIntel.captureEventId(this._searchIntel, body);
   }
 
   _recordSearchInteraction(objectId, position) {
+    if (typeof BpSearchIntel === "undefined") return;
     BpSearchIntel.trackInteraction(
       "documents",
       this._dataset,
@@ -517,11 +525,12 @@ class BpReferencePicker extends HTMLElement {
       const body = await res.json();
       const docs = body.documents || [];
       // Prefix-agnostic: the stored value is canonical, the matching row
-      // may be its drafts.* counterpart (or vice versa).
+      // may be its drafts.* counterpart (or vice versa). No match keeps the
+      // id: a dangling reference must never borrow another document's title.
       const canon = (v) =>
         v && v.startsWith("drafts.") ? v.slice("drafts.".length) : v || "";
       const match =
-        docs.find((d) => canon(d._id || d.id) === canon(id)) || docs[0] || null;
+        docs.find((d) => canon(d._id || d.id) === canon(id)) || null;
       const title = match && (match.title || match._id || match.id);
       if (title && this._value) {
         this._selectedTitle = title;
@@ -550,6 +559,12 @@ class BpReferencePicker extends HTMLElement {
   set value(v) {
     if (v === this._value) return;
     this._value = v || "";
+    // Before connectedCallback the element has no config (ref-type, dataset,
+    // strings) to render with. Keep the value; connectedCallback renders it.
+    if (!this._mounted) {
+      this.setAttribute("value", this._value);
+      return;
+    }
     this._render();
     if (this._value) this._loadSelectedTitle();
   }

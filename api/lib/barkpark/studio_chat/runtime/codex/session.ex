@@ -253,41 +253,10 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   # nothing — the raise has to be handled either way — so it is gone and the
   # rescue is confined to the close alone. The pid is still read BEFORE the
   # close, which is the ordering the paragraph above requires.
-  defp reap_port(port) do
-    os_pid = port_os_pid(port)
-
-    try do
-      Port.close(port)
-    rescue
-      _ -> :ok
-    end
-
-    kill_os_process(os_pid)
-    :ok
-  end
-
-  defp port_os_pid(port) do
-    case Port.info(port, :os_pid) do
-      {:os_pid, os_pid} when is_integer(os_pid) -> os_pid
-      _ -> nil
-    end
-  rescue
-    ArgumentError -> nil
-  end
-
-  # Best-effort by design: the child has usually already exited on EOF, in which
-  # case `kill` just reports "no such process". A missing `kill` binary or a
-  # racing reap must never take the Session (or its terminate/2) down with it.
-  defp kill_os_process(nil), do: :ok
-
-  defp kill_os_process(os_pid) when is_integer(os_pid) do
-    System.cmd("kill", ["-9", Integer.to_string(os_pid)], stderr_to_stdout: true)
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
-  end
+  #
+  # The mechanism now lives in `Barkpark.PortReaper.reap/1`, shared with every
+  # other site that closes a spawned program's port (task-aa975de15eff4e6b).
+  defp reap_port(port), do: Barkpark.PortReaper.reap(port)
 
   defp consume_line("", state), do: state
 

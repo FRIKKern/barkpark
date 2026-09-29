@@ -1703,11 +1703,10 @@ defmodule Barkpark.StudioChat.Provider.Claude do
         # Raising here also skipped the `send` below AND turned the intended
         # `{:stop, :normal, ...}` into a crash, so the sink was told nothing.
         # Rescue the close alone; the stop and the named error always follow.
-        try do
-          Port.close(port)
-        rescue
-          _ -> :ok
-        end
+        # `PortReaper.reap/1` is that rescued close PLUS the SIGKILL a child
+        # that ignores EOF needs (task-aa975de15eff4e6b) — the spawn `exec`s
+        # the CLI, so the port's os_pid IS the CLI.
+        Barkpark.PortReaper.reap(port)
 
         send(
           state.sink,
@@ -1782,12 +1781,10 @@ defmodule Barkpark.StudioChat.Provider.Claude do
       # reding whichever unrelated PR happened to be running. The membership
       # test bought nothing — the raise has to be handled either way — so the
       # check is gone and the rescue is confined to the close. Cleanup now
-      # runs on every teardown path, raised or not.
-      try do
-        Port.close(port)
-      rescue
-        _ -> :ok
-      end
+      # runs on every teardown path, raised or not. `PortReaper.reap/1` is that
+      # rescued close plus a SIGKILL for a CLI that ignores EOF
+      # (task-aa975de15eff4e6b); `teardown/1`'s reap-wait then sees it gone.
+      Barkpark.PortReaper.reap(port)
 
       teardown(state)
     end

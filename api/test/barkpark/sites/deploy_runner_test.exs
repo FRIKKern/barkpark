@@ -1129,6 +1129,34 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert %{state: :done, exit_code: 0} = await_done("wedged")
     end
 
+    # task-aa975de15eff4e6b: the watchdog must END the deploy child, not merely
+    # close its port (which sends no signal). `exec sleep 30` cannot notice EOF or
+    # die to SIGPIPE, so it is gone only if it was SIGNALLED. Revert
+    # `close_port/1` to a bare `Port.close/1` and this reds while the run still
+    # reads :done / -2.
+    test "the deadline watchdog ENDS the deploy child's OS process" do
+      pid_file =
+        Path.join(System.tmp_dir!(), "deploy-runner-pid-#{System.unique_integer([:positive])}")
+
+      on_exit(fn -> File.rm(pid_file) end)
+
+      put_cfg(
+        enabled: true,
+        command: stub("echo $$ > #{pid_file}; exec sleep 30"),
+        run_deadline_ms: 300
+      )
+
+      assert DeployRunner.trigger(req("reaped")) == {:ok, :started}
+      os_pid = Barkpark.Test.OsProcess.read_pid_file(pid_file)
+      assert is_integer(os_pid)
+      on_exit(fn -> Barkpark.Test.OsProcess.kill(os_pid) end)
+
+      assert %{state: :done, exit_code: -2} = await_done("reaped")
+
+      assert Barkpark.Test.OsProcess.gone_within?(os_pid),
+             "deploy child #{os_pid} survived the run deadline"
+    end
+
     test "a missing executable is a start failure, never a Runner crash" do
       pid = Process.whereis(DeployRunner)
       put_cfg(enabled: true, command: {"bp-no-such-executable-9f2a", []})

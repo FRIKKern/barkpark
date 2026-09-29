@@ -2245,4 +2245,68 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert resp.status == 304
     end
   end
+
+  # task-1bf751b276f81cfd: a subsystem switched off by Barkpark.Capability
+  # (BARKPARK_CAPABILITIES_OFF) 404s every route through RequireCapability, so
+  # the manifest must stop advertising its verbs — one test per capability.
+  describe "switched-off capabilities leave the manifest (Barkpark.Capability)" do
+    setup do
+      previous = Application.get_env(:barkpark, Barkpark.Capability)
+      on_exit(fn -> restore_app_env(Barkpark.Capability, previous) end)
+      :ok
+    end
+
+    defp prefixed(manifest, prefix),
+      do: Enum.filter(manifest["commands"], &String.starts_with?(&1["id"], prefix))
+
+    defp noun?(manifest, name), do: Enum.any?(manifest["nouns"], &(&1["name"] == name))
+
+    test "all on (the default): chat.* and cycle.* are advertised", %{conn: conn} do
+      Application.delete_env(:barkpark, Barkpark.Capability)
+      body = capabilities(conn)
+
+      assert length(prefixed(body, "chat.")) == 12
+      assert length(prefixed(body, "cycle.")) == 11
+      assert noun?(body, "chat") and noun?(body, "cycle")
+    end
+
+    test "studio_chat off: no chat.* commands, no chat noun, no ?chat=1 root key",
+         %{conn: conn} do
+      Application.put_env(:barkpark, Barkpark.Capability, studio_chat: false)
+      body = caps_conn(conn, "?chat=1") |> json_response(200)
+
+      assert prefixed(body, "chat.") == []
+      refute noun?(body, "chat")
+      refute Map.has_key?(body, "chat")
+      assert length(prefixed(body, "cycle.")) == 11
+    end
+
+    test "cycle_fleet off: no cycle.* commands and no cycle noun", %{conn: conn} do
+      Application.put_env(:barkpark, Barkpark.Capability, cycle_fleet: false)
+      body = capabilities(conn)
+
+      assert prefixed(body, "cycle.") == []
+      refute noun?(body, "cycle")
+      assert length(prefixed(body, "chat.")) == 12
+    end
+
+    test "epic_fleet off: cycle.* goes too (CycleFleet requires EpicFleet)", %{conn: conn} do
+      Application.put_env(:barkpark, Barkpark.Capability, epic_fleet: false)
+      body = capabilities(conn)
+
+      assert prefixed(body, "cycle.") == []
+      refute noun?(body, "cycle")
+      assert length(prefixed(body, "chat.")) == 12
+    end
+
+    test "the etag moves with the switch, so a cached manifest is not replayed", %{conn: conn} do
+      Application.delete_env(:barkpark, Barkpark.Capability)
+      on_etag = caps_conn(conn) |> get_resp_header("etag")
+
+      Application.put_env(:barkpark, Barkpark.Capability, studio_chat: false)
+      off_etag = caps_conn(scoped_conn()) |> get_resp_header("etag")
+
+      refute on_etag == off_etag
+    end
+  end
 end

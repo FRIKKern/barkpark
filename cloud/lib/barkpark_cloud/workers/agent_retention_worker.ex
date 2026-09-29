@@ -44,6 +44,16 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
       This arm is BATCHED, unlike the four above; see
       `@notification_delivery_batch_limit`.
 
+  NOT HERE, ON PURPOSE: `deployments`. It is append-only and grows (~100
+  rows/day at the 2026-09 steady state, 40,192 rows in all), and it is left
+  UNBOUNDED by ruling — charter D622 in
+  `.claude/workflows/bp-deploy-reliability-charter.md`. The deploy census reads
+  any caller-pinned window over the whole history (D3), so a prune here would
+  make an old `from` silently report over a shorter population than it claims.
+  A bound may ship only together with a census that REFUSES windows older than
+  the horizon; D622 names the revisit trigger. The test "deployments are NOT
+  pruned" fails if an arm lands here without that.
+
   Idempotent: a run with nothing to prune returns `{:ok, %{events_deleted: 0,
   tokens_deleted: 0, samples_deleted: 0, deliveries_deleted: 0,
   notification_deliveries_deleted: 0}}` and never raises. `max_attempts: 1` —

@@ -116,6 +116,8 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.Holder do
             generation: status.generation,
             boot: status.boot,
             pending: status.pending,
+            writers: Map.get(status, :writers, 0),
+            dead_writers: Map.get(status, :dead_writers, 0),
             operation: status.operation,
             held: if(state.hold, do: state.hold.operation, else: nil)
           }}, state}

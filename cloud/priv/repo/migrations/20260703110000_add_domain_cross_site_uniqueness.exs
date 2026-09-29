@@ -20,6 +20,9 @@ defmodule BarkparkCloud.Repo.Migrations.AddDomainCrossSiteUniqueness do
   # Existing duplicates therefore remain (frozen, cannot grow) until the separate
   # prod-duplicate audit resolves them. The trigger does NOT auto-heal them — it
   # only prevents NEW collisions. Do not treat this migration as the dedup.
+  # THE AUDIT (task-b51e13714022da8f): `Registry.duplicate_hostname_census/0`,
+  # run as `mix barkpark_cloud.duplicate_hostnames` — every hostname more than one
+  # site/box holds, with the owning teams and a cross_team flag. Read-only.
   def up do
     execute("""
     CREATE OR REPLACE FUNCTION enforce_site_domain_uniqueness()

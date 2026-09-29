@@ -142,6 +142,8 @@ defmodule BarkparkCloud.Usage do
 
   import Ecto.Query, only: [from: 2]
 
+  require Logger
+
   alias BarkparkCloud.{Accounts, Billing, Registry, Repo, Telemetry}
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Usage.Sample
@@ -700,19 +702,25 @@ defmodule BarkparkCloud.Usage do
     end
   end
 
-  # Seat count = the team's members. Rescued to nil (→ seats "unmetered") so a
-  # transient repo hiccup / missing team degrades one meter, never the envelope.
-  defp seats(team) do
-    length(Accounts.list_team_members(team))
-  rescue
-    _ -> nil
-  end
+  # THE TRANSIENT DB FAULTS a display meter may swallow (ccpca-bl-usage-bare-
+  # rescue-narrow). Each gatherer below degrades ONE meter to "unmetered" on a
+  # repo hiccup — and ONLY on one. A bare `rescue _` also swallowed a FUTURE
+  # programmer error (KeyError, FunctionClauseError, a broken association) into a
+  # silent "unmetered" that reads exactly like a flaky database; those now raise.
+  # A missing team is not an exception at all: it has its own nil clause.
+  @transient_db_faults [DBConnection.ConnectionError, Postgrex.Error]
 
-  defp pending_invitations(team) do
-    length(Accounts.list_invitations(team))
-  rescue
-    _ -> nil
-  end
+  # Seat count = the team's members. nil (→ seats "unmetered") on a missing team
+  # or a transient repo fault degrades one meter, never the envelope.
+  defp seats(nil), do: nil
+
+  defp seats(team),
+    do: fail_soft(:seats, nil, fn -> length(Accounts.list_team_members(team)) end)
+
+  defp pending_invitations(nil), do: nil
+
+  defp pending_invitations(team),
+    do: fail_soft(:pending_invitations, nil, fn -> length(Accounts.list_invitations(team)) end)
 
   # The fleet meter input (OC11). `value` is the team's live managed-instance
   # count; `quota` is the plan ceiling the create-time 402 guard + the quota
@@ -724,12 +732,31 @@ defmodule BarkparkCloud.Usage do
   #   * a "forever"-tier placeholder (>= 100_000) → nil. A bar to a million is a
   #     lie.
   #
-  # Rescued so a repo hiccup / missing team degrades THIS meter (→ "unmetered"),
+  # A missing team or a transient repo fault degrades THIS meter (→ "unmetered"),
   # never the envelope. `compose/1` derives `warn_at` from the quota.
+  defp instances_input(nil), do: %{value: nil, quota: nil}
+
   defp instances_input(team) do
-    %{value: Registry.count_barkparks(team), quota: instance_quota(team)}
+    fail_soft(:instances, %{value: nil, quota: nil}, fn ->
+      %{value: Registry.count_barkparks(team), quota: instance_quota(team)}
+    end)
+  end
+
+  @doc false
+  # The ONE rescue the three control-plane gatherers share: `fun`'s value, or
+  # `fallback` when it raises a whitelisted transient DB fault. Anything else
+  # re-raises. Public only so the suite can drive both arms directly.
+  @spec fail_soft(atom(), term(), (-> term())) :: term()
+  def fail_soft(meter, fallback, fun) when is_function(fun, 0) do
+    fun.()
   rescue
-    _ -> %{value: nil, quota: nil}
+    e in @transient_db_faults ->
+      Logger.warning(
+        "usage meter #{meter} degraded to unmetered on a transient DB fault: " <>
+          inspect(e.__struct__)
+      )
+
+      fallback
   end
 
   defp instance_quota(team) do

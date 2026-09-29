@@ -125,6 +125,35 @@ defmodule Barkpark.CycleFleet.ReleaseCaptureAdapterTest do
              "expected the deadline to cut the run below the stub's 20s sleep, got #{div(elapsed_us, 1000)}ms"
     end
 
+    # task-aa975de15eff4e6b: cutting the run at the deadline must END the stub,
+    # not just close its port (which sends no signal). `exec sleep 20` cannot
+    # notice EOF or die to SIGPIPE, so it is gone only if it was SIGNALLED.
+    # Revert `close_command_port/1` to a bare `Port.close/1` and this reds.
+    @tag timeout: 120_000
+    test "the deadline branch ENDS the stub's OS process, not just the port", %{
+      bypass: bypass
+    } do
+      pid_file =
+        Path.join(System.tmp_dir!(), "release-capture-pid-#{System.unique_integer([:positive])}")
+
+      on_exit(fn -> File.rm(pid_file) end)
+
+      write_bp_stub("""
+      #!/bin/sh
+      echo $$ > #{pid_file}
+      exec sleep 20
+      """)
+
+      assert ReleaseCaptureAdapter.capture(request(bypass)) == {:error, :headless_capture_failed}
+
+      os_pid = Barkpark.Test.OsProcess.read_pid_file(pid_file)
+      assert is_integer(os_pid)
+      on_exit(fn -> Barkpark.Test.OsProcess.kill(os_pid) end)
+
+      assert Barkpark.Test.OsProcess.gone_within?(os_pid),
+             "release-capture stub #{os_pid} survived the deadline cut"
+    end
+
     @tag timeout: 120_000
     test "the over-cap branch closes the port the moment the cap is crossed (125)", %{
       bypass: bypass

@@ -3821,7 +3821,7 @@ test("dr-w1-s2 (criterion 1): the taxonomy is NOT re-derived client-side — app
   // exists to forbid, and it fails HERE rather than in production six months
   // later when a new class renders under the wrong name.
   const TAXONOMY = [
-    "BOX_BUSY_409", "ABANDONED_AT_CAPACITY", "ABANDONED_BOX_STUCK", "ABANDONED_UNCLASSIFIED",
+    "BOX_BUSY_409", "PREBUILT_REFUSED_409", "ABANDONED_AT_CAPACITY", "ABANDONED_BOX_STUCK", "ABANDONED_UNCLASSIFIED",
     "CONTENT_API_500", "CONTENT_API_503", "CONTENT_API_UNREACHABLE", "CONTENT_API_403",
     "DOC_ID_EMPTY", "BOX_500", "FORBIDDEN_403", "BUILD_FAILED", "BOX_DEPLOY_DISABLED_503",
     "BOX_RUNNER_UNAVAILABLE_503", "BOX_UNAVAILABLE_503", "BOX_UNREACHABLE", "HEALTH_GATE_FAILED",

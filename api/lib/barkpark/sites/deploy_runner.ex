@@ -2666,19 +2666,12 @@ defmodule Barkpark.Sites.DeployRunner do
     Process.send_after(self(), {:run_deadline, port}, run_deadline_ms())
   end
 
-  # Closing a `{:spawn_executable, _}` port closes the pipe fds and sends the child
-  # NO signal — it terminates only a program that exits on stdin EOF or dies to
-  # SIGPIPE (GH #6681: the Codex runtime orphaned a child that did neither, which
-  # `Session.reap_port/1` now SIGKILLs after the close). A deploy child that
-  # ignores EOF survives this watchdog the same way; reaping here is filed, not
-  # done. Tolerate an already-closed port so the watchdog never crashes the Runner.
-  defp close_port(port) do
-    Port.close(port)
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
-  end
+  # The deadline fires precisely BECAUSE the deploy child is misbehaving, so
+  # closing the port alone (which sends it no signal) left it running with its
+  # pipes closed. `Barkpark.PortReaper.reap/1` reads the pid, closes, then
+  # SIGKILLs it (task-aa975de15eff4e6b); it never raises, so the watchdog never
+  # crashes the Runner.
+  defp close_port(port), do: Barkpark.PortReaper.reap(port)
 
   # Apply `fun` to the run this port belongs to; a port we do not know (a stale
   # message from a finished run) is ignored.

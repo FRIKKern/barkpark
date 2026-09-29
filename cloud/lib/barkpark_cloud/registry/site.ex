@@ -5,6 +5,27 @@ defmodule BarkparkCloud.Registry.Site do
   runs on) and through it to a `Team`.
 
   The `(team_id, slug)` pair is unique — a Team names each of its sites once.
+
+  ## `team_id` is CREATE-TIME-ONLY (task-69d84bc7f15c88d6)
+
+  `Registry.create_site/2` copies `team_id` from the box at insert and nothing
+  ever re-stamps it. That is safe TODAY only because nothing moves a box between
+  teams: the one writer of `barkparks.team_id` is `Registry.insert_barkpark/2`
+  (on a fresh `%Barkpark{}`), and no route, worker or mix task updates it. An
+  out-of-band move (hand SQL) WOULD leave every site on the old team, and every
+  reader below would follow the stale column. `Registry.site_team_drift/1` is the
+  census that names such a site; it reads zero on a correct fleet. A future
+  box-move verb MUST re-stamp `sites.team_id` in the same transaction.
+
+  Readers that key team scope on `sites.team_id` (not `barkpark.team_id`):
+  `Registry.list_sites_for_team/1` (and through it `Notifications.team_site_ids/1`,
+  the digest), `Registry.get_team_site/2` (every slug/id-addressed site route),
+  `Notifications.site_owning_team_ids/0` (digest audience), `DeployLedger`'s
+  tenant-narrowed fold (`where s.team_id in ^team_ids`), the team deploy-ledger
+  census route (its scope hops through `sites.team_id`), `add_site_domain/2`'s
+  `hostname_claimed?/2` team scope, and the per-site side effects the router keys
+  on `site.team_id` (SSE `push_event/2`, audit rows, the GitHub installation
+  token lookup, `Registry.resolve_cloudflare_credential/1`).
   `domains` is an array because one site can answer on the apex, www, and any
   number of custom hostnames; the array carries a GIN index so the on-demand
   TLS `/v1/tls/ask` gate can answer "is this domain registered?" in O(1).

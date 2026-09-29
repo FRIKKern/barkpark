@@ -311,17 +311,18 @@ check("S3.2 runToOps: editing the callout BODY → one patch-block with the new 
   assert.equal(patches.length, 1, "exactly one patch-block, for the callout");
   assert.equal(patches[0].id, "c-1");
   assert.deepEqual(patches[0].patch.content, [{ type: "text", value: "new body!" }]);
-  assert.equal(patches[0].patch.tone, "info", "tone is carried in the patch");
-  // The patch carries the chrome fields EXPLICITLY (removal-safe over the shallow
-  // merge): a title-less callout patches title:null, which compose drops — so the
-  // stored callout stays title-less.
-  assert.equal(patches[0].patch.title, null, "explicit title:null (removal-safe)");
-  assert.equal(patches[0].patch.collapsible, false);
-  assert.equal(patches[0].patch.collapsed, false);
+  // A body edit writes ONLY the body: unchanged chrome (tone, and the title /
+  // collapsible / collapsed keys this callout never carried) stays out of the patch,
+  // so the stored block gains no keys the author never wrote (task-56bafb69a8a1f250).
+  // A CHANGED chrome field is still explicit — see the S3.2-d cases below.
+  assert.deepEqual(Object.keys(patches[0].patch), ["content"], "a body edit patches only the body");
 
   // FOLD GATE: the callout carries its new body; the prose is untouched.
   const folded = assertFolds(blocks, doc, ops, "S3.2-c callout body edit");
   assert.deepEqual(folded[1].content, [{ type: "text", value: "new body!" }]);
+  for (const key of ["title", "collapsible", "collapsed"]) {
+    assert.equal(key in folded[1], false, `the stored callout gains no ${key} key`);
+  }
   assert.deepEqual(folded[0].content, [{ type: "text", value: "before" }]);
   assert.deepEqual(folded[2].content, [{ type: "text", value: "after" }]);
 });
@@ -384,10 +385,11 @@ check("S3.2 runToOps: toggling the fold (collapsed) → a patch-block carrying c
   assert.equal(ops.length, 1);
   assert.equal(ops[0].op, "patch-block");
   assert.equal(ops[0].patch.collapsed, true);
-  assert.equal(ops[0].patch.collapsible, true, "collapsible is carried alongside");
+  assert.deepEqual(Object.keys(ops[0].patch), ["collapsed"], "only the changed field rides");
 
   const folded = assertFolds(blocks, doc, ops, "S3.2-d fold toggle");
   assert.equal(folded[0].collapsed, true);
+  assert.equal(folded[0].collapsible, true, "the unchanged stored collapsible survives the merge");
 });
 
 // S3.2-d2) REMOVAL DIRECTIONS — patch-block is a SHALLOW merge that cannot delete

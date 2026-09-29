@@ -206,6 +206,8 @@ defmodule BarkparkWeb.WriteAdmissionHoldControllerTest do
     view = Jason.decode!(resp.resp_body)
     assert view["phase"] == "recovery_required"
     assert view["pending"] == 1
+    assert view["writers"] == 0
+    assert view["dead_writers"] == 1
     assert view["held"] == "switch"
 
     resp =

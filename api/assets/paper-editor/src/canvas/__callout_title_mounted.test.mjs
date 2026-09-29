@@ -63,12 +63,12 @@ try {
       assert.equal(title.textContent, "Edited in place");
       host.flushPendingChanges();
       assert.equal(ops.length, 1);
+      // Only the edited field rides: unchanged body, tone and fold keys stay out, so
+      // the stored callout gains no key the author never wrote (task-56bafb69a8a1f250).
       assert.deepEqual(ops[0], { op: "patch-block", id: "callout", patch: {
-        content: original.content, tone: "warning", title: "Edited in place",
-        collapsible: !!attrs.collapsible, collapsed: !!attrs.collapsed,
+        title: "Edited in place",
       } });
-      assert.deepEqual({ ...original, ...ops[0].patch }, { ...original, title: "Edited in place",
-        collapsible: !!attrs.collapsible, collapsed: !!attrs.collapsed },
+      assert.deepEqual({ ...original, ...ops[0].patch }, { ...original, title: "Edited in place" },
         "body, marks, tone, fold and custom metadata remain intact");
       assert.equal(key(title, "Enter").defaultPrevented, true);
       assert.equal(host._editor.state.doc.childCount, 1);
@@ -108,7 +108,7 @@ try {
     composing.host.flushPendingChanges();
     assert.equal(composing.ops.length, 1);
     assert.equal(composing.ops[0].patch.title, "日本語");
-    assert.deepEqual(composing.ops[0].patch.content, composing.original.content);
+    assert.equal("content" in composing.ops[0].patch, false, "a title edit leaves the body out of the patch");
   } finally { composing.host.remove(); }
 
   console.log("mounted callout title: in-place input, fold isolation, immediate flush, undo/redo, absence and composition passed");

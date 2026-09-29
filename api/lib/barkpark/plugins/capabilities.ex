@@ -315,11 +315,36 @@ defmodule Barkpark.Plugins.Capabilities do
       "nouns" => core_nouns ++ plugin_nouns,
       "commands" => core_commands ++ plugin_commands
     }
+    |> drop_switched_off_subsystems()
     |> maybe_put_build(base, opts)
     |> maybe_gate_views(opts)
     |> maybe_gate_chat(base, opts)
     |> maybe_gate_bpml(base, opts)
     |> then(fn m -> Map.put(m, "etag", etag_for(m)) end)
+  end
+
+  # Operator switches (`Barkpark.Capability`, BARKPARK_CAPABILITIES_OFF). A
+  # switched-off subsystem's routes already 404 through RequireCapability, so
+  # advertising its verbs would hand `bp` and the MCP bridge commands that can
+  # only fail (task-1bf751b276f81cfd). Drop the noun and every command under it.
+  # `enabled?(:cycle_fleet)` is false when `:epic_fleet` is off too, since
+  # CycleFleet writes into the EpicFleet ledger. Every capability defaults ON,
+  # so a box that sets nothing gets a byte-identical manifest (etag included).
+  @capability_nouns [studio_chat: "chat", cycle_fleet: "cycle"]
+
+  defp drop_switched_off_subsystems(manifest) do
+    off =
+      for {capability, noun} <- @capability_nouns,
+          not Barkpark.Capability.enabled?(capability),
+          do: noun
+
+    if off == [] do
+      manifest
+    else
+      manifest
+      |> Map.update("nouns", [], &Enum.reject(&1, fn n -> noun_name(n) in off end))
+      |> Map.update("commands", [], &Enum.reject(&1, fn c -> command_noun(c) in off end))
+    end
   end
 
   # The root `bpml` vocabulary key (BPML masterplan W0): the block-tag →
@@ -387,7 +412,8 @@ defmodule Barkpark.Plugins.Capabilities do
   # so the gated key feeds etag_for/1 (chat and non-chat bodies get distinct
   # etags; no 304 cross-contamination).
   defp maybe_gate_chat(manifest, caller_tier, opts) do
-    if Keyword.get(opts, :include_chat, false) and caller_tier != "none" do
+    if Keyword.get(opts, :include_chat, false) and caller_tier != "none" and
+         Barkpark.Capability.enabled?(:studio_chat) do
       Map.put(manifest, "chat", %{"providers" => chat_provider_caps()})
     else
       manifest

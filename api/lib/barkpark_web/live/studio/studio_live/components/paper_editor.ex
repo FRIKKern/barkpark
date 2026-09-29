@@ -1860,13 +1860,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     >
       <div
         class="bp-paper-links-title-owner"
-        style={@presentation.title_style <> ";font-weight:bold"}
+        style={paper_links_title_owner_style(@presentation.title_style)}
         data-paper-links-title-default={@presentation.title_default? && "true"}
       >
         <h2
           :if={!@empty}
           class="bp-paper-links-title-heading"
-          style="margin:0;font:inherit;color:inherit"
+          style="margin:0;font:inherit;color:inherit;letter-spacing:inherit"
         >
           <button
             type="button"
@@ -1941,6 +1941,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       </div>
     </header>
     """
+  end
+
+  # The reader paints this title as `<h2 style={title_style}>`, so the paper
+  # surface's h2 rule supplies family, weight, tracking and balanced wrapping
+  # (compose.ex paper_links_html/2). In Edit the paint button and the focused
+  # textarea sit under `font: inherit`, so the owner carries that rule itself;
+  # title_style comes last so a layout's own family and tracking still win, as
+  # they do on the reader's h2.
+  defp paper_links_title_owner_style(title_style) do
+    "font-family:var(--paper-font-serif);font-weight:var(--bp-h2-weight);" <>
+      "letter-spacing:var(--bp-h2-tracking);text-wrap:balance;" <> title_style
   end
 
   defp paper_links_dom_id(field, block_id) do
