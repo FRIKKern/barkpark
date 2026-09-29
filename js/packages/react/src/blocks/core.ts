@@ -17,6 +17,7 @@ import {
   capitalize,
   renderInlines,
   glyphHtml,
+  draftHtml,
   roleOf,
   labelForRole,
   meaningForRole,
@@ -1444,7 +1445,7 @@ const roadmap: Emit = (b) => {
       const left = clampf(m.left)
       const width = clampfWidth(m.width, left)
       const cls = phase ? 'bp-rm__lane bp-rm__lane--phase' : 'bp-rm__lane'
-      return `<div class="${cls}"><span class="bp-rm__lbl">${title}</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--${role}" style="left:${left}%;width:${width}%"></span>${today}</div></div>`
+      return `<div class="${cls}"><span class="bp-rm__lbl">${draftHtml(m)}${title}</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--${role}" style="left:${left}%;width:${width}%"></span>${today}</div></div>`
     })
     .join('')
   return `<div class="bp-roadmap">${scale}<div class="bp-rm__lanes">${lanes}</div></div>`

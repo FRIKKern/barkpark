@@ -655,7 +655,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
           "title" => "Ship the legend",
           "status" => "done",
           "criteria" => %{"met" => 2, "total" => 2}
-        }
+        },
+        # The DRAFT chip (task-0310f53709aca6de): byte-parity for the chip on a
+        # board card. Spelled as TaskResolver.row_from_task/1 emits a draft row.
+        %{"title" => "Draft-only row", "status" => "open", "draft" => true}
       ]
     },
     "roadmap" => %{
@@ -668,7 +671,15 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
           "left" => 0,
           "width" => 40
         },
-        %{"title" => "Ship the board", "status" => "in_progress", "left" => 40, "width" => 35}
+        %{"title" => "Ship the board", "status" => "in_progress", "left" => 40, "width" => 35},
+        # The DRAFT chip on a roadmap lane label (task-0310f53709aca6de).
+        %{
+          "title" => "Draft lane",
+          "status" => "ready",
+          "left" => 75,
+          "width" => 25,
+          "draft" => true
+        }
       ],
       "scale" => ["Q1", "Q2", "Q3"]
     },
@@ -679,7 +690,9 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "snapshot" => [
         %{"title" => "Author the array", "status" => "done"},
         %{"title" => "Wire the generator", "status" => "in_progress", "priority" => "0"},
-        %{"title" => "Prove parity", "status" => "ready"}
+        %{"title" => "Prove parity", "status" => "ready"},
+        # The DRAFT chip on a task-list row (task-0310f53709aca6de).
+        %{"title" => "Draft-only row", "status" => "open", "draft" => true}
       ]
     },
     "task-list" => %{

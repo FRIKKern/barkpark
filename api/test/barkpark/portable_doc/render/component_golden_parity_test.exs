@@ -127,10 +127,21 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
       assert html =~ ~s|bp-g--#{col["glyph_role"]}|, "glyph-role #{col["glyph_role"]} missing"
 
       for card <- col["cards"] do
-        assert html =~ ~s|<span class="bp-bcard__t">#{card["title"]}</span>|,
-               "card title #{inspect(card["title"])} missing from lane #{role}"
+        # The projection's per-card `draft` slot (task-0310f53709aca6de): a draft
+        # card realizes the DRAFT chip inside its title span; any other card
+        # realizes the bare title, so a chip painted on a published card reds too.
+        chip = if card["draft"] == true, do: ~s|<span class="bp-draft">DRAFT</span> |, else: ""
+
+        assert html =~ ~s|<span class="bp-bcard__t">#{chip}#{card["title"]}</span>|,
+               "card title #{inspect(card["title"])} (draft=#{card["draft"] == true}) missing from lane #{role}"
       end
     end
+
+    drafts = for col <- columns, card <- col["cards"], card["draft"] == true, do: card
+    assert length(drafts) >= 1, "projection floor: no draft card — regen dropped the chip proof"
+
+    assert occurrences(html, ~s|<span class="bp-draft">|) == length(drafts),
+           "rendered DRAFT chip count diverged from the projection's draft cards"
   end
 
   test "status-legend: the View emitter realizes the projection (6 rungs · per-row glyph-role · spinner)" do
