@@ -50,6 +50,8 @@ lib/barkpark/plugins/sheets/web/export_controller.ex	export_html
 lib/barkpark/plugins/sheets/web/export_controller.ex	export_xlsx
 lib/barkpark/plugins/sheets/web/import_controller.ex	read_upload
 lib/barkpark/plugins/tickets/attachments.ex	store
+lib/barkpark/plugins/tickets/web/tickets_attachments_controller.ex	read_upload
+lib/barkpark/plugins/tickets/web/tickets_attachments_controller.ex	stream_file
 lib/barkpark/release.ex	seed
 lib/barkpark/release/secrets.ex	read_existing
 lib/barkpark/release/secrets.ex	write_env
@@ -163,8 +165,6 @@ lib/barkpark_web/controllers/media_controller.ex	maybe_send_file
 lib/barkpark_web/controllers/saml_controller.ex	slo
 lib/barkpark_web/controllers/share_link_controller.ex	serve
 lib/barkpark_web/controllers/status_controller.ex	index
-lib/barkpark_web/controllers/tickets_attachments_controller.ex	read_upload
-lib/barkpark_web/controllers/tickets_attachments_controller.ex	stream_file
 lib/barkpark_web/controllers/workspace_controller.ex	deliver_bundle
 lib/barkpark_web/controllers/workspace_controller.ex	spill_body
 lib/barkpark_web/layouts.ex	paper_stylesheet

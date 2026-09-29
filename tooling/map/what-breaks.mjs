@@ -306,6 +306,8 @@ function surfaceReach(dependentNodes) {
 function isSeamSeed(file, selfFields) {
   if (selfFields && selfFields.seam) return true;
   if (/barkpark_web\/controllers\//.test(file)) return true;
+  // a plugin's own controllers (plugins/<p>/web/*_controller.ex) are the same seam
+  if (/barkpark\/plugins\/[^/]+\/web\/.*_controller\.ex$/.test(file)) return true;
   if (/\/v1(\/|\.|$)/.test(file)) return true;
   if (/barkpark_web\/router/.test(file)) return true;
   return false;
