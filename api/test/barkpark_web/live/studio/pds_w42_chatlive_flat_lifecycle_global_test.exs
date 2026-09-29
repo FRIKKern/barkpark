@@ -69,6 +69,9 @@ defmodule BarkparkWeb.Studio.PdsW42ChatLiveFlatLifecycleGlobalTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the studio_chat capability (StudioChat.RuntimeSupervisor / SessionRegistry and the /studio/chat routes)
+  @moduletag :requires_plugins
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth

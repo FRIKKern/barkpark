@@ -194,6 +194,8 @@ defmodule BarkparkWeb.Studio.ChatTurnFilesChangedTest do
   end
 
   describe "the settled turn's fold header (three states)" do
+    # Plugins-off: the studio_chat capability (StudioChat.RuntimeSupervisor / SessionRegistry and the /studio/chat routes)
+    @tag :requires_plugins
     test "FILES: the header carries the summary", %{conn: conn} do
       id =
         settled_session([
@@ -212,6 +214,8 @@ defmodule BarkparkWeb.Studio.ChatTurnFilesChangedTest do
       refute html =~ "data-turn-file="
     end
 
+    # Plugins-off: the studio_chat capability (StudioChat.RuntimeSupervisor / SessionRegistry and the /studio/chat routes)
+    @tag :requires_plugins
     test "NO FILES: a read-only turn renders no summary and no empty container",
          %{conn: conn} do
       id =
@@ -233,6 +237,8 @@ defmodule BarkparkWeb.Studio.ChatTurnFilesChangedTest do
       refute opened =~ "files changed"
     end
 
+    # Plugins-off: the studio_chat capability (StudioChat.RuntimeSupervisor / SessionRegistry and the /studio/chat routes)
+    @tag :requires_plugins
     test "EXPAND: the summary expands to the per-path list with per-path totals",
          %{conn: conn} do
       id =
@@ -270,6 +276,8 @@ defmodule BarkparkWeb.Studio.ChatTurnFilesChangedTest do
       assert length(String.split(opened, "data-turn-file=")) == 3
     end
 
+    # Plugins-off: the studio_chat capability (StudioChat.RuntimeSupervisor / SessionRegistry and the /studio/chat routes)
+    @tag :requires_plugins
     test "a LIVE (unsettled) turn has no fold and therefore no files summary",
          %{conn: conn} do
       id = Ecto.UUID.generate()
