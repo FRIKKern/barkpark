@@ -168,6 +168,8 @@ defmodule BarkparkWeb.MutateTaskBriefGateTest do
   end
 
   describe "POST /v1/data/mutate/:dataset publish of a type:task" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "ARM A — a task with NO brief is REFUSED with a 409 naming content.brief" do
       resp = create_and_publish(uniq("brief-gate-none"), :none)
 
@@ -182,6 +184,8 @@ defmodule BarkparkWeb.MutateTaskBriefGateTest do
              "the refusal must NAME the field; got: #{inspect(message)}"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "ARM B — a brief carrying a bogus block type is REFUSED with a 409 naming it" do
       brief = %{"version" => 1, "blocks" => [%{"type" => "totally-bogus-block"}]}
 

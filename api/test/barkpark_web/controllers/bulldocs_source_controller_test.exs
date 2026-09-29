@@ -135,6 +135,8 @@ defmodule BarkparkWeb.BulldocsSourceControllerTest do
     # blocks through the same `Papers.resolve_tasks_in_blocks/3`. Its scope now
     # carries the caller's `AnonPerspective` verdict, so a tokenless caller —
     # pinned to `:published` — gets published task rows only.
+    # Plugins-off: the bulldocs plugin owns the paper schema, its fences and its routes
+    @tag :requires_plugins
     test "an anonymous source read of a published paper omits a draft-only task",
          %{conn: conn, scope: scope} do
       epic = "epic-#{System.unique_integer([:positive])}"

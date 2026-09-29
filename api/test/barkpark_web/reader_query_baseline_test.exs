@@ -409,6 +409,8 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   end
 
   describe "anonymous /papers/:slug statement budget (pinned three-shape fixture)" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "dead leg <= #{@dead_leg_budget} and both legs <= #{@both_legs_budget} statements",
          %{conn: conn, scope: scope} do
       slug = seed_fixture!(scope)

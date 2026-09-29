@@ -112,6 +112,8 @@ defmodule BarkparkWeb.TasksIndexDatasetFlagTest do
       assert Enum.count(flag_names(ls), &(&1 == "dataset")) == 1
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "it reaches the WIRE: GET /v1/capabilities serves the flag on task.ls", %{conn: conn} do
       # The CLI reads the SERVED manifest, not cli_commands/0. RED on
       # origin/main on this envelope too.

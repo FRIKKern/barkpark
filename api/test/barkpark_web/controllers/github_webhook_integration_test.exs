@@ -745,6 +745,8 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
              "a re-delivery reported `exists` but the store gained a row"
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "a lifecycle-gate veto says outcome: vetoed — nothing was written, and it says so" do
       number = 90_320 + System.unique_integer([:positive])
 
@@ -771,6 +773,8 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
       assert refusal_rows(number) == []
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "a dedup refusal whose dead-letter write LANDS says recorded: true — and the row is there",
          %{scope: scope} do
       put_repo!("acme/refusal-receipt")
@@ -801,6 +805,8 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
                "for ##{number} — got #{inspect(rows)}"
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "a dedup refusal whose dead-letter write FAILS says recorded: false — no row is promised",
          %{scope: scope} do
       # No repo is configured in this suite's setup, and `Github.Conflict`'s
@@ -833,6 +839,8 @@ defmodule BarkparkWeb.GithubWebhookIntegrationTest do
     # still pass individually against a collapsed `%{ok: true, refused: true}`
     # only if they stopped asserting `outcome`, so this one asserts the
     # DISTINCTION itself rather than any single shape.
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "the three refusal receipts are pairwise DISTINCT bodies", %{scope: scope} do
       put_intake_workspace!(scope)
       vetoed_number = 90_350 + System.unique_integer([:positive])

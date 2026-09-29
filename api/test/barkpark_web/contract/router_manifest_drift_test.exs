@@ -481,6 +481,8 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
              """
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "every walked route is a manifest command, a declared non-CLI surface, or a filed gap" do
       command_keys = MapSet.new(manifest_commands(), &command_key/1)
 

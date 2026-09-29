@@ -164,6 +164,8 @@ defmodule BarkparkWeb.TokenExpiryMintTest do
       assert row!(raw_of(mint_fleet_support(raw), 201)).expires_at == nil
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "chat-token mint: no expiry", %{ws: ws, admin_raw: raw} do
       assert row!(raw_of(mint_chat(ws, raw), 201)).expires_at == nil
     end

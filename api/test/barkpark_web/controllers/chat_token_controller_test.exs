@@ -29,6 +29,9 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
   """
   use BarkparkWeb.ConnCase, async: true
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
   alias Barkpark.{Auth, StudioChat, Tenancy}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 

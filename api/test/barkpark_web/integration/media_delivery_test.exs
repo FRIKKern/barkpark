@@ -68,6 +68,8 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
   end
 
   describe "delivery URLs in v1 API" do
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "upload returns WoodWing-style delivery URLs and dimensions", %{conn: conn} do
       created =
         conn

@@ -164,6 +164,8 @@ defmodule BarkparkWeb.NonBinaryWriteParam500Test do
       end
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "POSITIVE CONTROL — a binary dataset still adopts (200, state flips)",
          %{conn: conn, task: task, scope: scope} do
       resp =
@@ -181,6 +183,8 @@ defmodule BarkparkWeb.NonBinaryWriteParam500Test do
     # Uses the setup's task: the task birth fence rejects a near-duplicate
     # title, so a test that births a SECOND intake fixture fails in setup
     # rather than in the assertion under test.
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "POSITIVE CONTROL — an absent dataset still defaults to production and adopts",
          %{conn: conn, task: task, scope: scope} do
       resp =

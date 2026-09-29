@@ -40,6 +40,8 @@ defmodule BarkparkWeb.PulseChannelTest do
     assert {:ok, _socket} = connect(BarkparkWeb.PulseSocket, %{})
   end
 
+  # Plugins-off: the pulse plugin supervises Pulse.Metrics and mounts its routes
+  @tag :requires_plugins
   test "HTTP POST broadcasts the strike to subscribers, chg carried through" do
     {_reply, _socket} = join!("test-storm")
 
@@ -101,6 +103,8 @@ defmodule BarkparkWeb.PulseChannelTest do
   end
 
   describe "cost vitals fastlane" do
+    # Plugins-off: the pulse plugin supervises Pulse.Metrics and mounts its routes
+    @tag :requires_plugins
     test "a Metrics vitals tick reaches a JOINED channel as a push, never a crash" do
       {_reply, socket} = join!("test-storm")
 

@@ -777,6 +777,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       chat.unarchive chat.upload_attachment chat.get_attachment
     )
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "the `chat` noun is declared and names the SSE streaming carve-out", %{conn: conn} do
       manifest = capabilities(conn)
 
@@ -791,6 +793,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "chat noun summary must name the SSE streaming carve-out; got: #{inspect(noun["summary"])}"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "exactly the twelve non-streaming chat verbs are registered (events stays absent)",
          %{conn: conn} do
       manifest = capabilities(conn)
@@ -808,6 +812,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       refute Enum.any?(manifest["commands"], &(&1["id"] == "chat.events"))
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "every chat command is admin-tier (existence-hidden from anon/lower callers)",
          %{conn: conn} do
       manifest = capabilities(conn)
@@ -824,6 +830,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       end
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "chat verbs map to the shipped /v1/chat routes (method + path)", %{conn: conn} do
       manifest = capabilities(conn)
 
@@ -853,6 +861,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       end
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "session-scoped chat verbs carry the `id` path arg + their body args", %{conn: conn} do
       manifest = capabilities(conn)
 
@@ -892,6 +902,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     # token's base tier stays "none" (chat lifts no rank), but a `+chat`
     # capability rides alongside so project/2's chat_visible?/2 side-branch
     # projects the `chat` noun + its ten verbs — and ONLY the chat noun.
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a workspace token carrying only `chat` sees the chat noun WITHOUT any rank lift (D36 orthogonal)",
          %{conn: conn} do
       ws = Barkpark.TenancyFixtures.create_workspace!()
@@ -1182,6 +1194,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
                "it must be withheld unless ?views=1 is sent"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "?views=1 declares the frozen `views` descriptor on exactly the three brief-capable commands",
          %{conn: conn} do
       manifest =
@@ -1209,6 +1223,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "views key appeared on unexpected commands: #{inspect(declaring)}"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "task.get NEVER declares `views` — it is the full-only escape hatch", %{conn: conn} do
       # Both with and without the opt-in, task.get must stay views-free.
       default = capabilities(conn)
@@ -1245,6 +1261,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert json_response(with_views, 200)["etag"] == views_etag
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "manifest.schema.json wires `views` as an ADDITIVE optional command-level $def", %{
       conn: conn
     } do
@@ -1327,6 +1345,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert get_resp_header(plain, "etag") == get_resp_header(twin, "etag")
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "?chat=1 carries claude caps and empty-array codex (the degrade signal)",
          %{conn: conn} do
       body = caps_conn(conn, "?chat=1") |> json_response(200)
@@ -1360,6 +1380,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "an anonymous caller must not discover the chat surface via ?chat=1"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "chat and non-chat bodies get DISTINCT etags; the plain etag does NOT 304 ?chat=1",
          %{conn: conn} do
       plain = caps_conn(conn)
@@ -1468,6 +1490,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              """
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "the 16 commands that shipped mislabelled are present and now honest",
          %{conn: conn} do
       commands = capabilities(conn)["commands"]
@@ -1533,6 +1557,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     # `ReadOnlyHint: true` — a mutator advertised to every MCP client as a safe
     # read, and `bp`'s prod write confirmation skipped for it.
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "the plugin split is non-empty and every command in it reaches the wire with a BOOLEAN writes bit (the omission itself is caught by WritesFixturePlugin, not here)",
          %{conn: conn} do
       cmds = plugin_commands(conn)

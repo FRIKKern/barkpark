@@ -169,6 +169,8 @@ defmodule BarkparkWeb.Contract.ErrorEnvelopeRequestIdParityTest do
 
     # chat_host_controller.ex — 8 sites. `enroll/2`'s catch-all is FULLY
     # ANONYMOUS, so this is the cheapest reachable one.
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "chat_host_controller: enroll with no enrollment token", %{conn: conn} do
       resp = post(conn, "/v1/chat-host/enroll", %{})
 
