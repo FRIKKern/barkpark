@@ -82,6 +82,18 @@ defmodule Barkpark.PortableDoc.TaskResolver do
     end
   end
 
+  @doc """
+  Every query map `resolve/3` would fetch in `blocks`, as
+  `{row_queries, agg_queries}` — the SAME traversal and type guards the
+  resolver itself fetches under, so a caller asking "which live task queries
+  does this paper hold?" (`Barkpark.Tasks.PaperRefresh`, the task-transition →
+  paper cache-bust) can never disagree with what a read would resolve.
+  Author-pinned blocks (no `query`) contribute nothing. Duplicates are kept.
+  """
+  @spec query_maps(term()) :: {[map()], [map()]}
+  def query_maps(blocks) when is_list(blocks), do: collect_query_maps(blocks, {[], []})
+  def query_maps(_blocks), do: {[], []}
+
   # Collect every query map `resolve_block/3` would fetch, walking the same
   # three container shapes (`children` / `blocks` / `columns`). Row and
   # aggregate queries pool separately — they run against different fetchers.

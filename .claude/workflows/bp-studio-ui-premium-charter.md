@@ -827,3 +827,14 @@ pushes+PRs). The lead closes each slice's merge-gated criterion on merge. Review
 folds the merged results, the debrief, and the final grade back into this log.
 `sup-w4-pixel-evidence` (D32) stays separate; it + the user re-verdict remain the
 epic's only non-Wave-5 debt.
+
+### Wave 4 close-out — `sup-w4-pixel-evidence` folded into the crit-4 human-gate pack (2026-09-29)
+
+This adds the AFTER pack to the Proof 4 human-gate pack (Wave 3 QA close-out above). The evidence of record is the task's stamped criteria 0–3 (lead-studio-r22, 2026-09-23): `bp task get sup-w4-pixel-evidence -o json`, then read `.doc.content.acceptance_criteria[].evidence`.
+
+- **Preflight.** The guerrilla Studio footer read `v0.2.26.4113 · b91641361`, and `status.json` gave commit `b91641361`. The ladder merge `0838cde02` (#2146) is an ancestor of that commit.
+- **AFTER pack** (D24e login-ticket harness; theme set through `data-theme` only, per D27a; session theme fjord; 1440×900): `c1-desk-pane1-dark.png` and `c1-desk-pane1-light.png`, written to the lead's scratchpad `orchestrate/tmp/lead-studio-w6/` together with `probe.js`. They are not committed and not on this machine. The computed-style numbers below are the durable proof. Re-shoot through D24e if pixels are needed.
+- **The user's bug is gone.** At rest, the Projects row (`a.pane-item.nav-plugin-entry`) has the same colour as its sibling Papers row (`.pane-item`) and as `--fg-muted`: dark `rgb(146,156,159)`, light `rgb(99,106,109)`. Before the fix (Wave 4 log above) Projects was `rgb(242,242,242)` against `rgb(161,161,170)` in dark and `rgb(9,9,11)` against `rgb(110,110,119)` in light. The Projects row now carries `.pane-item-chevron`, at opacity 0 when at rest.
+- **The ladder is live.** On hover the chevron goes from opacity 0 to 1, text lifts to `--fg` (dark `rgb(229,234,240)`), and siblings stay put; moving the hover to Papers flips the chevrons back (control). Doc titles rest at `--fg-muted` and lift to `--fg` on hover. In the drill trail the ancestor pane sits on `--bg-card`, the selected row on `--bg-accent` with a 3px `--primary` bar, and the focus pane on `--surface-raised`. This holds in both modes.
+
+Epic `studio-ui-premium` criterion 3 (the user's re-verdict above 3/10) remains the **owner's** call. This pack is input to it; it is not a stamp. `sup-w4-pixel-evidence` criterion 4 is paid by this entry. The lead closes the row after review.

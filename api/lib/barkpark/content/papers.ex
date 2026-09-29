@@ -42,6 +42,7 @@ defmodule Barkpark.Content.Papers do
   alias Barkpark.Content.Papers.{BlockOps, Hollow}
   alias Barkpark.PortableDoc.{BodyWalk, HtmlSanitizer, Projection, Render, Synthesis}
   alias Barkpark.Repo
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -246,7 +247,8 @@ defmodule Barkpark.Content.Papers do
             {:blocks, blocks, rendered}
 
           {:stale, rendered} ->
-            refresh_html_cache(paper, blocks, rendered)
+            # A held managed instance serves the derived HTML without persisting it (C083).
+            Door.admit_or_skip(fn -> refresh_html_cache(paper, blocks, rendered) end, :ok)
             {:blocks, blocks, rendered}
 
           :divergent ->
@@ -1383,8 +1385,11 @@ defmodule Barkpark.Content.Papers do
   # A reader's dataset is the implicit task-query dataset. Explicit authoring
   # stays authoritative: row queries keep a top-level `dataset`, while
   # aggregate queries keep `filter.dataset`. Stamping both harmlessly lets the
-  # two closed query shapes share one fail-closed defaulting seam.
-  defp task_query_dataset(query, dataset) when is_map(query) and is_binary(dataset) do
+  # two closed query shapes share one fail-closed defaulting seam. Public
+  # (`@doc false`) so `Barkpark.Tasks.PaperRefresh` defaults a paper's task
+  # queries exactly as this read does, rather than re-deriving the rule.
+  @doc false
+  def task_query_dataset(query, dataset) when is_map(query) and is_binary(dataset) do
     query
     |> Map.put_new("dataset", dataset)
     |> Map.update("filter", %{"dataset" => dataset}, fn
@@ -1393,7 +1398,7 @@ defmodule Barkpark.Content.Papers do
     end)
   end
 
-  defp task_query_dataset(query, _dataset), do: query
+  def task_query_dataset(query, _dataset), do: query
 
   @doc """
   Pre-resolve every note-embed (`![[note]]`) target in a block list into the

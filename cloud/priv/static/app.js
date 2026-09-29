@@ -8085,8 +8085,8 @@
     // disagreement, verbatim Go phrasing, instead of the false all-clear
     // "A newer release is available" over a box no release can describe.
     if (kind === "behind") {
-      var commitWhy = commitBehindDetail(bp);
-      if (commitWhy && bp.update_state !== "behind") return { role: "info", label: "Update available", detail: commitWhy };
+      var commitWhy = commitBehindParts(bp);
+      if (commitWhy.fact && bp.update_state !== "behind") return { role: "info", label: "Update available", detail: commitWhy.fact, note: commitWhy.note };
       return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
     }
     if (kind === "removing") return { role: "info", label: "Removing", detail: "Tearing down the server" };
@@ -8182,12 +8182,24 @@
   // (or `statusOf`'s shape, which is the same `{role,label,detail}` plus a
   // detail segment); `extraClass` rides after the role; `attrs` is a pre-escaped
   // attribute string for the callers that need a title / aria-label.
+  //
+  // SHAPE: the CAPSULE is `.status-pill-chip` (dot + label, one line, never
+  // wraps) and `.status-pill-detail` is PROSE beside it, outside the chrome.
+  // The detail used to sit inside the capsule, so a two-clause reason painted
+  // a tinted balloon around a bold word and a paragraph on every card; the
+  // outer `.status-pill` is now a layout row that paints nothing itself.
+  // `meta.note` is the SECONDARY clause — diagnostic context nobody acts on
+  // from a list — and it rides as the chip's native hover title, never as
+  // inline prose. Hover-only is the right place ONLY for a note: the reason
+  // itself (meta.detail) stays visible wherever the host asks for it.
   function statusMetaPill(meta, extraClass, attrs) {
     return '<span class="status-pill status-pill--' + esc(meta.role) +
       (meta.variant ? STATUS_PILL_VARIANT_CLASS[meta.variant] || "" : "") +
       (extraClass ? " " + extraClass : "") + '"' + (attrs || "") + ">" +
-      '<span class="status-pill-dot" aria-hidden="true"></span>' +
-      '<span class="status-pill-label">' + esc(meta.label) + "</span>" +
+      '<span class="status-pill-chip"' + (meta.note ? ' title="' + esc(meta.note) + '"' : "") + ">" +
+        '<span class="status-pill-dot" aria-hidden="true"></span>' +
+        '<span class="status-pill-label">' + esc(meta.label) + "</span>" +
+      "</span>" +
       (meta.detail ? '<span class="status-pill-detail">' + esc(meta.detail) + "</span>" : "") +
     "</span>";
   }
@@ -8196,8 +8208,21 @@
   // the semantic role. This is the only status affordance in a fleet row and
   // the instance-detail header (charter decision 6). It is now one consumer of
   // statusMetaPill among several rather than its own component.
-  function statusPill(bp, extraClass) {
-    return statusMetaPill(statusOf(bp), extraClass);
+  // `opts.detail === false` renders the chip alone — for a host that already
+  // says WHY in prose of its own (the attention queue's `.attention-reason`),
+  // so one row never prints the same sentence twice. `opts.tooltip === true`
+  // renders the chip alone too, but folds the whole sentence (detail + note)
+  // into the chip's hover title — for a SUMMARY host (the Overview card) whose
+  // info-level reason is already said in the attention queue above it.
+  function statusPill(bp, extraClass, opts) {
+    var meta = statusOf(bp);
+    if (opts && opts.tooltip === true) {
+      var full = meta.detail ? (meta.note ? meta.detail + " · " + meta.note : meta.detail) : meta.note;
+      meta = { role: meta.role, label: meta.label, note: full || "" };
+    } else if (opts && opts.detail === false) {
+      meta = { role: meta.role, label: meta.label, note: meta.note || "" };
+    }
+    return statusMetaPill(meta, extraClass);
   }
 
   // A deploy-ledger row's status chip — the deploy-side consumer of the same
@@ -8306,17 +8331,26 @@
   // The WHY for a row behind BY COMMITS — the sentence that keeps the
   // release-tag grade from reading as an all-clear beside it. Verbatim Go
   // phrasing (behindDetail): naming the disagreement IS the finding.
-  function commitBehindDetail(bp) {
+  // The two halves of that sentence, separately: `fact` is what an operator
+  // acts on ("3 commits behind main"); `note` is the diagnostic clause that
+  // explains why the release-tag grade disagrees. The Overview shows the fact
+  // inline and keeps the note as the chip's hover title — it is jargon nobody
+  // acts on from a queue — while the fleet mono line, the instance rail and
+  // updatePanelHtml still carry the full sentence through commitBehindDetail.
+  function commitBehindParts(bp) {
     bp = bp || {};
-    if (!behindByCommits(bp)) return "";
-    var reason = bp.commit_distance == null
+    if (!behindByCommits(bp)) return { fact: "", note: "" };
+    var fact = bp.commit_distance == null
       ? "behind main by an unmeasured number of commits"
       : String(bp.commit_distance) + " commits behind main";
     var grade = String(bp.update_state || "").trim();
-    if (grade && grade !== "behind") {
-      reason += " · release-tag grade still reads " + grade;
-    }
-    return reason;
+    var note = grade && grade !== "behind" ? "release-tag grade still reads " + grade : "";
+    return { fact: fact, note: note };
+  }
+  function commitBehindDetail(bp) {
+    var parts = commitBehindParts(bp);
+    if (!parts.fact) return "";
+    return parts.note ? parts.fact + " · " + parts.note : parts.fact;
   }
   // The mono-line/rail segment: the full disagreement sentence when the row is
   // behind by commits, the labelled cell otherwise. "" collapses the segment.
@@ -9258,13 +9292,56 @@
       bp.deprovision_status === "failed";
     return !!bp.host && !bp.suspended && !removing;
   }
-  // Pure: one attention-queue row — pill + clickable name + reason + View
-  // instance + (when live) Open Studio. Open Studio reuses the .fleet-open-studio
+  // Pure: one attention-queue row — chip-only pill + clickable name + reason
+  // + View instance + (when live) Open Studio. The reason column IS the pill's
+  // detail sentence (attentionReason reads statusOf(bp).detail), so the pill
+  // renders without it — the WHY is said once, in the column built to wrap it. Open Studio reuses the .fleet-open-studio
   // hook so wireFleetRows wires it (stopPropagation-safe); the name/View links
   // are plain hash navigations (no JS wiring).
+  // Pure: collapse the queue's IDENTICAL info-level rows into one group item.
+  // Five boxes that are all "Update available · 3 commits behind main" are one
+  // fact about the fleet, not five rows with five View-instance buttons; a
+  // warn/danger row is never grouped (each one is its own emergency), and an
+  // info row whose sentence differs stays on its own. Returns items in the
+  // queue's order — a group sits where its first member sat.
+  function attentionGroups(queue) {
+    var items = [], byKey = {};
+    (queue || []).forEach(function (bp) {
+      var s = statusOf(bp);
+      if (s.role !== "info") { items.push({ bp: bp }); return; }
+      var key = s.label + "|" + (s.detail || "") + "|" + (s.note || "");
+      if (byKey[key]) { byKey[key].bps.push(bp); return; }
+      var g = { group: true, role: s.role, label: s.label, reason: s.detail || "", note: s.note || "", bps: [bp] };
+      byKey[key] = g; items.push(g);
+    });
+    return items.map(function (it) { return it.group && it.bps.length === 1 ? { bp: it.bps[0] } : it; });
+  }
+  // Pure: one grouped attention row — the shared chip, "N instances" as the
+  // name, the shared reason once, then every member as its own link. The
+  // group's action is the fleet filter that names the same set; each member
+  // still opens from its own name.
+  function attentionGroupRowHtml(g) {
+    var names = g.bps.map(function (bp) {
+      return '<a class="attention-group-name" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>";
+    }).join("");
+    return '<div class="attention-row attention-row--group" data-ids="' + esc(g.bps.map(function (b) { return b.id; }).join(" ")) + '">' +
+      statusMetaPill({ role: g.role, label: g.label, note: g.note }) +
+      '<div class="attention-main">' +
+        '<span class="attention-name">' + g.bps.length + " instances</span>" +
+        '<span class="attention-reason">' + esc(g.reason || "Need a look.") + "</span>" +
+        '<span class="attention-group-names">' + names + "</span>" +
+      "</div>" +
+      '<div class="attention-acts">' +
+        '<a class="btn btn-sm" href="#fleet/attention">View in fleet</a>' +
+      "</div>" +
+    "</div>";
+  }
+  function attentionItemHtml(it) {
+    return it.group ? attentionGroupRowHtml(it) : attentionRowHtml(it.bp);
+  }
   function attentionRowHtml(bp) {
     return '<div class="attention-row" data-id="' + esc(bp.id) + '">' +
-      statusPill(bp) +
+      statusPill(bp, "", { detail: false }) +
       '<div class="attention-main">' +
         '<a class="attention-name" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>" +
         '<span class="attention-reason">' + esc(attentionReason(bp)) + "</span>" +
@@ -9363,7 +9440,11 @@
       banner +
       '<div class="instance-card-head">' +
         '<a class="instance-card-name" href="#instance/' + esc(bp.id) + '"><bdi>' + esc(bp.name) + "</bdi></a>" +
-        providerChipHtml(bp.provider) + statusPill(bp) +
+        // Severity decides the card's prose: a warn/danger reason is why the
+        // card is tinted and stays inline; an info reason ("Update available
+        // · 3 commits behind main") is news the attention queue above already
+        // carries, so the card shows the chip and keeps the sentence on hover.
+        providerChipHtml(bp.provider) + statusPill(bp, "", { tooltip: statusOf(bp).role === "info" }) +
       "</div>" +
       fleetInfraLine(bp) +
       '<div class="instance-card-url">' + esc(displayUrl(bp)) + "</div>" +
@@ -9731,14 +9812,19 @@
       // The queue is ONLY the instances that actually need an operator — the
       // attention bucket (ranks 1–5), most-urgent first, capped. The "View all"
       // target (#fleet/attention) names the SAME set.
-      var queue = filterFleet(list, "attention").sort(attentionCompare).slice(0, 6);
+      // Identical info-level rows collapse into one group BEFORE the cap, so
+      // five "3 commits behind main" boxes cost one slot, not five.
+      var queue = attentionGroups(filterFleet(list, "attention").sort(attentionCompare)).slice(0, 6);
+      // "View all" appears only when the cap hid something: count MEMBERS, not
+      // items, or a five-box group would offer a link to nothing more.
+      var shown = queue.reduce(function (n, it) { return n + (it.group ? it.bps.length : 1); }, 0);
       var queueHtml;
       if (queue.length) {
         queueHtml = '<section class="overview-attention">' +
           '<div class="overview-sub"><h2>Needs attention</h2>' +
-            (sum.attention > queue.length ? '<a href="#fleet/attention">View all</a>' : "") +
+            (sum.attention > shown ? '<a href="#fleet/attention">View all</a>' : "") +
           "</div>" +
-          '<div class="attention-card">' + queue.map(attentionRowHtml).join("") + "</div>" +
+          '<div class="attention-card">' + queue.map(attentionItemHtml).join("") + "</div>" +
         "</section>";
       } else {
         // Nothing needs action. Stay honest when boxes are still in flight —
@@ -16546,7 +16632,11 @@
     return kind || "";
   }
 
-  // Pure: one rung chip in the v4 rung-pill grammar (.dom-rung, gr-p3): ok → ●,
+  // Pure: one rung ROW — the capsule (.dom-rung: glyph + label, one line) and
+  // the server's evidence (.dom-rung-code) as SIBLINGS, never the evidence
+  // inside the capsule (that shape painted a 100px-tall balloon in the rail).
+  // The listitem is the row, so the accessible name covers both halves.
+  // Rung-pill grammar (.dom-rung, gr-p3): ok → ●,
   // failed → ✕, active → ◐, unknown → ?, waiting → ·, proxied → ● info
   // (informational — the domain is fronted by a proxy, so origin-pointing is a
   // mode, not a check). The accessible name carries the state in WORDS, never
@@ -16574,10 +16664,12 @@
       : row.role === "active" ? "in progress"
       : row.role === "unknown" ? "could not check"
       : blocked ? "not checked" : "waiting";
-    return '<span class="dom-rung dom-rung--' + esc(row.role) + '" role="listitem" aria-label="' +
+    return '<span class="dom-rung-row" role="listitem" aria-label="' +
       esc(row.label + " — " + state) + '">' +
-      '<span class="dom-rung-glyph" aria-hidden="true">' + glyph + "</span>" +
-      esc(row.label) +
+      '<span class="dom-rung dom-rung--' + esc(row.role) + '">' +
+        '<span class="dom-rung-glyph" aria-hidden="true">' + glyph + "</span>" +
+        esc(row.label) +
+      "</span>" +
       (showEvidence && row.evidence ? '<span class="dom-rung-code">' + esc(row.evidence) + "</span>" : "") +
       "</span>";
   }
@@ -29357,6 +29449,14 @@
       // Transient/rate-limited failure — nothing changed; re-arm and explain.
       if (approveBtn) { approveBtn.disabled = false; approveBtn.textContent = "Approve sign-in"; }
       if (denyBtn) { denyBtn.disabled = false; denyBtn.textContent = "Deny"; }
+      if (r.status === 403 && r.data && r.data.error === "team_mismatch") {
+        // The CLI bound this login to a team the signed-in account is not in.
+        // Nothing was stamped and the request stays pending, so a member of that
+        // team can still approve it; this account can only deny it.
+        toast({ kind: "error", title: "Not your team",
+          body: "This sign-in is for a team your account isn't a member of. Ask a member of that team to approve it, or deny it." });
+        return;
+      }
       if (r.status === 429) {
         // Honest: the limiter tripped, not a network failure. Nothing changed —
         // the buttons are re-armed so the user can retry after a moment.
@@ -31360,6 +31460,7 @@
       overviewHeadChipsHtml: overviewHeadChipsHtml, overviewSlotsModel: overviewSlotsModel,
       overviewSlotsHtml: overviewSlotsHtml, attentionReason: attentionReason,
       attentionCanStudio: attentionCanStudio, attentionRowHtml: attentionRowHtml,
+      attentionGroups: attentionGroups, attentionGroupRowHtml: attentionGroupRowHtml, attentionItemHtml: attentionItemHtml,
       instanceCardStats: instanceCardStats, instanceCardHtml: instanceCardHtml,
       overviewInstancesHtml: overviewInstancesHtml, runwayStepModel: runwayStepModel,
       runwayProgressText: runwayProgressText, runwayCardHtml: runwayCardHtml,
@@ -32006,7 +32107,7 @@
       // stay browser-verified. archivesModel now carries the notConfigured state.
       fleetMetaHtml: fleetMetaHtml, fleetAutoupdateText: fleetAutoupdateText,
       fleetVerifyText: fleetVerifyText,
-      commitBehindCell: commitBehindCell, commitBehindDetail: commitBehindDetail,
+      commitBehindCell: commitBehindCell, commitBehindDetail: commitBehindDetail, commitBehindParts: commitBehindParts,
       fleetCommitDistanceText: fleetCommitDistanceText,
       fleetUpdateChip: fleetUpdateChip, fleetUpdateChipHtml: fleetUpdateChipHtml,
       withoutUpdateState: withoutUpdateState, fleetRow: fleetRow,

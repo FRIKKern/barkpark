@@ -180,6 +180,13 @@ config :barkpark, :search_analytics_async, false
 # `Barkpark.Webhooks.Dispatcher.dispatch_audit_async/1`.
 config :barkpark, :audit_dispatch_async, false
 
+# Task transition → paper cache-bust (`Barkpark.Tasks.PaperRefresh`) is OFF by
+# default in tests: its async spawn would leak queries past a test's sandbox
+# owner (the audit-dispatch deadlock above), and inline it would add queries to
+# every task CAS write the suite's query-count locks measure. The tests that
+# own the behaviour switch it to `:sync` (paper_refresh_test.exs).
+config :barkpark, :task_paper_refresh, :off
+
 # Self-update stays OFF (no Checker in the tree) and the upstream client is
 # the scripted Fake — tests prime it per-call via Application env.
 config :barkpark, Barkpark.SelfUpdate,

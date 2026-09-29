@@ -337,7 +337,7 @@ func resolveArchiveTarget(out *writer, g globals, kind string, a *hzArgs, zone s
 }
 
 // hzBundleSpec reads the resurrection shape hints off a live hcloud server:
-// region (location, else the datacenter's location) and server-type slug. A nil
+// region (the server's location) and server-type slug. A nil
 // server or missing fields yield empty strings — the resurrect path tolerates
 // empty hints and re-shapes onto the target provider's nearest size.
 func hzBundleSpec(srv *hcloud.Server) cloud.BundleSpec {

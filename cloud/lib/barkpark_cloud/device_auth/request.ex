@@ -27,6 +27,11 @@ defmodule BarkparkCloud.DeviceAuth.Request do
 
     belongs_to :user, BarkparkCloud.Accounts.User
 
+    # The team (workspace) this login is FOR, when the CLI named one at start.
+    # nil = unbound (mint the approver's primary team). When set, only a member
+    # of this team may approve (DeviceAuth.approve/2 refuses anyone else).
+    belongs_to :requested_team, BarkparkCloud.Accounts.Team
+
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -43,6 +48,7 @@ defmodule BarkparkCloud.DeviceAuth.Request do
       :user_agent,
       :status,
       :user_id,
+      :requested_team_id,
       :expires_at
     ])
     |> validate_required([:device_code_hash, :user_code_hash, :status, :expires_at])
@@ -59,5 +65,6 @@ defmodule BarkparkCloud.DeviceAuth.Request do
     # cannot) cover that path; it is left unchanged, and approve/2 only ever
     # writes a user_id it just resolved from a live session.
     |> assoc_constraint(:user)
+    |> assoc_constraint(:requested_team)
   end
 end

@@ -216,6 +216,12 @@ nobody can reproduce.
 
 ## Baselines
 
+The JPEGs in `baselines/` are **Git LFS** objects (`.gitattributes`,
+task-8edf208dd6f16579); the `*.report.json` files stay plain text. To get the
+pixels locally: `git lfs install && git lfs pull --include 'tooling/paper-excellence/rig/baselines/*'`.
+`gate.sh`, with or without `--check`, reads only the reports, so it runs on
+pointers. In CI only the re-capture arm checks out with LFS.
+
 `baselines/` holds one panel per committed fixture — **45 files on 2026-09-12**,
 and that number is derived, not decreed: `2 schemes x 2 widths x 9 fixtures = 36`
 JPEGs plus one `report.json` each. Re-derive it rather than trusting this

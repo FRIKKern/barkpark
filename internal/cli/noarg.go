@@ -39,6 +39,19 @@ func LoadFailureAdvice(baseURL string) string {
 	return fmt.Sprintf("Check that %s is reachable, then run `bp doctor` to diagnose the connection.", baseURL)
 }
 
+// NoServerAdvice is the menu every no-server state prints (bare `bp` on a fresh
+// install, and any manifest verb such as `bp task ready` refused for lack of a
+// server). It names Barkpark Cloud as a first-class path BESIDE the local and
+// self-hosted ones, never instead of them — bp-login-ux-epic criterion 0: every
+// unauthenticated state presents "Log in to Barkpark Cloud" without obscuring
+// the other choices. Each line is indented two spaces so it reads as a block
+// under whatever headline the caller prints.
+func NoServerAdvice() string {
+	return "  Log in to Barkpark Cloud:             bp login\n" +
+		"  connect to a server or bring one up:  bp setup\n" +
+		"  one-off call:                         pass -s <url> / set BARKPARK_API_URL"
+}
+
 // isLocalTarget reports whether baseURL points at a loopback / local-dev host.
 // A parse failure or an empty host is treated as local — the historical default
 // floor is localhost:4000, so an unparseable target is far more likely a local
