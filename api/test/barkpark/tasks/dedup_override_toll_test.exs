@@ -67,6 +67,8 @@ defmodule Barkpark.Tasks.DedupOverrideTollTest do
   end
 
   describe "a second same-title assertion has to be explained" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the third copy of one title, overriding two predecessors with no reason, is REFUSED",
          %{scope: scope} do
       # Copy 1 — nothing to override yet.
@@ -120,6 +122,8 @@ defmodule Barkpark.Tasks.DedupOverrideTollTest do
       assert doc.content["distinct_from_reason"]["r-one"] =~ "API half"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "one reason copy-pasted across both ids is REFUSED as the bulk assertion it is",
          %{scope: scope} do
       assert {:ok, _} = create("d-one", @title, scope, %{"parent_id" => "epic-a"})
@@ -145,6 +149,8 @@ defmodule Barkpark.Tasks.DedupOverrideTollTest do
       assert payload.message =~ "d-two"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "an empty-string reason is no reason at all", %{scope: scope} do
       assert {:ok, _} = create("b-one", @title, scope, %{"parent_id" => "epic-a"})
 
@@ -210,6 +216,8 @@ defmodule Barkpark.Tasks.DedupOverrideTollTest do
   end
 
   describe "the toll is on the OVERRIDE path only" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a create refused on its merits still gets the ordinary refusal", %{scope: scope} do
       assert {:ok, _} = create("m-one", @title, scope, %{"parent_id" => "epic-a"})
 

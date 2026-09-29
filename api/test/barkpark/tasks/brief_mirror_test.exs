@@ -293,6 +293,8 @@ defmodule Barkpark.Tasks.BriefMirrorWiringTest do
     |> get_in(["content", Access.at(0), "value"])
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a description write re-syncs the stored brief, and leaves other blocks alone" do
     id = "brief-mirror-wiring-#{System.unique_integer([:positive])}"
 
@@ -360,6 +362,8 @@ defmodule Barkpark.Tasks.BriefMirrorWiringTest do
            "the hand-authored block was rewritten by the re-sync"
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "lossy rendering, read back from the store: the brief drops the code span, the description round-trips sha-identical" do
     # task-d0c4a5061e04fdcc criterion 1, in the test database rather than on the
     # production ledger. Written through the real create door, READ BACK with
@@ -405,6 +409,8 @@ defmodule Barkpark.Tasks.BriefMirrorWiringTest do
            "the stored brief is not the documented lossy rendering of the description"
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "the create_document door is wired too" do
     # Discovered by mutation: neutering the create_document call site left the
     # whole suite green, because the test above reaches storage through

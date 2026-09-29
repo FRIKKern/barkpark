@@ -96,6 +96,8 @@ defmodule Barkpark.Tasks.DraftTerminalFenceTest do
 
   # ── (a) THE HOLE — refused ───────────────────────────────────────────────
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "the 2026-07-23 witness shape: a never-published draft moved open → cancelled " <>
          "with no closed_by is REFUSED",
        %{scope: scope} do

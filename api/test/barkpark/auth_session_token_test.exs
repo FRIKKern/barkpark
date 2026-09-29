@@ -339,6 +339,8 @@ defmodule Barkpark.AuthSessionTokenTest do
 
     defp config_path(sid), do: Path.join(System.tmp_dir!(), "barkpark-claude-#{sid}.mcp.json")
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "spawn mints + writes the config; close (terminate WITH port) revokes + removes it",
          %{minter: minter} do
       put_chat_config(command: {"cat", []})
@@ -379,6 +381,8 @@ defmodule Barkpark.AuthSessionTokenTest do
       refute File.exists?(path)
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "a subprocess exit (terminate WITHOUT port) also revokes + removes",
          %{minter: minter} do
       put_chat_config(command: {"sh", ["-c", "exit 0"]})
@@ -399,6 +403,8 @@ defmodule Barkpark.AuthSessionTokenTest do
       refute File.exists?(config_path(sid))
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "no minter ⇒ no mint, no config — the chat spawns exactly as before",
          _ctx do
       put_chat_config(command: {"cat", []})
@@ -413,6 +419,8 @@ defmodule Barkpark.AuthSessionTokenTest do
       ClaudeChat.close(session)
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "a refused mint fails SOFT — the session still spawns, without hands",
          %{ws: ws} do
       {:ok, reader} =

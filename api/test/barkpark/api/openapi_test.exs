@@ -155,6 +155,8 @@ defmodule Barkpark.Api.OpenApiTest do
     assert Enum.all?(op["parameters"], fn p -> p["in"] != "path" or p["required"] == true end)
   end
 
+  # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+  @tag :requires_plugins
   test "task.ready exposes an optional integer offset query parameter", %{spec: spec} do
     parameters = get_in(spec, ["paths", "/v1/tasks/ready", "get", "parameters"])
 
@@ -165,6 +167,8 @@ defmodule Barkpark.Api.OpenApiTest do
     assert offset["schema"]["type"] == "integer"
   end
 
+  # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+  @tag :requires_plugins
   test "task.ready exposes an optional closure order query parameter", %{spec: spec} do
     parameters = get_in(spec, ["paths", "/v1/tasks/ready", "get", "parameters"])
     order = Enum.find(parameters, &(&1["in"] == "query" and &1["name"] == "order"))

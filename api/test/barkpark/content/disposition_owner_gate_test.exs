@@ -80,6 +80,8 @@ defmodule Barkpark.Content.DispositionOwnerGateTest do
   end
 
   describe "c2 — an owner that is not a registered durable role is REFUSED" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a well-shaped garbage slug is refused, and the 422 names the registry",
          %{scope: scope} do
       id = uniq("owner-garbage")
@@ -97,6 +99,8 @@ defmodule Barkpark.Content.DispositionOwnerGateTest do
       refute Map.has_key?(content_of(id, scope), @owner_key)
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the expiring wave-N shape is refused, naming the ruling's reason", %{scope: scope} do
       id = uniq("owner-wave")
       mk_task!(id, scope)
@@ -109,6 +113,8 @@ defmodule Barkpark.Content.DispositionOwnerGateTest do
       refute Map.has_key?(content_of(id, scope), @owner_key)
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a ledger task id in the owner slot is refused as a task id", %{scope: scope} do
       id = uniq("owner-taskid")
       mk_task!(id, scope)
@@ -119,6 +125,8 @@ defmodule Barkpark.Content.DispositionOwnerGateTest do
       assert message =~ "TASK ID"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the fence runs on the createOrReplace and replace doors too", %{scope: scope} do
       # A patch-only fence leaves createOrReplace open, and createOrReplace is
       # the fleet's file-order shape (D53's lesson, re-derived).
@@ -148,6 +156,8 @@ defmodule Barkpark.Content.DispositionOwnerGateTest do
       assert {:error, {:invalid_task_content, %{@owner_key => _}}} = mutate([cor], scope)
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a BIRTH through createOrReplace cannot mint an unregistered owner", %{scope: scope} do
       # This guard deliberately does NOT head on `("task", nil, …), do: :ok`:
       # it judges the value being written, a question a birth can answer.

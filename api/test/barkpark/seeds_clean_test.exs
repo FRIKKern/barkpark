@@ -51,6 +51,8 @@ defmodule Barkpark.SeedsCleanTest do
     |> Enum.filter(fn t -> is_nil(t.revoked_at) and Auth.has_permission?(t, "admin") end)
   end
 
+  # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+  @tag :requires_plugins
   test "seeds ONLY plugin schemas + welcome paper — no demo rows, no dev token" do
     output = run_clean()
 

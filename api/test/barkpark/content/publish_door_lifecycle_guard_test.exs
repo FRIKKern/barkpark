@@ -129,6 +129,8 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
 
   # ── (a) the resurrection probe, REFUSED ──────────────────────────────────
 
+  # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+  @tag :requires_plugins
   test "resurrection probe: republishing a stale open draft over a claimed+closed " <>
          "published row is refused — done survives, the claim survives",
        %{scope: scope} do
@@ -165,6 +167,8 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
 
   # ── (b) forged terminal state through the publish door, REFUSED ──────────
 
+  # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+  @tag :requires_plugins
   test "a done-carrying draft (born via :sync, exempt at the Writer seam) cannot flip " <>
          "an open published row to done via publish",
        %{scope: scope} do
@@ -329,6 +333,8 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
     }
   end
 
+  # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+  @tag :requires_plugins
   test "a sync-sourced publish cannot blank a met:true flag or a non-empty evidence " <>
          "string on a published task row",
        %{scope: scope} do
@@ -366,6 +372,8 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
              pub.content["acceptance_criteria"]
   end
 
+  # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+  @tag :requires_plugins
   test "APPLIER path: the exact createOrReplace+publish batch Sync.Applier synthesizes " <>
          "is refused when it would erase a stamped proof — and the refusal is :terminal, " <>
          "never a retry wedge",
@@ -394,6 +402,8 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
              pub.content["acceptance_criteria"]
   end
 
+  # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+  @tag :requires_plugins
   test "PUSHER path: the synthesized publish Sync.Pusher ships is refused by the REMOTE " <>
          "door (source: :api there) when it would erase a stamped proof",
        %{scope: scope} do
@@ -457,6 +467,8 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
   #     published-first fenced writers in #16479 — the door half above is the
   #     contract, this is its producer-side tripwire).
 
+  # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+  @tag :requires_plugins
   test "a github-sourced publish cannot blank a met:true flag or a non-empty evidence " <>
          "string — the criteria fence is reached for :github",
        %{scope: scope} do
@@ -490,6 +502,8 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
              pub.content["acceptance_criteria"]
   end
 
+  # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+  @tag :requires_plugins
   test "THE ARM DISCRIMINATOR: an open→done forge is REFUSED from :github and PASSES " <>
          "from :sync — the two arms cannot be collapsed silently",
        %{scope: scope} do
@@ -568,6 +582,8 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
   # The wall itself is the quiet arm: the refusal fires BEFORE the remedy and
   # the published row does not move until the remedy runs.
   describe "the stale-claim refusal prescribes a remedy that lands" do
+    # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+    @tag :requires_plugins
     test "discard-draft, then a bare-id patch: lands, claim byte-identical", %{scope: scope} do
       id = "pdg-remedy"
       mk_task!(id, scope)

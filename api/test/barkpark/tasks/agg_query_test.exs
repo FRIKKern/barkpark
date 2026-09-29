@@ -198,6 +198,8 @@ defmodule Barkpark.Tasks.AggQueryTest do
     assert is_list(spark["spark"]) and Enum.sum(spark["spark"]) == 2
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "Studio editor preview wires the scoped aggregate into the reader shape", %{
     proj_a: proj_a,
     scope_a: scope_a,

@@ -285,6 +285,8 @@ defmodule Barkpark.Tasks.StageOperatingInstructionTest do
       assert reload(task).content["operating_instruction"] == @index_convention
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the RAW /v1/data/mutate door refuses content.operating_instruction and names the verb",
          %{scope: scope} do
       # A guard at the verb's seam is one a raw patch walks past — which would

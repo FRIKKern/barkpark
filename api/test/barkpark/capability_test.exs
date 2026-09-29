@@ -145,6 +145,8 @@ defmodule Barkpark.CapabilityTest do
   end
 
   describe "the booted application (test env leaves every capability ON)" do
+    # Plugins-off: asserts the test env boots every capability ON
+    @tag :requires_plugins
     test "Studio Chat runs under the capability supervisor, which runs under the app" do
       top = Supervisor.which_children(Barkpark.Supervisor)
 

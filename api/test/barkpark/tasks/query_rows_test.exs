@@ -324,6 +324,8 @@ defmodule Barkpark.Content.PapersTaskResolveTest do
     %{scope: scope}
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "resolve_tasks_in_blocks fills a task-list block from live tasks", %{scope: scope} do
     epic = "epic-#{System.unique_integer([:positive])}"
 

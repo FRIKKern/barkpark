@@ -319,6 +319,8 @@ defmodule Barkpark.Sync.ApplierTest do
   end
 
   describe "dead-letter unblocks the cursor (no silent loss)" do
+    # Plugins-off: its poison fixtures are the tasks plugin content fence (terminal) and the sheets before_save gate (transient)
+    @tag :requires_plugins
     test "a poison event is recorded + dead-lettered at max_attempts, then the cursor advances past it",
          %{ctx: base_ctx} do
       ctx = Map.put(base_ctx, :max_attempts, 1)
@@ -353,6 +355,8 @@ defmodule Barkpark.Sync.ApplierTest do
       assert Cursor.get(ctx.source, ctx.dataset) == 8
     end
 
+    # Plugins-off: its poison fixtures are the tasks plugin content fence (terminal) and the sheets before_save gate (transient)
+    @tag :requires_plugins
     test "below max_attempts a poison halts and does NOT advance the cursor (invariant #3)",
          %{ctx: base_ctx} do
       ctx = Map.put(base_ctx, :max_attempts, 3)
@@ -374,6 +378,8 @@ defmodule Barkpark.Sync.ApplierTest do
     # advance the cursor past a possibly-VALID mutation — the exact w14 gap
     # (HANDOFF.md P1b follow-up). The two arms are proved in one test so the
     # discrimination itself is the assertion.
+    # Plugins-off: its poison fixtures are the tasks plugin content fence (terminal) and the sheets before_save gate (transient)
+    @tag :requires_plugins
     test "a TRANSIENT error (plugin before_save halt) HALTS + replays and NEVER advances; a TERMINAL error still dead-letters",
          %{ctx: base_ctx} do
       ctx = Map.put(base_ctx, :max_attempts, 1)

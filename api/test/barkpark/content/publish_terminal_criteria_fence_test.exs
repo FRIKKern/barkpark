@@ -163,6 +163,8 @@ defmodule Barkpark.Content.PublishTerminalCriteriaFenceTest do
 
   # ── (a) THE RESIDUE — reproduced, then refused ───────────────────────────
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "publishing a stale draft over a WITHDRAWN criterion on a done row is REFUSED",
        %{scope: scope} do
     id = "ptcf-witness"
@@ -204,6 +206,8 @@ defmodule Barkpark.Content.PublishTerminalCriteriaFenceTest do
     end
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "the refusal is the FENCE's own sentence, not a second spelling of it", %{scope: scope} do
     id = "ptcf-one-spelling"
     %{doc: closed, epoch: epoch} = closed_done_row!(id, scope)
