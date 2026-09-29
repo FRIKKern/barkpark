@@ -1522,6 +1522,13 @@ textarea.bp-canvas-island__input { resize: vertical; }
 .bp-paper-stats-config > .bp-paper-contextual-panel {
   max-height: none; overflow: visible;
 }
+/* Notes rows edit in place the same way (notes-inline.js); their controls sit
+   outside the authored rows like the Cards/Stats ones. */
+.bp-paper-contextual-controls.bp-paper-notes-config { top: auto; bottom: 100%; }
+.bp-paper-contextual-controls.bp-paper-notes-config[open] {
+  position: relative; inset: auto; width: 100%; max-width: none;
+}
+.bp-paper-notes-config > .bp-paper-contextual-panel { max-height: none; overflow: visible; }
 /* PM list items require a paragraph; reader items carry inline text. */
 .bp-paper-editor-body li > p { margin: 0; }
 /* No authored article palette: retain the browser's legacy paragraph rhythm. */

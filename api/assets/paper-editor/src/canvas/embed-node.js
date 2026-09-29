@@ -64,6 +64,7 @@ import { DEBOUNCE_MS } from "../contract.js";
 import { isStatsType, wireStatsInline } from "./stats-inline.js";
 import { canvasScope, coercePickerValue } from "./field-node.js";
 import { wireCardsInline } from "./cards-inline.js";
+import { wireNotesInline } from "./notes-inline.js";
 
 // The TipTap node NAMES are `bpSheet` / `bpEmbed` (the canvas naming convention, like
 // bpCode/bpDiagram/bpField). The portable-doc `bpType` stays "sheet" / "embed"
@@ -1424,7 +1425,8 @@ export const Fleet = Node.create({
         if (!cur || cur.type.name !== BP_FLEET_NODE_NAME) return;
         editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...cur.attrs, bpBlock: nextBlock }));
       };
-      const wireNative = isStatsType(bpType) ? wireStatsInline : bpType === "cards" ? wireCardsInline : null;
+      const wireNative = isStatsType(bpType) ? wireStatsInline : bpType === "cards" ? wireCardsInline
+        : bpType === "notes" ? wireNotesInline : null;
       const nativeInline = wireNative ? wireNative(body, {
         getBlock: currentBlock, isEditable: () => editor.isEditable,
         commit: commitBlock, undo: () => editor.commands.undo(), redo: () => editor.commands.redo(),
@@ -1485,10 +1487,11 @@ export const Fleet = Node.create({
           dom.classList.add("bp-paper-contextual-editor");
           if (isStatsType(bpType)) dom.classList.add("bp-canvas-stats-inline");
           nativeConfig = document.createElement("details");
-          nativeConfig.className = `bp-paper-contextual-controls bp-paper-${bpType === "cards" ? "cards" : "stats"}-config`;
+          const nativeKind = bpType === "cards" || bpType === "notes" ? bpType : "stats";
+          nativeConfig.className = `bp-paper-contextual-controls bp-paper-${nativeKind}-config`;
           const summary = document.createElement("summary");
           summary.className = "bp-paper-contextual-toggle";
-          summary.textContent = bpType === "cards" ? "Configure Cards" : "Configure Stats";
+          summary.textContent = { cards: "Configure Cards", notes: "Configure Notes" }[nativeKind] || "Configure Stats";
           nativeConfig.appendChild(summary);
           fleetEditor.el.classList.add("bp-paper-contextual-panel");
           nativeConfig.appendChild(fleetEditor.el);
