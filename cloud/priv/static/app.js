@@ -29449,6 +29449,14 @@
       // Transient/rate-limited failure — nothing changed; re-arm and explain.
       if (approveBtn) { approveBtn.disabled = false; approveBtn.textContent = "Approve sign-in"; }
       if (denyBtn) { denyBtn.disabled = false; denyBtn.textContent = "Deny"; }
+      if (r.status === 403 && r.data && r.data.error === "team_mismatch") {
+        // The CLI bound this login to a team the signed-in account is not in.
+        // Nothing was stamped and the request stays pending, so a member of that
+        // team can still approve it; this account can only deny it.
+        toast({ kind: "error", title: "Not your team",
+          body: "This sign-in is for a team your account isn't a member of. Ask a member of that team to approve it, or deny it." });
+        return;
+      }
       if (r.status === 429) {
         // Honest: the limiter tripped, not a network failure. Nothing changed —
         // the buttons are re-armed so the user can retry after a moment.

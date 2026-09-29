@@ -1202,6 +1202,14 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "shield, same raw-request remainder. Flip: picker drift."
     },
     %{
+      code: "invalid_team",
+      site: "router.ex POST /v1/auth/device/start",
+      reason:
+        "CLI-only: device/start is bp login's transport and team_id is a CLI-sent " <>
+          "binding; the console never starts a device login. Flip: the console " <>
+          "gains a device-start flow."
+    },
+    %{
       code: "invalid_token",
       site: "router.ex POST /v1/auth/reset",
       reason:

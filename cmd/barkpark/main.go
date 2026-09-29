@@ -73,18 +73,7 @@ func runTUI() int {
 	loaded, err := ds.LoadSchemas()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading schemas: %v\n", err)
-		switch {
-		case cli.FirstRun():
-			fmt.Fprintf(os.Stderr, "No server is configured yet — run `bp setup` to connect to one or bring one up.\n")
-		default:
-			// Note: the logged-in-to-Cloud-but-no-barkpark state is intercepted
-			// above (before the Connecting print), so it never reaches here.
-			// Advice is derived from the RESOLVED target: a remote host (guerrilla/
-			// prod) gets a reachability + `bp doctor` line; only a local-dev target
-			// gets the mix-phx.server remedy (it used to print unconditionally, which
-			// is useless advice when you are pointed at a remote server).
-			fmt.Fprintf(os.Stderr, "%s\n", cli.LoadFailureAdvice(cfg.BaseURL))
-		}
+		schemaLoadFailureAdvice(os.Stderr, cli.FirstRun(), cfg.BaseURL)
 		return 1
 	}
 	schemas = loaded
@@ -159,4 +148,24 @@ func headlessStatusCard(w io.Writer, cfg apiclient.Config, ds *apiclient.Client,
 		Counts:      counts,
 	}))
 	return 0
+}
+
+// schemaLoadFailureAdvice prints the remedy under "Error loading schemas". A
+// fresh install (firstRun) gets the no-server menu — Barkpark Cloud login
+// beside setup and the one-off flag, never a setup-only line; a configured
+// target gets advice derived from where it points. Extracted from runTUI so the
+// no-server wording is testable without a server or a TTY.
+func schemaLoadFailureAdvice(w io.Writer, firstRun bool, baseURL string) {
+	switch {
+	case firstRun:
+		fmt.Fprintf(w, "No server is configured yet. From here:\n%s\n", cli.NoServerAdvice())
+	default:
+		// Note: the logged-in-to-Cloud-but-no-barkpark state is intercepted
+		// in runTUI (before the Connecting print), so it never reaches here.
+		// Advice is derived from the RESOLVED target: a remote host (guerrilla/
+		// prod) gets a reachability + `bp doctor` line; only a local-dev target
+		// gets the mix-phx.server remedy (it used to print unconditionally, which
+		// is useless advice when you are pointed at a remote server).
+		fmt.Fprintf(w, "%s\n", cli.LoadFailureAdvice(baseURL))
+	}
 }

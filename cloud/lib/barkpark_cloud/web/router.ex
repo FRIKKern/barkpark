@@ -21,10 +21,10 @@ defmodule BarkparkCloud.Web.Router do
       GET     /activate            —         bp-login device-approve page → SPA shell
       POST    /v1/auth/login       —         email+password → {token, team_id} | {two_factor_required, challenge_token}
       POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id} (429 carries retry_after)
-      POST    /v1/auth/device/start   —      {client_name} → {device_code, user_code, verification_uri, ...}
+      POST    /v1/auth/device/start   —      {client_name, team_id?} → {device_code, user_code, verification_uri, ...}
       POST    /v1/auth/device/poll    —      {device_code} → pending | {token, team_id} | slow_down | expired
       POST    /v1/auth/device/inspect user   {user_code} → {client_name, ip_address, user_agent, expires_at}
-      POST    /v1/auth/device/approve user   {user_code} → {ok: true} (pending→approved CAS)
+      POST    /v1/auth/device/approve user   {user_code} → {ok: true} (pending→approved CAS) | 403 team_mismatch
       POST    /v1/auth/device/deny    user   {user_code} → {ok: true}
       GET     /v1/auth/oauth/providers           —  enabled OAuth providers (SPA buttons)
       GET     /v1/auth/oauth/:provider           —  302 → IdP authorize URL (signed, single-use state)
@@ -939,10 +939,12 @@ defmodule BarkparkCloud.Web.Router do
   ## Bearer session is the 2FA guarantee: the mint function itself doesn't enforce
   ## 2FA, so approve must NEVER run unauthenticated (charter decision 5).
 
-  ## POST /v1/auth/device/start {client_name}
+  ## POST /v1/auth/device/start {client_name, team_id?}
   ##   → 200 {device_code, user_code, verification_uri, verification_uri_complete,
   ##          interval, expires_in}
+  ##   → 422 {error: "invalid_team"} — team_id is not the UUID of an existing team
   ##   → 429 {error: "rate_limited"} — >10 starts/min for this IP
+  ##   team_id binds the login to one team: only a member of it may approve.
   post "/v1/auth/device/start" do
     ip = peer_ip(conn)
 
@@ -954,7 +956,8 @@ defmodule BarkparkCloud.Web.Router do
         attrs = %{
           client_name: conn.body_params["client_name"],
           ip_address: ip,
-          user_agent: get_first_header(conn, "user-agent")
+          user_agent: get_first_header(conn, "user-agent"),
+          team_id: conn.body_params["team_id"]
         }
 
         case DeviceAuth.start(attrs) do
@@ -969,6 +972,9 @@ defmodule BarkparkCloud.Web.Router do
               interval: interval,
               expires_in: expires_in
             })
+
+          {:error, :invalid_team} ->
+            json(conn, 422, %{error: "invalid_team"})
 
           {:error, _changeset} ->
             json(conn, 500, %{error: "server_error"})
@@ -1031,7 +1037,8 @@ defmodule BarkparkCloud.Web.Router do
                 client_name: row.client_name,
                 ip_address: row.ip_address,
                 user_agent: row.user_agent,
-                expires_at: row.expires_at
+                expires_at: row.expires_at,
+                team_id: row.requested_team_id
               })
 
             {:error, :expired_or_invalid} ->
@@ -1043,6 +1050,8 @@ defmodule BarkparkCloud.Web.Router do
 
   ## POST /v1/auth/device/approve {user_code} (require_user)
   ##   → 200 {ok: true}                   — pending→approved, user_id stamped
+  ##   → 403 {error: "team_mismatch"}     — the login is bound to a team this user is
+  ##     not a member of; nothing is stamped and the request stays pending
   ##   → 404 {error: "expired_or_invalid"} — unknown / already-approved / denied / expired
   ##   → 429 {error: "rate_limited"}      — >10 approve attempts/min for this user
   post "/v1/auth/device/approve" do
@@ -1060,6 +1069,7 @@ defmodule BarkparkCloud.Web.Router do
         :ok ->
           case DeviceAuth.approve(conn.body_params["user_code"] || "", user.id) do
             :ok -> json(conn, 200, %{ok: true})
+            {:error, :team_mismatch} -> json(conn, 403, %{error: "team_mismatch"})
             {:error, :expired_or_invalid} -> json(conn, 404, %{error: "expired_or_invalid"})
           end
       end
