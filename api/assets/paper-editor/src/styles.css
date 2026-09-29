@@ -789,7 +789,9 @@
  * Keep BYTE-IDENTICAL with the root.html.heex copy. */
 /* The highlight layer under the textarea: the SAME text painted with hljs-* tokens (code-highlight.js),
  * metrics identical to the island above it, which shows only its caret and selection. */
-.bp-canvas-code-hl {
+/* Scoped under the editor body so it outranks `.bp-paper-editor-body code` (inline-code size
+ * and padding): the layer must paint at the textarea's metrics or clicks land a line off. */
+.bp-paper-editor-body .bp-canvas-code-hl {
   position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 0; pointer-events: none;
   margin: 0; padding: var(--bp-codeblock-pad); box-sizing: border-box; overflow: hidden;
   display: block; font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
@@ -1548,9 +1550,9 @@ bp-paper-canvas .ProseMirror :is(.bp-table__th, .bp-table__td) { white-space: pr
    lifts the Chronicle navigation and title by one paragraph margin in Edit. */
 .bp-paper-editor > .bp-paper-edit-canvas:nth-child(1 of .bp-paper-edit-canvas, .bp-paper-edit-block) .bp-paper-editor-body .ProseMirror > :first-child:not(p) { margin-top: 0; }
 
-/* Configuration sits over the code frame without adding a publish-time gap. */
+/* Configuration sits in the gap above the code frame: no publish-time gap, and never over code text. */
 .bp-paper-editor-body pre.bp-canvas-code { position: relative; }
-.bp-canvas-code-lang { position: absolute; top: 0; right: 0; z-index: 2; max-width: 10em; opacity: 0; pointer-events: none; }
+.bp-canvas-code-lang { position: absolute; bottom: 100%; right: 0; z-index: 2; max-width: 10em; opacity: 0; pointer-events: none; }
 .bp-canvas-code:hover .bp-canvas-code-lang,
 .bp-canvas-code:focus-within .bp-canvas-code-lang { opacity: 1; pointer-events: auto; }
 /* Server-painted bodies own their rhythm; wrappers must allow margin collapse. */
