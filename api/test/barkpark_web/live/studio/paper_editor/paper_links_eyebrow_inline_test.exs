@@ -80,9 +80,9 @@ defmodule BarkparkWeb.Studio.PaperEditor.PaperLinksEyebrowInlineTest do
 
     assert cleared === Map.delete(first, "eyebrow")
 
-    # Only title, description and eyebrow are reference copy.
+    # Identity fields are never reference copy.
     assert {:error, {:source_validation, _}} =
-             Blocks.resolve_block_form([block], source(first, "meta", "75 changes"))
+             Blocks.resolve_block_form([block], source(first, "slug", "elsewhere"))
   end
 
   defp render_fields(block),

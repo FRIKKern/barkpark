@@ -2154,6 +2154,60 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-description-input {
 [data-paper-link-ref-description-empty="true"]:not(:focus-within) {
   height: 0; margin-block: 0 !important; padding-block: 0;
 }
+/* Inline reference copy (task-0b0790fbf00c236d): a chapters card's meta inside
+   its generated footer and a default card's reason after "Why it matters:".
+   The generated words stay under the open-paper overlay; only the authored run
+   takes the caret, and its textarea sits in the same line box. Form controls
+   reset text-transform in the UA sheet, so the uppercase eyebrow/footer copy
+   inherits it back explicitly. */
+.bp-paper-link-ref-meta-owner,
+.bp-paper-link-ref-reason-owner {
+  position: relative; z-index: 2; min-width: 0; pointer-events: none;
+}
+.bp-paper-link-ref-meta-owner { display: inline; }
+.bp-paper-link-ref-meta-paint-wrapper,
+.bp-paper-link-ref-reason-paint-wrapper { display: inline; }
+.bp-paper-edit-form.bp-paper-link-ref-meta-form,
+.bp-paper-edit-form.bp-paper-link-ref-reason-form {
+  display: inline; margin: 0; padding: 0; color: inherit; font: inherit;
+  pointer-events: auto;
+}
+.bp-paper-link-ref-meta-form:not(:focus-within) {
+  position: absolute; inset: 0 0 auto; clip-path: inset(50%);
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-link-ref-reason-form:not(:focus-within) {
+  position: absolute; inset: 0 0 auto; clip-path: inset(50%);
+  opacity: 0; pointer-events: none;
+}
+.bp-paper-link-ref-meta-owner:has(.bp-paper-link-ref-meta-form:focus-within)
+  > .bp-paper-link-ref-meta-paint-wrapper,
+.bp-paper-link-ref-reason-owner:has(.bp-paper-link-ref-reason-form:focus-within)
+  > .bp-paper-link-ref-reason-paint-wrapper { display: none; }
+[data-paper-link-ref-meta-paint],
+[data-paper-link-ref-reason-paint] {
+  display: inline; padding: 0; margin: 0; border: 0;
+  background: transparent; color: inherit; font: inherit; text-align: inherit;
+  letter-spacing: inherit; word-spacing: inherit; text-transform: inherit;
+  white-space: normal; cursor: text; pointer-events: auto;
+}
+[data-paper-link-ref-eyebrow-paint],
+textarea.bp-paper-inline-text.bp-paper-link-ref-eyebrow-input { text-transform: inherit; }
+[data-paper-link-card-editable] textarea.bp-paper-inline-text.bp-paper-link-ref-meta-input,
+[data-paper-link-card-editable] textarea.bp-paper-inline-text.bp-paper-link-ref-reason-input {
+  display: inline-block; vertical-align: baseline; field-sizing: content;
+  width: auto; min-width: 2ch; max-width: 100%; box-sizing: border-box;
+  margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: transparent; color: inherit; font: inherit; letter-spacing: inherit;
+  text-transform: inherit; resize: none; overflow: hidden; overflow-wrap: anywhere;
+  outline-offset: 3px;
+}
+[data-paper-link-ref-meta-paint]:focus-visible,
+[data-paper-link-ref-reason-paint]:focus-visible,
+.bp-paper-link-ref-meta-input:focus-visible,
+.bp-paper-link-ref-reason-input:focus-visible {
+  outline: 2px solid var(--paper-accent); outline-offset: 3px;
+}
 .bp-paper-figure-editor-frame > .bp-figcaption { position: relative; }
 [data-paper-figure-caption-empty="true"]:not(:focus-within) {
   height: 0; margin: 0;

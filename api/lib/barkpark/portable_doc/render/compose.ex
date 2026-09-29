@@ -3248,6 +3248,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       %{
         index: index,
         slug: slug,
+        prefer_authored_copy?: prefer_authored_copy,
         title_source: paper_links_form_text(Map.get(ref, "title")),
         title_authored?: not is_nil(authored_title),
         title:
@@ -3265,9 +3266,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         reason:
           nonblank(Map.get(ref, "reason")) ||
             nonblank(Map.get(reasons, slug)),
+        reason_source: paper_links_form_text(Map.get(ref, "reason")),
+        reason_authored?: not is_nil(nonblank(Map.get(ref, "reason"))),
         eyebrow: nonblank(Map.get(ref, "eyebrow")),
         eyebrow_source: paper_links_form_text(Map.get(ref, "eyebrow")),
         meta: nonblank(Map.get(ref, "meta")),
+        meta_source: paper_links_form_text(Map.get(ref, "meta")),
         featured: Map.get(ref, "featured") == true,
         live: map_size(live) > 0,
         event_type: live_value(live, :event_type),
@@ -3317,6 +3321,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
         after_copy_html: "",
         footer_text: meta,
+        footer_label: live_label,
+        meta_text: ref.meta,
         footer_style:
           "display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)"
       })
@@ -3376,7 +3382,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp paper_link_card_presentation(ref, style, _layout) do
     href = "/papers/" <> ref.slug
     description = paper_link_description(ref.description)
-    reason = paper_link_reason(ref.reason, ref.description)
+    reason_text = paper_link_reason_text(ref.reason, ref.description)
+    reason = paper_link_reason(reason_text)
     metadata = paper_link_metadata(ref)
 
     card_style =
@@ -3401,6 +3408,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         description_style:
           "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
         after_copy_html: reason <> metadata,
+        reason_text: reason_text,
+        reason_style: paper_link_reason_style(),
+        metadata_html: metadata,
         footer_text: nil,
         footer_style: nil
       })
@@ -3423,11 +3433,20 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       else: ""
   end
 
-  defp paper_link_reason(reason, description) do
-    if reason && normalized_copy(reason) != normalized_copy(description),
-      do:
-        ~s|<span style="display:block;margin-top:0.65rem;color:var(--paper-ink, #17332d);font-size:0.88rem;line-height:1.45"><strong>Why it matters:</strong> #{Util.escape_html(reason)}</span>|,
-      else: ""
+  # The reason a default-layout card paints, or nil when it only repeats the
+  # description.
+  defp paper_link_reason_text(reason, description) do
+    if reason && normalized_copy(reason) != normalized_copy(description), do: reason
+  end
+
+  defp paper_link_reason_style,
+    do:
+      "display:block;margin-top:0.65rem;color:var(--paper-ink, #17332d);font-size:0.88rem;line-height:1.45"
+
+  defp paper_link_reason(nil), do: ""
+
+  defp paper_link_reason(reason) do
+    ~s|<span style="#{paper_link_reason_style()}"><strong>Why it matters:</strong> #{Util.escape_html(reason)}</span>|
   end
 
   defp normalized_copy(nil), do: nil
