@@ -62,8 +62,8 @@ defmodule BarkparkCloud.DeviceAuth.Request do
     # instead of returning {:error, changeset}. NOTE: the hot approve path,
     # `BarkparkCloud.DeviceAuth.approve/2`, stamps user_id via `Repo.update_all`,
     # which BYPASSES changesets by construction — this translator does not (and
-    # cannot) cover that path; it is left unchanged, and approve/2 only ever
-    # writes a user_id it just resolved from a live session.
+    # cannot) cover that path. approve/2 therefore contains the FK itself: an
+    # approver erased mid-flight (Erasure.delete_user/2) is refused, not raised.
     |> assoc_constraint(:user)
     |> assoc_constraint(:requested_team)
   end

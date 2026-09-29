@@ -214,22 +214,50 @@ defmodule BarkparkCloud.DeviceAuth do
 
     member_teams = from(m in TeamMembership, where: m.user_id == ^user_id, select: m.team_id)
 
-    {count, _} =
+    query =
       from(r in Request,
         where:
           r.user_code_hash == ^hash and r.status == "pending" and r.expires_at > ^now and
             (is_nil(r.requested_team_id) or r.requested_team_id in subquery(member_teams))
       )
-      |> Repo.update_all(set: [status: "approved", user_id: user_id, updated_at: now])
 
-    cond do
-      count == 1 -> :ok
-      pending_team_bound?(hash, now) -> {:error, :team_mismatch}
-      true -> {:error, :expired_or_invalid}
+    case stamp_approval(query, user_id, now) do
+      {:ok, 1} -> :ok
+      {:ok, _zero} -> zero_row_refusal(hash, now)
+      {:error, :user_gone} -> {:error, :expired_or_invalid}
     end
   end
 
   def approve(_, _), do: {:error, :expired_or_invalid}
+
+  # `Repo.update_all` bypasses Request.changeset/2, so its `assoc_constraint(:user)`
+  # never runs and an FK violation would RAISE. Since #18913 that is reachable:
+  # `Erasure.delete_user/2` (DELETE /v1/account) deletes the users row, so an
+  # approve racing an account erasure can stamp a user_id whose row is gone
+  # (task-felix-w20-bl-devauth-approve-bypass-guard). The approver no longer
+  # exists, so the approval is simply invalid — the same undifferentiated 404 as
+  # any other dead code, never a 500. The request stays pending (the UPDATE
+  # aborted) and expires on its own clock.
+  @user_fk "device_auth_requests_user_id_fkey"
+
+  defp stamp_approval(query, user_id, now) do
+    {count, _} =
+      Repo.update_all(query, set: [status: "approved", user_id: user_id, updated_at: now])
+
+    {:ok, count}
+  rescue
+    e in Postgrex.Error ->
+      case e.postgres do
+        %{code: :foreign_key_violation, constraint: @user_fk} -> {:error, :user_gone}
+        _ -> reraise e, __STACKTRACE__
+      end
+  end
+
+  defp zero_row_refusal(hash, now) do
+    if pending_team_bound?(hash, now),
+      do: {:error, :team_mismatch},
+      else: {:error, :expired_or_invalid}
+  end
 
   # After a zero-row approve: was the code live and pending, but bound to a team
   # the approver is not in? Only then is the refusal a team mismatch; every other
