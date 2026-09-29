@@ -509,6 +509,13 @@ defmodule Barkpark.Tasks.Query do
 
   @doc "The filtered, scoped, ordered task Documents for a block `query` map."
   def docs_for_query(query, scope) when is_map(query) do
+    query |> docs_query(scope) |> Repo.all()
+  end
+
+  # The unexecuted Ecto query behind `docs_for_query/2` — ONE builder, so the
+  # reference test (`references_any?/4`) runs the exact predicate a paper read
+  # resolves with.
+  defp docs_query(query, scope) do
     ws_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
     limit = clamp_limit(Map.get(query, "limit"))
@@ -524,7 +531,53 @@ defmodule Barkpark.Tasks.Query do
     |> apply_labels(Map.get(query, "label") || Map.get(query, "labels"))
     |> apply_statuses(Map.get(query, "status"))
     |> apply_index_order(parent)
-    |> Repo.all()
+  end
+
+  @doc """
+  Could a transition of any task in `task_ids` (document UUIDs) change what a
+  paper block carrying `query` renders? `class` is `:rows` for a task-row block
+  (`query` is the row-query map `rows_for_query/3` reads) or `:agg` for a
+  data-viz block (`query["filter"]` is what `agg_for_query/3` reads).
+
+  Runs the SAME builder the read runs (`docs_query/2` / `agg_query/2`),
+  restricted to `task_ids`, with ONE deliberate relaxation: the `status`
+  predicate is dropped. A CAS transition is precisely a status change, and a
+  task LEAVING a status-filtered board (an `open` board losing the task that
+  just got claimed) is as visible as one entering it — while the post-write row
+  only shows the entering half. Every other predicate (tenancy, twin collapse,
+  dataset, kind, parent, labels) is evaluated exactly. A superset, never a
+  subset: over-matching costs one spurious cache bust, under-matching a stale
+  page.
+  """
+  @spec references_any?(map(), :rows | :agg, keyword(), [Ecto.UUID.t()]) :: boolean()
+  def references_any?(_query, _class, _scope, []), do: false
+
+  def references_any?(query, :rows, scope, task_ids) when is_map(query) do
+    query
+    |> Map.delete("status")
+    |> docs_query(scope)
+    |> restrict_ids(task_ids)
+  end
+
+  def references_any?(query, :agg, scope, task_ids) when is_map(query) do
+    case Map.get(query, "source", "tasks") do
+      "tasks" ->
+        query
+        |> filter_of()
+        |> Map.delete("status")
+        |> agg_query(scope)
+        |> restrict_ids(task_ids)
+
+      _other ->
+        false
+    end
+  end
+
+  def references_any?(_query, _class, _scope, _task_ids), do: false
+
+  defp restrict_ids(q, ids) do
+    from(d in Ecto.Query.exclude(q, :order_by), where: d.id in ^ids)
+    |> Repo.exists?()
   end
 
   # D5 published-perspective gate for the LIVE-plan task fetcher — the twin of
@@ -774,7 +827,9 @@ defmodule Barkpark.Tasks.Query do
   # Scoped, filtered task Documents for an aggregate — reuses the EXACT same
   # `Scope.scope_to_workspace/3` + `maybe_filter_*` composables as
   # `docs_for_query/2` so the tenancy boundary and filter semantics can't drift.
-  defp agg_docs(filter, scope) do
+  defp agg_docs(filter, scope), do: filter |> agg_query(scope) |> Repo.all()
+
+  defp agg_query(filter, scope) do
     ws_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
 
@@ -786,7 +841,6 @@ defmodule Barkpark.Tasks.Query do
     |> maybe_filter_parent_id(Map.get(filter, "parent_id"))
     |> apply_labels(Map.get(filter, "label") || Map.get(filter, "labels"))
     |> apply_statuses(Map.get(filter, "status"))
-    |> Repo.all()
   end
 
   # ── groupBy / over normalisation (closed-whitelist gate) ────────────────────

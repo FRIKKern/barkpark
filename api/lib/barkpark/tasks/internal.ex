@@ -1157,6 +1157,10 @@ defmodule Barkpark.Tasks.Internal do
       Content.broadcast_document_mutation(doc, kind, event_id: eid, previous_rev: prev)
     end)
 
-    :ok
+    # PubSub alone never reaches the web front's paper cache: a paper whose
+    # task block QUERIES this task is announced over the webhook path so it
+    # refreshes within seconds, not the 300 s cache TTL. Off the request path,
+    # fail-open (tlv-bl-web-task-cache-bust).
+    Barkpark.Tasks.PaperRefresh.notify(broadcasts)
   end
 end
