@@ -1866,7 +1866,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <h2
           :if={!@empty}
           class="bp-paper-links-title-heading"
-          style="margin:0;font:inherit;color:inherit"
+          style="margin:0;font:inherit;color:inherit;letter-spacing:inherit"
         >
           <button
             type="button"
