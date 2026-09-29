@@ -80,7 +80,7 @@ defmodule BarkparkWeb.Studio.McpChipReplayCapTest do
   end
 
   defp row(sid, id) do
-    StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["tool_use_id"] == id))
+    StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.metadata["tool_use_id"] == id))
   end
 
   # Record one MCP tool call + its result, and answer the persisted row's

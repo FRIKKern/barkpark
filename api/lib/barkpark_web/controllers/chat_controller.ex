@@ -203,7 +203,7 @@ defmodule BarkparkWeb.ChatController do
   def show(conn, %{"id" => id} = params) do
     with {:ok, since} <- validate_since(params),
          %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
-      messages = id |> StudioChat.list_messages() |> filter_since(since)
+      messages = id |> StudioChat.list_messages(store_scope(scope(conn))) |> filter_since(since)
       json(conn, full_session_json(session, messages))
     else
       nil -> not_found(conn)
@@ -807,7 +807,7 @@ defmodule BarkparkWeb.ChatController do
   defp replay(conn, _id, nil), do: conn
 
   defp replay(conn, id, since) do
-    Enum.reduce(replay_events(id, since), conn, fn frame, c ->
+    Enum.reduce(replay_events(id, since, store_scope(scope(conn))), conn, fn frame, c ->
       case chunk(c, frame) do
         {:ok, c2} -> c2
         {:error, _} -> c
@@ -818,10 +818,13 @@ defmodule BarkparkWeb.ChatController do
   @doc false
   # The replay projection (D5) — persisted rows `seq > since` as SSE
   # `event: message` frame strings, seq-ascending. A public seam so the
-  # resume contract is assertable without a live socket.
-  def replay_events(id, since) do
+  # resume contract is assertable without a live socket. `scope` is the STORE
+  # request's chat scope: the stream door already ran fetch_scoped/2, and the
+  # read is scoped again here because list_messages has no default scope
+  # (drafts.task-bb38ed88099c9723).
+  def replay_events(id, since, scope) do
     id
-    |> StudioChat.list_messages()
+    |> StudioChat.list_messages(scope)
     |> filter_since(since)
     |> Enum.map(&sse_message_frame/1)
   end

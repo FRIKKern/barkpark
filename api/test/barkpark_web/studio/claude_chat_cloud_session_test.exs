@@ -93,7 +93,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       refute Enum.any?(events1, &(&1["type"] == "bp_sandbox")),
              "the bp_sandbox binding frame must never reach a viewer"
 
-      assert StudioChat.list_messages(sid) == [],
+      assert StudioChat.list_messages(sid, :global) == [],
              "the bp_sandbox frame appends no chat_messages row"
 
       # ARGV shape — the shim's OWN argv, captured verbatim (empty args preserved).

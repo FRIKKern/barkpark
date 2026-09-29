@@ -1442,14 +1442,14 @@ defmodule BarkparkWeb.ChatControllerTest do
     test "a send persists an organic role:\"user\" row with the submitted content (zero pre-seeding)",
          %{admin: a1, sid: sid} do
       # A genuinely fresh session — no manual pre-seeding (contrast :470/:503/:955).
-      assert StudioChat.list_messages(sid) == []
+      assert StudioChat.list_messages(sid, :global) == []
       assert StudioChat.get_session(sid).message_count == 0
 
       json_conn(a1)
       |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "organic hello"}))
       |> json_response(202)
 
-      user_rows = for m <- StudioChat.list_messages(sid), m.role == "user", do: m
+      user_rows = for m <- StudioChat.list_messages(sid, :global), m.role == "user", do: m
 
       assert match?([_], user_rows),
              "exactly one organic user row (no double-write), got #{inspect(user_rows)}"
@@ -1475,7 +1475,9 @@ defmodule BarkparkWeb.ChatControllerTest do
       # The append advanced the count to exactly 1 — proving it ran (post-dispatch),
       # once, without pre-empting turn-1's zero-valued derivation.
       assert StudioChat.get_session(sid).message_count == 1
-      assert [%{role: "user", source_markdown: "turn one"}] = StudioChat.list_messages(sid)
+
+      assert [%{role: "user", source_markdown: "turn one"}] =
+               StudioChat.list_messages(sid, :global)
     end
   end
 
@@ -1782,7 +1784,7 @@ defmodule BarkparkWeb.ChatControllerTest do
              )
              |> response(204)
 
-      [message] = StudioChat.list_messages(sid)
+      [message] = StudioChat.list_messages(sid, :global)
       assert message.metadata["approval_status"] == "pending"
       assert StudioChat.get_session(sid).pending_approvals == 1
     end
@@ -1804,7 +1806,7 @@ defmodule BarkparkWeb.ChatControllerTest do
                |> response(204)
       end
 
-      [message] = StudioChat.list_messages(sid)
+      [message] = StudioChat.list_messages(sid, :global)
       assert message.metadata["approval_status"] == "allowed"
       assert StudioChat.get_session(sid).pending_approvals == 0
     end
@@ -1864,7 +1866,7 @@ defmodule BarkparkWeb.ChatControllerTest do
              )
              |> response(204)
 
-      [message] = StudioChat.list_messages(sid)
+      [message] = StudioChat.list_messages(sid, :global)
       assert message.role == "question"
       assert message.metadata["approval_status"] == "allowed"
       assert StudioChat.get_session(sid).pending_approvals == 0
@@ -1884,7 +1886,7 @@ defmodule BarkparkWeb.ChatControllerTest do
              )
              |> response(204)
 
-      [message] = StudioChat.list_messages(sid)
+      [message] = StudioChat.list_messages(sid, :global)
       assert message.role == "plan"
       assert message.metadata["approval_status"] == "denied"
       assert StudioChat.get_session(sid).pending_approvals == 0
@@ -1915,7 +1917,7 @@ defmodule BarkparkWeb.ChatControllerTest do
              )
              |> response(204)
 
-      [message] = StudioChat.list_messages(sid)
+      [message] = StudioChat.list_messages(sid, :global)
       assert message.metadata["approval_status"] == "allowed"
       assert StudioChat.get_session(sid).pending_approvals == 0
     end
@@ -2214,7 +2216,7 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert updated["questions"] == @ask["questions"]
       assert updated["answers"] == %{"Which color?" => "Blue"}
 
-      [message] = StudioChat.list_messages(sid)
+      [message] = StudioChat.list_messages(sid, :global)
       assert message.metadata["approval_status"] == "allowed"
       assert StudioChat.get_session(sid).pending_approvals == 0
     end
@@ -2307,7 +2309,7 @@ defmodule BarkparkWeb.ChatControllerTest do
       # NOTHING was delivered and the row is untouched — a rejected answer must
       # not resolve the card.
       refute_receive {:answered, _, _}, 200
-      [message] = StudioChat.list_messages(sid)
+      [message] = StudioChat.list_messages(sid, :global)
       assert message.metadata["approval_status"] == "pending"
     end
 
@@ -2336,7 +2338,7 @@ defmodule BarkparkWeb.ChatControllerTest do
       refute_receive {:answered, "q-once", _}, 200
 
       # The FIRST answer still stands — the replay changed nothing.
-      [message] = StudioChat.list_messages(sid)
+      [message] = StudioChat.list_messages(sid, :global)
       assert message.metadata["approval_status"] == "allowed"
     end
 
@@ -2368,7 +2370,7 @@ defmodule BarkparkWeb.ChatControllerTest do
       end
 
       # Both rows are still pending: /answer never touched them.
-      for message <- StudioChat.list_messages(sid) do
+      for message <- StudioChat.list_messages(sid, :global) do
         assert message.metadata["approval_status"] == "pending"
       end
     end
@@ -2417,7 +2419,7 @@ defmodule BarkparkWeb.ChatControllerTest do
              )
              |> response(204)
 
-      [message] = StudioChat.list_messages(sid)
+      [message] = StudioChat.list_messages(sid, :global)
       assert message.metadata["approval_status"] == "allowed"
       assert StudioChat.get_session(sid).pending_approvals == 0
     end
@@ -2586,19 +2588,19 @@ defmodule BarkparkWeb.ChatControllerTest do
       for i <- 1..3,
           do: {:ok, _} = StudioChat.append_message(sid, %{role: "user", source_markdown: "m#{i}"})
 
-      frames = ChatController.replay_events(sid, 1)
+      frames = ChatController.replay_events(sid, 1, :global)
       assert length(frames) == 2
 
       assert Enum.at(frames, 0) =~ ~r/\Aid: 2\nevent: message\ndata: /
       assert Enum.at(frames, 1) =~ ~r/\Aid: 3\nevent: message\ndata: /
 
       # nil since replays everything.
-      assert length(ChatController.replay_events(sid, nil)) == 3
+      assert length(ChatController.replay_events(sid, nil, :global)) == 3
     end
 
     test "a replayed assistant row carries PortableDoc blocks (D8)", %{sid: sid} do
       {:ok, _} = StudioChat.append_message(sid, %{role: "assistant", source_markdown: "# Title"})
-      [frame] = ChatController.replay_events(sid, 0)
+      [frame] = ChatController.replay_events(sid, 0, :global)
 
       data =
         frame
