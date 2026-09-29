@@ -562,7 +562,22 @@ func (c managedBoxCaddy) Steps(name, zone string, appPort int) []cloud.CaddyStep
 		}
 	}
 	// Managed boxes are cloud-operated — new boxes ship with the self-update executor enabled.
-	return append(steps, setSelfUpdateApplyStep(attachEnvFile))
+	return append(steps, setSelfUpdateApplyStep(attachEnvFile), setShapeCloudStep(attachEnvFile))
+}
+
+// setShapeCloudStep declares the box's shape (docs/contracts/product-era.md):
+// a managed box is Cloud, reported in /status.json via Barkpark.Shape. It
+// REPLACES any BARKPARK_SHAPE line (deploy.sh writes `solo` when a line is
+// missing, and a warm-baked image may carry that) — grep -v then append, the
+// portable rewrite (no sed -i), so a re-run leaves exactly one cloud line.
+func setShapeCloudStep(envFile string) cloud.CaddyStep {
+	script := "{ grep -v '^BARKPARK_SHAPE=' " + envFile + " 2>/dev/null || true; printf 'BARKPARK_SHAPE=cloud\\n'; } > " +
+		envFile + ".bpshape && cat " + envFile + ".bpshape > " + envFile + " && rm -f " + envFile + ".bpshape"
+	return cloud.CaddyStep{
+		Title: "declare the shape (BARKPARK_SHAPE=cloud)",
+		Cmd:   script,
+		Argv:  []string{"bash", "-lc", script},
+	}
 }
 
 var _ cloud.CaddyStepper = managedBoxCaddy{}

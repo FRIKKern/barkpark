@@ -67,6 +67,8 @@ services:
       # Boot-time seed profile: `clean` skips the heavy demo dataset (avoids the
       # codelist-seed memory pressure); `demo` for a populated stage.
       - BARKPARK_SEED_PROFILE=${BARKPARK_SEED_PROFILE:-clean}
+      # The shape (docs/contracts/product-era.md): compose installs a Solo box.
+      - BARKPARK_SHAPE=${BARKPARK_SHAPE:-solo}
       # ── Passthrough allowlist ────────────────────────────────────────────
       # Everything below is a BARE line on purpose: the variable reaches the
       # container ONLY when set in the invoking shell / .env, and stays UNSET

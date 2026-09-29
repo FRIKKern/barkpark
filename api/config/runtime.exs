@@ -196,6 +196,18 @@ case System.get_env("BARKPARK_CAPABILITIES_OFF") do
     :ok
 end
 
+# The shape this node runs in: cloud, solo or app (`Barkpark.Shape`,
+# docs/contracts/product-era.md). Declared by the installing door, reported in
+# /status.json, never read by core to branch. Unset or empty reports null
+# (undeclared); an unknown name refuses the boot.
+case System.get_env("BARKPARK_SHAPE") do
+  shape when is_binary(shape) and shape != "" ->
+    config :barkpark, :shape, Barkpark.Shape.parse!(shape)
+
+  _ ->
+    :ok
+end
+
 # Write admission for a dedicated managed instance (Barkdown migration, C083).
 # Both variables are required to enable it; a half-configured pair refuses the
 # boot rather than starting a server that silently admits every write.

@@ -71,6 +71,29 @@ defmodule BarkparkWeb.StatusControllerTest do
              body["commit"]
   end
 
+  test "GET /status.json reports the declared shape, and null when none was declared",
+       %{conn: conn} do
+    prev = Application.get_env(:barkpark, :shape)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, :shape, prev),
+        else: Application.delete_env(:barkpark, :shape)
+    end)
+
+    Application.delete_env(:barkpark, :shape)
+    body = conn |> get("/status.json") |> json_response(200)
+    assert Map.has_key?(body, "shape"), "shape must be SURFACED as null, never omitted"
+    assert body["shape"] == nil
+
+    for shape <- Barkpark.Shape.names() do
+      Application.put_env(:barkpark, :shape, shape)
+
+      assert scoped_conn() |> get("/status.json") |> json_response(200) |> Map.fetch!("shape") ==
+               shape
+    end
+  end
+
   test "an underivable sha renders \"unknown\" rather than dropping the key" do
     # BuildInfo freezes its sha at compile time, so the fallback is proven
     # through Status.commit/1's injectable resolver — the same code path
