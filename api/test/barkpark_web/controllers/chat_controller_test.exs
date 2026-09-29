@@ -94,8 +94,10 @@ defmodule BarkparkWeb.ChatControllerTest do
 
     on_exit(fn ->
       # Reap any spawned runtimes so a live subprocess — and the node-global
-      # admission lease it holds — never leaks into the next test.
-      reap_runtimes()
+      # admission lease it holds — never leaks into the next test. Guarded: with
+      # studio_chat off there is no RuntimeSupervisor, and a raise here would
+      # skip the env restores below and leak public_demo_studio=false.
+      if Process.whereis(Barkpark.StudioChat.RuntimeSupervisor), do: reap_runtimes()
 
       if prev,
         do: Application.put_env(:barkpark, :claude_chat, prev),
