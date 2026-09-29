@@ -1442,7 +1442,7 @@ func (e apiError) hint() string {
 		if e.credentialSent {
 			return "the request DID carry a credential and the server still refused it, so minting another will not help — this refusal's own message names the gate; check `bp whoami` for the identity this token actually has, and note that some routes require an interactive login session rather than an API token"
 		}
-		return "set BARKPARK_API_TOKEN or run `bp setup --target connect`"
+		return "set BARKPARK_API_TOKEN, run `bp setup --target connect`, or Log in to Barkpark Cloud with `bp login` and connect one of its barkparks"
 	case "forbidden", "cors_forbidden", "csrf_required":
 		return "token needs write/admin — check `bp whoami`"
 	case "no_team":

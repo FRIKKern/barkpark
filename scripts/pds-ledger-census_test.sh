@@ -188,8 +188,42 @@ build_bound() {
 # Sets: ON_SHA (a commit origin/main HAS), OFF_SHA (a REAL commit origin/main
 # never saw -- committed on main and then reset away, so the object survives
 # unreachable), BLOB_SHA (a blob, which owes existence and NOT ancestry).
+#
+# THE SHAS ARE PINNED, AND PINNED TO A SHAPE THE CLAUSE WILL READ. The census's
+# `cited_shas` drops any <40-char hex token that is not BOTH digits and letters
+# (so a year, a count or the word `decade` is never filed as a commit). A commit
+# sha depends on its timestamp, so with the wall clock ~1 run in 110 minted an
+# ALL-DIGIT 10-char OFF_SHA ((10/16)^10 = 0.91%), the clause correctly declined
+# to read it as a sha, and three clause-8 checks went red with no code change
+# (task-e6b78869b43d3e2b; reproduced at GIT_COMMITTER_DATE=@1700000042 +0000,
+# OFF_SHA 0817621757). So the dates are fixed -- the same bytes every run -- and
+# if a future git (another hash, another object format) lands a pinned sha on a
+# digit-only or letter-only shape, the date is re-rolled deterministically
+# rather than left to fail one run in a hundred.
+reason_repo_sha_readable() {
+  [[ $1 =~ [0-9] && $1 =~ [a-f] ]]
+}
+
 build_reason_repo() {
+  local dir=$1 epoch=1700000000 tries=0
+  while :; do
+    rm -rf -- "$dir"
+    build_reason_repo_at "$dir" "$epoch"
+    if reason_repo_sha_readable "$ON_SHA" && reason_repo_sha_readable "$OFF_SHA"; then
+      return 0
+    fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 64 ]; then
+      echo "SELFTEST FIXTURE: 64 pinned dates never produced a digit+letter ON/OFF sha" >&2
+      exit 2
+    fi
+    epoch=$((epoch + 1))
+  done
+}
+
+build_reason_repo_at() {
   local dir=$1
+  local -x GIT_AUTHOR_DATE="@$2 +0000" GIT_COMMITTER_DATE="@$2 +0000"
   mkdir -p "$dir"
   git init -q "$dir" >/dev/null 2>&1
   git -C "$dir" symbolic-ref HEAD refs/heads/main

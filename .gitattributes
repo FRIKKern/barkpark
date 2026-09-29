@@ -1,2 +1,6 @@
 # Fixed-width terminal snapshots intentionally preserve right-padding cells.
 internal/pdrender/testdata/golden/*.txt whitespace=-blank-at-eol,blank-at-eof
+# Paper-rig baseline shots (36 JPEGs, ~103 MB) live in Git LFS (Barkspark
+# phase 0, task-8edf208dd6f16579). Only the rig's re-capture arm needs the
+# pixels; gate.sh reads baselines/*.report.json, which stay plain text.
+tooling/paper-excellence/rig/baselines/*.jpeg filter=lfs diff=lfs merge=lfs -text

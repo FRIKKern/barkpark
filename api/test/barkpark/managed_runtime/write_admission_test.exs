@@ -175,6 +175,67 @@ defmodule Barkpark.ManagedRuntime.WriteAdmissionTest do
     assert {:error, :admission_closed} = begin_hold(gate, "lost-holder")
   end
 
+  test "explicit recovery reopens a blocked instance once, with a fresh generation", %{
+    gate: gate
+  } do
+    parent = self()
+
+    owner =
+      spawn(fn ->
+        {:ok, :held, _} = begin_hold(gate, "lost-holder")
+        send(parent, :held)
+        receive do: (:die -> :ok)
+      end)
+
+    assert_receive :held
+
+    assert {:error, :not_in_recovery} =
+             Admission.recover(gate, Admission.status(gate).generation, 0)
+
+    send(owner, :die)
+    await_phase(gate, :recovery_required)
+    %{generation: generation, pending: pending} = Admission.status(gate)
+    assert {:error, :stale_generation} = Admission.recover(gate, generation + 1, pending)
+    assert {:error, :unreconciled} = Admission.recover(gate, generation, pending + 1)
+    assert :ok = Admission.recover(gate, generation, pending)
+    assert %{phase: :open, generation: next, operation: nil, pending: 0} = Admission.status(gate)
+    assert next == generation + 1
+    assert {:error, :not_in_recovery} = Admission.recover(gate, next, 0)
+    assert {:ok, ticket} = Admission.checkout(gate)
+    assert :ok = Admission.checkin(gate, ticket)
+    assert {:ok, :held, _} = begin_hold(gate, "after-recovery")
+  end
+
+  test "recovery clears a dead writer's uncertain root but refuses while one is alive", %{
+    gate: gate
+  } do
+    parent = self()
+
+    writer = fn ->
+      spawn(fn ->
+        {:ok, _} = Admission.checkout(gate)
+        send(parent, :admitted)
+        receive do: (:die -> :ok)
+      end)
+    end
+
+    dead = writer.()
+    assert_receive :admitted
+    alive = writer.()
+    assert_receive :admitted
+    {:ok, :closing, _} = begin_hold(gate, "switch")
+    send(dead, :die)
+    await_phase(gate, :recovery_required)
+    %{generation: generation, pending: 2} = Admission.status(gate)
+    assert {:error, :writers_present} = Admission.recover(gate, generation, 2)
+    send(alive, :die)
+    await_phase(gate, :recovery_required)
+    assert {:error, :unreconciled} = Admission.recover(gate, generation, 1)
+    assert :ok = Admission.recover(gate, generation, 2)
+    assert %{phase: :open, pending: 0, generation: next} = Admission.status(gate)
+    assert next == generation + 1
+  end
+
   for phase <- [:open, :closing, :held] do
     test "coordinator death in #{phase} cannot reopen interrupted work", %{
       gate: gate,

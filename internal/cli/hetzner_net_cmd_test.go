@@ -354,6 +354,44 @@ func TestHetznerNetworkAddSubnet(t *testing.T) {
 	}
 }
 
+// TestHetznerNetworkAddSubnetServerAlias pins the deprecated --type server
+// spelling: accepted, sent as "cloud" (hcloud-go deprecates
+// NetworkSubnetTypeServer in favour of NetworkSubnetTypeCloud).
+func TestHetznerNetworkAddSubnetServerAlias(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /networks", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"networks":[{"id":5,"name":"backend","ip_range":"10.0.0.0/16","subnets":[],"routes":[],"servers":[]}]}`)
+	})
+	f.mux.HandleFunc("POST /networks/5/actions/add_subnet", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":33,"command":"add_subnet","status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /networks/5", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"network":{"id":5,"name":"backend","ip_range":"10.0.0.0/16",
+			"subnets":[{"type":"cloud","ip_range":"10.0.1.0/24","network_zone":"eu-central"}],
+			"routes":[],"servers":[]}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":33,"status":"success","progress":100}]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "table",
+		"hetzner", "network", "add-subnet", "backend",
+		"--type", "server", "--network-zone", "eu-central", "--ip-range", "10.0.1.0/24")
+	if code != exitOK {
+		t.Fatalf("add-subnet --type server exited %d, stderr: %s", code, stderr)
+	}
+	req, ok := f.find("POST", "/networks/5/actions/add_subnet")
+	if !ok {
+		t.Fatal("no POST /networks/5/actions/add_subnet was issued")
+	}
+	if req.Body["type"] != "cloud" {
+		t.Errorf("add_subnet body type = %v, want cloud", req.Body["type"])
+	}
+	if !strings.Contains(stdout, "subnet_observed: true") {
+		t.Errorf("add-subnet output = %q, want the OBSERVED subnet", stdout)
+	}
+}
+
 // hzNetworkPairFake stands up the network fake both membership pairs share: the
 // name lookup, both route actions, both subnet actions, and ONE post-read whose
 // body the caller pins.
@@ -1059,8 +1097,13 @@ func TestHetznerPrimaryIPCreate(t *testing.T) {
 	if !ok {
 		t.Fatal("no POST /primary_ips was issued")
 	}
-	if req.Body["type"] != "ipv4" || req.Body["datacenter"] != "nbg1-dc3" || req.Body["name"] != "web-ip" {
-		t.Errorf("create body = %v, want type/datacenter/name", req.Body)
+	// --datacenter is a compatibility alias: the API no longer takes a
+	// datacenter, so nbg1-dc3 goes out as its location nbg1.
+	if req.Body["type"] != "ipv4" || req.Body["location"] != "nbg1" || req.Body["name"] != "web-ip" {
+		t.Errorf("create body = %v, want type/location/name", req.Body)
+	}
+	if _, has := req.Body["datacenter"]; has {
+		t.Errorf("create body = %v, must not carry datacenter", req.Body)
 	}
 	if req.Body["assignee_type"] != "server" {
 		t.Errorf("create body assignee_type = %v, want server", req.Body["assignee_type"])

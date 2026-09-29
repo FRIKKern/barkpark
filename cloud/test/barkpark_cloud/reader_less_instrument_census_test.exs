@@ -2015,6 +2015,8 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       "the warm-pool staleness stamp that ORDERS refresh eligibility: registry.ex:3377 filters on it and registry.ex:3380 orders `asc_nulls_first` so the stalest box refreshes first. Its consumer is the ORDER BY clause; there is no seat where a human wants this timestamp.",
     "refunded_at" =>
       "RESERVED, and the schema says so verbatim at subscription.ex:47 — a column standing ahead of the deferred refund seam. The honest disposition is that it is not an instrument yet: it is not emitted, nothing computes it, and giving it a reader before it has a writer would manufacture an audience for a hole.",
+    "requested_team_id" =>
+      "the team a device login is bound to (device_auth.ex start/1). approve/2 folds it into its CAS UPDATE as a membership subquery and mint_team/2 re-checks it at poll; the wire carries it as inspect's `team_id` and the minted envelope's `team_id`, so no consumer names the column itself.",
     "result_ip" =>
       "the box IP the provision worker ECHOED BACK (registry.ex:2081). registry.ex:2809 is explicit that it is stamped only when the worker echoed the ip it was told to configure, so the column is a CONSISTENCY check between two halves of a provision, not an address anyone is meant to dial.",
     "session_token_id" =>

@@ -32,6 +32,7 @@ defmodule Barkpark.Crypto.DataKeys do
   import Ecto.Query, warn: false
   alias Barkpark.Repo
   alias Barkpark.Crypto.{DataKey, KeyProvider}
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   @cache :barkpark_dek_cache
   @dek_bytes 32
@@ -63,7 +64,8 @@ defmodule Barkpark.Crypto.DataKeys do
         {v, unwrap_cached(dk)}
 
       nil ->
-        create_active(workspace_id, scope)
+        # C083: the first encryption per scope inserts a key row; held refuses by raising.
+        Door.admit!(fn -> create_active(workspace_id, scope) end)
     end
   end
 

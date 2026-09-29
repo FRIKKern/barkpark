@@ -57,6 +57,7 @@ defmodule Barkpark.Content.Broadcast do
 
   alias Barkpark.Audit
   alias Barkpark.Repo
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   alias Barkpark.Content.{CallerContext, Document, DraftId, Envelope, MutationEvent, Revision}
 
@@ -393,6 +394,29 @@ defmodule Barkpark.Content.Broadcast do
     e -> Logger.warning("audit emit crashed for #{doc.doc_id}: #{inspect(e)}")
   end
 
+  @doc """
+  Fan a document-shaped webhook out through the SAME seam `tap_broadcast/7`
+  uses (`maybe_dispatch_webhook/7`: the listener muzzle, transaction deferral,
+  then `Webhooks.Dispatcher.dispatch_async/7`), for a caller that must announce
+  a document WITHOUT writing it — `Tasks.PaperRefresh` announcing a paper whose
+  task query a task transition changed. `event_id` must be a real
+  `mutation_events.id` (the delivery dedup key); `opts` carries
+  `:workspace_id` / `:project_id` for webhook selection and sync-tags.
+  """
+  @spec dispatch_webhook(
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          map() | nil,
+          integer(),
+          keyword()
+        ) :: term()
+  def dispatch_webhook(dataset, action, type, doc_id, document, event_id, opts \\ [])
+      when is_integer(event_id) do
+    maybe_dispatch_webhook(dataset, action, type, doc_id, document, event_id, opts)
+  end
+
   # Defer if we're inside a transaction; broadcast immediately otherwise.
   defp maybe_broadcast(topic, msg) do
     if Repo.in_transaction?() do
@@ -595,7 +619,12 @@ defmodule Barkpark.Content.Broadcast do
   end
 
   @doc false
-  def save_event(doc, type, dataset, action, prev_rev, source \\ :api) do
+  def save_event(doc, type, dataset, action, prev_rev, source \\ :api),
+    do: Door.admit!(fn -> admitted_save_event(doc, type, dataset, action, prev_rev, source) end)
+
+  # C083: the event row is a door of its own for the two plugin callers that write
+  # it outside a Writer or Lifecycle door (OnixEdit staleness and Bokbasen status).
+  defp admitted_save_event(doc, type, dataset, action, prev_rev, source) do
     %MutationEvent{}
     |> Ecto.Changeset.change(%{
       dataset: dataset,

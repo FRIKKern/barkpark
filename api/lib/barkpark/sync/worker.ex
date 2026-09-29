@@ -27,6 +27,7 @@ defmodule Barkpark.Sync.Worker do
 
   require Logger
 
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Sync
   alias Barkpark.Sync.Cursor
 
@@ -88,7 +89,18 @@ defmodule Barkpark.Sync.Worker do
   # Live chunk from the current stream.
   def handle_info({:sse_chunk, ref, chunk}, %{stream: %{ref: ref}} = state) do
     buf = state.buf <> chunk
-    {results, rest} = Sync.apply_frames(buf, state.ctx)
+
+    # C083: the whole drain (document writes, cursor, dead letters) runs under one
+    # admission. A held instance halts the drain like a failed event: the cursor
+    # stays at the last success and the producer replays from it after reopen.
+    {results, rest} =
+      case Door.admit(fn -> Sync.apply_frames(buf, state.ctx) end) do
+        {:error, {:write_admission, reason}} ->
+          {[{:hold, {:error, {:write_admission, reason}}}], buf}
+
+        applied ->
+          applied
+      end
 
     case first_error(results) do
       nil ->

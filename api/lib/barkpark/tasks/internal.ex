@@ -11,6 +11,7 @@ defmodule Barkpark.Tasks.Internal do
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Repo
   alias Barkpark.Tasks.BriefMirror
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   # New rev token, same shape as `Content.generate_rev/0`. Kept here so the task
   # modules do not depend on a private function in another module.
@@ -105,7 +106,15 @@ defmodule Barkpark.Tasks.Internal do
   # atom is deliberately NOT an `{:error, …}` tuple: callers map it to their own
   # existing error (`:stale_claim` for the lifecycle/claim arms, `:stale_rev` for
   # the merge reconcile), so no caller's return shape moves.
-  def fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev) do
+  # The one write door for every task verb (Barkdown C083, D-managed-writers): a held managed
+  # instance refuses here by raising, since the eighteen callers match {:ok, _} | :stale.
+  def fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev),
+    do:
+      Door.admit!(fn ->
+        admitted_fenced_content_write(doc, observed_rev, new_content, new_rev)
+      end)
+
+  defp admitted_fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev) do
     new_content = resync_brief_on_mirrored_change(doc, new_content)
 
     query =
@@ -951,13 +960,19 @@ defmodule Barkpark.Tasks.Internal do
   # `%{"fenced" => "edge_added", "edge" => …}`. It mirrors how `TtlSweeper`
   # nests its `"lease_expired"` reap payload. Defaults to `%{}` (no-op merge),
   # so the claim/close/relabel callers passing arity 3/4 are untouched.
-  def insert_mutation_event!(
-        %Document{} = doc,
-        kind,
-        previous_rev,
-        source \\ "api",
-        extra_document \\ %{}
-      ) do
+  def insert_mutation_event!(doc, kind, previous_rev, source \\ "api", extra_document \\ %{}),
+    do:
+      Door.admit!(fn ->
+        admitted_insert_mutation_event!(doc, kind, previous_rev, source, extra_document)
+      end)
+
+  defp admitted_insert_mutation_event!(
+         %Document{} = doc,
+         kind,
+         previous_rev,
+         source,
+         extra_document
+       ) do
     %MutationEvent{}
     |> Ecto.Changeset.change(%{
       dataset: doc.dataset,
@@ -1142,6 +1157,10 @@ defmodule Barkpark.Tasks.Internal do
       Content.broadcast_document_mutation(doc, kind, event_id: eid, previous_rev: prev)
     end)
 
-    :ok
+    # PubSub alone never reaches the web front's paper cache: a paper whose
+    # task block QUERIES this task is announced over the webhook path so it
+    # refreshes within seconds, not the 300 s cache TTL. Off the request path,
+    # fail-open (tlv-bl-web-task-cache-bust).
+    Barkpark.Tasks.PaperRefresh.notify(broadcasts)
   end
 end

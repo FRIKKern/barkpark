@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -286,9 +287,9 @@ func hzObserveLBType(token string) hzResObserveFn[hcloud.LoadBalancer] {
 //	  so a CORRECT create fires a guaranteed false advisory. MEASURED against a
 //	  production-shaped response: enrolling it emitted `divergence: datacenter
 //	  — you asked for nbg1-dc3, the server reports nbg1` at exit 0 on a create
-//	  that did exactly what was asked. (The SDK's Datacenter field is also
-//	  deprecated past its removal date, so there is nothing to compare against
-//	  that will survive.) Pinned by TestHetznerCreateAdvisoryExclusions.
+//	  that did exactly what was asked. (hcloud-go v2.49 removed the SDK's
+//	  Datacenter field outright; --datacenter is now sent as its location via
+//	  hzPrimaryIPLocation.) Pinned by TestHetznerCreateAdvisoryExclusions.
 //	placement-group --type — hetzner_lb_cmd.go rejects everything but "spread"
 //	  CLIENT-SIDE before the request leaves, so the only reachable comparison is
 //	  spread-vs-spread: the pair is degenerate, and an advisory that can never
@@ -402,6 +403,22 @@ func hzObserveFloatingIPUnassigned(fip *hcloud.FloatingIP) hzResObservation {
 			"no server")
 	}
 	return hzResAgrees(map[string]any{"assigned": false})
+}
+
+// hzDatacenterSuffix matches the "-dc<N>" tail of a Hetzner datacenter name
+// (nbg1-dc3 → nbg1).
+var hzDatacenterSuffix = regexp.MustCompile(`-dc[0-9]+$`)
+
+// hzPrimaryIPLocation resolves the create location. The Hetzner API removed
+// `datacenter` from primary-ip create on 2026-07-01 (hcloud-go v2.49 dropped
+// PrimaryIPCreateOpts.Datacenter), so --datacenter stays as a compatibility
+// alias and is sent as its location: a datacenter name is its location plus
+// a "-dc<N>" suffix.
+func hzPrimaryIPLocation(datacenter, location string) string {
+	if location != "" {
+		return location
+	}
+	return hzDatacenterSuffix.ReplaceAllString(datacenter, "")
 }
 
 // hzObservePrimaryIPCreated enrols --type and --location. --datacenter is NOT
@@ -1571,7 +1588,7 @@ func runHetznerPrimaryIPList(out *writer, g globals, args []string) int {
 		return exitOK
 	}
 	if len(pips) == 0 {
-		out.outf("no primary ips in this project — create one with 'bp cloud hetzner primary-ip create --type ipv4 --datacenter <dc> --name <n>'")
+		out.outf("no primary ips in this project — create one with 'bp cloud hetzner primary-ip create --type ipv4 --location <loc> --name <n>'")
 		return exitOK
 	}
 	rows := make([][]string, 0, len(pips))
@@ -1617,7 +1634,7 @@ func runHetznerPrimaryIPGet(out *writer, g globals, args []string) int {
 }
 
 func runHetznerPrimaryIPCreate(out *writer, g globals, args []string) int {
-	const usage = "bp cloud hetzner primary-ip create --type ipv4|ipv6 (--datacenter <dc> | --location <loc>) [--name <n>] [--label k=v]…"
+	const usage = "bp cloud hetzner primary-ip create --type ipv4|ipv6 (--location <loc> | --datacenter <dc>, deprecated: sent as its location) [--name <n>] [--label k=v]…"
 	a, err := parseHzArgs(args, []string{"type", "datacenter", "location", "name", "label"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
@@ -1646,8 +1663,7 @@ func runHetznerPrimaryIPCreate(out *writer, g globals, args []string) int {
 		Type:         ipType,
 		Name:         a.val("name"),
 		AssigneeType: "server",
-		Datacenter:   a.val("datacenter"),
-		Location:     a.val("location"),
+		Location:     hzPrimaryIPLocation(a.val("datacenter"), a.val("location")),
 		Labels:       labels,
 	}
 	result, _, err := hc.PrimaryIP.Create(ctx, opts)
@@ -2267,7 +2283,7 @@ func printHetznerPrimaryIPHelp(out *writer) {
 USAGE
   bp cloud hetzner primary-ip list
   bp cloud hetzner primary-ip get <id|name|ip>
-  bp cloud hetzner primary-ip create --type ipv4|ipv6 (--datacenter <dc> | --location <loc>)
+  bp cloud hetzner primary-ip create --type ipv4|ipv6 (--location <loc> | --datacenter <dc>)
                                      [--name <n>] [--label k=v]…
   bp cloud hetzner primary-ip delete <id|name|ip> [--yes]
   bp cloud hetzner primary-ip assign <id|name|ip> --server <s>
@@ -2275,7 +2291,9 @@ USAGE
 
 NOTES
   <id|name|ip>  primary IPs also resolve by their literal address
-  assign        the target server must be powered off and in the IP's location
+  --datacenter  deprecated: the API no longer takes a datacenter, so nbg1-dc3
+                is sent as its location nbg1 — prefer --location
+  assign       the target server must be powered off and in the IP's location
   unassign      detaches the IP but keeps it reserved (billed while unattached)
 
 EXAMPLE

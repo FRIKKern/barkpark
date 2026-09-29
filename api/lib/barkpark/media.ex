@@ -4,6 +4,7 @@ defmodule Barkpark.Media do
   import Ecto.Query
   alias Barkpark.Repo
   alias Barkpark.Content
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Delivery.{Cdn, Events}
   alias Barkpark.Media.Probe
@@ -63,7 +64,10 @@ defmodule Barkpark.Media do
     * `:workspace_id` — stamp the owning workspace (nil = unscoped / pre-tenancy).
     * `:project_id`   — stamp the owning project (nil = workspace-wide).
   """
-  def upload(plug_upload, dataset, opts \\ []) when is_binary(dataset) do
+  def upload(plug_upload, dataset, opts \\ []),
+    do: Door.admit(fn -> admitted_upload(plug_upload, dataset, opts) end)
+
+  defp admitted_upload(plug_upload, dataset, opts) when is_binary(dataset) do
     %Plug.Upload{filename: original_name, path: temp_path} = plug_upload
 
     # Generate date-based path: 2026/04/filename, under the owning dataset's key
@@ -688,7 +692,9 @@ defmodule Barkpark.Media do
   connection without telling us, and even THAT may not escape as an unmatched
   tuple (criterion: no code path returns an unmatched `{:error, :rollback}`).
   """
-  def delete_file(id, opts) when is_list(opts) do
+  def delete_file(id, opts), do: Door.admit(fn -> admitted_delete_file(id, opts) end)
+
+  defp admitted_delete_file(id, opts) when is_list(opts) do
     # FIRST statement in the function, BEFORE the row is even read: a caller
     # that omitted the decision must learn so on every id, including one that
     # does not exist, and must NOT get a delete out of the raise.
@@ -998,12 +1004,13 @@ defmodule Barkpark.Media do
              | :storage_unavailable
              | :not_stored
              | {:storage_mismatch, non_neg_integer(), non_neg_integer()}}
-  def put_blob(relative_path, body, opts \\ [])
+  def put_blob(relative_path, body, opts \\ []),
+    do: Door.admit(fn -> admitted_put_blob(relative_path, body, opts) end)
 
-  def put_blob(_relative_path, "", _opts), do: {:error, :empty_body}
+  defp admitted_put_blob(_relative_path, "", _opts), do: {:error, :empty_body}
 
-  def put_blob(relative_path, body, opts)
-      when is_binary(relative_path) and is_binary(body) and is_list(opts) do
+  defp admitted_put_blob(relative_path, body, opts)
+       when is_binary(relative_path) and is_binary(body) and is_list(opts) do
     with true <- valid_blob_path?(relative_path) or {:error, :invalid_path},
          {:ok, object_key} <- authorize_blob_key(relative_path, opts) do
       # The bytes land at the caller's OWN row's object address, which for every
