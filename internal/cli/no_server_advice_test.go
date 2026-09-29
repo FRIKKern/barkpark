@@ -42,3 +42,18 @@ func TestTaskReadyWithNoConfigPointsAtCloudLogin(t *testing.T) {
 	}
 	assertNoServerMenu(t, "bp task ready", out)
 }
+
+// The anonymous 401 (no credential sent) is an unauthenticated state too: its
+// hint keeps the token and self-hosted remedies and adds Cloud login beside them.
+func TestAnonymousUnauthorizedHintOffersCloudLogin(t *testing.T) {
+	h := apiError{code: "unauthorized"}.hint()
+	for _, want := range []string{"set BARKPARK_API_TOKEN", "bp setup --target connect", "Log in to Barkpark Cloud", "bp login"} {
+		if !strings.Contains(h, want) {
+			t.Errorf("anonymous 401 hint missing %q: %q", want, h)
+		}
+	}
+	// A credential that was SENT and refused must not be told to log in again.
+	if sent := (apiError{code: "unauthorized", credentialSent: true}).hint(); strings.Contains(sent, "bp login") {
+		t.Errorf("credential-sent 401 hint must not suggest a fresh login: %q", sent)
+	}
+}
