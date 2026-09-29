@@ -102,6 +102,8 @@ defmodule BarkparkWeb.Studio.ScopedAdminFamilyTest do
       assert has_element?(view, "[data-test-id=plugin-cards], [data-test-id=plugins-empty]")
     end
 
+    # Plugins-off: at least one registered plugin (the plugin settings route and toggle)
+    @tag :requires_plugins
     test "_plugins/:plugin/settings mounts PluginSettingsLive", %{
       admin_conn: conn,
       ws_b: ws_b,
@@ -121,6 +123,8 @@ defmodule BarkparkWeb.Studio.ScopedAdminFamilyTest do
   end
 
   describe "SUBSTANCE: settings under workspace B write to B, never to Default" do
+    # Plugins-off: at least one registered plugin (the plugin settings route and toggle)
+    @tag :requires_plugins
     test "toggling a plugin under B persists on B and leaves Default untouched", %{
       admin_conn: conn,
       default_ws: default_ws,

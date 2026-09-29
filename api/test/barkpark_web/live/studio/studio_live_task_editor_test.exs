@@ -79,6 +79,8 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
     |> render_click()
   end
 
+  # Plugins-off: the tasks plugin (the task schema's work/system tab groups)
+  @tag :requires_plugins
   test "lifecycle_status renders as a select with the five lifecycle options", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
@@ -96,6 +98,8 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
     assert html =~ ~r{<option value="in_progress"[^>]*selected}
   end
 
+  # Plugins-off: the tasks plugin (the task schema's work/system tab groups)
+  @tag :requires_plugins
   test "dependencies/claim render read-only JSON with no form input", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
@@ -115,6 +119,8 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
     assert html =~ "read-only — managed via API"
   end
 
+  # Plugins-off: the tasks plugin (the task schema's work/system tab groups)
+  @tag :requires_plugins
   test "empty engine fields hide behind visibleWhen non_empty", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
@@ -126,6 +132,8 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
     refute html =~ ~s(data-readonly-field="history_summary")
   end
 
+  # Plugins-off: the tasks plugin (the task schema's work/system tab groups)
+  @tag :requires_plugins
   test "a Studio save preserves dependencies and claim byte-identically", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
