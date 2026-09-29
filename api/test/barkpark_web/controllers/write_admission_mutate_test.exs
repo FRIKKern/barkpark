@@ -101,39 +101,18 @@ defmodule BarkparkWeb.WriteAdmissionMutateTest do
     assert {:error, {:write_admission, :admission_closed}} =
              Content.publish_document("before", "post", "test")
 
-    release(hold)
+    release(gate, hold)
     resp = mutate(conn, [create("after-1")])
     assert resp.status in 200..299, resp.resp_body
   end
 
-  # The hold must belong to a process that holds no write; the test process is clean here,
-  # but a separate holder keeps the drain observable from the outside.
-  defp hold(gate, operation) do
-    parent = self()
+  # The test process owns the hold: begin_hold/reopen are synchronous calls that
+  # journal to DETS before replying, so there is no message to race. A spawned
+  # holder re-published the replies against assert_receive's 100ms default,
+  # which CI load outran (main run 36574063509, task-5381a4e7a1724185). The
+  # owner only needs to hold no write of its own when the hold begins.
+  defp hold(gate, operation),
+    do: Admission.begin_hold(gate, operation, Admission.status(gate).generation)
 
-    holder =
-      spawn(fn ->
-        result = Admission.begin_hold(gate, operation, Admission.status(gate).generation)
-        send(parent, {:hold, self(), result})
-
-        receive do
-          :release ->
-            {:ok, :held, ticket} = result
-            send(parent, {:released, Admission.reopen(gate, ticket)})
-        end
-      end)
-
-    receive do
-      {:hold, ^holder, result} ->
-        Process.put(:holder, holder)
-        result
-    after
-      1_000 -> flunk("no hold reply")
-    end
-  end
-
-  defp release(_hold) do
-    send(Process.get(:holder), :release)
-    assert_receive {:released, :ok}
-  end
+  defp release(gate, ticket), do: assert(Admission.reopen(gate, ticket) == :ok)
 end

@@ -82,7 +82,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.DoorsSlice2Test do
     assert after_hold.rev == before.rev
     assert after_hold.content == before.content
     assert Admission.status(gate).phase == :held
-    release(hold)
+    release(gate, hold)
 
     assert {:ok, _} = Content.upsert_paper(attrs)
     assert Admission.status(gate).pending == 0
@@ -116,7 +116,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.DoorsSlice2Test do
     assert unchanged.rev == paper.rev
     assert get_in(unchanged.content, ["body_html"]) == "<p>stale</p>"
     assert Admission.status(gate).phase == :held
-    release(hold)
+    release(gate, hold)
 
     # Control: the same read repairs the cache once admission is open again.
     assert {:blocks, _} = Papers.reader_source(paper, ds, [])
@@ -146,7 +146,7 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.DoorsSlice2Test do
     assert Repo.get(MediaFile, row.id)
     assert File.ls!(upload_dir) |> Enum.sort() == files_before
     assert Admission.status(gate).phase == :held
-    release(hold)
+    release(gate, hold)
     assert Admission.status(gate).pending == 0
   end
 
@@ -165,32 +165,17 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.DoorsSlice2Test do
     |> Repo.insert!()
   end
 
-  # The holder must be a process with no write of its own; keep it separate so
-  # the drain is observed from outside, as a coordinator client would.
+  # The test process owns the hold: begin_hold/reopen are synchronous calls that
+  # journal to DETS before replying, so there is no message to race. A spawned
+  # holder re-published the replies against assert_receive's 100ms default,
+  # which CI load outran (main run 36574063509, task-5381a4e7a1724185). The
+  # owner only needs to hold no write of its own when the hold begins.
   defp hold(gate, operation) do
-    parent = self()
+    assert {:ok, :held, ticket} =
+             Admission.begin_hold(gate, operation, Admission.status(gate).generation)
 
-    holder =
-      spawn(fn ->
-        result = Admission.begin_hold(gate, operation, Admission.status(gate).generation)
-        send(parent, {:hold, self(), result})
-
-        receive do
-          :release ->
-            {:ok, :held, ticket} = result
-            send(parent, {:released, Admission.reopen(gate, ticket)})
-        end
-      end)
-
-    receive do
-      {:hold, ^holder, {:ok, :held, _}} -> holder
-    after
-      1_000 -> flunk("no hold")
-    end
+    ticket
   end
 
-  defp release(holder) do
-    send(holder, :release)
-    assert_receive {:released, :ok}
-  end
+  defp release(gate, ticket), do: assert(Admission.reopen(gate, ticket) == :ok)
 end
