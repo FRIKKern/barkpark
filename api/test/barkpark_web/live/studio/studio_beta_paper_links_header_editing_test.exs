@@ -124,6 +124,17 @@ defmodule BarkparkWeb.Studio.StudioBetaPaperLinksHeaderEditingTest do
       [h2_rule, layout_rule] = String.split(style, "text-wrap:balance;", parts: 2)
       assert h2_rule =~ "font-weight"
       assert layout_rule =~ "font-size"
+
+      # The resting paint sits inside a real <h2>, which the surface h2 rule
+      # would re-track; it must inherit the owner's (layout-winning) tracking.
+      [h2_style] =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(".bp-paper-links-title-heading")
+        |> LazyHTML.attribute("style")
+
+      assert h2_style =~ "letter-spacing:inherit"
     end
   end
 
