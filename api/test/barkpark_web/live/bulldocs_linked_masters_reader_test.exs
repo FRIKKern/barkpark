@@ -55,6 +55,8 @@ defmodule BarkparkWeb.BulldocsLinkedMastersReaderTest do
   # `Content.create_document/4`, which births every document as a DRAFT. The
   # editor's own save now publishes that draft (docs/decisions/0010 §5a), so a
   # linked instance on a published paper renders its master for the public.
+  # Plugins-off: the bulldocs plugin (paper masters and linked instances on the public reader)
+  @tag :requires_plugins
   test "a master saved from the editor (draft-born) renders on the public reader",
        %{conn: conn} do
     n = System.unique_integer([:positive])
@@ -76,6 +78,8 @@ defmodule BarkparkWeb.BulldocsLinkedMastersReaderTest do
     refute html =~ "Master unavailable"
   end
 
+  # Plugins-off: the bulldocs plugin (paper masters and linked instances on the public reader)
+  @tag :requires_plugins
   test "a newer master DRAFT never reaches the public reader; the published row does",
        %{conn: conn} do
     n = System.unique_integer([:positive])
@@ -111,6 +115,8 @@ defmodule BarkparkWeb.BulldocsLinkedMastersReaderTest do
   # instance on a published paper renders for the public reader — before the
   # fix it froze the draft rev, which is never published, and read "Master
   # unavailable" forever.
+  # Plugins-off: the bulldocs plugin (paper masters and linked instances on the public reader)
+  @tag :requires_plugins
   test "an instance pinned while the master has an unpublished draft renders publicly",
        %{conn: conn} do
     n = System.unique_integer([:positive])
@@ -165,6 +171,8 @@ defmodule BarkparkWeb.BulldocsLinkedMastersReaderTest do
     refute html =~ "Master unavailable"
   end
 
+  # Plugins-off: the bulldocs plugin (paper masters and linked instances on the public reader)
+  @tag :requires_plugins
   test "a master that exists only as a draft (created through another door) stays unavailable",
        %{conn: conn} do
     n = System.unique_integer([:positive])
