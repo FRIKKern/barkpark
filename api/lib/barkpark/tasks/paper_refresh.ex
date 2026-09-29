@@ -22,7 +22,7 @@ defmodule Barkpark.Tasks.PaperRefresh do
              │    (`content @@ <jsonpath>` on `documents_content_path_idx`)
              ├─ per paper: TaskResolver.query_maps/1 → Tasks.Query.references_any?/4
              │    (the read's own query builder, status predicate relaxed)
-             └─ ≥1 referencing paper → Webhooks.Dispatcher.dispatch_async/7
+             └─ ≥1 referencing paper → Content.dispatch_webhook/7 (tap_broadcast's seam)
                   ("update", type "paper") — web busts type:paper + _all
                 0 referencing papers → nothing dispatched (the negative control)
 
@@ -54,11 +54,11 @@ defmodule Barkpark.Tasks.PaperRefresh do
 
   require Logger
 
+  alias Barkpark.Content
   alias Barkpark.Content.{Document, DraftId, Papers}
   alias Barkpark.PortableDoc.TaskResolver
   alias Barkpark.Repo
   alias Barkpark.Tasks.{Edge, Query}
-  alias Barkpark.Webhooks.Dispatcher
 
   @event "update"
   @paper_type "paper"
@@ -164,7 +164,7 @@ defmodule Barkpark.Tasks.PaperRefresh do
     |> Enum.map(fn {{dataset, project_id}, papers} ->
       doc_id = papers |> Enum.map(&DraftId.published_id(&1.doc_id)) |> Enum.min()
 
-      Dispatcher.dispatch_async(dataset, @event, @paper_type, doc_id, nil, first.event_id,
+      Content.dispatch_webhook(dataset, @event, @paper_type, doc_id, nil, first.event_id,
         workspace_id: ws_id,
         project_id: project_id
       )
