@@ -109,7 +109,7 @@ compare() {
   # when the sets agree but the files are not byte-identical.
   reordering_only=false
   if [[ $n_removed -eq 0 && $n_added -eq 0 ]] && ! cmp -s -- "$old" "$new"; then
-    reordering_only=true
+    reordering_only=false  # MUTANT (disarm proof, reverted next commit)
   fi
 
   printf '%s_rows=%s\n' "$label_old" "$n_old"
