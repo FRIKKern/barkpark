@@ -974,6 +974,45 @@ run_cr 1 "a genuinely orphaned row, written well before the run list was sampled
 saw "WRONG: 1 of 4" "the instrument still loses on a real miss with the gap fully declared"
 not_saw "WRITTEN-IN-FLIGHT: " "an old row is never excused by a watermark that postdates it"
 
+section "(w3s) a STALE run page is COULD NOT READ, not WRONG (task-c784a708903323c1)"
+# Live runs 36524401199/36524410886: the API served a deploy.yml page whose
+# newest run was ~16h old, and 11 rows written by that day's LATER deploys —
+# run ids ABOVE the page maximum, first_seen_at hours BEFORE the watermark —
+# were judged WRONG. Same shape as (w3), ONE difference: the runs those rows
+# name EXIST (their job lists answer). An existing run above the page maximum,
+# written for before the list was sampled, proves the page stale: ids are
+# allocated in creation order, so a fresh page would have carried it.
+JOBS_W3S="$(jobs_json jobs-w3s "1:success" "2:success" "600:success" "601:success")"
+CROWN_W3S="$(crown_json crown-w3s \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN1" 600)" \
+  "$(row "$SHA_D" instance false "$IN2" 601)")"
+run_cr 2 "two rows name EXISTING runs above the page max, written before the watermark — the page was stale" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_W3S" --crown-fixture "$CROWN_W3S" --health-fixture "$HEALTH_BASE" \
+  --runlist-at "$TEAR_T0"
+saw "STALE-RUN-PAGE: 2 crown row(s)" "the stale page is named as the condition, with its row count"
+saw "(span 1..2)" "and the stale span the API served is quoted"
+saw "newest named: 601" "and the newest run the page should have carried"
+saw "COULD NOT FULLY READ" "the run exits on the could-not-read arm"
+not_saw "WRONG:" "a stale read cannot manufacture a ghost"
+
+# The same stale page with a GENUINE orphan beside it: run 9001 does not exist
+# (its job list does not answer), so that row is still WRONG and outranks the
+# stale-page exit. The stale arm excuses the rows it can prove, nothing else.
+CROWN_W3S_MIX="$(crown_json crown-w3s-mix \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN1" 600)" \
+  "$(row "$SHA_D" instance false "$IN2" 9001)")"
+run_cr 1 "a stale page AND a row naming a run that does not exist" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_W3S" --crown-fixture "$CROWN_W3S_MIX" --health-fixture "$HEALTH_BASE" \
+  --runlist-at "$TEAR_T0"
+saw "WRONG: 1 of 4" "the orphan is still accused, over the rows actually judged"
+saw "stale-run-page=1" "and the stale-proven row is counted apart, not cleared"
+
 section "(w4) NEGATIVE ARM — being RECENT is not on its own an excuse"
 # The row is written inside the gap, but its run id (9) sits BELOW the page
 # maximum (50), so the page could have carried that run and did not. Time alone
