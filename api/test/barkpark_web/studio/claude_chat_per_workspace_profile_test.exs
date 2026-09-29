@@ -30,6 +30,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatPerWorkspaceProfileTest do
   # cross-check) from ITS process, which must reach this test's DB connection.
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Workspace
   alias BarkparkWeb.Studio.ClaudeChat

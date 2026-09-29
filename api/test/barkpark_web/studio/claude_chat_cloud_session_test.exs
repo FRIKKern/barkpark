@@ -38,6 +38,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
   # process that must reach this test's DB connection.
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
   alias Barkpark.Connectors.CloudPolicy
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder

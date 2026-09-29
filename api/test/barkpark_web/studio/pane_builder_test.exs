@@ -417,6 +417,8 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
   end
 
   describe "mediaAsset explorer view" do
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "browsing mediaAsset list without a doc opens the media explorer editor" do
       dataset = "pb_media_explorer"
 
@@ -473,6 +475,8 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
              "top-menu Media must not appear in the gated root desk"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a top-menu type absent from the gated desk still opens via the ungated fallback" do
       dataset = "pb_media_fallback"
 
@@ -496,6 +500,8 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
              "the root pane stays gated even though resolution used the ungated tree"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a stale deep link to a demoted type drills the Plugins column and reveals it" do
       ws = create_workspace!()
       proj = create_project!(ws)
@@ -562,6 +568,8 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
     # revealing the doc. Sibling cases (enabled-demoted via Plugins, top-menu
     # ungated fallback) are pinned above; this pins the third, previously verified
     # only by code-trace.
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a disabled plugin's owned type reveals via …Rest when documents exist" do
       ws = create_workspace!()
       proj = create_project!(ws)

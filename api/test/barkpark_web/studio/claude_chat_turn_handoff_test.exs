@@ -19,6 +19,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatTurnHandoffTest do
   """
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Auth

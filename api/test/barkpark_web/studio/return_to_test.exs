@@ -192,6 +192,8 @@ defmodule BarkparkWeb.Studio.ReturnToTest do
       {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "renders exactly one scoped return control on every flat surface", %{conn: conn} do
       encoded = URI.encode_www_form(@scoped)
 
@@ -255,6 +257,8 @@ defmodule BarkparkWeb.Studio.ReturnToTest do
                live(conn, "/studio/chat?return_to=#{URI.encode_www_form("https://evil.com")}")
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "enabled chat threads return_to through its own session patch links", %{conn: conn} do
       set_chat!(enabled: true, command: {"cat", []})
       {:ok, _} = StudioChat.create_session(%{id: Ecto.UUID.generate(), cwd: ".", mode: "plan"})
@@ -275,6 +279,8 @@ defmodule BarkparkWeb.Studio.ReturnToTest do
       assert_patch(view, "/studio/chat?return_to=#{encoded}")
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "enabled chat ignores a hostile return_to (no param leaks into links)", %{conn: conn} do
       set_chat!(enabled: true, command: {"cat", []})
 
