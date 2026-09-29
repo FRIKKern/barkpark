@@ -57,6 +57,7 @@ defmodule Barkpark.Content.Broadcast do
 
   alias Barkpark.Audit
   alias Barkpark.Repo
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   alias Barkpark.Content.{CallerContext, Document, DraftId, Envelope, MutationEvent, Revision}
 
@@ -595,7 +596,12 @@ defmodule Barkpark.Content.Broadcast do
   end
 
   @doc false
-  def save_event(doc, type, dataset, action, prev_rev, source \\ :api) do
+  def save_event(doc, type, dataset, action, prev_rev, source \\ :api),
+    do: Door.admit!(fn -> admitted_save_event(doc, type, dataset, action, prev_rev, source) end)
+
+  # C083: the event row is a door of its own for the two plugin callers that write
+  # it outside a Writer or Lifecycle door (OnixEdit staleness and Bokbasen status).
+  defp admitted_save_event(doc, type, dataset, action, prev_rev, source) do
     %MutationEvent{}
     |> Ecto.Changeset.change(%{
       dataset: dataset,

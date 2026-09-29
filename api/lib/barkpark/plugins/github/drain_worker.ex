@@ -69,6 +69,7 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
 
   use GenServer
 
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Plugins.Github.{Cursor, MirrorJob, Outbox, Settings}
 
   # Halt-retry backoff bounds (mirrors PushWorker): 1 s floor, 30 s cap.
@@ -167,11 +168,18 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
     if active? do
       # Thread `state` through the fold so each dataset's one-time bootstrap is
       # recorded in `state.bootstrapped`; OR the per-dataset halt flags.
+      # C083: cursor seeds and advances are admitted as one write per tick. A
+      # held instance halts the tick with every cursor frozen and backs off.
       {state, halted?} =
-        Enum.reduce(state.datasets_fun.(), {state, false}, fn dataset, {st, acc} ->
-          st = ensure_bootstrapped(dataset, st)
-          {st, drain_dataset(dataset, st) or acc}
-        end)
+        case Door.admit(fn ->
+               Enum.reduce(state.datasets_fun.(), {state, false}, fn dataset, {st, acc} ->
+                 st = ensure_bootstrapped(dataset, st)
+                 {st, drain_dataset(dataset, st) or acc}
+               end)
+             end) do
+          {:error, {:write_admission, _reason}} -> {state, true}
+          drained -> drained
+        end
 
       {attempt, delay} =
         if halted? do

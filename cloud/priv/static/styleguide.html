@@ -401,6 +401,9 @@
         <h2>05 · Status pills, plan chip, provider marks</h2>
         <p class="sg-note">
           Pill grammar: glyph + colour + word — three redundant channels, told ONCE per row.
+          The capsule (<code>.status-pill-chip</code>) holds only the state and never wraps;
+          the optional detail is muted prose <em>beside</em> it, outside the chrome, so a long
+          reason wraps as a sentence instead of inflating the chip into a balloon.
           The status-pill is the single status voice, and since the decision-24 sweep that
           includes every DEPLOY status chip: the `.dep-*` family is retired and the second row
           below is the same family, driven by <code>statusMeta</code> in app.js. Two SHAPE
@@ -413,20 +416,20 @@
         <div class="sg-panes" data-sg-clone>
           <div>
             <div class="sg-row">
-              <span class="status-pill status-pill--ok"><span class="status-pill-dot"></span><span class="status-pill-label">Live</span><span class="status-pill-detail">v1.42</span></span>
-              <span class="status-pill status-pill--warn"><span class="status-pill-dot"></span><span class="status-pill-label">Degraded</span></span>
-              <span class="status-pill status-pill--info"><span class="status-pill-dot"></span><span class="status-pill-label">Provisioning</span><span class="status-pill-detail">2m 10s</span></span>
-              <span class="status-pill status-pill--danger"><span class="status-pill-dot"></span><span class="status-pill-label">Unreachable</span><span class="status-pill-detail">3 checks failed</span></span>
-              <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Archived</span></span>
+              <span class="status-pill status-pill--ok"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Live</span></span><span class="status-pill-detail">v1.42</span></span>
+              <span class="status-pill status-pill--warn"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Degraded</span></span></span>
+              <span class="status-pill status-pill--info"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Provisioning</span></span><span class="status-pill-detail">2m 10s</span></span>
+              <span class="status-pill status-pill--danger"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Unreachable</span></span><span class="status-pill-detail">3 checks failed</span></span>
+              <span class="status-pill status-pill--neutral"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Archived</span></span></span>
             </div>
             <div class="sg-row">
-              <span class="status-pill status-pill--ok"><span class="status-pill-dot"></span><span class="status-pill-label">Live</span></span>
-              <span class="status-pill status-pill--warn"><span class="status-pill-dot"></span><span class="status-pill-label">Building</span></span>
-              <span class="status-pill status-pill--warn"><span class="status-pill-dot"></span><span class="status-pill-label">Pushing</span></span>
-              <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Queued</span></span>
-              <span class="status-pill status-pill--danger"><span class="status-pill-dot"></span><span class="status-pill-label">Failed</span></span>
-              <span class="status-pill status-pill--warn status-pill--hollow"><span class="status-pill-dot"></span><span class="status-pill-label">Deferred</span></span>
-              <span class="status-pill status-pill--neutral status-pill--stopped"><span class="status-pill-dot"></span><span class="status-pill-label">Cancelled</span></span>
+              <span class="status-pill status-pill--ok"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Live</span></span></span>
+              <span class="status-pill status-pill--warn"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Building</span></span></span>
+              <span class="status-pill status-pill--warn"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Pushing</span></span></span>
+              <span class="status-pill status-pill--neutral"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Queued</span></span></span>
+              <span class="status-pill status-pill--danger"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Failed</span></span></span>
+              <span class="status-pill status-pill--warn status-pill--hollow"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Deferred</span></span></span>
+              <span class="status-pill status-pill--neutral status-pill--stopped"><span class="status-pill-chip"><span class="status-pill-dot"></span><span class="status-pill-label">Cancelled</span></span></span>
               <span class="sg-plan-chip">Supporter</span>
             </div>
             <div class="sg-row">

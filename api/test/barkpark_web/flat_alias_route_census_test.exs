@@ -227,6 +227,27 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
       {:global,
        "instance-operational, no tenant rows: drives Barkpark.SelfUpdate.Runner — this box's " <>
          "own update and rollback executor. Source carries no scope marker at all."},
+    # WriteAdmissionController (C083 trusted hold endpoint)
+    {"GET", "/v1/admin/write-admission"} =>
+      {:global,
+       "instance-operational, no tenant rows: the write-admission coordinator's view. Source " <>
+         "carries no scope marker at all."},
+    {"POST", "/v1/admin/write-admission/recover"} =>
+      {:global,
+       "instance-operational, no tenant rows: explicit recovery of the coordinator after an " <>
+         "interrupted hold. Source carries no scope marker at all."},
+    {"POST", "/v1/admin/write-admission/hold"} =>
+      {:global,
+       "instance-operational, no tenant rows: begins the managed hold on this instance's " <>
+         "write-admission coordinator. Source carries no scope marker at all."},
+    {"GET", "/v1/admin/write-admission/hold/:capability"} =>
+      {:global,
+       "instance-operational, no tenant rows: reports the managed hold. Source carries no " <>
+         "scope marker at all."},
+    {"DELETE", "/v1/admin/write-admission/hold/:capability"} =>
+      {:global,
+       "instance-operational, no tenant rows: aborts the managed hold. Source carries no " <>
+         "scope marker at all."},
     # SiteDeployController.status
     {"GET", "/v1/admin/site-deploy"} =>
       {:global,
@@ -483,6 +504,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # DocumentOpsController.apply_op
+    {"POST", "/v1/data/doc/:dataset/:type/:doc_id/ops"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into the schema read, the draft lookup and " <>
+         "Content.apply_document_block_op/5, so the document it edits is the " <>
+         "pipeline-derived :current_workspace's, the same as MutateController.mutate."},
     # QueryController.index
     {"GET", "/v1/data/query/:dataset/:type"} =>
       {:workspace_derived,
