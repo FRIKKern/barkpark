@@ -1,3 +1,20 @@
+defmodule Barkpark.ManagedRuntime.WriteAdmission.Refused do
+  @moduledoc """
+  Raised by doors whose callers cannot take a refusal tuple: the task-board verbs match
+  `{:ok, doc} | :stale` from one shared primitive, so a hold refuses by raising and the
+  enclosing transaction rolls back. Renders as 503 (`Plug.Exception`).
+  """
+  defexception [:reason]
+  @impl true
+  def message(%{reason: reason}),
+    do: "writes are not admitted while this instance is being switched (#{inspect(reason)})"
+
+  defimpl Plug.Exception do
+    def status(_), do: 503
+    def actions(_), do: []
+  end
+end
+
 defmodule Barkpark.ManagedRuntime.WriteAdmission.Door do
   @moduledoc """
   Door-level write admission for content and media owners (C083).
@@ -41,6 +58,17 @@ defmodule Barkpark.ManagedRuntime.WriteAdmission.Door do
   @doc "Run a write under admission; refuse with `{:error, {:write_admission, reason}}`."
   def admit(fun) when is_function(fun, 0) do
     if enabled?(), do: admitted(fun), else: fun.()
+  end
+
+  @doc "Run a write under admission; a refusal raises `Refused` for callers with a fixed return shape."
+  def admit!(fun) when is_function(fun, 0) do
+    case admit(fun) do
+      {:error, {:write_admission, reason}} ->
+        raise Barkpark.ManagedRuntime.WriteAdmission.Refused, reason: reason
+
+      other ->
+        other
+    end
   end
 
   @doc """
