@@ -1470,13 +1470,14 @@ textarea.bp-canvas-island__input { resize: vertical; }
 .bp-canvas-action .bp-button--primary {
   border: none; background: var(--paper-accent); color: #ffffff;
 }
+/* The label edits in place; an empty label keeps the button's shape and says what goes there. */
+.bp-canvas-action [data-test-id="paper-action-label"]:empty::before { content: attr(data-placeholder); opacity: 0.6; }
 .bp-canvas-action-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
 }
-.bp-canvas-action-label,
 .bp-canvas-action-href {
   flex: 1 1 160px;
   min-width: 0;
