@@ -8,6 +8,7 @@ defmodule Barkpark.Plugins.Bulldocs.Events do
   import Ecto.Query
   import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
   alias Barkpark.Repo
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Plugins.Bulldocs.Event
 
   @doc """
@@ -21,9 +22,13 @@ defmodule Barkpark.Plugins.Bulldocs.Events do
   provides none) so a goal's events share the goal's workspace/project.
   """
   def create_event(attrs) when is_map(attrs) do
-    %Event{}
-    |> Event.changeset(attrs)
-    |> Repo.insert()
+    # C083: paper events from BulldocsLive and the intents controller are a door;
+    # the BlockOps caller is already admitted and nests.
+    Door.admit(fn ->
+      %Event{}
+      |> Event.changeset(attrs)
+      |> Repo.insert()
+    end)
   end
 
   @decision_ttl_seconds 24 * 60 * 60
@@ -308,9 +313,11 @@ defmodule Barkpark.Plugins.Bulldocs.Events do
             {:error, :not_found}
 
           %Event{} = event ->
-            event
-            |> Ecto.Changeset.change(processed_at: DateTime.utc_now())
-            |> Repo.update()
+            Door.admit(fn ->
+              event
+              |> Ecto.Changeset.change(processed_at: DateTime.utc_now())
+              |> Repo.update()
+            end)
         end
     end
   end

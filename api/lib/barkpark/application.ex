@@ -154,6 +154,11 @@ defmodule Barkpark.Application do
     self_update_children =
       if Barkpark.SelfUpdate.enabled?(), do: [Barkpark.SelfUpdate.Checker], else: []
 
+    # C083: a managed instance refuses seed and one-shot boots outright. Their
+    # raw Repo writes never reach a door, and the serving tree's coordinator
+    # would not see them (fail closed, before any child starts).
+    :ok = refuse_managed_offline_boot!(boot_mode())
+
     children =
       child_specs(plugin_children, oban_config, sync_children, self_update_children, boot_mode())
 
@@ -161,6 +166,11 @@ defmodule Barkpark.Application do
     # starts so the first job Oban runs is already routed; a no-op per job
     # whenever the pool is not running (see `Barkpark.Repo.route_job_to_job_pool/4`).
     :ok = Barkpark.Repo.attach_job_pool_router()
+
+    # Write admission for Oban jobs (Barkdown C083): the same seam, attached only
+    # when the instance admits writes, so an unmanaged server pays nothing.
+    if Barkpark.ManagedRuntime.WriteAdmission.Door.enabled?(),
+      do: :ok = Barkpark.ManagedRuntime.WriteAdmission.ObanAdmission.attach()
 
     # Chapter 64 (layering isolates blast radius). The top supervisor keeps the
     # OTP-default 3-restarts-in-5s budget — made EXPLICIT here — but that budget
@@ -388,73 +398,106 @@ defmodule Barkpark.Application do
         {Barkpark.ManagedRuntime.WriteAdmission,
          journal: Keyword.fetch!(config, :journal),
          instance_id: Keyword.fetch!(config, :instance_id),
-         initialize: Keyword.get(config, :initialize, false)}
+         initialize: Keyword.get(config, :initialize, false)},
+        # Owns HTTP-requested holds (the trusted hold endpoint).
+        Barkpark.ManagedRuntime.WriteAdmission.Holder
       ]
     else
       []
     end
   end
 
+  @doc """
+  Refuse a `:seed` or `:one_shot` boot when write admission is enabled (C083).
+
+  Pure on its arguments so the boot-mode tests can assert it; `start/2` calls it
+  with the live mode before building the tree.
+  """
+  @spec refuse_managed_offline_boot!(boot_mode(), keyword()) :: :ok
+  def refuse_managed_offline_boot!(
+        mode,
+        config \\ Application.get_env(:barkpark, :write_admission, [])
+      )
+
+  def refuse_managed_offline_boot!(mode, config) when mode in [:seed, :one_shot] do
+    if Keyword.get(config, :enabled, false) == true do
+      raise ArgumentError,
+            "a managed instance (write admission enabled) refuses a #{inspect(mode)} boot: " <>
+              "its writes bypass every admission door; run seeds and one-shot tasks " <>
+              "with admission disabled, or through the serving node"
+    else
+      :ok
+    end
+  end
+
+  def refuse_managed_offline_boot!(_mode, _config), do: :ok
+
   defp write_admission_child?({Barkpark.ManagedRuntime.WriteAdmission, _}), do: true
+  defp write_admission_child?(Barkpark.ManagedRuntime.WriteAdmission.Holder), do: true
   defp write_admission_child?(_), do: false
 
   defp static_full_children(plugin_children, oban_config, sync_children, self_update_children) do
-    write_admission_children() ++
+    # C083: the write admission coordinator starts AFTER SchemaBootstrap's
+    # synchronous init, so the boot-time schema and codelist writes are
+    # pre-open by construction, and BEFORE Oban, so the first job is admitted.
+    [
+      # Dedicated Finch pool for the auth/login OUTBOUND path (Felix W10,
+      # task-felix-outbound-pool-isolation + task-felix-sso-explicit-timeout).
+      # The 5 auth-outbound clients (SSO OIDC/Social, github/indx/bokbasen
+      # plugin-auth token fetches) route through THIS pool via `finch:
+      # Barkpark.Auth.Finch` instead of Req's global default (Req.Finch).
+      # DEFENSE-IN-DEPTH, not a crash-fix: Finch partitions connection slots
+      # per {scheme,host,port}, so a webhook/CDN storm to other hosts already
+      # cannot drain the IdP host's slots on the shared instance. The value is
+      # (a) an owned/tunable/observable connection budget for the login path
+      # decoupled from the global default (mirrors Sync.Finch:~51 below),
+      # (b) bounds BEAM-global socket/FD/ephemeral-port pressure under a real
+      # concurrent storm, (c) deterministically isolates the same-host edge (a
+      # self-hosted IdP sharing a reverse-proxy host with a webhook target).
+      # UNCONDITIONAL + no Repo dep — free idle pool, always up before the
+      # Endpoint so the first login never races an unstarted pool.
+      {Finch, name: Barkpark.Auth.Finch, pools: %{default: [size: 10, count: 1]}},
+      Barkpark.RateLimiter,
+      BarkparkWeb.Telemetry,
+      # Rolling req/s + p95 aggregator over [:phoenix, :endpoint, :stop]
+      # (cloud-console W5). Up before the Endpoint so early traffic is counted;
+      # a pure ETS-backed window, no Repo dependency.
+      BarkparkWeb.RequestStats,
+      # Always-on Linux-host vitals sampler for the Studio bottom bar. Core /
+      # plugin-independent (unlike Pulse.Metrics), no Repo dependency; reads
+      # :os_mon + /proc every few seconds and broadcasts on "server_vitals".
+      Barkpark.HostVitals.Sampler,
+      Barkpark.Repo,
+      Barkpark.Vault,
+      # WI1: plugin registry — must come up before workers/endpoint so any
+      # later boot hook that calls Barkpark.Plugins.Registry has a live PID.
+      Barkpark.Plugins.Registry,
+      # Task barkpark-otv: in-memory run-status tracker the plugin admin LV
+      # reads to surface "last bootstrap" / "last seed" timestamps. Must
+      # come up before the post-boot Task that calls Bootstrap +
+      # codelist seeders so the very first sweep's results land in the
+      # map. Empty-state if absent — never crashes the caller.
+      Barkpark.Plugins.RunStatus,
+      # Phase 3 WI1: cross-field validation kernel — registry of value-
+      # checkers (ETS-backed) and per-schema rule cache. Both must be up
+      # before the endpoint can serve mutate/export traffic.
+      Barkpark.Validation.Registry,
+      Barkpark.Content.Validation.Rules,
+      # VOLATILE plugin tier (was folded in FLAT here via plugin_children).
+      # Now isolated under its own supervisor + restart budget: a crash-looping
+      # third-party/plugin worker can no longer breach Barkpark.Supervisor's
+      # budget and take Repo/Oban/Endpoint down. Same slot → boot order held
+      # (plugin workers still come up after Repo/Vault/Registry, before Oban).
+      {Barkpark.Plugins.Supervisor, plugin_children},
+      # Boot-order fix: SchemaBootstrap runs SYNCHRONOUSLY here, after the
+      # Repo + Plugins.Registry GenServer (above) and BEFORE Oban. The
+      # supervisor blocks on its init/1 (which registers every plugin's
+      # schemas) before starting Oban, so Oban can never dequeue a job
+      # against an unregistered schema. No paused queues, no resume loop.
+      Barkpark.SchemaBootstrap
+    ] ++
+      write_admission_children() ++
       [
-        # Dedicated Finch pool for the auth/login OUTBOUND path (Felix W10,
-        # task-felix-outbound-pool-isolation + task-felix-sso-explicit-timeout).
-        # The 5 auth-outbound clients (SSO OIDC/Social, github/indx/bokbasen
-        # plugin-auth token fetches) route through THIS pool via `finch:
-        # Barkpark.Auth.Finch` instead of Req's global default (Req.Finch).
-        # DEFENSE-IN-DEPTH, not a crash-fix: Finch partitions connection slots
-        # per {scheme,host,port}, so a webhook/CDN storm to other hosts already
-        # cannot drain the IdP host's slots on the shared instance. The value is
-        # (a) an owned/tunable/observable connection budget for the login path
-        # decoupled from the global default (mirrors Sync.Finch:~51 below),
-        # (b) bounds BEAM-global socket/FD/ephemeral-port pressure under a real
-        # concurrent storm, (c) deterministically isolates the same-host edge (a
-        # self-hosted IdP sharing a reverse-proxy host with a webhook target).
-        # UNCONDITIONAL + no Repo dep — free idle pool, always up before the
-        # Endpoint so the first login never races an unstarted pool.
-        {Finch, name: Barkpark.Auth.Finch, pools: %{default: [size: 10, count: 1]}},
-        Barkpark.RateLimiter,
-        BarkparkWeb.Telemetry,
-        # Rolling req/s + p95 aggregator over [:phoenix, :endpoint, :stop]
-        # (cloud-console W5). Up before the Endpoint so early traffic is counted;
-        # a pure ETS-backed window, no Repo dependency.
-        BarkparkWeb.RequestStats,
-        # Always-on Linux-host vitals sampler for the Studio bottom bar. Core /
-        # plugin-independent (unlike Pulse.Metrics), no Repo dependency; reads
-        # :os_mon + /proc every few seconds and broadcasts on "server_vitals".
-        Barkpark.HostVitals.Sampler,
-        Barkpark.Repo,
-        Barkpark.Vault,
-        # WI1: plugin registry — must come up before workers/endpoint so any
-        # later boot hook that calls Barkpark.Plugins.Registry has a live PID.
-        Barkpark.Plugins.Registry,
-        # Task barkpark-otv: in-memory run-status tracker the plugin admin LV
-        # reads to surface "last bootstrap" / "last seed" timestamps. Must
-        # come up before the post-boot Task that calls Bootstrap +
-        # codelist seeders so the very first sweep's results land in the
-        # map. Empty-state if absent — never crashes the caller.
-        Barkpark.Plugins.RunStatus,
-        # Phase 3 WI1: cross-field validation kernel — registry of value-
-        # checkers (ETS-backed) and per-schema rule cache. Both must be up
-        # before the endpoint can serve mutate/export traffic.
-        Barkpark.Validation.Registry,
-        Barkpark.Content.Validation.Rules,
-        # VOLATILE plugin tier (was folded in FLAT here via plugin_children).
-        # Now isolated under its own supervisor + restart budget: a crash-looping
-        # third-party/plugin worker can no longer breach Barkpark.Supervisor's
-        # budget and take Repo/Oban/Endpoint down. Same slot → boot order held
-        # (plugin workers still come up after Repo/Vault/Registry, before Oban).
-        {Barkpark.Plugins.Supervisor, plugin_children},
-        # Boot-order fix: SchemaBootstrap runs SYNCHRONOUSLY here, after the
-        # Repo + Plugins.Registry GenServer (above) and BEFORE Oban. The
-        # supervisor blocks on its init/1 (which registers every plugin's
-        # schemas) before starting Oban, so Oban can never dequeue a job
-        # against an unregistered schema. No paused queues, no resume loop.
-        Barkpark.SchemaBootstrap,
         # VOLATILE Indx retriever-seam subsystem (was Auth/Monitor/Recovery flat).
         # Indx is NOT a registered plugin, so these are declared statically. Now
         # wrapped so an Indx crash-loop degrades (engine=indx falls back to
