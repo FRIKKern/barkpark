@@ -149,6 +149,25 @@ defmodule BarkparkCloud.DeviceAuthTest do
       user = user_fixture()
       assert {:error, :expired_or_invalid} = DeviceAuth.approve("ZZZZ-ZZZZ", user.id)
     end
+
+    # task-felix-w20-bl-devauth-approve-bypass-guard. approve/2 stamps user_id via
+    # Repo.update_all, which bypasses the changeset's assoc_constraint(:user).
+    # Since #18913 an account can be erased (Erasure.delete_user/2, DELETE
+    # /v1/account), so an approve that races the erasure stamps a user_id whose
+    # row is gone and the FK aborts the UPDATE. That must be a refusal, not a
+    # raise — and the request must stay pending, stamped with nobody.
+    test "an approver whose account was erased in between is refused, never a raise" do
+      user = user_fixture()
+      {:ok, %{user_code: uc}} = DeviceAuth.start(%{})
+
+      assert {:ok, :erased} = BarkparkCloud.Accounts.Erasure.delete_user(user)
+
+      assert {:error, :expired_or_invalid} = DeviceAuth.approve(uc, user.id)
+
+      row = Repo.one(Request)
+      assert row.status == "pending"
+      assert is_nil(row.user_id)
+    end
   end
 
   describe "deny/1" do
