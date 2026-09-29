@@ -3,37 +3,113 @@ defmodule Barkpark.Release do
 
   @app :barkpark
 
-  def migrate do
+  @doc """
+  Run every pending migration in the enabled directory set
+  (`run_migrations/2`) against each repo, started repo-only by
+  `Ecto.Migrator.with_repo/3`.
+
+  `bin/barkpark eval "Barkpark.Release.migrate()"` calls it with no options.
+  The options exist for the fixture-plugin test: `:with_repo` replaces
+  `Ecto.Migrator.with_repo/3` (a running test repo must not be restarted), and
+  the rest goes to `run_migrations/2`.
+  """
+  def migrate(opts \\ []) do
     load_app()
+    {with_repo, run_opts} = Keyword.pop(opts, :with_repo, &Ecto.Migrator.with_repo/3)
 
     for repo <- repos() do
       {:ok, _, _} =
-        Ecto.Migrator.with_repo(
-          repo,
-          &Ecto.Migrator.run(&1, :up, all: true),
-          # `with_repo/3` starts the repo with the SAME config, so a migration
-          # connection would otherwise inherit prod's 30 s `statement_timeout`
-          # (config/runtime.exs) — and a backfill or a `CREATE INDEX
-          # CONCURRENTLY` that Postgres CANCELS at 30 s leaves an INVALID index
-          # behind. A migration is an operator-supervised, offline-shaped step:
-          # its bound is the deploy window, not a request budget. These opts are
-          # passed through to `repo.start_link/1`, where they REPLACE the
-          # `:parameters` from config (nothing else sets that key).
-          #
-          # NOTE, and it is the load-bearing half: `make deploy` migrates via
-          # `mix ecto.migrate` (Makefile), not through this function, so this
-          # override does not cover the live path. A long migration must still
-          # disable the wall itself — see `Barkpark.Repo`'s @moduledoc for the
-          # `repo().checkout` + `SET statement_timeout = 0` shape.
-          parameters: [statement_timeout: "0"]
-        )
+        with_statement_timeout_lifted(repo, fn ->
+          with_repo.(repo, &run_migrations(&1, run_opts), [])
+        end)
     end
   end
 
   @doc """
+  Run `fun` with `statement_timeout` lifted to `"0"` in the startup parameters
+  of `repo` (or of each repo in a list), then restore the previous app env.
+
+  Both migrate paths go through it: `migrate/1` here, and
+  `Mix.Tasks.Barkpark.Migrate` (what `mix ecto.migrate` is aliased to, and what
+  `make migrate` / `scripts/deploy-rebuild.sh` run on the prod box).
+
+  WHY: prod's repo config (config/runtime.exs) sends
+  `parameters: [statement_timeout: "30s"]` as a Postgrex startup parameter,
+  and `Ecto.Migrator.with_repo/3` starts the repo from that same config — so
+  without this a backfill or a `CREATE INDEX CONCURRENTLY` that Postgres
+  CANCELS at 30 s leaves an INVALID index behind. A migration is an
+  operator-supervised, offline-shaped step: its bound is the deploy window,
+  not a request budget.
+
+  WHY THE APP ENV, not a `with_repo/3` option: ecto_sql 3.13.5's
+  `with_repo/3` reads only `:mode` and `:pool_size` from its third argument
+  and starts the repo as `repo.start_link(pool_size: pool_size)`
+  (deps/ecto_sql/lib/ecto/migrator.ex, `ensure_repo_started/2`). A
+  `parameters:` passed there was silently dropped, and migrations ran under
+  the 30 s wall (measured: "30s", test/barkpark/release/
+  migrate_statement_timeout_test.exs). `repo.start_link/1` DOES read the
+  repo's app env, so the override is merged into it for the duration of the
+  call — `statement_timeout` only; any other startup parameter is kept — and
+  the previous env is restored afterwards, raise or not.
+
+  Scope: it only reaches a repo that `fun` STARTS. A repo already running
+  (the test node's sandbox repo) keeps the connections it has.
+  """
+  @spec with_statement_timeout_lifted(module() | [module()], (-> result)) :: result
+        when result: term()
+  def with_statement_timeout_lifted(repos, fun) when is_list(repos) do
+    repos
+    |> Enum.reduce(fun, fn repo, inner -> fn -> with_statement_timeout_lifted(repo, inner) end end)
+    |> then(& &1.())
+  end
+
+  def with_statement_timeout_lifted(repo, fun) when is_atom(repo) and is_function(fun, 0) do
+    previous = Application.get_env(@app, repo)
+    config = previous || []
+    parameters = Keyword.put(config[:parameters] || [], :statement_timeout, "0")
+    Application.put_env(@app, repo, Keyword.put(config, :parameters, parameters))
+
+    try do
+      fun.()
+    after
+      if previous == nil,
+        do: Application.delete_env(@app, repo),
+        else: Application.put_env(@app, repo, previous)
+    end
+  end
+
+  @doc """
+  Apply every pending migration in `Barkpark.MigrationPaths.enabled/1` to
+  `repo`: the core directory plus the migrations folder of each plugin and
+  capability switched on by `BARKPARK_PLUGINS` and `BARKPARK_CAPABILITIES_OFF`.
+
+  `migrate/1` runs this inside `Ecto.Migrator.with_repo/3`. With no plugin or
+  capability folder holding migrations the list is the core directory alone,
+  `Ecto.Migrator.migrations_path(repo)`, which is exactly what
+  `Ecto.Migrator.run(repo, :up, all: true)` reads.
+
+  `opts` takes the `Barkpark.MigrationPaths` options (`:priv_root`, `:plugins`,
+  `:capability_enabled?`); anything else goes to `Ecto.Migrator.run/4`. Tests
+  use both; `bin/barkpark eval "Barkpark.Release.migrate()"` passes none.
+  """
+  @spec run_migrations(Ecto.Repo.t(), keyword()) :: [integer()]
+  def run_migrations(repo, opts \\ []) do
+    {path_opts, migrator_opts} = Keyword.split(opts, [:priv_root, :plugins, :capability_enabled?])
+
+    Ecto.Migrator.run(
+      repo,
+      Barkpark.MigrationPaths.enabled(path_opts),
+      :up,
+      Keyword.put(migrator_opts, :all, true)
+    )
+  end
+
+  @doc """
   Assert the migrate step actually applied the tree: every migration version in
-  the release's `priv/repo/migrations` is present in `schema_migrations`, and no
-  two files claim the same version. Raises, naming the version, otherwise.
+  the directories `Barkpark.MigrationPaths.enabled/1` returns (the release's
+  `priv/repo/migrations` plus any enabled plugin or capability folder) is
+  present in `schema_migrations`, and no two files claim the same version.
+  Raises, naming the version, otherwise.
 
   The same `Barkpark.MigrationIntegrity.check/1` the test suite runs — a release
   has no `mix test` alias to migrate for it, so an operator runs this after

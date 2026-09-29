@@ -115,6 +115,14 @@ defmodule Barkpark.Plugin do
   logs and skips that plugin; sibling schemas still install. Never
   reintroduce manual `mix run -e "...register_schemas..."` registration.
 
+  ## Migrations are a folder, not a callback
+
+  A plugin's tables come from `priv/plugins/<name>/migrations/*.exs`, with
+  that folder's own `MANIFEST.sha256`. `Barkpark.MigrationPaths` hands the
+  folder to every migrate path (`Barkpark.Release.migrate/0` and
+  `mix ecto.migrate`) when `BARKPARK_PLUGINS` enables the plugin. The switch
+  is instance-wide; per-workspace enablement never decides which tables exist.
+
   ## Schema-metadata columns a plugin can populate
 
   The host reads these `Barkpark.Content.SchemaDefinition` columns

@@ -119,101 +119,6 @@ importers:
         specifier: ^5.6.0
         version: 5.9.3
 
-  packages/astro-decoy:
-    devDependencies:
-      '@astrojs/react':
-        specifier: 4.4.2
-        version: 4.4.2(@types/node@20.19.39)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(jiti@2.7.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
-      '@types/react':
-        specifier: ^19
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19
-        version: 19.2.3(@types/react@19.2.14)
-      astro:
-        specifier: 5.18.2
-        version: 5.18.2(@types/node@20.19.39)(jiti@2.7.0)(rollup@4.60.1)(typescript@5.9.3)
-      happy-dom:
-        specifier: ^20.0.0
-        version: 20.10.6
-      react:
-        specifier: ^19.0.0
-        version: 19.2.5
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.5(react@19.2.5)
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@6.4.3(@types/node@20.19.39)(jiti@2.7.0))
-
-  packages/astro-parity:
-    dependencies:
-      '@barkpark/react':
-        specifier: workspace:^
-        version: link:../react
-    devDependencies:
-      '@types/react':
-        specifier: ^19
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19
-        version: 19.2.3(@types/react@19.2.14)
-      astro:
-        specifier: 5.18.2
-        version: 5.18.2(@types/node@20.19.39)(jiti@2.7.0)(rollup@4.60.1)(typescript@5.9.3)
-      happy-dom:
-        specifier: ^20.0.0
-        version: 20.10.6
-      react:
-        specifier: ^19.0.0
-        version: 19.2.5
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.5(react@19.2.5)
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
-
-  packages/blog-hydration-parity:
-    dependencies:
-      '@barkpark/react':
-        specifier: workspace:^
-        version: link:../react
-    devDependencies:
-      '@testing-library/react':
-        specifier: ^16.1.0
-        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
-      '@types/react':
-        specifier: ^19
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19
-        version: 19.2.3(@types/react@19.2.14)
-      '@vitest/browser':
-        specifier: ^4.1.0
-        version: 4.1.9(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))(vitest@4.1.9)
-      '@vitest/browser-playwright':
-        specifier: ^4.1.0
-        version: 4.1.9(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(playwright@1.59.1)(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))(vitest@4.1.9)
-      asciinema-player:
-        specifier: ^3.8.0
-        version: 3.17.0
-      mermaid:
-        specifier: ^11.0.0
-        version: 11.16.0
-      playwright:
-        specifier: ^1.48.0
-        version: 1.59.1
-      react:
-        specifier: ^19.0.0
-        version: 19.2.5
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.5(react@19.2.5)
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
-
   packages/codegen:
     dependencies:
       '@barkpark/core':
@@ -346,62 +251,6 @@ importers:
         specifier: ^4.1.0
         version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
 
-  packages/media-parity:
-    dependencies:
-      '@barkpark/react':
-        specifier: workspace:^
-        version: link:../react
-    devDependencies:
-      '@vitest/browser':
-        specifier: ^4.1.0
-        version: 4.1.9(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))(vitest@4.1.9)
-      '@vitest/browser-playwright':
-        specifier: ^4.1.0
-        version: 4.1.9(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(playwright@1.59.1)(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))(vitest@4.1.9)
-      asciinema-player:
-        specifier: ^3.8.0
-        version: 3.17.0
-      mermaid:
-        specifier: ^11.0.0
-        version: 11.16.0
-      playwright:
-        specifier: ^1.48.0
-        version: 1.59.1
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
-
-  packages/next-parity:
-    dependencies:
-      '@barkpark/nextjs':
-        specifier: workspace:^
-        version: link:../nextjs
-      '@barkpark/react':
-        specifier: workspace:^
-        version: link:../react
-    devDependencies:
-      '@types/react':
-        specifier: ^19
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19
-        version: 19.2.3(@types/react@19.2.14)
-      happy-dom:
-        specifier: ^20.0.0
-        version: 20.10.6
-      next:
-        specifier: 16.2.1
-        version: 16.2.1(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
-      react:
-        specifier: ^19.0.0
-        version: 19.2.5
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.5(react@19.2.5)
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
-
   packages/nextjs:
     dependencies:
       '@barkpark/core':
@@ -478,37 +327,6 @@ importers:
         specifier: ^4.1.0
         version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
 
-  packages/pinned-parity:
-    dependencies:
-      '@barkpark/core':
-        specifier: workspace:^
-        version: link:../core
-      '@barkpark/react':
-        specifier: workspace:^
-        version: link:../react
-    devDependencies:
-      '@types/node':
-        specifier: ^20
-        version: 20.19.39
-      '@types/react':
-        specifier: ^19
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19
-        version: 19.2.3(@types/react@19.2.14)
-      react:
-        specifier: ^19.0.0
-        version: 19.2.5
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.5(react@19.2.5)
-      typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
-
   packages/react:
     dependencies:
       '@barkpark/core':
@@ -554,6 +372,188 @@ importers:
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.10)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
+
+  test-harnesses/astro-decoy:
+    devDependencies:
+      '@astrojs/react':
+        specifier: 4.4.2
+        version: 4.4.2(@types/node@20.19.39)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(jiti@2.7.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      '@types/react':
+        specifier: ^19
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.14)
+      astro:
+        specifier: 5.18.2
+        version: 5.18.2(@types/node@20.19.39)(jiti@2.7.0)(rollup@4.60.1)(typescript@5.9.3)
+      happy-dom:
+        specifier: ^20.0.0
+        version: 20.10.6
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.5(react@19.2.5)
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@6.4.3(@types/node@20.19.39)(jiti@2.7.0))
+
+  test-harnesses/astro-parity:
+    dependencies:
+      '@barkpark/react':
+        specifier: workspace:^
+        version: link:../../packages/react
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.14)
+      astro:
+        specifier: 5.18.2
+        version: 5.18.2(@types/node@20.19.39)(jiti@2.7.0)(rollup@4.60.1)(typescript@5.9.3)
+      happy-dom:
+        specifier: ^20.0.0
+        version: 20.10.6
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.5(react@19.2.5)
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
+
+  test-harnesses/blog-hydration-parity:
+    dependencies:
+      '@barkpark/react':
+        specifier: workspace:^
+        version: link:../../packages/react
+    devDependencies:
+      '@testing-library/react':
+        specifier: ^16.1.0
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      '@types/react':
+        specifier: ^19
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.14)
+      '@vitest/browser':
+        specifier: ^4.1.0
+        version: 4.1.9(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))(vitest@4.1.9)
+      '@vitest/browser-playwright':
+        specifier: ^4.1.0
+        version: 4.1.9(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(playwright@1.59.1)(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))(vitest@4.1.9)
+      asciinema-player:
+        specifier: ^3.8.0
+        version: 3.17.0
+      mermaid:
+        specifier: ^11.0.0
+        version: 11.16.0
+      playwright:
+        specifier: ^1.48.0
+        version: 1.59.1
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.5(react@19.2.5)
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
+
+  test-harnesses/media-parity:
+    dependencies:
+      '@barkpark/react':
+        specifier: workspace:^
+        version: link:../../packages/react
+    devDependencies:
+      '@vitest/browser':
+        specifier: ^4.1.0
+        version: 4.1.9(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))(vitest@4.1.9)
+      '@vitest/browser-playwright':
+        specifier: ^4.1.0
+        version: 4.1.9(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(playwright@1.59.1)(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))(vitest@4.1.9)
+      asciinema-player:
+        specifier: ^3.8.0
+        version: 3.17.0
+      mermaid:
+        specifier: ^11.0.0
+        version: 11.16.0
+      playwright:
+        specifier: ^1.48.0
+        version: 1.59.1
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
+
+  test-harnesses/next-parity:
+    dependencies:
+      '@barkpark/nextjs':
+        specifier: workspace:^
+        version: link:../../packages/nextjs
+      '@barkpark/react':
+        specifier: workspace:^
+        version: link:../../packages/react
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.14)
+      happy-dom:
+        specifier: ^20.0.0
+        version: 20.10.6
+      next:
+        specifier: 16.2.1
+        version: 16.2.1(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.5(react@19.2.5)
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.9(@types/node@20.19.39)(@vitest/browser-playwright@4.1.9)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@25.0.1)(msw@2.13.4(@types/node@20.19.39)(typescript@5.9.3))(vite@7.3.5(@types/node@20.19.39)(jiti@2.7.0))
+
+  test-harnesses/pinned-parity:
+    dependencies:
+      '@barkpark/core':
+        specifier: workspace:^
+        version: link:../../packages/core
+      '@barkpark/react':
+        specifier: workspace:^
+        version: link:../../packages/react
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.39
+      '@types/react':
+        specifier: ^19
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.2.3(@types/react@19.2.14)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.5(react@19.2.5)
       typescript:
         specifier: ^5.6.0
         version: 5.9.3

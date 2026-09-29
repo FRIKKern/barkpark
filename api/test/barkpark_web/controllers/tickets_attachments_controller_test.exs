@@ -270,6 +270,26 @@ defmodule BarkparkWeb.TicketsAttachmentsControllerTest do
       assert get_resp_header(conn, "content-disposition") == [~s(inline; filename="shot.png")]
     end
 
+    # task-43f7a77dbb264559: the object-storage arm used to sign only the type
+    # and disposition, so bucket-served bytes carried whatever cache-control the
+    # bucket sends. The SAME attachment is served through BOTH arms. The file arm
+    # sets no header of its own and carries Plug's default, which orders the
+    # directives differently, so the compare is on the directive SET.
+    test "the presigned URL signs the file arm's cache policy", ctx do
+      file_arm = get(signed(ctx.owner_raw), show_path(ctx.ticket, ctx.asset_id))
+      assert file_arm.status == 200
+      assert [file_policy] = get_resp_header(file_arm, "cache-control")
+
+      use_s3_backend!()
+      redirect = get(signed(ctx.owner_raw), show_path(ctx.ticket, ctx.asset_id))
+
+      assert redirect.status == 302
+      signed = signed_cache_control(redirect)
+      assert is_binary(signed)
+      assert directives(signed) == directives(file_policy)
+      assert get_resp_header(redirect, "cache-control") == [signed]
+    end
+
     test "anonymous → 401 and NOT the bytes", ctx do
       conn = get(build_conn(), show_path(ctx.ticket, ctx.asset_id))
 
@@ -433,5 +453,41 @@ defmodule BarkparkWeb.TicketsAttachmentsControllerTest do
     File.write!(tmp, bytes)
     on_exit(fn -> File.rm(tmp) end)
     %Plug.Upload{path: tmp, filename: filename, content_type: content_type}
+  end
+
+  # The `response-cache-control` value signed into a 302's Location.
+  defp signed_cache_control(conn) do
+    [location] = get_resp_header(conn, "location")
+    assert location =~ "X-Amz-Signature="
+
+    location
+    |> URI.parse()
+    |> Map.fetch!(:query)
+    |> URI.decode_query()
+    |> Map.get("response-cache-control")
+  end
+
+  # `:media_storage` is process-GLOBAL VM state (this module is async: false).
+  # No network: `S3.serve_strategy/2` only SIGNS a URL.
+  defp use_s3_backend! do
+    previous = Application.get_env(:barkpark, :media_storage)
+
+    Application.put_env(:barkpark, :media_storage,
+      backend: :s3,
+      s3: [
+        endpoint: "https://test.r2.example.com",
+        bucket: "bp-ticket-attachments-test",
+        region: "auto",
+        access_key_id: "test-access-key",
+        secret_access_key: "test-secret-key"
+      ]
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark, :media_storage, previous) end)
+    :ok
+  end
+
+  defp directives(value) do
+    value |> String.split(",") |> Enum.map(&String.trim/1) |> MapSet.new()
   end
 end

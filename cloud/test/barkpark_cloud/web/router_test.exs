@@ -532,7 +532,10 @@ defmodule BarkparkCloud.Web.RouterTest do
       # `div-1` (commit_ancestry "diverged" → diverged, rank 6). This count is a
       # FRESHNESS pin on the producer-backed fixture, so it moves WITH the
       # fixture, in the same commit, and never by widening it to `>=`.
-      assert length(fixture_rows) == 18
+      # 18 -> 21 (dr-w15-s5): `cd-1` (a measured site_deploy.configured=false on
+      # a box with sites → cannot_deploy, rank 5) and the rung's two negative
+      # arms, `nosite-1` (no deploy surface) and `unm-1` (capability null).
+      assert length(fixture_rows) == 21
 
       assert Enum.all?(fixture_rows, &Map.has_key?(&1, "queued_deploy_age_seconds")),
              "every Go ranking row must preserve the field the producer always emits"
@@ -1066,11 +1069,16 @@ defmodule BarkparkCloud.Web.RouterTest do
       conn1 = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
       assert conn1.status == 201
 
-      # The double-click: same name → same slug. The barkparks_team_slug_unique_idx
-      # is the launch idempotency guard — the second submit is a 422, never a
-      # second billed box, even though the plan has 2 slots to spare.
+      # The double-click: same name → same slug. The second submit reconciles to
+      # the first, still-provisioning box — 409 already_provisioning carrying its
+      # id (dwb-launch-flow-double-submit-test; it was a bare 422 slug-taken the
+      # /new client could not act on) — never a second billed box, even though
+      # the plan has 2 slots to spare. The barkparks_team_slug_unique_idx stays
+      # the backstop a racing pair collides on.
       conn2 = call(:post, "/v1/go-live", %{name: "My Prod", plan: "supporter"}, token)
-      assert conn2.status == 422
+      assert conn2.status == 409
+      assert json_body(conn2)["error"] == "already_provisioning"
+      assert json_body(conn2)["barkpark"]["id"] == json_body(conn1)["barkpark"]["id"]
 
       # Exactly ONE barkpark and ONE provision job from the two intents.
       assert [%Barkpark{slug: "my-prod"}] = Registry.list_barkparks(team)

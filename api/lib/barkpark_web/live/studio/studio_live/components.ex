@@ -2028,6 +2028,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         show_profile={@show_profile}
         user_name={@user_name}
         user_color={@user_color}
+        account_path={account_path(assigns)}
         image_picker_field={@image_picker_field}
         uploads={@uploads}
         media_files={@media_files}
@@ -2341,6 +2342,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     do: JS.push("sidebar-toggle-panel") |> JS.focus(to: return_to)
 
   defp dismiss_or_toggle(_not_destination, _return_to), do: "sidebar-toggle-panel"
+
+  # The profile modal's "Download or erase your data" link. Only a scoped
+  # surface (non-empty `scope_prefix`) can address `…/d/:dataset/studio/_account`;
+  # anywhere else the link is not rendered.
+  defp account_path(%{scope_prefix: prefix, dataset: dataset})
+       when is_binary(prefix) and prefix != "" and is_binary(dataset),
+       do: Paths.studio_path(prefix, ["_account"], dataset)
+
+  defp account_path(_assigns), do: nil
 
   # spd-w18 — "this body renders NOTHING a reader can see", the gate on the
   # never-blank arm. It is deliberately NOT `html == ""`:

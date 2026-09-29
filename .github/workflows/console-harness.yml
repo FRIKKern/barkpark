@@ -667,6 +667,21 @@ jobs:
       # pass. `pipefail` is load-bearing: a `run:` step takes the LAST command's
       # status, so without it `tee` would launder a red suite into a green step.
       #
+      # PIN 1542 — bumped 2026-09-25 from 1537 on cloud/vercel-clone-root-directory
+      # (task-32e385b29e75c102): +5 tests over the Vercel clone URL. For every
+      # catalog template it names the template's folder as `root-directory` or is
+      # withheld with the catalog's reason; a user's own repo gets no folder; the
+      # withheld render; and the control that drops the parameter and moves a
+      # folder. RE-MEASURED, not added: `bash scripts/console-harness.sh` printed
+      # `ran 1542 test(s)`; the same command on a detached worktree at the base
+      # 2802596e4 printed `# tests 1537`; `bash scripts/console-pins.sh --write`
+      # measured 1542 and rewrote the literal.
+      # PIN 1537 — bumped 2026-09-25 from 1536 on cloud/launch-default-name
+      # (task-ef37ebad8249e82a): +1 test driving the /new blank-name submit from
+      # renderNewFlow to the progress view, with the pre-fix 422 as its control.
+      # RE-MEASURED, not added: `bash scripts/console-harness.sh` printed `ran 1537
+      # test(s)`, and `bash scripts/console-pins.sh --write` measured 1537 and
+      # rewrote the literal.
       # PIN 1536 — bumped 2026-09-24 from 1535 on console/w73-newcreaterepo
       # (cch-w73-bl-newcreaterepo-success-fields-unasserted): +1 test pinning
       # newCreateRepo's success arm to both fields POST /v1/github/repos returns.
@@ -991,7 +1006,7 @@ jobs:
       # that grows the suite bumps this literal in its own diff. The reasoning and
       # the accepted trade-off are recorded once, beside the seal-predicate pin
       # below (task-4f9e0ad4b9b02bac); every pin in this file follows it.
-      - name: Run console harness (1536-test EXACT pin, never bare `node --test`)
+      - name: Run console harness (1545-test EXACT pin, never bare `node --test`)
         run: |
           set -euo pipefail
           # SELF-TEST BEFORE THE MEASUREMENT — the shape the TDZ guard in this
@@ -1007,14 +1022,14 @@ jobs:
           # tree is still refused, and the arm itself reds if the pin were ever set
           # to 1.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1536 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1536 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 1545 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 1545 — this pin can no longer lose"; exit 1; }
           node --test cloud/priv/static/__app.test.mjs 2>&1 | tee /tmp/console-app-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/console-app-tests.txt)
-          if [ "${tally:-0}" -ne 1536 ]; then
-            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1536 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1536 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 1545 ]; then
+            echo "::error::console harness: ran ${tally:-0} test(s), the committed pin is 1545 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__app.test.mjs: bump every 1545 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "console harness: ${tally} tests, exact pin 1536 — the pin re-earned"
+          echo "console harness: ${tally} tests, exact pin 1545 — the pin re-earned"
 
       # The preview SMOKE harness — the instrument that renders every console
       # scenario against the SHIPPED app.js and asserts what each one draws. It
@@ -1253,6 +1268,11 @@ jobs:
           # appears twice per step — the self-test arm and the comparison — plus
           # the step name and the two messages.
           #
+          # PIN 153 — RE-DERIVED 2026-09-25 (task-76866f421d2b91c9), which adds ONE arm:
+          #   `ONE WORLD: an origin/main PINNED before a mid-run move is the one read; unpinned, the move refuses`.
+          #   MEASURED, not added: `node --test cloud/priv/static/__preview__/seal-predicate.test.mjs` under
+          #   Node v20.20.2 -> `# tests 153 / # pass 153 / # fail 0`, rc=0. The roster was never the variable in
+          #   the mid-run reds that row fixes: `# tests` was 152 on every pre-fix run, moved or not.
           # PIN 152 — RE-DERIVED 2026-09-24 (task-88edd0348e6f703d), which adds TWO arms:
           #   `w88: a Node of the declared major found ONLY under RUNNER_TOOL_CACHE resolves; without that root it is refused`, and
           #   `w88: LOCK — seal-predicate's and console-harness.sh's Node search roots are the SAME set, and both refusals name them`.
@@ -1409,14 +1429,14 @@ jobs:
           # read 1 out of a gutted file's `# pass 1`, and 1 must be under this
           # step's literal, or this floor has gone blind and its green means nothing.
           gutted=$(printf '# tests 1\n# pass 1\n# fail 0\n' | awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }')
-          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 152 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 152 — this pin can no longer lose"; exit 1; }
+          [ "${gutted:-x}" = "1" ] && [ "$gutted" -ne 153 ] || { echo "::error::tally self-test: a gutted file's TAP parsed to '${gutted}' against pin 153 — this pin can no longer lose"; exit 1; }
           PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs 2>&1 | tee /tmp/seal-predicate-tests.txt
           tally=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' /tmp/seal-predicate-tests.txt)
-          if [ "${tally:-0}" -ne 152 ]; then
-            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 152 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 152 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
+          if [ "${tally:-0}" -ne 153 ]; then
+            echo "::error::seal predicate tests: ran ${tally:-0} test(s), the committed pin is 153 — this pin is EXACT (two-sided). If the tally is HIGHER you grew cloud/priv/static/__preview__/seal-predicate.test.mjs: bump every 153 in this step (.github/workflows/console-harness.yml) in THIS SAME PR. If it is LOWER, tests were deleted, or a file that still LOADS but registers nothing reported itself as one passing test. Either way the number is decided here, deliberately."
             exit 1
           fi
-          echo "seal predicate tests: ${tally} tests, exact pin 152 — the pin re-earned"
+          echo "seal predicate tests: ${tally} tests, exact pin 153 — the pin re-earned"
           if [ -s "$log" ]; then
             echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
             cat "$log"
@@ -2716,7 +2736,9 @@ jobs:
       # step that actually decided the job, in both directions. It NAMES a
       # failure; it never grades one — `console-gate` computes `bad` from
       # `result` alone.
-      verdict: ${{ steps.roster.outputs.verdict || steps.tier.outputs.verdict }}
+      # `stopwatch` (dwb-12) is the last step, so the same argument holds one
+      # step further down: it can only publish if `tier` and `roster` exited 0.
+      verdict: ${{ steps.stopwatch.outputs.verdict || steps.roster.outputs.verdict || steps.tier.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -2830,6 +2852,68 @@ jobs:
             *)
               verdict UNINTERPRETABLE
               echo "::error title=Roster phone band render UNINTERPRETABLE::breakpoint-sweep.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+      # ── DWB STOPWATCH SELF-TEST (task dwb-12). A STEP here, not a job, for
+      # the reason the roster step gives: zero aggregator surface. This job
+      # already has what it needs: Node 22 (CDP over the global WebSocket),
+      # an explicit CHROME, and the console path filter (the stopwatch drives
+      # cloud/priv/static/app.js's /new flow).
+      #
+      # OFFLINE ONLY. It serves this tree's SPA from a stub control plane on
+      # 127.0.0.1 and never contacts a Barkpark host: live runs provision real
+      # instances and are owner item 52, never CI. The first two commands prove
+      # the live guard refuses (exit 2) without BOTH --live and --host.
+      #
+      # The self-test runs six fixtures and asserts each budget both ways: a
+      # clean fixture passes all four; a sixth click, a p95 past the (scaled)
+      # instance-live budget, a bare spinner past 2 s, and a token-paste or
+      # two-click Studio entry each fail with that budget named. Exit 1 = an arm
+      # gave the wrong verdict; exit 2 = it refused to measure.
+      - name: DWB stopwatch — offline self-test (dwb-12)
+        id: stopwatch
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          verdict() { if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "verdict=$1" >> "$GITHUB_OUTPUT"; fi; return 0; }
+          sw=cloud/priv/static/__preview__/dwb-stopwatch.mjs
+          guard() {
+            label=$1; shift
+            rc=0; out=$(node "$sw" "$@" 2>&1) || rc=$?
+            case "$out" in *"owner item 52"*) named=yes ;; *) named=no ;; esac
+            if [ "$rc" -ne 2 ] || [ "$named" != yes ]; then
+              verdict MEASURED_DEFECT
+              echo "::error title=DWB stopwatch live guard OPEN::${label}: exited ${rc} (want 2), named owner item 52: ${named}. Live mode must refuse without BOTH --live and --host."
+              printf '%s\n' "$out"
+              exit 1
+            fi
+            echo "live guard holds: ${label} -> exit 2, names owner item 52"
+          }
+          guard "--live without --host" --live
+          guard "--host without --live" --host https://example.invalid
+          rc=0
+          node "$sw" --selftest --json /tmp/dwb-stopwatch-selftest.json || rc=$?
+          case "$rc" in
+            0)
+              verdict OK
+              echo "DWB stopwatch: every arm gave its expected verdict; each of c0-c3 proven able to pass and fail."
+              ;;
+            2)
+              verdict REFUSED
+              echo "::error title=DWB stopwatch REFUSED::The stopwatch refused to measure (exit 2) — Chrome bring-up, a squatted port, or the /new flow reached a screen the script cannot drive. NO claim is made about the budgets. The log above names the cause."
+              exit 1
+              ;;
+            1)
+              verdict MEASURED_DEFECT
+              echo "::error title=DWB stopwatch self-test WRONG VERDICT::At least one arm gave the wrong verdict (exit 1): see the 'arm WRONG' lines above. Either the /new flow changed under a fixture, or a budget check can no longer pass or fail."
+              exit 1
+              ;;
+            *)
+              verdict UNINTERPRETABLE
+              echo "::error title=DWB stopwatch UNINTERPRETABLE::dwb-stopwatch.mjs exited ${rc}, outside its vocabulary (0 / 1 / 2). Cannot tell, therefore red."
               exit 1
               ;;
           esac

@@ -32,7 +32,15 @@ export interface RevalidatePayload {
   event?: string
   type?: string
   doc_id?: string
-  document?: { _id?: string; _type?: string }
+  /**
+   * The affected document. `null` and an untyped record are accepted because
+   * `createWebhookHandler`'s `onMutation` payload is core's `WebhookEvent`,
+   * whose `document` is `Record<string, unknown> | null`. Forwarding that
+   * payload here is the documented pattern (`onMutation: (payload) =>
+   * revalidateBarkpark(payload)`), and with the narrower type it failed to
+   * typecheck. `_id` / `_type` are read only through the `nonEmpty` guard below.
+   */
+  document?: { _id?: unknown; _type?: unknown } | Record<string, unknown> | null
   dataset?: string
   sync_tags?: readonly string[]
 
@@ -42,8 +50,8 @@ export interface RevalidatePayload {
    * Both the canonical (`workspace`/`project`) and the dispatcher `_slug`
    * spellings (`workspace_slug`/`project_slug`) are accepted.
    */
-  workspace?: string
-  project?: string
+  workspace?: string | null
+  project?: string | null
   workspace_slug?: string
   project_slug?: string
 

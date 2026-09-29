@@ -162,6 +162,8 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     ".bp-slash-menu" => :body_portal,
     ".bp-paper-format" => :body_portal,
     ".bp-paper-context-menu" => :body_portal,
+    # canvas/link-preview.js appends the shared hover card to document.body.
+    ".bp-link-preview" => :body_portal,
     ".bp-ab-overlay" => :body_portal,
     ".bp-bulk-action-bar" => :layout_sibling,
     ".image-picker-overlay" => :layout_sibling,
@@ -194,7 +196,11 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # wikilink-menu.js:117-120 names the node `.bp-wikilink-menu` and immediately
     # `document.body.appendChild(el)`s it — portalled out of the panel before it
     # is ever shown, so no containing block the panel grows can reach it.
-    ".bp-wikilink-menu" => :body_portal
+    ".bp-wikilink-menu" => :body_portal,
+    # The canvas owns this notice and appends it to itself. Its viewport/caret
+    # coordinates rely on the same panel containing-block ban as the toolbar;
+    # it is not a body portal. Scroll/resize dismiss it before its anchor moves.
+    "[data-bp-paste-notice]" => :under_panel
   }
 
   # Server-rendered INLINE `position: fixed` (style="…"), by file, with the
@@ -826,9 +832,10 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
       end
     end
 
-    test "exactly four fixed-position selectors render under a panel root" do
+    test "exactly five fixed-position selectors render under a panel root" do
       under_panel =
         @fixed_css_inventory
+        |> Map.merge(@paper_editor_fixed_inventory)
         |> Enum.filter(fn {_sel, placement} -> placement == :under_panel end)
         |> Enum.map(&elem(&1, 0))
         |> MapSet.new()
@@ -838,7 +845,8 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
                  ".bp-ae-toast",
                  ".bp-ae-modal",
                  ".sheet-context-menu",
-                 ".bp-paper-edit-toolbar"
+                 ".bp-paper-edit-toolbar",
+                 "[data-bp-paste-notice]"
                ])
     end
 
@@ -1018,14 +1026,14 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
         |> Enum.filter(fn {_sel, placement} -> placement == :under_panel end)
         |> Enum.map(&elem(&1, 0))
 
-      assert under_panel == [],
+      assert under_panel == ["[data-bp-paste-notice]"],
              """
              A paper-editor selector is classified :under_panel: #{inspect(under_panel)}
 
              That is a real finding, not a test bug — the paper editor mounts
              inside an `.editor-panel` root, so this surface is now subject to any
              containing block the panel grows. Add it to the hand-verified
-             under-panel set (the "exactly four" test above) with a rationale,
+             under-panel set (the "exactly five" test above) with a rationale,
              then update this expectation. Do not just delete the classification.
              """
     end

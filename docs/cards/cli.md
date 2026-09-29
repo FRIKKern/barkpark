@@ -16,7 +16,7 @@ Dev-loop builtins (scoped URLs `/w/<ws>/p/<project>/v1/…`, not flat BuildURL):
 - internal/cli/cli.go — func Execute
 - internal/cli/builtins.go — func runWhoami, func runCapabilities
 - internal/cli/paper_cmd.go — func runPaper
-- internal/cli/errors.go — func exitForCode, func classifyError, (apiError).hint
+- internal/cli/errors.go — codeExit (paper_exists: 6), classifyError, hint
 - internal/cli/make_cmd.go — func runMakeSchema
 - internal/cli/make_workflow.go — func renderDeployWorkflow, func runMakeWorkflow
 - internal/cli/seed_cmd.go — func runSeed, func generateDoc

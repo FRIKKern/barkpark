@@ -361,6 +361,17 @@ set -euo pipefail
 # mobile half of the push-token deferral is still unshipped. A DECLARATION, not
 # an exemption: the test is an ordinary cloud/test file in the default lane, so
 # a PR editing apps/mobile/package.json must dispatch the suite that reads it.
+#
+# README.md and docs/setup/DEPLOY-WITH-BARKPARK.md — dwb-9.
+# cloud/test/…/web/deploy_button_docs_test.exs reads both: the root README's
+# "Deploy with Barkpark" badge and the launch page that documents the path
+# behind it. The test checks every URL, route and template slug they name
+# against the router, the template catalog and app.js, so an edit to either
+# document is an edit to the thing under test. Declared as EXACT FILES: the
+# test reads exactly these two, and `docs/**` would hand every doc-only PR the
+# Postgres-backed Cloud suite. Cost measured over the last 60 days: 13 commits
+# touched README.md and 12 of them dispatched nothing else in this set, so 12
+# newly run the suite.
 CLOUD_PATHS='cloud/**
 cloud/lib/**
 .github/workflows/**
@@ -385,7 +396,9 @@ js/packages/create-barkpark-app/templates/**
 scripts/**
 templates/**
 templates/astro-search-starter/src/lib/bp.ts
-templates/search-starter/lib/markers.corpus-status.test.ts'
+templates/search-starter/lib/markers.corpus-status.test.ts
+README.md
+docs/setup/DEPLOY-WITH-BARKPARK.md'
 
 # ---------------------------------------------------------------------------
 # THE CENSUS TIER — a SECOND, NARROWER verdict

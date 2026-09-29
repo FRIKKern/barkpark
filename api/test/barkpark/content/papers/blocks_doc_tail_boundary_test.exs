@@ -55,10 +55,21 @@ defmodule Barkpark.Content.Papers.BlocksDocTailBoundaryTest do
     handler = "blocks-doc-tail-#{System.unique_integer([:positive])}"
     test = self()
 
+    # `:telemetry.attach/4` is GLOBAL: the handler runs in whichever process
+    # emits the event. This module is async, so without the guard every
+    # concurrent test that writes a paper (paper_upsert_revision_trail_test's
+    # `rev-trail-*` slugs, for one) delivered its {:tail, _} here, red-ing the
+    # refused-write CONTROL and the session test's slug assertion by race.
+    # Forward only events emitted by this test's process or a process it
+    # spawned; the tail is emitted synchronously in the caller, so every event
+    # this test causes still arrives.
     :telemetry.attach(
       handler,
       @tail,
-      fn _event, _measurements, metadata, _ -> send(test, {:tail, metadata}) end,
+      fn _event, _measurements, metadata, _ ->
+        if self() == test or test in Process.get(:"$callers", []),
+          do: send(test, {:tail, metadata})
+      end,
       nil
     )
 

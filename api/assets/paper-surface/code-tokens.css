@@ -1,0 +1,21 @@
+/* Code tokens — ONE rule set for every surface that paints highlighted code: the `/papers` reader
+   and Studio (embedded through Render.Stylesheet, after paper-surface.css) and the canvas's code
+   node (imported by paper-editor/src/styles.css). The classes are highlight.js's (`hljs-*`), emitted
+   by paper-editor/src/code-highlight.js on both sides; the colours are the paper's own tokens with
+   two restrained accents, so a block reads as prose in the same ink, not as a terminal theme. */
+.hljs { color: inherit; }
+.hljs-comment, .hljs-quote { color: var(--paper-ink-faint, rgba(55, 53, 47, 0.5)); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag, .hljs-meta, .hljs-built_in, .hljs-type { color: var(--paper-accent, #a23925); }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-template-tag, .hljs-symbol { color: var(--bp-code-string, #2f6f3e); }
+.hljs-number, .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-selector-attr, .hljs-selector-pseudo { color: var(--bp-code-number, #8a5a00); }
+.hljs-title, .hljs-title.function_, .hljs-title.class_, .hljs-section, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: var(--bp-code-title, #2e6fd6); }
+.hljs-params, .hljs-punctuation, .hljs-operator, .hljs-property { color: inherit; }
+.hljs-deletion { color: var(--paper-danger, #8b3b32); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+.hljs-subst { color: inherit; }
+@media (prefers-color-scheme: dark) {
+  :root { --bp-code-string: #8fcf9a; --bp-code-number: #e0b866; --bp-code-title: #7fb0ff; }
+}
+[data-theme="dark"], html[data-theme="dark"] { --bp-code-string: #8fcf9a; --bp-code-number: #e0b866; --bp-code-title: #7fb0ff; }
+[data-theme="light"], html[data-theme="light"] { --bp-code-string: #2f6f3e; --bp-code-number: #8a5a00; --bp-code-title: #2e6fd6; }

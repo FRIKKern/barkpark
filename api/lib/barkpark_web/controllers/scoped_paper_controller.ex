@@ -16,10 +16,14 @@ defmodule BarkparkWeb.ScopedPaperController do
   without workspace membership. With no share, `ResolveWorkspace`'s membership
   gate runs first and a non-member never gets here.
 
-  Static, server-rendered HTML — no LiveView, no streaming. The cached
-  `content["body_html"]` (rendered at ingest time) is wrapped in the
-  full-document `:bulldocs` root layout's `.bp-paper-shell` shell. A missing
-  slug 404s; it never leaks the existence of a paper in another scope.
+  Static, server-rendered HTML — no LiveView, no streaming. The body comes
+  from `Content.Papers.reader_html/3`: a blocks paper is rendered from its
+  blocks on this read, and only a legacy paper with no blocks is served its
+  sanitized `content["body_html"]`. It is wrapped in the full-document
+  `:bulldocs` root layout's `.bp-paper-shell` shell. A missing slug 404s; it
+  never leaks the existence of a paper in another scope. A paper the reader
+  refuses (redacted, empty, or ambiguous source) answers 422, the same status
+  `BulldocsLive` and `ShareLinkController` give it.
   """
 
   use BarkparkWeb, :controller
@@ -33,69 +37,70 @@ defmodule BarkparkWeb.ScopedPaperController do
   @dataset "production"
 
   def show(conn, %{"slug" => slug}) do
-    case Content.get_paper(slug, @dataset, scope_opts(conn)) do
-      %Content.Document{} = paper ->
-        # Social-share head (preview-contract pc-w2): the `:bulldocs` root layout
-        # reads `:preview` + `:page_title` (kept in sync with BulldocsLive even
-        # though this dead-render controller is currently retired from routing —
-        # see the backlinks note below).
-        preview =
-          BarkparkWeb.ShareMeta.manifest(
-            paper.content || %{},
-            "/papers/#{slug}",
-            "paper",
-            paper.title
-          )
-
-        conn
-        |> put_root_layout(html: {BarkparkWeb.Layouts, :bulldocs})
-        |> put_layout(false)
-        |> render(:show,
-          article?: paper_article?(paper),
-          body_html: paper_body_html(paper),
-          preview: preview,
-          page_title: preview["title"],
-          # Related Paper cards — papers that link TO this one, rendered as a
-          # server-side section AFTER the body. Powered by the INDEXED engine
-          # `Content.Graph.reverse_referencers/2` (over `content_edges`), scoped
-          # exactly like the read so it only sees papers the caller may read.
-          # Empty string when nothing links → the template omits the section.
-          #
-          # NOTE: this dead-render controller is currently RETIRED from routing
-          # (router.ex mounts BulldocsLive at the scoped
-          # `live("/papers/:slug", BulldocsLive, :index)` reader too); the
-          # live section is wired in `BarkparkWeb.BulldocsLive`. The assign is
-          # kept here so the controller + its template stay self-consistent if it
-          # is ever re-routed.
-          backlinks_html:
-            BarkparkWeb.PaperBacklinks.section_html(
-              Content.Graph.reverse_referencers(
-                Content.published_id(paper.doc_id),
-                [dataset: @dataset] ++ scope_opts(conn)
-              )
-            ),
-          # "Driven tasks" (lvw-t8) — same parity note as backlinks_html above.
-          driven_tasks_html:
-            BarkparkWeb.PaperTasks.section_html(
-              Barkpark.Tasks.driven_tasks(
-                paper.doc_id,
-                [dataset: @dataset] ++ scope_opts(conn)
-              )
-            ),
-          slug: slug
+    with %Content.Document{} = paper <- Content.get_paper(slug, @dataset, scope_opts(conn)),
+         {:ok, body_html} <- Content.Papers.reader_html(paper, @dataset, scope_opts(conn)) do
+      # Social-share head (preview-contract pc-w2): the `:bulldocs` root layout
+      # reads `:preview` + `:page_title` (kept in sync with BulldocsLive even
+      # though this dead-render controller is currently retired from routing —
+      # see the backlinks note below).
+      preview =
+        BarkparkWeb.ShareMeta.manifest(
+          paper.content || %{},
+          "/papers/#{slug}",
+          "paper",
+          paper.title
         )
 
-      nil ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(BarkparkWeb.ErrorHTML)
-        |> render(:"404")
+      conn
+      |> put_root_layout(html: {BarkparkWeb.Layouts, :bulldocs})
+      |> put_layout(false)
+      |> render(:show,
+        article?: paper_article?(paper),
+        body_html: body_html,
+        preview: preview,
+        page_title: preview["title"],
+        # Related Paper cards — papers that link TO this one, rendered as a
+        # server-side section AFTER the body. Powered by the INDEXED engine
+        # `Content.Graph.reverse_referencers/2` (over `content_edges`), scoped
+        # exactly like the read so it only sees papers the caller may read.
+        # Empty string when nothing links → the template omits the section.
+        #
+        # NOTE: this dead-render controller is currently RETIRED from routing
+        # (router.ex mounts BulldocsLive at the scoped
+        # `live("/papers/:slug", BulldocsLive, :index)` reader too); the
+        # live section is wired in `BarkparkWeb.BulldocsLive`. The assign is
+        # kept here so the controller + its template stay self-consistent if it
+        # is ever re-routed.
+        backlinks_html:
+          BarkparkWeb.PaperBacklinks.section_html(
+            Content.Graph.reverse_referencers(
+              Content.published_id(paper.doc_id),
+              [dataset: @dataset] ++ scope_opts(conn)
+            )
+          ),
+        # "Driven tasks" (lvw-t8) — same parity note as backlinks_html above.
+        driven_tasks_html:
+          BarkparkWeb.PaperTasks.section_html(
+            Barkpark.Tasks.driven_tasks(
+              paper.doc_id,
+              [dataset: @dataset] ++ scope_opts(conn)
+            )
+          ),
+        slug: slug
+      )
+    else
+      {:error, :not_found} -> error_page(conn, :not_found, :"404")
+      {:error, _reason} -> error_page(conn, :unprocessable_entity, :"422")
+      _ -> error_page(conn, :not_found, :"404")
     end
   end
 
-  # Cached, ingest-time-rendered HTML fragment (no <html>/<body> wrapper). The
-  # template wraps it in the paper shell.
-  defp paper_body_html(%{content: content}), do: Map.get(content || %{}, "body_html") || ""
+  defp error_page(conn, status, template) do
+    conn
+    |> put_status(status)
+    |> put_view(BarkparkWeb.ErrorHTML)
+    |> render(template)
+  end
 
   # The SAME chrome decision as BulldocsLive's `@article?` (article, or no
   # style at all — the web default); one predicate so the doors cannot drift.

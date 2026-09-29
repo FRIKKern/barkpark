@@ -685,6 +685,16 @@
         "env": {}
       },
       {
+        "name": "usage-envelope-diff: a reason-bearing -> reasonless meter across adjacent ticks is NAMED, not silent",
+        "run": "node --check scripts/usage-envelope-diff.mjs\nnode scripts/node-test-floor.mjs --floor 1 scripts/usage-envelope-diff.test.mjs\n",
+        "env": {}
+      },
+      {
+        "name": "cp-ops: choice list == scripts/cp-ops.sh arms (both ways) and every arm's ssh argv matches its golden",
+        "run": "bash -n scripts/cp-ops.sh\nbash scripts/cp-ops.test.sh\n",
+        "env": {}
+      },
+      {
         "name": "paper-reader audit fixture",
         "run": "bash scripts/audit-paper-readers-test.sh",
         "env": {}
@@ -770,6 +780,16 @@
       {
         "name": "the live corpus is portable",
         "run": "bash scripts/workflow-portability-check.sh .claude/workflows",
+        "env": {}
+      },
+      {
+        "name": "epic-cycle-carry.mjs syntax check",
+        "run": "node --check scripts/epic-cycle-carry.mjs",
+        "env": {}
+      },
+      {
+        "name": "bp-epic-cycle resume replays what it claims (runs the real engine with a stub agent; counts dispatches)",
+        "run": "node --test scripts/epic-cycle-resume.test.mjs",
         "env": {}
       },
       {

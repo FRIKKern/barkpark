@@ -2895,22 +2895,33 @@
         },
         {
           "type": "text",
-          "value": " graph is legitimate for a leaf and catastrophic from a broken instrument, a positive control over "
+          "value": " graph is legitimate for a leaf and catastrophic from a broken instrument, a probe compares a hub ("
         },
         {
           "type": "text",
-          "value": "lib/barkpark/repo.ex",
+          "value": "lib/barkpark/plugin.ex",
           "marks": [
             "code"
           ]
         },
         {
           "type": "text",
-          "value": " runs first: no dependents there and the whole run falls back to "
+          "value": ") and a leaf ("
         },
         {
           "type": "text",
-          "value": "ALL",
+          "value": "lib/barkpark/tasks/landed.ex",
+          "marks": [
+            "code"
+          ]
+        },
+        {
+          "type": "text",
+          "value": "). If their closures do not differ, it logs "
+        },
+        {
+          "type": "text",
+          "value": "narrowing unavailable: running ALL",
           "marks": [
             "code"
           ]

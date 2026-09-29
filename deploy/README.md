@@ -793,6 +793,11 @@ It is **two calls**, and the order is forced by build identity:
    STAGE → HEALTH → SWITCH → RETIRE with **BUILD reported `skipped`** — no npm
    runs there.
 
+A symlink anywhere in the directory is refused as well, by design (charter D120,
+ruled 2026-09-25): an on-box build keeps a contained symlink (`cp -a`) and serves it,
+so the same `dist` can deploy from the box yet be refused as `--prebuilt` — the lane
+does not promise parity there; replace each link with the file it points to first.
+
 What it refuses, all before the upload: a directory that is empty, one with no
 root `index.html` (that is the project dir, not the output dir), and — after the
 mint — bytes whose `<meta name="bp-build-id">` is not the id this deployment

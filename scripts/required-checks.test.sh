@@ -2771,6 +2771,8 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # RENDERED on a drift-examined sha when #19951 touched console-harness.yml,
         # so the gap sat latent until a push-to-main made the dispatcher emit it.
         --expect-unrendered "console-harness.sh reads CI's pin (it must be able to LOSE)"
+        # Paper parity postdates both frozen registration samples; acknowledge its paths-filtered exclusion.
+        --expect-unrendered "Barkdown parity rows"
         # ── 2026-09-23 (task-a0abaae6f64c0a9c): absent-context-census.yml. The
         # census job's name had no row although it renders on main commits (never
         # on a PR head — no pull_request trigger); the workflow_run leg added in
@@ -2779,7 +2781,12 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # fixture pair predates the workflow. DERIVED by
         # scripts/required-checks-ack-derive.sh, which named exactly these two.
         --expect-unrendered "Absent required-context census"
-        --expect-unrendered "Census cadence (hold, re-arm)")
+        --expect-unrendered "Census cadence (hold, re-arm)"
+        # ── 2026-09-25 (task-19428fc715804f49): core-without-owned-tables.yml.
+        # Schedule + workflow_dispatch only, so its job name renders on main
+        # commits and never on a PR head; its row lands with the workflow and the
+        # frozen fixture pair predates it.
+        --expect-unrendered "Core without owned tables (differential, two suite runs)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

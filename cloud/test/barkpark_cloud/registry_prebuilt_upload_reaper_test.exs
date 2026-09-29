@@ -297,8 +297,9 @@ defmodule BarkparkCloud.RegistryPrebuiltUploadReaperTest do
     assert reaped.failure_reason =~ "prebuilt artifact was never uploaded"
   end
 
-  ## 6. A HUMAN-CANCELLED prebuilt mint is neither resurrected nor re-terminated
-  ##    — pass (0d)'s `status == "queued"` guard, asserted rather than assumed.
+  ## 6. A CANCELLED prebuilt mint (fleet-produced, charter D614(c)) is neither
+  ##    resurrected nor re-terminated — pass (0d)'s `status == "queued"` guard,
+  ##    asserted rather than assumed.
   test "pass (0d) leaves a cancelled prebuilt row alone" do
     site = static_site_fixture(barkpark_fixture())
     d = mint_prebuilt(site, "pb5")

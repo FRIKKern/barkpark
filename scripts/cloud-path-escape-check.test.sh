@@ -386,7 +386,12 @@ check_match "js/packages/create-barkpark-app/templates/package.json" cloud true
 check_match "js/packages/create-barkpark-app/templates" cloud true
 # …and the whole point of the shim: these must NOT run the Cloud suite.
 check_match "docs/ops/merge-gates.md" cloud false
-check_match "README.md" cloud false
+check_match "CHANGELOG.md" cloud false
+# dwb-9: README.md and the launch page ARE read by deploy_button_docs_test.exs,
+# so they dispatch the suite. Exact files only — a sibling doc still does not.
+check_match "README.md" cloud true
+check_match "docs/setup/DEPLOY-WITH-BARKPARK.md" cloud true
+check_match "docs/setup/QUICKSTART.md" cloud false
 # …and the whole point of the shim: these must NOT run the Cloud suite. api/,
 # web/ and js/ are three of `ReaderScan.roots/0`'s five trees and they stay
 # FALSE on purpose — declaring them was built and costed at 2233 newly-

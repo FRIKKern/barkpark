@@ -3087,6 +3087,24 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     ## `fk_census_test.exs` was 5/0. The structural half of the guard lives in
     ## `site_cascade_census_test.exs`; these are the behavioural half.
 
+    test "a site's hostname claims cascade on delete, freeing its domains" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+      host = "claimed-#{System.unique_integer([:positive])}.example.com"
+      {:ok, site} = Registry.add_site_domain(site, host)
+      assert Repo.get_by(Registry.HostnameClaim, host: host, site_id: site.id)
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      assert conn.status == 200, "site delete answered #{conn.status}: #{conn.resp_body}"
+      assert Registry.get_site(site.id) == nil
+      refute Repo.get_by(Registry.HostnameClaim, host: host)
+    end
+
     test "an uploaded artifact BOUND TO A DEPLOYMENT cascades on delete" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)

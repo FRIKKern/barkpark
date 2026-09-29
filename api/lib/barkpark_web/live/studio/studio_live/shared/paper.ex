@@ -20,7 +20,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   alias Barkpark.Access
   alias Barkpark.Content
-  alias Barkpark.Content.Labels
   alias Barkpark.Content.Papers.CanvasRunContext
   alias Barkpark.Content.Papers.PreGateRegister
   alias Barkpark.PortableDoc.Render.SectionLayout
@@ -2446,19 +2445,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # `share_link_controller.ex` writes down where it refuses to copy it. Note
   # what that leaves ALONE, honestly: a principal-LESS socket on the open
   # public-demo desk is write-capable BY DESIGN, so nothing here narrows it.
+  #
+  # THE CACHE IS NOT READ FOR A BLOCKS PAPER (pt-backlog-kill-the-body-html-cache).
+  # On a write-capable socket, a paper whose content carries a block list opens
+  # in `paper_block_mode` (`reader_paper_blocks/2` returns that same
+  # `Projection.read_blocks/1` list), and the block arm renders from the blocks.
+  # The `raw(@paper_html)` arm is never reached for it, so the stored
+  # `body_html` cache is not read at all: `:paper_html` is `""`. Only a legacy
+  # paper with no block list reads `body_html`, because there it is the source.
   @doc """
   The `body_html` this SOCKET may be shown for `paper`.
 
-  A write-denied (non-editing) viewer gets `Content.Papers.reader_source/3`'s
-  verdict — redacted-safe, sanitized, and `""` where the reader refuses to name
-  a source at all (the never-blank arm then renders the honest notice).
-  Do not re-derive this: the three `:paper_html` feeds must not drift.
+  A write-denied (non-editing) viewer gets `Content.Papers.reader_html/3`'s
+  verdict — blocks rendered on this read, redacted-safe, sanitized, and `""`
+  where the reader refuses to name a source at all (the never-blank arm then
+  renders the honest notice). A write-capable socket reads the sanitized
+  `body_html` only for a legacy paper with no block list; a blocks paper gets
+  `""` because its body renders from blocks. Do not re-derive this: the three
+  `:paper_html` feeds must not drift.
   """
-  def reader_paper_html(socket, %{content: _} = paper) do
-    if write_denied?(socket) do
-      reader_source_html(socket, paper)
-    else
-      editor_body_html(Map.get(paper.content || %{}, "body_html"))
+  def reader_paper_html(socket, %{content: content} = paper) do
+    cond do
+      write_denied?(socket) -> reader_source_html(socket, paper)
+      is_list(Projection.read_blocks(content || %{})) -> ""
+      true -> editor_body_html(Map.get(content || %{}, "body_html"))
     end
   end
 
@@ -2536,26 +2546,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   def reader_paper_blocks(_socket, _paper), do: nil
 
+  # A `{:blocks, …}` verdict here means Envelope promoted a structured source
+  # this pane's `Projection.read_blocks/1` did not see; `reader_html/3` renders
+  # THOSE blocks (the reader's own canonical source, already visibility-redacted)
+  # rather than blanking a readable paper. `:redacted_source`, `:semantic_empty`,
+  # `:ambiguous_source`, … — the reader refuses to name a source, so there is
+  # nothing this viewer may be shown. Falling back to the cache is precisely the
+  # disclosure.
   defp reader_source_html(socket, paper) do
-    dataset = socket.assigns.dataset
-    scope = ScopeHelpers.scope_opts(socket)
-
-    case Content.Papers.reader_source(paper, dataset, scope) do
-      {:html, sanitized} ->
-        sanitized
-
-      # Envelope promoted a structured source this pane's `Projection.read_blocks/1`
-      # did not see. Render THOSE blocks (the reader's own canonical source,
-      # already visibility-redacted) rather than blanking a readable paper.
-      {:blocks, blocks} ->
-        style = Map.get(paper.content || %{}, "style")
-        Render.render_blocks(blocks, Labels.paper_render_opts(dataset, style, scope))
-
-      # `:redacted_source`, `:semantic_empty`, `:ambiguous_source`, … — the
-      # reader refuses to name a source, so there is nothing this viewer may be
-      # shown. Falling back to the cache is precisely the disclosure.
-      {:error, _reason} ->
-        ""
+    case Content.Papers.reader_html(
+           paper,
+           socket.assigns.dataset,
+           ScopeHelpers.scope_opts(socket)
+         ) do
+      {:ok, html} -> html
+      {:error, _reason} -> ""
     end
   end
 

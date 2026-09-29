@@ -41,11 +41,25 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # into the attribute.
   def code_block_html(value), do: code_block_html(value, [])
 
-  def code_block_html(value, emphasis) do
-    ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
+  def code_block_html(value, emphasis), do: code_block_html(value, emphasis, nil)
+
+  # `lang` rides as `data-lang` (only when present, so a lang-less block is byte-identical to before):
+  # the reader's /assets/bp-paper-code.js paints hljs-* tokens from THE tokenizer the canvas uses
+  # (paper-editor/src/code-highlight.js) — view and edit are one producer (Barkdown plan #27).
+  def code_block_html(value, emphasis, lang) do
+    ~s|<pre#{code_lang_attr(lang)} style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
       ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, #{@font_mono});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);| <>
       ~s|overflow-x:auto;white-space:pre">#{code_body_html(value, emphasis)}</pre>|
   end
+
+  defp code_lang_attr(lang) when is_binary(lang) do
+    case String.trim(lang) do
+      "" -> ""
+      l -> ~s| data-lang="#{escape_attr(l)}"|
+    end
+  end
+
+  defp code_lang_attr(_), do: ""
 
   # Split/join on "\n" round-trips the source exactly (including a trailing
   # newline, which yields a final empty segment that simply never matches a

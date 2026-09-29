@@ -52,7 +52,7 @@ reset-db: ## Drop, recreate, migrate, and seed the database
 # ── Local development ────────────────────────────────────────────────────────
 
 dev: wasm ## Start tmux dev session (CC + TUI + Phoenix)
-	./dev.sh
+	./scripts/dev/dev.sh
 
 update: ## LOCAL: pull + rebuild bp + deps + migrations + digest of what changed
 	@bash scripts/local-update.sh
@@ -79,7 +79,7 @@ web-build: ## Build the Next.js Vercel demo (web/) for production
 	cd web && pnpm build
 
 run: ## Start Phoenix (if needed) and run TUI
-	./run.sh
+	./scripts/dev/run.sh
 
 build: ## Build Go TUI binary
 	@# bin/barkpark is the TRACKED personal-local launcher script — the compiled

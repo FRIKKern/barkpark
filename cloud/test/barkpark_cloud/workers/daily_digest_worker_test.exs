@@ -309,8 +309,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
   ##
   ##    This section used to be titled "a logged no-op", and it asserted exactly
   ##    the no-op: `{:ok, :no_admins}`, no email. Both of those are still true and
-  ##    both are still asserted — but on prod `PLATFORM_ADMIN_EMAILS` is unset, so
-  ##    this is the arm that runs EVERY day, and the pin below said nothing about
+  ##    both are still asserted — but on prod `PLATFORM_ADMIN_EMAILS` was unset
+  ##    (until gr-ops-platform-admin-emails, 2026-09-25), so this was the arm that
+  ##    ran EVERY day, and the pin below said nothing about
   ##    whether anyone could tell. Oban recorded 5 of 5 digest jobs `completed`
   ##    and `notification_deliveries` held zero `fleet_digest` rows across 37
   ##    unpruned days: a push channel succeeding at sending nothing.

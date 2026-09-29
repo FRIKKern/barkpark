@@ -35,6 +35,50 @@ defmodule BarkparkCloud.Registry.Deployment do
   and served by the black box recorder:
   `GET /v1/sites/:id/deployments/:dep_id/build-log` (the record) and
   `…/build-log/bytes` (a bounded, scrubbed tail). Point readers there.
+
+  ## Cancellation: cancel FREES (dwb-cancel-blocking-semantics, ruled 2026-09-25)
+
+  `cancelled` is terminal FOR THE ROW and frees the build slot at once. This
+  paragraph writes down what the schema already did; no behaviour changed.
+
+    * **Slot uniqueness.** The one-active-build rule is the partial unique index
+      `deployments_active_site_env_index` on `(site_id, environment)` WHERE
+      `status IN ('queued','building','pushing') AND environment = 'production'`
+      (previews: `deployments_active_preview_branch_index` on
+      `(site_id, branch)`). `cancelled` is outside that predicate, so the moment a
+      row is cancelled it stops holding the slot, and so do `failed`, `live` and
+      `deferred`. `Registry.find_active_deployment/2` and the manual-deploy
+      coalesce use the same three statuses.
+    * **No dependents.** A deployment has no dependency graph: no row references
+      another row's outcome. Nothing waits on a cancelled row, so nothing can
+      be wedged behind one. The only thing a cancel "blocks" is itself.
+    * **Transitions.** `@transitions` has no edge out of `cancelled`, so a
+      builder still holding the claim gets `409 illegal_transition` when it
+      reports `building`/`pushing`/`live`/`failed` afterwards. A repeated cancel
+      is a same-status write: legal, 200, no column changes, and no second
+      terminal notification (the dispatch is edge-triggered on the prior status).
+    * **Retries.** The same commit rebuilds as a NEW row: a manual redeploy
+      (`POST /v1/sites/:id/deploy`, `bp cloud site deploy`) or a NEW GitHub push
+      delivery. The cancelled row is never reopened.
+    * **Redelivery.** `deployments_delivery_id_index` (unique `delivery_id`
+      WHERE NOT NULL) has no status filter, and the webhook asks
+      `Registry.find_deployment_by_delivery_id/1` before anything else. So
+      GitHub retrying the SAME `X-GitHub-Delivery` answers `200
+      duplicate_delivery` pointing at the cancelled row, and a retry by GitHub
+      does not undo a cancel.
+    * **UI/API status.** The row reads `status: "cancelled"` on every
+      deployment view, with its `failure_reason`/`detail` as the writer's reason.
+      `Sites.Deploy.active_production_deployment/1` uses the same three statuses
+      as the index, so the static pipeline never waits behind a cancelled row.
+    * **Writers.** There is no operator cancel route. `cancelled` is written by
+      the builder/agent fenced transition routes, by the unfenced
+      `Registry.transition_deployment/2` (AutoDeployWorker's prebuilt refusal),
+      by preview teardown/supersede/eviction, and by the active-index migrations'
+      backfills.
+    * **Backward compatibility.** No schema, index or wire change. Existing
+      cancelled rows already sat outside the active index.
+
+  Pinned by `test/barkpark_cloud/web/deployment_cancel_frees_test.exs`.
   """
   use Ecto.Schema
   import Ecto.Changeset

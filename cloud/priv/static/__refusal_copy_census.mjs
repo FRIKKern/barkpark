@@ -729,6 +729,8 @@ const PIN = [
   { key: "MAP|ERRORS.not_live", verdict: "CONSULTED", copy: "The instance isn't live yet — wait for provisioning to finish." },
   { key: "MAP|ERRORS.no_admin_token", verdict: "CONSULTED", copy: "No stored credentials for this instance — it may need a re-..." },
   { key: "MAP|ERRORS.instance_unreachable", verdict: "CONSULTED", copy: "Couldn't reach the instance — try again in a moment." },
+  // task-71082f5541c13b53 (N-08): every /v1/sites/:id/forms route's 409 (router.ex forms_refusal/2).
+  { key: "MAP|ERRORS.forms_unsupported", verdict: "CONSULTED", copy: "This instance doesn't have the forms plugin turned on, so it can't tak..." },
   { key: "MAP|ERRORS.instance_not_armed", verdict: "CONSULTED", copy: "This instance hasn't armed one-click apply, so resuming aut..." },
   { key: "MAP|ERRORS.network_error", verdict: "CONSULTED", copy: "Network error — is the control plane running?" },
   { key: "MAP|ERRORS.limit_reached", verdict: "CONSULTED", copy: "You're at your plan's instance limit." },
@@ -984,6 +986,23 @@ const PIN = [
   { key: "FN|sitePreviewsSectionHtml|0518bdaf", verdict: "UNREVIEWED", copy: "Turn them on with <span class=\\\"mono\\\">bp cloud site settin..." },
   { key: "FN|sitePreviewsSectionHtml|e7ec0c7a", verdict: "UNREVIEWED", copy: "<div class=\"empty-state\"><h2>No branch previews are being s..." },
   { key: "FN|sitePreviewsSectionHtml|527cc320", verdict: "UNREVIEWED", copy: "<p>This lists the previews the instance is serving right no..." },
+  // task-71082f5541c13b53 (N-08): the form inbox. The two headings are painted
+  // only over a server answer (forms_unsupported, or a failed read whose own
+  // cause readFailureCopy relays); every fallback is reached only after that
+  // relay found no cause of its own. The four markup rows carry no cause at all.
+  { key: "FN|siteFormsSectionHtml|0b0c6880", verdict: "CONSULTED", copy: "<div class=\"empty-state\"><h2>Forms aren\\'t available on this instance<..." },
+  { key: "FN|siteFormsSectionHtml|b6d85ce4", verdict: "CONSULTED", copy: "<div class=\"empty-state\"><h2>Couldn\\'t load the form inbox</h2><p>" },
+  { key: "FN|siteFormsSectionHtml|cc70a458", verdict: "CONSULTED", copy: "You don't have access to this site's form inbox." },
+  { key: "FN|siteFormsSectionHtml|37b57d85", verdict: "CONSULTED", copy: "The form inbox couldn't be loaded, and the answer didn't say why." },
+  { key: "FN|siteFormsSectionHtml|bbbba99a", verdict: "UNREVIEWED", copy: "<button class=\"seg-btn\" type=\"button\" data-forms-filter=\"" },
+  { key: "FN|siteFormsSectionHtml|a90bab43", verdict: "UNREVIEWED", copy: "<button class=\"btn btn-ghost btn-sm\" type=\"button\" data-forms-export=\"" },
+  { key: "FN|siteFormsSectionHtml|c043c1cf", verdict: "UNREVIEWED", copy: "<button class=\"btn btn-ghost btn-sm\" type=\"button\" data-forms-export=\"" },
+  { key: "FN|siteFormsSectionHtml|4b660db6", verdict: "UNREVIEWED", copy: "<p class=\"deploys-note\">Showing the 200 most recent submissions.</p>" },
+  { key: "FN|wireSiteForms|757e4c9f", verdict: "CONSULTED", copy: "You don't have permission to change this site's forms." },
+  { key: "FN|wireSiteForms|7d1c83f1", verdict: "CONSULTED", copy: "The change didn't go through, and the answer didn't say why." },
+  { key: "FN|wireSiteForms|ace3602b", verdict: "CONSULTED", copy: "You don't have permission to change this site's submissions." },
+  { key: "FN|wireSiteForms|530c7822", verdict: "CONSULTED", copy: "You don't have permission to export this site's submissions." },
+  { key: "FN|wireSiteForms|2602b482", verdict: "CONSULTED", copy: "The export didn't go through, and the answer didn't say why." },
   { key: "FN|sitePreviewsSectionHtml|821a1ecc", verdict: "UNREVIEWED", copy: "or was torn down when the branch was deleted, is not listed..." },
   { key: "FN|sitePreviewsSectionHtml|107dba76", verdict: "UNREVIEWED", copy: "what has been pushed.</p></div>" },
   { key: "ARG|siteDetailHtml|faultCopy|43d5ca9a", verdict: "DELEGATED", copy: "the read failed without saying why." },

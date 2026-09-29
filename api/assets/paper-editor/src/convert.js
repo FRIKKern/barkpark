@@ -65,6 +65,21 @@ function inlineToTiptapNodes(node, marks, out) {
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
     }
+    case "highlight": {
+      const next = [...marks, { type: "highlight" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
+    case "sub": {
+      const next = [...marks, { type: "subscript" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
+    case "sup": {
+      const next = [...marks, { type: "superscript" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
     case "link": {
       const next = [...marks, { type: "link", attrs: { href: node.href || "" } }];
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
@@ -190,6 +205,9 @@ const MARK_ORDER = [
   "em",
   "underline",
   "strikethrough",
+  "highlight",
+  "sub",
+  "sup",
   "code",
   "blockref",
   "tag",
@@ -209,6 +227,12 @@ function markToPd(mark) {
       return { kind: "strikethrough" };
     case "underline":
       return { kind: "underline" };
+    case "highlight":
+      return { kind: "highlight" };
+    case "subscript":
+      return { kind: "sub" };
+    case "superscript":
+      return { kind: "sup" };
     case "link":
       return { kind: "link", href: (mark.attrs && mark.attrs.href) || "" };
     case "wikilink": {
@@ -319,6 +343,9 @@ function pdKindToMark(kind) {
   if (kind === "strong") return "strong";
   if (kind === "em") return "em";
   if (kind === "underline") return "underline";
+  if (kind === "highlight") return "highlight";
+  if (kind === "sub") return "subscript";
+  if (kind === "sup") return "superscript";
   if (kind === "strikethrough") return "strikethrough";
   if (kind === "link") return "link";
   if (kind === "wikilink") return "wikilink";
@@ -336,8 +363,8 @@ function pdKindToMark(kind) {
 // round-trips through these two, never a reinvented inline serializer.
 export function tiptapInlineToPd(content) {
   return (content || [])
-    .filter((n) => n.type === "text")
-    .map(tiptapTextNodeToPd);
+    .filter((n) => n.type === "text" || n.type === "hardBreak")
+    .map(n => tiptapTextNodeToPd(n.type === "hardBreak" ? { ...n, type: "text", text: "\n" } : n));
 }
 
 // ── block ⇄ TipTap document ────────────────────────────────────────────────
@@ -356,7 +383,13 @@ export function blockToTiptap(block) {
       for (const key of ["content", "text"]) {
         if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
       }
+      // A level beyond the three the canvas offers (an import, an agent) is shown at the
+      // nearest level and carried on the source, so an edit to the text never rewrites it
+      // (D-headings: three levels to author, a deeper stored level is never restructured).
+      if (Number.isFinite(Number(block.level)) && clampLevel(block.level) !== Number(block.level)) source.level = Number(block.level);
+      if (Object.hasOwn(block, "align")) source.align = block.align === "center" || block.align === "right" ? block.align : null;
       const node = { type: "heading", attrs: { level, bpHeadingSource: source } };
+      if (block.align === "center" || block.align === "right") node.attrs.textAlign = block.align;
       const inline = headingInline(source);
       if (inline.length) node.content = inline;
       return { type: "doc", content: [node] };
@@ -370,7 +403,11 @@ export function blockToTiptap(block) {
       for (const key of ["content", "text"]) {
         if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
       }
+      // The key's presence rides the source even when cleared (align:null), so a re-projection of
+      // a live doc (the diff runs on one) still knows the block carries an align to drop.
+      if (Object.hasOwn(block, "align")) source.align = block.align === "center" || block.align === "right" ? block.align : null;
       const node = { type: "paragraph", attrs: { bpParagraphSource: source } };
+      if (block.align === "center" || block.align === "right") node.attrs.textAlign = block.align;
       const inline = inlineArrayToTiptap(listItemToInlineArray(source));
       if (inline.length) node.content = inline;
       return { type: "doc", content: [node] };
@@ -507,7 +544,7 @@ function exactObjectKeys(value, expected) {
 
 const TABLE_CELL_KINDS = new Set(["inline-array", "content-map"]);
 const TABLE_PROTECTED_CHAIN_TYPES = new Set([
-  "link", "wikilink", "strong", "em", "underline", "strikethrough", "text",
+  "link", "wikilink", "strong", "em", "underline", "strikethrough", "highlight", "sub", "sup", "text",
 ]);
 
 function tableCellDescriptor(cellShape) {
@@ -616,9 +653,18 @@ function tableProtectedInlineSupported(inline, sourceInline, descriptor) {
 }
 
 const TABLE_MARKS = new Set([
-  "bold", "italic", "underline", "strike", "code", "link", "wikilink",
+  "bold", "italic", "underline", "strike", "highlight", "subscript", "superscript", "code", "link", "wikilink",
   "blockref", "tag", "valueref",
 ]);
+
+function tableCellAttrsPlain(attrs) {
+  if (attrs == null) return true;
+  if (!tableAttrsHaveOnly(attrs, ["bpTableCellSource", "colspan", "rowspan", "align", "head"])) return false;
+  if (attrs.bpTableCellSource != null) return false;
+  // A per-cell alignment or a row-header cell (plan #26) is canvas-only here: fail closed.
+  if (attrs.align != null || attrs.head === true) return false;
+  return (attrs.colspan == null || attrs.colspan === 1) && (attrs.rowspan == null || attrs.rowspan === 1);
+}
 
 function tableAttrsHaveOnly(attrs, allowed) {
   return attrs && typeof attrs === "object" && !Array.isArray(attrs) &&
@@ -628,7 +674,7 @@ function tableAttrsHaveOnly(attrs, allowed) {
 function validTableMark(mark) {
   if (!mark || typeof mark !== "object" || Array.isArray(mark) ||
       !TABLE_MARKS.has(mark.type)) return false;
-  if (["bold", "italic", "underline", "strike", "code"].includes(mark.type)) {
+  if (["bold", "italic", "underline", "strike", "highlight", "subscript", "superscript", "code"].includes(mark.type)) {
     return exactObjectKeys(mark, ["type"]);
   }
   if (!exactObjectKeys(mark, ["type", "attrs"])) return false;
@@ -728,8 +774,12 @@ function tableCellRows(editorJSON, projection) {
   const nodes = editorJSON?.content;
   if (!source.editable || !Array.isArray(nodes) || nodes.length !== 1 ||
       nodes[0]?.type !== "bpTable" || nodes[0]?.attrs?.bpId !== projection.id ||
-      !tableAttrsHaveOnly(nodes[0]?.attrs, ["bpId", "bpType", "bpTableSource"]) ||
+      !tableAttrsHaveOnly(nodes[0]?.attrs, ["bpId", "bpType", "bpTableSource", "colWidths", "headCol"]) ||
+      nodes[0]?.attrs?.headCol === true ||
       nodes[0]?.attrs?.bpTableSource != null ||
+      // Column widths (plan #25) are a canvas attribute; the per-block Studio editor edits plain
+      // grids, so a table carrying one fails closed here (read-only) and no widths reads as plain.
+      (Array.isArray(nodes[0]?.attrs?.colWidths) && nodes[0].attrs.colWidths.some((w) => w != null)) ||
       !Array.isArray(nodes[0].content)) return null;
   const liveRows = nodes[0].content;
   const hasHead = source.head != null;
@@ -739,9 +789,10 @@ function tableCellRows(editorJSON, projection) {
         row.content.length !== source.rows[0].length) return null;
     const expectedType = header ? "bpTableHeaderCell" : "bpTableCell";
     const cells = row.content.map((cell, column) => {
-      if (cell?.type !== expectedType ||
-          (cell.attrs != null && (!exactObjectKeys(cell.attrs, ["bpTableCellSource"]) ||
-            cell.attrs.bpTableCellSource != null))) return null;
+      // The canvas cell carries colspan / rowspan (merged cells, plan #24); the per-block Studio
+      // editor edits plain grids only, so a spanning cell fails closed here (read-only), and 1/1
+      // reads as the plain cell it is.
+      if (cell?.type !== expectedType || !tableCellAttrsPlain(cell.attrs)) return null;
       const inline = cell.content || [];
       if (!Array.isArray(inline)) return null;
       try {
@@ -899,6 +950,13 @@ function comparableListInline(content) {
   const out = [];
   for (const node of content || []) {
     const next = deepCloneJson(node);
+    // Chromium may parse a literal inline newline as a native break while
+    // typing. Both represent the same PortableDoc text; retain source carriers
+    // when this DOM normalization is the only difference (including Undo).
+    if (next.type === "hardBreak") {
+      next.type = "text";
+      next.text = "\n";
+    }
     if (!next.marks?.length) delete next.marks;
     const previous = out[out.length - 1];
     if (previous?.type === "text" && next.type === "text" && jsonEqual(previous.marks, next.marks)) {
@@ -1025,11 +1083,15 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
 
   switch (blockType) {
     case "heading": {
-      const level = clampLevel(top.attrs && top.attrs.level);
+      const shown = clampLevel(top.attrs && top.attrs.level);
       const source = top.attrs?.bpHeadingSource;
+      // The carried deeper level stands while the canvas still shows its nearest level; a
+      // turn-into to another level is the author's change and wins.
+      const level = source && typeof source === "object" && Number.isFinite(source.level) && clampLevel(source.level) === shown ? source.level : shown;
       if (source && typeof source === "object") {
         const fields = deepCloneJson(source);
-        if (jsonEqual(comparableListInline(headingInline(source)), comparableListInline(top.content))) return { ...fields, level };
+        delete fields.level;
+        if (jsonEqual(comparableListInline(headingInline(source)), comparableListInline(top.content))) return withAlign({ ...fields, level }, top, source);
         const content = tiptapInlineToPd(top.content);
         const rich = content.some(node => node.type !== "text");
         if ((Array.isArray(source.content) && source.content.length) || rich) {
@@ -1038,12 +1100,12 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
         } else {
           fields.text = plainText(top.content);
         }
-        return { ...fields, level };
+        return withAlign({ ...fields, level }, top, source);
       }
       const content = tiptapInlineToPd(top.content);
-      if (content.some(node => node.type !== "text")) return { content, level };
+      if (content.some(node => node.type !== "text")) return withAlign({ content, level }, top, null);
       const text = plainText(top.content);
-      return { text, level };
+      return withAlign({ text, level }, top, null);
     }
     case "list": {
       const task = top.type === "taskList";
@@ -1056,8 +1118,8 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
     case "paragraph":
     default: {
       const source = top.attrs?.bpParagraphSource;
-      if (source && typeof source === "object") return inlineCarrierFromTiptap(source, top.content);
-      return { content: tiptapInlineToPd(top.content) };
+      if (source && typeof source === "object") return withAlign(inlineCarrierFromTiptap(source, top.content), top, source);
+      return withAlign({ content: tiptapInlineToPd(top.content) }, top, null);
     }
   }
 }
@@ -1080,6 +1142,18 @@ export function buildPatchBlockOp(editorJSON, blockId, blockType) {
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
+// The author's alignment on the way back: "center" | "right" ride as `align`; left drops the
+// key — as `align: null` on a block whose source carried one (the patch merge drops it),
+// as nothing on a fresh block.
+function withAlign(fields, top, source) {
+  const out = fields && typeof fields === "object" ? fields : {};
+  const align = top && top.attrs && top.attrs.textAlign;
+  if (align === "center" || align === "right") out.align = align;
+  else if (source && Object.hasOwn(source, "align")) out.align = null;
+  else delete out.align;
+  return out;
+}
+
 function clampLevel(level) {
   const n = Number(level);
   if (!Number.isFinite(n)) return 1;
@@ -1092,8 +1166,8 @@ function clampLevel(level) {
 // carry a flat string in portable-doc, so marks are dropped here by design.
 function plainText(content) {
   return (content || [])
-    .filter((n) => n.type === "text")
-    .map((n) => n.text || "")
+    .filter((n) => n.type === "text" || n.type === "hardBreak")
+    .map((n) => n.type === "hardBreak" ? "\n" : n.text || "")
     .join("");
 }
 

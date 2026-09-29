@@ -304,6 +304,10 @@ defmodule Barkpark.Content do
   def delete_document(doc_id, type, dataset, opts \\ []),
     do: Lifecycle.delete_document(doc_id, type, dataset, opts)
 
+  @doc "Delete only an exact draft at the caller's opaque revision, retaining recovery evidence."
+  def delete_exact_draft(doc_id, type, dataset, expected_rev, opts \\ []),
+    do: Lifecycle.delete_exact_draft(doc_id, type, dataset, expected_rev, opts)
+
   # ── Batch mutations (extracted → Content.Mutations, concern H) ─────────────
   #
   # `apply_mutations/3` (transaction + broadcast-deferral + per-op dispatch)

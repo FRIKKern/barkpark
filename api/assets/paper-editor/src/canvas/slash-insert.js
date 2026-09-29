@@ -58,6 +58,14 @@ export const CANVAS_SLASH_TYPES = new Set([
   "diagram",
   "action",
   "figure",
+  "image",
+  "expandable",
+  "steps",
+  "tabs",
+  "equation",
+  "footnote",
+  "toc",
+  "video",
   "columns",
   "section",
   "terminal",
@@ -111,6 +119,11 @@ export function canvasDefaultBlock(type) {
       return { id: null, type: "heading", text: "New heading", level: 2 };
     case "paragraph":
       return { id: null, type: "paragraph", content: [{ type: "text", value: "" }] };
+    case "blockquote":
+      // The plain quote: an empty inline body, like a paragraph (the catch-all below
+      // used to swallow this into a paragraph, so "/Quote" inserted no quote at all —
+      // found by Barkdown's row 12 slash sweep).
+      return { id: null, type: "blockquote", content: [{ type: "text", value: "" }] };
     case "list":
       return {
         id: null,
@@ -146,6 +159,10 @@ export function canvasDefaultBlock(type) {
       return { id: null, type: "diagram", source: "", caption: "" };
     case "action":
       return { id: null, type: "action", href: "", label: "" };
+    case "image":
+      // An empty image: the node-view shows the "no image yet" frame with the url
+      // input open, so the author pastes a url (uploads are the next plan item).
+      return { id: null, type: "image", src: "", alt: "" };
     case "figure":
       return {
         id: null,
@@ -164,6 +181,26 @@ export function canvasDefaultBlock(type) {
         id: null,
         type: "section",
         title: "New section",
+        blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }],
+      };
+    case "equation":
+      return { id: null, type: "equation", tex: "" };
+    case "footnote":
+      return { id: null, type: "footnote", notes: [] };
+    case "toc":
+      return { id: null, type: "toc", items: [] };
+    case "video":
+      return { id: null, type: "video", src: "" };
+    case "steps":
+      return { id: null, type: "steps", steps: [{ title: "Step 1", blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }] }] };
+    case "tabs":
+      return { id: null, type: "tabs", tabs: [{ label: "Tab 1", blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }] }] };
+    case "expandable":
+      // A toggle with a summary and one empty paragraph (the `+` body must hold a child).
+      return {
+        id: null,
+        type: "expandable",
+        summary: "Details",
         blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }],
       };
     case "terminal":

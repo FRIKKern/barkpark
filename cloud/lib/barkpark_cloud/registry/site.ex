@@ -204,6 +204,13 @@ defmodule BarkparkCloud.Registry.Site do
     # byte-identical to today.
     field :prebuilt_enabled, :boolean, default: false
 
+    # task-71082f5541c13b53 (N-08): whether this site's form endpoint is on. The
+    # endpoint itself is a `form_endpoint` document on the box
+    # (`BarkparkCloud.Sites.Forms`); this bit only decides whether the next
+    # deploy hands the build `BARKPARK_FORMS_URL`, the template's opt-in.
+    # Written ONLY through `forms_changeset/2`, after the box accepted the write.
+    field :forms_enabled, :boolean, default: false
+
     # ssw8-persist-binding-verdict (charter D73): what the control plane OBSERVED
     # when it read this site's binding at create, and when. Written by
     # `POST /v1/sites` from `verify_content_binding/2`; `never_checked` until
@@ -530,6 +537,17 @@ defmodule BarkparkCloud.Registry.Site do
     |> cast(attrs, [:theme, :doc_type, :prebuilt_enabled])
     |> validate_theme()
     |> validate_length(:doc_type, min: 1, max: 100)
+  end
+
+  @doc """
+  task-71082f5541c13b53 (N-08): the NARROW changeset for the forms bit. Its own
+  changeset, not `settings_changeset/2`: the bit must only move after the box
+  accepted the matching `form_endpoint` write, so no PATCH can flip it alone.
+  """
+  def forms_changeset(site, attrs) do
+    site
+    |> cast(attrs, [:forms_enabled])
+    |> validate_required([:forms_enabled])
   end
 
   @doc """

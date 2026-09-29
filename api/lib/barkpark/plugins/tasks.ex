@@ -971,12 +971,12 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary:
               "Narrow the page to the DIRECT children of this parent task id " <>
-                "(`parent_id` is an accepted alias server-side). This is the " <>
-                "parent-scoped read that carries updated_at per row — the " <>
-                "close-time field a \"which children closed between T1 and T2\" " <>
-                "audit needs. `bp task get <parent>` renders the same rail but " <>
-                "its child summaries are a lighter card; use this verb when you " <>
-                "are querying by time rather than reading one task."
+                "(`parent_id` is an accepted alias server-side). Each row is " <>
+                "the full card, claim, assignee and content included. " <>
+                "`bp task get <parent>` lists the same children as summaries " <>
+                "of at most seven keys (updated_at, the close-time field, " <>
+                "included; no claim, assignee or content). Both omit " <>
+                "criteria_progress on a row with no criteria."
           }
         ],
         writes: false,

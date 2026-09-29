@@ -20,6 +20,7 @@ lib/barkpark/media/image_metadata.ex	maybe_lqip
 lib/barkpark/media/probe.ex	read_prefix
 lib/barkpark/media/renditions.ex	delete_for_file
 lib/barkpark/media/renditions.ex	generate
+lib/barkpark/migration_paths.ex	read_manifest
 lib/barkpark/plugins/bulldocs.ex	register_schemas
 lib/barkpark/plugins/frt.ex	load_schema!
 lib/barkpark/plugins/github.ex	validate_settings
@@ -54,7 +55,14 @@ lib/barkpark/release/secrets.ex	read_existing
 lib/barkpark/release/secrets.ex	write_env
 lib/barkpark/repo.ex	set_local_statement_timeout!
 lib/barkpark/search/golden_eval.ex	run
+lib/barkpark/self_update/runner.ex	append_log_line
 lib/barkpark/self_update/runner.ex	bounded_preflight
+lib/barkpark/self_update/runner.ex	os_pid_alive?
+lib/barkpark/self_update/runner.ex	persist_start
+lib/barkpark/self_update/runner.ex	read_deploy_status
+lib/barkpark/self_update/runner.ex	read_json
+lib/barkpark/self_update/runner.ex	read_log_tail
+lib/barkpark/self_update/runner.ex	write_json
 lib/barkpark/sites/build_log_scrub.ex	do_scrub_file
 lib/barkpark/sites/build_log_scrub.ex	fail
 lib/barkpark/sites/build_log_scrub.ex	fold_line

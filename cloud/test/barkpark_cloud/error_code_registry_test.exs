@@ -135,6 +135,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "expired_or_invalid",
              "feature_not_configured",
              "forbidden",
+             "forms_unsupported",
              "github_error",
              "illegal_transition",
              "installation_id_required",

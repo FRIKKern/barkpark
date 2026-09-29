@@ -72,7 +72,9 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "heading", "level" => l} = b, d) when l in ~w(1 2 3),
     do: heading_line(String.to_integer(l), b, d)
 
-  defp block(%{"type" => "paragraph"} = b, d), do: inline_tag("p", b, d)
+  # `align` rides the row on <p> and <h1..3> (Barkdown plan #21): render/compose.ex reads it
+  # ("center" | "right"), so a pulled paper that lost it came back flush left on push.
+  defp block(%{"type" => "paragraph"} = b, d), do: inline_tag("p", b, d, ["id", "align"])
   defp block(%{"type" => "pullquote"} = b, d), do: inline_tag("pullquote", b, d)
   defp block(%{"type" => "ingress"} = b, d), do: inline_tag("ingress", b, d)
 
@@ -202,17 +204,47 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
           []
 
         cells ->
-          ths = Enum.map_join(cells, "", &"<th>#{head_cell(&1)}</th>")
+          ths = Enum.map_join(cells, "", &"<th#{cell_align_attr(&1)}>#{head_cell(&1)}</th>")
           ["#{pad(d + 1)}<tr>#{ths}</tr>"]
       end
 
+    # Merged cells (Barkdown plan #24): `spans` rides as colspan/rowspan attributes on the
+    # origin's <td>; every grid cell still prints (a covered position is an empty <td>), so the
+    # round trip is byte-exact.
+    spans = Map.get(b, "spans", []) |> List.wrap()
+
     rows =
-      Enum.map(Map.get(b, "rows", []), fn cells ->
-        tds = Enum.map_join(cells, "", &"<td>#{inline(&1)}</td>")
+      Map.get(b, "rows", [])
+      |> Enum.with_index()
+      |> Enum.map(fn {cells, r} ->
+        tds =
+          cells
+          |> Enum.with_index()
+          |> Enum.map_join("", fn {cell, c} ->
+            "<td#{td_span_attrs(spans, r, c)}#{cell_align_attr(cell)}>#{cell_inline(cell)}</td>"
+          end)
+
         "#{pad(d + 1)}<tr>#{tds}</tr>"
       end)
 
-    wrap("table", attr_str(b, ["id"]), head ++ rows, d)
+    # Columns (type for the reader's numeric/spark columns, width for Barkdown plan #25) print as
+    # self-closing <col> lines ahead of the rows, so a pull/push no longer drops them.
+    cols =
+      case Map.get(b, "cols") do
+        list when is_list(list) and list != [] ->
+          Enum.map(list, fn col ->
+            attrs = if is_map(col), do: attr_str(col, ["type", "width"]), else: ""
+            "#{pad(d + 1)}<col#{attrs}/>"
+          end)
+
+        _ ->
+          []
+      end
+
+    table_attrs =
+      attr_str(b, ["id"]) <> if(Map.get(b, "headCol") == true, do: ~s( headcol="true"), else: "")
+
+    wrap("table", table_attrs, cols ++ head ++ rows, d)
   end
 
   defp block(%{"type" => "section"} = b, d) do
@@ -779,6 +811,9 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp mark_tag("em"), do: "i"
   defp mark_tag("code"), do: "code"
   defp mark_tag("underline"), do: "u"
+  defp mark_tag("highlight"), do: "mark"
+  defp mark_tag("sub"), do: "sub"
+  defp mark_tag("sup"), do: "sup"
   defp mark_tag("strike"), do: "s"
   # The corpus's HTML-ish aliases for the same two marks; the parser returns
   # the canonical name, so a `bold` mark canonicalizes to `strong` on push the
@@ -874,15 +909,17 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   defp heading_line(l, b, d),
-    do: pad(d) <> "<h#{l}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
+    do:
+      pad(d) <>
+        "<h#{l}#{attr_str(b, ["id", "align"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
 
   defp text_tag(tag, b, d),
     do: pad(d) <> "<#{tag}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</#{tag}>"
 
-  defp inline_tag(tag, b, d),
+  defp inline_tag(tag, b, d, attrs \\ ["id"]),
     do:
       pad(d) <>
-        "<#{tag}#{attr_str(b, ["id"])}>#{inline(alias_get(b, ["content", "text"]) || [])}</#{tag}>"
+        "<#{tag}#{attr_str(b, attrs)}>#{inline(alias_get(b, ["content", "text"]) || [])}</#{tag}>"
 
   defp wrap(tag, attrs, [], d), do: pad(d) <> "<#{tag}#{attrs}/>"
 
@@ -909,5 +946,27 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   defp esc(other), do: esc(to_string(other))
 
+  # A body cell is an inline list or a content-map (plan #26 alignment rides the map).
   defp esc_attr(s), do: s |> esc() |> String.replace("\"", "&quot;")
+  defp cell_inline(%{"content" => content}) when is_list(content), do: inline(content)
+  defp cell_inline(cell), do: inline(cell)
+
+  defp cell_align_attr(%{"align" => a}) when a in ["center", "right"], do: ~s( align="#{a}")
+  defp cell_align_attr(_cell), do: ""
+
+  defp td_span_attrs(spans, r, c) do
+    case Enum.find(spans, fn s ->
+           is_map(s) and Map.get(s, "row") == r and Map.get(s, "col") == c
+         end) do
+      nil ->
+        ""
+
+      s ->
+        cs = Map.get(s, "colspan", 1)
+        rs = Map.get(s, "rowspan", 1)
+
+        if(is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
+          if is_integer(rs) and rs > 1, do: ~s( rowspan="#{rs}"), else: ""
+    end
+  end
 end

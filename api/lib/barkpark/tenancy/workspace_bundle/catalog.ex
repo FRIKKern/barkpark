@@ -70,6 +70,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   double-count. The count-parity gate uses the identical semi-join.
   """
 
+  alias Barkpark.OwnedTables
+
   # ── Pinned partition (the reviewed baseline the sentinel diffs against) ──────
   #
   # These lists are the reviewed classification of every base table as of this
@@ -475,8 +477,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     live_e3 = live_e3(repo)
     live_base = live_base_tables(repo)
 
-    diff_or_raise!("E1", live_e1, Enum.sort(@pinned_e1))
-    diff_or_raise!("E2", live_e2, Enum.sort(@pinned_e2))
+    # A switched-off owner's tables may be absent (task-d3ecc509d4ea227d); they
+    # leave the pinned lists only then. An enabled owner's table stays pinned,
+    # so its absence still raises as a phantom below.
+    absent = absent_owned_tables(live_base)
+
+    diff_or_raise!("E1", live_e1, Enum.sort(@pinned_e1 -- absent))
+    diff_or_raise!("E2", live_e2, Enum.sort(@pinned_e2 -- absent))
     diff_or_raise!("E3", live_e3, Enum.sort(@e3_doc_keyed ++ @e3_dataset_keyed))
 
     # Every E2 table must have a reviewed join spec; every E3 table a keyed shape.
@@ -501,13 +508,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     end
 
     partition =
-      [@root_table] ++
-        @pinned_e1 ++
-        @pinned_e2 ++
-        @e3_doc_keyed ++
-        @e3_dataset_keyed ++
-        Map.keys(@allowlist) ++
-        @pinned_non_tenant
+      ([@root_table] ++
+         @pinned_e1 ++
+         @pinned_e2 ++
+         @e3_doc_keyed ++
+         @e3_dataset_keyed ++
+         Map.keys(@allowlist) ++
+         @pinned_non_tenant) -- absent
 
     dupes = partition -- Enum.uniq(partition)
 
@@ -630,6 +637,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     end
 
     :ok
+  end
+
+  # Owned tables (`Barkpark.OwnedTables`) whose owner is switched off AND that
+  # are missing from the live catalog. Turning an owner off keeps its tables,
+  # so a present table stays classified and travels exactly as before.
+  defp absent_owned_tables(live_base) do
+    for t <- OwnedTables.tables(), not OwnedTables.enabled?(t), t not in live_base, do: t
   end
 
   defp diff_or_raise!(label, live, pinned) do
@@ -839,6 +853,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
          live_e1(repo) ++ live_e2(repo) ++ live_e3(repo) ++ Map.keys(@allowlist))
       |> Enum.uniq()
       |> Enum.sort()
+
+    # A switched-off owner's absent tables are neither reachable nor phantom
+    # (task-d3ecc509d4ea227d).
+    partition = Map.drop(partition, absent_owned_tables(live_base_tables(repo)))
 
     classified = partition |> Map.keys() |> Enum.sort()
 

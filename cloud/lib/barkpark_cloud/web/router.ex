@@ -198,6 +198,10 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/sites/:id        user(s)   delete a site — tear it down on the box + deregister (write ability)
       GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
       GET     /v1/sites/:id/doctor user  every substrate this site occupies, three-valued, each absence naming its repair (team-scoped)
+      GET     /v1/sites/:id/forms  user(s)   the site's form endpoint state + its inbox, newest first (read ability; N-08)
+      PUT     /v1/sites/:id/forms  user(s)   turn the site's form endpoint on/off on the box (write ability; N-08)
+      PATCH   /v1/sites/:id/forms/submissions/:sub_id user(s)  set one submission's state (new/seen) and/or spam disposition (write ability; N-08)
+      POST    /v1/sites/:id/forms/export user(s)  the selected submissions as CSV or JSON (write ability — bulk personal-data copy; N-08)
       POST    /v1/sites/:id/deploy user(s)   enqueue a Deployment (the build job) (write ability)
       GET     /v1/sites/:id/deployments user(s)  list a site's PRODUCTION deployments, newest first (read ability) — the only route that can express a DENOMINATOR, so an automation credential can compute the owner's own deploy number (D219 re-tiering)
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
@@ -317,6 +321,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Registry.HetznerCatalog
   alias BarkparkCloud.Registry.InstanceApiCatalog
   alias BarkparkCloud.Sites
+  alias BarkparkCloud.Sites.Forms
   alias BarkparkCloud.Sites.RollbackAttribution
   alias BarkparkCloud.Web.Auth
 
@@ -542,6 +547,19 @@ defmodule BarkparkCloud.Web.Router do
     runaway_procs: nil,
     slot_units: nil,
     slot_units_truncated: nil,
+    reported_at: nil
+  }
+
+  # dr-w15-s5: the all-UNMEASURED site-deploy capability block, for a box that has
+  # never beaten and for a beat whose agent predates the `site_deploy` field (or
+  # whose probe could not read the instance route — the agent's `omitempty` keeps
+  # the key OFF the wire then). Both booleans are nil, NEVER false: `false` is the
+  # box's own verdict "I refuse deploys", and an un-upgraded or unread box must
+  # never be reported as refusing. Key-identical to merge_capability/2's measured
+  # arm so a consumer can always destructure.
+  @unmeasured_site_deploy %{
+    configured: nil,
+    runner_alive: nil,
     reported_at: nil
   }
 
@@ -5109,7 +5127,8 @@ defmodule BarkparkCloud.Web.Router do
   #
   #   1. `Auth.require_platform_operator` — 401 with no session, 403 for a
   #      non-operator session, and 403 `allowlist: "unconfigured"` when
-  #      PLATFORM_ADMIN_EMAILS is unset (which it is, in production). It FAILS
+  #      PLATFORM_ADMIN_EMAILS is unset (it is set in production since
+  #      2026-09-25, gr-ops-platform-admin-emails). It FAILS
   #      CLOSED: an unconfigured allowlist admits nobody rather than everybody.
   #      An operator-only send route reachable by anyone is a spam cannon.
   #   2. `digest_send:<user_id>` — 2/60s (DeviceAuth.RateLimiter). The smallest
@@ -5383,10 +5402,11 @@ defmodule BarkparkCloud.Web.Router do
   # GET /v1/deploy-ledger/census?from=&to=[&site_ids=a,b] → 200 <census + scope>
   # — THE SAME census, over the CALLER'S OWN sites (dr-w16-s6). The operator
   # route above is gated by `require_platform_operator`, and PLATFORM_ADMIN_EMAILS
-  # is unset in production: measured live this wave, that route answers
-  # `403 {"error":"forbidden","scope":"platform","required":"platform_operator"}`
-  # to every real account, in the same minute GET /v1/sites answers 200 to the
-  # same token. Sixteen waves built a correct number nobody could read. This is
+  # was unset in production when this landed: measured live that wave, that route
+  # answered `403 {"error":"forbidden","scope":"platform","required":"platform_operator"}`
+  # to every real account, in the same minute GET /v1/sites answered 200 to the
+  # same token. (gr-ops-platform-admin-emails provisioned the allowlist
+  # 2026-09-25; this route remains the read for every non-operator member.) Sixteen waves built a correct number nobody could read. This is
   # the read.
   #
   # ONE census computation, never two: `DeployLedger.census/3` is called here
@@ -5448,7 +5468,9 @@ defmodule BarkparkCloud.Web.Router do
               |> Map.put(:scope, census_scope(team, scoped))
               # THE DELIVERY NODE, SCOPED (dr-w21-s6). It was added ONLY by
               # `deploy_census_json/2` on the OPERATOR route, so wave 15's
-              # reader shipped onto a route nobody can reach: measured live,
+              # reader shipped onto a route nobody could reach (the operator
+              # allowlist was unset on prod until gr-ops-platform-admin-emails,
+              # 2026-09-25): measured live,
               # `bp cloud deployments -o table` rendered "NOT MEASURED — this
               # control plane sends no delivery census" to every real operator,
               # because the only route a real token can reach is this one and it
@@ -6944,24 +6966,37 @@ defmodule BarkparkCloud.Web.Router do
   # to `current_team = nil`, so 403 BEFORE querying rather than running the fence
   # against a nil team_id.
   #
-  # THE SELF-SCOPED READ IS NOT FREE, AND THE NUMBER IS MEASURED, NOT ARGUED.
-  # EXPLAIN (ANALYZE, BUFFERS) against a seeded table (one team, 200k rows, 50
-  # recipients) shows the planner DECLINING `notification_deliveries_team_id_
-  # inserted_at_index` for the fenced query — `lower(recipient)` is not indexed,
-  # so it bitmap-scans `notification_deliveries_team_id_index`, filters 196k rows
-  # away and top-N heapsorts what is left: 30.8 ms / 3798 shared buffers. The
-  # ADMIN read on the same team still walks the compound index backwards and
-  # stops at the LIMIT: 0.037 ms / 6 buffers. The team fence keeps it bounded and
-  # 30 ms is a fine page today, but it scales with the TEAM'S WHOLE LOG rather
-  # than the page size. The table's unboundedness is now CLOSED —
-  # `Workers.AgentRetentionWorker` prunes `notification_deliveries` past 180 days
-  # (cch-w34-bl-delivery-log-has-no-retention) — so the team's whole log is
-  # bounded by that window rather than by nothing. The remaining fix is an
-  # index on `(team_id, lower(recipient), inserted_at)` — deliberately NOT taken
-  # in this slice (it is a migration, outside this slice's file fence). It is
-  # OPEN WORK, not a solved problem: re-run the same EXPLAIN (ANALYZE, BUFFERS)
-  # after adding it and quote both plans, because a green suite proves nothing
-  # about a query plan.
+  # THE SELF-SCOPED READ WAS NOT FREE, AND THE NUMBERS ARE MEASURED, NOT ARGUED.
+  # Wave 33 (one team, 200k rows, 50 recipients) measured the planner DECLINING
+  # `notification_deliveries_team_id_inserted_at_index` for the fenced query and
+  # bitmap-scanning the team: 30.8 ms / 3798 shared buffers, against the ADMIN
+  # read's 0.037 ms / 6. The cause is that `lower(recipient)` was not indexed,
+  # so the fence was a Filter applied row by row AFTER the team fence, and the
+  # planner has no statistics for the expression (it guesses a flat 0.5%).
+  #
+  # cch-w34-bl-lower-recipient-index RE-MEASURED it (PG 17 local, seeded,
+  # EXPLAIN (ANALYZE, BUFFERS), warm, Limit-node buffers) against the index set
+  # origin/main ships — 20260629120300's `(team_id)` + `(team_id, inserted_at)`
+  # plus 20260918110000's three `(team_id, <axis>, inserted_at)` — and the
+  # read DEGRADES WITH RECIPIENT CARDINALITY and with the member's SHARE of the
+  # log, worst for a member with FEW rows, because the LIMIT never fills and
+  # the scan walks the whole team partition:
+  #
+  #     shape (heap order)              member        absent member   admin
+  #     1 team x 200k, 50 rcpt (append)  100 / 0.48ms  7060 / 33.7ms   15
+  #     1 team x 200k, 50 rcpt (random) 2513 / 2.6ms  202377 / 70ms   65
+  #     5 teams x 50k, 25 rcpt (append)  923 / 7.9ms   923 / 7.5ms     15
+  #     5 teams x 50k, 25 rcpt (random) 1398 / 1.1ms  50554 / 12.5ms  62
+  #
+  # ("absent member" = a member with no rows yet, e.g. a new joiner; `Rows
+  # Removed by Filter` equals the team's whole log.) Migration 20260925120000
+  # adds `(team_id, lower(recipient), inserted_at)`, which moves the fence into
+  # the Index Cond and walks backwards to the LIMIT. AFTER, same shapes:
+  # member 56 / 63 / 37 / 65 buffers (<= 0.13 ms), absent member 12 buffers
+  # (<= 0.04 ms) in all four, admin unchanged. A member's page now costs about
+  # one heap page per returned row — the admin's order of magnitude — instead
+  # of the team's whole log. A green suite proved none of this; the plans are
+  # quoted in full on the PR that added the index.
   #
   # `?channel=` / `?status=` / `?event=` narrow the log, and `?before=<oldest
   # inserted_at>&before_id=<that row's id>` walks the next page (the /v1/audit
@@ -9807,8 +9842,9 @@ defmodule BarkparkCloud.Web.Router do
   #
   # TEAM-SCOPED, the SAME door its siblings already use
   # (dr-w19-site-build-log-is-operator-only). It shipped `operator`-gated, which is
-  # the `:platform_admin_emails` allowlist — unset on prod and unsettable through
-  # any route, console action or User field (`gr-ops-platform-admin-emails`) — so
+  # the `:platform_admin_emails` allowlist — then unset on prod (provisioned
+  # 2026-09-25 by `gr-ops-platform-admin-emails`) and unsettable through any
+  # route, console action or User field — so
   # the ONE deploy-health read carrying a failed build's own words was readable by
   # ZERO accounts while `GET /v1/sites/:id/deployments/:dep_id` next door answered
   # every member of the owning team. Fail-closed to the point of uselessness is not
@@ -9856,9 +9892,9 @@ defmodule BarkparkCloud.Web.Router do
   # the exact condition it widened under: "the widening moved WHO may ask, never
   # WHAT is served … Not raw log bytes, and never has." THIS route serves the
   # bytes, so that argument does not reach it and the audience does not move with
-  # it. `Auth.require_platform_operator/2` is 403-dark in production today
-  # (`gr-ops-platform-admin-emails`), which this route INHERITS from the row this
-  # task was filed under — no criterion here asserts a live 200 from it, and
+  # it. `Auth.require_platform_operator/2` admits only the platform-admin
+  # allowlist (provisioned on the live control plane 2026-09-25,
+  # `gr-ops-platform-admin-emails`) — no criterion here asserts a live 200 from it, and
   # widening it is a separate decision with a separate secret-boundary review.
   # All policy lives in `Sites.BuildLogBytes`.
   get "/v1/sites/:id/deployments/:dep_id/build-log/bytes" do
@@ -11572,6 +11608,183 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # ── Forms inbox (task-71082f5541c13b53, N-08 criterion 2) ────────────────
+  #
+  # The control-plane door onto a hosted site's form intake. The endpoint and
+  # every submission live ON THE BOX, in the site's bound dataset
+  # (`Sites.Forms` moduledoc); these four routes only relay, over the instance
+  # admin credential, to the SCOPED `/w/:ws/p/:proj/v1/data/*` routes of that
+  # one binding. TEAM-SCOPED through `with_team_site/3`: a wrong-team, absent
+  # or malformed site id is the same 404 with no box call made, so the routes
+  # cannot be used to learn that another team's site exists, let alone read
+  # its inbox. Reads need the `read` ability, writes `write` (a browser session
+  # carries root, so the console is never locked out).
+  #
+  # Refusals, one vocabulary for all four (`forms_refusal/2`):
+  #   422 no_content_binding  the site has no workspace/project/dataset
+  #   409 forms_unsupported   the box's plugin roster has no `forms` (the
+  #                           intake route does not exist there)
+  #   409 not_live / no_admin_token   the box cannot be driven yet
+  #   502 instance_unreachable / instance_refused   the box did not answer / refused
+
+  # GET /v1/sites/:id/forms → 200 {forms, submissions, has_more}
+  get "/v1/sites/:id/forms" do
+    with_team_site(conn, {:ability, "read"}, fn conn, site ->
+      bp = Registry.get_barkpark(site.barkpark_id)
+
+      with {:ok, endpoint} <- Forms.endpoint(site, bp),
+           {:ok, page} <- Forms.list(site, bp) do
+        json(conn, 200, %{
+          forms: forms_json(site, bp, endpoint),
+          submissions: page.submissions,
+          has_more: page.has_more
+        })
+      else
+        {:error, reason} -> forms_refusal(conn, reason)
+      end
+    end)
+  end
+
+  # PUT /v1/sites/:id/forms {enabled: bool} → 200 {forms}
+  #
+  # The box write happens FIRST; the control plane's `forms_enabled` bit moves
+  # only after the box accepted it, so the bit never names an endpoint the box
+  # does not hold. The bit is what hands the NEXT deploy BARKPARK_FORMS_URL —
+  # the response says so (`redeploy_needed`), because a site already live keeps
+  # serving pages built without the form until it is rebuilt.
+  put "/v1/sites/:id/forms" do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      case conn.body_params do
+        %{"enabled" => enabled} when is_boolean(enabled) ->
+          bp = Registry.get_barkpark(site.barkpark_id)
+
+          with {:ok, endpoint} <- Forms.put_endpoint(site, bp, enabled),
+               {:ok, updated} <- Registry.set_site_forms_enabled(site, enabled) do
+            push_event(updated.team_id, "sites")
+
+            json(conn, 200, %{
+              forms: forms_json(updated, bp, endpoint),
+              redeploy_needed: site.forms_enabled != enabled
+            })
+          else
+            {:error, %Ecto.Changeset{} = cs} ->
+              json(conn, 422, %{error: "invalid", details: errors(cs)})
+
+            {:error, reason} ->
+              forms_refusal(conn, reason)
+          end
+
+        _ ->
+          json(conn, 422, %{error: "invalid", details: %{enabled: ["must be true or false"]}})
+      end
+    end)
+  end
+
+  # PATCH /v1/sites/:id/forms/submissions/:sub_id {state?, spam?} → 200 {submission}
+  #
+  # The submission is read first and must carry THIS site's slug — two sites
+  # may share a dataset, and an id from the neighbour's inbox is the same 404
+  # as an id that does not exist (`Sites.Forms.update_submission/4`).
+  patch "/v1/sites/:id/forms/submissions/:sub_id" do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      bp = Registry.get_barkpark(site.barkpark_id)
+      changes = if is_map(conn.body_params), do: conn.body_params, else: %{}
+
+      case Forms.update_submission(site, bp, conn.path_params["sub_id"], changes) do
+        {:ok, submission} -> json(conn, 200, %{submission: submission})
+        {:error, reason} -> forms_refusal(conn, reason)
+      end
+    end)
+  end
+
+  # POST /v1/sites/:id/forms/export {ids: [..], format: "csv" | "json"}
+  #   → 200 text/csv (attachment) | 200 {submissions, missing}
+  #
+  # A POST because the selection is a body (up to 1000 ids does not fit a
+  # URL). It writes nothing, but it is gated on `write`, not `read`: the read
+  # tier is widened INTO by every PAT tier and must stay GET-only
+  # (`router_ability_matrix_test.exs`), and a bulk copy of visitors' personal
+  # data out of the dataset is a heavier act than viewing the inbox — a
+  # read-only PAT can list, not export. Ids that are not this site's
+  # submissions come back in `missing` (JSON) or as the `x-barkpark-missing`
+  # count (CSV), never dropped without a trace.
+  post "/v1/sites/:id/forms/export" do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      params = if is_map(conn.body_params), do: conn.body_params, else: %{}
+      ids = params["ids"]
+      format = params["format"] || "csv"
+
+      cond do
+        not (is_list(ids) and ids != [] and length(ids) <= 1000 and Enum.all?(ids, &is_binary/1)) ->
+          json(conn, 422, %{
+            error: "invalid",
+            details: %{ids: ["select between 1 and 1000 submissions"]}
+          })
+
+        format not in ["csv", "json"] ->
+          json(conn, 422, %{error: "invalid", details: %{format: ["must be csv or json"]}})
+
+        true ->
+          bp = Registry.get_barkpark(site.barkpark_id)
+
+          case Forms.export(site, bp, ids) do
+            {:ok, %{submissions: subs, missing: missing}} when format == "json" ->
+              json(conn, 200, %{submissions: subs, missing: missing})
+
+            {:ok, %{submissions: subs, missing: missing}} ->
+              conn
+              |> put_resp_content_type("text/csv")
+              |> put_resp_header(
+                "content-disposition",
+                ~s(attachment; filename="#{site.slug}-submissions.csv")
+              )
+              |> put_resp_header("x-barkpark-missing", Integer.to_string(length(missing)))
+              |> send_resp(200, Forms.to_csv(subs))
+
+            {:error, reason} ->
+              forms_refusal(conn, reason)
+          end
+      end
+    end)
+  end
+
+  defp forms_json(site, bp, endpoint) do
+    %{
+      # The control plane's bit: does the NEXT deploy get BARKPARK_FORMS_URL?
+      enabled: site.forms_enabled == true,
+      # The box's truth: is the intake accepting posts for this site right now?
+      accepting: Map.get(endpoint, :present, false) and Map.get(endpoint, :enabled, false),
+      endpoint_present: Map.get(endpoint, :present, false),
+      endpoint_url: Forms.endpoint_url(site, bp),
+      allowed_origins: Map.get(endpoint, :allowed_origins, []),
+      fields: Map.get(endpoint, :fields, [])
+    }
+  end
+
+  defp forms_refusal(conn, :no_content_binding),
+    do: json(conn, 422, %{error: "no_content_binding"})
+
+  defp forms_refusal(conn, :forms_unsupported), do: json(conn, 409, %{error: "forms_unsupported"})
+  defp forms_refusal(conn, :not_live), do: json(conn, 409, %{error: "not_live"})
+  defp forms_refusal(conn, :no_admin_token), do: json(conn, 409, %{error: "no_admin_token"})
+  defp forms_refusal(conn, :decrypt_failed), do: json(conn, 500, %{error: "decrypt_failed"})
+  defp forms_refusal(conn, :instance_error), do: json(conn, 502, %{error: "instance_unreachable"})
+  defp forms_refusal(conn, :not_found), do: json(conn, 404, %{error: "not_found"})
+  defp forms_refusal(conn, :conflict), do: json(conn, 409, %{error: "conflict"})
+
+  defp forms_refusal(conn, :invalid) do
+    json(conn, 422, %{
+      error: "invalid",
+      details: %{
+        state: ["must be new or seen"],
+        spam: ["must be clean, suspected or spam"]
+      }
+    })
+  end
+
+  defp forms_refusal(conn, {:instance, status}),
+    do: json(conn, 502, %{error: "instance_refused", status: status})
+
   ## Catch-all → 404 JSON
 
   match _ do
@@ -11752,6 +11965,72 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # The launch request's identity, resolved ONCE per request: go_live inserts
+  # with it AND looks for an in-flight twin with it, so the two can never
+  # disagree. The name is OPTIONAL when a template is given: absent, blank or
+  # whitespace-only defaults to the template's display title (else its slug),
+  # so the /new form's "(optional)" label, the badge flow and a bare curl all
+  # launch — and a nameless double-submit resolves to the SAME slug as its
+  # first submission. With no template there is nothing to derive from: name
+  # and slug stay nil and the 422 name_required stands. `slugify/1` is called
+  # once because its fallback for an all-symbol name is random.
+  #
+  # Resolved before go_live's validation, so `provider` may be `:error` here
+  # (the cond 422s it before any insert); no row carries it, so the twin
+  # lookup simply finds nothing.
+  defp launch_identity(conn) do
+    template = template_or_nil(conn.body_params["template"])
+    name = launch_name(conn.body_params["name"], template)
+
+    %{
+      template: template,
+      name: name,
+      slug: if(is_binary(name), do: slugify(name), else: nil),
+      provider: launch_provider(conn.body_params["provider"])
+    }
+  end
+
+  # dwb-launch-flow-double-submit-test: the team's in-flight twin of THIS
+  # launch (same slug, template, provider — `Registry.inflight_launch_twin/4`
+  # owns the predicate), or nil.
+  defp launch_twin(conn, %{slug: slug} = launch) when is_binary(slug) do
+    Registry.inflight_launch_twin(
+      conn.assigns.current_team,
+      slug,
+      launch.template,
+      launch.provider
+    )
+  end
+
+  defp launch_twin(_conn, _launch), do: nil
+
+  # The "already provisioning" envelope the /new client reconciles to (it jumps
+  # to the progress view of `barkpark.id`). The same shape the fleet-support
+  # enqueue emits for its own in-flight row.
+  defp already_provisioning(conn, %Barkpark{} = twin),
+    do: json(conn, 409, %{error: "already_provisioning", barkpark: barkpark_json(twin)})
+
+  # go_live's quota refusal, BOTH of them (the cond's pre-check and the
+  # register backstop). Each re-asks for the twin before answering 403,
+  # because a full slot is exactly what the LOSER of a racing equivalent pair
+  # sees: its first twin check ran before the winner committed, and the quota
+  # count ran after (task-1f5c2cceae36e4d9 — the cond's arm used to 403
+  # directly, and CI load opened that window). The winner's row is the slot,
+  # so the answer is 409 with the winner's id, not "plan limit reached".
+  defp limit_reached_unless_twin(conn, team, launch) do
+    case launch_twin(conn, launch) do
+      nil ->
+        json(conn, 403, %{
+          error: "limit_reached",
+          limit: Billing.barkpark_limit(team),
+          upgrade_path: "/v1/billing/checkout"
+        })
+
+      twin ->
+        already_provisioning(conn, twin)
+    end
+  end
+
   defp go_live(conn) do
     # go-live is the launch action — accept a session OR a PAT, but gate each
     # principal correctly (CREDENTIAL-AWARE):
@@ -11791,6 +12070,8 @@ defmodule BarkparkCloud.Web.Router do
           Auth.forbidden(conn, required: "admin", scope: "team")
       end
 
+    launch = launch_identity(conn)
+
     cond do
       conn.halted ->
         conn
@@ -11818,18 +12099,29 @@ defmodule BarkparkCloud.Web.Router do
           checkout_path: "/v1/billing/checkout"
         })
 
+      # dwb-launch-flow-double-submit-test — IDEMPOTENT LAUNCH. An equivalent
+      # launch whose first submission is still provisioning (a double-click, a
+      # client retry, a second tab) reconciles to THAT instance: 409
+      # already_provisioning + the existing row, and nothing is inserted,
+      # enqueued, audited or billed. It precedes the quota gate because the
+      # first submission already fills the slot it would count: a trial team
+      # (ceiling 1) used to be told "plan limit reached" by its own double-click.
+      # A RACING pair both pass this check; the database decides the loser (the
+      # team-row lock / the (team_id, slug) index) and the `with/else` below
+      # re-asks this question before refusing it.
+      (twin = launch_twin(conn, launch)) != nil ->
+        already_provisioning(conn, twin)
+
       # usage-limits-quotas: the QUOTA gate — the plan's managed-instance ceiling.
       # 403 (authenticated AND entitled, but the plan forbids one more) with the
       # actionable upgrade path, surfaced BEFORE the caller fills in a name. It
       # runs AFTER the 402 so an unsubscribed caller still learns "subscribe"
       # first. The Registry.register_barkpark/2 guard below is the un-bypassable
       # backstop for any path that skips this handler (the agent/internal register).
+      # A full slot may be the in-flight twin that committed after the twin
+      # check above — `limit_reached_unless_twin/3` asks once more.
       Billing.barkpark_limit_reached?(conn.assigns.current_team) ->
-        json(conn, 403, %{
-          error: "limit_reached",
-          limit: Billing.barkpark_limit(conn.assigns.current_team),
-          upgrade_path: "/v1/billing/checkout"
-        })
+        limit_reached_unless_twin(conn, conn.assigns.current_team, launch)
 
       # dwb-4: an UNKNOWN template is rejected HERE, before any row/job/box
       # exists — a 4xx at launch, never a burned box discovered mid-provision.
@@ -11863,14 +12155,13 @@ defmodule BarkparkCloud.Web.Router do
 
       true ->
         team = conn.assigns.current_team
-        name = conn.body_params["name"]
-        slug = if(is_binary(name), do: slugify(name), else: nil)
-        template = template_or_nil(conn.body_params["template"])
-        # Provider-neutral launch config (charter Decision 9). The provider was
-        # validated by the cond above (:error already 422'd), so it is a known
-        # slug or the hetzner default here; region/server_type ride through as
-        # given (nil → the claim's warm-pool fallback).
-        provider = launch_provider(conn.body_params["provider"])
+        # Name (template-defaulted), slug and template come from the ONE
+        # resolution `launch_identity/1` made — the same values the twin check
+        # above used. Provider-neutral launch config (charter Decision 9): the
+        # provider was validated by the cond above (:error already 422'd), so it
+        # is a known slug or the hetzner default here; region/server_type ride
+        # through as given (nil → the claim's warm-pool fallback).
+        %{template: template, name: name, slug: slug, provider: provider} = launch
         region = string_param_or_nil(conn.body_params["region"])
         server_type = string_param_or_nil(conn.body_params["server_type"])
 
@@ -11938,15 +12229,20 @@ defmodule BarkparkCloud.Web.Router do
           # (a concurrent create that filled the last slot between the check and
           # the insert) still returns 403, never a 500. The context guard is the
           # backstop; this maps it to the same friendly response.
+          #
+          # dwb-launch-flow-double-submit-test: both refusals below are also how
+          # the LOSER of a racing equivalent pair arrives — the slot or the slug
+          # it collided on is the winner's, committed by now (the team-row lock
+          # and the unique index both wait for it). Re-ask for the twin, so the
+          # loser answers 409 with the winner's id instead of a refusal.
           {:error, :limit_reached} ->
-            json(conn, 403, %{
-              error: "limit_reached",
-              limit: Billing.barkpark_limit(team),
-              upgrade_path: "/v1/billing/checkout"
-            })
+            limit_reached_unless_twin(conn, team, launch)
 
           {:error, %Ecto.Changeset{} = changeset} ->
-            json(conn, 422, %{error: "invalid", details: errors(changeset)})
+            case launch_twin(conn, launch) do
+              nil -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+              twin -> already_provisioning(conn, twin)
+            end
         end
     end
   end
@@ -12341,6 +12637,28 @@ defmodule BarkparkCloud.Web.Router do
   defp template_or_nil(t) when is_binary(t) and t != "", do: t
   defp template_or_nil(_), do: nil
 
+  # go_live's name default (task-ef37ebad8249e82a). A given non-blank name is
+  # kept exactly as sent. nil, "" or whitespace-only → the template's catalog
+  # title (the same string the /new form shows as its placeholder), else the
+  # template slug; with no template → nil, which go_live answers with 422
+  # name_required. A non-binary name is returned unchanged so it still 422s —
+  # a malformed value is not an absent one.
+  defp launch_name(name, template) when is_binary(name) do
+    if String.trim(name) == "", do: default_launch_name(template), else: name
+  end
+
+  defp launch_name(nil, template), do: default_launch_name(template)
+  defp launch_name(name, _template), do: name
+
+  defp default_launch_name(nil), do: nil
+
+  defp default_launch_name(template) do
+    case BarkparkCloud.Templates.get(template) do
+      %{title: title} when is_binary(title) and title != "" -> title
+      _ -> template
+    end
+  end
+
   # Normalize the launch `provider` param (charter Decision 9). Absent/blank → the
   # hetzner default (a provider-less launch is Hetzner, as before). A known slug →
   # itself. Anything else (an unknown string, a non-binary) → `:error`, which the
@@ -12547,6 +12865,7 @@ defmodule BarkparkCloud.Web.Router do
     |> merge_provision_steps(provision)
     |> merge_provision_console(provision)
     |> merge_pressure(pressure)
+    |> merge_capability(pressure)
     |> merge_deploy_rate(deploy_rate)
   end
 
@@ -12696,6 +13015,50 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp merge_pressure(map, _), do: Map.put(map, :pressure, @unmetered_pressure)
+
+  # dr-w15-s5: "can this box deploy sites" on the fleet row — the one per-box
+  # quantity that is true or false at n=1 (charter D235/D236).
+  #
+  # Read off the SAME latest-health-beat RAW jsonb `merge_pressure/2` reads (the
+  # `pressure` prefetch is that beat): the agent's `site_deploy` record
+  # (internal/agent/report.go SiteDeployCapability, probed from the instance's
+  # GET /v1/instance/site-deploy) lands whole in the beat's payload via
+  # POST /v1/agent/report, so this needs NO migration and NO widening of
+  # `Barkpark.health_changeset/2` — nothing here is a column.
+  #
+  # HONESTY LAW, the measured_or_nil law restated for a BOOLEAN: only a real
+  # JSON `true`/`false` survives. An absent `site_deploy` key (an agent
+  # predating dr-w15-s5, or a probe that 404ed on an instance predating
+  # dr-w15-s1 — the agent sends NOTHING then, by `omitempty`), an absent inner
+  # key, a JSON null, and any non-boolean garbage ALL render nil — UNMEASURED.
+  # Never `false` and never 0: `configured: false` is the box's OWN refusal
+  # ("feature_not_configured"), and fabricating it for a box nobody measured is
+  # the exact lie this slice exists to prevent.
+  #
+  # The key is always present (all-nil when the box has never beaten), so a
+  # consumer branches on the VALUES, not on the key's existence — the same
+  # contract `pressure` keeps.
+  defp merge_capability(map, %{payload: payload, reported_at: at}) when is_map(payload) do
+    record = site_deploy_record(Map.get(payload, "site_deploy"))
+
+    Map.put(map, :site_deploy, %{
+      configured: bool_or_nil(Map.get(record, "configured")),
+      runner_alive: bool_or_nil(Map.get(record, "runner_alive")),
+      reported_at: at
+    })
+  end
+
+  defp merge_capability(map, _), do: Map.put(map, :site_deploy, @unmeasured_site_deploy)
+
+  # A `site_deploy` value that is not an object (absent, null, garbage) carries
+  # no record, and reads as an EMPTY one — so both booleans fall to nil below.
+  defp site_deploy_record(record) when is_map(record), do: record
+  defp site_deploy_record(_), do: %{}
+
+  # The boolean counterpart of measured_or_nil: a real boolean is a measurement,
+  # anything else — nil, a string "false", 0 — is UNMEASURED.
+  defp bool_or_nil(b) when is_boolean(b), do: b
+  defp bool_or_nil(_), do: nil
 
   # A vital counts as MEASURED only when it is a non-negative number. Anything
   # else — absent, non-numeric, or the agent's `-1` unwired sentinel — is nil.

@@ -11,8 +11,8 @@ defmodule BarkparkCloud.Workers.DailyDigestWorker do
   columns the fleet already polls (`Registry.all_barkparks/0`) and hands them to
   `Notifications.deliver_fleet_digest/1`, which partitions the fleet BY TEAM,
   resolves each team's own members as the recipients (dr-w19-s5 — it used to
-  resolve the platform-admin allowlist, which is unset on prod and joinable by
-  nobody), and renders/sends.
+  resolve the platform-admin allowlist, which was then unset on prod and joinable
+  by nobody), and renders/sends.
 
   A fleet with no team that has a member is NOT a no-op (dr-w18-s3). It is a
   COUNTED LOSS: `deliver_fleet_digest/1` emits `fleet_digest phase=settled
@@ -45,11 +45,12 @@ defmodule BarkparkCloud.Workers.DailyDigestWorker do
   WHAT THIS DOES NOT DO, said out loud: it does not invent a recipient, it does
   not blast the fleet's state to every team (charter D362 — the digest is
   per-team and its body names instances), and it does not make anything ARRIVE.
-  A cancelled row is a record a human can find; it is not a push. The audience
-  itself remains a human gate: `PLATFORM_ADMIN_EMAILS` is unset on prod and
-  settable by no route, console action or User field
-  (`dr-bl-w5-census-is-dark-to-every-human`), so there is no platform address to
-  send to and this slice deliberately does not manufacture one.
+  A cancelled row is a record a human can find; it is not a push. The platform
+  audience is a human gate: `PLATFORM_ADMIN_EMAILS` is settable by no route,
+  console action or User field (`dr-bl-w5-census-is-dark-to-every-human`), and
+  this slice deliberately does not manufacture a platform address. (The env var
+  was provisioned on the live control plane 2026-09-25 by
+  `gr-ops-platform-admin-emails`; the digest stays per-team regardless.)
 
   `unique:` collapses a digest that is still PENDING — `[:available,
   :scheduled, :executing, :retryable, :suspended]`, the same state set every

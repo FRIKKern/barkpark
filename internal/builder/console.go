@@ -271,9 +271,9 @@ func (c *buildConsole) report(line string) error {
 // control plane can't stall the build on a best-effort console POST.
 func (c *buildConsole) client() *http.Client {
 	if c.b.HTTPClient != nil {
-		return c.b.HTTPClient
+		return c.b.withTokenSource(c.b.HTTPClient)
 	}
-	return &http.Client{Timeout: defaultConsoleReportTimeout}
+	return c.b.withTokenSource(&http.Client{Timeout: defaultConsoleReportTimeout})
 }
 
 // --- redaction ---------------------------------------------------------------

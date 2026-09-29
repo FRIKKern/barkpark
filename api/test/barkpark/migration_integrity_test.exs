@@ -49,13 +49,12 @@ defmodule Barkpark.MigrationIntegrityTest do
       assert {:ok, %{checked: checked, applied: applied}} = MigrationIntegrity.check()
 
       on_disk =
-        MigrationIntegrity.default_dir()
-        |> Path.join("*.exs")
-        |> Path.wildcard()
+        MigrationIntegrity.default_dirs()
+        |> Enum.flat_map(&(&1 |> Path.join("*.exs") |> Path.wildcard()))
         |> length()
 
       assert on_disk > 0,
-             "read ZERO migration files from #{MigrationIntegrity.default_dir()} — " <>
+             "read ZERO migration files from #{inspect(MigrationIntegrity.default_dirs())} — " <>
                "the denominator itself is broken"
 
       assert checked == on_disk,
@@ -63,6 +62,11 @@ defmodule Barkpark.MigrationIntegrityTest do
 
       assert checked > 0
       assert applied >= checked
+    end
+
+    test "reads the directory set the migrator runs, core first" do
+      assert MigrationIntegrity.default_dirs() == Barkpark.MigrationPaths.enabled()
+      assert hd(MigrationIntegrity.default_dirs()) == MigrationIntegrity.default_dir()
     end
 
     test "check!/1 returns the same denominator instead of raising" do
@@ -125,6 +129,45 @@ defmodule Barkpark.MigrationIntegrityTest do
     end
   end
 
+  describe "several directories share one schema_migrations" do
+    test "a version unapplied in a plugin folder reds naming the folder", %{tmp_dir: dir} do
+      {core, plugin} = two_dirs(dir)
+      write(core, "20260101000000_create_widgets.exs")
+      write(plugin, "20260102000000_create_plugin_things.exs")
+
+      assert {:error, message} =
+               MigrationIntegrity.check(dirs: [core, plugin], applied: [20_260_101_000_000])
+
+      assert message =~ "20260102000000"
+      assert message =~ Path.join("migrations", "20260102000000_create_plugin_things.exs")
+      assert message =~ "Checked 2 migration version(s)"
+    end
+
+    test "one version in core and in a plugin folder is a collision", %{tmp_dir: dir} do
+      {core, plugin} = two_dirs(dir)
+      write(core, "20260101000000_create_widgets.exs")
+      write(plugin, "20260101000000_create_widgets.exs")
+
+      assert {:error, message} =
+               MigrationIntegrity.check(dirs: [core, plugin], applied: [20_260_101_000_000])
+
+      assert message =~ "SAME version"
+      assert message =~ "version 20260101000000"
+    end
+
+    test "distinct versions across the folders pass — the negative control", %{tmp_dir: dir} do
+      {core, plugin} = two_dirs(dir)
+      write(core, "20260101000000_create_widgets.exs")
+      write(plugin, "20260102000000_create_plugin_things.exs")
+
+      assert {:ok, %{checked: 2}} =
+               MigrationIntegrity.check(
+                 dirs: [core, plugin],
+                 applied: [20_260_101_000_000, 20_260_102_000_000]
+               )
+    end
+  end
+
   describe "positive control — an empty read is a failure, never a pass" do
     test "zero migration files reds instead of vacuously passing", %{tmp_dir: dir} do
       assert {:error, message} = MigrationIntegrity.check(dir: dir, applied: [1])
@@ -169,6 +212,14 @@ defmodule Barkpark.MigrationIntegrityTest do
       assert MapSet.size(applied) > 0
       assert Enum.all?(applied, &is_integer/1)
     end
+  end
+
+  defp two_dirs(dir) do
+    core = Path.join(dir, "repo/migrations")
+    plugin = Path.join(dir, "plugins/fixture/migrations")
+    File.mkdir_p!(core)
+    File.mkdir_p!(plugin)
+    {core, plugin}
   end
 
   defp write(dir, name) do

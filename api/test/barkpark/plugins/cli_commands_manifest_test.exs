@@ -23,6 +23,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   # OnixEdit `register_routes/1`), prefixed with the host's `/v1/plugins` mount.
   @bulldocs_routes MapSet.new([
                      "/v1/plugins/bulldocs/papers",
+                     "/v1/plugins/bulldocs/papers/:slug/create",
                      "/v1/plugins/bulldocs/papers/:slug/ops",
                      "/v1/plugins/bulldocs/papers/:slug/proposals",
                      "/v1/plugins/bulldocs/intents",
@@ -95,21 +96,22 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Bulldocs.cli_commands/0" do
-    test "declares five paper verbs, all ingest-tier, all grounded in a real route" do
+    test "declares six paper verbs, all ingest-tier, all grounded in a real route" do
       cmds = Bulldocs.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
+      assert "bulldocs.create" in ids
       assert "bulldocs.publish" in ids
       assert "bulldocs.patch" in ids
       assert "bulldocs.propose" in ids
       assert "bulldocs.intents" in ids
       assert "bulldocs.intent-processed" in ids
 
-      # The five `bulldocs.*` paper verbs all sit behind the ingest highway
+      # The six `bulldocs.*` paper verbs all sit behind the ingest highway
       # bucket (the `session.*` group added in task 6 is NOT all-ingest —
       # see the dedicated describe block below).
       paper_cmds = Enum.filter(cmds, &(&1.noun == "bulldocs"))
-      assert length(paper_cmds) == 5
+      assert length(paper_cmds) == 6
       assert Enum.all?(paper_cmds, &(&1.auth_tier == "ingest"))
 
       # Every path_template is a route the plugin actually mounts — no invented
@@ -736,10 +738,12 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
 
       assert parent.type == "string"
 
-      # The help text has to say WHY this route rather than the rail: it is the
-      # one that answers a close-time question. A summary that merely said
-      # "filter by parent" would leave the audit ergonomics exactly where the
-      # trap found them.
+      # The help text has to name the close-time field, so a reader auditing
+      # "which children closed in this window?" knows the answer is on the
+      # row. Both this listing and `bp task get`'s child rail carry updated_at
+      # (pinned below); the help states the real difference between them
+      # (claim/assignee/content on these rows) rather than implying the rail
+      # lacks it — task-40e138710f10229b.
       assert parent.summary =~ "updated_at"
       assert parent.summary =~ "close-time"
     end

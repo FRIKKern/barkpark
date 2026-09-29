@@ -1,3 +1,5 @@
+/* The code tokens: one rule set shared with the reader (Render.Stylesheet appends the same file) — an @import must lead. */
+@import "../../paper-surface/code-tokens.css";
 /* bp-paper-editor — standalone portable stylesheet.
  *
  * Extracted from api/lib/barkpark_web/layouts/root.html.heex's inline <style>
@@ -710,6 +712,10 @@
  * .bp-table* selectors). Control rails reveal on hover so an idle table reads
  * byte-identically to /papers. Keep byte-aligned with the root.html.heex copy. */
 .bp-canvas-table { position: relative; }
+/* Column-resize grips (plan #25): thin hit areas on each column's right edge, visible on hover. */
+.bp-canvas-table__resizers { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.bp-canvas-table__resize { position: absolute; width: 7px; cursor: col-resize; pointer-events: auto; opacity: 0; border-radius: 2px; background: var(--paper-accent-soft); transition: opacity var(--dur-1) ease-out; }
+.bp-canvas-table:hover .bp-canvas-table__resize, .bp-canvas-table__resize:active { opacity: 1; }
 /* Idle controls add no reader spacing. When exposed, reserve their own space
  * BELOW the table: grids have no safe gutter for floating controls. */
 .bp-canvas-table__controls { position: absolute; opacity: 0; pointer-events: none; width: 100%; box-sizing: border-box; margin: 0; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; white-space: normal; }
@@ -781,10 +787,19 @@
  * pre; transparent/borderless so only the frame paints. NONE of this touches
  * the island contract (stopEvent/ignoreMutation), so editing is unaffected.
  * Keep BYTE-IDENTICAL with the root.html.heex copy. */
+/* The highlight layer under the textarea: the SAME text painted with hljs-* tokens (code-highlight.js),
+ * metrics identical to the island above it, which shows only its caret and selection. */
+.bp-canvas-code-hl {
+  position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 0; pointer-events: none;
+  margin: 0; padding: var(--bp-codeblock-pad); box-sizing: border-box; overflow: hidden;
+  display: block; font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+  color: var(--paper-ink); white-space: pre; overflow-wrap: normal; background: transparent;
+}
 .bp-canvas-code-area {
+  position: relative; z-index: 1; color: transparent; caret-color: var(--paper-ink);
   display: block;
   font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
-  color: var(--paper-ink); white-space: pre; overflow-wrap: normal;
+  white-space: pre; overflow-wrap: normal;
   background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
   letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit;
   font-feature-settings: inherit; font-variant-ligatures: inherit;
@@ -1217,6 +1232,58 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * --paper-ink-soft) plus an input reset. An <input> inherits none of it, which is why
  * the copy is here at all. The empty-caption resting-hide is JS (configControlHidden
  * toggles the <figcaption> display), NOT CSS — same as the diagram caption. */
+/* The expandable container in the canvas: the reader's <details class="bp-expandable"> shape, always open,
+   with the summary as an editable island. */
+/* The canvas wrapper is a div, not <details>, so the reader's `> summary` rules are restated on the island. */
+.bp-canvas-expandable { position: relative; }
+.bp-canvas-expandable::before { content: "▾"; position: absolute; left: 15px; top: 10px; color: var(--paper-ink-soft); pointer-events: none; }
+.bp-canvas-expandable > .bp-expandable__summary { display: block; width: 100%; box-sizing: border-box; padding: 10px 15px 10px 34px; margin: 0; border: 0; background: transparent; font: inherit; font-weight: 700; color: var(--paper-ink); cursor: text; outline: none; }
+.bp-canvas-expandable > .bp-expandable__summary::placeholder { color: var(--paper-ink-faint); font-weight: 400; }
+.ProseMirror-selectednode.bp-canvas-expandable { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
+/* steps / tabs in the canvas: the reader's markup with a title input per row, a remove button and an add
+   button as edit-only chrome. */
+.bp-canvas-row__head { display: flex; align-items: center; gap: 6px; }
+.bp-canvas-row__head > input.bp-canvas-row__title { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; font: inherit; color: var(--paper-ink); outline: none; padding: 0; }
+.bp-canvas-row__head > input.bp-canvas-row__title::placeholder { color: var(--paper-ink-faint); font-weight: 400; }
+.bp-canvas-row__remove, .bp-canvas-rows__add { appearance: none; border: 1px solid var(--paper-chrome-border); background: var(--paper-chrome-bg); color: var(--paper-ink-soft); border-radius: 4px; font: 12px/1 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 7px; cursor: pointer; }
+.bp-canvas-row__remove { opacity: 0; }
+.bp-canvas-row:hover > .bp-canvas-row__head > .bp-canvas-row__remove, .bp-canvas-row:focus-within > .bp-canvas-row__head > .bp-canvas-row__remove { opacity: 1; }
+.bp-canvas-rows__foot { margin: 0.3rem 0 1rem; }
+.bp-canvas-steps > .bp-canvas-row > .bp-canvas-row__head > input.bp-steps__title { font-weight: 700; }
+.bp-canvas-tabs > .bp-canvas-row { padding: 0; }
+.bp-canvas-tabs > .bp-canvas-row > .bp-canvas-row__head { padding: 6px 8px 0; background: var(--paper-bg-deep); border-bottom: 1px solid var(--paper-chrome-border); }
+.bp-canvas-tabs > .bp-canvas-row > .bp-canvas-row__head > input.bp-tabs__tab { font-weight: 700; color: var(--paper-ink); border-bottom: var(--bp-rule-hairline) solid var(--paper-accent); padding: 6px 12px; }
+.bp-canvas-tabs > .bp-canvas-row + .bp-canvas-row { border-top: 1px solid var(--paper-chrome-border); }
+/* find matches (canvas/find-replace.js): the host's bar drives them. */
+.bp-find-match { background: hsl(var(--warn-hsl) / 0.28); border-radius: 2px; box-decoration-break: clone; }
+.bp-find-match--active { background: hsl(var(--warn-hsl) / 0.55); outline: 1px solid var(--paper-accent); }
+/* island atoms (equation / footnotes / contents / video): a preview in the reader's classes over a fields
+   row that hides at rest once the block has data. */
+.bp-canvas-island { position: relative; margin: 1rem 0 0; }
+.bp-canvas-island__empty { padding: 1rem; border: 1px dashed var(--paper-rule); border-radius: 6px; color: var(--paper-ink-soft); font: 0.9rem/1.45 var(--paper-font-sans, system-ui, sans-serif); text-align: center; }
+.bp-canvas-island__fields { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 0.5rem 0 0; }
+.bp-canvas-island__field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 220px; min-width: 0; font: 0.8rem/1.4 var(--paper-font-sans, system-ui, sans-serif); color: var(--paper-ink-soft); }
+.bp-canvas-island__field--bool { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; }
+.bp-canvas-island__input { border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; min-width: 0; }
+.bp-canvas-island__input:focus { outline: none; border-color: var(--paper-accent); }
+textarea.bp-canvas-island__input { resize: vertical; }
+.bp-canvas-island__mono, .bp-canvas-equation__tex { font-family: var(--paper-font-mono, ui-monospace, monospace); }
+.bp-canvas-video video { max-width: 100%; border-radius: 6px; }
+.ProseMirror-selectednode.bp-canvas-island { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
+/* editable-image: the bpImage atom — the picture, or an empty frame, over an alt + url row. */
+.bp-canvas-image { margin: var(--bp-air-figure, 1.6rem) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); max-width: none; box-sizing: border-box; position: relative; }
+.bp-canvas-image-frame { position: relative; }
+.bp-canvas-image-img { display: block; max-width: 100%; height: auto; border-radius: 4px; }
+.bp-canvas-image-empty { display: none; padding: 1.4rem 1rem; border: 1px dashed var(--paper-rule); border-radius: 6px; color: var(--paper-ink-soft); font: 0.9rem/1.45 var(--paper-font-sans, system-ui, sans-serif); text-align: center; }
+.bp-canvas-image--empty .bp-canvas-image-empty { display: block; }
+.bp-canvas-image-chrome { display: flex; gap: 8px; margin: 0.5rem 0 0; }
+.bp-canvas-image-chrome input { flex: 1 1 0; min-width: 0; border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; }
+.bp-canvas-image-chrome input:focus { outline: none; border-color: var(--paper-accent); color: var(--paper-ink); }
+.bp-canvas-image-chrome .bp-canvas-image-src { flex: 2 1 0; }
+.bp-canvas-image-chrome .bp-canvas-image-width { flex: 0 0 90px; }
+.bp-canvas-image-badge { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 4px; background: var(--paper-chrome-bg); border: 1px solid var(--paper-chrome-border); color: var(--paper-ink-soft); font: 0.75rem/1.4 var(--paper-font-sans, system-ui, sans-serif); }
+.bp-canvas-image-badge--error { color: var(--bp-tone-danger-fg); border-color: var(--bp-tone-danger-fg); }
+.ProseMirror-selectednode.bp-canvas-image { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
 .bp-canvas-figure-caption { margin: 0.8rem 0 0; }
 .bp-canvas-figure-caption-input {
   display: block; width: 100%; box-sizing: border-box;
@@ -1464,6 +1531,8 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 }
 /* Preserve typed spaces without giving trailing spaces their own wrap width. */
 .bp-paper-surface .ProseMirror { white-space: pre-wrap; }
+/* Table cells are editable text too: preserve stored newlines. */
+bp-paper-canvas .ProseMirror :is(.bp-table__th, .bp-table__td) { white-space: pre-wrap; }
 
 [data-bp-text-boundary] {
   margin-block: 12px;
@@ -1566,3 +1635,19 @@ bp-paper-canvas { position: relative; display: block; }
 .bp-block-menu__glyph { width: 22px; text-align: center; font-size: 11px; color: var(--paper-ink-soft); }
 .bp-paper-format__btn--strike { text-decoration: line-through; }
 .bp-paper-format__btn--underline { text-decoration: underline; text-underline-offset: 2px; }
+.bp-paper-format__btn--highlight { background: hsl(var(--warn-hsl) / 0.35); color: var(--paper-ink); border-radius: 3px; }
+/* The highlight mark inside the canvas; the reader's paper-surface.css carries the same rule (mirrored above). */
+bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn-hsl) / 0.35); color: inherit; padding: 0 0.12em; border-radius: 2px; box-decoration-break: clone; }
+
+
+/* Clipboard recovery stays beside the caret without changing document geometry. */
+[data-bp-paste-notice] {
+  position: fixed; z-index: 10001; box-sizing: border-box;
+  padding: 10px 12px; border: 1px solid var(--paper-rule);
+  border-radius: 8px; background: var(--paper-bg, Canvas); color: var(--paper-ink, CanvasText);
+  box-shadow: 0 4px 18px hsl(var(--bp-shadow-hsl) / 0.13); font: 13px/1.45 var(--paper-font-ui, system-ui, sans-serif);
+  white-space: normal; overflow-wrap: anywhere; overflow: auto; scrollbar-width: none;
+}
+
+[data-bp-paste-notice]::-webkit-scrollbar { display: none; }
+[data-bp-paste-notice]:focus-visible { outline: 2px solid var(--paper-ink-soft, currentColor); outline-offset: 2px; }

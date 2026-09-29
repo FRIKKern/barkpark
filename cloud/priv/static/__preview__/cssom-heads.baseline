@@ -790,7 +790,7 @@
 # rule heads, sidecar baseline is 1358 (+1)") against Chrome 153.0.8010.53 / node
 # v22.22.0, with MISSES 0 and MULTISET DEFICITS 0 — which is what makes this an
 # unrecorded ADD rather than a parity defect.
-1365
+1373
 # cch-w49-s7 2026-09-05 (console-3/billing-checkout-capability, #16069 — the billing
 # screens consult the plane's declared checkout capability): 1340 -> 1341, +1 authored
 # rule head. The slice adds 6 app.css lines: ONE new head for the unconfigured-checkout
@@ -921,3 +921,32 @@
 # (the 32px `from` keyframe), keyed on the class app.js's EDGE_CUES table measures.
 # NOT arithmetic: 1365 is what cssom-parity.mjs PRINTED on this branch ("1365 authored
 # rule heads, sidecar baseline is 1363 (+2)") with MISSES 0 and MULTISET DEFICITS 0.
+# task-71082f5541c13b53 2026-09-25 (N-08 form inbox): 1365 -> 1376, +11 authored
+# rule heads, ZERO removed. The site-detail Form inbox adds `.site-forms`,
+# `.forms-status`, `.forms-status .mono`, `.forms-toolbar`, `.forms-selected`,
+# `.form-sub-check`, `.form-sub-badges`, `.form-sub-fields`, `.form-sub-fields dt`,
+# `.form-sub-fields dd` and `.form-sub-actions`; the rows themselves reuse the
+# deploy-list anatomy and add no head.
+# NOT arithmetic: 1376 is what cssom-parity.mjs PRINTED on this branch ("1376 authored
+# rule heads, sidecar baseline is 1365 (+11)") with MISSES 0 and MULTISET DEFICITS 0.
+# task-a6deb00712567a2b 2026-09-28 (status-pill detail leaves the capsule): 1376 -> 1367,
+# -9 net. REMOVED 13: the five wrapper-scoped .status-pill wrap copies and their
+# -dot/-detail/-label jackets (`.attention-row`, `.detail-rail`, `.fleet-status`,
+# `.instance-card-head`/`.detail-title-row`), the W20 band rule `.attention-row
+# .status-pill { flex: 0 0 100% }`, and `.status-pill-detail::before` — all of
+# them existed to keep a sentence inside a capsule that no longer holds one.
+# ADDED 4: `.status-pill-chip` (the capsule, dot + label), `.dom-rung-row` (the
+# domain-checklist row whose capsule and evidence are now siblings), and the
+# one host-scoped pair `.detail-rail .status-pill-chip` / `.detail-rail
+# .status-pill-label` (the site rail's value column is narrower than a three-word
+# state, so that chip alone may grow a second line).
+# NOT arithmetic: 1367 is what cssom-parity.mjs PRINTED on this branch ("1367 authored
+# rule heads, sidecar baseline is 1365 (+2)") with MISSES 0 and MULTISET DEFICITS 0.
+# task-ba8db95d07cfd491 2026-09-28 (the attention queue says a shared fact once): 1367 -> 1373,
+# +6 authored rule heads, ZERO removed: `.attention-row--group`, `.attention-row--group
+# .status-pill`, `.attention-group-names`, `.attention-group-name`,
+# `.attention-group-name:hover` (the grouped Overview row — several boxes sharing one
+# info-level reason collapse into one row) and `.status-pill-chip[title]` (a chip
+# carrying a hover note shows the help cursor).
+# NOT arithmetic: 1373 is what cssom-parity.mjs PRINTED on this branch ("1373 authored
+# rule heads, sidecar baseline is 1367 (+6)") with MISSES 0 and MULTISET DEFICITS 0.

@@ -88,7 +88,13 @@ defmodule Barkpark.PortableDoc.Render.Stylesheet do
               __DIR__
             )
   @external_resource @css_path
-  @css Comments.strip(File.read!(@css_path))
+  # Code tokens (hljs-* classes painted by paper-editor/src/code-highlight.js on both the reader
+  # and the canvas) live in their own file the canvas stylesheet imports too — one rule set, two
+  # consumers (Barkdown plan #27). Appended after the surface rules so its selectors read the
+  # surface's tokens.
+  @tokens_path Path.join(Path.dirname(@css_path), "code-tokens.css")
+  @external_resource @tokens_path
+  @css Comments.strip(File.read!(@css_path) <> "\n" <> File.read!(@tokens_path))
 
   @doc """
   The canonical paper-surface CSS, comment-stripped (no `<style>` wrapper).

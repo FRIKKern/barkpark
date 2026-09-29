@@ -807,6 +807,16 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "construction, not a missing one here.",
       anchor: ~r/"site\.deleted"/
     },
+    "barkpark_cloud/registry.ex|release_site_host" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "hostname_claims BOOKKEEPING, not an act (task-274fad4f639e6890): it deletes the " <>
+          "claim row mirroring a domain that remove_site_domain/2 drops from the site in the " <>
+          "SAME transaction. The act is the domain removal, and its only route runs it " <>
+          "INSIDE Accounts.audit/3 as site.domain_removed.",
+      anchor: ~r/action: "site\.domain_removed"/
+    },
     "barkpark_cloud/web/router.ex|delete_site_after_audit" => %{
       kind: :allowlisted,
       count: 1,

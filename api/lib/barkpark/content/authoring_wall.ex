@@ -210,7 +210,12 @@ defmodule Barkpark.Content.AuthoringWall do
     if exempt? do
       :ok
     else
-      :ok = DedupWall.lock_publish_scope!(type, dataset, opts)
+      # The audit-chain pre-lock inside `lock_publish_scope!/3` must key on
+      # the workspace this DOCUMENT is audited under (`Audit.emit/1` keys on
+      # `doc.workspace_id`), not the caller's scope, which a publish may leave
+      # unset (task-0c397ec87de1f924).
+      scope_opts = Keyword.put(opts, :audit_workspace_id, audit_workspace(ref, opts))
+      :ok = DedupWall.lock_publish_scope!(type, dataset, scope_opts)
 
       case DedupWall.guard(ref, type, dataset, Keyword.put(opts, :dedup_in_transaction, true)) do
         :ok ->
@@ -224,6 +229,9 @@ defmodule Barkpark.Content.AuthoringWall do
   end
 
   def recheck_dedup_under_scope_lock(_ref, _type, _pid, _dataset, _opts), do: :ok
+
+  defp audit_workspace(%{workspace_id: ws}, _opts) when is_binary(ws) and ws != "", do: ws
+  defp audit_workspace(_ref, opts), do: Keyword.get(opts, :workspace_id)
 
   @doc """
   Dry-run the whole wall and return EVERY failing gate at once (BPML

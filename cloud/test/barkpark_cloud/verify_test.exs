@@ -129,7 +129,7 @@ defmodule BarkparkCloud.VerifyTest do
   ## ── the executor ──
 
   describe "Verify.run/1 — happy path" do
-    test "all three probes green → ok result with per-probe evidence" do
+    test "all four probes green → ok result with per-probe evidence" do
       {_user, team} = user_with_team()
       bp = live_barkpark(team)
       program_green()
@@ -139,8 +139,14 @@ defmodule BarkparkCloud.VerifyTest do
       assert result.reachable
       assert {:ok, _, _} = DateTime.from_iso8601(result.verified_at)
 
-      assert length(result.probes) == 3
-      assert Enum.map(result.probes, & &1.name) == ["verify.api", "verify.login", "verify.studio"]
+      assert length(result.probes) == 4
+
+      assert Enum.map(result.probes, & &1.name) == [
+               "verify.api",
+               "verify.login",
+               "verify.studio",
+               "verify.siteplane"
+             ]
 
       for p <- result.probes do
         assert p.ok
@@ -372,6 +378,216 @@ defmodule BarkparkCloud.VerifyTest do
     end
   end
 
+  describe "Verify.run/1 — verify.siteplane (conditional, reads the agent beat)" do
+    # A box hosts sites iff a sites row points at it — the ONLY thing that makes
+    # the plane REQUIRED.
+    defp host_a_site(bp) do
+      n = System.unique_integer([:positive])
+
+      {:ok, _site} =
+        Registry.create_site(bp, %{
+          name: "Blog #{n}",
+          slug: "blog-#{n}",
+          kind: "static",
+          framework: "astro",
+          bootstrap_workspace: "acme",
+          bootstrap_project: "blog",
+          bootstrap_dataset: "production",
+          read_token: "bpt_public_read"
+        })
+
+      bp
+    end
+
+    # One agent beat, stored exactly as POST /v1/agent/report stores it: the
+    # whole body verbatim as a `health` event payload (string keys).
+    defp beat(bp, payload), do: {:ok, _} = Registry.record_event(bp, "health", payload)
+
+    defp tool(present, version \\ nil),
+      do: %{"present" => present, "version" => version}
+
+    defp plane(overrides) do
+      Map.merge(
+        %{
+          "docker" => tool(true, "Docker version 27.1.1"),
+          "buildx" => tool(true, "github.com/docker/buildx v0.16.2"),
+          "nixpacks" => tool(true, "nixpacks 1.29.1"),
+          "go" => tool(true, "go version go1.23.2 linux/arm64"),
+          "git" => tool(true, "git version 2.43.0"),
+          "builder_unit_active" => true,
+          "runtime_unit_active" => true,
+          "complete" => true
+        },
+        overrides
+      )
+    end
+
+    defp siteplane(result), do: find(result.probes, "verify.siteplane")
+
+    test "a box that hosts NO sites is SKIPPED — ok, flagged skipped, never a red" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+      # Even a plane-less beat must not red a box that has no use for a plane.
+      beat(bp, %{"site_plane" => plane(%{"nixpacks" => tool(false), "complete" => false})})
+      program_green()
+
+      assert {:ok, result} = Verify.run(bp)
+      sp = siteplane(result)
+      assert sp.ok
+      assert sp.skipped
+      assert sp.reachable
+      assert sp.status == nil
+      assert sp.evidence =~ "skipped"
+      assert result.ok
+    end
+
+    test "a site-hosting box with a COMPLETE plane passes, not skipped" do
+      {_user, team} = user_with_team()
+      bp = team |> live_barkpark() |> host_a_site()
+      beat(bp, %{"health_status" => "up", "site_plane" => plane(%{})})
+      program_green()
+
+      assert {:ok, result} = Verify.run(bp)
+      sp = siteplane(result)
+      assert sp.ok
+      refute sp.skipped
+      assert sp.evidence =~ "site plane complete"
+      assert result.ok
+    end
+
+    test "a site-hosting box with an INCOMPLETE plane FAILS, naming what is missing" do
+      {_user, team} = user_with_team()
+      bp = team |> live_barkpark() |> host_a_site()
+
+      beat(bp, %{
+        "site_plane" =>
+          plane(%{
+            "nixpacks" => tool(false),
+            "builder_unit_active" => false,
+            "complete" => false
+          })
+      })
+
+      program_green()
+
+      assert {:ok, result} = Verify.run(bp)
+      sp = siteplane(result)
+      refute sp.ok
+      refute sp.skipped
+      assert sp.reachable
+      assert sp.evidence =~ "missing: nixpacks, builder unit"
+      refute result.ok
+      # The box answered — a plane fault is not an unreachable box.
+      assert result.reachable
+    end
+
+    test "only the NEWEST beat counts — an older complete reading cannot mask a newer failure" do
+      {_user, team} = user_with_team()
+      bp = team |> live_barkpark() |> host_a_site()
+      beat(bp, %{"site_plane" => plane(%{})})
+      beat(bp, %{"site_plane" => plane(%{"git" => tool(false), "complete" => false})})
+      program_green()
+
+      assert {:ok, result} = Verify.run(bp)
+      sp = siteplane(result)
+      refute sp.ok
+      assert sp.evidence =~ "missing: git"
+    end
+
+    # END TO END over the real wire: the agent POSTs its beat (the exact JSON
+    # shape internal/agent/site_plane.go marshals) to POST /v1/agent/report, the
+    # control plane STORES it — the whole body lands verbatim as the `health`
+    # event's jsonb payload, no migration and no new column — and verify.siteplane
+    # READS that stored fact. This is the "CP stores it" half of the fact source.
+    test "a beat POSTed to /v1/agent/report is stored and is what verify.siteplane reads" do
+      {_user, team} = user_with_team()
+      bp = team |> live_barkpark() |> host_a_site()
+      {:ok, agent_token, _} = Registry.mint_agent_token(bp, "report")
+
+      body = %{
+        "health_status" => "up",
+        "agent_status" => "online",
+        "version" => "0.1.0",
+        "git_commit" => "abc123",
+        "health_checks" => [],
+        "site_plane" => plane(%{"buildx" => tool(false), "complete" => false})
+      }
+
+      conn =
+        conn(:post, "/v1/agent/report", Jason.encode!(body))
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("authorization", "Bearer #{agent_token}")
+        |> Router.call(@opts)
+
+      assert conn.status == 200
+
+      # Stored: the newest health event carries the plane verbatim.
+      assert [%{payload: %{"site_plane" => stored}}] =
+               Registry.recent_events_of_type(bp, "health", 1)
+
+      assert stored["complete"] == false
+      assert stored["git"] == %{"present" => true, "version" => "git version 2.43.0"}
+
+      # Read: the probe's verdict comes from that stored beat.
+      program_green()
+      assert {:ok, result} = Verify.run(bp)
+      sp = siteplane(result)
+      refute sp.ok
+      assert sp.evidence =~ "missing: buildx"
+    end
+
+    test "a site-hosting box whose beat carries NO site_plane FAILS as unmeasured" do
+      {_user, team} = user_with_team()
+      bp = team |> live_barkpark() |> host_a_site()
+      # An agent older than the fact source: the key is absent, not false.
+      beat(bp, %{"health_status" => "up"})
+      program_green()
+
+      assert {:ok, result} = Verify.run(bp)
+      sp = siteplane(result)
+      refute sp.ok
+      refute sp.skipped
+      assert sp.evidence =~ "UNMEASURED"
+    end
+
+    test "a null `complete` (a sub-fact went unmeasured) FAILS as unmeasured, not as missing" do
+      {_user, team} = user_with_team()
+      bp = team |> live_barkpark() |> host_a_site()
+      beat(bp, %{"site_plane" => plane(%{"docker" => %{"present" => nil}, "complete" => nil})})
+      program_green()
+
+      assert {:ok, result} = Verify.run(bp)
+      sp = siteplane(result)
+      refute sp.ok
+      assert sp.evidence =~ "UNMEASURED"
+      refute sp.evidence =~ "missing"
+    end
+
+    test "a site-hosting box that has NEVER beaten FAILS as unmeasured" do
+      {_user, team} = user_with_team()
+      bp = team |> live_barkpark() |> host_a_site()
+      program_green()
+
+      assert {:ok, result} = Verify.run(bp)
+      sp = siteplane(result)
+      refute sp.ok
+      assert sp.evidence =~ "never reported a beat"
+    end
+
+    test "on an UNREACHABLE box the plane reads unreachable too — a stale beat is not a reading" do
+      {_user, team} = user_with_team()
+      bp = team |> live_barkpark() |> host_a_site()
+      beat(bp, %{"site_plane" => plane(%{})})
+      FakeHttp.program(%{__all__: {:error, {:http_client, :nxdomain}}})
+
+      assert {:ok, result} = Verify.run(bp)
+      sp = siteplane(result)
+      refute sp.ok
+      refute sp.reachable
+      refute result.reachable
+    end
+  end
+
   describe "the probe vocabulary matches the shared fixture (D32)" do
     test "Verify.probes/0 deep-equals verify_probes.json (names, labels, pass-rules, order)" do
       fixture = @fixture_path |> File.read!() |> Jason.decode!()
@@ -399,7 +615,7 @@ defmodule BarkparkCloud.VerifyTest do
       body = json_body(conn)
       assert body["ok"] == true
       assert body["reachable"] == true
-      assert length(body["probes"]) == 3
+      assert length(body["probes"]) == 4
 
       # Recorded as a `verify` instance event on the timeline.
       events = Registry.recent_events(bp, 10)

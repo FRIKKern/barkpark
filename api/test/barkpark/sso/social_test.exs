@@ -203,6 +203,19 @@ defmodule Barkpark.Sso.SocialTest do
     assert u1.id == u2.id
   end
 
+  test "after GDPR erasure the linked (provider, external_id) no longer logs in as the erased user" do
+    enable("google")
+    userinfo("erased-social@example.com", "g-erased")
+    assert {:ok, u1} = callback("google")
+
+    assert {:ok, _} = Barkpark.Accounts.Privacy.erase_subject(u1)
+
+    # The link is gone and the email was pseudonymised, so the same provider
+    # account can only reach a NEW account, never the erased one.
+    assert {:ok, u2} = callback("google")
+    refute u2.id == u1.id
+  end
+
   test "re-login with the same (provider, external_id) returns the same user (no dup identity)" do
     enable("google")
     userinfo("carol@example.com", "g-7")

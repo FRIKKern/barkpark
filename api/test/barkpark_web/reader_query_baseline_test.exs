@@ -502,6 +502,9 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
     # app in every env) put `chat_messages 1` into the dead-leg census on main
     # at 2c5b658d41 and pushed 18 -> 19. This test reproduces that
     # DETERMINISTICALLY instead of once per 60s.
+    # its witness statement reads chat_messages, so it needs the plugin/fleet tables present
+    # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
+    @tag :owned_tables
     test "a statement from a process outside the request never enters the census",
          %{conn: conn, scope: scope} do
       slug = seed_fixture!(scope)

@@ -14,15 +14,43 @@ name: security
 #                   the `census:` table below, and it is COMPARED, not trusted).
 #                   `--exit Low`
 #                   reports any non-baselined finding at Low confidence or above.
-#                   ADVISORY (continue-on-error: true) — Sobelow fingerprints are
-#                   derived from compiled AST and are NOT stable across Elixir
-#                   toolchains (a baseline generated on a dev machine's Elixir
-#                   version does not match CI's 1.18.1/OTP27), so a blocking gate
-#                   would red the fleet on fingerprint drift, not on real
-#                   regressions. Keep it advisory (findings stay VISIBLE) until
-#                   the baseline is regenerated IN CI (matched toolchain) or the
-#                   30 real high/medium findings are remediated (task-c9d6d29cc0059d2a),
-#                   then flip to blocking.
+#                   NO job-level continue-on-error since 2026-09-25
+#                   (task-f248c4889c3322fd): the sobelow job now fails its run
+#                   on a new finding, and `Security gate` judges it on
+#                   `outputs.verdict`. An inherited red that main already
+#                   carries stays neutral (the main-red breaker's Decide step).
+#
+#                   THE OLD GROUND WAS FALSE AS WRITTEN. The job was advisory
+#                   because Sobelow fingerprints were said to be "derived from
+#                   compiled AST and NOT stable across Elixir toolchains".
+#                   deps/sobelow/lib/sobelow/finding.ex (0.14.1) hashes
+#                   :erlang.phash2([type, vuln_source, filename, vuln_line_no])
+#                   — four plain terms, no AST among them — and Sobelow never
+#                   compiles the app: .ex/.exs files are PARSED
+#                   (parse.ex, Code.string_to_quoted); .heex/.eex templates go
+#                   through EEx.compile_string, which also yields quoted AST
+#                   and no BEAM code.
+#
+#                   WHAT WAS MEASURED, AND ONLY THAT. The Config.* family
+#                   (csrf.ex -> config.ex -> parse.ex: File.read! +
+#                   Code.string_to_quoted, never compiled): the six router.ex
+#                   Config.CSRF hashes CI generated on Elixir 1.18.1/OTP 27
+#                   reproduce byte-exactly on 1.19.5/OTP 28, old 6/6 and new
+#                   6/6, with a one-line-shift negative control (@132 ->
+#                   14CE4AF, stored 7FE4923). The other families — XSS.Raw
+#                   (whose line comes from EEx.compile_string), Traversal, SQL
+#                   and the rest — were NOT measured across toolchains, and
+#                   nothing here claims their line numbers are
+#                   toolchain-stable. If one moves on a CI toolchain bump, the
+#                   reconciled-baseline artifact this job uploads shows the
+#                   row, and the fix is a reviewed baseline edit, never a
+#                   regeneration on a dev machine.
+#
+#                   The exit condition the old text set was "regenerate in CI
+#                   OR remediate the 30 real high/medium findings
+#                   (task-c9d6d29cc0059d2a)"; the second held (that row is
+#                   done), so the flag came off on that condition plus the
+#                   corrected premise above.
 #
 #   ── BASELINE CENSUS — DERIVED AND MACHINE-COMPARED ───────────────────────
 #   The rows below are re-derived from api/.sobelow-skips and compared against
@@ -336,14 +364,13 @@ jobs:
           # dominant mechanism.
           #
           # The last row is a MEASUREMENT trap, not a defect, and the two must
-          # not be collapsed. A run concludes `success` while the sobelow job
-          # inside it concluded `failure` because that job carries
-          # `continue-on-error: true` — documented at the top of this file with
-          # a written exit condition (task-c9d6d29cc0059d2a: regenerate the
-          # baseline in CI or remediate the real findings, then flip to
-          # blocking) and recorded as an S2 ADVISORY exclusion in
-          # .github/required-checks.json. It is behaving as designed, and the
-          # check run itself is RED and visible.
+          # not be collapsed. Until 2026-09-25 a run concluded `success` while
+          # the sobelow job inside it concluded `failure`, because that job
+          # carried `continue-on-error: true`. The flag is gone
+          # (task-f248c4889c3322fd; see the top of this file), so on runs from
+          # then on a red sobelow job reds its run. On older runs the trap
+          # still reads: it was behaving as designed, and the check run itself
+          # was RED and visible.
           #
           # What the trap costs is only this: `gh run list --json conclusion`
           # cannot see it, so a census built on run conclusions undercounts.
@@ -420,14 +447,19 @@ jobs:
     name: Sobelow static analysis (regression gate, baseline .sobelow-skips)
     needs: changes
     if: needs.changes.outputs.api == 'true'
-    # Advisory: fingerprint baselines drift across toolchains. Reconciliation
+    # NO job-level `continue-on-error` since 2026-09-25 (task-f248c4889c3322fd;
+    # the header says why the old "fingerprints drift across toolchains" ground
+    # was dropped): a new finding fails this job's own run. Reconciliation
     # stays pinned to CI and produces a human-reviewed artifact, never a commit.
-    continue-on-error: true
-    # ── THE CHANNEL THAT SURVIVES `continue-on-error` ────────────────────────
-    # `continue-on-error: true` destroys this job's RESULT for a consumer:
-    # `needs.sobelow.result` reads `success` even when the job concluded
-    # FAILURE (measured; see the aggregator header). It does NOT destroy this
-    # job's OUTPUTS. `outputs.verdict` is written by the `Publish` step at the
+    # scripts/security-gate-shape.test.sh pins "no job in this file carries
+    # job-level continue-on-error", so re-adding the flag reds that ratchet.
+    # ── THE VERDICT CHANNEL (built while the flag was on; kept) ─────────────
+    # While this job carried `continue-on-error: true`, that flag destroyed its
+    # RESULT for a consumer: `needs.sobelow.result` read `success` even when the
+    # job concluded FAILURE (measured; see the aggregator header). It never
+    # touched the OUTPUTS. The aggregator still judges this job on the verdict,
+    # because `decide_verdict` is fail-closed on an EMPTY verdict from a
+    # dispatched job, which `.result` cannot say. `outputs.verdict` is written by the `Publish` step at the
     # bottom from `BP_STEP_VERDICT`, which scripts/run-instrument.sh combined
     # worst-first across every channelled step — so the aggregator can judge
     # Sobelow on a channel the laundering cannot reach. Before this block, a
@@ -487,7 +519,7 @@ jobs:
         id: s2
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
         # A newly introduced insecure pattern is not in the reviewed baseline and
-        # reds this advisory job. Never regenerate/commit the baseline on a dev
+        # reds this job (via the Decide step below). Never regenerate/commit the baseline on a dev
         # toolchain; the matched-toolchain artifact below is for human review.
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
@@ -528,8 +560,9 @@ jobs:
         # The blocking staleness ratchet carries a GENERATED detector→token
         # table so it can run with no deps. This is the only job with a real
         # Sobelow checkout, so it is the only place the table can be proven
-        # against its source. Advisory like the rest of this job: a Sobelow
-        # version bump that adds a detector should be visible, not a hard stop.
+        # against its source. Channelled like every gate step here: a failure
+        # reaches the Decide step below, which fails the job's run unless main
+        # already carries the same red.
         if: always()
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
@@ -590,8 +623,8 @@ jobs:
   # below, which is the true and intended reading.
   sobelow-inline-overlap:
     name: Sobelow baseline does not swallow its own inline waivers (blocking)
-    # BLOCKING on purpose, unlike the sobelow job above. That job is advisory
-    # because fingerprints drift across toolchains; this check reads only text —
+    # BLOCKING on purpose. The sobelow job above was advisory until 2026-09-25
+    # on a toolchain-drift ground the header now corrects; this check reads only text —
     # api/.sobelow-skips entries versus `# sobelow_skip` annotations in api/lib —
     # so it is deterministic and toolchain-independent, and has no honest reason
     # to be advisory. No BEAM, no deps, ~1s.
@@ -755,8 +788,9 @@ jobs:
     # would spend that property on every run of all three. So this job pays
     # for the BEAM alone and leaves that one untouched.
     #
-    # WHY NOT IN THE `sobelow` JOB, WHICH ALREADY HAS THE BEAM. Because that job
-    # is `continue-on-error: true`. A check hosted there renders a red check run
+    # WHY NOT IN THE `sobelow` JOB, WHICH ALREADY HAS THE BEAM. Because, when
+    # this was written, that job was `continue-on-error: true` (dropped
+    # 2026-09-25). A check hosted there rendered a red check run
     # that `needs.<job>.result` reports as `success` — the aggregator cannot see
     # it, and by design it is excluded from `needs` entirely. A fingerprint check
     # placed there CANNOT RED. That is exactly how this capability was reported
@@ -764,13 +798,18 @@ jobs:
     # in that job and only uploads an artifact. `felix-w24-bl-config-hash-line-
     # consistency` was reopened for it.
     #
-    # THE ADVISORY RATIONALE DOES NOT TRANSFER. `sobelow` is advisory because
-    # SOBELOW's fingerprints come from compiled AST and drift across toolchains.
-    # This job compiles nothing, fetches no deps, and runs no Sobelow code — it
-    # recomputes phash2 over [binary, atom|binary, binary, integer]. Measured
-    # while writing it: every hash in the committed baseline, generated by CI on
-    # OTP 27, reproduces byte-exactly on OTP 28 — on the Config.* path AND on
-    # the AST path. Toolchain-stable, therefore blocking.
+    # THE OLD ADVISORY RATIONALE WAS FALSE. `sobelow` was advisory on the claim
+    # that SOBELOW's fingerprints "come from compiled AST and drift across
+    # toolchains". They do not: finding.ex hashes phash2 over four plain terms
+    # (type, vuln_source, filename, vuln_line_no), and Sobelow parses source,
+    # it never compiles it (see the header). This job compiles nothing, fetches
+    # no deps, and runs no Sobelow code — it recomputes phash2 over
+    # [binary, atom|binary, binary, integer]. Measured while writing it: every
+    # hash in the committed baseline, generated by CI on OTP 27, reproduces
+    # byte-exactly on OTP 28 given the row's own inputs. That proves the HASH is
+    # toolchain-stable; whether a detector assigns the same LINE on another
+    # toolchain was measured only for the Config.* family. Toolchain-stable
+    # inputs in, therefore blocking.
     #
     # WHAT IT CATCHES THAT THE OTHER THREE CANNOT. `--skip` matches on the HASH
     # ALONE (lib/sobelow.ex:531-546 discards the type and the file:line into
@@ -778,12 +817,10 @@ jobs:
     # like a reviewed waiver while waiving nothing, and the finding it covered
     # is reported again as if it were new.
     #
-    # It IS reported — the advisory job renders a RED check run and says so.
-    # What is missing is not visibility but CONSEQUENCE: no gate reds, so
-    # nothing stops a merge, and on main that job's run is usually evicted from
-    # the concurrency queue before it renders at all. Say it that way rather
-    # than calling it hidden; `continue-on-error` is a documented decision with
-    # a written exit condition, not a concealment.
+    # It IS reported — the sobelow job renders a RED check run and says so.
+    # What was missing (while that job was continue-on-error) was not
+    # visibility but CONSEQUENCE, and on main that job's run is usually evicted
+    # from the concurrency queue before it renders at all.
     #
     # Measured on the head this job was added to: #13886 inserted 23 lines
     # above router.ex:131 and orphaned all six Config.CSRF rows at once, while
@@ -1101,6 +1138,17 @@ jobs:
     # felix-w24-s7 flips Sobelow to blocking, it simply moves into the normal
     # `decide` roster and (3) stops applying to it.
     #
+    # 2026-09-25 (task-f248c4889c3322fd): the flag is gone, and `sobelow` did
+    # NOT move to `decide`. It stays on `decide_verdict`, because that judge is
+    # fail-closed on an EMPTY verdict from a dispatched job — a reading `.result`
+    # cannot give — and because the extracted-step harnesses (case 6b of
+    # scripts/security-gate-shape.test.sh, scripts/gate-announces-skips.test.sh)
+    # drive this step through V_SOBELOW. The shape ratchet's D36 arm accepts a
+    # job judged on its verdict only when `decide_verdict` actually consumes the
+    # bound V_* variable. With no continue-on-error job left in the file, rule
+    # (1)-(3) has no subject; the ratchet pins that zero instead of asserting
+    # over an empty set.
+    #
     # `decide_verdict` below is fail-closed on the one thing the result channel
     # could never say: an EMPTY verdict on a DISPATCHED job means the job did
     # not reach a channelled step, which is CANNOT READ, and a gate that cannot
@@ -1140,9 +1188,10 @@ jobs:
           # the job never reached one of those steps (skipped, or it died
           # earlier) — which is NOT a claim that nothing refused, so this step
           # never reads an empty V_* as MEASURED.
-          # NO `R_SOBELOW`. Binding `needs.sobelow.result` is the laundering
-          # hazard itself: it would read `success` over a failed Sobelow, and
-          # the shape ratchet reds if it ever appears here.
+          # NO `R_SOBELOW`. While sobelow was continue-on-error, binding
+          # `needs.sobelow.result` was the laundering hazard itself (`success`
+          # over a failed Sobelow). The flag is gone; the job is still judged on
+          # the verdict alone, so it is not bound here (see the header above).
           V_SOBELOW: ${{ needs.sobelow.outputs.verdict }}
           V_OVERLAP: ${{ needs.sobelow-inline-overlap.outputs.verdict }}
           V_FINGERPRINT: ${{ needs.sobelow-baseline-fingerprint.outputs.verdict }}
@@ -1231,9 +1280,11 @@ jobs:
 
           # ── decide_verdict <job> <verdict> <gate-value> ──────────────────
           # The `decide` above judges a RESULT. This one judges a VERDICT, and
-          # it exists for exactly one shape: a `continue-on-error: true` job,
-          # whose result is laundered to `success` and therefore must never be
-          # read, but whose `outputs.verdict` survives intact.
+          # It was built for one shape: a `continue-on-error: true` job, whose
+          # result is laundered to `success` and therefore must never be read,
+          # but whose `outputs.verdict` survives intact. No job in this file
+          # carries that flag today; `sobelow` stays on this judge for its
+          # fail-closed empty-verdict arm (see the header above).
           #
           # It is FAIL-CLOSED on the unreadable case, which is the whole point:
           # an EMPTY verdict on a job whose gate said 'true' means the job never
@@ -1469,12 +1520,9 @@ jobs:
             Read the aggregator's "Decide (fail-closed over every upstream
             result)" step: it names which of `gate-shape`,
             `sobelow-inline-overlap`, `sobelow-baseline-fingerprint`,
-            `mix-audit` or the `changes` dispatcher is out of the allow-set.
-
-            `sobelow` itself is NOT in that needs set and never can be — it is
-            `continue-on-error: true`, and such a job reads `success` from
-            `needs.<job>.result` even when it concluded failure. A red Sobelow
-            check run will NOT produce this issue; read its own check run.
+            `mix-audit`, `sobelow` or the `changes` dispatcher is out of the
+            allow-set. `sobelow` is judged on its `outputs.verdict`
+            (MEASURED-DEFECT, REFUSED, or empty when dispatched all red it).
             This issue is idempotent per key: an ongoing failure appends a
             comment rather than opening a new issue. CLOSE IT once main is green
             again — the next main-push failure opens a fresh one.

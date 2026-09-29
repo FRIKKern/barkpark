@@ -174,7 +174,7 @@ defmodule Barkpark.Accounts do
     # lock a non-existent account) and unlike the generic failed-login event it
     # takes 10 failures to provoke — no cheap enumeration oracle.
     if locked? do
-      emit_audit(%{
+      Audit.emit_best_effort(%{
         category: "auth",
         action: "account_locked",
         subject: user.id,
@@ -876,7 +876,7 @@ defmodule Barkpark.Accounts do
       # A one-time recovery code was just burned — a security-relevant fallback
       # authentication. Record it (with how many codes remain) so a run of
       # recovery-code use, or a user running low, is visible on the audit trail.
-      emit_audit(%{
+      Audit.emit_best_effort(%{
         category: "auth",
         action: "recovery_code_used",
         subject: id,
@@ -889,19 +889,6 @@ defmodule Barkpark.Accounts do
     else
       :error
     end
-  end
-
-  # Best-effort audit emit: an audit-bus hiccup must NEVER break an
-  # authentication decision (the change it records has already committed). The
-  # emit result is discarded and any infra-level raise/throw is swallowed —
-  # mirrors `Barkpark.Access.emit_grant_event/4`.
-  defp emit_audit(attrs) do
-    Audit.emit(attrs)
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
   end
 
   # ── Step-up MFA ──────────────────────────────────────────────────────────────
