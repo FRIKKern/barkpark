@@ -2827,15 +2827,15 @@ defmodule PDS.Census do
         why:
           "KNOWN-STALE BASIS, NOT A WRONG HASH: expr_fp moved 118018566 -> 21327746; head_hash 116314994 is unmoved, so the receipt EXPRESSION was re-shaped under an unchanged def head. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
-    # barkpark/plugins/tickets/web/tickets_controller.ex:93
+    # barkpark/plugins/tickets/web/tickets_controller.ex:93 (lineref-ok: path re-pointed by the plugin move)
     %{key: {"api/lib/barkpark/plugins/tickets/web/tickets_controller.ex",
             "BarkparkWeb.TicketsController.index_own/2", "13011616", "113191402"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark/plugins/tickets/web/tickets_controller.ex:169
+    # barkpark/plugins/tickets/web/tickets_controller.ex:169 (lineref-ok: path re-pointed by the plugin move)
     %{key: {"api/lib/barkpark/plugins/tickets/web/tickets_controller.ex",
             "BarkparkWeb.TicketsController.inbox/2", "102026838", "113191402"},
       verdict: "UNJUDGED", basis: :unexamined},
-    # barkpark/plugins/tickets/web/tickets_controller.ex:263
+    # barkpark/plugins/tickets/web/tickets_controller.ex:263 (lineref-ok: path re-pointed by the plugin move)
     #
     # THE FILING'S REASON FOR LEAVING THIS UNBOUGHT IS REFUTED BY THE TREE (PDS w36
     # crit 2). The wave-36 row deferred it as ~60-80 lines "in a different call
